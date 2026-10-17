@@ -13,7 +13,7 @@ func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	st := storetest.Open(t)
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
 	ctx := t.Context()
-	now := time.Now()
+	now := time.Now().Truncate(time.Millisecond)
 	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}
@@ -24,11 +24,15 @@ func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	if err := acme.PutAuthorizedGitHubAutomation(ctx, githubAppAuthorization(t, st, acme), a); err != nil {
 		t.Fatal(err)
 	}
+	first, err := acme.GitHubAppAutomation(ctx, 7, 701)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := acme.PutAuthorizedGitHubAutomation(ctx, githubAppAuthorization(t, st, acme), a); err != nil {
 		t.Fatal(err)
 	}
 	got, err := acme.GitHubAppAutomation(ctx, 7, 701)
-	if err != nil || !got.Enabled || got.EnabledAt.Before(now) {
+	if err != nil || !got.Enabled || got.EnabledAt.Before(now) || !got.EnabledAt.Equal(first.EnabledAt) {
 		t.Fatalf("idempotent consent = %+v,%v", got, err)
 	}
 	if _, err := other.GitHubAppAutomation(ctx, 7, 701); !errors.Is(err, store.ErrNotFound) {

@@ -965,11 +965,12 @@ opener. Missing or failed decryption refuses acceptance. The controller/store
 tests use the shared validator to refuse decrypted secret identifiers before
 insertion. Native host and generated-expansion evidence remain separate.
 
-C1's audited release method returns confirmed stored SSH/HTTPS credentials.
-GitHub App minting and extra-repository release still need an audited C1
-contract before their runtime can be restored. W2 retains no unaudited App
-mint path. The source Access consumer in W3 and client projection in W9 must
-consume the new credential response with their existing sealed source facts.
+C1's audited release methods return confirmed stored SSH/HTTPS credentials or
+a narrowly scoped GitHub App token. `SourceController.GitHub` supplies the existing
+client through C1's `GitHubSourceProvider` interface. The default server adapter
+uses its configured App client. The App token is returned as `kind: github_app`,
+`host: github.com`, and `secret`. W3's source Access and W9's client consume that
+credential with the checkout facts already present in the seal.
 
 ### Identity linking and local HTTP composition
 
@@ -3354,3 +3355,20 @@ new issuance operation. Customer intake cannot supply its proof. Revocation,
 installation moves, consent replacement and partial-delivery replay are checked
 again in the committing transaction. Source credential release remains a separate
 claim-authorized operation.
+
+
+### Integration amendment: App credential provenance
+
+`SourceReleaseRequest.GitHubApp` is trusted provider provenance, set only by
+C1's App release transaction after current installation, subscription and ID
+coverage checks. It exempts App tokens from machine-owner stored-credential
+consent under frozen §2.5. It supplies no grants and bypasses no ancestry,
+repository, audience, binding or liveness check. It is never accepted from a
+source request body. Stored-credential requests leave it false.
+
+The source route keeps the existing response contract. Legacy `token`,
+`repositories`, SHA and checkout-policy fields do not return. Missing source
+credentials use the shared `not_found` error with a remedy. Missing grants or
+bindings use `forbidden`. Runner roots remain claim-only. Current source bodies
+are rejected, including caller-selected extra repositories. No route, flag,
+setting, environment variable or compatibility surface is added.

@@ -64,7 +64,7 @@ func TestGitHubAppMutationsRequireCurrentAdministrationProperty(t *testing.T) {
 		before := purgeRows(t, s, "a", true)
 		out, put := tenant.PutAuthorizedGitHubTrigger(t.Context(), a, row)
 		auto := tenant.PutAuthorizedGitHubAutomation(t.Context(), a, GitHubAppAutomation{RepositoryID: 701, Repository: "acme/app", InstallationID: 7})
-		extras, extra := tenant.SetAuthorizedGitHubExtraRepos(t.Context(), a, "acme/app", []string{"acme/lib"}, map[string]int64{"acme/lib": 42})
+		extras, extra := tenant.SetAuthorizedGitHubExtraRepos(t.Context(), a, "acme/app", []string{"acme/lib"}, map[string]int64{"acme/app": 701, "acme/lib": 42})
 		del := tenant.DeleteAuthorizedGitHubTrigger(t.Context(), a, 701, "ci")
 		revoke := tenant.DeleteAuthorizedGitHubAutomation(t.Context(), a, 701)
 		unbind := tenant.UnbindAuthorizedGitHubInstallation(t.Context(), a, 7)
@@ -111,7 +111,7 @@ func TestGitHubAppMutationsCommitActorTimeAndConsentGeneration(t *testing.T) {
 	if err := s.inTx(ctx, func(tx *storeTx) error { return tenant.checkGitHubAppAutomationTx(ctx, tx, first) }); !errors.Is(err, ErrGitHubAppAutomationRevoked) {
 		t.Fatalf("old consent=%v", err)
 	}
-	list, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "Acme/App", []string{"acme/lib"}, map[string]int64{"Acme/Lib": 42})
+	list, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "Acme/App", []string{"acme/lib"}, map[string]int64{"acme/app": 701, "Acme/Lib": 42})
 	if err != nil || !reflect.DeepEqual(list, []string{"acme/lib"}) {
 		t.Fatalf("extras=%v: %v", list, err)
 	}
@@ -139,11 +139,11 @@ func TestGitHubAppMutationRefusalsRollBack(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s, tenant, a, _ := githubMutationFixture(t)
 			ctx := t.Context()
-			if _, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "acme/app", []string{"acme/old"}, map[string]int64{"acme/old": 1}); err != nil {
+			if _, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "acme/app", []string{"acme/old"}, map[string]int64{"acme/app": 701, "acme/old": 1}); err != nil {
 				t.Fatal(err)
 			}
 			row := GitHubAppTrigger{RepositoryID: 701, Repository: "acme/app", InstallationID: 7, Pipeline: "ci", Push: true}
-			ids := map[string]int64{"acme/new": 2}
+			ids := map[string]int64{"acme/app": 701, "acme/new": 2}
 			extra := "acme/new"
 			switch mode {
 			case "missing-id":

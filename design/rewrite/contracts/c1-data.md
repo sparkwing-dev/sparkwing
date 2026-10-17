@@ -3527,3 +3527,32 @@ remain untrusted. Generated tests cover these cases through live data authority.
 The raw automation-specific trigger insertion API is removed. The legacy generic
 trigger insertion and controller schedule intake remain open until scheduled
 execution reaches `admitRun`.
+
+
+## Integration amendment: audited GitHub source release
+
+`Tenant.ReleaseGitHubSourceCredential(ctx, Authorized, GitHubSourceProvider)`
+returns a `githubapp.Token` only after the existing source-release audit commits.
+The provider interface has `InstallationRepositories` and
+`InstallationTokenByIDs`, matching the existing GitHub client and the store test
+fake. The store derives the repository, ref, SHA, installation and executor from
+its authority chain and request seal. Verified App requests use their recorded
+installation. Typed requests require a current team subscription for their
+numeric repository ID. A live installation belongs to the same team. Every
+requested ID must be covered, and only `contents: read` is minted.
+
+`github_app_extra_repos.repository_id` is a positive source repository ID in the
+disposable baseline schema. Owner writes resolve it from the installation along
+with each extra ID. Release and replacement use this source ID, so neither a
+source nor an extra can transfer its approval to a replacement at the old name.
+Display slugs remain reporting fields. No migration or name-based fallback is
+added. The unused `GitHubAppExtraRepoRefs` reader and legacy `SourceCredential`
+and `SourceSpec` response declarations are removed. Their numeric-ID assertions
+now run through the release transaction and generated rename tests.
+
+The App and stored-credential paths share persisted source authority, fences and
+the audit writer. App tokens do not require machine-owner opt-in. Stored team
+credentials still require verified Cloud enrollment or the machine owner's
+consent. The App path checks authority and lease again after provider I/O. Audit
+failure returns no token. An upstream token minted before a refused audit stays
+unreturned, within the existing external-token revocation residual.

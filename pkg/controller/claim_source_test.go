@@ -1,10 +1,12 @@
 package controller_test
 
 import (
-	"context"
+	"crypto/sha256"
 	"net/http"
 	"testing"
-	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -13,27 +15,28 @@ import (
 
 func (f *appFixture) launchedRun(who signedIn, runID, owner, name string) string {
 	f.t.Helper()
-	ctx := store.WithoutCreditMetering(context.Background())
-	now := time.Now()
-	if _, err := f.store.DB().ExecContext(ctx, `INSERT INTO repos (team, repo, dispatch, updated_at) VALUES (?, ?, ?, ?)
-ON CONFLICT DO NOTHING`, who.team, store.RepoKey(owner, name), string(store.RepoDispatchController), now.UnixNano()); err != nil {
-		f.t.Fatal(err)
-	}
-	tn, err := f.store.ForTeam(ctx, store.Team(who.team))
+	id := map[string]int64{"acme/widgets": 701, "acme/plans": 702}[owner+"/"+name]
+	seedSourceRun(f.t, f.store, who.team, runID, "https://github.com/"+owner+"/"+name+".git", githubFixtureKey(id), "refs/heads/main", headSHA, id, runspec.DispatchController)
+	root, err := f.store.LookupCapability(f.t.Context(), sha256.Sum256([]byte(f.admin)))
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: runID, Pipeline: "build", GithubOwner: owner, GithubRepo: name, Repo: owner + "/" + name,
-		GithubRepoID: map[string]int64{"acme/widgets": 701, "acme/plans": 702}[owner+"/"+name],
-		GitBranch:    "main", GitSHA: headSHA, CreatedAt: now,
-	}, store.Run{
-		ID: runID, Pipeline: "build", Status: "pending", GithubOwner: owner, GithubRepo: name,
-		DeclaredRepo: owner + "/" + name, CreatedAt: now, StartedAt: now,
-	}); err != nil {
+	launcher, err := f.store.ProvisionCapability(f.t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, Authority: &root.Authority, RegistrationID: "service:launcher-" + runID, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher-" + runID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
+	if err != nil {
 		f.t.Fatal(err)
 	}
-	return controller.LauncherFixtureClaim(f.t, f.store, runID, store.PlanNodeID)
+	tenant, err := f.store.ForTeam(f.t.Context(), store.Team(who.team))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := tenant.RecordCreditGrant(f.t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "fixture:" + runID, CreatedBy: "fixture"}); err != nil {
+		f.t.Fatal(err)
+	}
+	claim, err := f.store.ClaimUnit(f.t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runID}})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return string(claim.Bearer)
 }
 
 // The token reads the repositories an owner approved by their GitHub IDs, so
@@ -50,11 +53,11 @@ func TestRunSourceCredential_MintsTheApprovedRepositoriesByID(t *testing.T) {
 		githubapptest.Repo{ID: 702, FullName: "acme/plans-archive", Private: true},
 		githubapptest.Repo{ID: 703, FullName: "acme/plans", Private: true})
 	tok := f.launchedRun(olga, "run-renamed", "acme", "widgets")
-	var sc store.SourceCredential
+	var sc controller.SourceCredentialResponse
 	if code := f.call("POST", "/api/v1/runs/run-renamed/source-credential", "Bearer "+tok, nil, &sc); code != http.StatusOK {
 		t.Fatalf("source credential = %d", code)
 	}
-	if !f.app.TokenCovers(sc.Token, "acme/plans-archive") || f.app.TokenCovers(sc.Token, "acme/plans") {
+	if !f.app.TokenCovers(sc.Secret, "acme/plans-archive") || f.app.TokenCovers(sc.Secret, "acme/plans") {
 		t.Fatal("the token followed the name to another repository")
 	}
 }

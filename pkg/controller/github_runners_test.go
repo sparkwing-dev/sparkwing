@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc/githuboidctest"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
@@ -55,6 +57,7 @@ func newGHFixture(t *testing.T) *ghFixture {
 		WithExternalURL(ghAudience).
 		WithGitHubRunners(gh.Config(ghAudience)).
 		WithDashboard(controller.Dashboard{})
+	configureGitHubClaims(srv, st)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return &ghFixture{
@@ -104,23 +107,11 @@ func (f *ghFixture) work(team, runID, slug string) {
 func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 	f.t.Helper()
 	ctx := context.Background()
-	tn, err := f.store.ForTeam(ctx, store.Team(team))
-	if err != nil {
-		f.t.Fatal(err)
+	id := int64(42)
+	if strings.EqualFold(slug, "acme/gadgets") {
+		id = 43
 	}
-	owner, name, _ := strings.Cut(slug, "/")
-	now := time.Now()
-	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: runID, Pipeline: "build", TriggerSource: "github", Repo: slug,
-		GithubOwner: owner, GithubRepo: name, TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push"}, CreatedAt: now,
-		WebhookDelivery: runID, WebhookReplayKey: "signed-" + runID,
-		GitBranch: branch, GitSHA: sha,
-	}, store.Run{
-		ID: runID, Pipeline: "build", Status: "pending", DeclaredRepo: slug, GithubOwner: owner, GithubRepo: name,
-		CreatedAt: now, StartedAt: now, GitBranch: branch, GitSHA: sha,
-	}); err != nil {
-		f.t.Fatal(err)
-	}
+	seedSourceRun(f.t, f.store, team, runID, "https://github.com/"+slug+".git", githubFixtureKey(id), "refs/heads/"+branch, sha, id, runspec.DispatchHost)
 	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
@@ -131,45 +122,36 @@ func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 
 func TestGitHubRunnerCredentialClaimsOnlyItsRepository(t *testing.T) {
 	f := newGHFixture(t)
-	owner := f.user("o", "olga@example.com")
-	stranger := f.user("s", "sam@example.com")
+	owner, stranger := f.user("o", "olga@example.com"), f.user("s", "sam@example.com")
 	f.bind(owner, widgetsJob)
 	f.work(owner.team, "run-gadgets", "acme/gadgets")
 	f.work(stranger.team, "run-strangers-widgets", "acme/widgets")
 	runner := f.credential(widgetsJob, owner.team)
-	claim := map[string]any{"holder_id": "gh-1", "labels": []string{controller.GitHubActionsLabel}}
-
-	if code := f.call("POST", "/api/v1/nodes/claim", runner, claim, nil); code != http.StatusNoContent {
-		t.Fatalf("claim with only other repositories' and teams' work queued = %d, want 204", code)
-	}
-	for _, path := range []string{
-		"/api/v1/runs/run-gadgets/nodes/compile/claim",
-		"/api/v1/runs/run-strangers-widgets/nodes/compile/claim",
-	} {
-		if code := f.call("POST", path, runner, map[string]any{"holder_id": "gh-1"}, nil); code != http.StatusForbidden {
-			t.Fatalf("named claim %s = %d, want 403", path, code)
+	for _, kind := range []capability.UnitKind{capability.UnitNode, capability.UnitTrigger} {
+		var response controllerwire.ClaimResponse
+		if code := f.call("POST", "/api/v1/runners/claim", runner, githubClaimBody(kind, "", ""), &response); code != http.StatusOK || response.Claim != nil {
+			t.Fatalf("foreign queue: HTTP %d %+v", code, response)
+		}
+		for _, run := range []string{"run-gadgets", "run-strangers-widgets"} {
+			job := ""
+			if kind == capability.UnitNode {
+				job = "compile"
+			}
+			if code := f.call("POST", "/api/v1/runners/claim", runner, githubClaimBody(kind, run, job), nil); code != http.StatusForbidden {
+				t.Fatalf("named %s %s = %d, want 403", kind, run, code)
+			}
 		}
 	}
 	if code := f.call("GET", "/api/v1/runs/run-gadgets", runner, nil, nil); code != http.StatusForbidden {
-		t.Fatalf("read another repository's run = %d, want 403", code)
+		t.Fatalf("read another repository = %d", code)
 	}
-	if code := f.call("POST", "/api/v1/triggers/claim", runner, nil, nil); code != http.StatusNoContent {
-		t.Fatalf("trigger claim with only other repositories' triggers = %d, want 204", code)
-	}
-	if code := f.call("POST", "/api/v1/triggers/run-gadgets/claim", runner, nil, nil); code != http.StatusForbidden {
-		t.Fatalf("claiming another repository's trigger by id = %d, want 403", code)
-	}
-
 	f.work(owner.team, "run-widgets", "Acme/Widgets")
-	var node struct {
-		RunID  string `json:"run_id"`
-		NodeID string `json:"node_id"`
+	var response controllerwire.ClaimResponse
+	if code := f.call("POST", "/api/v1/runners/claim", runner, githubClaimBody(capability.UnitNode, "", ""), &response); code != http.StatusOK || response.Claim == nil || response.Claim.RunID != "run-widgets" {
+		t.Fatalf("own queue = %d %+v", code, response)
 	}
-	if code := f.call("POST", "/api/v1/nodes/claim", runner, claim, &node); code != http.StatusOK || node.RunID != "run-widgets" {
-		t.Fatalf("claim = %d %+v, want run-widgets", code, node)
-	}
-	if code := f.call("GET", "/api/v1/runs/run-widgets", runner, nil, nil); code != http.StatusOK {
-		t.Fatalf("read its own run = %d, want 200", code)
+	if code := f.call("GET", "/api/v1/runs/run-widgets", "Bearer "+response.Claim.Capability, nil, nil); code != http.StatusOK {
+		t.Fatalf("read own run = %d", code)
 	}
 }
 
@@ -182,7 +164,7 @@ func TestGitHubRunnerCredentialReachesNothingOutsideItsRoutes(t *testing.T) {
 	for _, route := range [][2]string{
 		{"GET", "/api/v1/runs"},
 		{"GET", "/api/v1/runners/github"},
-		{"POST", "/api/v1/team/tokens"},
+		{"POST", "/api/v1/tokens"},
 		{"GET", "/api/v1/tokens"},
 	} {
 		if code := f.call(route[0], route[1], runner, map[string]any{}, nil); code != http.StatusForbidden {
@@ -208,9 +190,6 @@ func TestGitHubRunnerCredentialsPerTeamAreBounded(t *testing.T) {
 	}
 }
 
-// A job's ID token names the push it runs for. Its credential reaches only
-// work recorded for that same branch and commit, so a workflow on a feature
-// branch cannot claim main's runs or read the secrets they are given.
 func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
 	f := newGHFixture(t)
 	owner := f.user("o", "olga@example.com")
@@ -221,36 +200,30 @@ func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
 	f.workAt(owner.team, "run-main", "Acme/Widgets", "main", githuboidctest.DefaultSHA)
 	f.workAt(owner.team, "run-feature-old", "Acme/Widgets", "feature", githuboidctest.DefaultSHA)
 	runner := f.credential(feature, owner.team)
-	claim := map[string]any{"holder_id": "gh-1", "labels": []string{controller.GitHubActionsLabel}}
-
-	if code := f.call("POST", "/api/v1/nodes/claim", runner, claim, nil); code != http.StatusNoContent {
-		t.Fatalf("claim with only main's and an older feature commit's work queued = %d, want 204", code)
-	}
-	if code := f.call("POST", "/api/v1/triggers/claim", runner, nil, nil); code != http.StatusNoContent {
-		t.Fatalf("trigger claim with only other pushes' triggers = %d, want 204", code)
-	}
-	for _, run := range []string{"run-main", "run-feature-old"} {
-		if code := f.call("POST", "/api/v1/runs/"+run+"/nodes/compile/claim", runner, map[string]any{"holder_id": "gh-1"}, nil); code != http.StatusForbidden {
-			t.Errorf("named claim on %s = %d, want 403", run, code)
+	for _, kind := range []capability.UnitKind{capability.UnitNode, capability.UnitTrigger} {
+		var response controllerwire.ClaimResponse
+		if code := f.call("POST", "/api/v1/runners/claim", runner, githubClaimBody(kind, "", ""), &response); code != http.StatusOK || response.Claim != nil {
+			t.Fatalf("other pushes queued = %d %+v", code, response)
 		}
-		if code := f.call("GET", "/api/v1/runs/"+run, runner, nil, nil); code != http.StatusForbidden {
-			t.Errorf("read %s = %d, want 403", run, code)
-		}
-		if code := f.call("POST", "/api/v1/triggers/"+run+"/claim", runner, nil, nil); code != http.StatusForbidden {
-			t.Errorf("claim trigger %s by id = %d, want 403", run, code)
+		for _, run := range []string{"run-main", "run-feature-old"} {
+			job := ""
+			if kind == capability.UnitNode {
+				job = "compile"
+			}
+			if code := f.call("POST", "/api/v1/runners/claim", runner, githubClaimBody(kind, run, job), nil); code != http.StatusForbidden {
+				t.Fatalf("named %s %s = %d", kind, run, code)
+			}
+			if code := f.call("GET", "/api/v1/runs/"+run, runner, nil, nil); code != http.StatusForbidden {
+				t.Fatalf("read %s = %d", run, code)
+			}
 		}
 	}
-
 	f.workAt(owner.team, "run-feature", "Acme/Widgets", "feature", featureSHA)
-	var trigger store.Trigger
-	if code := f.call("POST", "/api/v1/triggers/claim", runner, nil, &trigger); code != http.StatusOK || trigger.ID != "run-feature" {
-		t.Fatalf("claim own push's trigger = %d %+v, want run-feature", code, trigger)
-	}
-	var node struct {
-		RunID string `json:"run_id"`
-	}
-	if code := f.call("POST", "/api/v1/nodes/claim", runner, claim, &node); code != http.StatusOK || node.RunID != "run-feature" {
-		t.Fatalf("claim = %d %+v, want run-feature", code, node)
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
+		var response controllerwire.ClaimResponse
+		if code := f.call("POST", "/api/v1/runners/claim", runner, githubClaimBody(kind, "", ""), &response); code != http.StatusOK || response.Claim == nil || response.Claim.RunID != "run-feature" {
+			t.Fatalf("own %s = %d %+v", kind, code, response)
+		}
 	}
 }
 

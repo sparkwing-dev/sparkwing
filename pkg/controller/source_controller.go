@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -16,9 +17,10 @@ type SourceTransactions interface {
 	SetSourceMachineConsent(context.Context, capability.AuthorityRef, string, bool) error
 }
 
-// SourceController opens only credentials returned with a committed release audit.
+// SourceController releases source access only after its store audit commits.
 type SourceController struct {
 	Store         *store.Store
+	GitHub        store.GitHubSourceProvider
 	Cipher        BoundCipher
 	ResolveTenant func(context.Context, store.Team) (SourceTransactions, error)
 }
@@ -50,9 +52,30 @@ func (s *SourceController) transactions(ctx context.Context, team string) (Sourc
 	return tenant, engineLookupError(err)
 }
 
-// Release decrypts the audited credential after the store commits its authorization.
+// Release returns an App token or opens a stored credential after its audit commits.
 func (s *SourceController) Release(ctx context.Context, a capability.Authorized) (SourceCredentialResponse, error) {
-	if s == nil || s.Cipher == nil {
+	if s == nil {
+		return SourceCredentialResponse{}, missingEndpointPolicy()
+	}
+	var appMissing error
+	if s.GitHub != nil && s.Store != nil {
+		appTenant, err := s.Store.ForTeam(ctx, store.Team(a.Target.Team))
+		if err != nil {
+			return SourceCredentialResponse{}, engineLookupError(err)
+		}
+		token, err := appTenant.ReleaseGitHubSourceCredential(ctx, a, s.GitHub)
+		if err == nil {
+			return SourceCredentialResponse{Kind: "github_app", Host: "github.com", Secret: token.Token}, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return SourceCredentialResponse{}, err
+		}
+		var missing *apierr.Error
+		if errors.As(err, &missing) {
+			appMissing = err
+		}
+	}
+	if s.Cipher == nil {
 		return SourceCredentialResponse{}, missingEndpointPolicy()
 	}
 	tenant, err := s.transactions(ctx, a.Target.Team)
@@ -61,6 +84,13 @@ func (s *SourceController) Release(ctx context.Context, a capability.Authorized)
 	}
 	credential, audit, err := tenant.ReleaseSourceCredential(ctx, a)
 	if err != nil {
+		if appMissing != nil && errors.Is(err, store.ErrNotFound) {
+			err = appMissing
+		}
+		var typed *apierr.Error
+		if errors.As(err, &typed) {
+			return SourceCredentialResponse{}, typed
+		}
 		return SourceCredentialResponse{}, engineLookupError(err)
 	}
 	if !sourceReleaseMatches(a, credential, audit) {
@@ -97,7 +127,11 @@ func (s *Server) sourceAdapter() *SourceController {
 		return s.sourceController
 	}
 	cipher, _ := s.secretsCipher.(BoundCipher)
-	return &SourceController{Store: s.store, Cipher: cipher}
+	source := &SourceController{Store: s.store, Cipher: cipher}
+	if s.githubApp != nil {
+		source.GitHub = s.githubApp.client
+	}
+	return source
 }
 
 func (s *Server) sourceEndpoints() []Endpoint {

@@ -119,7 +119,7 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 		return nil, http.StatusBadGateway, fmt.Errorf("GitHub installation repositories: %w", err)
 	}
 	ids := map[string]int64{}
-	for _, raw := range extras {
+	for _, raw := range append([]string{repo.Slug()}, extras...) {
 		for _, l := range listed {
 			if strings.EqualFold(l.FullName, raw) {
 				ids[strings.ToLower(raw)] = l.ID

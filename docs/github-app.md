@@ -141,7 +141,7 @@ Each run a delivery creates spends one of the team's hourly runs (`--max-runs-pe
 
 The hourly run budget uses store-wide counters shared by controller replicas.
 
-`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source credential route, which serves a run that already exists, keeps GitHub's answer for up to a minute, and an `installation_repositories` delivery drops what it kept. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery answers 502 without withdrawing any schedule except those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
+`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source credential route reads current installation coverage for each release. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery answers 502 without withdrawing any schedule except those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
 
 ### Pull requests from forks
 
@@ -159,7 +159,9 @@ Source acquisition uses `POST /api/v1/runs/{run}/source-credential` under a
 live claim with `source.read` and the sealed source binding. Repository identity
 comes from intake. A typed repository name cannot grant access to an App's private
 repositories. App issuance checks the current installation and the authorized
-repository IDs, including any owner-approved extra repositories.
+repository IDs, including any owner-approved extra repositories. Both source
+and extra approvals follow numeric IDs through renames. The release audit
+commits before the token is returned in the response's `secret` field.
 
 Stored team credentials require executor consent as well as repository permission.
 The store records each release before exposing a credential. The source owner
