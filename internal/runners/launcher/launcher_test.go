@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 )
@@ -386,4 +388,35 @@ func TestBuildJobRoundsFractionalCPUUpToKubernetesPrecision(t *testing.T) {
 
 func (c *controlFake) Prepare(ctx context.Context, _ []capability.LeaseRef) error {
 	return context.Cause(ctx)
+}
+
+type retryAfterControl struct {
+	*controlFake
+	claimed []time.Time
+	stop    context.CancelFunc
+}
+
+func (c *retryAfterControl) Claim(ctx context.Context) (*CloudJobAward, error) {
+	c.claimed = append(c.claimed, time.Now())
+	if len(c.claimed) > 1 {
+		c.stop()
+		return nil, nil
+	}
+	return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(7000)}}
+}
+
+func TestLauncherWaitsOutAControllerRetryAfter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, _, _, control := fixture()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		retrying := &retryAfterControl{controlFake: control, stop: cancel}
+		l.Control, l.Poll = retrying, time.Second
+		if err := l.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if len(retrying.claimed) != 2 || retrying.claimed[1].Sub(retrying.claimed[0]) != 7*time.Second {
+			t.Fatalf("claims at %v, want the second after the controller's 7s", retrying.claimed)
+		}
+	})
 }

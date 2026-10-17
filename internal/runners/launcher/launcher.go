@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
@@ -78,12 +79,15 @@ func (l *Launcher) Run(ctx context.Context) error {
 		logger = slog.Default()
 	}
 	for ctx.Err() == nil {
+		wait := poll
 		if err := l.Sync(ctx); err != nil {
-			logger.Warn("launcher reconciliation failed", "error", err)
+			logger.Warn("launcher reconciliation failed", failureAttrs(err)...)
+			wait = retryWait(err, poll)
 		} else if _, err := l.LaunchOne(ctx); err != nil {
-			logger.Warn("launcher claim failed", "error", err)
+			logger.Warn("launcher claim failed", failureAttrs(err)...)
+			wait = retryWait(err, poll)
 		}
-		timer := time.NewTimer(poll)
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -92,6 +96,25 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func retryWait(err error, poll time.Duration) time.Duration {
+	if delay, ok := apierr.RetryDelay(err); ok {
+		return max(delay, poll)
+	}
+	return poll
+}
+
+func failureAttrs(err error) []any {
+	attrs := []any{"error", err}
+	var failure *apierr.Error
+	if errors.As(err, &failure) {
+		attrs = append(attrs, "code", failure.Code)
+		if failure.Hint != "" {
+			attrs = append(attrs, "hint", failure.Hint)
+		}
+	}
+	return attrs
 }
 
 // LaunchOne persists a suspended Job, creates its bootstrap Secret, then permits execution.

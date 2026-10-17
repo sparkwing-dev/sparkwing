@@ -1,9 +1,15 @@
 package charts
 
 import (
+	"os"
 	"reflect"
 	"slices"
 	"testing"
+	"time"
+
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 func TestCloudLauncherSecretPermissions(t *testing.T) {
@@ -55,5 +61,24 @@ func TestCloudLauncherProvisioningPermissions(t *testing.T) {
 	}
 	if len(wants) != 0 {
 		t.Fatalf("missing provisioning permissions: %v", wants)
+	}
+}
+
+func TestCloudLauncherDefaultPollHonorsTheControllerIdleInterval(t *testing.T) {
+	data, err := os.ReadFile("sparkwing-runner-bundle/values.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values struct {
+		Launcher struct {
+			PollInterval string `json:"pollInterval"`
+		} `json:"launcher"`
+	}
+	if err := utilyaml.Unmarshal(data, &values); err != nil {
+		t.Fatal(err)
+	}
+	poll, err := time.ParseDuration(values.Launcher.PollInterval)
+	if err != nil || poll < controller.DefaultMaxIdleClaimPoll {
+		t.Fatalf("launcher pollInterval %q polls faster than the controller's idle interval %s: %v", values.Launcher.PollInterval, controller.DefaultMaxIdleClaimPoll, err)
 	}
 }

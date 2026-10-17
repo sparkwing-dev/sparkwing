@@ -51,7 +51,9 @@ launcher:
   dockerImage: {}
   cpuCeiling: ""
   memoryCeiling: ""
-  pollInterval: 500ms
+  # Keep at or above the controller's --idle-claim-poll (5s by default), which
+  # refuses faster idle polls under the Cloud limits profile.
+  pollInterval: 5s
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: "1", memory: 1Gi}

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -239,6 +240,10 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			case <-drain:
 				return nil, nil
 			default:
+			}
+			if delay, ok := apierr.RetryDelay(outcome.err); ok {
+				pollAt = time.Now().Add(max(delay, l.Config.PollInterval))
+				continue
 			}
 			if outcome.err != nil {
 				return nil, fmt.Errorf("claim runner work: %w", outcome.err)
