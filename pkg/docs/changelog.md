@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Reuse local pipeline binaries before resolving Go dependencies, so
+  cache hits do not require a working Go compiler.
+
 - **run:** Keep artifact input selectors separate from execution rows so
   registered machines can start dependent jobs. Profile cache reads honor caller
   cancellation when local execution has no extra lookup deadline. Keep the owner

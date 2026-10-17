@@ -12,6 +12,12 @@ If the pipeline's `go.mod` replaces the Go SDK, Sparkwing uses the installed CLI
 engine and warns that engine pinning is off for that run. The shared installer
 builds the replacement locally.
 
+Local Go runs reuse their executable while source and captured build inputs match.
+Reusing the binary skips dependency preparation and compilation. On a miss,
+Sparkwing resolves imported packages with `go list -deps`, then hashes the prepared
+checksums and builds the executable.
+Preparation uses the build's selected toolchain, workspace and sparks overlay.
+
 The commands bind sealed intake to the shared controller, source, private
 environment, storage and host services. The CLI sends state operations over the
 authenticated private API. Owner evaluation delegates a fresh SDK process from

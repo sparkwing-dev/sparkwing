@@ -74,6 +74,7 @@ func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
 			writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/pipeline\ngo 1.26.8\n")
 			writeFile(t, filepath.Join(dir, "main.go"), "package main\nfunc main() {}\n")
 			probeLog := filepath.Join(root, "probes")
+			prepareLog := filepath.Join(root, "prepare")
 			buildLog := filepath.Join(root, "build")
 			script := `#!/bin/sh
 if [ "$1" = env ]; then
@@ -81,7 +82,7 @@ if [ "$1" = env ]; then
  printf 'go1.26.6\ngo1.26.6\noff\n'
  exit 0
 fi
-if [ "$1" = mod ]; then exit 0; fi
+if [ "$1" = list ]; then printf '%s\n' "$GOTOOLCHAIN" >> "$PREPARE_LOG"; exit 0; fi
 printf '%s\n' "$GOTOOLCHAIN" >> "$BUILD_LOG"
 while [ $# -gt 0 ]; do
  if [ "$1" = -o ]; then
@@ -104,6 +105,7 @@ exit 1
 			t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
 			t.Setenv("GOTOOLCHAIN", "go1.26.6")
 			t.Setenv("PROBE_LOG", probeLog)
+			t.Setenv("PREPARE_LOG", prepareLog)
 			t.Setenv("BUILD_LOG", buildLog)
 			t.Setenv("SPARKWING_GITCACHE_URL", "")
 			child := exec.Command(os.Args[0], "-test.run=^TestPipelineToolchainOverrideStaysInTheBuild$")
@@ -111,6 +113,14 @@ exit 1
 				fmt.Sprintf("SPARKWING_TEST_TOOLCHAIN_UNCACHED=%t", uncached))
 			if out, err := child.CombinedOutput(); err != nil {
 				t.Fatalf("launch: %v: %s", err, out)
+			}
+			prepared, err := os.ReadFile(prepareLog)
+			if uncached {
+				if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("uncached preparation = %q, %v", prepared, err)
+				}
+			} else if err != nil || strings.TrimSpace(string(prepared)) != "go1.26.8" {
+				t.Fatalf("cached preparation = %q, %v", prepared, err)
 			}
 			for path, want := range map[string]string{buildLog: "go1.26.8", probeLog: "probe"} {
 				data, err := os.ReadFile(path)

@@ -2,11 +2,57 @@ package bincache
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
+	dir := newPipelineDir(t)
+	t.Setenv("SPARKWING_HOME", filepath.Join(t.TempDir(), "home"))
+	env := []string{"PATH=" + t.TempDir(), "GOWORK=off"}
+	key, _, err := ExplainCacheKey(dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := PipelineEntry(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, _, err := entry.AcquireOrMaterialize(t.Context(), func(path string) error {
+		return os.WriteFile(path, []byte("cached pipeline"), 0o700)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Release(); err != nil {
+		t.Fatal(err)
+	}
+	lease, published, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: env, Diagnostics: io.Discard})
+	if err != nil {
+		t.Fatalf("cached binary required Go: %v", err)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if published || lease.Key() != key || lease.Path() != seed.Path() {
+		t.Fatalf("cached binary replaced: published=%t key=%s path=%s", published, lease.Key(), lease.Path())
+	}
+	writeCacheConfig(t, "cache:\n  max_bytes: lots\n")
+	if _, _, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: env, Diagnostics: io.Discard}); err == nil || !strings.Contains(err.Error(), "cache.max_bytes") {
+		t.Fatalf("invalid ceiling not refused on cache hit: %v", err)
+	}
+	writeCacheConfig(t, "cache:\n  max_bytes: 0\n")
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main(){println(2)}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: env, Diagnostics: io.Discard}); err == nil {
+		t.Fatal("edited source reused a stale executable without Go")
+	}
+}
 
 func TestMaterializePipelineUsesTheCompilationWorkspace(t *testing.T) {
 	for _, covering := range []bool{true, false} {
