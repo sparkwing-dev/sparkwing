@@ -78,6 +78,7 @@ func gitRepo(t *testing.T, name, pipelinesBody string) string {
 	t.Helper()
 	root := writeRepo(t, name, pipelinesBody)
 	git(t, root, "init", "--quiet")
+	git(t, root, "config", "commit.gpgsign", "false")
 	git(t, root, "config", "user.email", "tester@example.invalid")
 	git(t, root, "config", "user.name", "tester")
 	git(t, root, "add", ".")
@@ -561,8 +562,8 @@ func TestTickFiresTheEffectiveCadenceAndRecordsItsArgs(t *testing.T) {
       schedule:
         - cron: "0 3 * * *"
           where: local
-        args:
-          depth: shallow
+          args:
+            depth: shallow
 `)
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
@@ -927,6 +928,7 @@ func TestTickLeavesTheOtherSidesSchedulesAlone(t *testing.T) {
 	// safety: a controller row that reached this store fires from the
 	// controller, never from the host's timer.
 	if _, _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ArmCronSchedule(ctx, store.CronSchedule{
+		GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		ID: "crn_pushed", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly",
 		Name: store.CronScheduleDefaultName, Cron: "* * * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,

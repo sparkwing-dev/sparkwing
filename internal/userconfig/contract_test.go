@@ -1,6 +1,8 @@
 package userconfig
 
 import (
+	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,4 +125,21 @@ func TestTypedMachineValidationMatchesDecode(t *testing.T) {
 			t.Errorf("accepted budget %q", raw)
 		}
 	}
+}
+
+func FuzzRetiredProfileFieldsKeepValuesPrivate(f *testing.F) {
+	f.Add([]byte("private-profile-value"))
+	f.Fuzz(func(t *testing.T, input []byte) {
+		if len(input) == 0 || len(input) > 256 {
+			return
+		}
+		value := "private-" + hex.EncodeToString(input)
+		for _, key := range []string{"state", "secrets", "logs", "cache", "mirror_local"} {
+			_, err := Decode("machine.yaml", []byte("profiles: {company.prod: {"+key+": {token: "+value+"}}}"))
+			var field *FieldError
+			if !errors.As(err, &field) || field.Key != "profiles.company.prod."+key || field.Line != 1 || !strings.Contains(field.Problem, "is removed") || !strings.Contains(field.Problem, "https://sparkwing.dev/docs/migration-guide/") || strings.Contains(err.Error(), value) {
+				t.Fatalf("removal diagnostic lost its location, guidance or privacy: %v", err)
+			}
+		}
+	})
 }

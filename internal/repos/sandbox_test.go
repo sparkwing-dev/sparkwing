@@ -9,6 +9,9 @@ import (
 
 func TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", "")
+	if err := os.Unsetenv("SPARKWING_CONFIG"); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	got, err := DefaultPath()
@@ -40,6 +43,9 @@ func TestDefaultPath_StillHonorsAnExplicitOverride(t *testing.T) {
 	}
 
 	t.Setenv("SPARKWING_CONFIG", "")
+	if err := os.Unsetenv("SPARKWING_CONFIG"); err != nil {
+		t.Fatal(err)
+	}
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	got, err = DefaultPath()

@@ -489,11 +489,7 @@ func (n *JobNode) Requires(labels ...string) *JobNode {
 	return n
 }
 
-// Prefers holds the node back, for the controller's placement hold, from a
-// claim-mode runner that does not advertise the labels while a live runner
-// that does advertise them has a free slot. After the hold any eligible runner
-// takes the node. Each argument uses the comma-OR and AND semantics of
-// Requires. No arguments clears the preferences.
+// Prefers ranks eligible runners without relaxing requirements, reservations or resource bounds.
 func (n *JobNode) Prefers(labels ...string) *JobNode {
 	n.prefers = normalizeLabels(labels)
 	return n

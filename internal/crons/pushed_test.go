@@ -40,7 +40,7 @@ func TestArmPushed_StoresCloneURLBranchAndPin(t *testing.T) {
 	ctx := context.Background()
 
 	report, err := svc.ArmPushed(ctx, crons.ArmPush{
-		RepoURL: pushedRepoURL,
+		RepoURL: pushedRepoURL, GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Branch:  "main",
 		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{declaredEntry("nightly", "default", "0 3 * * *")},
@@ -87,7 +87,7 @@ func TestArmPushed_FollowingTheBranchTipHasNoPin(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := svc.ArmPushed(ctx, crons.ArmPush{
-		RepoURL: pushedRepoURL,
+		RepoURL: pushedRepoURL, GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Branch:  "main",
 		Entries: []crons.Declared{declaredEntry("nightly", "default", "0 3 * * *")},
 	}); err != nil {
@@ -127,6 +127,9 @@ func TestArmPushed_AppIdentityKeepsStateAcrossRepositoryRename(t *testing.T) {
 	if _, err := svc.SetOverride(ctx, id, crons.Override{Cron: &override}); err != nil {
 		t.Fatal(err)
 	}
+	if err := teststore.SeedRun(svc.Store, ctx, store.DefaultTeam, store.Run{ID: "run-before-rename", Pipeline: "nightly", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
 	cursor := time.Now().Add(time.Hour)
 	if err := teststore.ForTeam(t, svc.Store, store.DefaultTeam).ResolveCronDue(ctx, id, cursor, nil, &store.CronFire{
 		ID: "crf_rename", Outcome: store.CronOutcomeFired, RunID: "run-before-rename", DecidedAt: cursor,
@@ -154,9 +157,9 @@ func TestArmPushed_KeepsPauseCursorAndOverrideAndWithdrawsTheRest(t *testing.T) 
 	ctx := context.Background()
 
 	push := crons.ArmPush{
-		RepoURL: pushedRepoURL,
-		Branch:  "main",
-		SHA:     "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: pushedRepoURL, GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		Branch: "main",
+		SHA:    "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{
 			declaredEntry("nightly", "default", "0 3 * * *"),
 			declaredEntry("sweep", "quick", "*/5 * * * *"),
@@ -165,7 +168,7 @@ func TestArmPushed_KeepsPauseCursorAndOverrideAndWithdrawsTheRest(t *testing.T) 
 	if _, err := svc.ArmPushed(ctx, push); err != nil {
 		t.Fatalf("ArmPushed: %v", err)
 	}
-	nightly := crons.ScheduleID(pushedRepoURL, "nightly", "default")
+	nightly := crons.AppScheduleID(store.DefaultTeam, 7, 701, "nightly", "default")
 	if err := svc.Pause(ctx, nightly); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
@@ -211,7 +214,7 @@ func TestDisarmRepoURL_RemovesEveryRowOfOneRepository(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := svc.ArmPushed(ctx, crons.ArmPush{
-		RepoURL: pushedRepoURL,
+		RepoURL: pushedRepoURL, GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Entries: []crons.Declared{
 			declaredEntry("nightly", "default", "0 3 * * *"),
 			declaredEntry("sweep", "quick", "*/5 * * * *"),
@@ -243,12 +246,12 @@ func TestResolve_AcceptsAPushedDisplayName(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := svc.ArmPushed(ctx, crons.ArmPush{
-		RepoURL: pushedRepoURL,
+		RepoURL: pushedRepoURL, GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Entries: []crons.Declared{declaredEntry("sweep", "quick", "*/5 * * * *")},
 	}); err != nil {
 		t.Fatalf("ArmPushed: %v", err)
 	}
-	want := crons.ScheduleID(pushedRepoURL, "sweep", "quick")
+	want := crons.AppScheduleID(store.DefaultTeam, 7, 701, "sweep", "quick")
 	for _, name := range []string{want, "acme/widgets/sweep/quick", "sweep/quick", "sweep"} {
 		sched, err := svc.Resolve(ctx, name)
 		if err != nil {
@@ -265,7 +268,7 @@ func TestRefresh_LeavesPushedRowsAlone(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := svc.ArmPushed(ctx, crons.ArmPush{
-		RepoURL: pushedRepoURL,
+		RepoURL: pushedRepoURL, GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Branch:  "main",
 		Entries: []crons.Declared{declaredEntry("nightly", "default", "0 3 * * *")},
 	}); err != nil {
@@ -300,7 +303,7 @@ func TestControllerHealth_ReportsTheLoopAndTheStoredTick(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := svc.ArmPushed(ctx, crons.ArmPush{
-		RepoURL: pushedRepoURL,
+		RepoURL: pushedRepoURL, GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Entries: []crons.Declared{declaredEntry("nightly", "default", "0 3 * * *")},
 	}); err != nil {
 		t.Fatalf("ArmPushed: %v", err)

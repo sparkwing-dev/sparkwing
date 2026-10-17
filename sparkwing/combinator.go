@@ -127,8 +127,7 @@ func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
 	return g
 }
 
-// Prefers sets the same runner-label preference on every member: it holds the
-// node back from a runner that does not advertise it. See [JobNode.Prefers].
+// Prefers ranks eligible runners for every member without relaxing requirements, reservations or resource bounds.
 func (g *JobGroup) Prefers(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Prefers(labels...)

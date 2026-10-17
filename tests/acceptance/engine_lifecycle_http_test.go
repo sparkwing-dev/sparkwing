@@ -61,7 +61,7 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 				case "job renewal":
 					path, body = "/api/v1/runs/run/jobs/job/heartbeat", `{"executing":true}`
 				case "retry":
-					b, path, body = intakeBoundary(), "/api/v1/runs/run/retry", `{"idempotency_key":"retry-once"}`
+					b, path, body = intakeBoundary(), "/api/v1/runs/run/retry", `{"idempotency_key":"retry-once","mode":"failed"}`
 					b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl}
 				}
 				status, code, writes := http.StatusOK, apierr.Code(""), 1

@@ -133,7 +133,7 @@ func TestSessionPolicyHTTPLifetimeProperty(t *testing.T) {
 	h := f.server.WithSessionMaxLifetime(maximum).Handler()
 	property := func(age uint8, header bool) bool {
 		elapsed := (time.Duration(age%96) - 24) * time.Hour
-		created := time.Now().Add(-elapsed)
+		created := time.Now().Truncate(time.Millisecond).Add(-elapsed)
 		if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE sessions SET created_at=?`, created.UnixNano()); err != nil {
 			t.Fatal(err)
 		}

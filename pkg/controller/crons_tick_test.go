@@ -19,9 +19,9 @@ func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
 	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam)}
 	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
-		RepoURL: "https://github.com/acme/widgets.git",
-		Branch:  "main",
-		SHA:     "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		Branch: "main",
+		SHA:    "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
 			Pipeline: "nightly",
 			Name:     store.CronScheduleDefaultName,
@@ -169,9 +169,7 @@ func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{ID: "run_old", Pipeline: "nightly", CreatedAt: now}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
+
 	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "run_old", Pipeline: "nightly", Status: "pending",
 		CreatedAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour),
@@ -225,9 +223,9 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 		t.Fatalf("ForTeam default: %v", err)
 	}
 	report, err := (&crons.Service{Store: st, Schedules: tenantB}).ArmPushed(ctx, crons.ArmPush{
-		RepoURL: "https://github.com/acme/widgets.git",
-		Branch:  "main",
-		SHA:     "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		Branch: "main",
+		SHA:    "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
 			Pipeline: "nightly",
 			Name:     store.CronScheduleDefaultName,

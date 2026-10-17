@@ -14,11 +14,12 @@ import (
 )
 
 var configDirPackages = map[string]bool{
-	"internal/fssecure": true,
-	"internal/paths":    true,
-	"internal/profile":  true,
-	"internal/repos":    true,
-	"internal/secrets":  true,
+	"internal/fssecure":   true,
+	"internal/paths":      true,
+	"internal/profile":    true,
+	"internal/repos":      true,
+	"internal/secrets":    true,
+	"internal/userconfig": true,
 }
 
 var configDirProviders = map[string]bool{
@@ -34,13 +35,11 @@ var configDirProviders = map[string]bool{
 }
 
 var configDirWriters = []string{
-	"cmd/sparkwing/configure_init.go",
 	"cmd/sparkwing/versionhold.go",
 	"internal/configguard/configguard.go",
 	"internal/localsecrets/key.go",
 	"internal/profile/profile.go",
 	"internal/repos/repos.go",
-	"internal/userconfig/legacy_migrate.go",
 	"internal/userconfig/userconfig.go",
 }
 

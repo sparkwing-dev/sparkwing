@@ -178,11 +178,11 @@ establish GitHub App token-provider integration.
 
 Store continuation moves three more harness files into `pkg/store` tests.
 `store_actions_enrollment.go` becomes
-`acceptance_actions_enrollment_test.go:TestStoreActionsEnrollment`.
+`pkg/store/acceptance_actions_enrollment_test.go:TestStoreActionsEnrollment`.
 `store_enrollment.go` becomes
-`acceptance_enrollment_test.go:TestStoreEnrolledClaims`.
+`pkg/store/acceptance_enrollment_test.go:TestStoreEnrolledClaims`.
 `store_launcher_sync.go` becomes
-`acceptance_launcher_sync_test.go:TestStoreLauncherSync`.
+`pkg/store/acceptance_launcher_sync_test.go:TestStoreLauncherSync`.
 They open through storetest and use sign-in, issuance, admission, acceptance and
 release transactions to seed their rows. They retain reopening, enrollment
 revocation, granted identity, award exchange and replacement-generation cleanup.

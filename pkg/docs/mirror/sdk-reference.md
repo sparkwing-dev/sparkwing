@@ -536,7 +536,7 @@ type JobGroup struct {
 - `func (g *JobGroup) NeedsTools(names ...string) *JobGroup` -- NeedsTools restricts every member to agents that have the named tools.
 - `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
-- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers sets the same runner-label preference on every member: it holds the node back from a runner that does not advertise it.
+- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers ranks eligible runners for every member without relaxing requirements, reservations or resource bounds.
 - `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires constrains runner claims for every non-inline dispatched member.
 - `func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup` -- Resources pins the same peak on every member of the group.
 - `func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup` -- Retry configures every member to be re-attempted up to attempts additional times on failure.
@@ -574,7 +574,7 @@ type JobNode struct {
 - `func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode` -- NoProgressTimeout caps how long an attempt may run without emitting a node log record.
 - `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure declares and returns a recovery job that runs when this job fails.
 - `func (n *JobNode) Optional() *JobNode` -- Optional marks the node as non-essential: a failure is logged as a warning and does not count toward the run's overall success/fail outcome.
-- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers holds the node back, for the controller's placement hold, from a claim-mode runner that does not advertise the labels while a live runner that does advertise them has a free slot.
+- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers ranks eligible runners without relaxing requirements, reservations or resource bounds.
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
 - `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.

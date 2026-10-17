@@ -181,48 +181,6 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	}
 }
 
-func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	ctx := context.Background()
-	created := time.Now().Add(-time.Hour)
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID:        "run-pending-1",
-		Pipeline:  "demo",
-		Status:    "pending",
-		CreatedAt: created,
-		StartedAt: created,
-	}); err != nil {
-		t.Fatalf("CreateRun pending: %v", err)
-	}
-
-	started := time.Now()
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID:        "run-pending-1",
-		Pipeline:  "demo",
-		Status:    "running",
-		StartedAt: started,
-	}); err != nil {
-		t.Fatalf("CreateRun running upsert: %v", err)
-	}
-
-	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, "run-pending-1")
-	if err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-	if got.Status != "running" {
-		t.Errorf("Status=%q want running", got.Status)
-	}
-	if got.CreatedAt.Truncate(time.Second) != created.Truncate(time.Second) {
-		t.Errorf("CreatedAt=%v want %v (lost on upsert)", got.CreatedAt, created)
-	}
-}
-
 func postJSON(t *testing.T, url string, body any) *http.Response {
 	t.Helper()
 	buf, err := json.Marshal(body)

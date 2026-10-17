@@ -150,7 +150,9 @@ func TestReviewConsoleCommitRevalidatesProofProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ordinal := 0
 	property := func(configured, derived, foreign bool) bool {
+		ordinal++
 		s.WithOperatorAccounts(nil)
 		if configured {
 			s.WithOperatorAccounts([]string{"member"})
@@ -162,7 +164,7 @@ func TestReviewConsoleCommitRevalidatesProofProperty(t *testing.T) {
 		if derived {
 			proof = nil
 		}
-		spec := capability.ProvisionSpec{Kind: capability.ProvisionService, Authority: &auth.Principal.Authority, ConsoleProof: proof, RegistrationID: "service:property", Subject: capability.Subject{Kind: capability.SubjectService, ID: "property"}, Grants: []capability.Grant{capability.OperatorTokens}, Binding: capability.Binding{Kind: capability.BindingNone}}
+		spec := capability.ProvisionSpec{Kind: capability.ProvisionService, Authority: &auth.Principal.Authority, ConsoleProof: proof, RegistrationID: fmt.Sprintf("service:property-%d", ordinal), Subject: capability.Subject{Kind: capability.SubjectService, ID: fmt.Sprintf("property-%d", ordinal)}, Grants: []capability.Grant{capability.OperatorTokens}, Binding: capability.Binding{Kind: capability.BindingNone}}
 		issued, err := s.store.ProvisionCapability(t.Context(), spec)
 		return (err == nil && issued.Raw != "") == (configured && !derived && !foreign)
 	}

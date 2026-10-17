@@ -14,11 +14,11 @@ import (
 // Decode validates the complete machine schema without filling defaults.
 func Decode(path string, raw []byte) (Config, error) {
 	var cfg Config
-	doc, err := DecodeYAML(path, raw, &cfg)
+	doc, _, err := parseDoc(path, raw)
 	if err != nil {
 		return Config{}, err
 	}
-	if err := ValidateConfig(cfg); err != nil {
+	if err := doc.Decode(&cfg); err != nil {
 		return Config{}, LocateError(path, doc, err)
 	}
 	return cfg, nil

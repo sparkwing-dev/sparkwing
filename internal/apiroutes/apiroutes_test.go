@@ -386,8 +386,8 @@ func TestParseDataEndpointsUsesActualRegistrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Route{
-		{Method: "POST", Path: "/api/v1/data/download", Scope: "data.read` or `data.read` or `data.read"},
-		{Method: "POST", Path: "/api/v1/data/has-many", Scope: "data.read` or `data.read` or `data.read"},
+		{Method: "POST", Path: "/api/v1/data/download", Scope: "data.read"},
+		{Method: "POST", Path: "/api/v1/data/has-many", Scope: "data.read"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("data registration=%+v want=%+v", got, want)

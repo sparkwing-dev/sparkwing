@@ -214,7 +214,7 @@ func identityLinkError(err error) error {
 	case errors.Is(err, store.ErrProviderAlreadyLinked):
 		return identityLinkRefusal(apierr.Conflict, "provider_already_linked", "this account already has a sign-in from this provider; unlink it before linking another")
 	default:
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "linking service unavailable; start linking again"}, err)
+		return &apierr.Error{Code: apierr.Unavailable, Message: "linking service unavailable; start linking again"}
 	}
 }
 
@@ -225,7 +225,7 @@ func identityLinkProviderError(err error) error {
 	case errors.Is(err, errSignInUnverified):
 		return identityLinkRefusal(apierr.Forbidden, "provider_unverified", "the provider has not verified this account's email address")
 	default:
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "linking service unavailable; start linking again"}, err)
+		return &apierr.Error{Code: apierr.Unavailable, Message: "linking service unavailable; start linking again"}
 	}
 }
 

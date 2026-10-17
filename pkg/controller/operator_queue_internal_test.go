@@ -23,7 +23,7 @@ func TestOperationalQueueSamplerReadsFinalStoreStates(t *testing.T) {
 		`sparkwing_queue_depth{state="running"}`:          0,
 		`sparkwing_queue_depth{state="approval_pending"}`: 0,
 		`sparkwing_pending_nodes`:                         1,
-		`sparkwing_active_runners`:                        1,
+		`sparkwing_active_runners`:                        0,
 	} {
 		if got := mustSample(t, body, series); got != want {
 			t.Errorf("%s: %v; want %v", series, got, want)

@@ -545,7 +545,7 @@ The exact source spelling is retained in the first column, including `/metrics`,
 |---|---|---|---|---|
 | `GET /api/v1/runs/{id}/nodes/{nodeID}/output` | unresolved | Job resource `/api/v1/runs/{run}/jobs/{job}` and controller `/data`; C2 names final output/record operations. | `credentials-matrix-node-child-slot` | DATA; U-INPUT-PATH |
 | `POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | unresolved | Job resource `/api/v1/runs/{run}/jobs/{job}` and controller `/data`; C2 names final output/record operations. | `credentials-matrix-node-child-slot` | OWN; DATA; HOST for owner-side writes |
-| `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input` | removed | C1 retires claim-input resolution. The local credential probe uses the own-job data-authority route. | `credentials-matrix-node-child-slot` | OWN; DATA |
+| `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input` | delete | C1 retires claim-input resolution. The local credential probe uses the own-job data-authority route. | `credentials-matrix-node-child-slot` | OWN; DATA |
 | `POST /api/v1/runs/{id}/nodes/{nodeID}/output-commit` | unresolved | Job resource `/api/v1/runs/{run}/jobs/{job}` and controller `/data`; C2 names final output/record operations. | `credentials-matrix-node-child-slot` | OWN; DATA; HOST for owner-side writes |
 | `POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload` | unresolved | Job resource `/api/v1/runs/{run}/jobs/{job}` and controller `/data`; C2 names final output/record operations. | `credentials-matrix-node-child-slot` | OWN; DATA; HOST for owner-side writes |
 

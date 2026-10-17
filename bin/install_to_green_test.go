@@ -709,7 +709,7 @@ func TestInstallToGreenTidiesSoACandidateDependencyResolves(t *testing.T) {
 	run := func(dir string, args ...string) (string, error) {
 		cmd := exec.Command(goBinary, args...)
 		cmd.Dir = dir
-		cmd.Env = append(environWithoutGitBindings(), "GOWORK=off", "GOFLAGS=")
+		cmd.Env = append(environWithoutGitBindings(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}

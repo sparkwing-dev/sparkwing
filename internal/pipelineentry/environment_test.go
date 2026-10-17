@@ -25,10 +25,10 @@ func TestInstallAppliesCredentialPolicyAndMasksOutput(t *testing.T) {
 	if err := InstallTypeScript(t.Context(), dir, env, &output); err != nil {
 		t.Fatal(err)
 	}
-	if got := output.String(); got != "|||******" {
+	if got := output.String(); got != "|||https://***@proxy.example***" {
 		t.Fatalf("install did not filter and mask output: %q", got)
 	}
-	for _, value := range []string{"aws-private", "gh-private", "custom-private", "proxy-private-password"} {
+	for _, value := range []string{"aws-private", "gh-private", "custom-private", "proxy-private-password", "alice"} {
 		if strings.Contains(output.String(), value) {
 			t.Errorf("credential reached output: %s", value)
 		}

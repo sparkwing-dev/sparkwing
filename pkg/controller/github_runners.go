@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -14,11 +13,6 @@ import (
 
 // GitHubActionsLabel identifies a GitHub Actions runner observation.
 const GitHubActionsLabel = "github-actions"
-
-// safety: a job never outlives six hours and a node that outlives the
-// credential fails, so the credential is short and the workflow's timeout
-// matches it.
-const githubRunnerCredentialTTL = time.Hour
 
 // safety: pull_request runs a contributor's code, and pull_request_target and workflow_run hand
 // the base repository's privileges to input a fork controls, so those jobs get no credential.

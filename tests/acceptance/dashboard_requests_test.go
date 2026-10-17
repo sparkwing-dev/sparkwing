@@ -27,7 +27,7 @@ func TestDashboardRequestsReachControllerHandlers(t *testing.T) {
    return new Response(JSON.stringify({run_id: "accepted", points: []}), {status: 200});
  };
  const api = await import("./src/lib/api.ts");
- await api.triggerRun("ci", {message: "hello"}, {repo_url: "https://github.com/acme/app", branch: "main", repo: "app", github_owner: "acme", github_repo: "app"});
+ await api.triggerRun("ci", {message: "hello"}, {repo_url: "https://git.example/acme/app", branch: "main", repo: "app"});
  await api.cancelRun("run");
  await api.retryRun("run", {full: true});
  await api.getNodeMetrics("run", "job");

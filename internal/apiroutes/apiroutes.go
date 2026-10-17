@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -138,7 +139,7 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 				}
 				alternatives = append(alternatives, strings.Join(grants, " + "))
 			}
-			scope := strings.Join(alternatives, "` or `")
+			scope := strings.Join(slices.Compact(alternatives), "` or `")
 			if policy.Authentication == capability.AuthPublic {
 				scope = Public
 			} else if policy.Authentication != capability.AuthCapability {
