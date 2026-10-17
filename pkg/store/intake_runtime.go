@@ -46,13 +46,11 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if snapshot.request.RunID != "" {
 		pipeline = snapshot.request.Request.Pipeline
 	}
-	scope, err := stateHash(struct {
-		Subject  capability.Subject
-		Pipeline string
-	}{principal.Capability.Subject, pipeline})
+	scope, err := intakeScope(principal, pipeline)
 	if err != nil {
 		return AdmissionResult{}, err
 	}
+
 	// safety: serializing intake per team reserves the number without taking the team row before owner authority.
 	if err = advisoryLockTx(ctx, tx, "intake:"+string(team)); err != nil {
 		return AdmissionResult{}, err
@@ -102,6 +100,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 				}
 				return admissionResultTx(ctx, tx, team, previous)
 			}
+		}
+		if err := validateChildLineageTx(ctx, tx, team, &input); err != nil {
+			return AdmissionResult{}, err
 		}
 		pools, err := intakePoolsTx(ctx, tx, team, &input, policy.RepositoryAuthorized)
 		if err != nil {
@@ -401,4 +402,47 @@ func appReplayKey(input runspec.Request) string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%s", input.Git.App.Value.DeliveryKey, input.Pipeline)
+}
+
+func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request) error {
+	if input.Lineage.RepoInherited && input.Lineage.ParentRunID == "" {
+		return authorityError(apierr.BadRequest, "repository inheritance requires a parent")
+	}
+	seen := map[string]bool{}
+	for id := input.Lineage.ParentRunID; id != ""; {
+		if seen[id] {
+			return authorityError(apierr.Conflict, "child pipeline cycle")
+		}
+		seen[id] = true
+		ancestor, err := readRunTx(ctx, tx, team, id)
+		if err != nil {
+			return err
+		}
+		parent := ancestor.Request.Request
+		if id == input.Lineage.ParentRunID {
+			if input.Env.Digest != "" && (input.Env.Digest != parent.Env.Digest || !slices.Equal(input.Env.Names, parent.Env.Names) || input.EnvironmentSource != parent.EnvironmentSource) {
+				return authorityError(apierr.SpecDrift, "child environment differs from its parent")
+			}
+			input.Env, input.EnvironmentSource = parent.Env, parent.EnvironmentSource
+		}
+		if id == input.Lineage.ParentRunID && input.Lineage.RepoInherited && parent.Git.Repository.Key != input.Git.Repository.Key {
+			return authorityError(apierr.BadRequest, "inherited repository differs from its parent")
+		}
+		if parent.Pipeline == input.Pipeline && parent.Git.Repository.Key == input.Git.Repository.Key {
+			return authorityError(apierr.Conflict, "child pipeline cycle")
+		}
+		id = ancestor.Lineage.ParentRunID
+	}
+	return nil
+}
+
+func intakeScope(principal capability.Principal, pipeline string) (string, error) {
+	subject := principal.Capability.Subject
+	if principal.Authority.Kind == "schedule" {
+		subject.ID, pipeline = principal.Authority.ID, ""
+	}
+	return stateHash(struct {
+		Subject  capability.Subject
+		Pipeline string
+	}{subject, pipeline})
 }

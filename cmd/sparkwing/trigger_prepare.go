@@ -342,7 +342,7 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 	}
 	return controllerwire.CreateRunRequest{IdempotencyKey: key, SubmittedEnv: input.submittedEnv, Request: runspec.Request{
 		Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Reason: input.reason,
-		Git: input.source.git, Source: input.source.source, Options: options, Env: env,
+		Git: input.source.git, Source: input.source.source, Options: options, Env: env, EnvironmentSource: runspec.EnvironmentSubmitted,
 		RequestedArgs: args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: secretArgs},
 	}}, nil
 }

@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -35,29 +34,23 @@ func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 	}
 }
 
-// A run's events belong to its team: another team's handle neither lists
-// them nor appends a once-only event onto the run.
 func TestTenantEventsStayInTheRunsTeam(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	st := storetest.New(t).Open(t)
 	acme := tenantFor(t, st, "acme")
 	globex := tenantFor(t, st, "globex")
 	seedTenantRun(t, acme, "run-a", "deploy")
-
-	if _, err := globex.AppendEventOnce(ctx, "run-a", "", "credits_blocked", []byte(`{}`)); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.AppendEventOnce = %v, want ErrNotFound", err)
+	if _, err := globex.AppendEventCharged(ctx, "replica", "run-a", "", "credits_blocked", []byte(`{}`)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("foreign event append: %v", err)
 	}
-	if wrote, err := acme.AppendEventOnce(ctx, "run-a", "", "credits_blocked", []byte(`{}`)); err != nil || !wrote {
-		t.Fatalf("acme.AppendEventOnce = %v, %v, want written", wrote, err)
-	}
-	if wrote, err := acme.AppendEventOnce(ctx, "run-a", "", "credits_blocked", []byte(`{}`)); err != nil || wrote {
-		t.Fatalf("second acme.AppendEventOnce = %v, %v, want skipped", wrote, err)
+	if _, err := acme.AppendEventCharged(ctx, "replica", "run-a", "", "credits_blocked", []byte(`{}`)); err != nil {
+		t.Fatal(err)
 	}
 	if events, err := globex.ListEventsAfter(ctx, "run-a", 0, 10); err != nil || len(events) != 0 {
-		t.Fatalf("globex.ListEventsAfter = %v, %v, want none", events, err)
+		t.Fatalf("foreign events: %v, %v", events, err)
 	}
 	if events, err := acme.ListEventsAfter(ctx, "run-a", 0, 10); err != nil || len(events) != 1 {
-		t.Fatalf("acme.ListEventsAfter = %v, %v, want the one event", events, err)
+		t.Fatalf("owner events: %v, %v", events, err)
 	}
 }
 

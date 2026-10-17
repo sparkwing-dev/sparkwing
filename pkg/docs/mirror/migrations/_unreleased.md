@@ -1,5 +1,24 @@
 # Migrating to the next release
 
+## Environment and source selections
+
+Requests with nonempty environments set `environment_source` to `captured` for
+private local snapshots or `submitted` for encrypted controller transport. Child
+intake inherits the parent's source and snapshot. Changing invocation origin
+never changes where those values live. Retry retains the original selection.
+
+Local `--sw-ref` selects the execution revision. `--sw-pipeline-ref` selects the
+pipeline code revision. Both resolve before engine selection, inspection and
+building. The sealed request retains the exact execution and code commits.
+`source.working_tree` records local code from the current tree, while
+`source.committed_checkout` distinguishes a requested execution commit from the
+working tree even when that commit equals HEAD.
+
+An alias such as `deploy-prod` with `entrypoint: Deploy` selects the SDK's `Deploy`
+registration. Author code still sees `deploy-prod` in its run context. Scaffolds
+register that configured entrypoint.
+
+
 ## Go SDK replacements
 
 An applicable Go SDK `replace` directive runs with the installed CLI's engine.
@@ -1818,13 +1837,13 @@ kept for S3 and Postgres state profiles.
 | Before | After |
 |---|---|
 | `sparkwing run build --profile shared` with an S3 or Postgres `state:` | `sparkwing pipeline trigger build --profile prod` to run on a controller, or `sparkwing run build` to run here |
-| `state: {type: s3, ...}` or `state: {type: postgres, ...}` in a machine profile (`~/.config/sparkwing/config.yaml`) | Delete the `state:` key, or the profile, or replace it with a controller profile (`sparkwing cloud connect`). The config fails to load with `state.type: s3 is removed` (or `postgres`) and a pointer to this section. |
+| `state: {type: s3, ...}` or `state: {type: postgres, ...}` in a machine profile (`~/.config/sparkwing/config.yaml`) | Delete the `state:` key, or the profile, or replace it with a controller profile (`sparkwing profiles add --controller URL`). The config fails to load with `state.type: s3 is removed` (or `postgres`) and a pointer to this section. |
 | The same in a project profile (`.sparkwing/sparkwing.yaml`) | A project profile declares all four surfaces, so deleting `state:` alone fails with `state surface is required`. Remove the profile, or set `state: {type: sqlite}` for this machine or `state: {type: controller}` for the profile's controller. Both errors name these choices. |
 | `url_source: env:VAR` on any surface | Delete it; it named the Postgres state DSN. The config fails to load with `field url_source not found`; a Postgres `state:` that carries it fails on that key before its type is checked. |
 | `mirror_local:` on a profile | Delete it. The config fails to load with `field mirror_local not found`. |
 | `cache: {binaries: {...}}` | Delete the `binaries:` block. The config fails to load with `field binaries not found`. Runs fetch prebuilt binaries from the git cache `SPARKWING_GITCACHE_URL` names. |
 | `sparkwing run X --sw-artifact-digest-backfill` | Delete the flag; it applied only to binaries fetched from a profile's cache. `run` refuses it as an unknown runner flag. |
-| `sparkwing serve start --profile P [--no-local-store]` | `sparkwing serve start` for this machine's runs, or the controller's dashboard for shared ones. |
+| `sparkwing serve start --profile P [--no-local-store]` | `sparkwing dashboard start` for this machine's runs, or the controller's dashboard for shared ones. |
 | `guards: {require: [profile:name=prod]}` | `profile:local`, `profile:controller` or an `arg:` token. A run never has a named profile, so the token never matched; a config naming it now fails to load. |
 | `sparkwing runs list --profile shared` against an S3 or Postgres state profile | Nothing reads that history any more. The bucket or database is yours to keep or delete. |
 
@@ -1911,9 +1930,9 @@ script that called the binary directly moves to the CLI:
 | Before | After |
 |---|---|
 | `<binary> <pipeline> [flags]` | `sparkwing run <pipeline> [flags]` |
-| `<binary> <pipeline> --plan`, `sparkwing run <pipeline> --plan` | `sparkwing pipeline plan --name <pipeline>` |
-| `<binary> <pipeline> --explain`, `sparkwing run <pipeline> --explain` | `sparkwing pipeline plan --static --name <pipeline>` |
-| `<binary> <pipeline> config`, `sparkwing run <pipeline> config` | `sparkwing pipeline describe --name <pipeline> --secrets` |
+| `<binary> <pipeline> --plan`, `sparkwing run <pipeline> --plan` | `sparkwing pipeline plan --pipeline <pipeline>` |
+| `<binary> <pipeline> --explain`, `sparkwing run <pipeline> --explain` | `sparkwing pipeline plan --pipeline <pipeline>` |
+| `<binary> <pipeline> config`, `sparkwing run <pipeline> config` | `sparkwing pipeline describe --pipeline <pipeline> --secrets` |
 | `<binary> ops queue`, `ops doctor`, `ops version` | `sparkwing queue`, `sparkwing doctor`, `sparkwing version` |
 | `<binary> ops stats`, `ops stats-reset` | none |
 | `<binary> replay-node`, `sparkwing debug replay` | none; a hosted run records no dispatch snapshot |
@@ -2381,8 +2400,19 @@ use their existing lease-holder identity and require no new configuration.
 
 `POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
 `Tenant.RecordCreditGrant` refuse `paid` grants.
-Free operator grants keep their console path. Payment reversals require a
-verified provider event.
+Free operator grants keep their console path. `Tenant.RecordCreditGrant` accepts
+only free grants. Payment reversals require a verified provider event or the
+authorized console refund transaction. `ValidCreditGrantKind` and
+`ErrReversalExceedsPayment` are removed with the raw reversal path.
+
+`Tenant.AppendEventOnce` and the unused `Operator.DropCardAttempt` are removed.
+State events commit with their transition. External event ingestion uses
+`Tenant.AppendEventCharged`.
+
+Queued refund callbacks use verified provider settlement, which selects the
+persisted payment and exact refund object. `Operator.MarkCardRefundMade` applies
+any matching outcome recorded before the provider response was bound. Callback
+callers no longer supply refund-attempt keys.
 
 Checkout integrations must supply C2's verified provider event to
 `Store.SettlePayment`. The committed checkout supplies the team and credit

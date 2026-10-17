@@ -20,6 +20,7 @@ import (
 )
 
 type runFlags struct {
+	sourceSelection         *localSourceSelection
 	invocation              clisurface.Invocation
 	parseErr                error
 	ref                     string

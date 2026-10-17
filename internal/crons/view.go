@@ -1,6 +1,7 @@
 package crons
 
 import (
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -203,6 +204,7 @@ func RowFromView(v controllerwire.ScheduleView) Row {
 			SetAt:   parseRFC3339(v.Override.SetAt),
 			Cron:    v.Override.Cron,
 			TZ:      v.Override.TZ,
+			TZSet:   slices.Contains(v.Override.Fields, "tz"),
 			Overlap: v.Override.Overlap,
 			Args:    overrideArgsFromView(v.Override),
 		}

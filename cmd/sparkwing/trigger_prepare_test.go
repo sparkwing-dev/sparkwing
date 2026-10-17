@@ -257,7 +257,7 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 		args: []string{"-r", "us-east", "--image", "release", "--password", password},
 		described: []nodeproto.PipelineDescription{
 			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
-			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{
+			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{
 				{Name: "region", Short: "r", Type: "string", Required: true},
 				{Name: "image", Type: "string", JobID: "rollout", Required: true},
 				{Name: "password", Type: "string", Secret: true},
@@ -295,7 +295,7 @@ func TestPrepareTriggerRequestSubmitsThroughTheFinalController(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := prepareTriggerRequest(triggerRequestInput{source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "deploy-prod"}}, idempotencyKey: "stable-key"})
+	request, err := prepareTriggerRequest(triggerRequestInput{source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "Deploy"}}, idempotencyKey: "stable-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 	request, err := prepareTriggerRequest(triggerRequestInput{
 		idempotencyKey: "retained",
 		source:         preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-		described:      []nodeproto.PipelineDescription{{Name: "deploy-prod"}},
+		described:      []nodeproto.PipelineDescription{{Name: "Deploy"}},
 		settings:       settings.Inputs{Flags: settings.Values{Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: priority}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: output}}, Runner: runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runner}}}}, Context: settings.Context{NumCPU: 4}},
 		submittedEnv:   map[string][]byte{"DEPLOY_REGION": []byte("private-region")},
 	})
@@ -380,7 +380,7 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 		value = "private-" + value
 		request, err := prepareTriggerRequest(triggerRequestInput{
 			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-			described: []nodeproto.PipelineDescription{{Name: "deploy-prod"}},
+			described: []nodeproto.PipelineDescription{{Name: "Deploy"}},
 			settings:  settings.Inputs{Context: settings.Context{NumCPU: 4}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte(value)},
 		})
 		if strings.ContainsRune(value, 0) {
@@ -422,7 +422,7 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 		}
 		_, err := prepareTriggerRequest(triggerRequestInput{
 			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-			described: []nodeproto.PipelineDescription{{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
+			described: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
 			args:      args,
 		})
 		var canonical *apierr.Error
@@ -443,7 +443,7 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 func TestPrepareTriggerRequestMasksQuotedEnumValues(t *testing.T) {
 	_, err := prepareTriggerRequest(triggerRequestInput{
 		source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-		described: []nodeproto.PipelineDescription{{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"us-east"}}}}},
+		described: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"us-east"}}}}},
 		args:      []string{"--region=private-\x00value"},
 	})
 	if err == nil || strings.Contains(err.Error(), `private-\x00value`) || !strings.Contains(err.Error(), "--region") {

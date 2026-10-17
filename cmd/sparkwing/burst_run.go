@@ -110,6 +110,9 @@ func runConfiguredInvocation(pipeline string, flags runFlags, args []string) err
 	if err != nil {
 		return err
 	}
+	if flags.sourceSelection != nil {
+		directory = flags.sourceSelection.execution.Directory
+	}
 	route, err := loadRunRouting(directory, pipeline)
 	if err != nil {
 		return err

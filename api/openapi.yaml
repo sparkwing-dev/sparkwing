@@ -4899,6 +4899,8 @@ components:
           type: string
         parent_run_id:
           type: string
+        repo_inherited:
+          type: boolean
         retrier:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Actor.'
         retry_of:
@@ -5235,6 +5237,8 @@ components:
           type: string
         env:
           $ref: '#/components/schemas/internal.runspec.EnvSnapshot'
+        environment_source:
+          type: string
         execution_location:
           type: string
         git:
@@ -5645,6 +5649,8 @@ components:
       properties:
         bundle_digest:
           $ref: '#/components/schemas/internal.runspec.Optional.string.'
+        committed_checkout:
+          type: boolean
         entrypoint:
           type: string
         hash_all_files:
@@ -5655,6 +5661,8 @@ components:
           type: boolean
         ref:
           type: string
+        working_tree:
+          type: boolean
       required:
         - ref
         - entrypoint
@@ -10810,11 +10818,6 @@ paths:
             liveness: credential
           - credential: awarded_or_delegated_claim
             grants:
-              - source.read
-            binding: run
-            liveness: sensitive
-          - credential: awarded_or_delegated_claim
-            grants:
               - trigger.host
             binding: run
             liveness: sensitive
@@ -10849,11 +10852,6 @@ paths:
               - runs.read
             binding: none
             liveness: credential
-          - credential: awarded_or_delegated_claim
-            grants:
-              - source.read
-            binding: run
-            liveness: sensitive
           - credential: awarded_or_delegated_claim
             grants:
               - trigger.host

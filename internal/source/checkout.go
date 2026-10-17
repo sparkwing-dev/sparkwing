@@ -119,10 +119,6 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			return entry, errors.Join(err, refErr)
 		}
 	}
-	if spec.SHA != "" && !strings.EqualFold(actual, spec.SHA) {
-		return entry, errors.New("source checkout HEAD differs from the sealed commit")
-	}
-	entry.SHA = actual
 	if entry.DefaultBranch == "" && (spec.LocalCheckout != "" || options.PreparedCheckout != "") {
 		branch, err := client.run(ctx, checkout, "", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
 		if err == nil {
@@ -131,9 +127,54 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			return entry, err
 		}
 	}
+	if spec.LocalCheckout != "" && (spec.CommittedCheckout || spec.SHA != "" && !strings.EqualFold(actual, spec.SHA)) {
+		if !filepath.IsAbs(options.Workspace) {
+			return entry, errors.New("selected local revision requires an absolute host workspace")
+		}
+		if err := fssecure.EnsureDir(options.Workspace); err != nil {
+			return entry, err
+		}
+		root, err := fssecure.MkdirPrivateTemp(options.Workspace, "revision-")
+		if err != nil {
+			return entry, err
+		}
+		entry.ownedDirectory = root
+		selected := filepath.Join(root, "checkout")
+		local := client
+		local.env = append(append([]string{}, client.env...), "GIT_ALLOW_PROTOCOL=file")
+		if _, err := local.run(ctx, "", "", "clone", "--quiet", "--no-checkout", "--no-hardlinks", "--", checkout, selected); err != nil {
+			return entry, err
+		}
+		revision := spec.SHA
+		if revision == "" {
+			revision = actual
+		}
+		if _, err := client.run(ctx, selected, "", "checkout", "--quiet", "--detach", revision); err != nil {
+			return entry, err
+		}
+		checkout, actual = selected, revision
+	}
+	if spec.SHA != "" && !strings.EqualFold(actual, spec.SHA) {
+		return entry, errors.New("source checkout HEAD differs from the sealed commit")
+	}
+	entry.SHA = actual
 	entry.checkoutDirectory = checkout
 	entry.Directory, err = pipelineDirectory(checkout, spec.PipelineDir)
-	return entry, err
+	if err != nil {
+		return entry, err
+	}
+	entry.pipelineCheckout = checkout
+	if spec.PipelineSHA != "" && (spec.PipelineSHA != actual || spec.LocalCheckout != "" && !spec.CommittedCheckout) {
+		code := spec.PipelineSource()
+		codeOptions := options
+		codeOptions.PreparedCheckout = ""
+		entry.pipelineEntry, err = PrepareCheckout(ctx, code, codeOptions)
+		if err != nil {
+			return entry, err
+		}
+		entry.Directory, entry.pipelineCheckout = entry.pipelineEntry.Directory, entry.pipelineEntry.CheckoutDirectory()
+	}
+	return entry, nil
 }
 
 func validateSpec(spec Spec) error {
@@ -151,6 +192,9 @@ func validateSpec(spec Spec) error {
 		if spec.SHA == "" {
 			return errors.New("remote source requires the sealed commit, not a branch head")
 		}
+	}
+	if spec.PipelineSHA != "" && !commitID.MatchString(spec.PipelineSHA) {
+		return errors.New("pipeline commit must be a full hexadecimal ID")
 	}
 	if spec.SHA != "" && !commitID.MatchString(spec.SHA) {
 		return errors.New("source commit must be a full 40 or 64 digit hexadecimal ID")
@@ -287,6 +331,10 @@ func (e *Entry) Close() error {
 	if e.releaseSDK != nil {
 		err = e.releaseSDK()
 		e.releaseSDK = nil
+	}
+	if e.pipelineEntry != nil {
+		err = errors.Join(err, e.pipelineEntry.Close())
+		e.pipelineEntry = nil
 	}
 	if e.ownedDirectory != "" {
 		if removeErr := os.RemoveAll(e.ownedDirectory); removeErr != nil {

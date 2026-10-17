@@ -46,6 +46,10 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 		return err
 	})
 	if err != nil {
+		var unpriced *UnpricedCPUClassError
+		if errors.As(err, &unpriced) && unpriced.RunID != "" && unpriced.NodeID != "" {
+			err = errors.Join(err, s.failUnpricedClaim(ctx, demand, unpriced))
+		}
 		return UnitClaim{}, err
 	}
 	return out, nil
@@ -113,7 +117,14 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 	return kinds, nil
 }
 
-func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) (UnitClaim, error) {
+func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) (_ UnitClaim, err error) {
+	defer func() {
+		var unpriced *UnpricedCPUClassError
+		if errors.As(err, &unpriced) {
+			unpriced.RunID, unpriced.NodeID = unit.RunID, unit.NodeID
+		}
+	}()
+
 	if err := validateClaimUnit(unit); err != nil {
 		return UnitClaim{}, err
 	}
@@ -128,14 +139,29 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if err != nil {
 		return UnitClaim{}, err
 	}
+	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
+		return UnitClaim{}, err
+	}
+	if unit.Kind == capability.UnitNode {
+		root := p.Capability
+		if root.Parent != nil {
+			chain, err := authorityChainTx(ctx, tx, p.Authority, false)
+			if err != nil {
+				return UnitClaim{}, err
+			}
+			root = chain[len(chain)-1].principal.Capability
+		}
+		if meteredPlacement(p.Capability, root) {
+			if _, err := unitBillingPriceTx(ctx, tx, requirements.Request); err != nil {
+				return UnitClaim{}, err
+			}
+		}
+	}
 	if verdict := match.Evaluate(profile, requirements); !verdict.OK() {
 		return UnitClaim{}, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
 	}
 	if verdict := match.Fits(profile.Capacity, demand.Available, requirements.Request); !verdict.OK() {
 		return UnitClaim{}, authorityError(apierr.LockHeld, "claimant capacity is unavailable")
-	}
-	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
-		return UnitClaim{}, err
 	}
 	var team Team
 	if err = tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {

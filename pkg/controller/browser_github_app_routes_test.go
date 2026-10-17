@@ -256,6 +256,32 @@ func TestGitHubBrowserConnectionProviderAndReplay(t *testing.T) {
 	}
 }
 
+func TestGitHubBrowserConnectionRealStore(t *testing.T) {
+	f := newGitHubBrowserFixture(t)
+	engineSQL(t, f.s.store, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','42','member','member@example.test',1,1)`)
+	f.s.WithGitHubConnectWriter(nil)
+	f.h = f.s.Handler()
+	flow := f.start(t, false)
+	flow.Code, flow.InstallationID = "code", 7
+	w := f.request("GET", githubAppCompletePath, nil, &flow, nil)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("complete = %d %s", w.Code, w.Body)
+	}
+	tenant, err := f.s.store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.GitHubAppInstallation(t.Context(), 7)
+	if err != nil || row.ConnectedBy != "member" || row.GitHubUserID != 42 {
+		t.Fatalf("installation = %+v: %v", row, err)
+	}
+	calls := f.providerCalls
+	w = f.request("GET", githubAppCompletePath, nil, &flow, nil)
+	if w.Code < 400 || f.providerCalls != calls {
+		t.Fatalf("replay = %d %s, provider calls %d -> %d", w.Code, w.Body, calls, f.providerCalls)
+	}
+}
+
 func TestGitHubBrowserConnectionStateProperty(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
 	flow := f.start(t, false)

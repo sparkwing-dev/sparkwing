@@ -15,6 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
@@ -93,7 +95,7 @@ func exitCodeFor(err error) int {
 	return 1
 }
 
-func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, func()) error) error {
+func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, func()) error) (resultErr error) {
 	pipelineName := inv.Pipeline
 	flags, passthrough := runFlagsFromInvocation(inv)
 	if flags.parseErr != nil {
@@ -116,7 +118,30 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
-	route, err := loadRunRouting(dir, pipelineName)
+	routeDirectory, engineDirectory := dir, dir
+	var beforeExec func()
+	var closeErr error
+	if flags.ref != "" || flags.pipelineRef != "" || entry != nil && entry.Source != "" {
+		home, err := wingd.HomeDir("")
+		if err != nil {
+			return err
+		}
+		captured := os.Environ()
+		selection, err := selectLocalRunSource(context.Background(), home, dir, pipelineName, flags, captured, secrets.NewMasker())
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, selection.execution.Close()) }()
+		code, err := selection.checkout(context.Background(), home, captured)
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, code.Close()) }()
+		flags.sourceSelection = &selection
+		routeDirectory, engineDirectory = selection.execution.Directory, code.Directory
+		beforeExec = func() { closeErr = errors.Join(closeErr, code.Close(), selection.execution.Close()) }
+	}
+	route, err := loadRunRouting(routeDirectory, pipelineName)
 	if err != nil {
 		return err
 	}
@@ -126,9 +151,11 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 		}
 	}
 
-	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
-	if err := selectEngine(dir, nil); err != nil {
-		return err
+	if err := selectEngine(engineDirectory, beforeExec); err != nil {
+		return errors.Join(err, closeErr)
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 
 	return runConfiguredInvocation(pipelineName, flags, passthrough)

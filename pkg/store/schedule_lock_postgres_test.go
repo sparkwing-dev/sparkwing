@@ -1,0 +1,90 @@
+package store_test
+
+import (
+	"context"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+)
+
+func TestPostgresScheduleConcurrentFiresCommitOneRunWithoutDeadlock(t *testing.T) {
+	f := newStoreRecoveryFixtureAt(t, true, storetest.NewPostgres(t))
+	f.s.DB().SetMaxOpenConns(8)
+	controller.New(f.s, nil)
+	p, err := f.s.ResolveAuthority(t.Context(), f.plan.Seal.Request.AuthorityRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(f.tenant.Team())}}
+	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: "https://gitlab.com/acme/repo.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567", Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
+	ids, _, err := f.tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, err := f.s.TestOnlyDatabaseTime(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := now.Truncate(time.Minute)
+	if _, err := f.s.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET cursor_at=$1,next_due_at=$2 WHERE team=$3 AND id=$4`, due.Add(-time.Minute).UnixNano(), due.UnixNano(), f.tenant.Team(), ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	row, err := f.tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	intake, err := f.s.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = intake.Rollback() }()
+	if _, err := intake.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "intake:"+string(f.tenant.Team())); err != nil {
+		t.Fatal(err)
+	}
+	var pid int
+	if err := intake.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		admission store.AdmissionResult
+		err       error
+	}
+	done := make(chan result, 2)
+	for range 2 {
+		go func() { admission, err := f.tenant.AdmitScheduledRun(ctx, row, due); done <- result{admission, err} }()
+	}
+	for blocked := 0; blocked < 2; {
+		select {
+		case got := <-done:
+			t.Fatalf("fire finished before intake unlocked: %v", got.err)
+		default:
+		}
+		err := f.s.DB().QueryRowContext(ctx, `WITH RECURSIVE blocked AS (
+   SELECT pid FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))
+   UNION SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid=ANY(pg_blocking_pids(a.pid))
+  ) SELECT COUNT(*) FROM blocked`, pid).Scan(&blocked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runtime.Gosched()
+	}
+	if err := intake.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	first, second := <-done, <-done
+	if first.err != nil || second.err != nil || first.admission.RunID == "" || first.admission.RunID != second.admission.RunID {
+		t.Fatalf("concurrent fires: %+v %+v", first, second)
+	}
+	fires, err := f.tenant.ListCronFires(ctx, row.ID, 10)
+	if err != nil || len(fires) != 1 || fires[0].RunID != first.admission.RunID {
+		t.Fatalf("committed history: %+v %v", fires, err)
+	}
+}

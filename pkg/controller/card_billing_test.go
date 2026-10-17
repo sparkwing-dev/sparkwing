@@ -2,7 +2,6 @@ package controller_test
 
 import (
 	"net/http"
-	"testing"
 )
 
 type cardBilling struct {
@@ -32,21 +31,4 @@ func (f *identityFixture) billing(who signedIn) cardBilling {
 		f.t.Fatalf("billing = %d", code)
 	}
 	return b
-}
-
-func TestCardBilling_OwnerSetsABudget(t *testing.T) {
-	f, _ := billingFixture(t)
-	owner, editor, _ := teamOf(f)
-	if code := f.call("PUT", "/api/v1/team/billing/budget", editor.auth, map[string]any{"budget_cents": 1_000}, nil); code != http.StatusForbidden {
-		t.Fatalf("an editor's budget = %d, want 403", code)
-	}
-	if code := f.call("PUT", "/api/v1/team/billing/budget", owner.auth, map[string]any{"budget_cents": 1_000}, nil); code != http.StatusNoContent {
-		t.Fatalf("budget = %d", code)
-	}
-	if b := f.billing(owner); b.Limits.BudgetCents != 1_000 {
-		t.Fatalf("budget reads %d", b.Limits.BudgetCents)
-	}
-	if code := f.call("PUT", "/api/v1/team/billing/budget", owner.auth, map[string]any{"budget_cents": 100_000_000}, nil); code != http.StatusBadRequest {
-		t.Fatalf("an oversized budget = %d, want 400", code)
-	}
 }

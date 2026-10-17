@@ -12,8 +12,8 @@ import (
 func TestPipelineSelectionRefusesOnlyItsOwnDescribeFailure(t *testing.T) {
 	cause := &apierr.Error{Code: apierr.PlanFailed, Message: "describe pipeline broken: missing deployment setting"}
 	schemas := []nodeproto.PipelineDescription{
-		{Name: "broken", Args: []nodeproto.ArgumentDescription{}, Error: cause},
-		{Name: "build", Args: []nodeproto.ArgumentDescription{}, Secrets: []nodeproto.SecretDeclaration{{Name: "BUILD_TOKEN"}}},
+		{Name: "Broken", Args: []nodeproto.ArgumentDescription{}, Error: cause},
+		{Name: "Build", Args: []nodeproto.ArgumentDescription{}, Secrets: []nodeproto.SecretDeclaration{{Name: "BUILD_TOKEN"}}},
 	}
 	healthy, err := boundPipelineSchema(schemas, clisurface.PipelineIdentity{Name: "build", Entrypoint: "Build"})
 	if err != nil || len(healthy.Secrets) != 1 || healthy.Secrets[0].Name != "BUILD_TOKEN" {

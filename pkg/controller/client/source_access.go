@@ -38,7 +38,7 @@ func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (sou
 }
 
 func (s *sourceAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error) {
-	if !reflect.DeepEqual(spec, s.sealed) {
+	if !reflect.DeepEqual(spec, s.sealed) && (s.sealed.PipelineSHA == "" || !reflect.DeepEqual(spec, s.sealed.PipelineSource())) {
 		return source.Credential{}, localHostClientRefusal()
 	}
 	var result struct {

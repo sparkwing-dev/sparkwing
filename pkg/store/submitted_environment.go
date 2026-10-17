@@ -17,6 +17,15 @@ func (s *Store) SetRunEnvironmentCipher(cipher SessionKeyCipher) { s.runEnvCiphe
 
 func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx, result AdmissionResult, input IntakeRequest) error {
 	request := result.Request.Request
+	if request.EnvironmentSource == runspec.EnvironmentCaptured {
+		if len(input.SubmittedEnv) != 0 {
+			return authorityError(apierr.BadRequest, "captured environment cannot carry submitted values")
+		}
+		return nil
+	}
+	if request.EnvironmentSource != runspec.EnvironmentSubmitted && (request.EnvironmentSource != "" || len(request.Env.Names) != 0 || len(input.SubmittedEnv) != 0) {
+		return authorityError(apierr.BadRequest, "environment provenance is required")
+	}
 	values := input.SubmittedEnv
 	if input.Request.Lineage.RetryOf != "" || request.Lineage.ParentRunID != "" {
 		source := input.Request.Lineage.RetryOf
@@ -29,7 +38,7 @@ func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx,
 			return err
 		}
 	}
-	if len(values) == 0 && (request.Origin == runspec.OriginLocal || len(request.Env.Names) == 0) {
+	if len(values) == 0 && len(request.Env.Names) == 0 {
 		return nil
 	}
 	if err := runspec.VerifyEnvironment(request.Env, values); err != nil {
@@ -75,7 +84,13 @@ func (t *Tenant) readSubmittedEnvironmentTx(ctx context.Context, tx *storeTx, ru
 	if err := tx.QueryRowContext(ctx, `SELECT submitted_env FROM runs WHERE team=? AND id=?`, t.team, runID).Scan(&envelope); err != nil {
 		return nil, err
 	}
-	if envelope == "" && (run.Request.Request.Origin == runspec.OriginLocal || len(run.Request.Request.Env.Names) == 0) {
+	if run.Request.Request.EnvironmentSource == runspec.EnvironmentCaptured {
+		if envelope != "" {
+			return nil, authorityError(apierr.Unavailable, "captured environment has unexpected submitted values")
+		}
+		return nil, nil
+	}
+	if envelope == "" && len(run.Request.Request.Env.Names) == 0 {
 		return nil, nil
 	}
 	cipher := t.s.runEnvCipher

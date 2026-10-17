@@ -1236,3 +1236,37 @@ a plain pipeline name, or pretty guidance after dependency resolution succeeds.
 `runspec.Request.RequestID` and survives intake, sealing and retry. The detached
 JSON receipt includes `request_id` when supplied. It is trace metadata. Only
 `--sw-idempotency-key` deduplicates submissions.
+
+## Child lineage reporting, 2026-10-17
+
+`Lineage.RepoInherited` uses optional JSON `repo_inherited`. True records that the
+child caller omitted a repository override. C1 checks the parent repository and
+seals this intent before reporting it. False is omitted, preserving canonical
+encodings for requests without inherited repository intent. Source authorization
+continues through the current intake policy.
+
+## Pipeline and source selection integration
+
+SDK describe selection, CLI schema binding, initial planning and attempt replans
+select the configured SDK entrypoint. Scaffolds register that entrypoint.
+The invoked alias belongs in run context
+and presentation. `nodeproto.DescribeDoc.Pipeline` owns metadata selection.
+
+The dispatcher, local execution and help resolve `--sw-ref`, `--sw-pipeline-ref` and a configured
+source pin through one selection boundary before inspection or building. The
+execution checkout supplies project configuration. Its exact SHA is sealed in
+`Git.SHA`. Local source selection seals the pipeline code SHA in `Source.Ref`.
+A source ref that names the execution ref projects to the sealed `Git.SHA`
+without looking up that ref again. This also preserves scheduled intake. `Source.WorkingTree` retains
+local code from the working tree when no committed source was selected.
+`Source.CommittedCheckout` records explicit committed execution, including when
+that revision equals HEAD. Acquisition restores the execution and code checkouts
+separately. SDK installation uses the code checkout, while author code runs in
+the execution checkout. Retry carries these selections unchanged.
+
+Environment provenance is sealed independently of invocation origin. Children
+inherit both the parent's snapshot identity and its storage source. Local
+schedule registration marks captured provenance before saving its request.
+
+The documentation checker parses current migration destination commands in
+Before/After tables and fenced After examples. Before examples remain historical.

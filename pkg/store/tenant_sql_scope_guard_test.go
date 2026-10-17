@@ -58,13 +58,11 @@ var reviewedUnscopedSQL = map[string]string{
 		"each row it touches is named by its global id",
 	"settleCardPaymentTx": "a payment names its charge by global id, and the charge row it reads " +
 		"is checked against the team the payment names",
-	"failCardAttemptTx":           "a decline names its attempt by global id; the team is read from that row",
-	"(*Operator).DropCardAttempt": "an attempt that never reached Stripe is closed by its global id",
-	"recordAttemptIntentTx":       "the worker binds a payment to the attempt it names by global id",
-	"reportCardRefundTx":          "a provider refund names its payment identity before its persisted team is known",
-	"(*Operator).DueCardRefunds":  "the payment worker lists every team's queued refunds in one pass",
-	"globalRunsPerHourRefusal":    "the global hourly cap counts runs from every team",
-	"runOwnerTx":                  "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"failCardAttemptTx":          "a decline names its attempt by global id; the team is read from that row",
+	"recordAttemptIntentTx":      "the worker binds a payment to the attempt it names by global id",
+	"(*Operator).DueCardRefunds": "the payment worker lists every team's queued refunds in one pass",
+	"globalRunsPerHourRefusal":   "the global hourly cap counts runs from every team",
+	"runOwnerTx":                 "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).countRuns": "shares listRuns' predicate builder and its refusal",
@@ -102,8 +100,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).PruneEgressUsage": "expires every team's egress reports under the maintenance lease",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
-	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
-		"run's team",
 
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",

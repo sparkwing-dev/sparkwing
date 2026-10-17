@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **runs (Breaking):** Seal environment provenance independently of invocation origin. Children inherit their parent's captured or submitted environment. Request producers with nonempty environments set `environment_source`. See [migration](docs/migrations/_unreleased.md#environment-and-source-selections).
+- **cli:** Select configured SDK entrypoints in inspection, planning and scaffolds. Resolve `--sw-ref` and `--sw-pipeline-ref` before engine selection and retain the chosen revisions through sealing and retry.
+
 - **cli:** Submit present, allow-listed environment values with triggers and Cloud overflow. Encrypt private values at the controller, retain them through retry, and mask them on hosts.
 - **cli:** `run --sw-allow-unadmitted` uses an exclusive in-process local controller for standalone CI, with joined shutdown and its own admission queue.
 
@@ -58,6 +61,25 @@ unlock.
 
 - **source:** Accept authenticated proxy settings when inspecting Git checkouts.
 
+- **billing:** Apply early refund callbacks when the worker binds the provider
+  refund ID, so completion and retry outcomes are retained once.
+
+- **store (Breaking):** Require verified payment settlement or an authorized console
+  refund for reversals. `Tenant.RecordCreditGrant` accepts free grants only.
+  Remove the unused `Tenant.AppendEventOnce`, `Operator.DropCardAttempt`,
+  `ValidCreditGrantKind` and `ErrReversalExceedsPayment` APIs.
+
+- **store (Breaking):** Report committed output digests in jobs and receipts
+  Replace `Node.OutputRef` with `Node.OutputDigest` and remove `OutputRef`,
+  `OutputKeyPrefix` and `NodeLogSealGrace`. `CreditRateTable.ClassForResource`
+  takes `match.Resources` directly instead of the removed `ExecutorResource` alias.
+
+- **schedules:** Remove the controller's retired trigger insertion path. Scheduled execution requires a tenant scheduled-intake transaction and refuses a missing or wrong-team adapter.
+
+- **api:** Restore Git object ID validation on sealed run submissions and reject child pipeline cycles within a repository. A child request naming another team returns `forbidden`.
+
+- **controller:** Apply configured flood caps and queue shedding to sealed run submissions and retries
+  Content deduplication replays one committed run without returning its one-time here bearer again.
 - **run:** Reuse local pipeline binaries before resolving Go dependencies, so
   cache hits do not require a working Go compiler.
 

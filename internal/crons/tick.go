@@ -330,6 +330,12 @@ func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval
 	if outcome == store.CronOutcomeFired && !dryRun {
 		id, err := s.Launcher.Launch(ctx, sched, due)
 		if err != nil {
+			var conflict interface{ SQLState() string }
+			if errors.As(err, &conflict) && (conflict.SQLState() == "40P01" || conflict.SQLState() == "40001" || conflict.SQLState() == "55P03") {
+				report.Failed++
+				report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
+				return
+			}
 			outcome, detail = store.CronOutcomeFailed, err.Error()
 		} else {
 			runID = id

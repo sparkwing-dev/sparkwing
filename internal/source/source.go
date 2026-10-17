@@ -13,16 +13,18 @@ import (
 
 // Spec carries the sealed source identity, commit and checkout policy.
 type Spec struct {
-	RepoKey       string
-	RemoteURL     string
-	SHA           string
-	DefaultBranch string
-	LocalCheckout string
-	PipelineDir   string
-	Checkout      runspec.CheckoutPolicy
-	Engine        *engine.Identity
-	NoBincache    bool
-	HashAllFiles  bool
+	RepoKey           string
+	RemoteURL         string
+	SHA               string
+	PipelineSHA       string
+	CommittedCheckout bool
+	DefaultBranch     string
+	LocalCheckout     string
+	PipelineDir       string
+	Checkout          runspec.CheckoutPolicy
+	Engine            *engine.Identity
+	NoBincache        bool
+	HashAllFiles      bool
 	// BundleDigest identifies an optional authorized source_bundle seed.
 	BundleDigest string
 }
@@ -79,9 +81,17 @@ type Entry struct {
 	// DefaultBranch is resolved from origin HEAD only when the sealed request lacks it.
 	DefaultBranch     string
 	ownedDirectory    string
+	pipelineCheckout  string
+	pipelineEntry     *Entry
 	checkoutDirectory string
 	releaseSDK        func() error
 }
 
 // CheckoutDirectory returns the acquired root that bounds checkout-derived file reads.
 func (e *Entry) CheckoutDirectory() string { return e.checkoutDirectory }
+
+// PipelineSource projects the sealed code commit without widening acquisition authority.
+func (s Spec) PipelineSource() Spec {
+	s.SHA, s.PipelineSHA, s.CommittedCheckout = s.PipelineSHA, "", true
+	return s
+}

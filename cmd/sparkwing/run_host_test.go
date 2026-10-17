@@ -369,7 +369,7 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 	}
 	return localRunPreparation{
 		identity:  clisurface.PipelineIdentity{Name: "ci", Entrypoint: "CI"},
-		described: []nodeproto.PipelineDescription{{Name: "ci", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
+		described: []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
 		git:       award.Request.Request.Git, source: runspec.Source{Entrypoint: "CI"}, environment: env,
 		settings: settings.Inputs{Context: settings.Context{NumCPU: 4}},
 	}

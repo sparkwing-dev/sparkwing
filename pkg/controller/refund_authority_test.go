@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -24,9 +25,7 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 500 * store.MicroCreditsPerCent, Reference: "pi_private_refund", CreatedBy: "test"}); err != nil {
-		t.Fatal(err)
-	}
+	controller.PaidCreditsFixture(t, f.store, tenant, 500)
 	balance, err := tenant.CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -45,14 +44,20 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 	} {
 		t.Run(caller.name, func(t *testing.T) {
 			for _, route := range []struct {
-				path string
-				body map[string]any
+				path    string
+				body    map[string]any
+				retired bool
 			}{
-				{"/api/v1/credits/reversals", map[string]any{"payment_id": "pi_private_refund", "reference": "refund:pi_private_refund"}},
-				{"/api/v1/credits/card-refunds", map[string]any{"payment_intent": "pi_private_refund", "queue": "pi_private_refund-0", "refund_id": "re_private", "status": "succeeded"}},
+				{"/api/v1/credits/reversals", map[string]any{"payment_id": "pi_fixture", "reference": "refund:pi_fixture"}, true},
+				{"/api/v1/credits/card-refunds", map[string]any{"payment_intent": "pi_fixture", "queue": "pi_fixture-0", "refund_id": "re_private", "status": "succeeded"}, true},
+				{"/api/v1/operator/teams/" + owner.team + "/refunds", map[string]any{"payment_id": "pi_fixture", "refund_id": "re_private", "amount_cents": 500, "reason": "test"}, false},
 			} {
-				if code := f.call(http.MethodPost, route.path, caller.auth, route.body, nil); code != caller.want {
-					t.Errorf("%s status=%d want%d", route.path, code, caller.want)
+				want := caller.want
+				if route.retired {
+					want = http.StatusNotFound
+				}
+				if code := f.call(http.MethodPost, route.path, caller.auth, route.body, nil); code != want {
+					t.Errorf("%s status=%d want%d", route.path, code, want)
 				}
 			}
 		})

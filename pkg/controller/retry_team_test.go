@@ -7,9 +7,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
+
+// A trigger's retry_of links the new run into another run's attempt tree, and
+// the attempts route answers with every run in that tree, so a retry_of naming
+// another team's run would hand that run's record to the caller.
+func TestTeamBoundary_ATriggerCannotRetryAnotherTeamsRun(t *testing.T) {
+	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
+		for _, victim := range []string{f.runA, f.victim} {
+			code, body := f.do("POST", "/api/v1/runs/"+victim+"/retry", f.ownerB, controllerwire.RetryRequest{Mode: "all", IdempotencyKey: "foreign-retry"})
+			if code != http.StatusNotFound {
+				t.Fatalf("retry foreign run %s = %d: %s", victim, code, body)
+			}
+		}
+		code, body := f.do("POST", "/api/v1/runs", f.ownerB, computeIntake("build-b"))
+		var own controllerwire.CreateRunResponse
+		if code != http.StatusCreated || json.Unmarshal([]byte(body), &own) != nil || own.RunID == "" {
+			t.Fatalf("own intake = %d: %s", code, body)
+		}
+		if err := teststore.SeedRunFinish(f.st, t.Context(), f.teamB.Team(), own.RunID, "failed", "boom"); err != nil {
+			t.Fatal(err)
+		}
+		code, body = f.do("POST", "/api/v1/runs/"+own.RunID+"/retry", f.ownerB, controllerwire.RetryRequest{Mode: "all", IdempotencyKey: "own-retry"})
+		if code != http.StatusOK {
+			t.Fatalf("own retry = %d: %s", code, body)
+		}
+		var retried controllerwire.CreateRunResponse
+		if err := json.Unmarshal([]byte(body), &retried); err != nil {
+			t.Fatal(err)
+		}
+		code, body = f.do("GET", "/api/v1/runs/"+retried.RunID+"/attempts", f.ownerB, nil)
+		ids := attemptIDs(t, body)
+		if code != 200 || !ids[own.RunID] || !ids[retried.RunID] || ids[f.runA] || ids[f.victim] {
+			t.Fatalf("own attempts = %d: %s", code, body)
+		}
+	})
+}
 
 // A retry_of pointer that already crosses teams, whichever way it points, is
 // not followed: the attempt tree stays inside the team that asks for it.
@@ -19,10 +55,7 @@ func TestTeamBoundary_AttemptsNeverFollowAPointerIntoAnotherTeam(t *testing.T) {
 		now := time.Now()
 		seedRetry := func(tn *store.Tenant, id, retryOf string) {
 			t.Helper()
-			if err := teststore.SeedTriggerWithRun(f.st, ctx, tn.Team(),
-				store.Trigger{ID: id, Pipeline: "p", TriggerSource: "api", RetryOf: retryOf, CreatedAt: now},
-				store.Run{ID: id, Pipeline: "p", Status: "running", RetryOf: retryOf, CreatedAt: now, StartedAt: now},
-			); err != nil {
+			if err := teststore.SeedRun(f.st, ctx, tn.Team(), store.Run{ID: id, Pipeline: "p", Status: "running", RetryOf: retryOf, CreatedAt: now, StartedAt: now}); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestNativeAnnotationPreservesLocationAndStep(t *testing.T) {
@@ -70,5 +71,36 @@ func TestNativeAnnotationAllowsEmptyMaskedText(t *testing.T) {
 	process := &NativeProcessClient{transport: transport, run: "run", job: "job"}
 	if err := process.Annotation(t.Context(), nodeproto.AnnotationRequest{Level: "info"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNativeChildPreservesOmittedRepositoryIntent(t *testing.T) {
+	for _, repo := range []string{"", "git:example.test/team/repo"} {
+		t.Run(repo, func(t *testing.T) {
+			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
+				var body struct {
+					Request struct {
+						Lineage struct {
+							RepoInherited bool `json:"repo_inherited"`
+						} `json:"lineage"`
+					} `json:"request"`
+				}
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if body.Request.Lineage.RepoInherited != (repo == "") {
+					t.Fatalf("repository omission lost: %+v", body)
+				}
+				response, err := json.Marshal(controllerwire.CreateRunResponse{RunID: "child", Number: 2})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return engineResponse(http.StatusCreated, string(response)), nil
+			})
+			process := &NativeProcessClient{transport: transport, run: "run", job: "job", request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/team/repo"}}}}
+			if _, err := process.StartChild(t.Context(), "deploy", nil, repo, ""); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

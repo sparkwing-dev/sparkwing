@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,13 +16,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-const cronTestRepoURL = "https://github.com/acme/widgets.git"
+const cronTestRepoURL = "https://gitlab.com/acme/widgets.git"
 
 const cronTestSHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -54,7 +56,8 @@ func newCronsFixture(t *testing.T) *cronsFixture {
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}
-	return &cronsFixture{t: t, handler: controller.New(st, nil).Handler(), store: st, writer: writer, reader: reader, none: none}
+	s := controller.New(st, nil)
+	return &cronsFixture{t: t, handler: s.Handler(), store: st, writer: writer, reader: reader, none: none}
 }
 
 // safety: the request and its body's close live in one function, so no caller
@@ -135,32 +138,27 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	}
 
 	ctx := context.Background()
-	trigger, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetTrigger(ctx, launched.RunID)
+	tenant := teststore.ForTeam(t, f.store, store.DefaultTeam)
+	run, err := tenant.ReadRun(ctx, launched.RunID)
 	if err != nil {
-		t.Fatalf("GetTrigger: %v", err)
+		t.Fatal(err)
 	}
-	if trigger.TriggerSource != "schedule" {
-		t.Errorf("trigger source = %q, want schedule", trigger.TriggerSource)
+	request := run.Request.Request
+	if request.Origin != runspec.OriginSchedule || request.Actor.ID != "pusher" {
+		t.Errorf("scheduled origin/actor = %s/%+v", request.Origin, request.Actor)
 	}
-	if trigger.RepoURL != cronTestRepoURL || trigger.GitSHA != cronTestSHA || trigger.GitBranch != "main" {
-		t.Errorf("trigger git = %+v, want the pushed source", trigger)
+	if request.Source.Location.RemoteURL != cronTestRepoURL || request.Git.SHA != cronTestSHA || request.Git.Ref != "main" || request.Git.App.Set {
+		t.Errorf("sealed source = %+v %+v", request.Git, request.Source)
 	}
-	if trigger.Args["depth"] != "deep" {
-		t.Errorf("trigger args = %v, want the schedule's", trigger.Args)
+	if request.RequestedArgs["depth"] != "deep" {
+		t.Errorf("sealed args = %v", request.RequestedArgs)
 	}
-	scheduleID := launched.Schedule.ID
-	if trigger.TriggerEnv[crons.ScheduleEnvKey] != scheduleID {
-		t.Errorf("trigger env = %v, want the schedule id under %s", trigger.TriggerEnv, crons.ScheduleEnvKey)
-	}
-	if trigger.IdempotencyKey == "" {
-		t.Error("a scheduled launch carries no idempotency key")
-	}
-	run, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetRun(ctx, launched.RunID)
+	trigger, err := tenant.GetTrigger(ctx, launched.RunID)
 	if err != nil {
-		t.Fatalf("GetRun: %v", err)
+		t.Fatal(err)
 	}
-	if run.Status != "pending" {
-		t.Errorf("run status = %q, want pending", run.Status)
+	if trigger.IdempotencyKey == "" || trigger.Status != "pending" || run.State != store.RunPending || run.Request.Hash == "" {
+		t.Errorf("unsealed or unqueued schedule: trigger=%+v run=%+v", trigger, run)
 	}
 }
 
@@ -177,5 +175,31 @@ func TestControllerCrons_RunNowReplaysTheSameRequest(t *testing.T) {
 	runs, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListRuns(t.Context(), store.RunFilter{Limit: 10})
 	if err != nil || len(runs) != 1 || runs[0].ID != first.RunID {
 		t.Fatalf("replayed request persisted %d runs: %v", len(runs), err)
+	}
+}
+
+type scheduleSourceProbe struct {
+	store.IntakePolicy
+	calls int
+}
+
+func (p *scheduleSourceProbe) ResolveScheduleSource(context.Context, store.CronSchedule, runspec.Request) (runspec.Request, error) {
+	p.calls++
+	return runspec.Request{}, errors.New("source lookup reached")
+}
+
+func TestControllerCrons_BoundsEntriesBeforeResolvingSource(t *testing.T) {
+	f := newCronsFixture(t)
+	probe := &scheduleSourceProbe{}
+	f.store.SetIntakePolicy(probe)
+	body := cronPushBody()
+	entries := make([]map[string]any, 21)
+	for i := range entries {
+		entries[i] = map[string]any{"pipeline": fmt.Sprintf("job-%d", i), "cron": "0 3 * * *"}
+	}
+	body["schedules"] = entries
+	status := f.status(http.MethodPut, "/api/v1/schedules/repos", f.writer, body)
+	if status != 409 || probe.calls != 0 {
+		t.Fatalf("overfull declaration: status=%d source calls=%d", status, probe.calls)
 	}
 }

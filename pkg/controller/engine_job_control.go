@@ -44,15 +44,13 @@ func (s *EngineController) ReadFailure(ctx context.Context, a capability.Authori
 }
 
 func (s *EngineController) failureTarget(r *http.Request) (capability.RequestEvidence, error) {
-	evidence, err := s.runTarget(r)
-	if err != nil {
-		return evidence, err
-	}
+	evidence, _ := runSelectorTarget(r)
 	query := r.URL.Query()["generation"]
 	if len(query) != 1 {
 		return evidence, invalidEngineBody("one generation is required")
 	}
-	evidence.Target.SourceGeneration, err = strconv.ParseInt(query[0], 10, 64)
+	generation, err := strconv.ParseInt(query[0], 10, 64)
+	evidence.Target.SourceGeneration = generation
 	if err != nil || evidence.Target.SourceGeneration <= 0 {
 		return evidence, invalidEngineBody("generation must be positive")
 	}

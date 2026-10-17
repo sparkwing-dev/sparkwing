@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -8,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, provider string, cents int64) {
+func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, provider string, cents int64) string {
 	t.Helper()
 	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('billing-owner','billing@example.test',1,1)`)
 	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'billing-owner','owner',1)`, tenant.Team())
@@ -33,4 +34,15 @@ func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, pr
 	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, page); err != nil {
 		t.Fatal(err)
 	}
+	return page.ReservationID
+}
+
+// PaidCreditsFixture settles a signed checkout against its committed reservation.
+func PaidCreditsFixture(t *testing.T, s *store.Store, tenant *store.Tenant, cents int64) string {
+	t.Helper()
+	engineSQL(t, s, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
+	reservation := billingModelCheckout(t, s, tenant, "credit-fixture", cents)
+	_, webhook := billingModelPaymentHandler(t, &EngineController{Store: s})
+	webhook("paid-fixture", "checkout.session.completed", fmt.Sprintf(`{"id":"credit-fixture","object":"checkout.session","mode":"payment","livemode":false,"payment_status":"paid","payment_intent":"pi_fixture","amount_total":%d,"currency":"usd"}`, cents))
+	return "payment:test:" + reservation
 }

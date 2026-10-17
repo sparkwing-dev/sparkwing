@@ -215,6 +215,11 @@ pipeline's source revision. A declared pipeline source and an explicit pipeline
 ref must agree. Resume and retry use the persisted selection. They do not replace
 it with the caller's working tree or current machine settings.
 
+Both flags resolve before inspection and building. The selected execution
+checkout supplies the project configuration. Its configured entrypoint selects
+the SDK declaration, while pipeline code can come from the separate source
+revision. The pipeline alias remains in run context and output.
+
 The pinned Go or TypeScript SDK selects its matching verified engine before SDK
 installation, describe, planning or execution. Each machine fetches that release
 once from GitHub Releases and verifies it. Pipeline binaries are built and
@@ -309,7 +314,9 @@ membership or repository permission. See [scheduling](scheduling.md),
 
 ## Environment and secrets
 
-A local run captures its environment once. Children inherit that snapshot, and
+A local run captures its environment once. Children retain its captured snapshot
+when their invocation source becomes a child run. Submitted remote values use
+separate encrypted storage. Children inherit the parent's environment source, and
 schedules capture theirs at installation. The daemon's ambient environment never
 replaces accepted values. The sealed spec records names and a digest. Values
 remain in private host storage.

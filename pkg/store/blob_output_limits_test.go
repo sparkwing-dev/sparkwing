@@ -11,6 +11,29 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+func FuzzOutputRecordUsesSharedLimit(f *testing.F) {
+	for _, size := range []uint64{0, 1, uint64(limits.NodeOutputBytes - 1), uint64(limits.NodeOutputBytes), uint64(limits.NodeOutputBytes + 1), 64 << 20} {
+		f.Add(size)
+	}
+	f.Fuzz(func(t *testing.T, value uint64) {
+		s, records, intent := blobRecordFixture(t)
+		size := int64(value % (2*uint64(limits.NodeOutputBytes) + 1))
+		rewriteSchemaExec(t, s.db, "UPDATE blobs SET size=? WHERE team='a' AND digest=?", size, intent.Digest)
+		_, err := records.tenant.CommitRecord(t.Context(), blobOutputRequest(intent))
+		if size <= limits.NodeOutputBytes {
+			if err != nil {
+				t.Fatalf("size %d: %v", size, err)
+			}
+			return
+		}
+		var refusal *apierr.Error
+		if !errors.As(err, &refusal) || refusal.Code != apierr.PayloadTooLarge {
+			t.Fatalf("oversized output %d: %v", size, err)
+		}
+		rewriteSchemaCount(t, s.db, "blob_records", 0)
+	})
+}
+
 func TestBlobRecordsMemoCannotBypassOutputLimit(t *testing.T) {
 	for _, size := range []int64{limits.NodeOutputBytes, limits.NodeOutputBytes + 1} {
 		t.Run(strconv.FormatInt(size, 10), func(t *testing.T) {

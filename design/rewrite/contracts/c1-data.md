@@ -957,8 +957,8 @@ reporting the persisted seal, and never changes the job result.
 
 `Segment`, `SegmentCommit`, `LogSegments`, `RecordSegments` and `ReadLogSegments`
 live in `pkg/store/result_logs.go`. Log subject validation uses
-`blob.LogSubject.Validate`. The remaining declarations in `result_contract.go`
-cover steps, annotations and summaries.
+`blob.LogSubject.Validate`. Step, annotation and summary types and transactions
+live in `result_metadata.go`. The completed result contract scaffold is removed.
 
 The controller tests drive the final SQLite claim, start, segment commit and
 terminal transition through the reader. Revoking its capability refuses the next
@@ -1423,8 +1423,8 @@ checks share the matching-input reader without taking write locks. The awarding
 transaction evaluates observed labels and available resources through the matcher.
 Data selectors call the transaction's `DataAccessChecker`, supplied by the blob
 owner. Receipt and read-edge changes in that transaction govern its verdict.
-Concurrency binding returns unavailable until C2's resolved target can name the
-declared key. Node-host process cleanup remains the host's binding check.
+Concurrency binding resolves the accepted group and exact holder generation
+from C2's target selectors. Node-host process cleanup remains the host's binding check.
 
 Snapshot transactions omit row locks because PostgreSQL refuses them in a
 read-only transaction. Authorization and owner snapshots use the same repeatable
@@ -2224,8 +2224,8 @@ settlement writes the checkout's paid timestamp and grant association.
 
 `Operator` owns deployment card collection and refund workers: `DueCardCharges`,
 `RecordAttemptIntent`, `SettleCardPayment`,
-`DueCardRefunds`, `MarkCardRefundMade`, `FailCardAttempt`
-and `DropCardAttempt`. Their raw Store methods are removed. Provider workers
+`DueCardRefunds`, `MarkCardRefundMade` and `FailCardAttempt`.
+Their raw Store methods are removed. Provider workers
 select Operator before operating on persisted attempt and payment identities.
 Tenant spend policy and recovery checkout keep their tenant handles.
 Raw card setup, warning and provider refund callback APIs are removed. Their
@@ -2254,9 +2254,9 @@ bound to its first team and payment after release. Replay cannot restore a hold.
 Console HTTP and break-glass callers retain their authenticated tenant selection.
 
 The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
-`Tenant.GrantCredits` is removed. `Tenant.RecordCreditGrant` owns grant requests
-and refuses caller-selected paid credit before opening a ledger transaction.
-The existing free grant and payment-linked reversal paths remain. Checkout
+`Tenant.GrantCredits` is removed. `Tenant.RecordCreditGrant` owns free grant requests
+and refuses paid credit and reversals before writing the ledger. Payment reversals
+use verified provider settlement or the authorized console refund transaction. Checkout
 settlement checks actionable fraud warnings in the same transaction as the
 grant and event receipt. A refusal leaves the checkout and ledger unchanged.
 The verified-event implementation and HTTP adapter remain W2 integrations.
@@ -2431,8 +2431,9 @@ the default ladder from the scalar rate. Validation, ledger locking, settings
 serialization and rollback stay in their existing transaction owners.
 The raw Store methods are removed with every caller.
 `Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
-also removed. Callers select a Tenant explicitly before grants, charge history
-or idempotent events. The tenant methods keep their existing behavior.
+also removed. Callers select a Tenant explicitly before grants and charge history.
+The unused `Tenant.AppendEventOnce` writer is removed. State events commit with
+their owning transition. External event ingestion uses `Tenant.AppendEventCharged`.
 
 `Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
 Store twins are removed. Burn windows use the store clock. A credit-state read
@@ -2801,10 +2802,10 @@ schema version is added.
 | Create | `pkg/storage/state_contract.go` |
 | Create | `pkg/store/claim_contract.go` |
 | Create | `pkg/store/completion.go` |
-| Create | `pkg/store/concurrency_contract.go` |
+| Create | `pkg/store/capacity_adoption.go` |
 | Create | `pkg/store/maintenance_contract.go` |
 | Create | `pkg/store/node_state.go` |
-| Create | `pkg/store/result_contract.go` |
+| Implement | `pkg/store/result_metadata.go` |
 | Create | `pkg/store/rewrite_schema_test.go` |
 | Create | `pkg/store/run_spec.go` |
 | Create | `pkg/store/run_state.go` |
@@ -3014,7 +3015,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.AcknowledgeRunEffect` | AcknowledgeRunEffect advances delivered_rev only to the delivered revision, never to a newly observed desired_rev. |
 | `Tenant.RetryRunEffect` | RetryRunEffect records a failed delivery without overwriting a later desired state or its due work. |
 
-### pkg/store/concurrency_contract.go
+### pkg/store/capacity_adoption.go
 
 | Export | Purpose |
 |---|---|
@@ -3045,7 +3046,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.ReserveQuota` | ReserveQuota locks one shared team/quota row; log reads are exempt from download quota. |
 | `Tenant.SettleQuota` | SettleQuota commits actual usage or releases the reservation in one transaction. |
 
-### pkg/store/result_contract.go
+### pkg/store/result_metadata.go
 
 | Export | Purpose |
 |---|---|
@@ -3851,3 +3852,202 @@ claim fencing and committing audit remain the existing source-release path.
 The ordinary request seal, intake persistence and retry clone retain it. It
 carries no authority and does not replace the intake idempotency key. No schema
 column is added because it lives in the existing request JSON.
+
+## W1b child admission reconciliation
+
+`Tenant.AdmitRun` checks child ancestry before sealing or inserting the new run.
+A `(repo_key, pipeline)` already present in the same team's ancestry returns
+`conflict`. A repeated ancestor ID also returns `conflict`, so malformed lineage
+cannot loop. The walk uses committed `lineage_json` and tenant-scoped run reads.
+A missing ancestor returns the normal not-found error and exposes no foreign
+pipeline. Retry intake keeps its committed source seals and bypasses this new
+invocation check.
+
+Current child requests carry the source snapshot explicitly. The native process
+client inherits it from its authenticated parent snapshot. Explicit repository
+and ref inputs retain their own source facts. This does not implement the
+client's still-missing cross-repository source resolution.
+
+
+## W1b scheduled intake and concurrency transactions
+
+Tenant implements C2's six `ScheduleWriter` mutations. Automatic and manual
+launches use W1's `AdmitScheduledRun(ctx, CronSchedule, due)` adapter and its
+private schedule authority proof. There is one call to the shared `admitRun`.
+The duplicate admission implementation, private intake selector and separate
+schedule source-verification API are removed.
+
+A stored arming consent or a current App installation and automation grant is
+required for unattended execution. A raw declaration alone grants no execution.
+App schedules also
+recheck live same-team installation and repository automation consent. API/local
+registration retains its request template and arming authority in
+`cron_schedules.consent_json`; those registrations recheck that authority and its
+membership, including replay. `ArmedBy` supplies attribution through the schedule
+service principal. It never creates a credential or a session.
+
+Replacement locks the tenant and commits declarations, captured inputs,
+withdrawals and caps together. It preserves IDs, pauses, cursors, history and
+overrides. `CronOverride.TZSet` preserves an explicit empty zone. Local
+registration prepares pins and environment snapshots before the transaction.
+Its request retains the captured environment, checkout and configured entrypoint.
+
+`ScheduleSourcePolicy` resolves source intent before admission. The final
+transaction locks and rechecks the declaration and saved inputs, then uses W1's
+source proof through the existing intake policy. API/local due instants must
+match the effective cadence and store clock. Manual runs can launch a paused
+schedule without moving its cursor. Run, sealed request, queue unit and fire
+history commit together.
+
+Shared intake scopes schedule replay by tenant and schedule authority ID while
+preserving `ArmedBy` for attribution and rate guards. Automatic keys include the
+exact UTC due instant. Manual keys occupy a separate namespace. Replay retains
+the first revision after a followed branch moves and still checks current
+consent. Changed pinned revisions or execution inputs conflict under one key.
+Replacing the armer cannot admit a second run for an already committed instant.
+The tick reloads the tenant's stored row before passing it to the writer, so
+caller-supplied schedule fields cannot replace persisted intent.
+
+Tenant also implements all eight `ConcurrencyStore` transactions. They consume
+C2's resolved selectors, current authority and accepted declarations. Acquisition
+cannot replace declared capacity, cost or policy. Holder and waiter access checks
+the exact run, job and generation. Renewal and promotion respect authority and
+work deadlines. Release and force release notify and promote in their transaction.
+Claim group reads preserve contention accounting while removing memo keys and
+leader references outside the declared read set. Native host acquisition and the
+HTTP writer share the existing accounting helpers and lock order.
+
+Proofs use real SQLite, controller routing, source resolution and sealed intake.
+They cover concurrent due replay, consent revocation, membership loss, source
+resolution races, atomic cap refusal, empty override values and both local and
+Cloud scheduling. The real api.sock test is
+`TestNativeLocalControllerScheduleFiresOneSealedRunAtDueInstant`. Its in-memory
+transport counterpart runs the same assertions. Native evidence belongs to the
+lead harness.
+
+Open integration points: following a private remote branch needs audited
+controller credentials during revision lookup. Pinned App schedules use the
+existing post-admission source release. HTTP box groups need persisted host
+identity, and memo requests need accepted namespace metadata. Missing authority
+is refused. Native box admission remains available. These gaps remain visible
+for the lead's launch integration work.
+
+
+## W1b review integration, 2026-10-17
+
+Slot mutations take the admission key, controller lease, current authority chain,
+the bound unit's owner row, sorted runs and nodes, then the group. Owner locks
+use the current capability's UnitKind, including plan for controller dispatch.
+Group and holder reads use a read-only snapshot without admission or row locks.
+Release ignores the caller's outcome for inheritance. The unreachable legacy
+coalesce waiter deletion is removed. Real-store cross-team leader resolution
+returns 403 without disclosing outcomes.
+
+Scheduled intake locks its schedule FOR UPDATE before taking the intake lock.
+An aborted transaction does not write fire history or consume its due instant.
+The source and authority snapshots are rechecked at the committing boundary.
+Both schedule caps derive from internal/limits. Local principals retain their
+cap exemption.
+
+Unpriced job refusal now uses the existing node state owner. C1 adds the
+claimant actor and unpriced edge for an unclaimed pending or ready job. The edge
+also requires the private transaction proof carrying the failed poller's matching
+inputs. A public TransitionNode caller cannot manufacture it. Its guard rechecks live claimant ancestry, repository and unit scope, metered placement,
+matching policy and the current price table. Only a still-unpriced job can fail
+with unpriced_cpu_class. Claim issuance rolls back before that guarded edge,
+so no award, attempt or charge survives. Named and queued claims check pricing
+before resource fit. Pricing refusal does not limit unmetered self-hosted work.
+The guard is exercised by generated foreign, missing, revoked and repriced cases.
+
+IntakeQueueDepth reads the tenant queue from the same admission transaction.
+The controller's existing flood policy runs after C1 replay lookup. This removes
+nested store reads while holding the intake transaction and preserves replay
+and retry semantics.
+
+
+## W1b sealed inheritance and capacity legacy cut, 2026-10-17
+
+`runspec.Lineage.RepoInherited` retains whether the child caller omitted its
+repository override. The native client supplies that intent beside the parent's
+captured Git and Source. `AdmitRun` requires a parent when the bit is set and
+checks that its repository key matches that parent's committed request. The real
+intake policy still checks current source scope. The bit is sealed, participates
+in idempotency, survives retries and feeds run/trigger reporting. No SQL column
+or execution authority is added.
+
+The capacity core no longer implements inherited-holder IDs, synthetic zero-cost
+holders, recursive supersession or cost transfer. Both production entrypoints
+already refused inherited-holder IDs. The HTTP decoder now rejects the removed
+selector. Accepted declarations, bound leases and their state transitions own
+capacity continuity.
+
+The schema already refuses coalesce waiter rows. Its unused admission and
+promotion paths, follower draining, cached acquisition outcomes and constants
+are deleted. Memo and coalesced result selection remain in the blob/result
+transactions. Authorized leader reads still require declared read edges.
+
+`TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector` replaces the obsolete
+inheritance surface tests. Weighted admission, backfill, cancellation, promotion,
+owner-loss continuity and real result materialization retain their tests. The
+native harness still owns PostgreSQL and socket verification.
+
+The implemented capacity-adoption types and transaction now live in
+`pkg/store/capacity_adoption.go`. The completed contract scaffold is removed.
+
+
+## W1b committed output reporting and retired readers, 2026-10-17
+
+`Node.OutputDigest` replaces `Node.OutputRef`. GetNode and ListNodes select the
+exact committed output record under that tenant, run and job. A missing record
+has no digest. A malformed or foreign selector fails closed. Receipts hash these
+digests for executed and materialized results. No physical object key is exposed.
+The obsolete OutputRef type, output-prefix helpers and writers for the deleted
+node_outputs/data_objects tables are removed, along with direct-upload key and
+SHA validators with no callers. Current record and upload authority is unchanged.
+
+CreditRateTable.ClassForResource takes match.Resources directly. The unused
+ExecutorResource alias and nodeChargeTx/profile-fallback reader are removed.
+Billing still prices the resources sealed for the awarded unit. Later profile
+pins cannot reprice it. Storage inventory's unused lockTeamStorageTx and the
+unused legacy NodeLogSealGrace constant are also removed. The current blob,
+retained-storage and log transactions remain their respective writers.
+
+
+## W1b free grants and unused writer retirement, 2026-10-17
+
+The free-grant transaction cannot create paid credit or a payment-linked reversal.
+The duplicate raw reversal validator and writer, unused grant-kind helper and
+reversal overflow sentinel are removed. Provider settlement and ConsoleRefund
+retain payment identity, payer selection, replay and conservation.
+
+The unused Tenant.AppendEventOnce and Operator.DropCardAttempt writers are
+removed. The obsolete reportCardRefundTx callback adapter and its fixture API are deleted.
+Production refund callbacks use the verified-event transaction.
+Its exact refund mutation owner, applyCardRefundTx, remains shared with the
+collection worker. No persistence schema, protocol or runtime setting changes.
+
+MarkCardRefundMade binds the provider response and consumes any matching
+committed refund receipt in the same ledger transaction. The receipt is selected
+by configured provider mode, refund object, tenant and payment identity through
+the existing payment_events object index. A successful receipt completes the
+queue and wins over a stale failed worker response; failed or canceled receipts
+schedule one retry. Repeated binds cannot
+repeat that transition. The verified callback owns the financial reversal.
+No second callback authority or refund ledger is introduced.
+
+TestARefundOutcomeBeforeItsBindIsKept now uses provider settlement with a real
+committed collection correlation. TestRecordedRefundCannotBindAnotherAssociationProperty
+generates foreign tenant, mode, payment and refund associations.
+TestRecordedRefundBindingRollsBackWithItsOutcome proves atomicity when applying
+the stored outcome fails. The native harness retains PostgreSQL execution.
+
+## Environment provenance integration
+
+`runspec.Request.EnvironmentSource` seals `captured` or `submitted` independently
+of invocation origin. Captured snapshots stay in private local host storage.
+Submitted values use `runs.submitted_env` and its existing bound cipher. Intake
+rejects submitted values attached to captured provenance and refuses nonempty
+environments without known provenance. Child intake copies its parent's
+environment and provenance in the ancestry transaction. A supplied snapshot or
+provenance that differs from the parent fails with `spec_drift`. Retry retains
+the original seal. Invocation origin never selects environment storage.

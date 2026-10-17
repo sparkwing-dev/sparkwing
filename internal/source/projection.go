@@ -20,7 +20,17 @@ func ForRequest(sealed runspec.SealedRequest) (Spec, error) {
 		return Spec{}, errors.New("sealed pipeline directory must stay inside the checkout")
 	}
 	spec := Spec{RepoKey: string(r.Git.Repository.Key), SHA: r.Git.SHA, PipelineDir: location.PipelineDir, NoBincache: r.Source.NoBincache, HashAllFiles: r.Source.HashAllFiles}
+	if r.Source.WorkingTree && location.LocalCheckout == "" {
+		return Spec{}, errors.New("working-tree source requires a local checkout")
+	}
+	if !r.Source.WorkingTree {
+		spec.PipelineSHA = r.Source.Ref
+		if r.Source.Ref != "" && r.Source.Ref == r.Git.Ref {
+			spec.PipelineSHA = r.Git.SHA
+		}
+	}
 	if location.LocalCheckout != "" {
+		spec.CommittedCheckout = r.Source.CommittedCheckout
 		if !filepath.IsAbs(location.LocalCheckout) {
 			return Spec{}, errors.New("sealed local checkout must be absolute")
 		}

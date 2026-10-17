@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -169,11 +168,21 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 }
 
 func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, captured []string, snapshots *nodehost.FileEnvironmentSnapshots, flags runFlags) (_ localRunPreparation, err error) {
-	route, err := loadRunRouting(directory, pipeline)
+	masker := secrets.NewMasker()
+	var selection localSourceSelection
+	if flags.sourceSelection != nil {
+		selection = *flags.sourceSelection
+	} else {
+		selection, err = selectLocalRunSource(ctx, home, directory, pipeline, flags, captured, masker)
+		if err != nil {
+			return localRunPreparation{}, err
+		}
+		defer func() { err = errors.Join(err, selection.execution.Close()) }()
+	}
+	route, err := loadRunRouting(selection.execution.Directory, pipeline)
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	masker := secrets.NewMasker()
 	environment := slices.DeleteFunc(slices.Clone(captured), func(item string) bool {
 		name, value, _ := strings.Cut(item, "=")
 		if !slices.Contains(route.LocalSecrets, name) {
@@ -191,10 +200,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	identity, err := pipelineIdentityAt(directory, pipeline)
-	if err != nil {
-		return localRunPreparation{}, err
-	}
+	identity := selection.identity
 	configFile, err := userconfig.Path()
 	if err != nil {
 		return localRunPreparation{}, err
@@ -207,19 +213,18 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	if typescript, err := pipelineentry.IsTypeScript(directory); err != nil {
-		return localRunPreparation{}, err
-	} else if typescript {
-		options.SDK = engine.TypeScriptSDK
-	} else if err := resolveSparks(ctx, directory, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
-		return localRunPreparation{}, err
+	options.SDK = ""
+	options.InstallSDK = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+		if err := resolveSparks(ctx, filepath.Join(request.Directory, request.PipelineDir), compileOptions{NoUpdate: flags.noUpdate}); err != nil {
+			return engine.SDKCommand{}, err
+		}
+		return selected.InstallSDK(ctx, request)
 	}
-	root := filepath.Dir(directory)
-	repository, err := runspec.CanonicalRepository(runspec.RepoInput{AbsolutePath: root})
+	spec, err := source.ForRequest(runspec.SealedRequest{Request: runspec.Request{Git: selection.git, Source: selection.source}})
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	entry, err := source.Acquire(ctx, source.Spec{RepoKey: string(repository.Key), LocalCheckout: root, PipelineDir: filepath.Base(directory), NoBincache: flags.noBincache, HashAllFiles: flags.hashAllFiles}, options)
+	entry, err := source.Acquire(ctx, spec, options)
 	if entry != nil {
 		defer func() { err = errors.Join(err, entry.Close()) }()
 	}
@@ -228,6 +233,12 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	}
 	if entry == nil {
 		return localRunPreparation{}, errors.New("local source acquisition returned no entry")
+	}
+	if selection.git.SHA == "" {
+		selection.git.SHA = entry.SHA
+	}
+	if selection.source.Ref == "" {
+		selection.source.Ref = entry.SHA
 	}
 	if err := writeEngineNotices(os.Stderr, entry.Engine.Notices); err != nil {
 		return localRunPreparation{}, err
@@ -257,8 +268,8 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	}
 	return localRunPreparation{
 		identity: identity, described: []nodeproto.PipelineDescription{prepared.Description},
-		git:         runspec.Git{Repository: repository, SHA: entry.SHA},
-		source:      runspec.Source{Ref: entry.SHA, Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: filepath.Base(directory)}, NoBincache: flags.noBincache, HashAllFiles: flags.hashAllFiles},
+		git:         selection.git,
+		source:      selection.source,
 		environment: seal, localSecrets: localSecrets, machine: machine, machineFile: configFile,
 		settings: settings.Inputs{Context: settings.Context{Origin: runspec.OriginLocal, Submitter: true, Local: true, NumCPU: runtime.NumCPU()}},
 	}, nil

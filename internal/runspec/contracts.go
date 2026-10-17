@@ -159,12 +159,14 @@ type EnvSnapshot struct {
 
 // safety: Source records acquisition intent without embedding source credentials.
 type Source struct {
-	Ref          string           `json:"ref"`
-	Entrypoint   string           `json:"entrypoint"`
-	BundleDigest Optional[string] `json:"bundle_digest"`
-	Location     SourceLocation   `json:"location"`
-	NoBincache   bool             `json:"no_bincache,omitempty"`
-	HashAllFiles bool             `json:"hash_all_files,omitempty"`
+	Ref               string           `json:"ref"`
+	Entrypoint        string           `json:"entrypoint"`
+	BundleDigest      Optional[string] `json:"bundle_digest"`
+	Location          SourceLocation   `json:"location"`
+	WorkingTree       bool             `json:"working_tree,omitempty"`
+	CommittedCheckout bool             `json:"committed_checkout,omitempty"`
+	NoBincache        bool             `json:"no_bincache,omitempty"`
+	HashAllFiles      bool             `json:"hash_all_files,omitempty"`
 }
 
 // SourceLocation preserves acquisition input separately from repository identity and checkout policy.
@@ -179,10 +181,11 @@ type SourceLocation struct {
 
 // safety: Lineage records retriers separately from immutable original actor and git facts.
 type Lineage struct {
-	ParentRunID string          `json:"parent_run_id"`
-	ParentJobID string          `json:"parent_job_id"`
-	RetryOf     string          `json:"retry_of"`
-	Retrier     Optional[Actor] `json:"retrier"`
+	RepoInherited bool            `json:"repo_inherited,omitempty"`
+	ParentRunID   string          `json:"parent_run_id"`
+	ParentJobID   string          `json:"parent_job_id"`
+	RetryOf       string          `json:"retry_of"`
+	Retrier       Optional[Actor] `json:"retrier"`
 }
 
 // safety: Layer names the source to report when an explicit setting is invalid.
@@ -383,6 +386,7 @@ type Request struct {
 	PullRequest       Optional[PullRequest] `json:"pull_request"`
 	Source            Source                `json:"source"`
 	Lineage           Lineage               `json:"lineage"`
+	EnvironmentSource EnvironmentSource     `json:"environment_source,omitempty"`
 	Env               EnvSnapshot           `json:"env"`
 	Options           Options               `json:"options"`
 	ExecutionLocation string                `json:"execution_location"`

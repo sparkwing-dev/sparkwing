@@ -29,6 +29,7 @@ func FuzzSubmittedEnvironmentStaysPrivateAndClaimBound(f *testing.F) {
 		if strings.ContainsRune(value, 0) {
 			return
 		}
+		request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
 		request.SubmittedEnv = map[string][]byte{"APP_NOTE": []byte(value), "APP_EMPTY": {}}
 		request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"APP_NOTE": value, "APP_EMPTY": ""})
 		if err != nil {
@@ -91,6 +92,7 @@ func TestSubmittedEnvironmentRetryCopiesEncryptedValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant.s.SetRunEnvironmentCipher(cipher)
+	request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
 	request.SubmittedEnv = map[string][]byte{"BUILD_NOTE": []byte("retained-private-value")}
 	request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": "retained-private-value"})
 	if err != nil {
@@ -149,6 +151,7 @@ func TestSubmittedEnvironmentRefusesInvalidIntakeAtomically(t *testing.T) {
 			if problem == "reserved" {
 				name = "SPARKWING_RUN_ID"
 			}
+			request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
 			request.SubmittedEnv = map[string][]byte{name: []byte(value)}
 			request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{name: value})
 			if err != nil {
@@ -157,6 +160,7 @@ func TestSubmittedEnvironmentRefusesInvalidIntakeAtomically(t *testing.T) {
 			request.Request.Options.SubmitEnvAllow.Value = []string{name}
 			switch problem {
 			case "missing":
+				request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
 				request.SubmittedEnv = nil
 			case "changed":
 				request.SubmittedEnv[name] = []byte("different")

@@ -7,12 +7,44 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+// StepReport fences step state to the attempt that produced it.
+type StepReport struct {
+	Attempt     runspec.AttemptIdentity
+	Actor       Actor
+	StepID      string
+	State       string
+	MaskedError string
+	StartedAt   *time.Time
+	FinishedAt  *time.Time
+}
+
+// AnnotationWrite carries already masked text; the store rechecks the shared annotation byte limit without truncation.
+type AnnotationWrite struct {
+	Ref     NodeRef
+	Actor   Actor
+	StepID  string
+	Level   string
+	Message string
+	File    string
+	Line    *int
+}
+
+// SummaryWrite carries masked job or step markdown under the writer's live binding.
+type SummaryWrite struct {
+	Ref      NodeRef
+	Actor    Actor
+	StepID   string
+	Markdown string
+}
 
 func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef, actor Actor) (NodeRow, error) {
 	if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil {
@@ -57,7 +89,8 @@ func boundedResultText(text string) error {
 	return nil
 }
 
-func (t *Tenant) recordStep(ctx context.Context, report StepReport) error {
+// RecordStep fences each step report to its live attempt.
+func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 	if report.Attempt.Team != string(t.team) || report.StepID == "" || !slices.Contains([]string{"running", "passed", "failed", "cancelled", "skipped"}, report.State) {
 		return authorityError(apierr.BadRequest, "invalid step report")
 	}
@@ -133,7 +166,8 @@ type storedAnnotation struct {
 	Line    *int   `json:"line,omitempty"`
 }
 
-func (t *Tenant) writeAnnotation(ctx context.Context, annotation AnnotationWrite) error {
+// WriteAnnotation stores bounded masked text under the current writer binding.
+func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error {
 	if err := boundedResultText(annotation.Message); err != nil {
 		return err
 	}
@@ -191,7 +225,8 @@ func (t *Tenant) writeAnnotation(ctx context.Context, annotation AnnotationWrite
 	return tx.Commit()
 }
 
-func (t *Tenant) writeSummary(ctx context.Context, summary SummaryWrite) error {
+// WriteSummary stores bounded masked markdown under the current writer binding.
+func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 	if err := boundedResultText(summary.Markdown); err != nil {
 		return err
 	}

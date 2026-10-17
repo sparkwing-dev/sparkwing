@@ -3,62 +3,38 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
-	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-func runSelectedHelp(dir, pipeline string, flags runFlags, selectEngine func(string, func()) error) error {
+func runSelectedHelp(dir, pipeline string, flags runFlags, selectEngine func(string, func()) error) (resultErr error) {
 	captured := os.Environ()
-	var selections []func()
-	closeSelections := func() {
-		for i := len(selections) - 1; i >= 0; i-- {
-			selections[i]()
-		}
-	}
-	defer closeSelections()
-	executionDir := dir
-	if flags.ref != "" {
-		_, selected, cleanup, err := setupRefWorktree(dir, flags.ref)
-		if err != nil {
-			return err
-		}
-		selections = append(selections, cleanup)
-		executionDir = selected
-	}
-	config, err := projectconfig.Load(filepath.Join(executionDir, projectconfig.Filename))
+	home, err := wingd.HomeDir("")
 	if err != nil {
 		return err
 	}
-	identity, err := clisurface.ResolvePipeline(config, pipeline)
+	selected, err := selectLocalRunSource(context.Background(), home, dir, pipeline, flags, captured, secrets.NewMasker())
 	if err != nil {
 		return err
 	}
-	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: captured, Masker: secrets.NewMasker()}, procenv.Runtime{})
+	defer func() { resultErr = errors.Join(resultErr, selected.execution.Close()) }()
+	entry, err := selected.checkout(context.Background(), home, captured)
 	if err != nil {
 		return err
 	}
-	checkout := triggerCheckout{directory: filepath.Dir(dir), environment: environment}
-	revision, err := triggerPipelineRevision(context.Background(), checkout, config, pipeline, flags.pipelineRef, "")
-	if err != nil {
-		return err
-	}
-	sourceDir := executionDir
-	if revision != "" {
-		_, selected, cleanup, err := setupRefWorktree(dir, revision)
-		if err != nil {
-			return err
-		}
-		selections = append(selections, cleanup)
-		sourceDir = selected
-	}
+	defer func() { resultErr = errors.Join(resultErr, entry.Close()) }()
+	executionDir, sourceDir, identity := selected.execution.Directory, entry.Directory, selected.identity
+	var closeErr error
+	closeSelections := func() { closeErr = errors.Join(closeErr, entry.Close(), selected.execution.Close()) }
 	if err := selectEngine(sourceDir, closeSelections); err != nil {
-		return err
+		return errors.Join(err, closeErr)
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	run := newPipelineRun(sourceDir, compileOptions{NoUpdate: flags.noUpdate, NoBincache: flags.noBincache, HashAllFiles: flags.hashAllFiles, ExecutionDir: executionDir})
 	defer run.stop()

@@ -2564,7 +2564,9 @@ The default uses Tenant only if it implements this interface. There is no call
 to the old unfenced methods when it does not.
 
 C1's current BindSlotOfBoundNode checker still refuses missing resolved selectors.
-W1 must consume SlotKey/SlotHolderID and implement the transaction interface.
+Tenant consumes SlotKey/SlotHolderID through the concrete transaction interface.
+See C1's scheduled intake and concurrency section for coverage and remaining
+HTTP box and memo declaration gaps.
 The HTTP properties use committed-fact and transaction fakes. They prove target
 transport, policy selection, cancellation classes and safe failure. They do not
 close native group/memo declaration, cross-team leader, lease-continuity or
@@ -3419,3 +3421,110 @@ credentials use the shared `not_found` error with a remedy. Missing grants or
 bindings use `forbidden`. Runner roots remain claim-only. Current source bodies
 are rejected, including caller-selected extra repositories. No route, flag,
 setting, environment variable or compatibility surface is added.
+
+## W1b controller test reconciliation: preflight diagnostics and pricing errors
+
+Invariant: a planning claim learns only declared unreadable secret names, never
+the existence, value or pipeline scope of another secret row. SourceRead no
+longer authorizes GET `/api/v1/runs/{run}/events` or its `/stream` route. The
+member RunsRead and awarded TriggerHost alternatives remain. This closes the
+route-policy grant that exposed the team-only secret_preflight_refused payload.
+The hand-written policy expectation and generated API reference follow the same
+cut. Real-store HTTP properties cover original and delegated plan awards, ID
+and numeric aliases, both event routes and caller-supplied scope hints. A real
+member session still receives the scoped diagnostic. No grant table, schema or
+event projection changes.
+
+UnpricedCPUClassError maps through engineLookupError to HTTP 409 conflict with
+details.reason=unpriced_cpu_class. It formerly escaped as HTTP 500. Claim refusal
+fails the still-unclaimed job with unpriced_cpu_class, preserves its balance and
+attempts, and creates no reservation or charge. The controller tests use
+committed checkout reservations and signed Stripe events for paid credit setup.
+
+### API flood integration
+
+Sealed API intake and retry use the existing per-controller flood limiter,
+with one bucket per presenting token. Verified App intake keeps its separate
+team bucket. Queue shedding reads only that tenant's pending units through the
+admission transaction. Both paths return canonical rate_limited/unavailable
+errors with retry_after_ms. No new cap or default is introduced.
+
+Optional content deduplication gives normalized API requests a stable random
+intake key for the configured window, scoped by the server-derived team and
+subject. It stores no bearer or response. C1 AdmitRun owns atomic commit, replay
+and current authority checks, including concurrent first requests. Explicit
+idempotency keys win. HTTP uses the current 201/200 CreateRunResponse contract;
+replay carries no here bearer. Store replay lookup precedes flood charging,
+so replays spend no flood budget. Failed store transactions create no replay
+result and remain retryable inside the content window.
+
+
+## W1b run-intake validation reconciliation
+
+The shared HTTP intake handler validates `request.git.sha` before source
+resolution and admission. Empty is allowed. A supplied object ID has exactly
+40 or 64 hexadecimal characters. It uses the same validator as schedule input.
+A child body's team differing from its authorized path team returns
+`forbidden`, while missing internal authority still returns `policy_missing`.
+
+API input cannot supply trigger environment maps. The retired `git.repo`,
+`github_owner` and `github_repo` JSON spellings stay removed. Current source
+identity is the canonical repository key plus its verified acquisition location.
+The actor comes from authenticated authority. Submitted App facts are stripped,
+and App-origin intake still requires a verified delivery in the transaction.
+
+
+### W1b scheduled-intake boundary (integration reconciliation)
+
+`ScheduledRunWriter` is the controller tick's tenant transaction interface:
+
+- `Team() store.Team`
+- `AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)`
+
+The arguments after context are the tenant-loaded schedule snapshot and due instant.
+`WithScheduledRunWriter` supplies a resolver by tenant. The default requires
+`Tenant` to implement the interface. Missing and wrong-team adapters refuse with
+`policy_missing`. The controller reloads the stored row, passes a UTC instant and records activity only
+after a committed, nonempty run ID. It no longer builds legacy trigger/run rows
+or uses duplicate-trigger SQL as a replay path. `CronIdempotencyKey` is removed.
+
+The writer must load the schedule within its tenant and recheck current arming
+consent, complete authority ancestry, membership, repository authority and the
+schedule's declaration/paused state in the committing transaction. Derive actor,
+source, effective arguments, environment snapshot and all trust facts from stored
+consent and schedule state. Deduplicate `(team,schedule_id,due_instant)` inside
+that transaction, rechecking authority even on replay. Use the single sealed
+intake and its admission/billing guards. A typed schedule source grants no App
+trust or pool access. Return the first committed result for a repeated instant.
+
+Tenant implements both interfaces with persisted arming consent and sealed
+intake. The concrete controller proofs cover local registration, Cloud firing,
+replay and current authority. The real api.sock proof remains assigned to the
+lead harness. App and API/local schedules now share W1's sealed intake. C1 records the remaining private-follow, HTTP box and memo integration points.
+
+
+## W1b review integration, 2026-10-17
+
+Child intake uses Server.ResolveIntake and the current bound claim's repository
+scope. A child outside that source authorization returns 422 plan_invalid.
+An authorized explicit source retains its own repository, ref and SHA. The
+implicit SDK path preserves the complete sealed parent source and lineage.
+Source credential refusals use C2's credential_unconfirmed reason. The removed
+legacy git_credential_unconfirmed envelope is not restored.
+
+Schedule PUT defaults to replacement and bounds nonlocal principals by
+MaxSchedulesPerRepo before resolving any source. Local principals keep their
+schedule-cap exemption. The handler maps cadence guards through
+writeComputeLimitRefusal to 429. Both schedule caps return 409. Tick launches
+retain their listing snapshot. Paused schedules require an authorized manual
+run-now call. A transaction conflict leaves the due instant available for retry.
+
+## Run-resource existence
+
+Run-route decoders collect path selectors and body evidence without reading
+persisted resources. After authentication, `resolveRunSelector` resolves IDs
+and numeric selectors inside the credential's team. Foreign and missing runs
+return the same `not_found` envelope before decoder diagnostics or grant checks.
+Expansion resolution then reads the source node in that tenant and preserves
+its generation for binding. Exact result-body digests and child lineage
+selectors remain part of the authorization evidence.

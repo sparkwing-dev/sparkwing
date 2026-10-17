@@ -58,6 +58,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	input.EnvironmentSource = runspec.EnvironmentSubmitted
 	created, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "local-secret", LocalSecrets: map[string]string{"TOKEN": value}, SubmittedEnv: map[string][]byte{"BUILD_REGION": []byte(submittedValue), "BUILD_EMPTY": {}}})
 	if err != nil {
 		t.Fatal(err)

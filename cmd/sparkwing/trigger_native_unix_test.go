@@ -37,7 +37,7 @@ func (pipeline) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunConte
  sw.Job(p, "verify", func(context.Context) error { return nil })
  return nil
 }
-func main() { sw.Register("deploy-prod", func() sw.Pipeline[sw.NoInputs] { return pipeline{} }); sw.Main() }
+func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pipeline{} }); sw.Main() }
 `)
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "--quiet", "-m", "here source")

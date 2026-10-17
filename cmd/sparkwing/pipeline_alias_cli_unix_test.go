@@ -77,7 +77,7 @@ func (*Example) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, rc sw.RunCont
  return nil
 }
 func main() {
- sw.Register("example", func() sw.Pipeline[sw.NoInputs] { return &Example{} })
+ sw.Register("Example", func() sw.Pipeline[sw.NoInputs] { return &Example{} })
  sw.Main()
 }
 `)

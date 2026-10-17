@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"time"
 )
 
 // StorageKind names the storage inventory class.
@@ -38,24 +37,6 @@ func execStatements(ctx context.Context, tx *storeTx, script string) error {
 		}
 	}
 	return nil
-}
-
-// safety: a refusal returns before the first write, so a caller that keeps
-// the transaction after one commits nothing of the reservation.
-// safety: every change to a team_storage row locks it here first, so the lock orders them.
-func lockTeamStorageTx(ctx context.Context, tx *storeTx, team Team, kind StorageKind, now time.Time) (used, reserved int64, err error) {
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO team_storage (team, store, used_bytes, reserved_bytes, committed_bytes, reconciled_at, updated_at)
-VALUES (?, ?, 0, 0, 0, 0, ?) ON CONFLICT (team, store) DO NOTHING`,
-		string(team), string(kind), now.UnixNano()); err != nil {
-		return 0, 0, err
-	}
-	if err := tx.QueryRowContext(ctx,
-		`SELECT used_bytes, reserved_bytes FROM team_storage WHERE team = ? AND store = ?`+tx.forUpdate(),
-		string(team), string(kind)).Scan(&used, &reserved); err != nil {
-		return 0, 0, err
-	}
-	return used, reserved, nil
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {

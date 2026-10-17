@@ -53,23 +53,24 @@ func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
 }
 
 func boundPipelineSchema(schemas []nodeproto.PipelineDescription, identity clisurface.PipelineIdentity) (nodeproto.PipelineDescription, error) {
-	schema, err := findPipelineSchema(schemas, identity.Name)
+	schema, err := findPipelineSchema(schemas, identity.Entrypoint)
 	if err != nil {
 		return schema, fmt.Errorf("pipeline %q: %w", identity.Name, err)
 	}
+	schema.Name = identity.Name
 	return schema, nil
 }
 
 func findPipelineSchema(schemas []nodeproto.PipelineDescription, pipelineName string) (nodeproto.PipelineDescription, error) {
-	names := make([]string, 0, len(schemas))
-	for _, s := range schemas {
-		if s.Name == pipelineName {
-			if s.Error != nil {
-				return nodeproto.PipelineDescription{}, s.Error
-			}
-			return s, nil
+	if schema, found := (nodeproto.DescribeDoc{Pipelines: schemas}).Pipeline(pipelineName); found {
+		if schema.Error != nil {
+			return nodeproto.PipelineDescription{}, schema.Error
 		}
-		names = append(names, s.Name)
+		return schema, nil
+	}
+	names := make([]string, 0, len(schemas))
+	for _, schema := range schemas {
+		names = append(names, schema.Name)
 	}
 	msg := fmt.Sprintf("unknown pipeline %q", pipelineName)
 	if suggestion := sparkwingruntime.SuggestClosest(pipelineName, names); suggestion != "" {

@@ -23,3 +23,14 @@ func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, 
 	funded, err := teamFundedTx(ctx, tx, team)
 	return guards, funded, err
 }
+
+// IntakeQueueDepth reads pending work from the admission transaction.
+func IntakeQueueDepth(ctx context.Context, resolver capability.AuthorityResolver, team Team) (int, error) {
+	tx, ok := resolver.(*storeTx)
+	if !ok {
+		return 0, authorityError(apierr.Unavailable, "queue depth requires the admission transaction")
+	}
+	var depth int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM triggers WHERE team=? AND status=?`, team, triggerStatusPending).Scan(&depth)
+	return depth, err
+}

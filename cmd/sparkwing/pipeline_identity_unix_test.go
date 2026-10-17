@@ -22,7 +22,7 @@ func TestPipelineAliasSourceUsesTheInvokingCheckoutBinding(t *testing.T) {
 	writeRepoFile(t, filepath.Join(source, "go.mod"), "module sourcefixture\n\ngo 1.26\n")
 	writeRepoFile(t, filepath.Join(source, "sparkwing.yaml"), "pipelines:\n  - name: deploy-prod\n    entrypoint: Other\n")
 	fixture := filepath.Join(t.TempDir(), "pipeline")
-	protocolFixture(t, fixture, filepath.Join(t.TempDir(), "starts"), `[{"name":"deploy-prod","args":[{"name":"image","type":"string","required":true,"job_id":"rollout"}]}]`)
+	protocolFixture(t, fixture, filepath.Join(t.TempDir(), "starts"), `[{"name":"Deploy","args":[{"name":"image","type":"string","required":true,"job_id":"rollout"}]}]`)
 	run := &pipelineRun{ctx: t.Context(), sparkwingDir: source, entry: pipelineentry.Binary(fixture), opts: compileOptions{ExecutionDir: caller}}
 	schema, err := run.describedPipeline("deploy-prod")
 	if err != nil || schema.Name != "deploy-prod" || len(schema.Args) != 1 || schema.Args[0].JobID != "rollout" {
@@ -32,7 +32,7 @@ func TestPipelineAliasSourceUsesTheInvokingCheckoutBinding(t *testing.T) {
 
 func TestPipelineAliasInspectionParsesEntrypointArgs(t *testing.T) {
 	dir, _ := aliasProject(t)
-	describe := `"ok":true,"result":{"pipelines":[{"name":"deploy-prod","args":[{"name":"region","type":"string","required":true},{"name":"image","type":"string","required":true,"job_id":"rollout"}]}]}}`
+	describe := `"ok":true,"result":{"pipelines":[{"name":"Deploy","args":[{"name":"region","type":"string","required":true},{"name":"image","type":"string","required":true,"job_id":"rollout"}]}]}}`
 	bin, _ := fakePlanSDK(t, describe, fixturePlan, fixtureEval)
 	result, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), filepath.Dir(dir), "deploy-prod", []string{"--region", "us-east", "--image", "release"}, "plan")
 	if err != nil || result.pipeline != "deploy-prod" || result.args["region"] != "us-east" || result.args["image"] != "release" {
@@ -42,7 +42,7 @@ func TestPipelineAliasInspectionParsesEntrypointArgs(t *testing.T) {
 
 func TestPipelineInspectionSelectsRegisteredNameInV2Request(t *testing.T) {
 	dir, _ := aliasProject(t)
-	describe := `"ok":true,"result":{"pipelines":[{"name":"deploy-prod","args":[{"name":"region","type":"string","required":true},{"name":"image","type":"string","required":true,"job_id":"rollout"}]}]}}`
+	describe := `"ok":true,"result":{"pipelines":[{"name":"Deploy","args":[{"name":"region","type":"string","required":true},{"name":"image","type":"string","required":true,"job_id":"rollout"}]}]}}`
 	bin, requests := fakePlanSDK(t, describe, fixturePlan, fixtureEval)
 	if _, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), filepath.Dir(dir), "deploy-prod", []string{"--region", "us-east", "--image", "release"}, "plan"); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestPipelineInspectionSelectsRegisteredNameInV2Request(t *testing.T) {
 			t.Fatal(err)
 		}
 		if req.Op == nodeproto.OpPlan {
-			if req.Pipeline != "deploy-prod" || req.Run == nil || req.Run.Pipeline != "deploy-prod" || req.Args["region"] != "us-east" || req.Args["image"] != "release" {
+			if req.Pipeline != "Deploy" || req.Run == nil || req.Run.Pipeline != "deploy-prod" || req.Args["region"] != "us-east" || req.Args["image"] != "release" {
 				t.Fatalf("selected identity lost: %+v", req)
 			}
 			return
@@ -90,8 +90,8 @@ func (Deploy) Plan(_ context.Context, plan *sw.Plan, in Inputs, rc sw.RunContext
     return nil
 }
 func main() {
-    sw.Register[Inputs]("deploy-prod", func() sw.Pipeline[Inputs] { return Deploy{} })
-    sw.Register[Inputs]("deploy-stage", func() sw.Pipeline[Inputs] { return Deploy{} })
+    sw.Register[Inputs]("Deploy", func() sw.Pipeline[Inputs] { return Deploy{} })
+
     sw.Main()
 }
 `)

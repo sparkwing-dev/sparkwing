@@ -314,8 +314,9 @@ survey a fleet at all.
 A survey that cannot read the registry says so and exits non-zero. It never
 answers with an empty fleet, because that is what a machine with nothing
 registered answers, and one stray character in the registry used to make an
-unread fleet look like a swept one. `install --fleet` and `fire --fleet` refuse
-for the same reason. `doctor` keeps reporting the rest of its sweep and carries
+unread fleet look like a swept one. `sparkwing pipeline hooks install --all-repos`
+and `sparkwing pipeline hooks status --prove --all-repos` refuse for the same reason. `doctor` keeps reporting the rest of its sweep and
+carries
 the reason in `gates_survey_error`, since the registry says nothing about this
 home's runs, locks or daemon.
 
@@ -331,16 +332,17 @@ sparkwing pipeline hooks status --prove            # this repo: make the gate re
 sparkwing pipeline hooks status --prove --all-repos    # every registered repo
 ```
 
-`fire` stages a file and commits it with the gate told to refuse, then reports
+`sparkwing pipeline hooks status --prove` stages a file and commits it with the
+gate told to refuse, then reports
 whether git refused it and which hook file did. Everything happens in a
 throwaway linked worktree, which shares the repository's config -- so the same
 `core.hooksPath` and the same hooks apply -- while carrying its own index and
 its own detached HEAD, so the repository's working tree, index, branches and
 HEAD are untouched whatever the gate does.
 
-`fire` settles the pre-commit gate only. A pre-push gate needs a remote to fire
+`pipeline hooks status --prove` settles the pre-commit gate only. A pre-push gate needs a remote to fire
 against, so it is left to the push that exercises it, and a repository that
-declares no pre-commit trigger has nothing for `fire` to prove -- `--all-repos`
+declares no pre-commit trigger has nothing for `pipeline hooks status --prove` to prove -- `--all-repos`
 counts it apart from the repositories whose gate refused rather than among
 them.
 
@@ -350,7 +352,7 @@ failed for an unrelated reason reads exactly like a gate doing its job.
 
 Only a hook sparkwing wrote that carries the self-test guard is ever executed.
 A hand-written hook, or a managed one installed before the guard existed, is
-reported `unprovable` and `fire` exits non-zero -- an enforcement question that
+reported `unprovable` and `pipeline hooks status --prove` exits non-zero -- an enforcement question that
 could not be answered is not a pass. Re-run `hooks install` to replace an older
 managed hook with one that can be asked.
 

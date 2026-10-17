@@ -26,7 +26,7 @@ func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 	}
 	writeRepoFile(t, filepath.Join(dir, "go.mod"), "module aliasfixture\n\ngo 1.26\n")
 	schema := nodeproto.PipelineDescription{
-		Name: "deploy-prod", Short: "Deploy a service", Help: "Deploys the selected service.",
+		Name: "Deploy", Short: "Deploy a service", Help: "Deploys the selected service.",
 		Args: []nodeproto.ArgumentDescription{
 			{Name: "region", Short: "r", Type: "string", Required: true},
 			{Name: "image", Type: "string", Required: true, JobID: "rollout"},
@@ -40,7 +40,7 @@ func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 		t.Fatal(err)
 	}
 	stage := schema
-	stage.Name = "deploy-stage"
+	stage.Name = "Deploy"
 	if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{schema, stage}}); err != nil {
 		t.Fatal(err)
 	}
@@ -71,8 +71,8 @@ func FuzzPipelineAliasMetadataIsolation(f *testing.F) {
 			t.Fatal(err)
 		}
 		schemas := []nodeproto.PipelineDescription{
-			{Name: entry, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string"}}},
-			{Name: alias, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}, Risks: []string{"prod"}},
+			{Name: entry, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}, Risks: []string{"prod"}},
+			{Name: alias, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string"}}},
 		}
 		if reverse {
 			schemas[0], schemas[1] = schemas[1], schemas[0]
@@ -113,7 +113,7 @@ func TestPipelineAliasResolvesFlagsAndHelp(t *testing.T) {
 	if _, err := parsePipelineArgs(schema, []string{"--typo", "value"}); err == nil || !strings.Contains(err.Error(), "sparkwing run deploy-prod --help") {
 		t.Fatalf("alias diagnostic: %v", err)
 	}
-	if registered.Name != "deploy-prod" {
+	if registered.Name != "Deploy" {
 		t.Fatal("binding changed the registered schema")
 	}
 }
@@ -128,7 +128,7 @@ func TestPipelineAliasFlagsUseRegisteredName(t *testing.T) {
 
 func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 	dir, registered := aliasProject(t)
-	registered.Name = "Deploy"
+	registered.Name = "deploy-prod"
 	key, err := bincache.PipelineCacheKey(dir)
 	if err != nil {
 		t.Fatal(err)

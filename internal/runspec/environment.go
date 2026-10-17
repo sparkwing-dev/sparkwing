@@ -5,6 +5,14 @@ import (
 	"slices"
 )
 
+// EnvironmentSource selects private snapshot inheritance or encrypted submission.
+type EnvironmentSource string
+
+const (
+	EnvironmentCaptured  EnvironmentSource = "captured"
+	EnvironmentSubmitted EnvironmentSource = "submitted"
+)
+
 // VerifyEnvironment checks private byte-preserving values against their immutable identity.
 func VerifyEnvironment(expected EnvSnapshot, values map[string][]byte) error {
 	strings := make(map[string]string, len(values))

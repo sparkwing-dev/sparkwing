@@ -30,6 +30,6 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, run spa
 }
 
 func main() {
-	sparkwing.Register[inputs]("deploy-prod", func() sparkwing.Pipeline[inputs] { return pipeline{} })
+	sparkwing.Register[inputs]("Deploy", func() sparkwing.Pipeline[inputs] { return pipeline{} })
 	sparkwing.Main()
 }

@@ -260,3 +260,37 @@ func TestCheckCLIVerbsReportsReadFailures(t *testing.T) {
 		t.Fatal("missing documentation reported as a passing check")
 	}
 }
+
+func TestMigrationDestinationsUseCurrentGrammar(t *testing.T) {
+	for _, example := range []string{"sparkwing run ci --target prod", "sparkwing pipeline hooks status --fleet", "sparkwing pipeline hooks status --all", "sparkwing cluster triggers list"} {
+		t.Run(example, func(t *testing.T) {
+			content := t.TempDir()
+			if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeDoc(t, filepath.Join(content, "migrations"), "v1.md", "| Before | After |\n|---|---|\n| `sparkwing old-command --gone` | `"+example+"` |\n")
+			if checkCLIVerbs(content) {
+				t.Fatalf("invalid migration destination accepted: %s", example)
+			}
+		})
+	}
+	content := t.TempDir()
+	if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", "| Before | After |\n|---|---|\n| `sparkwing old-command --gone` | `sparkwing run ci` |\n\nBefore:\n```bash\nsparkwing old-command --gone\n```\nAfter:\n```bash\nsparkwing pipeline hooks status --all-repos\n```\n")
+	if !checkCLIVerbs(content) {
+		t.Fatal("historical Before examples were checked")
+	}
+}
+
+func TestMigrationAfterSectionChecksEveryExample(t *testing.T) {
+	content := t.TempDir()
+	if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", "### Before\n```bash\nsparkwing old-command\n```\n### After\n```bash\nsparkwing run ci\n```\n```bash\nsparkwing pipeline hooks status --fleet\n```\n")
+	if checkCLIVerbs(content) {
+		t.Fatal("second After example was ignored")
+	}
+}

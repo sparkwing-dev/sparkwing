@@ -157,7 +157,17 @@ func (o *Operator) MarkCardRefundMade(
 		return fmt.Errorf("%w: refund key %q", ErrInvalidInput, key)
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := applyCardRefundTx(ctx, tx, team, paymentIntent, refundID, status,
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return err
+		}
+		recorded, err := recordedRefundOutcomeTx(ctx, tx, team, paymentIntent, refundID)
+		if err != nil {
+			return err
+		}
+		if recorded == CardRefundSucceeded || status == CardRefundPending && recorded != "" {
+			status = recorded
+		}
+		_, err = applyCardRefundTx(ctx, tx, team, paymentIntent, refundID, status,
 			`attempts = ? AND status = 'due'`, []any{attempt}, now)
 		return err
 	})
@@ -173,11 +183,4 @@ func (o *Operator) FailCardAttempt(ctx context.Context, attemptID, paymentIntent
 		return "", false, err
 	}
 	return team, first, err
-}
-
-// DropCardAttempt closes a live collection attempt that never reached the provider.
-func (o *Operator) DropCardAttempt(ctx context.Context, attemptID string, now time.Time) error {
-	_, err := o.s.exec(ctx, `UPDATE card_attempts SET status = ?, decline_code = 'not_opened', updated_at = ?
-	    WHERE id = ? AND status = ?`, CardAttemptFailed, now.UnixNano(), attemptID, CardAttemptLive)
-	return err
 }

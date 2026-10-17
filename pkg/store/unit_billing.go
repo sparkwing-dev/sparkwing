@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func meteredPlacement(claimant, root capability.Capability) bool {
@@ -66,7 +67,7 @@ func billingUnitKind(kind capability.UnitKind) capability.BillingUnit {
 	return ""
 }
 
-func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources ExecutorResource) (CreditRate, error) {
+func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources match.Resources) (CreditRate, error) {
 	table, err := creditRateTableTx(ctx, tx)
 	if err != nil {
 		return CreditRate{}, err
@@ -74,11 +75,8 @@ func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources ExecutorReso
 	return table.ClassForResource(resources)
 }
 
-func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, resources ExecutorResource, cloud bool) (bool, error) {
-	price, err := unitBillingPriceTx(ctx, tx, resources)
-	if err != nil {
-		return false, err
-	}
+func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate, cloud bool) (bool, error) {
+	var err error
 	if cloud {
 		err = checkOverflowTx(ctx, tx, team, unit.RunID)
 		var overflow *apierr.Error

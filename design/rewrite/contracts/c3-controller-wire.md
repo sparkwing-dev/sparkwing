@@ -1232,3 +1232,26 @@ submitting the same cancellation again on each scheduling pass.
 The ordinary request seal, intake persistence and retry clone retain it. It
 carries no authority and does not replace the intake idempotency key. No schema
 column is added because it lives in the existing request JSON.
+
+## Child repository omission, 2026-10-17
+
+The native child client carries `lineage.repo_inherited=true` when its repository
+argument is omitted. An explicit argument equal to the parent repository keeps
+it false. Both carry the captured parent source. C1 seals the bit and checks the
+parent repository before commit. It grants no repository or credential access.
+Changed omission intent under one idempotency key conflicts. Cross-repository
+resolution in the native client remains a refusal until its source resolver is
+provided.
+
+## Environment and source selection integration
+
+The sealed request carries `environment_source`, `source.working_tree` and
+`source.committed_checkout`. These are execution inputs and grant no authority.
+The native child client retains environment provenance when setting child origin.
+Private values keep the existing captured-snapshot or encrypted award transport.
+
+Source access admits only the captured execution projection or its exact
+`Spec.PipelineSource()` projection. That projection changes the commit to the
+sealed pipeline SHA without changing repository, remote or checkout policy.
+Both request the same live, run-bound source credential route. A changed
+repository, URL, commit or policy is refused before transport.

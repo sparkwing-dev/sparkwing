@@ -282,3 +282,35 @@ func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.Payme
 	}
 	return result, err
 }
+
+func recordedRefundOutcomeTx(ctx context.Context, tx *storeTx, team Team, payment, refund string) (string, error) {
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT event_json FROM payment_events WHERE payment_mode=? AND object_id=? AND team=? AND payment_id=? AND event_kind='refund'`, mode, refund, team, payment)
+	if err != nil {
+		return "", err
+	}
+	var outcome string
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return "", errors.Join(err, rows.Close())
+		}
+		var event capability.PaymentEvent
+		if json.Unmarshal(body, &event) != nil || event.Mode != mode || event.Kind != capability.PaymentRefund || event.PaymentID != payment || event.ObjectID != refund || validateProviderPayment(event) != nil {
+			return "", errors.Join(authorityError(apierr.IntegrityFailure, "stored refund receipt is invalid"), rows.Close())
+		}
+		switch event.Status {
+		case CardRefundSucceeded, "failed", "canceled":
+			if outcome != CardRefundSucceeded {
+				outcome = event.Status
+			}
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return "", err
+	}
+	return outcome, nil
+}

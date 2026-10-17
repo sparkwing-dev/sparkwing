@@ -67,7 +67,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := preparedTriggerSource{pipeline: "ci", git: runspec.Git{Repository: repository, SHA: sha}, source: runspec.Source{Ref: sha, Entrypoint: "ci", Location: runspec.SourceLocation{LocalCheckout: repo, PipelineDir: ".sparkwing"}}}
+	selected := preparedTriggerSource{pipeline: "ci", git: runspec.Git{Repository: repository, SHA: sha}, source: runspec.Source{Ref: sha, Entrypoint: "ci", WorkingTree: true, Location: runspec.SourceLocation{LocalCheckout: repo, PipelineDir: ".sparkwing"}}}
 	for _, tc := range []struct{ flag, want string }{{"", "first"}, {"--sw-hash-all-files", "second"}, {"--sw-no-bincache", "third"}} {
 		t.Run(tc.flag, func(t *testing.T) {
 			writeSnapshotFile(t, repo, ".sparkwing/payload", tc.want, 0o600)
