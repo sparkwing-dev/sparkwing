@@ -40,7 +40,7 @@ func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
-	if _, err := s.DB().ExecContext(ctx, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('local',?,'run-local','build','award','usage',?,?,?)`, store.DefaultTeam, store.MinBillableSeconds, floor, time.Now().UnixNano()); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('local',?,'run-local','build','award','usage',?,?,?)`), store.DefaultTeam, store.MinBillableSeconds, floor, time.Now().UnixNano()); err != nil {
 		t.Fatalf("seed debit: %v", err)
 	}
 	balance, err := def.CreditBalanceMicro(ctx)

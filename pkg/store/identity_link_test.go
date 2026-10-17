@@ -297,7 +297,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 		}
 		var waiting int
 		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
-			WHERE wait_event_type = 'Lock' AND query LIKE '%accounts WHERE id%'
+			WHERE wait_event_type = 'Lock' AND (query LIKE '%accounts WHERE id%' OR query LIKE '%teams WHERE name%')
 			AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}

@@ -204,7 +204,7 @@ func TestAStoredRateTableNothingCanReadIsAnError(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	if _, err := s.DB().Exec(
-		`INSERT INTO settings (key, value) VALUES ('credit_rate_table', ?)`, []byte(`not json`),
+		storetest.Rebind(s, `INSERT INTO settings (key, value) VALUES ('credit_rate_table', ?)`), []byte(`not json`),
 	); err != nil {
 		t.Fatalf("write an unreadable table: %v", err)
 	}

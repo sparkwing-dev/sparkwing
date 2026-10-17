@@ -53,7 +53,7 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 		}
 	}
 
-	if _, err := st.DB().ExecContext(t.Context(), `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`, alpha.Team(), "DEPLOY_KEY", "ci"); err != nil {
+	if _, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st, `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`), alpha.Team(), "DEPLOY_KEY", "ci"); err != nil {
 		t.Fatalf("alpha DeleteSecret: %v", err)
 	}
 	if _, err := alpha.GetSecretRow("DEPLOY_KEY", "ci"); !errors.Is(err, store.ErrNotFound) {

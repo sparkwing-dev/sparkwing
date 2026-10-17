@@ -206,6 +206,28 @@ CREATE TABLE triggers (
     FOREIGN KEY(team,id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
+CREATE TABLE node_attempts (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    attempt BIGINT NOT NULL CHECK(attempt > 0),
+    generation BIGINT NOT NULL CHECK(generation > 0),
+    holder TEXT NOT NULL,
+    capability_prefix TEXT NOT NULL,
+    executor_kind TEXT NOT NULL,
+    executor_name TEXT NOT NULL,
+    executor_location TEXT NOT NULL,
+    started_at BIGINT NOT NULL,
+    finished_at BIGINT,
+    outcome TEXT NOT NULL DEFAULT '' CHECK(outcome IN ('','success','failed','cancelled','skipped','superseded','memoized')),
+    failure_reason TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(team,run_id,node_id,attempt),
+    UNIQUE(team,run_id,node_id,generation,attempt),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id,node_id) REFERENCES nodes(team,run_id,node_id) ON DELETE CASCADE,
+    CHECK((finished_at IS NOT NULL) = (outcome <> ''))
+);
+
 CREATE TABLE node_steps (
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
@@ -936,28 +958,6 @@ CREATE TABLE github_app_automation (
     repo_key TEXT NOT NULL,
     PRIMARY KEY (team, repository_id),
     FOREIGN KEY (installation_id) REFERENCES github_app_installations(installation_id) ON DELETE CASCADE
-);
-
-CREATE TABLE node_attempts (
-    team TEXT NOT NULL REFERENCES teams(name),
-    run_id TEXT NOT NULL,
-    node_id TEXT NOT NULL,
-    attempt BIGINT NOT NULL CHECK(attempt > 0),
-    generation BIGINT NOT NULL CHECK(generation > 0),
-    holder TEXT NOT NULL,
-    capability_prefix TEXT NOT NULL,
-    executor_kind TEXT NOT NULL,
-    executor_name TEXT NOT NULL,
-    executor_location TEXT NOT NULL,
-    started_at BIGINT NOT NULL,
-    finished_at BIGINT,
-    outcome TEXT NOT NULL DEFAULT '' CHECK(outcome IN ('','success','failed','cancelled','skipped','superseded','memoized')),
-    failure_reason TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY(team,run_id,node_id,attempt),
-    UNIQUE(team,run_id,node_id,generation,attempt),
-    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
-    FOREIGN KEY(team,run_id,node_id) REFERENCES nodes(team,run_id,node_id) ON DELETE CASCADE,
-    CHECK((finished_at IS NOT NULL) = (outcome <> ''))
 );
 
 CREATE TABLE log_streams (

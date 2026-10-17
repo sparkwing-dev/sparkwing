@@ -134,6 +134,9 @@ func (s *Store) now() time.Time {
 }
 
 func (t *storeTx) now() time.Time {
+	if t.store.pinnedClock != nil {
+		return t.store.pinnedClock().UTC()
+	}
 	if t.dialect == DialectSQLite && t.store.clock != nil {
 		return t.store.now()
 	}
@@ -156,6 +159,9 @@ func databaseTimeSQL(d Dialect) string {
 }
 
 func (s *Store) databaseNow(ctx context.Context) (time.Time, error) {
+	if s.pinnedClock != nil {
+		return s.pinnedClock().UTC(), nil
+	}
 	if s.dialect == DialectSQLite && s.clock != nil {
 		return s.now(), nil
 	}
