@@ -81,7 +81,7 @@ func seedMatchNode(t *testing.T, s *store.Store, runID, repoURL string, cores fl
 	ctx := context.Background()
 	seedRepoTrigger(t, s, runID, repoURL, time.Now())
 	plan := `{"nodes":[{"id":"work","modifiers":{"res_cores":` + strconv.FormatFloat(cores, 'f', -1, 64) + `}}]}`
-	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET plan_json = ? WHERE id = ?`), plan, runID); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET spec_json = ?, spec_hash = 'spec', plan_json = ?, plan_hash = 'plan', sealed_at = 1 WHERE id = ?`), []byte(`{}`), []byte(plan), runID); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedNode(s, ctx, store.Node{

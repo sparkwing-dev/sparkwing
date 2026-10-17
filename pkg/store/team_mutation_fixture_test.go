@@ -13,9 +13,10 @@ import (
 
 func (t *Tenant) mutationFixtureAuthority(test testing.TB, actor string, grant capability.Grant, at time.Time) capability.Authorized {
 	test.Helper()
-	previous := t.s.clock
+	previous, previousPinned := t.s.clock, t.s.pinnedClock
 	t.s.clock = func() time.Time { return at }
-	test.Cleanup(func() { t.s.clock = previous })
+	t.s.pinnedClock = t.s.clock
+	test.Cleanup(func() { t.s.clock, t.s.pinnedClock = previous, previousPinned })
 	if t.s.csrfCipher == nil {
 		cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 		if err != nil {

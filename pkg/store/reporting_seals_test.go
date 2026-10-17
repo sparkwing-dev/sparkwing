@@ -154,7 +154,7 @@ func TestReportingRefusesMalformedSeals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().ExecContext(t.Context(), `UPDATE runs SET request_json=? WHERE team=? AND id=?`, []byte(`{`), tenant.Team(), plan.RunID); err != nil {
+	if _, err := s.DB().ExecContext(t.Context(), storetest.Rebind(s, `UPDATE runs SET request_json=? WHERE team=? AND id=?`), []byte(`{`), tenant.Team(), plan.RunID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.GetRun(t.Context(), plan.RunID); err == nil {

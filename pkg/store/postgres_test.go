@@ -56,6 +56,9 @@ func TestPostgresAcquireConcurrencySlot_Serializes(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("CreateRun %s: %v", runID, err)
 		}
+		if err := teststore.SeedNode(st, ctx, store.Node{RunID: runID, NodeID: "n", Status: "pending"}); err != nil {
+			t.Fatalf("SeedNode %s: %v", runID, err)
+		}
 	}
 
 	type result struct {

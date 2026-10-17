@@ -42,6 +42,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
 	"advanceAuthGenerationsTx":            "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
+	"lockClaimantTx":                      "the claimant's globally unique capability prefix is locked before authority resolution, so its award stamp cannot invert lock order",
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"readMatchingInputsTx":                "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",

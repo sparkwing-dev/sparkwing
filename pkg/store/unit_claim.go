@@ -19,6 +19,9 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
+		if err := lockClaimantTx(ctx, tx, demand.CapabilityPrefix); err != nil {
+			return err
+		}
 		p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 		if err != nil {
 			return err
@@ -45,6 +48,19 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 		return UnitClaim{}, err
 	}
 	return out, nil
+}
+
+// safety: issuing the award stamps the claimant's last_used_at while the run is
+// locked, and authority resolution holds the claimant's row in share mode. Taking
+// the stronger lock first keeps two claims by one claimant from each holding a
+// share lock the other's update waits on while both queue for the run.
+func lockClaimantTx(ctx context.Context, tx *storeTx, prefix string) error {
+	var held string
+	err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=?`+tx.forNoKeyUpdate(), prefix).Scan(&held)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return err
 }
 
 func lockClaimControllerTx(ctx context.Context, tx *storeTx) error {
