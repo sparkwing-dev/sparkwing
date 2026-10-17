@@ -3516,3 +3516,15 @@ queued claims, owner self-claims and preference liveness through the same
 matching-input reader. Explicit CPU or memory requests retain their values.
 Trigger ownership keeps its existing request so a saturated here machine can
 still host scheduling and overflow.
+
+## Burst reservation before self-claim
+
+`ReconcileRequest.Reserved` is optional machine capacity already held for this
+job. The owner supplies its actual local admission grant. Within the same
+transaction as eligibility and self-claim, C1 adds that amount to the
+machine's observed free resources. Invalid, nonfinite, negative and
+above-capacity reservations refuse. The transaction still checks the current
+owner, claim fences, repository, selectors and placement. Private snapshot
+eligibility and ordinary claims see only free resources. The reservation never
+updates the stored observation, so concurrent heartbeats cannot erase it or
+advertise it to another job. Existing callers omit the field.

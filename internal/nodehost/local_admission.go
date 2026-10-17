@@ -25,6 +25,7 @@ type Admitter interface {
 // Lease holds machine capacity until Release and joins ownership watching.
 type Lease interface {
 	Token() string
+	Resources() wingwire.HostResources
 	Release() error
 	Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error
 }

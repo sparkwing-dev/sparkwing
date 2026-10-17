@@ -2467,6 +2467,10 @@ components:
           type: boolean
         policy:
           type: string
+        reserved:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.match.Resources'
+            - type: "null"
         source:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.ReuseSource'

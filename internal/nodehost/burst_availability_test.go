@@ -66,3 +66,43 @@ func TestBurstAvailabilityRefreshesBeforePlacementReadsAndClaims(t *testing.T) {
 		t.Fatalf("placement used failed observation: %v", calls)
 	}
 }
+
+type burstReservedWire struct {
+	controllerwire.Controller
+	available *match.Resources
+	reserved  *match.Resources
+}
+
+func (c *burstReservedWire) Renew(_ context.Context, _ string, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
+	c.available = body.Available
+	return controllerwire.RenewalResponse{}, nil
+}
+
+func (c *burstReservedWire) ReconcileJob(_ context.Context, _, _ string, request controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error) {
+	c.reserved = request.Reserved
+	return controllerwire.ReconcileResponse{}, errors.New("end of claim")
+}
+
+func TestBurstReservedComputeCountsOnlyForItsClaim(t *testing.T) {
+	wire := &burstReservedWire{}
+	state, err := NewRemoteHostStore(wire, burstAvailabilityPrivate{calls: new([]string)}, "owner", func() bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := match.Resources{Cores: 1, MemoryBytes: 1024}
+	state.Available = func(context.Context) (*match.Resources, error) { return &observed, nil }
+	_, _ = state.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Reserved: &match.Resources{Cores: 4, MemoryBytes: 4096}})
+	if wire.reserved == nil || *wire.reserved != (match.Resources{Cores: 4, MemoryBytes: 4096}) {
+		t.Fatalf("claim lost its private reservation: %+v", wire.reserved)
+	}
+	if wire.available == nil || *wire.available != observed {
+		t.Fatalf("reservation reached shared availability: %+v", wire.available)
+	}
+	if observed != (match.Resources{Cores: 1, MemoryBytes: 1024}) {
+		t.Fatal("reservation mutated shared observation")
+	}
+	_, _ = state.RenewOwner(t.Context(), store.Actor{}, false)
+	if wire.available == nil || *wire.available != observed {
+		t.Fatalf("reservation leaked beyond its claim: %+v", wire.available)
+	}
+}

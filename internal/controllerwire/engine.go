@@ -216,9 +216,10 @@ type MaterializedResultSource struct {
 }
 
 type ReconcileRequest struct {
-	Policy          string       `json:"policy"`
-	Source          *ReuseSource `json:"source,omitempty"`
-	MaterializeOnly bool         `json:"materialize_only,omitempty"`
+	Reserved        *match.Resources `json:"reserved,omitempty"`
+	Policy          string           `json:"policy"`
+	Source          *ReuseSource     `json:"source,omitempty"`
+	MaterializeOnly bool             `json:"materialize_only,omitempty"`
 }
 
 type ReconcileResponse struct {

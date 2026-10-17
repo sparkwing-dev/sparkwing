@@ -55,6 +55,9 @@ func discoverPackagePaths(root string) ([]string, error) {
 			return walkErr
 		}
 		if entry.IsDir() {
+			if entry.Name() == "testdata" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		name := entry.Name()

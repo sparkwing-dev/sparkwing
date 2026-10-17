@@ -170,7 +170,7 @@ func launcherClaimant(c capability.Capability) bool {
 	return c.Subject.Kind == capability.SubjectService && c.Binding.Kind == capability.BindingNone && slices.Contains(c.Grants, capability.ClaimsLaunch)
 }
 
-func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref NodeRef) (UnitClaim, error) {
+func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref NodeRef, reserved *match.Resources) (UnitClaim, error) {
 	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.now()); err != nil {
 		return UnitClaim{}, err
 	}
@@ -178,7 +178,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, r
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	demand, err := ownerClaimDemandTx(ctx, tx, p)
+	demand, err := reservedOwnerDemandTx(ctx, tx, p, reserved)
 	if err != nil {
 		return UnitClaim{}, err
 	}

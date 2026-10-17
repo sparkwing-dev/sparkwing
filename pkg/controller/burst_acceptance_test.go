@@ -41,6 +41,10 @@ func TestBurstAcceptanceSaturatedLocalOwnerCloudRetryWorker(t *testing.T) {
 	burstAcceptanceFlow(t, true, "cloud-retry")
 }
 
+func TestBurstAcceptanceSelfClaimUsesPrivateReservationWithZeroFreeCapacity(t *testing.T) {
+	burstAcceptanceFlow(t, false, "here-reserved")
+}
+
 func TestBurstAcceptanceLocalOwnerExecutesBeforeOverflow(t *testing.T) {
 	burstAcceptanceFlow(t, false, "here")
 }
@@ -51,6 +55,7 @@ func burstAcceptanceFlow(t *testing.T, saturated bool, placement string) {
 
 // BurstExecutionProof binds real SDK execution to the composed burst intake and claim fixture.
 type BurstExecutionProof struct {
+	Secret        string
 	Pipeline      string
 	Plan          nodeproto.PlanDoc
 	Engine        engine.Identity
@@ -123,7 +128,10 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	if proof != nil {
 		input.Pipeline = proof.Pipeline
 	}
-	const localSecret = "requesting-machine-only-secret"
+	localSecret := "requesting-machine-only-secret"
+	if proof != nil && proof.Secret != "" {
+		localSecret = proof.Secret
+	}
 	created, err := member.CreateRun(t.Context(), controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "burst-acceptance", LocalSecrets: map[string]string{"TOKEN": localSecret}})
 	if err != nil || created.HereBearer == "" {
 		t.Fatalf("Cloud-owned intake with local host: %+v %v", created, err)
@@ -172,8 +180,19 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		}
 	}
 	var awarded controllerwire.ClaimResponse
-	if placement == "here" {
-		result, err := owner.ReconcileJob(t.Context(), created.RunID, "job", controllerwire.ReconcileRequest{Policy: "none"})
+	if placement == "here" || placement == "here-reserved" {
+		request := controllerwire.ReconcileRequest{Policy: "none"}
+		if placement == "here-reserved" {
+			if _, err := owner.Renew(t.Context(), claimed.Claim.UnitID, controllerwire.RenewalRequest{Available: &match.Resources{}}); err != nil {
+				t.Fatal(err)
+			}
+			miss, err := owner.ReconcileJob(t.Context(), created.RunID, "job", request)
+			if err != nil || miss.Kind != string(store.Dispatch) || miss.Claim != nil {
+				t.Fatalf("zero capacity claimed without reservation: %+v %v", miss, err)
+			}
+			request.Reserved = &match.Resources{Cores: 1}
+		}
+		result, err := owner.ReconcileJob(t.Context(), created.RunID, "job", request)
 		if err != nil || result.Claim == nil || result.Claim.Runner.Name != claimed.Claim.Runner.Name {
 			t.Fatalf("local owner did not execute before overflow: %+v %v", result, err)
 		}

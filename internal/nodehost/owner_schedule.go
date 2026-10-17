@@ -392,40 +392,28 @@ func (h *OwnerHost) followRemote(ctx, parent context.Context, actor store.Actor,
 	}
 }
 
-func (h *OwnerHost) reconcileExecution(ctx context.Context, accepted AcceptedRun, request store.ReconcileRequest) (store.ReconciledNode, error) {
-	spec, err := admissionSpec(accepted)
-	if err != nil {
-		return store.ReconciledNode{}, err
-	}
-	for {
-		var before store.RunSnapshot
-		if spec.Request.Request.Burst != nil && h.retainRemote {
-			before, err = h.Store.ReadSnapshot(ctx, accepted.RunID)
-			if err != nil {
-				return store.ReconciledNode{}, err
-			}
-		}
-		result, err := FollowReconciliation(ctx, h.Store, request, h.WaitNode)
-		if err != nil || result.Kind != store.Dispatch || before.Run.ID == "" || !hasLocalConcurrency(result.Node.Execution.Concurrency) {
-			return result, err
-		}
-		if err := h.Wait(ctx, before); err != nil {
-			return store.ReconciledNode{}, err
-		}
-	}
-}
-
 func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest) error {
 	if h.Executor == nil || entry == nil {
 		return errors.New("self execution requires a node host and acquired entry")
 	}
-	result, err := h.reconcileExecution(ctx, accepted, request)
+	spec, err := admissionSpec(accepted)
+	if err != nil {
+		return err
+	}
+	if spec.Request.Request.Burst != nil && h.claimAdmission != nil {
+		return h.executeBurst(ctx, run, accepted, entry, request)
+	}
+	result, err := FollowReconciliation(ctx, h.Store, request, h.WaitNode)
 	if err != nil {
 		return err
 	}
 	if result.Kind != store.Execute {
 		return nil
 	}
+	return h.executeAward(ctx, run, accepted, entry, result)
+}
+
+func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, result store.ReconciledNode) error {
 	input, err := NewNodeInput(accepted, result.Node, entry.Engine, run.GrantedRunner)
 	if err != nil {
 		return err
@@ -439,25 +427,7 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 		}
 	}
 	input.Entry, input.Storage = entry, run.Storage
-	execute := func(ctx context.Context) error { return h.Executor.Execute(ctx, input) }
-	if h.claimAdmission != nil {
-		spec, err := admissionSpec(accepted)
-		if err != nil {
-			return err
-		}
-		if spec.Request.Request.Burst != nil {
-			admitted := false
-			err := h.claimAdmission.ClaimedNode(ctx, accepted, result.Node, func(ctx context.Context) error {
-				admitted = true
-				return execute(ctx)
-			})
-			if err != nil && !admitted {
-				err = claimSetupFailure(ctx, input, err, h.Mask, h.Store.TransitionNode)
-			}
-			return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: err})
-		}
-	}
-	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: execute(ctx)})
+	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: h.Executor.Execute(ctx, input)})
 }
 
 func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow) EvaluationInput {

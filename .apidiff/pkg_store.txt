@@ -1716,10 +1716,11 @@ const ReasonStaleGeneration IllegalTransitionReason = "stale_generation"
 const ReasonTerminal IllegalTransitionReason = "terminal"
 type ReconcileKind string
 type ReconcileRequest struct {
-	Ref    NodeRef
-	Actor  Actor
-	Policy SourcePolicy
-	Source *MaterializeSource
+	Reserved *match.Resources
+	Ref      NodeRef
+	Actor    Actor
+	Policy   SourcePolicy
+	Source   *MaterializeSource
 
 	MaterializeOnly bool
 }

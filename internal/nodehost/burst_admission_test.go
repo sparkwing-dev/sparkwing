@@ -261,6 +261,7 @@ func TestBurstRetainsConcurrencyWhileWaitingForPlacement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f, host, input, daemon := burstAdmissionFixture(t)
 		host.Store = burstPlacementStore{f}
+		f.snapshot.Nodes[0].OwnerExecution = &store.OwnerExecution{Allowed: false}
 		row := f.snapshot.Nodes[0]
 		row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "fail"}}
 		f.snapshot.Nodes[0] = row

@@ -37,8 +37,8 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 						return daemon.Acquire(ctx, request, queued)
 					}
 					row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
-					if err != nil || row.ReadyAt == nil || row.ClaimedBy == "" || row.Attempt != 0 {
-						t.Errorf("machine admission did not follow the committed claim: %+v %v", row, err)
+					if err != nil || row.ReadyAt == nil || row.ClaimedBy != "" || row.Attempt != 0 {
+						t.Errorf("machine admission consumed the claim before capacity: %+v %v", row, err)
 					}
 					return nil, errors.New("machine unavailable")
 				})
@@ -58,7 +58,17 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 			completion, err := fixture.Host.Run(ctx, fixture.Input)
 			want, attempts := "success", int64(1)
 			if refuse {
-				want, attempts = "failed", 0
+				if err == nil || completion.Outcome != "" || executed {
+					t.Fatalf("machine observation failure did not stop safely: %+v %v", completion, err)
+				}
+				row, readErr := fixture.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+				if readErr != nil || row.ClaimedBy != "" || row.Attempt != 0 || row.Outcome != "" {
+					t.Fatalf("preclaim failure changed the job: %+v %v", row, readErr)
+				}
+				if live, granted, released := daemon.counts(); live != 0 || granted != released {
+					t.Fatalf("preclaim failure leaked admission: %d/%d/%d", live, granted, released)
+				}
+				return
 			}
 			if err != nil || completion.Outcome != want || executed == refuse {
 				t.Fatalf("shared burst owner completion=%+v executed=%v error=%v", completion, executed, err)
@@ -74,27 +84,53 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 	}
 }
 
-type burstSaturatedOwner struct{}
+type burstSaturatedOwner struct{ optimistic bool }
 
-func (burstSaturatedOwner) ResolveClaimProfile(_ context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
+func (pstate burstSaturatedOwner) ResolveClaimProfile(_ context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
 	capacity := match.Resources{Cores: 64, MemoryBytes: 64 << 30}
 	available := capacity
-	if p.Capability.Subject.ID == "host" {
+	if p.Capability.Subject.ID == "host" && !pstate.optimistic {
 		available = match.Resources{}
 	}
 	return match.Profile{Capacity: capacity}, available, nil
 }
 
 func TestBurstSharedOwnerKeepsSaturatedWorkClaimableByAnotherMachine(t *testing.T) {
+	burstSharedOwnerContention(t, false)
+}
+
+func TestBurstSharedOwnerContentionAfterPlacementLeavesJobUnclaimed(t *testing.T) {
+	burstSharedOwnerContention(t, true)
+}
+
+func burstSharedOwnerContention(t *testing.T, optimistic bool) {
+	burstSharedOwnerContentionResources(t, optimistic, 4, 4096)
+}
+
+func FuzzBurstMachineWaitNeverConsumesClaim(f *testing.F) {
+	f.Add(uint8(4), uint32(4096))
+	f.Add(uint8(1), uint32(0))
+	f.Fuzz(func(t *testing.T, cpu uint8, memory uint32) {
+		burstSharedOwnerContentionResources(t, true, 0.25+float64(cpu%32)/4, int64(memory))
+	})
+}
+
+func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores float64, memory int64) {
+	t.Helper()
 	request := runspec.Request{
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
 		Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "name=host"}, {Target: "name=desktop"}}},
 	}
+	request.Options.Resources.Set = true
+	request.Options.Resources.Value.Cores.Set = true
+	request.Options.Resources.Value.Cores.Value = cores
+	request.Options.Resources.Value.MemoryBytes.Set = memory > 0
+	request.Options.Resources.Value.MemoryBytes.Value = memory
 	request.Options.OwnerExecutionTimeout = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}
 	plan := capacityPlan("queue", 0, "job")
 	plan.Jobs[0].Concurrency[0].Scope = new("run")
 	fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, request)
-	fixture.Store.SetClaimProfileResolver(burstSaturatedOwner{})
+	fixture.Store.SetClaimProfileResolver(burstSaturatedOwner{optimistic: optimistic})
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
@@ -114,12 +150,12 @@ func TestBurstSharedOwnerKeepsSaturatedWorkClaimableByAnotherMachine(t *testing.
 	daemon.hostGate = make(chan struct{})
 	configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: daemon}, &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor})
 	fixture.Host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error { t.Error("saturated host executed work"); return nil })
-	ready := make(chan struct{}, 1)
+	ready := make(chan string, 1)
 	wait := fixture.Host.Wait
 	fixture.Host.Wait = func(ctx context.Context, snapshot store.RunSnapshot) error {
 		if snapshot.Nodes[0].ReadyAt != nil {
 			select {
-			case ready <- struct{}{}:
+			case ready <- "ready":
 			default:
 			}
 		}
@@ -141,6 +177,9 @@ func TestBurstSharedOwnerKeepsSaturatedWorkClaimableByAnotherMachine(t *testing.
 			<-done
 		}
 	}()
+	if optimistic {
+		ready = daemon.queued
+	}
 	select {
 	case <-ready:
 	case err := <-done:
@@ -148,6 +187,10 @@ func TestBurstSharedOwnerKeepsSaturatedWorkClaimableByAnotherMachine(t *testing.
 		t.Fatalf("owner stopped before overflow readiness: %v", err)
 	case <-ctx.Done():
 		t.Fatal("saturated machine blocked overflow readiness")
+	}
+	rowBefore, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+	if err != nil || rowBefore.ClaimedBy != "" || rowBefore.Attempt != 0 {
+		t.Fatalf("waiting for machine capacity consumed the overflow claim: %+v %v", rowBefore, err)
 	}
 	if live, _, _ := daemon.counts(); live != 2 {
 		t.Fatalf("ready burst lost its requester concurrency: live=%d", live)
@@ -177,11 +220,7 @@ func TestBurstSharedOwnerKeepsSaturatedWorkClaimableByAnotherMachine(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, request := range daemon.requests() {
-		if !request.SemaphoresOnly {
-			t.Fatalf("another machine's job occupied local capacity: %+v", request)
-		}
-	}
+
 	if live, granted, released := daemon.counts(); live != 0 || granted != released {
 		t.Fatalf("overflow retained local admission: %d/%d/%d", live, granted, released)
 	}

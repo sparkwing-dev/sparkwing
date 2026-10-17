@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -144,7 +147,8 @@ func TestOverflowCannotBeReadOrChangedWithMachineAuthorityProperty(t *testing.T)
 	}
 }
 
-func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
+func burstHereOwnerFixture(t *testing.T) (*Store, UnitDemand, capability.Principal) {
+	t.Helper()
 	s, demand := burstFixture(t, runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here", Hold: time.Minute}, {Target: "machines"}, {Target: "cloud"}}})
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET created_at=?`, s.now().UnixNano())
 	root := authorityRoot("local-owner", "a")
@@ -172,6 +176,11 @@ func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return s, demand, principal
+}
+
+func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
+	s, demand, principal := burstHereOwnerFixture(t)
 	fallback := demand
 	fallback.CapabilityPrefix = "runner"
 	fallback.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
@@ -180,7 +189,7 @@ func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
 	}
 	node := NodeRef{RunID: "run", NodeID: "job"}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		eligible, err := ownerExecutionEligibleTx(t.Context(), tx, principal, node)
+		eligible, err := ownerExecutionEligibleTx(t.Context(), tx, principal, node, nil)
 		if err != nil {
 			return err
 		}
@@ -196,11 +205,25 @@ func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
 	if err := s.RecordHereAvailability(t.Context(), principal.Authority, demand.Available); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		reserved := demand.Capacity
+		eligible, err := ownerExecutionEligibleTx(t.Context(), tx, principal, node, &reserved)
+		if err != nil || !eligible {
+			t.Fatalf("held reservation was double-counted as occupied: eligible=%v error=%v", eligible, err)
+		}
+		eligible, err = ownerExecutionEligibleTx(t.Context(), tx, principal, node, nil)
+		if err != nil || eligible {
+			t.Fatalf("reservation leaked to other jobs: eligible=%v error=%v", eligible, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.ClaimUnit(t.Context(), fallback); err != nil {
 		t.Fatalf("saturated here owner blocked fallback: %v", err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		eligible, err := ownerExecutionEligibleTx(t.Context(), tx, principal, node)
+		eligible, err := ownerExecutionEligibleTx(t.Context(), tx, principal, node, nil)
 		if err != nil {
 			return err
 		}
@@ -267,4 +290,52 @@ func TestOverflowUsageIncludesCloudWorkAcrossMonthBoundary(t *testing.T) {
 	if err != nil || control.UsedSeconds != 120 {
 		t.Fatalf("usage across month: %+v %v", control, err)
 	}
+}
+
+func FuzzBurstReservationKeepsCapacityAndClaimFences(f *testing.F) {
+	for i := range uint8(9) {
+		f.Add(i, uint16(1))
+	}
+	f.Fuzz(func(t *testing.T, attack uint8, amount uint16) {
+		s, _, owner := burstHereOwnerFixture(t)
+		if err := s.RecordHereAvailability(t.Context(), owner.Authority, match.Resources{}); err != nil {
+			t.Fatal(err)
+		}
+		reserved := match.Resources{Cores: 4 + float64(amount%17)/4}
+		binding := owner.Capability.Binding
+		actor := Actor{Kind: ActorRunHost, Authority: owner.Authority, CapabilityPrefix: owner.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "run", Holder: binding.Holder, Generation: binding.Generation}}
+		switch attack % 9 {
+		case 1:
+			reserved.Cores = 9 + float64(amount)
+		case 2:
+			reserved.Cores = -1 - float64(amount)
+		case 3:
+			reserved.Cores = math.NaN()
+		case 4:
+			reserved.MemoryBytes = int64(amount) + 1
+		case 5:
+			reserved.Cores = math.Inf(1)
+		case 6:
+			actor.Owner.RunID = "foreign"
+		case 7:
+			actor.Owner.Generation++
+		case 8:
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["name=another-machine"]}}`))
+		}
+		tenant := &Tenant{s: s, team: "a"}
+		result, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone, Reserved: &reserved})
+		if attack%9 == 0 {
+			if err != nil || result.Kind != Execute || result.Claim == nil {
+				t.Fatalf("reserved job did not receive fenced award: %+v %v", result, err)
+			}
+		} else {
+			if result.Kind == Execute || result.Claim != nil {
+				t.Fatal("reservation widened capacity, placement or claim authority")
+			}
+			row, readErr := tenant.ReadNode(t.Context(), NodeRef{RunID: "run", NodeID: "job"})
+			if readErr != nil || row.ClaimedBy != "" {
+				t.Fatalf("refused reservation consumed a claim: %+v %v", row, readErr)
+			}
+		}
+	})
 }

@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Keep burst jobs available to other ranked claimants while the
+  requesting machine waits for compute capacity. Reserve local compute before
+  claiming, and join the wait when another claimant advances the job.
+
 - **run:** Keep configured requester secrets available during offline fallback
   through the local controller's masked secret path. Exclude those environment
   entries from saved local environment snapshots.

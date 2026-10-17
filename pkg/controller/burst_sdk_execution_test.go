@@ -91,11 +91,12 @@ func executeBurstSDK(t *testing.T, options client.EngineOptions, award controlle
 }
 
 type burstSDKNativeExecution struct {
-	entry      *source.Entry
-	engines    *engine.Resolver
-	serviceURL func(http.Handler) string
-	source     *source.Options
-	acquire    func(context.Context, source.Spec, source.Options) (*source.Entry, error)
+	secretValue string
+	entry       *source.Entry
+	engines     *engine.Resolver
+	serviceURL  func(http.Handler) string
+	source      *source.Options
+	acquire     func(context.Context, source.Spec, source.Options) (*source.Entry, error)
 }
 
 func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller, native *burstSDKNativeExecution) {
@@ -305,7 +306,11 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated || native == nil && !closed || processes.Computing(award.RunID) {
 		t.Fatalf("completed SDK retained claim authority: closed=%v error=%v", closed, err)
 	}
-	if !strings.Contains(logs.String(), "secret=*** encoded=***") || strings.Contains(logs.String(), "requesting-machine-only-secret") {
+	secretValue := "requesting-machine-only-secret"
+	if native != nil && native.secretValue != "" {
+		secretValue = native.secretValue
+	}
+	if !strings.Contains(logs.String(), "secret=*** encoded=***") || strings.Contains(logs.String(), secretValue) || strings.Contains(logs.String(), base64.StdEncoding.EncodeToString([]byte(secretValue))) {
 		observed, readErr := owner.ReadSnapshot(ctx, award.RunID)
 		t.Fatalf("SDK masking: %s; observed=%+v read=%v", logs.String(), observed, readErr)
 	}

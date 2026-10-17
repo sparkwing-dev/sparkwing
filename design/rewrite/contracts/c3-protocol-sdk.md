@@ -4,18 +4,20 @@
 
 For a sealed burst request, the owner retains run/box concurrency before
 readiness without acquiring compute resources. Run resource settings still
-flow into each job's sealed settings. A self-claim uses the shared store's
-current placement and capacity checks before acquiring a job-specific machine
-lease. No attempt starts until that lease is held. Cleanup joins before release.
-Contention that begins after the observation can queue an awarded job locally.
-Cancellation ends that wait without allocating an attempt.
+flow into each job's sealed settings. A self-claim acquires a job-specific machine lease before the shared store's
+fenced reconciliation. Waiting for machine capacity leaves the job unclaimed.
+A joined state follower cancels that wait when another claimant advances the
+job. Reconciliation still decides who executes after admission succeeds.
+No attempt starts before both admission and the award. Cleanup joins before release.
 
 Independently claimed burst jobs acquire compute resources without reacquiring
 the requester's logical concurrency. This also covers a registered runner on
 the requesting machine. The owner retains those semaphores until persisted job
 completion. Non-burst claimed-job admission keeps its existing concurrency rule.
-Pre-execution machine-admission failure reports through the same fenced setup
-result path as claimed source preparation, with attempt zero retained.
+For independently awarded jobs, pre-execution machine-admission failure reports
+through the fenced setup result path, with attempt zero retained. A self-hosting
+owner's preclaim admission transport failure returns an error without claiming
+or finishing the job.
 
 An unclaimed burst job retains its logical concurrency while waiting for
 placement. The owner follows the existing state subscription and retries the
@@ -23,6 +25,14 @@ fenced reconciliation after persisted state or its execution eligibility
 changes. `StateFollower.Wait` includes the private owner's execution projection
 in its change comparison. A capacity observation only wakes reconciliation.
 It never grants an execution award. `WaitNode` retains its state-sequence rule.
+
+The internal machine `Lease` exposes its actual granted `Resources`. Every
+production adapter and test lease implements this method. The owner carries that amount in `ReconcileRequest.Reserved`. The store adds
+it to observed free resources within that reconciliation transaction, bounded
+by the authenticated machine's physical capacity. This input does not update
+stored availability. Execution and ordinary heartbeats report only free
+resources. A concurrent heartbeat cannot erase a job's reservation. The additive
+`reserved` wire field adds no persistent reservation or claim-release route.
 
 ## Declared requester secrets in composed execution
 
@@ -49,6 +59,12 @@ for remote source. It authorizes Git or bundle access first, then uses the
 existing private-directory policy and acquisition-owned temporary checkout.
 Denied access creates no workspace. Closing an entry removes its checkout while
 retaining the empty host workspace. CLI options only select that workspace.
+
+The native subprocess property generates requester values with multiline,
+quoted, binary-derived and Unicode content. Real intake, claim and process
+secret release precede SDK execution. Plaintext and base64 values are absent
+from the captured logs. The property uses pipe HTTP transport and does not
+establish native socket or Kubernetes isolation evidence.
 
 The process secret route resolves its `name` as a secret selector, independently
 of named pipeline routes. Controller value replies use the shared SecretValue

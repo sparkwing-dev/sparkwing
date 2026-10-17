@@ -533,6 +533,7 @@ func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamWriter(resolve func(context.Context, store.Team) (TeamWriter, error)) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyAddr(addr string) *Server
+func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
 	DataDownloadURL string
 

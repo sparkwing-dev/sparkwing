@@ -1019,7 +1019,14 @@ resources. `RenewalRequest.available` refreshes the here owner's availability.
 The CLI reads the local admission daemon's actual capacity and free resources,
 including explicit zero availability. `RemoteHostStore.Available` supplies
 renewal observations. Canonical store placement decides owner self-execution.
-Here binding now supplies the real shared native host, private HTTP state,
+Burst self-claims reserve machine compute before reconciliation.
+`ReconcileRequest.reserved` carries the actual acquired lease resources to that
+transaction. C1 adds them to the authenticated machine's current free-resource
+observation for this job only. The field is optional, bounded by physical
+capacity, and never saved as shared availability. Ordinary heartbeats continue
+to report free resources. Claim authority, selectors, fences and placement
+holds still apply.
+Here binding supplies the real shared native host, private HTTP state,
 source access, data, logs, process services and leases.
 
 Runner `RequestCapacity` callbacks now take context and return physical capacity,

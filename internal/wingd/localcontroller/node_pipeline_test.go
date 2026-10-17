@@ -157,6 +157,8 @@ func (pipelineAdmission) Acquire(context.Context, wingwire.AdmissionRequest, fun
 	return pipelineAdmission{}, nil
 }
 
+func (pipelineAdmission) Resources() wingwire.HostResources { return wingwire.HostResources{} }
+
 func (pipelineAdmission) Token() string                                             { return "pipeline-test" }
 func (pipelineAdmission) Release() error                                            { return nil }
 func (pipelineAdmission) Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error { return nil }

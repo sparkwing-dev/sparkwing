@@ -109,7 +109,7 @@ func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRe
 func (c *dataClient) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error)
 func (c *dataClient) Download(ctx context.Context, input blob.GetRequest) (blob.SignedTransfer, error)
 func (c *dataClient) HasMany(ctx context.Context, input blob.HasManyRequest) (blob.Presence, error)
-func (c *dataClient) LookupDepcache(context.Context, blob.DepcacheLookup) (blob.DepcacheHit, error)
+func (c *dataClient) LookupDepcache(ctx context.Context, input blob.DepcacheLookup) (blob.DepcacheHit, error)
 func (c *dataClient) LookupMemo(context.Context, blob.MemoLookup) (blob.MemoHit, error)
 func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) (blob.RecordLookupResult, error)
 func (c *dataClient) Upload(ctx context.Context, input blob.UploadIntent) (blob.UploadTicket, error)

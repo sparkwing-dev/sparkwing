@@ -22,7 +22,7 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	if s.Controller == nil || request.Ref.RunID == "" || request.Ref.NodeID == "" {
 		return store.ReconciledNode{}, errors.New("reconciliation requires a controller and job identity")
 	}
-	body := controllerwire.ReconcileRequest{Policy: string(request.Policy), MaterializeOnly: request.MaterializeOnly}
+	body := controllerwire.ReconcileRequest{Policy: string(request.Policy), MaterializeOnly: request.MaterializeOnly, Reserved: request.Reserved}
 	if request.Source != nil {
 		if request.Policy != request.Source.Kind {
 			return store.ReconciledNode{}, errors.New("reconciliation source policy differs from its read edge")

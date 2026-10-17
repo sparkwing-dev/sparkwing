@@ -1051,8 +1051,10 @@ the sealed job resources, without creating another run record. Ordinary claimed
 jobs also acquire their local concurrency. Burst jobs leave logical concurrency
 with the requesting owner, including when a registered runner shares its
 machine. Here burst owners retain semaphores through persisted completion and
-acquire compute only after a successful self-claim. Unclaimed ready work never
-waits for local compute admission.
+acquire compute before requesting a self-claim. While that admission waits,
+the job stays ready for other ranked claimants. Another claimant's progress
+cancels and joins the machine wait. The store still fences execution after the
+machine lease is acquired.
 
 Machine admission for a Cloud-owned run uses `wingwire.RemoteRunID` with the
 controller address and run ID encoded as separate base64url fields. Job and
