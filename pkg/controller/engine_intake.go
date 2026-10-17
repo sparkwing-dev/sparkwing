@@ -65,9 +65,11 @@ func (s *EngineController) runTransactions(ctx context.Context, team string) (Ru
 // authenticated delivery ID through the separate store boundary.
 func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error) {
 	p := a.Principal
-	if p.Authority.ID == "" || a.Target.Team == "" || p.Capability.Team != a.Target.Team ||
-		(body.Request.Team != "" && body.Request.Team != a.Target.Team) {
+	if p.Authority.ID == "" || a.Target.Team == "" || p.Capability.Team != a.Target.Team {
 		return store.IntakeRequest{}, missingEndpointPolicy()
+	}
+	if body.Request.Team != "" && body.Request.Team != a.Target.Team {
+		return store.IntakeRequest{}, apierr.Authorization(apierr.ReasonTeam, "intake team does not match authority")
 	}
 	request := body.Request
 	request.Team = a.Target.Team

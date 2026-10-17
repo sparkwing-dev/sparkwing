@@ -3373,3 +3373,18 @@ subject. It stores no bearer or response. C1 AdmitRun owns atomic commit, replay
 and current authority checks, including concurrent first requests. Explicit
 idempotency keys win. HTTP uses the current 201/200 CreateRunResponse contract;
 replay carries no here bearer. Each API request still spends its flood budget.
+
+
+## W1b run-intake validation reconciliation
+
+The shared HTTP intake handler validates `request.git.sha` before source
+resolution and admission. Empty is allowed. A supplied object ID has exactly
+40 or 64 hexadecimal characters. It uses the same validator as schedule input.
+A child body's team differing from its authorized path team returns
+`forbidden`, while missing internal authority still returns `policy_missing`.
+
+API input cannot supply trigger environment maps. The retired `git.repo`,
+`github_owner` and `github_repo` JSON spellings stay removed. Current source
+identity is the canonical repository key plus its verified acquisition location.
+The actor comes from authenticated authority. Submitted App facts are stripped,
+and App-origin intake still requires a verified delivery in the transaction.

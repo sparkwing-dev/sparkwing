@@ -3466,3 +3466,19 @@ with each lane receiving its own bounded batch. The in-memory GitHub queue,
 capacity drops, retry sleeps and shutdown drain are removed. Pending, running
 and terminal intents all come from run transitions. Metrics and parent
 notification remain due for their unfinished consumers.
+
+
+## W1b child admission reconciliation
+
+`Tenant.AdmitRun` checks child ancestry before sealing or inserting the new run.
+A `(repo_key, pipeline)` already present in the same team's ancestry returns
+`conflict`. A repeated ancestor ID also returns `conflict`, so malformed lineage
+cannot loop. The walk uses committed `lineage_json` and tenant-scoped run reads.
+A missing ancestor returns the normal not-found error and exposes no foreign
+pipeline. Retry intake keeps its committed source seals and bypasses this new
+invocation check.
+
+Current child requests carry the source snapshot explicitly. The native process
+client inherits it from its authenticated parent snapshot. Explicit repository
+and ref inputs retain their own source facts. This does not implement the
+client's still-missing cross-repository source resolution.

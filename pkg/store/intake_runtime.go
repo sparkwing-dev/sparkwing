@@ -93,6 +93,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 				return admissionResultTx(ctx, tx, team, previous)
 			}
 		}
+		if err := validateChildLineageTx(ctx, tx, team, input); err != nil {
+			return AdmissionResult{}, err
+		}
 		pools, err := intakePoolsTx(ctx, tx, team, &input, policy.RepositoryAuthorized)
 		if err != nil {
 			return AdmissionResult{}, err
@@ -370,4 +373,24 @@ func appReplayKey(input runspec.Request) string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%s", input.Git.App.Value.DeliveryKey, input.Pipeline)
+}
+
+func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input runspec.Request) error {
+	seen := map[string]bool{}
+	for id := input.Lineage.ParentRunID; id != ""; {
+		if seen[id] {
+			return authorityError(apierr.Conflict, "child pipeline cycle")
+		}
+		seen[id] = true
+		ancestor, err := readRunTx(ctx, tx, team, id)
+		if err != nil {
+			return err
+		}
+		parent := ancestor.Request.Request
+		if parent.Pipeline == input.Pipeline && parent.Git.Repository.Key == input.Git.Repository.Key {
+			return authorityError(apierr.Conflict, "child pipeline cycle")
+		}
+		id = ancestor.Lineage.ParentRunID
+	}
+	return nil
 }

@@ -72,6 +72,18 @@ flush does not reopen general data, source or secret access. A job-process
 credential dies with its process. Plan, eval, owner and job bindings retain
 their separate permissions.
 
+### Run intake and child calls
+
+A supplied Git SHA must be empty or a full 40- or 64-character hexadecimal
+object ID. Revision names and option-shaped values are refused before admission.
+API input cannot choose the submitting account or attach verified App facts.
+
+A child call names its live parent job. Only that job can read the child through
+its parent relation. The private job snapshot supplies execution inputs, while
+public run details keep secret arguments redacted. Admission checks ancestor
+pipeline and repository identities within the same team. Re-entering one returns
+`409`; a missing ancestor returns `404` without disclosing foreign run facts.
+
 ### Request audit log
 
 Audit records identify the route, operation, team, subject and public credential

@@ -1,67 +1,28 @@
 package controller_test
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
-	"strings"
 	"testing"
-	"time"
+	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func newTriggerUserServer(t *testing.T) (*store.Store, *httptest.Server, string) {
-	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	raw, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write"}), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ts := httptest.NewServer(controller.New(st, nil).Handler())
-	t.Cleanup(ts.Close)
-	return st, ts, raw
-}
-
-// Released CLIs still send trigger.user, and a CLI and a controller upgrade
-// independently, so the field is accepted and never trusted.
 func TestTrigger_IgnoresAUserNamedInTheBody(t *testing.T) {
-	st, ts, raw := newTriggerUserServer(t)
-
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/triggers",
-		strings.NewReader(`{"pipeline":"demo","trigger":{"source":"manual","user":"mallory"}}`))
-	if err != nil {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	property := func(id, display string) bool {
+		body := computeIntake("demo")
+		body.Request.Actor = runspec.Actor{Kind: "operator", ID: id, Display: display}
+		created := floodRun(t, f.intake(f.token, body), 201)
+		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).ReadRun(t.Context(), created.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row.Request.Request.Actor == (runspec.Actor{Kind: "account", ID: "alice"})
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+raw)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var created struct {
-		RunID string `json:"run_id"`
-	}
-	decodeErr := json.NewDecoder(resp.Body).Decode(&created)
-	_ = resp.Body.Close()
-	if resp.StatusCode/100 != 2 || decodeErr != nil || created.RunID == "" {
-		t.Fatalf("status = %d (%v, run %q), want a released CLI's body accepted", resp.StatusCode, decodeErr, created.RunID)
-	}
-	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), created.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trig.TriggerUser != "alice" {
-		t.Fatalf("trigger user = %q, want the token's principal alice, never the body's mallory", trig.TriggerUser)
 	}
 }

@@ -24,7 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-var gitObjectSHA = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
+var gitObjectSHA = regexp.MustCompile(`^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
@@ -64,7 +64,7 @@ func validateGitSHA(sha string) error {
 	if sha == "" || gitObjectSHA.MatchString(sha) {
 		return nil
 	}
-	return errors.New("git.sha must be a 40-64 character hex object id")
+	return errors.New("git.sha must be a 40- or 64-character hex object id")
 }
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {

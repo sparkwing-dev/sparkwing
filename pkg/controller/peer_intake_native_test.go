@@ -43,7 +43,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 		body := controllerwire.CreateRunRequest{IdempotencyKey: peer.ID, Request: runspec.Request{
 			Version: 1, Team: string(store.DefaultTeam), Pipeline: "local", Mode: runspec.IntakeExecute,
 			Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
-			Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "head"},
+			Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"},
 			Actor:   runspec.Actor{Kind: "account", ID: "forged"},
 			Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 0}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "priority"}}},
 		}}

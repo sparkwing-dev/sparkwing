@@ -183,6 +183,9 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err := decodeEngineRequest(r, &body); err != nil {
 			return err
 		}
+		if err := validateGitSHA(body.Request.Git.SHA); err != nil {
+			return invalidEngineBody(err.Error())
+		}
 		if err := s.resolveIntakeSource(r.Context(), a.Target.Team, &body.Request); err != nil {
 			return err
 		}
