@@ -3518,3 +3518,13 @@ schedule-cap exemption. The handler maps cadence guards through
 writeComputeLimitRefusal to 429. Both schedule caps return 409. Tick launches
 retain their listing snapshot. Paused schedules require an authorized manual
 run-now call. A transaction conflict leaves the due instant available for retry.
+
+## Run-resource existence
+
+Run-route decoders collect path selectors and body evidence without reading
+persisted resources. After authentication, `resolveRunSelector` resolves IDs
+and numeric selectors inside the credential's team. Foreign and missing runs
+return the same `not_found` envelope before decoder diagnostics or grant checks.
+Expansion resolution then reads the source node in that tenant and preserves
+its generation for binding. Exact result-body digests and child lineage
+selectors remain part of the authorization evidence.

@@ -37,7 +37,7 @@ func (s *Server) githubConnectWriter(ctx context.Context, a capability.Authorize
 	} else if s.store != nil {
 		var tenant *store.Tenant
 		tenant, err = s.store.ForTeam(ctx, store.Team(a.Target.Team))
-		writer, _ = any(tenant).(GitHubConnectWriter)
+		writer = tenant
 	}
 	if err != nil {
 		return nil, engineLookupError(err)

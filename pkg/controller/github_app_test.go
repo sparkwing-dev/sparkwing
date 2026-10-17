@@ -39,7 +39,6 @@ const headSHA = "89abcdef0123456789abcdef0123456789abcdef"
 type appFixture struct {
 	*identityFixture
 	app     *githubapptest.GitHub
-	srv     *controller.Server
 	logs    *syncBuffer
 	replica func() (*controller.Server, string)
 }
@@ -86,7 +85,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 	srv, url := replica()
 	return &appFixture{
 		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin, srv: srv},
-		app:             app, srv: srv, replica: replica, logs: logs,
+		app:             app, replica: replica, logs: logs,
 	}
 }
 

@@ -25,9 +25,9 @@ type logSubmissionObjects interface {
 
 func (s *Server) logSubmissionEndpoints(e *EngineController) []Endpoint {
 	return []Endpoint{
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/logs", Decode: e.runTarget, Handle: s.handleLiveLogSubmission},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/log-segments", Decode: e.runTarget, Handle: s.handleLogSigning},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/log-manifest", Decode: e.runTarget, Handle: s.handleLogCommit},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/logs", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleLiveLogSubmission},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/log-segments", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleLogSigning},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/log-manifest", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleLogCommit},
 		{Method: "POST", Pattern: "/api/v1/claims/{claim}/logs", Decode: claimIDTarget, ResolveTarget: ownUnitTarget, Handle: s.handleLiveLogSubmission},
 		{Method: "POST", Pattern: "/api/v1/claims/{claim}/log-segments", Decode: claimIDTarget, ResolveTarget: ownUnitTarget, Handle: s.handleLogSigning},
 		{Method: "POST", Pattern: "/api/v1/claims/{claim}/log-manifest", Decode: claimIDTarget, ResolveTarget: ownUnitTarget, Handle: s.handleLogCommit},
