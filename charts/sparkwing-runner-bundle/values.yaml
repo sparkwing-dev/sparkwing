@@ -38,15 +38,37 @@ controller:
     # Key inside the Secret holding the bearer token.
     key: token
 
-# Provision identities and permissions for a separately configured Cloud launcher.
+# Cloud launcher. Jobs use a separate identity and digest-pinned images.
 launcher:
+  enabled: false
   serviceAccountName: ""
+  image:
+    pullPolicy: IfNotPresent
+  tokenSecret:
+    name: ""
+    key: token
+  jobImage: {}
+  dockerImage: {}
+  cpuCeiling: ""
+  memoryCeiling: ""
+  pollInterval: 500ms
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Default-deny selects customer Jobs and measurement probes. Explicitly allow
+  # required destinations through egress rules. Node-level enforcement is external.
+  networkPolicy:
+    egress: []
 
 # -----------------------------------------------------------------------
 # 2. Runner pool. Long-lived pods that poll the controller, claim
 #    triggers + nodes, and execute pipeline DAGs.
 # -----------------------------------------------------------------------
 runner:
+  enabled: true
   repos: []
 
   # Pool size. RollingUpdate strategy means a `helm upgrade` doesn't
@@ -55,9 +77,7 @@ runner:
   replicas: 2
 
   image:
-    # Pin repository and tag. This chart has no runnable public default image.
-    repository: ghcr.io/sparkwing-dev/sparkwing-runner
-    tag: "" # falls back to .Chart.AppVersion when empty
+    # Set repository and tag from one compatible build. Both are required.
     pullPolicy: IfNotPresent
 
   # --label flags advertised to the controller for Requires matching.

@@ -1,0 +1,89 @@
+# EKS kikd-prod / ArgoCD input. Replace public IDs and image coordinates with
+# one built release. Digests below are syntactic examples, not published images.
+controller:
+  image:
+    repository: ghcr.io/sparkwing-dev/sparkwing-controller
+    tag: rewrite-cloud
+  databaseSecret: {name: sparkwing-database, key: dsn}
+  bootstrapAdminToken: {name: sparkwing-bootstrap-admin, key: token}
+  secretsKey: {name: sparkwing-secrets-key, key: key}
+  credentialsSecret: {name: sparkwing-credentials}
+  storage: {type: emptyDir}
+  dataStore:
+    s3URL: s3://sparkwing-cloud-data
+  bucketCeiling:
+    store: s3://sparkwing-cloud-data
+  cloudfront:
+    domain: data.sparkwing.dev
+    keyPairID: REPLACE_PUBLIC_KEY_ID
+  externalURL: https://api.sparkwing.dev
+  dashboardURL: https://console.sparkwing.dev
+  oauthRedirectURIs: https://console.sparkwing.dev/auth/github/callback,https://console.sparkwing.dev/auth/google/callback
+  operatorAccounts: operator-account-id
+  github:
+    clientID: REPLACE_GITHUB_CLIENT_ID
+    appID: "123456"
+    appSlug: sparkwing
+  google:
+    clientID: REPLACE_GOOGLE_CLIENT_ID
+  extraEnv:
+    - name: AWS_REGION
+      value: us-west-2
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/sparkwing-controller
+# EKS EBS CSI can own volume permissions. emptyDir uses fsGroup directly.
+volumePermissions:
+  enabled: false
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+  hosts:
+    - host: api.sparkwing.dev
+      paths: [{path: /, pathType: Prefix}]
+    - host: console.sparkwing.dev
+      paths: [{path: /, pathType: Prefix}]
+  tls:
+    - secretName: sparkwing-tls
+      hosts: [api.sparkwing.dev, console.sparkwing.dev]
+sparkwing-runner-bundle:
+  enabled: true
+  controller:
+    # Use the public origin so escaped-node probes have the same required target.
+    url: https://api.sparkwing.dev
+  runner:
+    enabled: false
+  launcher:
+    enabled: true
+    serviceAccountName: sparkwing-launcher
+    image:
+      repository: ghcr.io/sparkwing-dev/sparkwing-runner
+      tag: rewrite-cloud
+    tokenSecret: {name: sparkwing-launcher-token, key: token}
+    jobImage:
+      repository: ghcr.io/sparkwing-dev/sparkwing-runner
+      tag: rewrite-cloud
+      digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    dockerImage:
+      repository: docker.io/library/docker
+      tag: "28-dind"
+      digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    cpuCeiling: "2"
+    memoryCeiling: 8Gi
+    # Keep launcher/controller on infrastructure nodes. Customer nodes are
+    # selected and reserved by their exact team-node label, never these selectors.
+    networkPolicy:
+      egress:
+        - to:
+            - namespaceSelector:
+                matchLabels: {kubernetes.io/metadata.name: kube-system}
+              podSelector:
+                matchLabels: {k8s-app: kube-dns}
+          ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+        - to:
+            - ipBlock:
+                cidr: 0.0.0.0/0
+                except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+          ports: [{protocol: TCP, port: 443}]

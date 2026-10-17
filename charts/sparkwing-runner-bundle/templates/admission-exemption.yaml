@@ -1,4 +1,4 @@
-{{- if .Values.launcher.serviceAccountName }}
+{{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
 {{- $name := printf "sparkwing-cloud-exemption-%s" .Release.Namespace }}
 {{- $excluded := printf "has(s.matchExpressions) && s.matchExpressions.exists(e, e.key == 'kubernetes.io/metadata.name' && e.operator == 'NotIn' && %q in e.values)" .Release.Namespace }}
 {{- $webhookExclusion := printf "has(w.namespaceSelector) && [w.namespaceSelector].exists(s, %s)" $excluded }}

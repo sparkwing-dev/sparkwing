@@ -1,7 +1,7 @@
 # Deployment
 
 Sparkwing is unopinionated about how your pipelines deploy. It provides
-the infrastructure - controller, runners, cache, logs - and your
+the infrastructure - controller, runners and shared data storage - and your
 pipeline code decides what to do with it.
 
 ## Run Targets
@@ -36,41 +36,19 @@ capture rejects conflicts, submodules, sparse checkouts, and Git content
 filters. It also requires a complete SHA-1 repository. The default requires an `origin` URL and a pushed commit. `--working-tree`
 needs a local Git checkout with a HEAD commit, but no origin: it uploads one
 source bundle directly to S3 before admitting the run.
-A runner started with `--trigger-runner k8s` creates one Kubernetes Job per
-node. `--trigger-runner warm` offers nodes to remote agents first and uses
-Kubernetes for unlabeled overflow. Both modes are opt-in; the runner-bundle
-chart exposes them through `runner.triggerRunner.kind`, while `inprocess`
-remains the default. The chart supplies the named runner ServiceAccount,
-namespace-scoped Job and pod-read permissions, and requires
-`runner.automountServiceAccountToken=true` so the trigger worker can call the
-Kubernetes API. `runner.triggerRunner.labels` declares static capabilities
-common to every spawned Job; it is empty by default and separate from the
-outer pool's `runner.labels`. The spawned Jobs mount no ServiceAccount token,
-and each carries its node's claim token in `SPARKWING_AGENT_TOKEN` rather than
-the runner's bearer.
+Sparkwing Cloud uses the launcher for plan, evaluation and work Jobs. Every Job
+runs as root with a privileged DinD sidecar on its own team-dedicated node, with
+fixed 20 GiB aggregate scratch. Jobs keep their exact team-node reservation,
+tolerate the CPU-band taint and carry `karpenter.sh/do-not-disrupt`.
+The launcher's Kubernetes identity is separate from the customer Job identity.
+Jobs exchange a one-use bootstrap Secret for an in-memory awarded capability.
 
-A Job for a cpu class above the warm one selects and tolerates the
-`sparkwing.dev/cpu-band: small` band, on top of whatever node selector and
-tolerations the runner was configured with. A cluster offering those classes
-needs a node pool labeled and tainted with that key and value; on a cluster
-without one the pod never schedules and the node fails with the scheduler's
-message. A Job placed on a band, by the class or by the operator's own
-selector, asks for one machine of its class and a node of its own: CPU of the
-class minus half a core with no limit, and as memory request and limit the
-class's 4 GiB per core less 7.5 percent and 2 GiB for the node's overhead.
-The runner's CPU and memory ceilings still cap both, and the pod carries
-`karpenter.sh/do-not-disrupt` so Karpenter never evicts it mid-run. The
-pool therefore needs N-vCPU machines with 4 GiB per vCPU, such as EC2's
-general-purpose families, and a kubelet reservation no larger than 110 pods
-leaves. A band Job refuses a node that holds another Job, and with
-`sparkwing-runner runner --team-nodes` (the Helm value `runner.teamNodes`; off by default) it also selects `sparkwing.dev/team-node` with its run's
-team. Turn it on only for a pool with an `Exists` requirement on that key:
-Karpenter then labels each node it boots with the team that asked, and only
-that team's Jobs reuse it. A band of static nodes without the label takes no
-band Job while it is on. Elsewhere, requests use the pipeline's pinned
-or measured resources, and a request exceeding every matching node's
-allocatable capacity fails before the Job is created. See
-[Runner classes](auth.md#runner-classes).
+The [Cloud chart](../charts/sparkwing-full/README.md) documents its values and
+node/network prerequisites. Team-node labels use the hash of the team ID.
+The launcher reserves existing Ready nodes, so infrastructure must provision
+them before claims can execute. Self-hosted runner pools use `runner.repos`,
+`runner.alsoClaimTriggers` and pool scheduling values. They claim through HTTP
+and need no Kubernetes API token.
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and

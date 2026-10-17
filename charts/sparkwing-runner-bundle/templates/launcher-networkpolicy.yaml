@@ -1,0 +1,28 @@
+{{- if .Values.launcher.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "cloud-deny") }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: sparkwing-launcher
+  policyTypes: [Egress]
+  egress: []
+{{- with .Values.launcher.networkPolicy.egress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" $ "component" "cloud-allow") }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: sparkwing-launcher
+  policyTypes: [Egress]
+  egress:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- end }}

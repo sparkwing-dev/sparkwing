@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **charts (Breaking):** Require repository and tag for every enabled image. Add a Cloud launcher Deployment, controller S3 values, and EKS/ExternalSecret examples. Cloud Jobs retain CPU-band tolerations and Karpenter disruption protection. See [migration guide](docs/migrations/_unreleased.md#cloud-helm-images-and-launcher).
+
 - **runners:** Connect installed start, warm, launch and Cloud bootstrap commands to the shared hosts, authenticated state and measured Kubernetes boundary. Plan and eval units retain their own leases. Owners use canonical placement and can report before a work attempt exists.
 - **sdk:** Encode empty service collections as objects or arrays instead of null, so child pipelines without arguments pass host validation.
 - **cli:** Show every job's outcome and recorded failing steps and errors in `runs status`, including plain output.

@@ -1,5 +1,5 @@
 {{- if gt (int .Values.controller.replicas) 1 -}}
-{{- fail "sparkwing-full: controller.replicas above 1 is unsupported with the controller's local SQLite state DB. Keep controller.replicas at 1; HA controller is a paid feature" -}}
+{{- fail "sparkwing-full: controller.replicas above 1 is unsupported; one replica is supported with SQLite or PostgreSQL. Keep controller.replicas at 1" -}}
 {{- end -}}
 {{- $bundle := index .Values "sparkwing-runner-bundle" -}}
 {{- if and (index $bundle "enabled") (or .Values.nameOverride .Values.fullnameOverride) (not (index $bundle "controller" "url")) -}}

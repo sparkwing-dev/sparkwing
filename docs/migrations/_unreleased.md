@@ -2631,3 +2631,18 @@ The legacy claim-input operation is removed with its retired input-resolution
 API. Executors use committed result records through `/data`, and local node
 credential checks use the own-job data-authority route. Job and child output
 reads return verified JSON values through the shared capability policy.
+
+
+## Cloud Helm images and launcher
+
+Helm no longer falls back to `appVersion` for empty image tags. Set repository
+and tag for every enabled controller, runner or launcher image. The Cloud Job
+runner and DinD images also require `sha256:` digests.
+
+Use [the Cloud values example](../../charts/sparkwing-full/examples/cloud.yaml)
+with `sparkwing-full`. It enables the launcher and disables the pool runner.
+Provide its separate `launcher.tokenSecret`, RDS `databaseSecret`, bootstrap,
+encryption and file-named credentials Secrets before startup. See the
+[chart README](../../charts/sparkwing-full/README.md) for SSM mappings and the
+team-node, admission API and network prerequisites. Existing pool deployments
+keep `runner.enabled=true` and explicitly pin their runner image.

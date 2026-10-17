@@ -34,6 +34,7 @@ const (
 	deadlineAnnotation    = "sparkwing.dev/job-deadline"
 	reservationAnnotation = "sparkwing.dev/node-reservation"
 	cleanupFinalizer      = "sparkwing.dev/cloud-cleanup"
+	doNotDisrupt          = "karpenter.sh/do-not-disrupt"
 	bootstrapPath         = "/etc/sparkwing/bootstrap/bootstrap"
 	bootstrapAnnotation   = "sparkwing.dev/bootstrap-cleanup"
 )
@@ -106,7 +107,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
-	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: map[string]string{doNotDisrupt: "true"}}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...), awardFileName: metadata}}
 	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline}, nil
 }
@@ -194,7 +195,8 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 	// including sidecar logs and writable layers.
 	main.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}, Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}}
 	return corev1.PodSpec{
-		NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
+		Tolerations: []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}},
+		NodeName:    r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 		SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr(int64(0)), RunAsGroup: ptr(int64(0)), RunAsNonRoot: ptr(false)},
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.
 		Resources:      &corev1.ResourceRequirements{Requests: budget, Limits: budget.DeepCopy()},
