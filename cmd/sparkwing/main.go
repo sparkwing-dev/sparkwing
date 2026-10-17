@@ -110,7 +110,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 		return err
 	}
 	if helpRequested {
-		return runSelectedHelp(dir, pipelineName, flags, selectEngine)
+		return runSelectedHelp(dir, pipelineName, flags)
 	}
 	home, err := wingd.HomeDir("")
 	if err != nil {

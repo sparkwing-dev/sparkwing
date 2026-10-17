@@ -7,15 +7,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"io"
-
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
@@ -90,8 +90,8 @@ Args:
 	}
 	reqs := readRequests(t, requests)
 	for _, sent := range []string{
-		`{"id":"2","op":"describe"}`,
-		`{"id":"3","op":"plan","pipeline":"demo","args":{"env":"prod","fast":"true"},"run":{"run_id":"plan","pipeline":"demo"}}`,
+		`"op":"describe"`,
+		`"op":"plan","pipeline":"demo","args":{"env":"prod","fast":"true"},"run":{"run_id":"plan","pipeline":"demo"}}`,
 	} {
 		if !strings.Contains(reqs, sent) {
 			t.Fatalf("requests:\n%s\nlack %s", reqs, sent)

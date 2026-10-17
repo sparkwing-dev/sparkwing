@@ -1,11 +1,15 @@
-# W9 continuation: redesign suite corrections
+# W9 continuation: preview, child secrets and migration docs
 
-Latest continuation: [W9-REDESIGN-SUITE-CORRECTIONS.md](W9-REDESIGN-SUITE-CORRECTIONS.md).
-The reported full-suite failures are corrected in the burst, local-controller,
-repository-example and shared-machine revocation fixtures. OpenAPI is regenerated.
-Build, vet, focused regressions and surface acceptance checks pass. The supplied
-native report is green for the previous committed state. The lead must commit
-these edits and run the full repository and socket-dependent native suites.
+Latest continuation: [W9-PREVIEW-CHILD-DOCS.md](W9-PREVIEW-CHILD-DOCS.md).
+Review 3 findings 3, 5 and 6 are implemented. Preview, describe and run help use
+shared source acquisition and the selected engine. Children do not inherit parent
+local-secret names. Migration instructions are checked after expanding abbreviated
+commands, and v0.67.0's pre-rewrite notes are explicitly archived. Build, vet,
+focused regressions, child fuzzing and surface acceptance checks pass.
+The supplied native report is green for the previous committed state. The lead
+must commit and rerun the repository and socket-dependent native suites.
+
+Previous continuation: [W9-REDESIGN-SUITE-CORRECTIONS.md](W9-REDESIGN-SUITE-CORRECTIONS.md).
 
 Previous redesign: [W9-SHARED-SOURCE-CHILD-ENVIRONMENT.md](W9-SHARED-SOURCE-CHILD-ENVIRONMENT.md).
 

@@ -90,9 +90,8 @@ func FuzzPipelineAliasMetadataIsolation(f *testing.F) {
 }
 
 func TestPipelineAliasResolvesFlagsAndHelp(t *testing.T) {
-	dir, registered := aliasProject(t)
-	run := &pipelineRun{ctx: t.Context(), sparkwingDir: dir}
-	schema, err := run.describedPipeline("deploy-prod")
+	_, registered := aliasProject(t)
+	schema, err := boundPipelineSchema([]nodeproto.PipelineDescription{registered}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,8 +135,7 @@ func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 	if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{registered}}); err != nil {
 		t.Fatal(err)
 	}
-	run := &pipelineRun{ctx: t.Context(), sparkwingDir: dir}
-	if _, err := run.describedPipeline("deploy-prod"); err == nil || !strings.Contains(err.Error(), "deploy-prod") {
+	if _, err := boundPipelineSchema([]nodeproto.PipelineDescription{registered}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"}); err == nil || !strings.Contains(err.Error(), "deploy-prod") {
 		t.Fatalf("missing registration used the Go type name: %v", err)
 	}
 	if _, err := pipelineFlagsFromCache(t.Context(), dir, "deploy-prod"); err == nil {
@@ -148,8 +146,7 @@ func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 func TestPipelineAliasRefusesInvalidBindingConfig(t *testing.T) {
 	dir, _ := aliasProject(t)
 	writeRepoFile(t, filepath.Join(dir, projectconfig.Filename), "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n    typo: private-value\n")
-	run := &pipelineRun{ctx: t.Context(), sparkwingDir: dir}
-	if _, err := run.describedPipeline("deploy-prod"); err == nil || strings.Contains(err.Error(), "private-value") {
+	if _, err := pipelineIdentityAt(dir, "deploy-prod"); err == nil || strings.Contains(err.Error(), "private-value") {
 		t.Fatalf("binding parser: %v", err)
 	}
 	if _, err := pipelineFlagsFromCache(t.Context(), dir, "deploy-prod"); err == nil || strings.Contains(err.Error(), "private-value") {

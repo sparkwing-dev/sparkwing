@@ -13,12 +13,15 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -73,8 +76,8 @@ func runPipelinePlan(inv clisurface.Invocation) error {
 		return err
 	}
 	var doc planPreviewDoc
-	err = withPipelineEntry(parsed.pipeline, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
-		planned, err := planOverProtocol(ctx, entry, dir, parsed.pipeline, parsed.passthrough, "plan")
+	err = withPipelineEntry(parsed.pipeline, func(ctx context.Context, entry pipelineInspection, _ string) error {
+		planned, err := planPipelineEntry(ctx, entry, parsed.pipeline, parsed.passthrough)
 		if err == nil {
 			doc, err = previewPlan(planned, parsed.startAt, parsed.stopAt)
 		}
@@ -91,35 +94,113 @@ func runPipelinePlan(inv clisurface.Invocation) error {
 	return nil
 }
 
-// safety: a pipeline with a declared source plans from that revision, as a run
-// of it would execute.
-func withPipelineEntry(pipeline string, fn func(ctx context.Context, entry pipelineentry.Command, dir string) error) error {
-	dir, err := findSparkwingDir()
+type pipelineInspection struct {
+	planner nodehost.SDKPlanner
+	input   nodehost.PlanningProcessInput
+}
+
+func withPipelineEntry(pipeline string, fn func(context.Context, pipelineInspection, string) error) error {
+	directory, err := findSparkwingDir()
 	if err != nil {
 		return err
 	}
-	if err := switchToolchain(dir, nil); err != nil {
-		return err
-	}
-	source, err := orchestrator.ResolvePipelineSource(context.Background(), filepath.Dir(dir), pipeline, "")
+	return withPipelineEntryAt(directory, pipeline, runFlags{}, fn)
+}
+
+func withPipelineEntryAt(directory, pipeline string, flags runFlags, fn func(context.Context, pipelineInspection, string) error) error {
+	home, err := wingd.HomeDir("")
 	if err != nil {
 		return err
 	}
-	bindDir := dir
-	if source != "" {
-		_, selected, cleanup, err := setupRefWorktree(dir, string(source))
-		if err != nil {
-			return err
+	ctx, stop, raise := interruptContext()
+	defer stop()
+	defer func() {
+		if ctx.Err() != nil {
+			stop()
+			raise()
 		}
-		defer cleanup()
-		dir = selected
+	}()
+	captured := os.Environ()
+	options, err := hostSourceOptions(home, captured, secrets.NewMasker(), true)
+	if err != nil {
+		return err
 	}
-	run := newPipelineRun(dir, compileOptions{})
-	defer run.stop()
-	if err := run.materialize(os.Environ()); err != nil {
-		return run.finish(err)
+	return withLocalPipelineEntry(ctx, home, directory, pipeline, flags, captured, options, fn)
+}
+
+func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline string, flags runFlags, captured []string, options source.Options, fn func(context.Context, pipelineInspection, string) error) (resultErr error) {
+	masker := options.Base.Masker
+	if masker == nil {
+		masker = secrets.NewMasker()
 	}
-	return run.finish(fn(run.ctx, run.entry, filepath.Dir(bindDir)))
+	defer func() {
+		if resultErr != nil {
+			resultErr = &maskedCLIError{err: resultErr, masker: masker}
+		}
+	}()
+	selection, err := selectLocalRunSource(ctx, home, directory, pipeline, flags, captured, masker)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, selection.execution.Close()) }()
+	options.SDK = ""
+	options.Base = procenv.Base{Local: true, Captured: captured, Masker: masker}
+	install := options.InstallSDK
+	options.InstallSDK = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+		if err := resolveSparks(ctx, filepath.Join(request.Directory, request.PipelineDir), flags.noUpdate); err != nil {
+			return engine.SDKCommand{}, err
+		}
+		if install != nil {
+			return install(ctx, selected, request)
+		}
+		return selected.InstallSDK(ctx, request)
+	}
+	spec, err := source.ForRequest(runspec.SealedRequest{Request: runspec.Request{Git: selection.git, Source: selection.source}})
+	if err != nil {
+		return err
+	}
+	entry, err := source.Acquire(ctx, spec, options)
+	if entry != nil {
+		defer func() { resultErr = errors.Join(resultErr, entry.Close()) }()
+	}
+	if err != nil {
+		return err
+	}
+	masked := &installDiagnostics{out: os.Stderr, stream: masker.Stream()}
+	if err := errors.Join(writeEngineNotices(masked, entry.Engine.Notices), masked.close()); err != nil {
+		return err
+	}
+	values := make(map[string]string, len(captured))
+	for _, item := range captured {
+		name, value, _ := strings.Cut(item, "=")
+		values[name] = value
+	}
+	environment, err := runspec.EnvironmentDigest(values)
+	if err != nil {
+		return err
+	}
+	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base}}
+	inspection := pipelineInspection{
+		planner: nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: masker, Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
+			if err := context.Cause(ctx); err != nil {
+				return err
+			}
+			_, err := fmt.Fprintln(os.Stderr, frame.Message)
+			return err
+		}},
+		input: nodehost.PlanningProcessInput{
+			Entry: entry, Entrypoint: selection.identity.Entrypoint, Environment: environment,
+			Run: nodeproto.RunContext{RunID: "inspection", Pipeline: pipeline}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+		},
+	}
+	return fn(ctx, inspection, filepath.Dir(selection.execution.Directory))
+}
+
+func (p pipelineInspection) describe(ctx context.Context) (nodeproto.PipelineDescription, error) {
+	prepared, err := p.planner.Prepare(ctx, p.input, nodehost.PlanningInput{})
+	schema := prepared.Description
+	schema.Name = p.input.Run.Pipeline
+	return schema, err
 }
 
 type planned struct {
@@ -128,50 +209,33 @@ type planned struct {
 	doc      nodeproto.PlanDoc
 }
 
-// safety: inspection never evaluates a closure. A skip_if predicate is customer code with side effects the
-// protocol cannot seal, so plan reports it as decided at run time instead.
-func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pipeline string, args []string, runID string) (planned, error) {
+func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline string, args []string) (planned, error) {
 	out := planned{pipeline: pipeline}
-	identity, err := pipelineIdentityAt(filepath.Join(dir, ".sparkwing"), pipeline)
+	schema, err := entry.describe(ctx)
 	if err != nil {
-		return out, err
+		return out, planError(pipeline, err)
 	}
-	masker := secrets.NewMasker()
-	err = repos.Converse(ctx, entry, dir, func(s *repos.Session) error {
-		described, err := s.Describe()
-		if err != nil {
-			return err
-		}
-		schema, err := boundPipelineSchema(described.Pipelines, identity)
-		if err != nil {
-			return err
-		}
-		resolvedArgs, err := parsePipelineArgs(schema, args)
-		if err != nil {
-			return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
-		}
-		out.args = maps.Clone(resolvedArgs)
-		for _, arg := range schema.Args {
-			if arg.Secret {
-				if arg.Default != nil {
-					masker.Register(*arg.Default)
-				}
-				masker.Register(resolvedArgs[arg.Name])
-				if _, present := out.args[arg.Name]; present {
-					out.args[arg.Name] = "***"
-				}
-			}
-		}
-		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: identity.Entrypoint, Args: resolvedArgs, Run: &nodeproto.RunContext{RunID: runID, Pipeline: pipeline}}
-		var raw json.RawMessage
-		if err := s.Call(req, &raw); err != nil {
-			return err
-		}
-		out.doc, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker})
-		return err
-	})
+	resolvedArgs, err := parsePipelineArgs(schema, args)
 	if err != nil {
-		err = &maskedCLIError{err: planError(pipeline, err), masker: masker}
+		return out, planError(pipeline, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()})
+	}
+	entry.input.Args = resolvedArgs
+	prepared, err := entry.planner.Prepare(ctx, entry.input, nodehost.PlanningInput{})
+	if err != nil {
+		return out, planError(pipeline, err)
+	}
+	out.args = maps.Clone(prepared.Args)
+	for _, name := range prepared.SecretArgs {
+		if _, ok := out.args[name]; ok {
+			out.args[name] = "***"
+		}
+	}
+	raw, err := prepared.Functions.Plan(ctx)
+	if err == nil {
+		out.doc, err = prepared.Functions.Validate(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: entry.planner.Masker})
+	}
+	if err != nil {
+		err = &maskedCLIError{err: planError(pipeline, err), masker: entry.planner.Masker}
 	}
 	return out, err
 }

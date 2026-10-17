@@ -7,42 +7,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
-
-// safety: a cache miss describes the binary again so the reason it cannot
-// describe reaches the operator instead of an empty pipeline list. A run that
-// executes in another checkout binds that checkout's pipeline names, so it is
-// described there and never from the source's cache.
-func (r *pipelineRun) describedPipeline(pipelineName string) (nodeproto.PipelineDescription, error) {
-	var schemas []nodeproto.PipelineDescription
-	bindDir := r.opts.ExecutionDir
-	if bindDir == "" {
-		bindDir = r.sparkwingDir
-		if key, err := bincache.PipelineCacheKey(r.sparkwingDir); err == nil && !r.typescript {
-			schemas = readDescribeFile(describeCachePath(key))
-		}
-	}
-	identity, err := pipelineIdentityAt(bindDir, pipelineName)
-	if err != nil {
-		return nodeproto.PipelineDescription{}, err
-	}
-	if schemas == nil {
-		doc, err := describeEntry(r.ctx, bindDir, r.entry)
-		if err != nil {
-			return nodeproto.PipelineDescription{}, err
-		}
-		schemas = doc.Pipelines
-	}
-	r.pipeline = nodehost.PipelineIdentity{Invoked: identity.Name, Entrypoint: identity.Entrypoint}
-	return boundPipelineSchema(schemas, identity)
-}
 
 func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
 	cfg, err := projectconfig.Load(filepath.Join(dir, projectconfig.Filename))

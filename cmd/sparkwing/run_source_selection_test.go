@@ -213,6 +213,22 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 			}
 		})
 	}
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: deploy-prod\n    entrypoint: HEADEntry\n    source: OLD\n", 0o600)
+	var inspectionErr error
+	described := captureStdout(t, func() {
+		inspectionErr = runSparkwing([]string{"pipeline", "describe", "--pipeline=deploy-prod", "-o=json"})
+	})
+	var schema nodeproto.PipelineDescription
+	if inspectionErr != nil || json.Unmarshal([]byte(described), &schema) != nil || schema.Help != "OLD/DIRTY" {
+		t.Fatalf("public describe selected wrong code: %s %v", described, inspectionErr)
+	}
+	preview := captureStdout(t, func() {
+		inspectionErr = runSparkwing([]string{"pipeline", "plan", "--pipeline=deploy-prod", "-o=json"})
+	})
+	var plan planPreviewDoc
+	if inspectionErr != nil || json.Unmarshal([]byte(preview), &plan) != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "deploy-prod-OLD-DIRTY" {
+		t.Fatalf("public preview selected wrong code: %s %v", preview, inspectionErr)
+	}
 }
 
 func codeRevisionForTest(sha, head string) string {

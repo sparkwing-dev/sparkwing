@@ -23,8 +23,11 @@ func TestPipelineAliasSourceUsesTheInvokingCheckoutBinding(t *testing.T) {
 	writeRepoFile(t, filepath.Join(source, "sparkwing.yaml"), "pipelines:\n  - name: deploy-prod\n    entrypoint: Other\n")
 	fixture := filepath.Join(t.TempDir(), "pipeline")
 	protocolFixture(t, fixture, filepath.Join(t.TempDir(), "starts"), `[{"name":"Deploy","args":[{"name":"image","type":"string","required":true,"job_id":"rollout"}]}]`)
-	run := &pipelineRun{ctx: t.Context(), sparkwingDir: source, entry: pipelineentry.Binary(fixture), opts: compileOptions{ExecutionDir: caller}}
-	schema, err := run.describedPipeline("deploy-prod")
+	entry, err := inspectionCommand(pipelineentry.Binary(fixture), filepath.Dir(caller), "deploy-prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := entry.describe(t.Context())
 	if err != nil || schema.Name != "deploy-prod" || len(schema.Args) != 1 || schema.Args[0].JobID != "rollout" {
 		t.Fatalf("source changed the invocation binding: %+v %v", schema, err)
 	}

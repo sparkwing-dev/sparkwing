@@ -115,7 +115,7 @@ func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, a
 			BundleDigest: parent.Source.BundleDigest, WorkingTree: parent.Source.WorkingTree, CommittedCheckout: parent.Source.CommittedCheckout,
 			NoBincache: parent.Source.NoBincache, HashAllFiles: parent.Source.HashAllFiles,
 		},
-		EnvironmentSource: parent.EnvironmentSource, Env: parent.Env, Options: parent.Options, LocalSecretNames: parent.LocalSecretNames, PullRequest: parent.PullRequest,
+		EnvironmentSource: parent.EnvironmentSource, Env: parent.Env, Options: parent.Options, PullRequest: parent.PullRequest,
 		ExecutionLocation: parent.ExecutionLocation,
 		Lineage:           runspec.Lineage{ParentRunID: c.run, ParentJobID: c.job, RepoInherited: repo == ""},
 	}

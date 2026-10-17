@@ -314,3 +314,34 @@ func TestMigrationCurrentInstructionsAreAllChecked(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrationUnprefixedInstructionsUseFullGrammar(t *testing.T) {
+	for _, command := range []string{"cloud status", "cloud status --cluster", "configure profiles show --name prod --show-token", "update --cli", "pipeline hooks status --fleet", "crons tick"} {
+		for _, example := range []string{"Run `" + command + "` now.", "Run `" + strings.Replace(command, " ", "\n", 1) + "` now.", "```bash\n" + command + "\n```", "```console\n$\t" + command + "\n```", "| Before | After |\n|---|---|\n| `retired --gone` | `" + command + "` |"} {
+			content := t.TempDir()
+			if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeDoc(t, filepath.Join(content, "migrations"), "v1.md", example)
+			if checkCLIVerbs(content) {
+				t.Fatalf("unchecked instruction: %s", example)
+			}
+		}
+	}
+}
+
+func TestArchivedMigrationNotesDoNotExemptCurrentInstructions(t *testing.T) {
+	content := t.TempDir()
+	if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	archive := "# Migration\n## Before: archived notes\n### Connections\nRun `cloud status --cluster`.\n## Current instructions\n"
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", archive+"Run `profiles show --profile prod`.\n")
+	if !checkCLIVerbs(content) {
+		t.Fatal("historical notes invalidated current instructions")
+	}
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", archive+"Run `update --cli`.\n")
+	if checkCLIVerbs(content) {
+		t.Fatal("archive exempted a current instruction")
+	}
+}
