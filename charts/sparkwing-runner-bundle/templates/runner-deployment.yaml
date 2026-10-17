@@ -1,3 +1,4 @@
+{{- if .Values.runner.enabled }}
 {{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
 {{- $runnerImage := include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) -}}
 {{- $goCache := .Values.runner.goCache.persistence.enabled -}}
@@ -172,3 +173,5 @@ spec:
         {{- with .Values.runner.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+
+{{- end }}

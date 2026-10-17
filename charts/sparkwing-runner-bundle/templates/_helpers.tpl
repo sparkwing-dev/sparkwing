@@ -121,15 +121,10 @@ component names do, so a long release still yields a valid DNS label.
 {{- end }}
 {{- end }}
 
-{{/*
-Resolved image tag for a component: per-component image.tag wins,
-otherwise fall back to .Chart.AppVersion. Lets users pin per-binary
-images independently while keeping a single appVersion default.
-Usage: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) }}
-*/}}
 {{- define "sparkwing-runner-bundle.image" -}}
-{{- $tag := default .root.Chart.AppVersion .img.tag -}}
-{{- printf "%s:%s" .img.repository $tag -}}
+{{- $repository := required "image.repository is required; pin repository and tag together" .img.repository -}}
+{{- $tag := required "image.tag is required; pin repository and tag together" .img.tag -}}
+{{- printf "%s:%s" $repository $tag -}}
 {{- end }}
 
 {{/*
@@ -164,4 +159,17 @@ deployment template stays readable.
 {{- range .Values.runner.labels }}
 - {{ printf "--label=%s" . | quote }}
 {{- end }}
+{{- end }}
+
+{{- define "sparkwing-runner-bundle.launcher.serviceAccountName" -}}
+{{- default (include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "launcher")) .Values.launcher.serviceAccountName -}}
+{{- end }}
+
+{{- define "sparkwing-runner-bundle.digestImage" -}}
+{{- $image := include "sparkwing-runner-bundle.image" (dict "img" .) -}}
+{{- $digest := required "launcher jobImage/dockerImage.digest is required" .digest -}}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" $digest) -}}
+{{- fail "launcher jobImage/dockerImage.digest must be sha256 followed by 64 lowercase hex digits" -}}
+{{- end -}}
+{{- printf "%s@%s" $image $digest -}}
 {{- end }}

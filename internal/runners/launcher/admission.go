@@ -15,7 +15,8 @@ func validateAdmittedJob(expected, admitted *batchv1.Job) error {
 		expected.Annotations[bootstrapAnnotation] != admitted.Annotations[bootstrapAnnotation] ||
 		!equality.Semantic.DeepDerivative(expected.Labels, admitted.Labels) ||
 		!equality.Semantic.DeepDerivative(expected.Annotations, admitted.Annotations) ||
-		!equality.Semantic.DeepDerivative(expected.Spec.Template.Labels, admitted.Spec.Template.Labels) {
+		!equality.Semantic.DeepDerivative(expected.Spec.Template.Labels, admitted.Spec.Template.Labels) ||
+		!equality.Semantic.DeepDerivative(expected.Spec.Template.Annotations, admitted.Spec.Template.Annotations) {
 		return errors.New("Kubernetes changed Cloud Job teardown ownership")
 	}
 	if admitted.Spec.Suspend == nil || !*admitted.Spec.Suspend ||

@@ -4,17 +4,14 @@ Sparkwing runner bundle installed.
   Namespace: {{ .Release.Namespace }}
   Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
 
-{{- $unpinnedImages := empty .Values.runner.image.tag -}}
-{{- if $unpinnedImages }}
-
-WARNING: This chart version has no compatible public default image set.
-At least one enabled component still uses the appVersion fallback. Pin both
-image.repository and image.tag for every enabled component to images built
-from one compatible Sparkwing revision before treating this as runnable.
-{{- end }}
-
 Components:
+{{- if .Values.runner.enabled }}
   Runner    {{ .Values.runner.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.runner.fullname" . }}
+{{- end }}
+{{- if .Values.launcher.enabled }}
+  Cloud launcher -> {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "launcher") }}
+  Jobs require team-dedicated nodes and enforced pod/node egress. See README.md.
+{{- end }}
 
 {{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . }}
 {{- if not $controllerURL }}
@@ -22,15 +19,18 @@ Components:
 WARNING: controller.url is empty. The runner will not be able to claim
 work until you set it:
 
-  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-runner-bundle \
+  helm upgrade {{ .Release.Name }} ./charts/sparkwing-runner-bundle \
     --namespace {{ .Release.Namespace }} \
     --set controller.url=https://your-controller.example.com \
     --set controller.tokenSecret.name=sparkwing-token
 
 {{- end }}
 
+{{- if .Values.runner.enabled }}
 Inspect runner logs:
   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "sparkwing-runner-bundle.runner.fullname" . }} -f
 
 Verify the runner registered with the controller:
   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "sparkwing-runner-bundle.runner.fullname" . }} | grep -i 'claim\|register'
+
+{{- end }}

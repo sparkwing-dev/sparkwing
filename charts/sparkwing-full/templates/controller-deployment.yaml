@@ -69,6 +69,9 @@ spec:
           command: ["/usr/local/bin/sparkwing-controller"]
           args:
             - {{ printf "--addr=0.0.0.0:%d" (int .Values.controller.port) | quote }}
+            {{- with .Values.controller.dataStore.s3URL }}
+            - {{ printf "--cache-blob-store=%s" . | quote }}
+            {{- end }}
             {{- with .Values.controller.dashboardURL }}
             - {{ printf "--dashboard-url=%s" . | quote }}
             {{- end }}

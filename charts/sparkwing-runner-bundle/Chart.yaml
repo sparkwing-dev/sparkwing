@@ -13,11 +13,9 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of the appVersion below. Bump on any user-facing
 # values.yaml change or template structural change.
-version: 0.1.12
+version: 0.1.13
 
-# appVersion is retained as Helm metadata and the empty-tag fallback. The
-# current value is not a compatible public image-set guarantee; operators
-# must pin per-component repositories and tags until a corrected release.
+# appVersion is metadata only. Every enabled image requires repository and tag.
 appVersion: "0.1.0"
 
 keywords:

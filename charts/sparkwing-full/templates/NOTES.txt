@@ -1,26 +1,21 @@
-Sparkwing full self-host installed.
+Sparkwing controller and execution bundle installed.
 
   Release:   {{ .Release.Name }}
   Namespace: {{ .Release.Namespace }}
   Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
 
 {{- $bundle := index .Values "sparkwing-runner-bundle" -}}
-{{- $unpinnedImages := empty .Values.controller.image.tag -}}
-{{- if index $bundle "enabled" -}}
-{{- $unpinnedImages = or $unpinnedImages (empty (index $bundle "runner" "image" "tag")) -}}
-{{- end -}}
-{{- if $unpinnedImages }}
-
-WARNING: This chart version has no compatible public default image set.
-At least one enabled component still uses the appVersion fallback. Pin both
-image.repository and image.tag for every enabled component to images built
-from one compatible Sparkwing revision before treating this as runnable.
-{{- end }}
-
 Components:
-  Controller and dashboard (1 replica) -> {{ include "sparkwing-full.controller.fullname" . }}
+  Controller and dashboard ({{ .Values.controller.replicas }} replica) -> {{ include "sparkwing-full.controller.fullname" . }}
 {{- if index $bundle "enabled" }}
-  Runner-bundle sub-chart -> see `helm get manifest {{ .Release.Name }}` for runners.
+{{- if index $bundle "runner" "enabled" }}
+  Runner pool: {{ index $bundle "runner" "replicas" }} replica(s)
+{{- end }}
+{{- if index $bundle "launcher" "enabled" }}
+  Cloud launcher: 1 replica. Jobs run root + DinD on team-dedicated nodes.
+  Preserve the Cloud namespace admission exemption and node/network prerequisites
+  described in charts/sparkwing-full/README.md before starting customer work.
+{{- end }}
 {{- else }}
   Runner-bundle: DISABLED -- runners must be deployed separately.
 {{- end }}
@@ -82,7 +77,7 @@ key is safe:
   (umask 077 && openssl rand -base64 32 > /tmp/sparkwing-key)
   kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-secrets-key \
     --from-file=key=/tmp/sparkwing-key
-  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
+  helm upgrade {{ .Release.Name }} ./charts/sparkwing-full \
     --reuse-values --set controller.secretsKey.name=sparkwing-secrets-key
 {{- else }}
 
@@ -104,7 +99,7 @@ new key:
 
   kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-secrets-key \
     --from-file=key=sparkwing-secrets.key
-  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
+  helm upgrade {{ .Release.Name }} ./charts/sparkwing-full \
     --reuse-values --set controller.secretsKey.name=sparkwing-secrets-key
 
 To change keys later, set the old key as controller.secretsPreviousKey and the

@@ -18,21 +18,14 @@
 # -----------------------------------------------------------------------
 # 1. Controller. Single-instance orchestrator: owns the state DB,
 #    serves /api/v1/*, the dashboard and its sign-in pages, and hosts
-#    webhooks. HA-multi-instance lives in the paid feature pack; the
-#    OSS posture is one pod.
+#    webhooks. One replica is supported.
 # -----------------------------------------------------------------------
 controller:
-  # Single-instance is the OSS posture (decision 0001). Don't bump
-  # this -- the controller's state DB is local SQLite; multi-replica
-  # would corrupt it. HA controller is a paid feature.
+  # One replica is supported for both SQLite and PostgreSQL.
   replicas: 1
 
   image:
-    # Registry-layout fallback only. The current appVersion is not a
-    # compatible public image contract; set repository and tag to an
-    # image built or mirrored with the other enabled components.
-    repository: ghcr.io/sparkwing-dev/sparkwing-controller
-    tag: "" # falls back to .Chart.AppVersion when empty
+    # Set repository and tag from one compatible build. Both are required.
     pullPolicy: IfNotPresent
 
   # Bind addr. Service maps :80 -> :4344. Match the controller's
@@ -158,8 +151,8 @@ controller:
   # from --credentials-dir: license, oidc-key, oidc-key.published,
   # github-client-secret, google-client-secret, github-app-key,
   # github-app-webhook-secret, cloudfront-key,
-  # billing-token, credits-token, and the others below. Every key is mounted under its
-  # own name; a key the controller does not know is ignored. The single
+  # billing-token, stripe-api-key, stripe-webhook-secret, and the others below.
+  # Every key is mounted under its own name; a key the controller does not know is ignored. The single
   # Secret values below land in the same directory under their fixed
   # names.
   # Helm cannot read a Secret's keys, so with this set the chart stops
@@ -210,10 +203,15 @@ controller:
     name: ""
     key: dsn
 
-  # SQLite state lives on a PVC. Set type=emptyDir with databaseSecret.
+  # /data HTTP object paths use this controller-owned S3 bucket. Empty uses
+  # the filesystem beneath SPARKWING_HOME. No separate storage service.
+  dataStore:
+    s3URL: ""
+
+  # Set type=emptyDir for RDS + S3. The mount is still the process home.
   storage:
     # "pvc" mounts a PersistentVolumeClaim at /data.
-    # "emptyDir" runs ephemeral (state lost on pod restart).
+    # "emptyDir" is ephemeral. Pair with PostgreSQL and S3 for durable state.
     type: pvc
     pvc:
       size: 5Gi
@@ -279,7 +277,7 @@ controller:
 
   # Further controller flags, passed verbatim after the ones above, for a
   # setting with no value of its own here, such as
-  # --object-store-budget, --cache-blob-store,
+  # --object-store-budget,
   # --billing-url or --egress-max-downloads. Run
   # `sparkwing-controller --help` for the list. Never put a secret here;
   # secrets are credential files.

@@ -1,0 +1,82 @@
+{{- if .Values.launcher.enabled }}
+{{- $launcher := .Values.launcher }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "launcher") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "launcher") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "launcher") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "launcher") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with $launcher.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $launcher.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $launcher.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: launcher
+          image: {{ include "sparkwing-runner-bundle.image" (dict "img" $launcher.image) | quote }}
+          imagePullPolicy: {{ $launcher.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["/usr/local/bin/sparkwing-runner"]
+          args:
+            - launch
+            - {{ printf "--controller=%s" (required "launcher requires controller.url" (include "sparkwing-runner-bundle.controllerURL" .)) | quote }}
+            - {{ printf "--namespace=%s" .Release.Namespace | quote }}
+            - {{ printf "--image=%s" (include "sparkwing-runner-bundle.digestImage" $launcher.jobImage) | quote }}
+            - {{ printf "--docker-image=%s" (include "sparkwing-runner-bundle.digestImage" $launcher.dockerImage) | quote }}
+            - {{ printf "--cpu-ceiling=%s" (required "launcher.cpuCeiling is required" $launcher.cpuCeiling | toString) | quote }}
+            - {{ printf "--memory-ceiling=%s" (required "launcher.memoryCeiling is required" $launcher.memoryCeiling) | quote }}
+            - {{ printf "--poll=%s" $launcher.pollInterval | quote }}
+            - --credentials-dir=/etc/sparkwing/credentials
+          env:
+            - name: HOME
+              value: /tmp
+          resources:
+            {{- toYaml $launcher.resources | nindent 12 }}
+          volumeMounts:
+            - name: scratch
+              mountPath: /tmp
+            - name: credentials
+              mountPath: /etc/sparkwing/credentials
+              readOnly: true
+      volumes:
+        - name: scratch
+          emptyDir: {}
+        - name: credentials
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ required "launcher.tokenSecret.name is required" $launcher.tokenSecret.name | quote }}
+                  items:
+                    - key: {{ required "launcher.tokenSecret.key is required" $launcher.tokenSecret.key | quote }}
+                      path: agent-token
+{{- end }}
