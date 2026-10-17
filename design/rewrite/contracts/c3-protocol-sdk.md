@@ -149,6 +149,10 @@ Source acquisition consumes Source.Location from the request seal, separately
 from repo identity and checkout policy. RemoteURL contains no credential and
 remote acquisition uses the sealed SHA. LocalCheckout is authorized on the
 machine whose store admitted it. PipelineDir stays inside that checkout.
+An unsealed local checkout may have an unborn branch and no commit; its SHA
+remains empty. A supplied SHA still requires that exact commit. A detached
+HEAD without a commit or a broken branch object fails acquisition. Remote
+source always requires a SHA.
 Intake verifies that the location belongs to the sealed repository before any
 credential release. Repo display text is never a clone location. Source.Options.Base feeds procenv
 for Git and Install. Resolve the pin after acquisition, then call the selected

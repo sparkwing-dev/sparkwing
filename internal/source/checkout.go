@@ -99,9 +99,18 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			}
 		}
 	}
-	actual, err := client.run(ctx, checkout, "", "rev-parse", "--verify", "HEAD^{commit}")
+	actual, err := client.run(ctx, checkout, "", "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
 	if err != nil {
-		return entry, err
+		if spec.LocalCheckout == "" || spec.SHA != "" || !gitExit(err, 1) {
+			return entry, err
+		}
+		branch, branchErr := client.run(ctx, checkout, "", "symbolic-ref", "--quiet", "HEAD")
+		if branchErr != nil {
+			return entry, errors.Join(err, branchErr)
+		}
+		if _, refErr := client.run(ctx, checkout, "", "show-ref", "--verify", "--quiet", branch); !gitExit(refErr, 1) {
+			return entry, errors.Join(err, refErr)
+		}
 	}
 	if spec.SHA != "" && !strings.EqualFold(actual, spec.SHA) {
 		return entry, errors.New("source checkout HEAD differs from the sealed commit")

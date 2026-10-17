@@ -69,6 +69,53 @@ func TestPrepareCheckoutUnresolvedDefaultStaysAbsent(t *testing.T) {
 	}
 }
 
+func TestPrepareCheckoutLocalBeforeFirstCommit(t *testing.T) {
+	dir := t.TempDir()
+	sourcetest.Git(t, dir, "init", "--quiet")
+	if err := os.Mkdir(filepath.Join(dir, ".sparkwing"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sourcetest.Write(t, filepath.Join(dir, ".sparkwing", "pipeline.go"), "package main\n")
+	options := source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
+	spec := source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir}
+	entry, err := source.PrepareCheckout(t.Context(), spec, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := entry.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if entry.SHA != "" || entry.Directory != filepath.Join(dir, ".sparkwing") {
+		t.Fatalf("uncommitted checkout facts = %+v", entry)
+	}
+	spec.SHA = strings.Repeat("a", 40)
+	if entry, err := source.PrepareCheckout(t.Context(), spec, options); err == nil {
+		_ = entry.Close()
+		t.Fatal("checkout without a commit satisfied a sealed SHA")
+	}
+}
+
+func TestPrepareCheckoutLocalRefusesBrokenHEAD(t *testing.T) {
+	for _, head := range []string{strings.Repeat("a", 40) + "\n", "ref: refs/heads/missing-object\n"} {
+		t.Run(head, func(t *testing.T) {
+			dir := t.TempDir()
+			sourcetest.Git(t, dir, "init", "--quiet")
+			if err := os.Mkdir(filepath.Join(dir, ".sparkwing"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			sourcetest.Write(t, filepath.Join(dir, ".git", "HEAD"), head)
+			if strings.HasPrefix(head, "ref:") {
+				sourcetest.Write(t, filepath.Join(dir, ".git", "refs", "heads", "missing-object"), strings.Repeat("a", 40)+"\n")
+			}
+			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
+			if err == nil {
+				_ = entry.Close()
+				t.Fatal("broken HEAD was treated as an unborn checkout")
+			}
+		})
+	}
+}
+
 func TestPrepareCheckoutRefusesEscapingEntrypoint(t *testing.T) {
 	dir, _ := sourcetest.Repository(t)
 	outside := t.TempDir()

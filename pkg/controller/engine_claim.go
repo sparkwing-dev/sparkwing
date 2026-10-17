@@ -40,6 +40,22 @@ func (p *SignedRunnerAdmission) CheckRunner(ctx context.Context, version string)
 	return err
 }
 
+// CheckRunner revalidates the claimant and selects version policy from its persisted subject.
+func (s *EngineController) CheckRunner(ctx context.Context, authority capability.AuthorityRef, version string) (capability.Principal, error) {
+	if s.Store == nil || s.RunnerPolicy == nil {
+		return capability.Principal{}, &apierr.Error{Code: apierr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
+	}
+	principal, err := s.Store.ResolveAuthority(ctx, authority)
+	if err != nil {
+		return capability.Principal{}, err
+	}
+	policy := s.RunnerPolicy
+	if principal.Capability.Subject.Kind == capability.SubjectLocal && s.LocalRunnerPolicy != nil {
+		policy = s.LocalRunnerPolicy
+	}
+	return principal, policy.CheckRunner(ctx, version)
+}
+
 func (s *EngineController) claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	if authorized.Principal.Authority.Kind != capability.AuthorityCapability || authorized.Principal.Authority.ID == "" || authorized.Principal.Authority.ID != authorized.Principal.Capability.Prefix {
 		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires capability authority")
@@ -50,18 +66,8 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if len(body.Kinds) == 0 {
 		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires unit kinds")
 	}
-	if s.Store == nil || s.RunnerPolicy == nil {
-		return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
-	}
-	principal, err := s.Store.ResolveAuthority(ctx, authorized.Principal.Authority)
+	principal, err := s.CheckRunner(ctx, authorized.Principal.Authority, body.RunnerVersion)
 	if err != nil {
-		return controllerwire.ClaimResponse{}, err
-	}
-	policy := s.RunnerPolicy
-	if principal.Capability.Subject.Kind == capability.SubjectLocal && s.LocalRunnerPolicy != nil {
-		policy = s.LocalRunnerPolicy
-	}
-	if err := policy.CheckRunner(ctx, body.RunnerVersion); err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
 	profile, _, err := s.Store.ReadClaimProfile(ctx, principal.Authority)

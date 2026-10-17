@@ -209,6 +209,11 @@ network refresh. No cached policy yields `NoticePolicyUnavailable` and permits
 local execution. Cached restrictions and executable verification still apply.
 `EvaluateRunner` refuses a missing policy even if it came from a local resolver.
 The local controller selects its local policy only for a persisted local subject.
+The embedded queue's startup and refresh checks use the same
+`EngineController.CheckRunner` selection as claim admission. The queue
+authenticates its bearer before that check; claim admission still authorizes
+the requested work separately. A fresh local controller therefore needs no
+online runner policy to remain available after admitting a local run.
 Machine and service claims keep the strict runner policy. Compatibility and run
 status remain available without policy metadata for local execution.
 
