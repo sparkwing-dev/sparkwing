@@ -169,9 +169,11 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   ports. The example allows public HTTPS and cluster DNS at the Pod layer.
   Supply node/firewall enforcement and adapt destinations for your network.
 
-The Cloud example sets `fsGroup: 65534` so the controller can write `/data` on
-emptyDir, and shows `trustedProxyCIDRs`. Replace the proxy CIDRs with the actual
-nginx source range.
+The Cloud example enables `volumePermissions` so the controller owns `/data`
+and can set its private mode to `0700`. `fsGroup: 65534` grants group access but
+cannot authorize that mode change on a root-owned emptyDir. The example also
+shows `trustedProxyCIDRs`. Replace the proxy CIDRs with the actual nginx source
+range.
 
 Infrastructure Pods carry component `app` labels. Customer Pods carry
 `app: sparkwing-job`. Baseline allow-all ingress/egress policies must exclude

@@ -38,9 +38,9 @@ podSecurityContext:
   runAsUser: 65534
   fsGroup: 65534
   seccompProfile: {type: RuntimeDefault}
-# emptyDir ownership follows fsGroup.
+# The controller must own /data to tighten its mode to 0700.
 volumePermissions:
-  enabled: false
+  enabled: true
 ingress:
   enabled: true
   className: nginx

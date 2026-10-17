@@ -3,9 +3,6 @@ package launcher
 import (
 	"bytes"
 	"context"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
-	ktesting "k8s.io/client-go/testing"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +11,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func requestedPod(t *testing.T) (*Launcher, *corev1.Pod) {
@@ -180,14 +180,7 @@ func TestLaunchVerifiesPodAfterJobActivation(t *testing.T) {
 			l, p := requestedPod(t)
 			kube := l.Kube.(*fake.Clientset)
 			mutate(p)
-			kube.PrependReactor("patch", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-				if bytes.Contains(action.(ktesting.PatchAction).GetPatch(), []byte(`"suspend":false`)) {
-					if err := kube.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), p, "cloud"); err != nil {
-						t.Fatal(err)
-					}
-				}
-				return false, nil, nil
-			})
+			podOnActivation(t, kube, p)
 			rejected := false
 			original := l.Control
 			l.Control = publicationControl{CloudControl: original, sync: func(obs []CloudJobObservation) ([]CloudJobState, error) {
@@ -262,5 +255,55 @@ func TestRestartComparesOriginalRequestedTemplate(t *testing.T) {
 	}
 	if _, err = l.Kube.BatchV1().Jobs("cloud").Get(t.Context(), job.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Fatalf("changed Job survived: %v", err)
+	}
+}
+
+func podOnActivation(t *testing.T, kube *fake.Clientset, pod *corev1.Pod) {
+	t.Helper()
+	kube.PrependReactor("patch", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if bytes.Contains(action.(ktesting.PatchAction).GetPatch(), []byte(`"suspend":false`)) {
+			if err := kube.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), pod, pod.Namespace); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return false, nil, nil
+	})
+}
+
+func TestLaunchAllowsEKSMutationsAfterJobActivation(t *testing.T) {
+	mutations := eksMutations()
+	mutations["combined"] = func(p *corev1.Pod) {
+		for _, mutate := range eksMutations() {
+			mutate(p)
+		}
+	}
+	mutations["pod_identity_ipv6"] = func(p *corev1.Pod) {
+		eksMutations()["pod_identity"](p)
+		for _, cs := range [][]corev1.Container{p.Spec.Containers, p.Spec.InitContainers} {
+			for i := range cs {
+				for j := range cs[i].Env {
+					if cs[i].Env[j].Name == "AWS_CONTAINER_CREDENTIALS_FULL_URI" {
+						cs[i].Env[j].Value = "http://[fd00:ec2::23]/v1/credentials"
+					}
+				}
+			}
+		}
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			l, p := requestedPod(t)
+			mutate(p)
+			podOnActivation(t, l.Kube.(*fake.Clientset), p)
+			if claimed, err := l.LaunchOne(t.Context()); !claimed || err != nil {
+				t.Fatalf("EKS Pod refused: claimed=%v err=%v", claimed, err)
+			}
+			if err := l.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			job, err := l.Kube.BatchV1().Jobs(p.Namespace).Get(t.Context(), p.OwnerReferences[0].Name, metav1.GetOptions{})
+			if err != nil || job.DeletionTimestamp != nil || job.Annotations[rejectedAnnotation] != "" {
+				t.Fatalf("EKS Job did not survive verification: %+v %v", job, err)
+			}
+		})
 	}
 }

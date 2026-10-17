@@ -23,7 +23,7 @@ unlock.
 - **Cloud launcher:** Verify created Pods against the requested spec, allowing
   named EKS injections. Unexpected mutations delete the Job and fail its award.
   Remove the Kubernetes admission-policy dependency. Cloud chart examples include
-  team NodePool labels and taints, writable controller storage and proxy CIDRs.
+  team NodePool labels and taints, controller-owned storage and proxy CIDRs.
 
 - **run:** Reuse local pipeline binaries before resolving Go dependencies, so
   cache hits do not require a working Go compiler.

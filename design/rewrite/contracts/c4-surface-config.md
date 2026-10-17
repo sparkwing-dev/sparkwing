@@ -1171,4 +1171,5 @@ Chart Pod labels use `app: sparkwing-<component>`. Cloud Job Pods use
 `app: sparkwing-job`. Namespace administrators grant create on Pods/Jobs only
 to the launcher. NodePool templates set the exact team-node label and matching
 NoSchedule taint. The Cloud example mounts a separate launcher controller
-credential, sets controller fsGroup, and shows trusted proxy CIDRs.
+credential, enables controller data-volume ownership with fsGroup and the
+ownership initializer, and shows trusted proxy CIDRs.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(helm, "template", "sparkwing", "./sparkwing-full", "--namespace", "sparkwing", "-f", "sparkwing-full/examples/cloud.yaml").CombinedOutput()
+	out, err := exec.Command(helm, "template", "sparkwing", "./sparkwing-full", "--namespace", "sparkwing", "-f", "../examples/cloud.yaml").CombinedOutput()
 	if err != nil {
 		t.Fatalf("Cloud example: %v\n%s", err, out)
 	}
@@ -120,8 +121,21 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 				t.Errorf("%s is outside baseline policy selectors", component)
 			}
 			pod := d.Spec.Template.Spec
-			if component == "controller" && (pod.SecurityContext == nil || pod.SecurityContext.FSGroup == nil || *pod.SecurityContext.FSGroup != 65534) {
-				t.Error("controller data volume lacks ownership")
+			if component == "controller" {
+				if pod.SecurityContext == nil || pod.SecurityContext.RunAsUser == nil || *pod.SecurityContext.RunAsUser != 65534 || pod.SecurityContext.FSGroup == nil || *pod.SecurityContext.FSGroup != 65534 {
+					t.Fatal("controller data identity is missing")
+				}
+				owned := false
+				for _, init := range pod.InitContainers {
+					if slices.Equal(init.Command, []string{"/bin/chown"}) && slices.Equal(init.Args, []string{"65534:65534", "/data"}) && init.SecurityContext != nil && init.SecurityContext.RunAsUser != nil && *init.SecurityContext.RunAsUser == 0 {
+						for _, mount := range init.VolumeMounts {
+							owned = owned || mount.Name == "data" && mount.MountPath == "/data" && !mount.ReadOnly
+						}
+					}
+				}
+				if !owned {
+					t.Error("controller cannot chmod the root-owned data volume to 0700")
+				}
 			}
 			paths := map[string]string{}
 			for _, volume := range pod.Volumes {
@@ -220,7 +234,7 @@ func TestCloudLauncherRequiresDigestAndSeparateCredential(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			out, err := exec.Command(helm, "template", "sparkwing", "./sparkwing-full", "-f", "sparkwing-full/examples/cloud.yaml", "--set", test.set).CombinedOutput()
+			out, err := exec.Command(helm, "template", "sparkwing", "./sparkwing-full", "-f", "../examples/cloud.yaml", "--set", test.set).CombinedOutput()
 			if err == nil || !strings.Contains(string(out), test.want) {
 				t.Fatalf("render error = %v %s, want %s", err, out, test.want)
 			}
