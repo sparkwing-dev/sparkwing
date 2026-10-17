@@ -2875,3 +2875,30 @@ on manual admission. Claimed App origin is refused. The real controller policy,
 issuer, request sealer and SQLite intake run. Existing verified-webhook suites
 retain the trusted positive cases. Test names remain discoverable. No acceptance
 registry, skip or native matrix claim is added.
+
+
+## W1b inherited-holder and coalesce retirement
+
+The five inherited-holder tests in concurrency_cost_test.go retire with the
+removed API: TestConcurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost,
+TestConcurrency_TerminalReaperTransfersInheritedHolderCost,
+TestConcurrency_ReleaseTransfersCostToSiblingInheritedHolder,
+TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders and
+TestConcurrency_CancelOthersSupersedesInheritedHolder. Both production writers
+already refused that selector. TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector
+now requires HTTP 400 and no capacity row. Weighted cost, restrictive capacity,
+FIFO/backfill, cancellation and lease continuity tests remain. Blob memo and
+materialization tests cover the replacement result-sharing path.
+
+TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority and
+TestNativeChildPreservesOmittedRepositoryIntent restore the omitted-versus-explicit
+reporting assertion. Generated cases retain current source-scope refusal, reject
+false inheritance from an authorized foreign repository, and conflict on changed
+intent under one replay key.
+
+The claim-pricing property now accepts the optional capacity observation defined
+by C3 and verifies that every generated launcher report reserves the sealed
+sixteen-core class and its exact rate. Publication fixtures carry valid hex SHAs.
+TestSourceSnapshotRealClientStorageAndIntake now needs no stored Git credential
+for a complete bundle and requires zero release audits. It still proves source
+sealing, exact checkout SHA, unique-byte charging and fenced bundle reads.

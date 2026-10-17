@@ -177,10 +177,11 @@ type SourceLocation struct {
 
 // safety: Lineage records retriers separately from immutable original actor and git facts.
 type Lineage struct {
-	ParentRunID string          `json:"parent_run_id"`
-	ParentJobID string          `json:"parent_job_id"`
-	RetryOf     string          `json:"retry_of"`
-	Retrier     Optional[Actor] `json:"retrier"`
+	RepoInherited bool            `json:"repo_inherited,omitempty"`
+	ParentRunID   string          `json:"parent_run_id"`
+	ParentJobID   string          `json:"parent_job_id"`
+	RetryOf       string          `json:"retry_of"`
+	Retrier       Optional[Actor] `json:"retrier"`
 }
 
 // safety: Layer names the source to report when an explicit setting is invalid.

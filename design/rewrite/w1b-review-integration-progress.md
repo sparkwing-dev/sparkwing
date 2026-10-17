@@ -165,3 +165,120 @@ cache entries during execution. Rebuilding passed, and the shared cache was kept
 Scratch is removed at session end.
 
 STATUS: CONTINUE
+
+
+## Continuation after native session 1, 2026-10-17
+
+This section supersedes the open RepoInherited item above. The lead committed
+the earlier merge at 9457be43f, and no unresolved conflicts remain. The four
+blocker fixes remain intact. No lead-owned amendment or handoff file changed.
+
+### Implemented and removed
+
+- Sealed `Lineage.RepoInherited` distinguishes an omitted child repository from
+  an explicit equal repository. The native client carries it. C1 checks the
+  parent repository, seals the bit and reports it through run/trigger readers.
+  Changing it under one replay key conflicts. Generated real-policy cases prove
+  that it grants no source authority and cannot label a foreign repository as
+  inherited even when that repository is otherwise authorized.
+- Removed inherited-holder IDs, synthetic zero-cost holders, cost transfer,
+  recursive supersession and their five obsolete tests. Both live writers
+  already refused the selector. A real HTTP/store regression ran red at 403 and
+  now requires 400 with no capacity row. Weighted costs, restrictive capacity,
+  queue/backfill, cancellation and lease-continuity tests remain.
+- Removed schema-forbidden coalesce admission, waiter promotion and draining,
+  and the unused coalesced/cached outcomes. Real memo/result materialization and
+  authorized leader-read transactions remain. No blob result-sharing path was
+  removed.
+- Moved the implemented capacity-adoption types and transaction unchanged from
+  concurrency_contract.go to capacity_adoption.go. The scaffold is deleted.
+- Reconciled three native failures with current contracts. The pricing property
+  accepts C3 capacity observations and proves every generated launcher report
+  reserves the sealed 16-core class at 70,000 microcredits/second. Publication
+  uses a valid hex SHA. Complete source-bundle checkout needs no stored Git
+  credential and requires zero credential-release audits while retaining exact
+  SHA, unique-byte charging and fenced-read assertions.
+- The tenancy fixture's approval and concurrency inserts now use placeholders
+  accepted by both dialects. The PostgreSQL syntax failure was fixture SQL.
+  The real cross-team response assertions remain.
+
+### Verification
+
+All commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOMAXPROCS=4, -p 4 and task scratch for TMPDIR/GOTMPDIR.
+
+Passed: whole-repository build, scoped vet, full runspec and controller/client,
+full internal/crons, full apiref/apispec and cmd/apidiff, commentcheck across
+2,802 files, and whitespace checks. Generated OpenAPI and public API snapshots
+are refreshed.
+
+Store selection `Concurrency|Capacity|Cost|Materializ|Memo|Reporting|LatestRun|Retry|Schedule`
+passes in 31.497s. It includes TestStoreScheduleBoundary. The earlier focused
+capacity/materialization selection passed in 22.097s. The controller selection
+`^(TestCredits_|TestProfilePublication|FuzzProfilePublication|TestSourceSnapshot|TestChildIntake|TestClaimRun_Child|TestEngineClaimHTTP|TestTeamBoundary_Concurrency)`
+passes in 5.747s. The acceptance selection
+`API|Drift|Snapshot|Concurrency|Child|PortInventory|MaterializedResult` passes in
+0.925s. No native placement cell was newly enabled.
+
+The full nodehost suite fails on three TestBurstSharedOwner groups,
+FuzzBurstMachineWaitNeverConsumesClaim seeds and
+TestOwnerDrainsPendingSupersessionIntent. A read-only Go overlay replacing every
+changed Go file with HEAD reproduces all five failures. Burst fixtures refuse
+with "burst work is reserved for the requester and selected Cloud executors".
+The owner-drain case reaches its one-second context deadline. These are existing
+integration failures for W3/W9, not claimed fixed here. The focused nodehost
+Concurrency/Capacity/Cost selection passed earlier.
+
+Focused race checks pass: store 96.336s, controller 25.404s and client 1.081s.
+The race selection is
+`TestConcurrencyHTTP|TestAuthorizedConcurrency|TestChildIntake|TestNativeChildPreserves|TestCredits_|TestSourceSnapshotRealClientStorageAndIntake|TestProfilePublicationImports|TestStoreScheduleBoundary`.
+The three existing PostgreSQL lock tests skip because SPARKWING_TEST_PG_URL is
+unset. No native PostgreSQL success is inferred from those skips.
+The native harness report still contains FAIL. Engineering completion and a
+clean native run are not claimed.
+
+### Contracts, shared files and remaining work
+
+C1 documents sealed inheritance and the legacy capacity cuts. C3/C4 document the
+optional lineage bit. The port inventory records the retired tests and their
+replacement proofs. Integration authority covers these changes. No service,
+setting, limit, environment variable or compatibility surface was added.
+
+Shared production files: internal/runspec/contracts.go,
+pkg/controller/client/native_services.go, pkg/controller/concurrency.go,
+pkg/store/capacity_owner.go, pkg/store/intake_runtime.go,
+pkg/store/latest_run.go and pkg/store/store.go. The capacity_owner change only
+migrates the removed request field. Shared fixture files:
+pkg/controller/{server_test,team_boundary_test,publication_http_test,source_upload_test,credits_claim_reconciliation_test}.go.
+The W2 run-existence privacy mechanism and its tests are unchanged except for the
+dialect-safe fixture insert. Generated files: api/openapi.yaml and
+.apidiff/pkg_store.txt.
+
+Remaining real integration points: native client cross-repository/ref resolution,
+audited credentials before private followed-branch lookup, persisted HTTP box
+identity and accepted memo namespace metadata. Missing authority still refuses.
+The rest of the legacy cuts and combined store budget remain open. The lead
+harness must verify this tree on PostgreSQL and native sockets and resolve its
+remaining W2 privacy failures. The nodehost baseline failures above also remain.
+
+### Volume and assumptions
+
+Production Go this session, counting the unchanged 138-line move on both sides:
++221 / -639, net -418. Excluding that move: +83 / -501. The five obsolete tests
+and unused fixture helper were removed. No live accepted feature was cut.
+
+Combined W1/W1b store versus main is -606 production lines, 3,644 over the -4,250
+budget, including the untracked replacement file and using the lead's path
+exclusions. Moving the 138 implemented lines out of a contract-named file makes
+them count in that budget. No budget waiver or completion is claimed.
+
+The new lineage bit is retained because sealed source equality cannot distinguish
+an omitted repository from an explicit equal override. Removing it would lose
+that reporting distinction. It is metadata and grants no authority. There is no
+new execution mechanism.
+
+Friction: the sandbox blocks native listeners and has no configured PostgreSQL
+URL. Git writes remain prohibited, so the lead must stage and commit. All writes
+are within this worktree or task scratch. Scratch is removed and the shared build cache retained.
+
+STATUS: CONTINUE

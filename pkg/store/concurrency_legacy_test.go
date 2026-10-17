@@ -174,15 +174,9 @@ func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, o
 		return false, nil, nil, err
 	}
 
-	released, runID, nodeID, err := txReleaseHolder(ctx, tx, t.team, key, holderID)
+	released, _, _, err = txReleaseHolder(ctx, tx, t.team, key, holderID)
 	if err != nil {
 		return false, nil, nil, err
-	}
-	if released && coalesceFollowersCanInherit(outcome) {
-		followers, err = txDrainCoalesceFollowers(ctx, tx, t.team, key, runID, nodeID)
-		if err != nil {
-			return false, nil, nil, err
-		}
 	}
 
 	if !entryDeclared {
@@ -200,57 +194,6 @@ func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, o
 		return false, nil, nil, err
 	}
 	return released, followers, promoted, nil
-}
-
-// ResolveCoalesceFollowers drains this tenant's waiters for the named leader.
-func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	out, err := txDrainCoalesceFollowers(ctx, tx, t.team, key, leaderRunID, leaderNodeID)
-	if err != nil {
-		return nil, err
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, team Team, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {
-	rows, err := tx.QueryContext(
-		ctx,
-		`SELECT `+waiterColumns+`
-		   FROM concurrency_waiters
-		  WHERE team = ? AND key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?
-		  ORDER BY arrived_at ASC`,
-		string(team), key, OnLimitCoalesce, leaderRunID, leaderNodeID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	var out []ConcurrencyWaiter
-	for rows.Next() {
-		w, err := scanWaiter(rows)
-		if err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		out = append(out, w)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for _, w := range out {
-		if _, err := txDeleteWaiter(ctx, tx, w.team, w.Key, w.RunID, w.NodeID); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
 }
 
 // ForceReleaseSupersededHolders removes this tenant's superseded holders.
@@ -373,6 +316,5 @@ func (t *Tenant) concurrencyHolder(ctx context.Context, key, holderID string, no
 	if err != nil {
 		return nil, err
 	}
-	scrubInheritedHolder(&holder)
 	return &holder, nil
 }

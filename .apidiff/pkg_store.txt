@@ -39,28 +39,24 @@ type AccountDeletion struct {
 	RevokedPrefixes []string
 }
 const AcquireAgain AdoptionKind = "new_arrival"
-const AcquireCached AcquireKind = "cached"
 const AcquireCancellingOthers AcquireKind = "cancelling_others"
-const AcquireCoalesced AcquireKind = "coalesced"
 const AcquireFailed AcquireKind = "failed"
 const AcquireGranted AcquireKind = "granted"
 type AcquireKind string
 const AcquireQueued AcquireKind = "queued"
 const AcquireSkipped AcquireKind = "skipped"
 type AcquireSlotRequest struct {
-	Key      string
-	HolderID string
-
-	InheritedHolderID string
-	RunID             string
-	NodeID            string
-	Capacity          int
-	Policy            string
-	CacheKeyHash      string
-	CacheTTL          time.Duration
-	CancelTimeout     time.Duration
-	Lease             time.Duration
-	BypassRead        bool
+	Key           string
+	HolderID      string
+	RunID         string
+	NodeID        string
+	Capacity      int
+	Policy        string
+	CacheKeyHash  string
+	CacheTTL      time.Duration
+	CancelTimeout time.Duration
+	Lease         time.Duration
+	BypassRead    bool
 
 	Cost int
 }
@@ -1438,7 +1434,6 @@ type NodeUsage struct {
 func NormalizeEmail(raw string) string
 func NormalizeTeam(team Team) Team
 const OnLimitCancelOthers = "cancel_others"
-const OnLimitCoalesce = "coalesce"
 const OnLimitFail = "fail"
 const OnLimitQueue = "queue"
 const OnLimitSkip = "skip"
@@ -1802,6 +1797,7 @@ const RoleEditor Role = "editor"
 const RoleOwner Role = "owner"
 const RoleReader Role = "reader"
 type Run struct {
+	RepoInherited   bool
 	ID              string
 	Number          int64
 	Pipeline        string
@@ -2896,23 +2892,20 @@ type VerifiedUploadCommit struct {
 	ReplicaID string
 }
 const WaitHolder ReconcileKind = "wait_holder"
-const WaiterCached WaiterStatus = "cached"
 const WaiterCancelled WaiterStatus = "cancelled"
 const WaiterExpired WaiterStatus = "expired"
 const WaiterLeaderFinished WaiterStatus = "leader_finished"
 const WaiterPromoted WaiterStatus = "promoted"
 type WaiterResolution struct {
-	Status             WaiterStatus
-	HolderID           string
-	HolderLeaseExpires time.Time
-	OutputRef          string
-	OriginRunID        string
-	OriginNodeID       string
-	LeaderRunID        string
-	LeaderNodeID       string
-
-	LeaderOutcome string
-
+	Status              WaiterStatus
+	HolderID            string
+	HolderLeaseExpires  time.Time
+	OutputRef           string
+	OriginRunID         string
+	OriginNodeID        string
+	LeaderRunID         string
+	LeaderNodeID        string
+	LeaderOutcome       string
 	LeaderFailureReason string
 
 	Position    int

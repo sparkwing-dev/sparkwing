@@ -250,3 +250,61 @@ func childSourceRepositories(t *testing.T, e *EngineController, claim string, re
 	}
 	engineSQL(t, e.Store, `UPDATE capabilities SET authority_json=?,repo_scope=? WHERE prefix=?`, body, scope, p.Capability.Prefix)
 }
+
+func TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority(t *testing.T) {
+	property := func(inherited bool, seed uint32) bool {
+		e, h, claim := childIntakeFixture(t)
+		tenant, err := e.Store.ForTeam(t.Context(), "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parent, err := tenant.ReadRun(t.Context(), "run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal([]byte(childIntakeBody(t, "deploy", parent.Request.Request.Git)), &body); err != nil {
+			t.Fatal(err)
+		}
+		request := body["request"].(map[string]any)
+		request["lineage"].(map[string]any)["repo_inherited"] = inherited
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 201)
+		var created controllerwire.CreateRunResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		trigger, err := tenant.GetTrigger(t.Context(), created.RunID)
+		if err != nil || trigger.RepoInherited != inherited {
+			t.Fatalf("inheritance projection: %+v %v, want %t", trigger, err, inherited)
+		}
+		request["lineage"].(map[string]any)["repo_inherited"] = !inherited
+		raw, err = json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 409)
+		request["lineage"].(map[string]any)["repo_inherited"] = inherited
+		body["idempotency_key"] = "foreign"
+		foreign := fmt.Sprintf("git:example.test/foreign/repo-%x", seed)
+		request["git"].(map[string]any)["repository"] = map[string]any{"key": foreign}
+		raw, err = json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 422)
+		childSourceRepositories(t, e, claim, []string{string(parent.Request.Request.Git.Repository.Key), foreign})
+		status := 201
+		if inherited {
+			status = 400
+		}
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), status)
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+		t.Fatal(err)
+	}
+}

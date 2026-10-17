@@ -4881,6 +4881,8 @@ components:
           type: string
         parent_run_id:
           type: string
+        repo_inherited:
+          type: boolean
         retrier:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Actor.'
         retry_of:

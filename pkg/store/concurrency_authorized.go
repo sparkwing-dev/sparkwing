@@ -205,7 +205,7 @@ func slotLease(now, until time.Time, lease time.Duration) time.Duration {
 // AcquireAuthorizedSlot admits only the current claim's accepted concurrency declaration.
 func (t *Tenant) AcquireAuthorizedSlot(ctx context.Context, a capability.Authorized, req AcquireSlotRequest) (AcquireSlotResponse, error) {
 	return authorizedConcurrency(ctx, t, a, req.Key, "/acquire", func(tx *storeTx, current capability.Authorized, until time.Time) (AcquireSlotResponse, error) {
-		if req.RunID != current.Binding.RunID || req.NodeID != current.Binding.NodeID || req.HolderID == "" || req.HolderID != a.Target.SlotHolderID || req.CacheKeyHash != "" || req.CacheTTL != 0 || req.InheritedHolderID != "" {
+		if req.RunID != current.Binding.RunID || req.NodeID != current.Binding.NodeID || req.HolderID == "" || req.HolderID != a.Target.SlotHolderID || req.CacheKeyHash != "" || req.CacheTTL != 0 {
 			return AcquireSlotResponse{}, bindingRefusal()
 		}
 		group, err := declaredSlotTx(ctx, tx, current.Principal.Capability, a.Target)
@@ -430,9 +430,6 @@ func (t *Tenant) ForceReleaseAuthorizedSlots(ctx context.Context, a capability.A
 				continue
 			}
 			if _, _, _, err := txReleaseHolder(ctx, tx, t.team, key, holder.HolderID); err != nil {
-				return nil, err
-			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM concurrency_waiters WHERE team=? AND key=? AND policy=? AND leader_run_id=? AND leader_node_id=?`, t.team, key, OnLimitCoalesce, holder.RunID, holder.NodeID); err != nil {
 				return nil, err
 			}
 			out = append(out, holder)

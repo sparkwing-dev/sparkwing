@@ -63,26 +63,21 @@ func TestCredits_AClaimAboveTheLargestClassIsRefusedAtomically(t *testing.T) {
 }
 
 func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
-	_, tenant, h, root := creditClaimFixture(t, 16, store.CreditRateTable{{Cores: 2, MicroPerSecond: 10000}, {Cores: 4, MicroPerSecond: 20000}, {Cores: 16, MicroPerSecond: 70000}})
 	property := func(value uint16) bool {
-		engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job","available_cores":128,"capacity":{"cores":%g}}`, float64(value)/100), http.StatusBadRequest)
+		_, tenant, h, root := creditClaimFixture(t, 16, store.CreditRateTable{{Cores: 2, MicroPerSecond: 10000}, {Cores: 4, MicroPerSecond: 20000}, {Cores: 16, MicroPerSecond: 70000}})
+		w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job","available_cores":128,"capacity":{"cores":%g}}`, float64(value)/100), http.StatusOK)
+		var response controllerwire.ClaimResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response.Claim == nil {
+			t.Fatalf("missing priced award: %s: %v", w.Body, err)
+		}
 		charges, err := tenant.ListCreditCharges(t.Context(), 10)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return len(charges) == 0
+		return len(charges) == 1 && charges[0].CPUClassCores == 16 && charges[0].RateMicroPerSecond == 70000 && charges[0].AmountMicro == 70000*store.MinBillableSeconds
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
-	}
-	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job","available_cores":128}`, http.StatusOK)
-	var response controllerwire.ClaimResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response.Claim == nil {
-		t.Fatalf("missing priced award: %s: %v", w.Body, err)
-	}
-	charges, err := tenant.ListCreditCharges(t.Context(), 10)
-	if err != nil || len(charges) != 1 || charges[0].CPUClassCores != 16 || charges[0].RateMicroPerSecond != 70000 || charges[0].AmountMicro != 70000*store.MinBillableSeconds {
-		t.Fatalf("sixteen-core reservation=%+v: %v", charges, err)
 	}
 }
 

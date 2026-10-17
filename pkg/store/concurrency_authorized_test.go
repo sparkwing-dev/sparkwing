@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -141,7 +142,7 @@ func TestAuthorizedConcurrencyPreservesDeclarationAndAuthorityProperty(t *testin
 		case 9:
 			req.CacheKeyHash = hostile
 		case 10:
-			req.InheritedHolderID = hostile
+			req.CacheTTL = time.Hour
 		case 11:
 			altered.Principal.Authority.ID = hostile
 		case 12:
@@ -404,5 +405,23 @@ func TestAuthorizedReleaseIgnoresReportedOutcomeForPromotion(t *testing.T) {
 				t.Fatalf("reported outcome changed promotion: %+v %v", state, err)
 			}
 		})
+	}
+}
+
+func TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector(t *testing.T) {
+	f := slotFixture(t)
+	handler := controller.New(f.s, nil).Handler()
+	body := fmt.Sprintf(`{"holder_id":"holder","run_id":%q,"job_id":%q,"inherited_holder_id":"foreign-holder"}`, f.ref.RunID, f.ref.NodeID)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/queue/groups/global:deploy/acquire", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+f.holderBearer)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("retired holder selector: %d %s", response.Code, response.Body)
+	}
+	state, err := f.tenant.GetConcurrencyState(t.Context(), "global:deploy")
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("retired selector created capacity: %+v %v", state, err)
 	}
 }

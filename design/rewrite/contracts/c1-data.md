@@ -2778,7 +2778,7 @@ schema version is added.
 | Create | `pkg/storage/state_contract.go` |
 | Create | `pkg/store/claim_contract.go` |
 | Create | `pkg/store/completion.go` |
-| Create | `pkg/store/concurrency_contract.go` |
+| Create | `pkg/store/capacity_adoption.go` |
 | Create | `pkg/store/maintenance_contract.go` |
 | Create | `pkg/store/node_state.go` |
 | Create | `pkg/store/result_contract.go` |
@@ -2991,7 +2991,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.AcknowledgeRunEffect` | AcknowledgeRunEffect advances delivered_rev only to the delivered revision, never to a newly observed desired_rev. |
 | `Tenant.RetryRunEffect` | RetryRunEffect records a failed delivery without overwriting a later desired state or its due work. |
 
-### pkg/store/concurrency_contract.go
+### pkg/store/capacity_adoption.go
 
 | Export | Purpose |
 |---|---|
@@ -3933,3 +3933,33 @@ IntakeQueueDepth reads the tenant queue from the same admission transaction.
 The controller's existing flood policy runs after C1 replay lookup. This removes
 nested store reads while holding the intake transaction and preserves replay
 and retry semantics.
+
+
+## W1b sealed inheritance and capacity legacy cut, 2026-10-17
+
+`runspec.Lineage.RepoInherited` retains whether the child caller omitted its
+repository override. The native client supplies that intent beside the parent's
+captured Git and Source. `AdmitRun` requires a parent when the bit is set and
+checks that its repository key matches that parent's committed request. The real
+intake policy still checks current source scope. The bit is sealed, participates
+in idempotency, survives retries and feeds run/trigger reporting. No SQL column
+or execution authority is added.
+
+The capacity core no longer implements inherited-holder IDs, synthetic zero-cost
+holders, recursive supersession or cost transfer. Both production entrypoints
+already refused inherited-holder IDs. The HTTP decoder now rejects the removed
+selector. Accepted declarations, bound leases and their state transitions own
+capacity continuity.
+
+The schema already refuses coalesce waiter rows. Its unused admission and
+promotion paths, follower draining, cached acquisition outcomes and constants
+are deleted. Memo and coalesced result selection remain in the blob/result
+transactions. Authorized leader reads still require declared read edges.
+
+`TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector` replaces the obsolete
+inheritance surface tests. Weighted admission, backfill, cancellation, promotion,
+owner-loss continuity and real result materialization retain their tests. The
+native harness still owns PostgreSQL and socket verification.
+
+The implemented capacity-adoption types and transaction now live in
+`pkg/store/capacity_adoption.go`. The completed contract scaffold is removed.

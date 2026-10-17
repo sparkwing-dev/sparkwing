@@ -405,6 +405,9 @@ func appReplayKey(input runspec.Request) string {
 }
 
 func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input runspec.Request) error {
+	if input.Lineage.RepoInherited && input.Lineage.ParentRunID == "" {
+		return authorityError(apierr.BadRequest, "repository inheritance requires a parent")
+	}
 	seen := map[string]bool{}
 	for id := input.Lineage.ParentRunID; id != ""; {
 		if seen[id] {
@@ -416,6 +419,9 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input r
 			return err
 		}
 		parent := ancestor.Request.Request
+		if id == input.Lineage.ParentRunID && input.Lineage.RepoInherited && parent.Git.Repository.Key != input.Git.Repository.Key {
+			return authorityError(apierr.BadRequest, "inherited repository differs from its parent")
+		}
 		if parent.Pipeline == input.Pipeline && parent.Git.Repository.Key == input.Git.Repository.Key {
 			return authorityError(apierr.Conflict, "child pipeline cycle")
 		}

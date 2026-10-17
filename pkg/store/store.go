@@ -573,6 +573,7 @@ func IsProtocolErr(err error) bool {
 
 // Run is the redacted reporting view of a persisted run.
 type Run struct {
+	RepoInherited   bool              `json:"repo_inherited,omitempty"`
 	ID              string            `json:"id"`
 	Number          int64             `json:"number"`
 	Pipeline        string            `json:"pipeline"`
@@ -917,6 +918,7 @@ func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 		return nil, fmt.Errorf("decode run request: %w", err)
 	}
 	display := runspec.DisplayRequest(sealed)
+	r.RepoInherited = sealed.Request.Lineage.RepoInherited
 	r.RepoURL = sealed.Request.Source.Location.RemoteURL
 	if len(spec) > 0 {
 		var accepted runspec.Spec
@@ -1508,7 +1510,7 @@ func scanTrigger(rs rowScanner) (*Trigger, error) {
 	tr.GitBranch, tr.GitSHA, tr.CreatedAt = run.GitBranch, run.GitSHA, run.CreatedAt
 	tr.ClaimedAt, tr.LeaseExpiresAt = stateTime(claimed), stateTime(lease)
 	tr.ParentRunID, tr.RetryOf, tr.RetrySource = run.ParentRunID, run.RetryOf, run.RetrySource
-	tr.Repo, tr.RepoURL = run.DeclaredRepo, run.RepoURL
+	tr.Repo, tr.RepoURL, tr.RepoInherited = run.DeclaredRepo, run.RepoURL, run.RepoInherited
 	return &tr, nil
 }
 

@@ -18,7 +18,7 @@ type capacityFence struct {
 
 // AcquireCapacity admits capacity under the live owner and captured work binding.
 func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, binding CapacityBinding, actor Actor) (AcquireSlotResponse, error) {
-	if req.RunID != binding.RunID || req.NodeID != binding.NodeID || req.CacheKeyHash != "" || req.InheritedHolderID != "" {
+	if req.RunID != binding.RunID || req.NodeID != binding.NodeID || req.CacheKeyHash != "" {
 		return AcquireSlotResponse{}, holderRefusal()
 	}
 	return t.acquireConcurrencySlot(ctx, req, &capacityFence{binding, actor})

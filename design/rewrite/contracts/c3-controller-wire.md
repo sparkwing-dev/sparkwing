@@ -1207,3 +1207,14 @@ deadline and an explicit host stop still terminate the owner context. Claimed
 executor renewal continues to cancel its execution context on a cancellation beat.
 An owner waits for a holder with persisted cancellation intent instead of
 submitting the same cancellation again on each scheduling pass.
+
+
+## Child repository omission, 2026-10-17
+
+The native child client carries `lineage.repo_inherited=true` when its repository
+argument is omitted. An explicit argument equal to the parent repository keeps
+it false. Both carry the captured parent source. C1 seals the bit and checks the
+parent repository before commit. It grants no repository or credential access.
+Changed omission intent under one idempotency key conflicts. Cross-repository
+resolution in the native client remains a refusal until its source resolver is
+provided.

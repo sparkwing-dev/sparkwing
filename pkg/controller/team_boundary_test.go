@@ -141,7 +141,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if err := teststore.SeedNode(st, ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES (?,?,?,?,?,?)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES ($1,$2,$3,$4,$5,$6)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {
 		t.Fatal(err)
 	}
 	seedControllerCapacityHolder(t, st, f.teamA.Team(), "deploy", "holder-a", f.runA, "n1", 0)
