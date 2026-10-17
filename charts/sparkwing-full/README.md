@@ -150,7 +150,8 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
 
 - Each team's nodes have `node-restriction.kubernetes.io/sparkwing-team-node` equal to the `node_label_value` from
   `sparkwing operator teams show --team <team> -o json`:
-  `sha256-` plus the first 40 lowercase hex characters of SHA-256 of the team ID.
+  `sha256-` plus the first 40 lowercase hex characters of SHA-256 of the team slug
+  (the `--team` value, for example `qa-team`).
   A presence-only label or a shared `small` value cannot establish team ownership.
 - Set that exact value in the team's NodePool template metadata labels and in a
   `node-restriction.kubernetes.io/sparkwing-team-node=<hash>:NoSchedule` taint. Retain the existing

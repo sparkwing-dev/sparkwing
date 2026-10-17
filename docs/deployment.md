@@ -44,7 +44,7 @@ The launcher's Kubernetes identity is separate from the customer Job identity.
 Jobs exchange a one-use bootstrap Secret for an in-memory awarded capability.
 
 The [Cloud chart](../charts/sparkwing-full/README.md) documents its values and
-node/network prerequisites. Team-node labels use the hash of the team ID.
+node/network prerequisites. Team-node labels use the hash of the team slug.
 The launcher reserves existing Ready nodes, so infrastructure must provision
 them before claims can execute. Self-hosted runner pools use `runner.repos`,
 `runner.alsoClaimTriggers` and pool scheduling values. They claim through HTTP
