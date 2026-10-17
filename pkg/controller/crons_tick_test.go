@@ -325,6 +325,7 @@ func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
 	st := newStoreForAuth(t)
 	sched := armPushedForTick(t, st)
 	srv := New(st, nil)
+	srv.WithScheduledRunWriter(func(context.Context, store.Team) (ScheduledRunWriter, error) { return nil, nil })
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
 	_, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due)
 	var missing *apierr.Error

@@ -304,7 +304,7 @@ func (t *Tenant) ReleaseAuthorizedSlot(ctx context.Context, a capability.Authori
 		if id == "" || id != a.Target.SlotHolderID {
 			return false, bindingRefusal()
 		}
-		released, run, job, err := txReleaseHolder(ctx, tx, t.team, key, id, outcome, "", "", 0)
+		released, run, job, err := txReleaseHolder(ctx, tx, t.team, key, id)
 		if err != nil {
 			return false, err
 		}
@@ -362,7 +362,7 @@ func (t *Tenant) ResolveAuthorizedWaiter(ctx context.Context, a capability.Autho
 				return WaiterResolution{}, err
 			}
 		}
-		response, err := t.resolveWaiterTx(ctx, tx, key, run, job, "", leaderRun, leaderJob, bypass, slotLease(tx.now(), until, DefaultConcurrencyLease), nil)
+		response, err := t.resolveWaiterTx(ctx, tx, key, run, job, leaderRun, leaderJob, slotLease(tx.now(), until, DefaultConcurrencyLease), nil)
 		if err != nil {
 			return WaiterResolution{}, err
 		}
@@ -420,7 +420,7 @@ func (t *Tenant) ForceReleaseAuthorizedSlots(ctx context.Context, a capability.A
 			if !holder.Superseded {
 				continue
 			}
-			if _, _, _, err := txReleaseHolder(ctx, tx, t.team, key, holder.HolderID, "cancelled", "", "", 0); err != nil {
+			if _, _, _, err := txReleaseHolder(ctx, tx, t.team, key, holder.HolderID); err != nil {
 				return nil, err
 			}
 			if _, err := tx.ExecContext(ctx, `DELETE FROM concurrency_waiters WHERE team=? AND key=? AND policy=? AND leader_run_id=? AND leader_node_id=?`, t.team, key, OnLimitCoalesce, holder.RunID, holder.NodeID); err != nil {

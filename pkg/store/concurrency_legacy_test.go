@@ -14,7 +14,7 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 
 // ResolveWaiter reads this tenant's waiter or cached result without inserting a waiter.
 func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error) {
-	return t.resolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead, nil)
+	return t.resolveWaiter(ctx, key, runID, nodeID, leaderRunID, leaderNodeID, nil)
 }
 
 // CancelWaiter removes this tenant's waiter or promoted holder for the named work.
@@ -140,7 +140,7 @@ func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outc
 		return false, err
 	}
 
-	released, _, _, err := txReleaseHolder(ctx, tx, t.team, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
+	released, _, _, err := txReleaseHolder(ctx, tx, t.team, key, holderID)
 	if err != nil {
 		return false, err
 	}
@@ -174,7 +174,7 @@ func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, o
 		return false, nil, nil, err
 	}
 
-	released, runID, nodeID, err := txReleaseHolder(ctx, tx, t.team, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
+	released, runID, nodeID, err := txReleaseHolder(ctx, tx, t.team, key, holderID)
 	if err != nil {
 		return false, nil, nil, err
 	}

@@ -256,3 +256,46 @@ func TestScheduleLocalSourceRequiresPersistedPeerAuthorityProperty(t *testing.T)
 		t.Fatal(err)
 	}
 }
+
+func TestScheduleRunNowPreservesCadenceWhilePaused(t *testing.T) {
+	tenant, a, body, now := consentedScheduleFixture(t)
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := ids[0]
+	if _, err := tenant.PauseAuthorizedSchedule(t.Context(), a, id, true); err != nil {
+		t.Fatal(err)
+	}
+	before, err := tenant.GetCronSchedule(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	*now = before.NextDueAt.Add(time.Second)
+	_, run, replayed, err := tenant.RunAuthorizedSchedule(t.Context(), a, id, "manual")
+	if err != nil || run == "" || replayed {
+		t.Fatalf("run paused schedule: %q %t %v", run, replayed, err)
+	}
+	_, replay, replayed, err := tenant.RunAuthorizedSchedule(t.Context(), a, id, "manual")
+	if err != nil || replay != run || !replayed {
+		t.Fatalf("manual replay: %q %t %v", replay, replayed, err)
+	}
+	after, err := tenant.GetCronSchedule(t.Context(), id)
+	if err != nil || !after.Paused || !after.CursorAt.Equal(before.CursorAt) || !after.NextDueAt.Equal(*before.NextDueAt) || after.LastRunID != run {
+		t.Fatalf("manual run changed cadence: %+v -> %+v: %v", before, after, err)
+	}
+	fires, err := tenant.ListCronFires(t.Context(), id, 10)
+	if err != nil || len(fires) != 1 || fires[0].RunID != run || fires[0].Detail != "run now" {
+		t.Fatalf("manual history: %+v %v", fires, err)
+	}
+	if _, err := tenant.PauseAuthorizedSchedule(t.Context(), a, id, false); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := tenant.GetCronSchedule(t.Context(), id)
+	if err != nil || resumed.Paused || !resumed.CursorAt.Equal(*now) || !resumed.NextDueAt.After(*now) {
+		t.Fatalf("resume retained paused due instants: %+v %v", resumed, err)
+	}
+	if _, err := tenant.AdmitScheduledRun(t.Context(), id, *before.NextDueAt); err == nil {
+		t.Fatal("resume replayed a paused due instant")
+	}
+}

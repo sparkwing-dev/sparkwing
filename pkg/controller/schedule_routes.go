@@ -42,7 +42,7 @@ func (s *Server) scheduleWriter(r *http.Request, a capability.Authorized) (Sched
 	} else if s.store != nil {
 		var tenant *store.Tenant
 		tenant, err = s.reportingTenant(r, a)
-		writer, _ = any(tenant).(ScheduleWriter)
+		writer = tenant
 	}
 	if err != nil {
 		return nil, engineLookupError(err)

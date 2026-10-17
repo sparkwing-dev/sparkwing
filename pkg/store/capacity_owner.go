@@ -26,7 +26,7 @@ func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, bi
 
 // ResolveCapacityWaiter adjudicates promotion and sealed queue expiry under the captured owner fence.
 func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding CapacityBinding, actor Actor) (WaiterResolution, error) {
-	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", "", false, &capacityFence{binding, actor})
+	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", &capacityFence{binding, actor})
 }
 
 func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {

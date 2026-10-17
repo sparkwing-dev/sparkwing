@@ -1,13 +1,18 @@
 package store_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -52,6 +57,52 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture, operation, id stri
 
 func slotRequest(f *storeRecoveryFixture, id string) store.AcquireSlotRequest {
 	return store.AcquireSlotRequest{Key: "global:deploy", HolderID: id, RunID: f.ref.RunID, NodeID: f.ref.NodeID, Lease: time.Hour}
+}
+
+func TestConcurrencyHTTPUsesDeclaredGroupAndConcreteTransactions(t *testing.T) {
+	f := slotFixture(t)
+	handler := controller.New(f.s, nil).Handler()
+	call := func(method, path, body string, want int, out any) {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/v1/queue/groups/global:deploy"+path, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+f.holderBearer)
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != want {
+			t.Fatalf("%s %s: %d %s; want %d", method, path, response.Code, response.Body, want)
+		}
+		if out != nil {
+			if err := json.Unmarshal(response.Body.Bytes(), out); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	body := fmt.Sprintf(`{"holder_id":"http-holder","run_id":%q,"job_id":%q,"lease_secs":3600}`, f.ref.RunID, f.ref.NodeID)
+	var acquired struct {
+		Granted bool      `json:"granted"`
+		Expires time.Time `json:"lease_expires_at"`
+	}
+	call(http.MethodPost, "/acquire", body, http.StatusOK, &acquired)
+	if !acquired.Granted || acquired.Expires.IsZero() {
+		t.Fatalf("uncommitted acquisition: %+v", acquired)
+	}
+	var group controllerwire.QueueGroup
+	call(http.MethodGet, "", "", http.StatusOK, &group)
+	if group.Capacity != 3 || group.UsedCost != 2 || len(group.Holders) != 1 || group.Holders[0].HolderID != "http-holder" || group.Holders[0].RunID != f.ref.RunID || group.Holders[0].JobID != f.ref.NodeID {
+		t.Fatalf("HTTP group differs from accepted declaration: %+v", group)
+	}
+	call(http.MethodGet, "/holder?holder_id=http-holder", "", http.StatusOK, nil)
+	call(http.MethodPost, "/heartbeat", `{"holder_id":"http-holder","lease_secs":3600}`, http.StatusOK, nil)
+	call(http.MethodPost, "/release", `{"holder_id":"http-holder","outcome":"success"}`, http.StatusNoContent, nil)
+	call(http.MethodGet, "", "", http.StatusOK, &group)
+	if group.UsedCost != 0 || len(group.Holders) != 0 {
+		t.Fatalf("HTTP release retained capacity: %+v", group)
+	}
+	state, err := f.tenant.GetConcurrencyState(t.Context(), "global:deploy")
+	if err != nil || state.UsedCost != 0 || len(state.Holders) != 0 {
+		t.Fatalf("HTTP release was not committed: %+v %v", state, err)
+	}
 }
 
 func TestAuthorizedConcurrencyPreservesDeclarationAndAuthorityProperty(t *testing.T) {

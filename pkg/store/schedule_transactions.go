@@ -322,6 +322,15 @@ func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, sele
 // PauseAuthorizedSchedule changes pause state under current tenant authority.
 func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, paused bool) (string, error) {
 	return t.editSchedule(ctx, a, id, func(tx *storeTx, row CronSchedule) error {
+		if row.Paused && !paused {
+			next, err := scheduleNext(row, tx.now(), 0)
+			if err != nil {
+				return err
+			}
+			if err := t.resolveCronDueTx(ctx, tx, row.ID, tx.now(), next, nil, tx.now()); err != nil {
+				return err
+			}
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET paused=?,updated_at=? WHERE team=? AND id=?`, boolToInt(paused), tx.now().UnixNano(), t.team, row.ID)
 		return err
 	})
@@ -495,7 +504,7 @@ func (t *Tenant) scheduleAdmissionTx(ctx context.Context, tx *storeTx, a capabil
 	if err != nil {
 		return row, consent, result, err
 	}
-	if !row.Declared || row.Paused {
+	if !row.Declared || row.Paused && a.Principal.Authority.ID == "" {
 		return row, consent, result, authorityError(apierr.Conflict, "schedule is paused or withdrawn")
 	}
 	scope, err := scheduleIntakeScope(row.ID)
@@ -582,15 +591,18 @@ func (t *Tenant) admitSchedule(ctx context.Context, a capability.Authorized, sel
 				return err
 			}
 		}
-		decided := due
-		if decided.IsZero() {
-			decided = now
+		fire := &CronFire{DueAt: due, DecidedAt: now, Outcome: CronOutcomeFired, RunID: result.RunID, Args: request.RequestedArgs}
+		cursor, next := row.CursorAt, row.NextDueAt
+		if due.IsZero() {
+			fire.DueAt, fire.Detail = now, "run now"
+		} else {
+			cursor = due
+			next, err = scheduleNext(row, now, 0)
+			if err != nil {
+				return err
+			}
 		}
-		next, err := scheduleNext(row, now, 0)
-		if err != nil {
-			return err
-		}
-		return t.resolveCronDueTx(ctx, tx, row.ID, decided, next, &CronFire{DueAt: decided, DecidedAt: now, Outcome: CronOutcomeFired, RunID: result.RunID, Args: request.RequestedArgs}, now)
+		return t.resolveCronDueTx(ctx, tx, row.ID, cursor, next, fire, now)
 	})
 	if err != nil {
 		return AdmissionResult{}, err

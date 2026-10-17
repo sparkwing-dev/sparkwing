@@ -306,13 +306,8 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	t.Cleanup(func() {
 		transport.CloseIdleConnections()
 		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("local controller failed to join")
+		if err := <-done; err != nil {
+			t.Error(err)
 		}
 	})
 	options := client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: transport, Timeout: 5 * time.Second}}

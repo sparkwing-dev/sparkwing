@@ -664,42 +664,6 @@ func (s *Service) Upcoming(ctx context.Context, id string, n int) ([]time.Time, 
 	return eval.schedule.Upcoming(s.now(), eval.loc, n), nil
 }
 
-// RunNow launches a schedule's pipeline immediately, whatever its cadence says
-// and whether or not it is paused, and records the launch in its history. The
-// cursor does not move: a manual run is not one of the cadence's due instants.
-func (s *Service) RunNow(ctx context.Context, id string) (string, error) {
-	sched, err := s.Schedules.GetCronSchedule(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	if err := s.pinnedBinaryReady(sched); err != nil {
-		return "", fmt.Errorf("%s: %w", DisplayName(sched), err)
-	}
-	now := s.now()
-	runID, err := s.Launcher.Launch(ctx, sched, now)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", DisplayName(sched), err)
-	}
-	var next *time.Time
-	if eval, perr := prepare(sched); perr == nil {
-		next = eval.nextAfter(now)
-	} else {
-		next = sched.NextDueAt
-	}
-	fire := &store.CronFire{
-		DueAt:     now,
-		DecidedAt: now,
-		Outcome:   store.CronOutcomeFired,
-		RunID:     runID,
-		Detail:    "run now",
-		Args:      sched.Effective().Args,
-	}
-	if err := s.Schedules.ResolveCronDue(ctx, id, sched.CursorAt, next, fire, now); err != nil {
-		return runID, fmt.Errorf("run %s launched but its fire could not be recorded: %w", runID, err)
-	}
-	return runID, nil
-}
-
 // ErrAmbiguousName is returned, wrapped, when a name matches more than one
 // armed schedule.
 var ErrAmbiguousName = errors.New("more than one schedule carries that name")

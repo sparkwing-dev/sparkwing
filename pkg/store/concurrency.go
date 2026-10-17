@@ -355,19 +355,6 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		}
 	}
 
-	hit, err := txCacheLookup(ctx, tx, t.team, req.Key, req.CacheKeyHash, nowNS, req.BypassRead, true)
-	if err != nil {
-		return AcquireSlotResponse{}, err
-	}
-	if hit != nil {
-		return AcquireSlotResponse{
-			Kind:         AcquireCached,
-			OutputRef:    hit.OutputRef,
-			OriginRunID:  hit.OriginRunID,
-			OriginNodeID: hit.OriginNodeID,
-		}, nil
-	}
-
 	driftNote := ""
 	prevCap := 0
 	var existingCap int
@@ -1367,7 +1354,7 @@ func txSupersedeHolderAndInherited(ctx context.Context, tx *storeTx, team Team, 
 	return ids, nil
 }
 
-func txReleaseHolder(ctx context.Context, tx *storeTx, team Team, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (released bool, runID, nodeID string, err error) {
+func txReleaseHolder(ctx context.Context, tx *storeTx, team Team, key, holderID string) (released bool, runID, nodeID string, err error) {
 	var supersededInt int
 	var leaseNS, queueArrivedNS int64
 	var cost int
@@ -1408,25 +1395,6 @@ UPDATE concurrency_holders
 		}
 	}
 
-	if outcome == "success" && cacheKeyHash != "" && ttl > 0 {
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO concurrency_cache
-			   (team, key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT (team, key, cache_key_hash) DO UPDATE SET
-			   output_ref     = excluded.output_ref,
-			   origin_run_id  = excluded.origin_run_id,
-			   origin_node_id = excluded.origin_node_id,
-			   created_at     = excluded.created_at,
-			   expires_at     = excluded.expires_at,
-			   last_hit_at    = excluded.last_hit_at`,
-			string(team), key, cacheKeyHash, outputRef, runID, nodeID,
-			now.UnixNano(), now.Add(ttl).UnixNano(), now.UnixNano(),
-		); err != nil {
-			return false, "", "", err
-		}
-	}
 	return true, runID, nodeID, nil
 }
 
@@ -1476,57 +1444,6 @@ func txTransferInheritedHolderCost(
 		cost, declaredCapacity, string(team), key, inheritedHolderID,
 	)
 	return err
-}
-
-type concurrencyCacheHit struct {
-	OutputRef    string
-	OriginRunID  string
-	OriginNodeID string
-}
-
-// safety: the row carries output_ref, origin_run_id and origin_node_id,
-// so two teams that author one concurrency key and hash the same inputs
-// would be handed pointers into each other's outputs; the team is in
-// every predicate here because this read is the leak, not the write.
-func txCacheLookup(ctx context.Context, tx *storeTx, team Team, key, cacheKeyHash string, nowNS int64, bypassRead, deleteExpired bool) (*concurrencyCacheHit, error) {
-	if cacheKeyHash == "" || bypassRead {
-		return nil, nil
-	}
-	var hit concurrencyCacheHit
-	var expiresNS int64
-	err := tx.QueryRowContext(
-		ctx,
-		`SELECT output_ref, origin_run_id, origin_node_id, expires_at
-		   FROM concurrency_cache
-		  WHERE team = ? AND key = ? AND cache_key_hash = ?`,
-		string(team), key, cacheKeyHash,
-	).Scan(&hit.OutputRef, &hit.OriginRunID, &hit.OriginNodeID, &expiresNS)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if expiresNS <= nowNS {
-		if deleteExpired {
-			if _, err := tx.ExecContext(
-				ctx,
-				`DELETE FROM concurrency_cache WHERE team = ? AND key = ? AND cache_key_hash = ? AND expires_at <= ?`,
-				string(team), key, cacheKeyHash, nowNS,
-			); err != nil {
-				return nil, err
-			}
-		}
-		return nil, nil
-	}
-	if _, err := tx.ExecContext(
-		ctx,
-		`UPDATE concurrency_cache SET last_hit_at = ? WHERE team = ? AND key = ? AND cache_key_hash = ?`,
-		nowNS, string(team), key, cacheKeyHash,
-	); err != nil {
-		return nil, err
-	}
-	return &hit, nil
 }
 
 func coalesceFollowersCanInherit(outcome string) bool {
@@ -1658,13 +1575,13 @@ type WaiterResolution struct {
 	Holders     []ConcurrencyHolder
 }
 
-func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool, fence *capacityFence) (WaiterResolution, error) {
+func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRunID, leaderNodeID string, fence *capacityFence) (WaiterResolution, error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return WaiterResolution{}, err
 	}
 	defer rollbackOrLog(tx)
-	result, err := t.resolveWaiterTx(ctx, tx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead, DefaultConcurrencyLease, fence)
+	result, err := t.resolveWaiterTx(ctx, tx, key, runID, nodeID, leaderRunID, leaderNodeID, DefaultConcurrencyLease, fence)
 	if err != nil {
 		return WaiterResolution{}, err
 	}
@@ -1674,7 +1591,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	return result, nil
 }
 
-func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool, lease time.Duration, fence *capacityFence) (WaiterResolution, error) {
+func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, nodeID, leaderRunID, leaderNodeID string, lease time.Duration, fence *capacityFence) (WaiterResolution, error) {
 	var err error
 
 	if fence != nil {
@@ -1716,19 +1633,6 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		}, nil
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return WaiterResolution{}, err
-	}
-
-	hit, err := txCacheLookup(ctx, tx, t.team, key, cacheKeyHash, nowNS, bypassRead, false)
-	if err != nil {
-		return WaiterResolution{}, err
-	}
-	if hit != nil {
-		return WaiterResolution{
-			Status:       WaiterCached,
-			OutputRef:    hit.OutputRef,
-			OriginRunID:  hit.OriginRunID,
-			OriginNodeID: hit.OriginNodeID,
-		}, nil
 	}
 
 	waiter, err := scanWaiter(tx.QueryRowContext(
@@ -1982,7 +1886,7 @@ func txReapTerminalConcurrencyHolders(ctx context.Context, tx *storeTx, team Tea
 		return nil, err
 	}
 	for _, holder := range stale {
-		if _, _, _, err := txReleaseHolder(ctx, tx, holder.team, holder.Key, holder.HolderID, "failed", "", "", 0); err != nil {
+		if _, _, _, err := txReleaseHolder(ctx, tx, holder.team, holder.Key, holder.HolderID); err != nil {
 			return nil, err
 		}
 	}

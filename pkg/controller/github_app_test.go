@@ -84,7 +84,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 	}
 	srv, url := replica()
 	return &appFixture{
-		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin},
+		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin, srv: srv},
 		app:             app, srv: srv, replica: replica, logs: logs,
 	}
 }

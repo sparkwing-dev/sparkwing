@@ -59,7 +59,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	} else {
 		var tenant *store.Tenant
 		tenant, err = l.server.tenantForTeam(ctx, s.Team)
-		writer, _ = any(tenant).(ScheduledRunWriter)
+		writer = tenant
 	}
 	if err != nil {
 		return "", err

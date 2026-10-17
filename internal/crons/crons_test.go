@@ -1031,42 +1031,6 @@ func TestResolveNamesTheCandidatesWhenABareNameIsAmbiguous(t *testing.T) {
 	}
 }
 
-func TestRunNowLaunchesWithoutMovingTheCursor(t *testing.T) {
-	ctx := context.Background()
-	now := at(t, "2026-01-01T00:00:30Z")
-	h := newHarness(t, now)
-	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
-	if err := h.svc.Pause(ctx, sched.ID); err != nil {
-		t.Fatalf("Pause: %v", err)
-	}
-	h.clock.set(at(t, "2026-01-01T00:00:45Z"))
-
-	runID, err := h.svc.RunNow(ctx, sched.ID)
-	if err != nil {
-		t.Fatalf("RunNow: %v", err)
-	}
-	if runID != "run-1" {
-		t.Fatalf("run id = %q", runID)
-	}
-	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
-	if err != nil {
-		t.Fatalf("GetCronSchedule: %v", err)
-	}
-	if !stored.CursorAt.Equal(sched.CursorAt) {
-		t.Errorf("RunNow moved the cursor to %v", stored.CursorAt)
-	}
-	if stored.LastRunID != runID || stored.LastOutcome != store.CronOutcomeFired {
-		t.Errorf("RunNow did not stamp the row: %+v", stored)
-	}
-	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
-	if err != nil {
-		t.Fatalf("ListCronFires: %v", err)
-	}
-	if len(fires) != 1 || fires[0].Detail != "run now" {
-		t.Fatalf("fires: %+v", fires)
-	}
-}
-
 func TestUpcomingReadsTheScheduleInItsOwnZone(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
