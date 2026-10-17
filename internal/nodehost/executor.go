@@ -426,6 +426,11 @@ func (h *nodeExecutor) bindStorage(ctx context.Context, input NodeInput) (NodeIn
 	if binding.Bytes == nil || binding.Records == nil || authority.CapabilityRef == "" || authority.Principal == "" || !authority.Attempt.Set || authority.Attempt.Value != attempt || authority.Repo == "" || spec.Request.Request.Git.Repository.Key != "" && authority.Repo != spec.Request.Request.Git.Repository.Key {
 		return input, errors.New("storage binding differs from its committed job attempt")
 	}
+	if spec.Request.Request.Origin != runspec.OriginLocal || spec.Request.Request.Options.CacheFrom.Value == "" {
+		binding.RemoteCache = nil
+	} else if binding.RemoteCache == nil {
+		binding.RemoteCache = input.Storage.RemoteCache
+	}
 	input.Storage = binding
 	return input, nil
 }

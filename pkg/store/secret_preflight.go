@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // EventKindSecretPreflightRefused records the plan a run's required secrets
@@ -108,6 +109,9 @@ func quoteList(names []string) string {
 // own row, else a shared team-wide row), so a run that passes here is never
 // refused a declared secret later unless a row changes in between.
 func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, required []string) (err error) {
+	if run.Request.Request.Mode == runspec.IntakePublish {
+		return nil
+	}
 	if len(required) == 0 {
 		return nil
 	}

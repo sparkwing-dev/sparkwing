@@ -13,7 +13,7 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor Ac
 	if proof == nil {
 		return nil
 	}
-	if proof.Actor != actor.Authority || proof.Method != "POST" || proof.RunID != ref.RunID || proof.NodeID != ref.NodeID || proof.ClaimID != "" || proof.Generation != actor.Generation || proof.Attempt != attempt || len(proof.Digest) != 64 {
+	if proof.Actor != actor.Authority || proof.Method != "POST" || proof.RunID != ref.RunID || proof.NodeID != ref.NodeID || proof.ClaimID != "" || proof.Generation != actor.Generation || len(proof.Digest) != 64 {
 		return holderRefusal()
 	}
 	if _, err := hex.DecodeString(proof.Digest); err != nil {
@@ -35,7 +35,10 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor Ac
 		return err
 	}
 	c := p.Capability
-	if c.Team != string(team) || c.Binding.RunID != ref.RunID || c.Binding.Generation != proof.Generation || c.Binding.Holder != actor.Holder || actor.CapabilityPrefix != c.Prefix {
+	if c.Data != nil && c.Data.Use == capability.DataPublish && actor.Kind == ActorOperator {
+		attempt = c.Binding.Attempt
+	}
+	if c.Team != string(team) || c.Binding.RunID != ref.RunID || c.Binding.Generation != proof.Generation || c.Binding.Holder != actor.Holder || actor.CapabilityPrefix != c.Prefix || proof.Attempt != attempt {
 		return holderRefusal()
 	}
 	return nil

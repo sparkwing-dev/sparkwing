@@ -153,21 +153,23 @@ type RenewalResponse struct {
 
 // JobResult references authorized records, so a raw digest cannot grant reachability.
 type JobResult struct {
-	Outcome  string                `json:"outcome"`
-	Reason   string                `json:"reason,omitempty"`
-	Failure  *nodeproto.JobFailure `json:"failure,omitempty"`
-	ExitCode *int                  `json:"exit_code,omitempty"`
-	Output   *blob.RecordKey       `json:"output,omitempty"`
-	Manifest *blob.RecordKey       `json:"manifest,omitempty"`
+	MaskedError string                `json:"masked_error,omitempty"`
+	Outcome     string                `json:"outcome"`
+	Reason      string                `json:"reason,omitempty"`
+	Failure     *nodeproto.JobFailure `json:"failure,omitempty"`
+	ExitCode    *int                  `json:"exit_code,omitempty"`
+	Output      *blob.RecordKey       `json:"output,omitempty"`
+	Manifest    *blob.RecordKey       `json:"manifest,omitempty"`
 }
 
 // JobTransitionRequest carries a transition and the observed source attempt without caller authority.
 type JobTransitionRequest struct {
-	To            string     `json:"to"`
-	Cause         string     `json:"cause"`
-	SourceAttempt *int64     `json:"source_attempt,omitempty"`
-	Result        *JobResult `json:"result,omitempty"`
-	RetryAt       *time.Time `json:"retry_at,omitempty"`
+	Publication   *runspec.PublishedAttempt `json:"publication,omitempty"`
+	To            string                    `json:"to"`
+	Cause         string                    `json:"cause"`
+	SourceAttempt *int64                    `json:"source_attempt,omitempty"`
+	Result        *JobResult                `json:"result,omitempty"`
+	RetryAt       *time.Time                `json:"retry_at,omitempty"`
 }
 
 type Applied struct {

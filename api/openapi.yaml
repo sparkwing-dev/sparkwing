@@ -83,6 +83,104 @@ components:
         - generation
       type: object
       x-sparkwing-go-type: blob.LogUnit
+    internal.blob.Member:
+      additionalProperties: true
+      properties:
+        Digest:
+          type: string
+        ManifestDigest:
+          type: string
+        Mode:
+          type: integer
+        Path:
+          type: string
+        Size:
+          type: integer
+        Team:
+          type: string
+      required:
+        - Team
+        - ManifestDigest
+        - Digest
+        - Path
+        - Size
+        - Mode
+      type: object
+      x-sparkwing-go-type: blob.Member
+    internal.blob.ReadEdge:
+      additionalProperties: true
+      properties:
+        Digest:
+          type: string
+        Kind:
+          type: string
+        Reader:
+          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
+        Record:
+          $ref: '#/components/schemas/internal.blob.RecordKey'
+        Source:
+          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
+      required:
+        - Kind
+        - Reader
+        - Source
+        - Record
+        - Digest
+      type: object
+      x-sparkwing-go-type: blob.ReadEdge
+    internal.blob.ReadSet:
+      additionalProperties: true
+      properties:
+        Edges:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.blob.ReadEdge'
+              type: array
+            - type: "null"
+        Reader:
+          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
+      required:
+        - Reader
+        - Edges
+      type: object
+      x-sparkwing-go-type: blob.ReadSet
+    internal.blob.Record:
+      additionalProperties: true
+      properties:
+        CreatedAt:
+          format: date-time
+          type: string
+        Digest:
+          type: string
+        ExpiresAt:
+          $ref: '#/components/schemas/internal.runspec.Optional.time.Time.'
+        Key:
+          $ref: '#/components/schemas/internal.blob.RecordKey'
+        ManifestDigest:
+          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.Digest.'
+        Pinned:
+          type: boolean
+        Provenance:
+          type: string
+        RefFacts:
+          $ref: '#/components/schemas/internal.blob.RefFacts'
+        Source:
+          $ref: '#/components/schemas/internal.blob.UploadIdentity'
+        Uploader:
+          type: string
+      required:
+        - Key
+        - Digest
+        - ManifestDigest
+        - Uploader
+        - Source
+        - Provenance
+        - RefFacts
+        - CreatedAt
+        - ExpiresAt
+        - Pinned
+      type: object
+      x-sparkwing-go-type: blob.Record
     internal.blob.RecordKey:
       additionalProperties: true
       properties:
@@ -101,6 +199,55 @@ components:
         - Name
       type: object
       x-sparkwing-go-type: blob.RecordKey
+    internal.blob.RecordLookupResult:
+      additionalProperties: true
+      properties:
+        Found:
+          type: boolean
+        Members:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.blob.Member'
+              type: array
+            - type: "null"
+        ReadSet:
+          $ref: '#/components/schemas/internal.blob.ReadSet'
+        Record:
+          $ref: '#/components/schemas/internal.blob.Record'
+        VerifiedDefault:
+          type: boolean
+      required:
+        - Found
+        - VerifiedDefault
+        - Record
+        - Members
+        - ReadSet
+      type: object
+      x-sparkwing-go-type: blob.RecordLookupResult
+    internal.blob.RefFacts:
+      additionalProperties: true
+      properties:
+        AppDeliveryKey:
+          type: string
+        DefaultBranch:
+          type: string
+        DefaultBranchVerified:
+          type: boolean
+        PullRequestBase:
+          $ref: '#/components/schemas/internal.runspec.Optional.string.'
+        SHA:
+          type: string
+        Scope:
+          $ref: '#/components/schemas/internal.blob.RefScope'
+      required:
+        - Scope
+        - DefaultBranch
+        - DefaultBranchVerified
+        - AppDeliveryKey
+        - SHA
+        - PullRequestBase
+      type: object
+      x-sparkwing-go-type: blob.RefFacts
     internal.blob.RefScope:
       additionalProperties: true
       properties:
@@ -134,6 +281,51 @@ components:
         - Key
       type: object
       x-sparkwing-go-type: blob.Scope
+    internal.blob.UploadIdentity:
+      additionalProperties: true
+      properties:
+        Attempt:
+          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.AttemptIdentity.'
+        CapabilityRef:
+          type: string
+        Kind:
+          type: string
+        Principal:
+          type: string
+        RunID:
+          type: string
+        Team:
+          type: string
+        Unit:
+          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.UploadUnit.'
+      required:
+        - Kind
+        - Team
+        - RunID
+        - Principal
+        - CapabilityRef
+        - Attempt
+        - Unit
+      type: object
+      x-sparkwing-go-type: blob.UploadIdentity
+    internal.blob.UploadUnit:
+      additionalProperties: true
+      properties:
+        Generation:
+          type: integer
+        ID:
+          type: string
+        Kind:
+          type: string
+        Source:
+          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.AttemptIdentity.'
+      required:
+        - Kind
+        - ID
+        - Generation
+        - Source
+      type: object
+      x-sparkwing-go-type: blob.UploadUnit
     internal.capability.AuthorityRef:
       additionalProperties: true
       properties:
@@ -185,6 +377,47 @@ components:
         - kind
       type: object
       x-sparkwing-go-type: capability.Binding
+    internal.capability.ConsoleProof:
+      additionalProperties: true
+      properties:
+        Session:
+          $ref: '#/components/schemas/internal.capability.AuthorityRef'
+      required:
+        - Session
+      type: object
+      x-sparkwing-go-type: capability.ConsoleProof
+    internal.capability.DataScope:
+      additionalProperties: true
+      properties:
+        attempt:
+          type: integer
+        generation:
+          type: integer
+        job_id:
+          type: string
+        read_refs:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        repo_key:
+          type: string
+        run_id:
+          type: string
+        use:
+          type: string
+        verified_default_only:
+          type: boolean
+        write_ref:
+          type: string
+      required:
+        - use
+        - repo_key
+        - read_refs
+        - verified_default_only
+      type: object
+      x-sparkwing-go-type: capability.DataScope
     internal.capability.LeaseRef:
       additionalProperties: true
       properties:
@@ -274,6 +507,39 @@ components:
         - workflow_run_id
       type: object
       x-sparkwing-go-type: capability.PushScope
+    internal.capability.RecordedResult:
+      additionalProperties: true
+      properties:
+        Actor:
+          $ref: '#/components/schemas/internal.capability.AuthorityRef'
+        Attempt:
+          type: integer
+        ClaimID:
+          type: string
+        Digest:
+          type: string
+        Generation:
+          type: integer
+        Method:
+          type: string
+        NodeID:
+          type: string
+        Pattern:
+          type: string
+        RunID:
+          type: string
+      required:
+        - Actor
+        - Method
+        - Pattern
+        - RunID
+        - NodeID
+        - ClaimID
+        - Generation
+        - Attempt
+        - Digest
+      type: object
+      x-sparkwing-go-type: capability.RecordedResult
     internal.capability.Subject:
       additionalProperties: true
       properties:
@@ -1446,6 +1712,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.blob.RecordKey'
             - type: "null"
+        masked_error:
+          type: string
         outcome:
           type: string
         output:
@@ -1529,6 +1797,10 @@ components:
       properties:
         cause:
           type: string
+        publication:
+          anyOf:
+            - $ref: '#/components/schemas/internal.runspec.PublishedAttempt'
+            - type: "null"
         result:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.JobResult'
@@ -4593,6 +4865,30 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[[]string]
+    internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.Digest.:
+      additionalProperties: true
+      properties:
+        set:
+          type: boolean
+        value:
+          type: string
+      required:
+        - set
+        - value
+      type: object
+      x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/blob.Digest]
+    internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.UploadUnit.:
+      additionalProperties: true
+      properties:
+        set:
+          type: boolean
+        value:
+          $ref: '#/components/schemas/internal.blob.UploadUnit'
+      required:
+        - set
+        - value
+      type: object
+      x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/blob.UploadUnit]
     internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Actor.:
       additionalProperties: true
       properties:
@@ -4617,6 +4913,18 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/runspec.AppFacts]
+    internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.AttemptIdentity.:
+      additionalProperties: true
+      properties:
+        set:
+          type: boolean
+        value:
+          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
+      required:
+        - set
+        - value
+      type: object
+      x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/runspec.AttemptIdentity]
     internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.:
       additionalProperties: true
       properties:
@@ -4641,6 +4949,19 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[string]
+    internal.runspec.Optional.time.Time.:
+      additionalProperties: true
+      properties:
+        set:
+          type: boolean
+        value:
+          format: date-time
+          type: string
+      required:
+        - set
+        - value
+      type: object
+      x-sparkwing-go-type: runspec.Optional[time.Time]
     internal.runspec.Options:
       additionalProperties: true
       properties:
@@ -4752,6 +5073,32 @@ components:
         - hold
       type: object
       x-sparkwing-go-type: runspec.PlacementStep
+    internal.runspec.PublishedAttempt:
+      additionalProperties: true
+      properties:
+        attempt:
+          type: integer
+        executor:
+          type: string
+        finished_at:
+          format: date-time
+          type: string
+        generation:
+          type: integer
+        outcome:
+          type: string
+        started_at:
+          format: date-time
+          type: string
+      required:
+        - attempt
+        - generation
+        - started_at
+        - finished_at
+        - outcome
+        - executor
+      type: object
+      x-sparkwing-go-type: runspec.PublishedAttempt
     internal.runspec.PullRequest:
       additionalProperties: true
       properties:
@@ -5294,6 +5641,10 @@ components:
     pkg.controller.client.CreateTokenRequest:
       additionalProperties: true
       properties:
+        data:
+          anyOf:
+            - $ref: '#/components/schemas/internal.capability.DataScope'
+            - type: "null"
         expires_at:
           anyOf:
             - format: date-time
@@ -5326,6 +5677,8 @@ components:
               type: array
             - type: "null"
         prefix:
+          type: string
+        principal:
           type: string
         team:
           type: string
@@ -5402,6 +5755,398 @@ components:
         - memory_bytes
       type: object
       x-sparkwing-go-type: match.Resources
+    pkg.store.AcceptedExpansionRow:
+      additionalProperties: true
+      properties:
+        Body: {}
+        BodyHash:
+          type: string
+        Source:
+          $ref: '#/components/schemas/pkg.store.NodeRef'
+        SourceGeneration:
+          type: integer
+      required:
+        - Source
+        - SourceGeneration
+        - Body
+        - BodyHash
+      type: object
+      x-sparkwing-go-type: store.AcceptedExpansionRow
+    pkg.store.Actor:
+      additionalProperties: true
+      properties:
+        Authority:
+          $ref: '#/components/schemas/internal.capability.AuthorityRef'
+        CapabilityPrefix:
+          type: string
+        ConsoleProof:
+          anyOf:
+            - $ref: '#/components/schemas/internal.capability.ConsoleProof'
+            - type: "null"
+        Generation:
+          type: integer
+        Holder:
+          type: string
+        Kind:
+          type: string
+        Owner:
+          $ref: '#/components/schemas/pkg.store.OwnerLeaseRef'
+        Result:
+          anyOf:
+            - $ref: '#/components/schemas/internal.capability.RecordedResult'
+            - type: "null"
+      required:
+        - Result
+        - ConsoleProof
+        - Authority
+        - Kind
+        - CapabilityPrefix
+        - Holder
+        - Generation
+        - Owner
+      type: object
+      x-sparkwing-go-type: store.Actor
+    pkg.store.LocalPublication:
+      additionalProperties: true
+      properties:
+        Expansions:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.store.AcceptedExpansionRow'
+              type: array
+            - type: "null"
+        Nodes:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.store.NodeRow'
+              type: array
+            - type: "null"
+        Run:
+          $ref: '#/components/schemas/pkg.store.RunRow'
+        StoreNow:
+          format: date-time
+          type: string
+        publication_records:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.blob.RecordLookupResult'
+              type: array
+            - type: "null"
+        publication_results:
+          anyOf:
+            - additionalProperties:
+                $ref: '#/components/schemas/pkg.store.NodeResult'
+              type: object
+            - type: "null"
+      required:
+        - Run
+        - Nodes
+        - Expansions
+        - StoreNow
+      type: object
+      x-sparkwing-go-type: store.LocalPublication
+    pkg.store.NodeRef:
+      additionalProperties: true
+      properties:
+        job_id:
+          type: string
+        run_id:
+          type: string
+      required:
+        - run_id
+        - job_id
+      type: object
+      x-sparkwing-go-type: store.NodeRef
+    pkg.store.NodeResult:
+      additionalProperties: true
+      properties:
+        ExitCode:
+          anyOf:
+            - type: integer
+            - type: "null"
+        Failure:
+          anyOf:
+            - $ref: '#/components/schemas/internal.nodeproto.JobFailure'
+            - type: "null"
+        ManifestRecord:
+          anyOf:
+            - $ref: '#/components/schemas/internal.blob.RecordKey'
+            - type: "null"
+        MaskedError:
+          type: string
+        Outcome:
+          type: string
+        OutputRecord:
+          anyOf:
+            - $ref: '#/components/schemas/internal.blob.RecordKey'
+            - type: "null"
+        Reason:
+          type: string
+      required:
+        - Outcome
+        - Reason
+        - MaskedError
+        - ExitCode
+        - OutputRecord
+        - ManifestRecord
+        - Failure
+      type: object
+      x-sparkwing-go-type: store.NodeResult
+    pkg.store.NodeRow:
+      additionalProperties: true
+      properties:
+        ApplicationRetries:
+          type: integer
+        Attempt:
+          type: integer
+        CancelReason:
+          type: string
+        CancelRequestedAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        CapabilityPrefix:
+          type: string
+        ClaimedBy:
+          type: string
+        Disruptions:
+          type: integer
+        Execution:
+          $ref: '#/components/schemas/internal.runspec.JobExecutionSettings'
+        Expansion:
+          type: string
+        ExpansionDigest:
+          type: string
+        FinishedAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        Generation:
+          type: integer
+        LeaseExpiresAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        ManifestRecord:
+          anyOf:
+            - $ref: '#/components/schemas/internal.blob.RecordKey'
+            - type: "null"
+        Outcome:
+          type: string
+        OutputRecord:
+          anyOf:
+            - $ref: '#/components/schemas/internal.blob.RecordKey'
+            - type: "null"
+        OwnerCapabilityPrefix:
+          type: string
+        OwnerExecution:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.store.OwnerExecution'
+            - type: "null"
+        QueueStartedAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        ReadyAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        Ref:
+          $ref: '#/components/schemas/pkg.store.NodeRef'
+        Spec: {}
+        SpecHash:
+          type: string
+        StartedAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        StateActor:
+          $ref: '#/components/schemas/pkg.store.Actor'
+        StateDigest:
+          type: string
+        StateSeq:
+          type: integer
+        Status:
+          type: string
+        StatusDetail:
+          type: string
+      required:
+        - Ref
+        - Status
+        - Outcome
+        - StatusDetail
+        - ClaimedBy
+        - CapabilityPrefix
+        - OwnerCapabilityPrefix
+        - Generation
+        - Attempt
+        - ApplicationRetries
+        - Disruptions
+        - ReadyAt
+        - QueueStartedAt
+        - LeaseExpiresAt
+        - StartedAt
+        - FinishedAt
+        - CancelRequestedAt
+        - CancelReason
+        - StateSeq
+        - StateDigest
+        - StateActor
+        - Expansion
+        - ExpansionDigest
+        - Execution
+        - Spec
+        - SpecHash
+        - OutputRecord
+        - ManifestRecord
+      type: object
+      x-sparkwing-go-type: store.NodeRow
+    pkg.store.OwnerExecution:
+      additionalProperties: true
+      properties:
+        Allowed:
+          type: boolean
+        Generation:
+          type: integer
+        Node:
+          $ref: '#/components/schemas/pkg.store.NodeRef'
+        NodeGeneration:
+          type: integer
+        Owner:
+          $ref: '#/components/schemas/internal.capability.AuthorityRef'
+        SpecHash:
+          type: string
+        Team:
+          type: string
+      required:
+        - Owner
+        - Team
+        - Generation
+        - Node
+        - NodeGeneration
+        - SpecHash
+        - Allowed
+      type: object
+      x-sparkwing-go-type: store.OwnerExecution
+    pkg.store.OwnerLeaseRef:
+      additionalProperties: true
+      properties:
+        Generation:
+          type: integer
+        Holder:
+          type: string
+        Kind:
+          type: string
+        Name:
+          type: string
+        RunID:
+          type: string
+        SourceGeneration:
+          type: integer
+        SourceNodeID:
+          type: string
+      required:
+        - Kind
+        - Name
+        - RunID
+        - SourceNodeID
+        - SourceGeneration
+        - Holder
+        - Generation
+      type: object
+      x-sparkwing-go-type: store.OwnerLeaseRef
+    pkg.store.RunRow:
+      additionalProperties: true
+      properties:
+        AllowedPools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        CancelReason:
+          type: string
+        CancelRequestedAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        CreatedAt:
+          format: date-time
+          type: string
+        Dispatch:
+          type: string
+        FinishedAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        ID:
+          type: string
+        Lineage:
+          $ref: '#/components/schemas/internal.runspec.Lineage'
+        Number:
+          type: integer
+        Owner:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.store.OwnerLeaseRef'
+            - type: "null"
+        Pipeline:
+          type: string
+        Plan: {}
+        PlanHash:
+          type: string
+        Request:
+          $ref: '#/components/schemas/internal.runspec.SealedRequest'
+        Spec:
+          anyOf:
+            - $ref: '#/components/schemas/internal.runspec.Spec'
+            - type: "null"
+        StartedAt:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        State:
+          type: string
+        StateActor:
+          $ref: '#/components/schemas/pkg.store.Actor'
+        StateDigest:
+          type: string
+        StateSeq:
+          type: integer
+        Team:
+          type: string
+      required:
+        - ID
+        - Number
+        - Team
+        - Pipeline
+        - State
+        - Request
+        - Lineage
+        - Spec
+        - Plan
+        - PlanHash
+        - Dispatch
+        - AllowedPools
+        - Owner
+        - CreatedAt
+        - CancelRequestedAt
+        - CancelReason
+        - StartedAt
+        - FinishedAt
+        - StateSeq
+        - StateDigest
+        - StateActor
+      type: object
+      x-sparkwing-go-type: store.RunRow
     pkg.wingwire.BudgetState:
       additionalProperties: true
       properties:
@@ -6261,6 +7006,19 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/data/commit:
     post:
+      parameters:
+        - in: query
+          name: job
+          schema:
+            type: string
+        - in: query
+          name: attempt
+          schema:
+            type: integer
+        - in: query
+          name: generation
+          schema:
+            type: integer
       requestBody:
         content:
           application/json:
@@ -6619,6 +7377,19 @@ paths:
             liveness: credential
         retry: safe
     post:
+      parameters:
+        - in: query
+          name: job
+          schema:
+            type: string
+        - in: query
+          name: attempt
+          schema:
+            type: integer
+        - in: query
+          name: generation
+          schema:
+            type: integer
       requestBody:
         content:
           application/json:
@@ -6744,6 +7515,18 @@ paths:
           name: Idempotency-Key
           schema:
             type: string
+        - in: query
+          name: job
+          schema:
+            type: string
+        - in: query
+          name: attempt
+          schema:
+            type: integer
+        - in: query
+          name: generation
+          schema:
+            type: integer
       requestBody:
         content:
           application/json:
@@ -12005,7 +12788,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/snapshot:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -12013,13 +12795,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/pkg.store.LocalPublication'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/local-host/snapshot
+      summary: Read awarded execution state or export completed local history as the verified local peer
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/local-host/snapshot
@@ -12042,8 +12830,12 @@ paths:
               - expansion.submit
             binding: run
             liveness: expansion
+          - credential: verified_local_peer
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/transition:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

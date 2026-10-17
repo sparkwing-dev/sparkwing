@@ -3553,3 +3553,24 @@ Named refs escape their colons, so a literal `manual:` ref cannot alias it.
 An empty verified ref is invalid. The dependency-cache client preserves the
 absent unverified ref on lookup instead of rejecting a valid local hit.
 No table, credential grant or public API changes.
+
+## Imported local history
+
+CausePublishAttempt (`publish_attempt`) is a pending-to-pending operator edge
+under GuardPublication. TransitionExtra.Publication carries PublishedAttempt:
+positive ordinal and generation, completed timestamps, terminal outcome and
+executor name. Import creates one terminal local node_attempts row, without an
+award, live holder, lease, trigger or billing reservation. It rejects a second import
+with changed bytes. CausePublish must agree with that imported outcome. Imported
+results retain the normal receipt, exact-attempt record and member checks.
+Publication result proofs keep the publisher's own zero attempt separate from
+the imported execution attempt. Secret availability preflight applies to
+executable intake, while publish-mode plans require no execution secrets.
+
+Tenant.ReadLocalPublication reads terminal state and its selected result records
+and verified members. The controller exposes it only to the verified local peer
+on the existing private snapshot route. Local CAS readers use ObjectKey and an
+os.Root, and signed uploads verify the digest and size again.
+
+Local publication reuses the persisted result reader used by materialization,
+retaining failure reasons, masked errors, exit codes and structured failures.

@@ -92,7 +92,7 @@ func TestParseEngineEndpointsUsesActualRegistrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/jobs/{job}/expansion", Scope: "expansion.submit"}}
+	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/jobs/{job}/expansion", Scope: "expansion.submit` or `expansion.submit"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("engine registrations = %+v, want %+v", got, want)
 	}
@@ -179,7 +179,7 @@ func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/source-credential", Scope: "source.read"}, {Method: "PUT", Path: "/api/v1/tokens/{token}/git-credentials", Scope: Authenticated}}
+	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/source-credential", Scope: "source.read` or `source.read"}, {Method: "PUT", Path: "/api/v1/tokens/{token}/git-credentials", Scope: Authenticated}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("source registrations=%+v want=%+v", got, want)
 	}
@@ -386,7 +386,7 @@ func TestParseDataEndpointsUsesActualRegistrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Route{
-		{Method: "POST", Path: "/api/v1/data/download", Scope: "data.read` or `data.read` or `data.read"},
+		{Method: "POST", Path: "/api/v1/data/download", Scope: "data.read` or `data.read` or `data.read` or `source.read"},
 		{Method: "POST", Path: "/api/v1/data/has-many", Scope: "data.read` or `data.read` or `data.read"},
 	}
 	if !reflect.DeepEqual(got, want) {

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -20,17 +19,7 @@ func (s *DataController) persistedDataAuthority(ctx context.Context, a capabilit
 	if err != nil {
 		return blob.Authority{}, err
 	}
-	selector := blob.Authority{CapabilityRef: c.Prefix}
-	if target := a.Target.Data; c.Data != nil && c.Data.Use == capability.DataPublish && target != nil && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {
-		selector.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: c.Team, RunID: target.RunID, NodeID: target.NodeID, Attempt: target.Attempt, Generation: target.Generation}}
-	}
-	grant := capability.DataRead
-	if slices.Contains(a.Access.Grants, capability.DataWrite) {
-		grant = capability.DataWrite
-	} else if a.Access.Binding == capability.BindSourceBundle && slices.Contains(a.Access.Grants, capability.SourceRead) {
-		grant = capability.SourceRead
-	}
-	return tenant.ResolveBlobAuthority(ctx, selector, grant)
+	return tenant.ResolveDataAuthority(ctx, a)
 }
 
 func dataForbidden() *apierr.Error {

@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -65,6 +67,10 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	}
 	return localRunRuntime{
 		controller: controller,
+		openCache:  openLocalProfileCache,
+		publish: func(ctx context.Context, profile, run string) error {
+			return publishLocalProfile(ctx, home, transport, profile, run)
+		},
 		follow: func(ctx context.Context, run, format string, out io.Writer) error {
 			return followControllerRunLogs(ctx, transport, run, format, out)
 		},
@@ -82,6 +88,44 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 			return bindLocalRunHost(ctx, home, transport, award)
 		},
 	}, nil
+}
+
+func openLocalProfileCache(ctx context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: request.Source.Location.LocalCheckout, pipeline: request.Pipeline, environment: os.Environ(), githubID: func(ctx context.Context, remote string) (int64, error) {
+		return lookupTriggerGitHubID(ctx, remote, os.Environ())
+	}})
+	if err != nil {
+		return nil, nil, err
+	}
+	cache, closeCache, err := openProfileCache(ctx, profile, selected.git)
+	if err == nil {
+		request.Git.Repository, request.Git.Ref, request.Git.DefaultBranch = selected.git.Repository, selected.git.Ref, selected.git.DefaultBranch
+	}
+	return cache, closeCache, err
+}
+
+func openProfileCache(ctx context.Context, profile string, git runspec.Git) (blob.RemoteCache, func() error, error) {
+	if !git.DefaultBranch.Set || git.DefaultBranch.Value == "" {
+		return nil, nil, errors.New("run: cache profile requires origin's default branch")
+	}
+	options, closeConnection, err := controllerOptions(ctx, profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	credential, err := client.OpenProfileData(ctx, options, capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: string(git.Repository.Key), ReadRefs: []string{git.DefaultBranch.Value}, VerifiedDefaultOnly: true})
+	if err != nil {
+		closeConnection()
+		return nil, nil, err
+	}
+	closeCache := func() error {
+		defer closeConnection()
+		return credential.Close(context.WithoutCancel(ctx))
+	}
+	cache, err := credential.RemoteCache(profile)
+	if err != nil {
+		return nil, nil, errors.Join(err, closeCache())
+	}
+	return cache, closeCache, nil
 }
 
 func hostSourceOptions(home string, captured []string, masker *secrets.Masker, local bool) (source.Options, error) {

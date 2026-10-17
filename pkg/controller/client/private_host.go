@@ -31,6 +31,20 @@ type localNodeBearer struct {
 	generation int64
 }
 
+// ReadLocalPublication exports terminal local state under operating-system peer authority.
+func ReadLocalPublication(ctx context.Context, options EngineOptions, run string) (store.LocalPublication, error) {
+	c, err := newEngineClient(options)
+	if err != nil {
+		return store.LocalPublication{}, err
+	}
+	var result store.LocalPublication
+	err = c.request(ctx, "GET", "/api/v1/runs/{run}/local-host/snapshot", "/api/v1/runs/"+url.PathEscape(run)+"/local-host/snapshot", "", nil, &result)
+	if err == nil && result.Run.ID != run {
+		err = localHostClientRefusal()
+	}
+	return result, err
+}
+
 // NewLocalHostClient uses the authenticated local controller API without opening state.
 func NewLocalHostClient(options EngineOptions, runID string) (*LocalHostClient, error) {
 	if runID == "" || options.Bearer == nil {
@@ -116,6 +130,18 @@ func (c *LocalHostClient) ReadSnapshot(ctx context.Context, run string) (store.R
 func (c *LocalHostClient) ReadNode(ctx context.Context, ref store.NodeRef) (store.NodeRow, error) {
 	var result store.NodeRow
 	if ref.RunID != c.run || ref.NodeID == "" {
+		return result, localHostClientRefusal()
+	}
+	if c.node != "" && ref.NodeID != c.node {
+		snapshot, err := c.ReadSnapshot(ctx, c.run)
+		if err != nil {
+			return result, err
+		}
+		for _, node := range snapshot.Nodes {
+			if node.Ref == ref {
+				return node, nil
+			}
+		}
 		return result, localHostClientRefusal()
 	}
 	if err := c.request(ctx, "GET", "", ref.NodeID, nil, &result); err != nil {

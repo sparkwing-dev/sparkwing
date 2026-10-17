@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -57,18 +56,7 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 			return remote.Secret(ctx, name)
 		}
 		service.Output = func(ctx context.Context, _ capability.Authorized, job string) (json.RawMessage, error) {
-			row, err := cfg.Store.ReadNode(ctx, store.NodeRef{RunID: service.RunID, NodeID: job})
-			if err != nil {
-				return nil, err
-			}
-			if row.OutputRecord == nil {
-				return nil, blob.ErrNotFound
-			}
-			storage, err := cfg.Storage(ctx, p)
-			if err != nil {
-				return nil, err
-			}
-			return (nodehost.OutputRecords{Blobs: storage.Bytes, Records: storage.Records}).ReadOutput(ctx, blob.RecordLookup{Authority: storage.Authority, Key: *row.OutputRecord})
+			return remote.Output(ctx, service.RunID, job)
 		}
 		service.Latest = func(ctx context.Context, _ capability.Authorized, pipeline, job string, age time.Duration) (nodehost.ProcessOutput, error) {
 			run, output, err := remote.Latest(ctx, pipeline, job, age)

@@ -51,8 +51,14 @@ selects the controller for `pipeline trigger`, run observations and management.
 | `sparkwing pipeline trigger build --profile prod --runner here --reason repair` | This CLI hosts the controller's named here run. |
 
 An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
-file. Publication still needs its authorized result/log publisher. A missing
-publisher fails before intake. It cannot change a completed local verdict.
+file. The selected cache profile supplies a temporary repository reader for
+verified default-branch records. The credential follows the profile's live
+membership and revocation and is revoked when the host closes.
+
+`--publish P` uploads completed local job results, artifacts and retained logs
+to profile P. Publication creates history with local provenance and no execution
+claim. A publication error prints a warning and preserves the local verdict.
+Background local runs publish when their host closes.
 
 Local schedule registration, pins, timer installation and `__tick` use the
 controller and lifecycle services. Timers carry their absolute state home into

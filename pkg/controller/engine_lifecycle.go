@@ -18,25 +18,11 @@ func (s *EngineController) TransitionJob(ctx context.Context, a capability.Autho
 	if err != nil {
 		return controllerwire.Applied{}, err
 	}
-	change := store.NodeTransition{
-		Ref: store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
-		To:  store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), Actor: engineActor(a),
-		SourceAttempt: body.SourceAttempt, Extra: store.TransitionExtra{RetryAt: body.RetryAt},
+	change, err := nodeTransitionForStore(a, body)
+	if err != nil {
+		return controllerwire.Applied{}, err
 	}
-	if body.Result != nil {
-		var masked string
-		var err error
-		if body.Result.Failure != nil {
-			masked, err = engineMaskedError(body.Result.Failure.Error)
-		}
-		if err != nil {
-			return controllerwire.Applied{}, err
-		}
-		change.Extra.Result = &store.NodeResult{
-			Outcome: store.NodeState(body.Result.Outcome), Reason: body.Result.Reason,
-			Failure: body.Result.Failure, MaskedError: masked, ExitCode: body.Result.ExitCode, OutputRecord: body.Result.Output, ManifestRecord: body.Result.Manifest,
-		}
-	}
+
 	applied, err := tenant.TransitionNode(ctx, change)
 	return appliedResponse(applied), engineLookupError(err)
 }
@@ -146,15 +132,26 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 	change := store.NodeTransition{
 		Ref: store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
 		To:  store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), Actor: engineActor(a),
-		SourceAttempt: body.SourceAttempt, Extra: store.TransitionExtra{RetryAt: body.RetryAt},
+		SourceAttempt: body.SourceAttempt, Extra: store.TransitionExtra{RetryAt: body.RetryAt, Publication: body.Publication},
 	}
 	if result := body.Result; result != nil {
+		if int64(len(result.MaskedError)) > limits.ErrorBytes {
+			return store.NodeTransition{}, invalidEngineBody("masked result error exceeds its byte limit")
+		}
 		change.Extra.Result = &store.NodeResult{
 			Outcome: store.NodeState(result.Outcome), Reason: result.Reason,
-			ExitCode: result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest, Failure: result.Failure,
+			MaskedError: result.MaskedError,
+			ExitCode:    result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest, Failure: result.Failure,
 		}
-		if result.Failure != nil && result.Failure.Error != nil {
-			change.Extra.Result.MaskedError = result.Failure.Error.Message
+		if result.Failure != nil {
+			masked, err := engineMaskedError(result.Failure.Error)
+			if err != nil {
+				return store.NodeTransition{}, err
+			}
+			if result.MaskedError != "" && result.MaskedError != masked {
+				return store.NodeTransition{}, invalidEngineBody("masked result error differs from its structured failure")
+			}
+			change.Extra.Result.MaskedError = masked
 		}
 	}
 	return change, nil

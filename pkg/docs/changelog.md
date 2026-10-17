@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **local runs:** Construct temporary scoped profile credentials for cache reads
+  and publication. Publish completed local results, artifacts and logs through
+  the shared controller APIs without scheduling execution. Publication failures
+  warn and preserve the local result.
+
 - **data:** Preserve verified default-branch cache selection across controller
   reads without exposing private source evidence. Resolve an omitted ref from
   authorized cache refs.

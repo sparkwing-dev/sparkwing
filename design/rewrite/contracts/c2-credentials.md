@@ -3290,3 +3290,34 @@ A private package context proof carries the resolved location and repository
 through the intake transaction; policy refuses missing or changed proofs and
 does not open a second SQLite connection inside the transaction. The proof is
 absent from the wire and seal. CLI environment tokens stay at the GitHub API.
+
+## Profile data opt-ins
+
+POST /api/v1/tokens accepts optional `data` with the shared DataScope shape.
+An unbound account credential with runs.read can narrow to exactly data.read,
+one repository, nonempty ReadRefs and VerifiedDefaultOnly. It cannot name a
+run, job, attempt, generation or WriteRef. An account with runs.write can narrow
+to exactly data.write for its own publish-mode intake and its sealed repository
+and manual ref. These remain Delegate credentials parented to the presented
+profile or session. Current parent grants, repository scope, membership, expiry
+and revocation constrain every use through InheritedGrants. The response includes
+the accountable principal for constructing the private storage binding.
+
+The existing local-host snapshot route adds a verified_local_peer alternative
+with runs.read, no resource binding and ordinary credential liveness. Its
+completed-local export includes only the run's selected output and manifest
+records and their verified members. Account, machine and bearer presentations
+cannot select that alternative. Peer identity comes from the local connection.
+For publication, BindData on plan, result, log and finish routes verifies the
+publish intake even when there is no object selector. Signed data POSTs accept
+job, attempt and generation query selectors together only under DataPublish.
+C1 rechecks the imported terminal attempt and upload identity before each write.
+
+The node-bound snapshot adds minimal rows for declared Consumes producers only
+once terminal: node identity, status, outcome, attempt/generation and manifest
+record selector. It exposes no producer declaration, owner decision or credential.
+LocalHostClient.ReadNode resolves those projections through its own node snapshot;
+private reads, writes and credential selection for other nodes stay refused.
+
+Typed dependency outputs use the existing authorized output route rather than
+reading another job's private row in process-service composition.

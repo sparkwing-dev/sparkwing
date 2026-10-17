@@ -90,10 +90,74 @@ func TestBurstPublicRunFallsBackLocallyWithRequesterSecrets(t *testing.T) {
 	}
 	read := exec.CommandContext(ctx, cli, "runs", "status", "--run", handle.RunID, "-o=json")
 	read.Dir = repo
+	var stderr bytes.Buffer
+	read.Stderr = &stderr
 	body, err = read.Output()
 	var detail controllerwire.RunDetail
 	if err != nil || json.Unmarshal(body, &detail) != nil || detail.Status != "success" || len(detail.Jobs) != 2 {
-		t.Fatalf("fallback did not finish in local history: %v\n%s", err, body)
+		t.Fatalf("fallback did not finish in local history: %v\n%s\n%s", err, body, stderr.String())
+	}
+}
+
+func TestBurstPublicRunPublishesCompletedLocalHistory(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		t.Skipf("native publication requires sockets: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	cli := buildSubmitCLI(t)
+	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("TOKEN", burstIntakeSecret)
+	repo := burstIntakeRepository(t)
+	endpoint := "http://" + listener.Addr().String()
+	if err := os.Remove(filepath.Join(repo, ".env")); err != nil {
+		t.Fatal(err)
+	}
+	state, controller, bearer := burstIntakeController(t, endpoint)
+	server := httptest.NewUnstartedServer(controller.Handler())
+	if err := server.Listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server.Listener = listener
+	server.Start()
+	t.Cleanup(server.Close)
+	config := filepath.Join(home, "config.yaml")
+	t.Setenv("SPARKWING_CONFIG", config)
+	if err := os.WriteFile(config, []byte(fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: local\n    local_secrets: [TOKEN]\n", endpoint, bearer)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offlineStopDaemon(t, home)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, cli, "run", "burst", "--publish", "cloud", "-o=json")
+	command.Dir = repo
+	output, err := command.CombinedOutput()
+	if err != nil || !bytes.Contains(output, []byte("burst-edited-ok secret=*** encoded=***")) || bytes.Contains(output, []byte("publication failed")) || bytes.Contains(output, []byte(burstIntakeSecret)) {
+		t.Fatalf("public local publication: %v\n%s", err, output)
+	}
+	reader, err := client.NewRunReader(client.EngineOptions{URL: endpoint, Bearer: func(context.Context) (string, error) { return bearer, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := reader.ListRuns(ctx, controllerwire.RunQuery{Pipeline: "burst", Limit: 10})
+	if err != nil || len(page.Runs) != 1 || page.Runs[0].Status != "success" {
+		t.Fatalf("published local history: %+v %v\n%s", page, err, output)
+	}
+	tenant, err := state.ForTeam(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := tenant.ReadSnapshot(ctx, page.Runs[0].ID)
+	if err != nil || snapshot.Run.Owner != nil || snapshot.Run.Request.Request.Mode != "publish" || len(snapshot.Nodes) != 2 || snapshot.Nodes[0].ManifestRecord == nil {
+		t.Fatalf("publication lost local result graph: %+v %v", snapshot, err)
 	}
 }
 
@@ -133,6 +197,8 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	endpoint := "http://" + listener.Addr().String()
 	state, controller, bearer := burstIntakeController(t, endpoint)
 	var personalAwarded atomic.Bool
+	runnerReady := make(chan struct{})
+	var runnerObserved sync.Once
 	handler := controller.Handler()
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/runners/claim" {
@@ -142,6 +208,9 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 		recorded := httptest.NewRecorder()
 		handler.ServeHTTP(recorded, r)
 		var result controllerwire.ClaimResponse
+		if recorded.Code == http.StatusOK {
+			runnerObserved.Do(func() { close(runnerReady) })
+		}
 		if recorded.Code == http.StatusOK && json.Unmarshal(recorded.Body.Bytes(), &result) == nil && result.Claim != nil && result.Claim.Unit == capability.UnitNode && result.Claim.Runner.Name == "burst-desktop" {
 			personalAwarded.Store(true)
 		}
@@ -162,7 +231,7 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	if contended {
 		contents += "    prefer: [{target: here}, {target: machines}]\n"
 	} else if personal {
-		contents += "    prefer: [{target: machines}]\n"
+		contents += "    prefer: [{target: machines, hold: 1m}]\n"
 	}
 	if err := os.WriteFile(config, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
@@ -188,6 +257,11 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	invoke("overflow", "set", "--profile", "cloud", "--minutes", "0", "-o=json")
 	if personal {
 		burstPublicPersonalRunner(t, ctx, cli, repo, state)
+		select {
+		case <-runnerReady:
+		case <-ctx.Done():
+			t.Fatal("registered personal machine did not complete its first authenticated poll")
+		}
 	}
 	if contended {
 		invoke("runs", "list", "-o=json")

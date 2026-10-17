@@ -192,6 +192,7 @@ type StateEventRule struct {
 // Cancellation requests emit job_cancel_requested while preserving claimed/running state until the holder drains.
 func NodeEvents() []StateEventRule {
 	return []StateEventRule{
+		{false, CausePublishAttempt, NodePending, "job_attempt_imported"},
 		{false, CauseRelease, NodeReady, "job_ready"},
 		{false, CauseRelease, NodePending, "job_requeued"},
 		{false, CauseRevoke, NodePending, "job_revoked"},

@@ -124,6 +124,9 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 		if rule == capability.BindReadSet {
 			return bindingDeclaredReadTx(ctx, tx, c, target)
 		}
+		if rule == capability.BindData && c.Data != nil && c.Data.Use == capability.DataPublish && target.RunID == c.Data.RunID {
+			return checkPublisherTx(ctx, tx, Team(c.Team), Actor{Kind: ActorOperator, Authority: p.Authority, CapabilityPrefix: c.Prefix}, target.RunID)
+		}
 	case capability.BindSource:
 		return bindingSourceTx(ctx, tx, c, target)
 	case capability.BindDeclaredSecret:

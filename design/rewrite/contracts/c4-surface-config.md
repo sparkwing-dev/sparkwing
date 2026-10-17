@@ -1076,3 +1076,19 @@ It uses the public controller log reader and selected output mode while the
 CLI hosts execution. Host and follower are joined before return. This preserves
 masked terminal output during offline Cloud fallback. No new flag or output
 format is added.
+
+## Local profile data construction and publication
+
+The CLI resolves --sw-cache-from against the checkout's canonical remote
+repository and origin default branch before sealing. It opens a temporary
+verified-default reader through the selected profile and revokes it on host
+cleanup. Background hosts use the sealed repository facts. Refreshing a job's
+attempt storage preserves the read-only cache only for the sealed local opt-in.
+
+--publish runs after local completion. The profile admits publish-mode history,
+imports terminal local attempts, copies selected output/artifact bytes through
+signed storage and streams retained logs through the shared log uploader. Local
+history is exported through verified peer authentication. Publication failure
+warns without changing the local verdict. The background local host publishes
+on cleanup. Historical generated topology is flattened to explicit dependencies;
+closure generation does not run during import.

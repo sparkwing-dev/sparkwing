@@ -2,12 +2,15 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"net/http"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -41,7 +44,18 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 	}
 	for _, node := range snapshot.Nodes {
 		if node.Ref.NodeID == a.Target.NodeID {
-			snapshot.Nodes = []store.NodeRow{node}
+			var job nodeproto.JobSpec
+			if err := json.Unmarshal(node.Spec, &job); err != nil {
+				return err
+			}
+			visible := []store.NodeRow{node}
+			for _, source := range snapshot.Nodes {
+				if source.Ref == node.Ref || source.Status != store.StatusDone || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return edge.Producer == source.Ref.NodeID }) {
+					continue
+				}
+				visible = append(visible, store.NodeRow{Ref: source.Ref, Status: source.Status, Outcome: source.Outcome, Generation: source.Generation, Attempt: source.Attempt, ManifestRecord: source.ManifestRecord})
+			}
+			snapshot.Nodes = visible
 			writeJSON(w, http.StatusOK, snapshot)
 			return nil
 		}
@@ -55,7 +69,17 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 		return err
 	}
 	ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
-	snapshot, err := tenant.ReadOwnerSnapshot(ctx, a.Principal.Authority, a.Target.RunID)
+	var snapshot store.RunSnapshot
+	if a.Access.Credential == capability.CredentialLocalPeer {
+		publication, err := tenant.ReadLocalPublication(ctx, a.Target.RunID)
+		if err != nil {
+			return engineLookupError(err)
+		}
+		writeJSON(w, http.StatusOK, publication)
+		return nil
+	} else {
+		snapshot, err = tenant.ReadOwnerSnapshot(ctx, a.Principal.Authority, a.Target.RunID)
+	}
 	if err != nil {
 		return engineLookupError(err)
 	}

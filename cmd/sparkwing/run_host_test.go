@@ -657,13 +657,39 @@ func TestLocalRemoteCacheRequiresTheSealedOptIn(t *testing.T) {
 			}
 		})
 	}
-	for _, flags := range []runFlags{{cacheFrom: "cache"}, {publish: "history"}} {
+	for _, flags := range []runFlags{{cacheFrom: "cache"}} {
 		var calls []string
 		deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 		err := runLocalCommand(t.Context(), "ci", flags, []string{"--password", "private-value"}, io.Discard, deps)
 		var unavailable *apierr.Error
 		if !errors.As(err, &unavailable) || unavailable.Code != apierr.Unavailable || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "close"}) {
 			t.Fatalf("unbound storage reached intake: calls=%v error=%v", calls, err)
+		}
+	}
+}
+
+func TestLocalPublicationFailurePreservesExecutionVerdict(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		var calls []string
+		deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+		resolve := deps.resolve
+		published := false
+		deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
+			runtime, err := resolve(ctx, opts)
+			runtime.publish = func(_ context.Context, profile, run string) error {
+				published = true
+				if profile != "history" || run != "local-run" {
+					t.Fatal("publication lost its profile or local run")
+				}
+				if fail {
+					return errors.New("profile unavailable")
+				}
+				return nil
+			}
+			return runtime, err
+		}
+		if err := runLocalCommand(t.Context(), "ci", runFlags{publish: "history"}, []string{"--password", "private-value"}, io.Discard, deps); err != nil || !published {
+			t.Fatalf("publication changed local verdict: published=%v err=%v", published, err)
 		}
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -227,12 +228,19 @@ func childOutputSQL(t *testing.T, st *store.Store, query string, args ...any) {
 	}
 }
 
+type childOutputCapacity struct{}
+
+func (childOutputCapacity) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+	return match.Profile{Capacity: match.Resources{Cores: 2}}, match.Resources{Cores: 2}, nil
+}
+
 func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, httpClient *http.Client, run string) {
 	t.Helper()
+	st.SetClaimProfileResolver(childOutputCapacity{})
 	if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'stamp','pending',1,?,?)`, run, []byte(`{"id":"stamp"}`), []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := st.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: run, NodeID: "stamp"}})
+	claim, err := st.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: run, NodeID: "stamp"}, Capacity: match.Resources{Cores: 2}, Available: match.Resources{Cores: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}

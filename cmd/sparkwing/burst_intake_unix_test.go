@@ -189,12 +189,15 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 	})
 	options := client.EngineOptions{URL: "http://controller.test", Bearer: func(context.Context) (string, error) { return bearer, nil }, HTTP: &http.Client{Transport: transport}}
 	route := userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"TOKEN"}}
-	prepared, err := prepareNativeBurst(t.Context(), "burst", runFlags{}, nil, route, options)
+	prepared, err := prepareNativeBurst(t.Context(), "burst", runFlags{}, []string{"--block"}, route, options)
 	if err != nil {
 		t.Fatalf("native burst preparation: %v", err)
 	}
 	if prepared.LocalSecrets["TOKEN"] != burstIntakeSecret || len(prepared.Request.LocalSecretNames) != 1 || !prepared.Request.Source.BundleDigest.Set {
 		t.Fatal("prepared intake lost its private secret or uploaded source")
+	}
+	if prepared.Request.RequestedArgs["block"] != "true" {
+		t.Fatal("burst preparation lost its described boolean argument")
 	}
 	member, err := client.NewEngineClient(options)
 	if err != nil {
@@ -352,7 +355,7 @@ import (
 )
 
 type pipeline struct{ sw.Base }
-type inputs struct { Block bool ` + "`sw:\"block\"`" + ` }
+type inputs struct { Block bool ` + "`flag:\"block\"`" + ` }
 type credentials struct { Token string ` + "`sw:\"TOKEN,required\"`" + ` }
 func (pipeline) ShortHelp() string { return "edited SDK" }
 func (pipeline) Secrets() any { return &credentials{} }

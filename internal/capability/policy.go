@@ -110,6 +110,7 @@ const (
 	CredentialPublisher    CredentialRule = "local_run_publisher"
 	CredentialRepoReader   CredentialRule = "repo_cache_reader"
 	CredentialDiscovery    CredentialRule = "discovery"
+	CredentialLocalPeer    CredentialRule = "verified_local_peer"
 )
 
 // AccessRule is one complete alternative. Every grant in it is required.
@@ -397,6 +398,8 @@ func isMember(p Principal) bool {
 func matchesCredential(p Principal, rule CredentialRule) bool {
 	c := p.Capability
 	switch rule {
+	case CredentialLocalPeer:
+		return p.Class == CredentialPeer && c.Subject.Kind == SubjectLocal && c.Unit == "" && c.Binding.Kind == BindingNone
 	case CredentialBootstrap:
 		return isClaim(p) && c.Delivery == DeliveryBootstrap
 	case CredentialAny:
@@ -573,7 +576,7 @@ func validateRoutePolicy(route RoutePolicy) error {
 	for _, access := range route.Access {
 		if !slices.Contains([]CredentialRule{
 			CredentialBootstrap, CredentialAny, CredentialMember, CredentialAccount, CredentialClaim, CredentialEval, CredentialHere, CredentialLauncher,
-			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialOwnerProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery,
+			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialOwnerProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery, CredentialLocalPeer,
 		}, access.Credential) ||
 			!slices.Contains([]BindingRule{
 				BindNone, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,

@@ -409,7 +409,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 			return nil, authorityError(apierr.Unauthenticated, "session parent identity differs")
 		}
 		if child.Issuance == capability.Delegate {
-			child.Grants = slices.DeleteFunc(slices.Clone(child.Grants), func(g capability.Grant) bool { return !slices.Contains(parent.Grants, g) })
+			child.Grants = capability.InheritedGrants(chain[i+1].principal, *child)
 		}
 		if child.Purpose == capability.PurposeHere && !slices.Contains(parent.Grants, capability.RunsWrite) {
 			return nil, authorityError(apierr.Unauthenticated, "here requester lost run authority")

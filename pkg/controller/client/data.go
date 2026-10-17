@@ -335,7 +335,12 @@ func dataDigestValid(digest blob.Digest) bool {
 
 func (c *dataClient) post(ctx context.Context, operation, key string, input, output any) error {
 	path := "/api/v1/data/" + operation
-	return c.transport.request(ctx, "POST", path, path, key, input, output)
+	target := path
+	if c.authority != nil && c.authority.Upload.Value.Kind == blob.UploadPublication && c.authority.Attempt.Set {
+		a := c.authority.Attempt.Value
+		target += "?" + url.Values{"job": {a.NodeID}, "attempt": {strconv.FormatInt(a.Attempt, 10)}, "generation": {strconv.FormatInt(a.Generation, 10)}}.Encode()
+	}
+	return c.transport.request(ctx, "POST", path, target, key, input, output)
 }
 
 func (c *dataClient) withBudget(ctx context.Context, budget blob.Budget, call func(context.Context) error) error {

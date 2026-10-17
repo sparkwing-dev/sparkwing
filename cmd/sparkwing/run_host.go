@@ -35,6 +35,8 @@ type localRunRuntime struct {
 	bind             func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error)
 	close            func() error
 	remoteCache      blob.RemoteCache
+	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
+	publish          func(context.Context, string, string) error
 	follow           func(context.Context, string, string, io.Writer) error
 }
 
@@ -110,10 +112,15 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		defer release()
 	}
 	if request.Request.Options.CacheFrom.Value != "" && runtime.remoteCache == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "run: remote cache requires an authorized read-only storage binding before intake"}
-	}
-	if request.Request.Options.Publish.Value != "" {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "run: publication requires the controller's authorized result and log publisher before intake"}
+		if runtime.openCache == nil {
+			return &apierr.Error{Code: apierr.Unavailable, Message: "run: remote cache requires an authorized read-only storage binding before intake"}
+		}
+		var closeCache func() error
+		runtime.remoteCache, closeCache, err = runtime.openCache(ctx, request.Request.Options.CacheFrom.Value, &request.Request)
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, closeCache()) }()
 	}
 	if runtime.ensureController != nil {
 		if err := runtime.ensureController(ctx); err != nil {
@@ -147,6 +154,13 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	}}, nil)
 	if err != nil {
 		return fmt.Errorf("run %s is admitted: %w", response.RunID, err)
+	}
+	if profile := request.Request.Options.Publish.Value; profile != "" {
+		if runtime.publish == nil {
+			_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication is unavailable")
+		} else if err := runtime.publish(context.WithoutCancel(ctx), profile, response.RunID); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication failed:", masker.Mask(err.Error()))
+		}
 	}
 	return statusExitCode(completion.Outcome)
 }

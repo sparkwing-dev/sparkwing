@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -57,6 +58,35 @@ func newLocalNativeServices(ctx context.Context, home string, owned *store.Store
 	services.Config.Owner.Delegator = owned
 	closeServices := services.Close
 	services.Close = func() error { return errors.Join(closeServices(), private.Close()) }
+	if binding.Principal.Capability.Unit == capability.UnitTrigger {
+		run, err := binding.Tenant.ReadRun(ctx, fence.RunID)
+		if err != nil {
+			return runners.NativeServices{}, errors.Join(err, services.Close())
+		}
+		if profile := run.Request.Request.Options.CacheFrom.Value; profile != "" {
+			cache, closeCache, err := openProfileCache(ctx, profile, run.Request.Request.Git)
+			if err != nil {
+				return runners.NativeServices{}, errors.Join(err, services.Close())
+			}
+			services.Storage.RemoteCache = cache
+			closeHost := services.Close
+			services.Close = func() error { return errors.Join(closeHost(), closeCache()) }
+		}
+		closeHost := services.Close
+		services.Close = func() error {
+			err := closeHost()
+			finished := context.WithoutCancel(ctx)
+			run, readErr := binding.Tenant.ReadRun(finished, fence.RunID)
+			if readErr == nil && run.FinishedAt != nil && run.Request.Request.Options.Publish.Value != "" {
+				local := options
+				local.Bearer = nil
+				if publishErr := publishLocalProfile(finished, home, local, run.Request.Request.Options.Publish.Value, run.ID); publishErr != nil {
+					slog.Warn("local run completed but publication failed", "run_id", run.ID, "err", publishErr)
+				}
+			}
+			return err
+		}
+	}
 	adopt := services.Config.Owner.AdoptClaim
 	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
 		if err := private.AdoptClaim(ctx, claim); err != nil {

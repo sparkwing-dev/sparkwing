@@ -1166,3 +1166,19 @@ Attached local execution starts the shared log follower beside the host and
 joins both. This also applies after a pre-intake Cloud connection failure.
 Detached submission keeps its existing receipt path. No wire field or route
 changes.
+
+## Profile publication transport
+
+JobTransitionRequest.Publication optionally carries runspec.PublishedAttempt on
+`publish_attempt`; every other cause rejects it. Job results still use `publish`.
+The token request optionally carries DataScope, and its one-time response includes
+principal. Data upload, commit and record POSTs accept the complete optional
+query selector `job`, `attempt`, `generation` for imported publication only.
+These are selectors, never asserted authority. Existing claim requests cannot
+use them. The verified-local-peer snapshot export adds optional
+publication_records to the private RunSnapshot shape.
+
+Local publication export also carries publication_results with the persisted
+reason, masked error, exit code and structured failure. JobResult.masked_error
+preserves an existing masked diagnostic without manufacturing a structured
+failure. It is bounded by ErrorBytes and must agree with a supplied failure.

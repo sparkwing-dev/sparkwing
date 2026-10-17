@@ -1,0 +1,61 @@
+package store
+
+import (
+	"testing"
+	"testing/quick"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+)
+
+func TestPublicationImportsTerminalAttemptWithoutExecution(t *testing.T) {
+	tenant, now, terminal := publicationFixture(t)
+	attempt := runspec.PublishedAttempt{Attempt: 2, Generation: 3, StartedAt: now.Add(-time.Second), FinishedAt: *now, Outcome: "success", Executor: "desktop"}
+	change := NodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: NodePending, Cause: CausePublishAttempt, Extra: TransitionExtra{Publication: &attempt}}
+	for i := range 2 {
+		applied, err := tenant.TransitionNode(t.Context(), change)
+		if err != nil || applied.Replayed != (i == 1) || applied.Attempt != 2 || applied.Generation != 3 {
+			t.Fatalf("import %d: %+v %v", i, applied, err)
+		}
+	}
+	if _, err := tenant.TransitionNode(t.Context(), terminal); err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.ReadNode(t.Context(), terminal.Ref)
+	if err != nil || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.Attempt != 2 || row.Generation != 3 || row.Status != StatusDone {
+		t.Fatalf("imported node: %+v %v", row, err)
+	}
+	rewriteSchemaCount(t, tenant.s.db, "node_attempts", 1)
+	rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
+}
+
+func TestPublicationAttemptNeverCreatesAnExecutableAward(t *testing.T) {
+	property := func(kind uint8, value int64) bool {
+		tenant, now, terminal := publicationFixture(t)
+		a := runspec.PublishedAttempt{Attempt: 1, Generation: 1, StartedAt: now.Add(-time.Second), FinishedAt: *now, Outcome: "success", Executor: "desktop"}
+		change := NodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: NodePending, Cause: CausePublishAttempt, Extra: TransitionExtra{Publication: &a}}
+		switch kind % 6 {
+		case 0:
+			a.Attempt = -(value & 0x7fffffff)
+		case 1:
+			a.Generation = -(value & 0x7fffffff)
+		case 2:
+			a.FinishedAt = a.StartedAt.Add(-time.Second)
+		case 3:
+			a.Outcome = "running"
+		case 4:
+			change.Cause = CauseStart
+		case 5:
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET intake_mode='execute' WHERE id=?`, terminal.Ref.RunID)
+		}
+		_, err := tenant.TransitionNode(t.Context(), change)
+		var count int
+		if e := tenant.s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM node_attempts`).Scan(&count); e != nil {
+			t.Fatal(e)
+		}
+		return err != nil && count == 0
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+}
