@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"net"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 )
 
 func openFilesystemData(root, externalURL, address string) (*blob.Filesystem, error) {
@@ -26,4 +28,12 @@ func openFilesystemData(root, externalURL, address string) (*blob.Filesystem, er
 		return nil, err
 	}
 	return blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(root, "data"), Endpoint: endpoint, SigningKey: key})
+}
+
+func openS3Data(ctx context.Context, storageURL string) (*blob.S3, error) {
+	client, bucket, prefix, err := s3store.Open(ctx, storageURL)
+	if err != nil {
+		return nil, err
+	}
+	return blob.NewS3(client, bucket, prefix)
 }

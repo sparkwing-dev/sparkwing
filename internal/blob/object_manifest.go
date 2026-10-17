@@ -75,7 +75,7 @@ func (s *S3) manifestReader(ctx context.Context, team string, digest Digest) (*v
 	if err != nil {
 		return nil, err
 	}
-	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(key))})
 	if s3Error(err, "NoSuchKey", "NotFound") {
 		return nil, ErrNotFound
 	}

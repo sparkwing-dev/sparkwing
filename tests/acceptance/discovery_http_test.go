@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -199,7 +200,7 @@ func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
 func TestDiscoveryHTTPRequiresAuthenticatedDataAdapters(t *testing.T) {
 	b := authorityMember()
 	client := s3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("synthetic", "synthetic", "")})
-	objects, err := blob.NewS3(client, "objects")
+	objects, err := blob.NewS3(client, "objects", "")
 	if err != nil {
 		t.Fatal(err)
 	}

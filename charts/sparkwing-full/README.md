@@ -106,16 +106,24 @@ Helm cannot inspect a Secret's keys. The controller validates their contents.
 
 `controller.dataStore.s3URL` configures the controller-owned `/data` object
 backend through `--cache-blob-store`. Set `controller.bucketCeiling.store` to the
-same bucket for multi-team storage accounting. This is a bucket URL such as
-`s3://sparkwing-cloud-data`. The example uses `controller.storage.type=emptyDir`
-for the process home at `/data`, because RDS and S3 hold durable state.
+same bucket and prefix for multi-team storage accounting. The example uses
+`s3://sparkwing-cloud-data/controller`. Every blob, artifact, source bundle,
+upload and log key stays under `controller/`; record metadata lives in RDS.
+The example uses `controller.storage.type=emptyDir` for the process home at
+`/data`, because RDS and S3 hold durable state.
 `controller.storage.type=pvc` remains available for filesystem/SQLite installs.
 
 The controller ServiceAccount's IRSA role needs S3 read, write, delete and list
-access to the bucket. Set `AWS_REGION` through `controller.extraEnv`. Configure
-CloudFront's origin access to that bucket, add its public key to a trusted key
-group, set `controller.cloudfront.domain` and `keyPairID`, and mount the matching
-`cloudfront-key`. Helm creates neither AWS resources nor TLS certificates.
+access under `controller/`. Scope object permissions to
+`arn:aws:s3:::sparkwing-cloud-data/controller/*` and `s3:ListBucket` to
+`controller/*` through its `s3:prefix` condition. Allow
+`s3:GetLifecycleConfiguration` on the bucket and configure lifecycle expiry
+rules for `controller/logs/r30/`, `controller/logs/r90/` and every other retention
+class in use. Set `AWS_REGION` through `controller.extraEnv`. Configure
+CloudFront's origin access to that prefix with an empty origin path, because
+signed download paths already include `controller/`. Add its public key to a
+trusted key group, set `controller.cloudfront.domain` and `keyPairID`, and mount
+the matching `cloudfront-key`. Helm creates neither AWS resources nor TLS certificates.
 
 Set `externalURL` to the API origin and `dashboardURL` to the console origin.
 List allowed console callback URLs in `oauthRedirectURIs`. Set GitHub/Google

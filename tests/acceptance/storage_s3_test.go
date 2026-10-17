@@ -20,15 +20,24 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
+const storageS3Prefix = "deployment/nested-root"
+
 type collectionS3 struct{ objects map[string][]byte }
 
 func (s collectionS3) RoundTrip(r *http.Request) (*http.Response, error) {
 	key := strings.TrimPrefix(r.URL.Path, "/bucket/")
+	if !r.URL.Query().Has("lifecycle") {
+		var ok bool
+		key, ok = strings.CutPrefix(key, storageS3Prefix+"/")
+		if !ok {
+			return nil, fmt.Errorf("S3 request escaped configured prefix: %s %s", r.Method, r.URL.Path)
+		}
+	}
 	out := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody, Request: r}
 	switch r.Method {
 	case http.MethodGet:
 		if r.URL.Query().Has("lifecycle") {
-			out.Body = io.NopCloser(strings.NewReader(`<LifecycleConfiguration><Rule><ID>free</ID><Filter><Prefix>logs/r30/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule><Rule><ID>standard</ID><Filter><Prefix>logs/r90/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`))
+			out.Body = io.NopCloser(strings.NewReader(`<LifecycleConfiguration><Rule><ID>free</ID><Filter><Prefix>deployment/nested-root/logs/r30/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule><Rule><ID>standard</ID><Filter><Prefix>deployment/nested-root/logs/r90/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`))
 			break
 		}
 		body, found := s.objects[key]
@@ -46,7 +55,11 @@ func (s collectionS3) RoundTrip(r *http.Request) (*http.Response, error) {
 			if err != nil {
 				return nil, err
 			}
-			body, found := s.objects[strings.TrimPrefix(source, "bucket/")]
+			source, ok := strings.CutPrefix(source, "bucket/"+storageS3Prefix+"/")
+			if !ok {
+				return nil, fmt.Errorf("S3 copy source escaped configured prefix")
+			}
+			body, found := s.objects[source]
 			if _, exists := s.objects[key]; !found || exists || r.Header.Get("If-None-Match") != "*" || r.Header.Get("X-Amz-Copy-Source-If-Match") != fmt.Sprintf(`"%x"`, sha256.Sum256(body)) {
 				out.StatusCode = http.StatusPreconditionFailed
 				break
@@ -89,7 +102,7 @@ func storageS3(t *testing.T) (*blob.S3, collectionS3) {
 		}),
 		HTTPClient: &http.Client{Transport: transport},
 	})
-	objects, err := blob.NewS3(client, "bucket")
+	objects, err := blob.NewS3(client, "bucket", storageS3Prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
