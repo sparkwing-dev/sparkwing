@@ -5,14 +5,24 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"fmt"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestRegisteredRunnerZeroHeadroomRefusesAward(t *testing.T) {
+	t.Run("explicit", func(t *testing.T) {
+		registeredRunnerZeroHeadroom(t, `{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`, 4)
+	})
+	t.Run("implicit", func(t *testing.T) { registeredRunnerZeroHeadroom(t, `{}`, 1) })
+}
+
+func registeredRunnerZeroHeadroom(t *testing.T, execution string, available float64) {
+	t.Helper()
 	server, session := credentialSessionServer(t)
 	e := &EngineController{Store: server.store, RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })}
 	engineSQL(t, e.Store, `UPDATE memberships SET role='owner' WHERE account_id='member'`)
@@ -39,14 +49,14 @@ func TestRegisteredRunnerZeroHeadroomRefusesAward(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display=? WHERE id='run'`, requestBody, sealed.Request.Git.Repository.Display)
-	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
+	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(execution))
 	request := `{"runner_version":"v1.2.3","kinds":["node"],"capacity":{"cores":8,"memory_bytes":8192},"available_cores":0,"available_memory_bytes":0,"os":"linux","arch":"arm64"}`
 	response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", request, 200)
 	var claim controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &claim); err != nil || claim.Claim != nil {
 		t.Fatalf("saturated registered machine received work: %s error=%v", response.Body, err)
 	}
-	request = `{"runner_version":"v1.2.3","kinds":["node"],"capacity":{"cores":8,"memory_bytes":8192},"available_cores":4,"available_memory_bytes":4096,"os":"linux","arch":"arm64"}`
+	request = fmt.Sprintf(`{"runner_version":"v1.2.3","kinds":["node"],"capacity":{"cores":8,"memory_bytes":8192},"available_cores":%g,"available_memory_bytes":4096,"os":"linux","arch":"arm64"}`, available)
 	response = engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", request, 200)
 	if err := json.Unmarshal(response.Body.Bytes(), &claim); err != nil || claim.Claim == nil || claim.Claim.JobID != "job" || claim.Claim.Runner.Name != "capacity-machine" {
 		t.Fatalf("available registered machine lost its award: %s error=%v", response.Body, err)

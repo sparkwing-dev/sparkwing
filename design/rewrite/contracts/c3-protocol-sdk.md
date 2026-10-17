@@ -1,5 +1,29 @@
 # C3 protocol and SDK contract
 
+## Burst release and machine admission
+
+For a sealed burst request, the owner retains run/box concurrency before
+readiness without acquiring compute resources. Run resource settings still
+flow into each job's sealed settings. A self-claim uses the shared store's
+current placement and capacity checks before acquiring a job-specific machine
+lease. No attempt starts until that lease is held. Cleanup joins before release.
+Contention that begins after the observation can queue an awarded job locally.
+Cancellation ends that wait without allocating an attempt.
+
+Independently claimed burst jobs acquire compute resources without reacquiring
+the requester's logical concurrency. This also covers a registered runner on
+the requesting machine. The owner retains those semaphores until persisted job
+completion. Non-burst claimed-job admission keeps its existing concurrency rule.
+Pre-execution machine-admission failure reports through the same fenced setup
+result path as claimed source preparation, with attempt zero retained.
+
+An unclaimed burst job retains its logical concurrency while waiting for
+placement. The owner follows the existing state subscription and retries the
+fenced reconciliation after persisted state or its execution eligibility
+changes. `StateFollower.Wait` includes the private owner's execution projection
+in its change comparison. A capacity observation only wakes reconciliation.
+It never grants an execution award. `WaitNode` retains its state-sequence rule.
+
 ## Declared requester secrets in composed execution
 
 `source.PrepareCheckout` owns preparation of an absent absolute host workspace

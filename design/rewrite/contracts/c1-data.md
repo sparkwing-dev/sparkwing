@@ -3488,3 +3488,14 @@ bootstrap cannot read it again. No new price, tier, limit or schema field is add
 The allocation property starts with an implicit resource request, replaces the
 price table, and exchanges the bootstrap. Generated table changes retain the
 original class and memory. Customer machine awards retain no Cloud allocation.
+
+## Unhinted job matching
+
+Node matching resolves an all-zero resource request to the existing one-core
+machine admission charge. `internal/admission.DefaultChargeCores` owns that
+value for both the local queue and the shared matcher input. This projection
+does not change the seal or the Cloud allocation. It applies to direct claims,
+queued claims, owner self-claims and preference liveness through the same
+matching-input reader. Explicit CPU or memory requests retain their values.
+Trigger ownership keeps its existing request so a saturated here machine can
+still host scheduling and overflow.

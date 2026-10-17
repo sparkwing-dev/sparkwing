@@ -438,6 +438,12 @@ admission controller with local runs. If that controller is absent, a released
 runner fetches the verified matching CLI and starts it before claiming work.
 Each claimed job holds its machine lease through source preparation, execution
 and cleanup. A full machine offers zero headroom, so later preferences can win.
+Busy local work does not prevent jobs from becoming ready for overflow.
+Jobs without resource settings use the same one-core admission charge locally
+and when matching a runner. A job awarded here can still wait for local work
+that arrived after the last capacity observation. Ctrl-C cancels that wait.
+Concurrency slots count once even when a registered runner shares this machine
+with the requesting CLI.
 Machine admission keeps Cloud run identities separate from local records.
 Cloud overflow captures the working tree. Use `pipeline trigger` for explicit
 committed revisions instead of `--sw-ref` or `--sw-pipeline-ref`.

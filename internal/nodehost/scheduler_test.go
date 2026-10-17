@@ -208,7 +208,9 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 		if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Accepted.RunID, Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel, Reason: "interrupted by SIGINT"}); err != nil {
 			return err
 		}
-		_, err = f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseReport, SourceAttempt: new(started.Attempt), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}}})
+		reportCtx, stopReport := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
+		defer stopReport()
+		_, err = f.State.TransitionNode(reportCtx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseReport, SourceAttempt: new(started.Attempt), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}}})
 		return err
 	})
 	completion, err := f.Host.Run(ctx, f.Input)

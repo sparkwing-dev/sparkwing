@@ -57,6 +57,9 @@ func (a *LocalAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 		return completion, err
 	}
 	resources := localResources(options.Resources.Value)
+	if spec.Request.Request.Burst != nil {
+		resources = wingwire.HostResources{}
+	}
 	parent := localRunLease{runID: accepted.RunID, resources: resources.Cores > 0 || resources.MemoryBytes > 0}
 	request := wingwire.AdmissionRequest{
 		RunID: wingwire.HolderRef(a.holderRunID(accepted.RunID)), Pipeline: spec.Request.Request.Pipeline,
@@ -86,9 +89,12 @@ func (a *LocalAdmission) ClaimedNode(ctx context.Context, accepted AcceptedRun, 
 	if row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" {
 		return errors.New("claimed job admission requires its accepted run and job")
 	}
-	claims, err := a.claims(row.Execution.Concurrency, accepted.RunID)
-	if err != nil {
-		return err
+	var claims []wingwire.SemaphoreClaim
+	if spec.Request.Request.Burst == nil {
+		claims, err = a.claims(row.Execution.Concurrency, accepted.RunID)
+		if err != nil {
+			return err
+		}
 	}
 	options := spec.Resolved.Settings.Options
 	request := wingwire.AdmissionRequest{

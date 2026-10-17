@@ -1038,8 +1038,12 @@ starts an independent local controller with the development CLI first.
 `NativeHostConfig.ClaimAdmission` composes the existing `LocalAdmission` into
 independently claimed jobs. `LocalAdmission.ClaimedNode` holds one job-specific
 machine lease before source preparation and through process cleanup. It uses
-the sealed job resources and concurrency, without creating another run record.
-Here owners retain their existing parent and child admission lifetimes.
+the sealed job resources, without creating another run record. Ordinary claimed
+jobs also acquire their local concurrency. Burst jobs leave logical concurrency
+with the requesting owner, including when a registered runner shares its
+machine. Here burst owners retain semaphores through persisted completion and
+acquire compute only after a successful self-claim. Unclaimed ready work never
+waits for local compute admission.
 
 Machine admission for a Cloud-owned run uses `wingwire.RemoteRunID` with the
 controller address and run ID encoded as separate base64url fields. Job and

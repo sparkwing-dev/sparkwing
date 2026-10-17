@@ -2,6 +2,9 @@ package admission
 
 import "errors"
 
+// DefaultChargeCores charges unhinted execution against one core.
+const DefaultChargeCores = 1.0
+
 var (
 	ErrInvalidConfig = errors.New("admission: invalid config")
 

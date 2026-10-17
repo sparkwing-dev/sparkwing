@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -97,6 +98,9 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 			return profile, demand, err
 		}
 		demand.Selector, demand.Prefers, demand.Request = slices.Clone(execution.Requires.Value), slices.Clone(execution.Prefers.Value), matchingResources(execution.Resources.Value)
+		if demand.Request == (match.Resources{}) {
+			demand.Request.Cores = admission.DefaultChargeCores
+		}
 	}
 	switch selected := requestSeal.Request.Options.Runner.Value; selected.Kind {
 	case runspec.RunnerName:

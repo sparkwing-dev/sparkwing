@@ -29,6 +29,7 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		copy.local = local != nil
 		capacity = &copy
 	}
+	owner.claimAdmission = local
 	owner.Around = func(ctx context.Context, accepted AcceptedRun, body func(context.Context) (RunCompletion, error)) (RunCompletion, error) {
 		spec, err := admissionSpec(accepted)
 		if err != nil {
@@ -56,7 +57,13 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		}
 		work := body
 		if local != nil {
-			work = func(ctx context.Context) error { return local.node(ctx, accepted, row, isLocal, body) }
+			spec, err := admissionSpec(accepted)
+			if err != nil {
+				return err
+			}
+			work = func(ctx context.Context) error {
+				return local.node(ctx, accepted, row, isLocal && spec.Request.Request.Burst == nil, body)
+			}
 		}
 		if capacity != nil {
 			return capacity.Node(ctx, accepted, row, work)

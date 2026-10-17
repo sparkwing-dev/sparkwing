@@ -25,27 +25,33 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestBurstPublicRunBuildsEditedSourceAndStreamsMaskedSecrets(t *testing.T) {
-	burstPublicRun(t, false, false)
+	burstPublicRun(t, false, false, false)
 }
 
 func TestBurstPublicRunExecutesOnRegisteredPersonalMachine(t *testing.T) {
-	burstPublicRun(t, true, false)
+	burstPublicRun(t, true, false, false)
+}
+
+func TestBurstPublicRunOverflowsToPersonalMachineWhileLocalCapacityIsHeld(t *testing.T) {
+	burstPublicRun(t, true, false, true)
 }
 
 func TestBurstPublicRunInterruptCancelsHereAndPersonalWork(t *testing.T) {
 	for _, personal := range []bool{false, true} {
 		t.Run(map[bool]string{false: "here", true: "personal"}[personal], func(t *testing.T) {
-			burstPublicRun(t, personal, true)
+			burstPublicRun(t, personal, true, false)
 		})
 	}
 }
 
-func burstPublicRun(t *testing.T, personal, interrupt bool) {
+func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
@@ -99,7 +105,9 @@ func burstPublicRun(t *testing.T, personal, interrupt bool) {
 	t.Cleanup(server.Close)
 	config := filepath.Join(os.Getenv("SPARKWING_HOME"), "config.yaml")
 	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n", endpoint, bearer)
-	if personal {
+	if contended {
+		contents += "    prefer: [{target: here}, {target: machines}]\n"
+	} else if personal {
 		contents += "    prefer: [{target: machines}]\n"
 	}
 	if err := os.WriteFile(config, []byte(contents), 0o600); err != nil {
@@ -126,6 +134,10 @@ func burstPublicRun(t *testing.T, personal, interrupt bool) {
 	invoke("overflow", "set", "--profile", "cloud", "--minutes", "0", "-o=json")
 	if personal {
 		burstPublicPersonalRunner(t, ctx, cli, repo, state)
+	}
+	if contended {
+		invoke("runs", "list", "-o=json")
+		burstPublicHoldMachine(t, ctx, endpoint)
 	}
 	handleFile := filepath.Join(t.TempDir(), "run.json")
 	args := []string{"run", "burst", "--sw-run-handle-file", handleFile, "-o=json"}
@@ -204,6 +216,43 @@ func burstPublicRun(t *testing.T, personal, interrupt bool) {
 	}
 	if local := invoke("runs", "list", "-o=json"); strings.Contains(string(local), handle.RunID) {
 		t.Fatalf("burst copied ownership into the local controller: %s", local)
+	}
+}
+
+func burstPublicHoldMachine(t *testing.T, ctx context.Context, endpoint string) {
+	t.Helper()
+	home := os.Getenv("SPARKWING_HOME")
+	capacity, _, err := observeBurstCapacity(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	daemon, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: installedVersion()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := daemon.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: wingwire.HolderRef(wingwire.RemoteRunID(endpoint, "competing-machine-work")), Pipeline: "machine-holder",
+		Resources: wingwire.HostResources{Cores: capacity.Cores}, CostSource: wingwire.CostSourcePin,
+	}, nil)
+	if err != nil {
+		_ = daemon.Close()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- held.WatchControl(func(wingwire.Evicted) { t.Error("competing machine holder was evicted") }, func(wingwire.Cancel) { t.Error("burst cancelled unrelated machine work") })
+	}()
+	t.Cleanup(func() {
+		if err := held.Release(); err != nil {
+			t.Error(err)
+		}
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	_, available, err := observeBurstCapacity(ctx, home)
+	if err != nil || available.Cores != 0 {
+		t.Fatalf("competing work did not occupy local capacity: %+v %v", available, err)
 	}
 }
 

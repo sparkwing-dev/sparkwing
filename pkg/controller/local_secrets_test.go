@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -22,6 +25,17 @@ func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
 	for _, value := range []string{"requester-local-secret-value", ""} {
 		t.Run(fmt.Sprintf("empty=%v", value == ""), func(t *testing.T) { requesterLocalSecretRelease(t, value) })
 	}
+}
+
+func FuzzRequesterLocalSecretNeverPersistsOrFallsBackOnAnotherProcess(f *testing.F) {
+	f.Add([]byte("private-value"))
+	f.Add([]byte{0, 255, 34, 10})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 256 {
+			return
+		}
+		requesterLocalSecretRelease(t, "requester-only-"+hex.EncodeToString(data))
+	})
 }
 
 func requesterLocalSecretRelease(t *testing.T, value string) {
@@ -138,6 +152,33 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	persisted, err := json.Marshal([]any{stored, events})
 	if err != nil || value != "" && strings.Contains(string(persisted), value) {
 		t.Fatal("plaintext persisted")
+	}
+	var sequence int
+	var database, databasePath string
+	if err := s.store.DB().QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &database, &databasePath); err != nil || databasePath == "" {
+		t.Fatalf("SQLite database path unavailable: %v", err)
+	}
+	for _, suffix := range []string{"", "-wal"} {
+		body, err := os.ReadFile(databasePath + suffix)
+		if suffix != "" && os.IsNotExist(err) {
+			continue
+		}
+		if err != nil || value != "" && bytes.Contains(body, []byte(value)) {
+			t.Fatalf("requester secret reached SQLite%s: %v", suffix, err)
+		}
+	}
+	other, err := store.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	otherServer := New(other, nil).WithSecretsCipher(s.secretsCipher)
+	lost := sourceUploadHTTP(otherServer.Handler(), reconciled.Claim.Capability, "GET", "/api/v1/secrets/TOKEN?run="+created.RunID, "")
+	if lost.Code != http.StatusServiceUnavailable || value != "" && strings.Contains(lost.Body.String(), value) {
+		t.Fatalf("another process restored or exposed requester values: HTTP %d", lost.Code)
+	}
+	if live := sourceUploadHTTP(h, reconciled.Claim.Capability, "GET", "/api/v1/secrets/TOKEN?run="+created.RunID, ""); live.Code != http.StatusOK {
+		t.Fatalf("another process changed the original process's secret delivery: HTTP %d", live.Code)
 	}
 	for _, name := range []string{"TOKEN?run=foreign", "UNDECLARED?run=" + created.RunID} {
 		refused := sourceUploadHTTP(h, string(award.Bearer), "GET", "/api/v1/secrets/"+name, "")

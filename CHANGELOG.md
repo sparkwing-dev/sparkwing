@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **overflow:** Release ready jobs while this machine is busy. Match unhinted
+  jobs against the existing one-core admission charge, and acquire machine
+  capacity after a here claim. Registered burst runners share the requester's
+  concurrency slots without acquiring them twice.
+
 - **overflow:** Registered machines advertise measured resource headroom and
   honor contribution and keep-free settings. Enrolled runners start a missing
   admission controller with the verified matching CLI. Claimed jobs hold machine
