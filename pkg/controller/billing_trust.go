@@ -69,7 +69,7 @@ func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request, a
 	case errors.Is(err, store.ErrInvalidInput):
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	case err != nil:
-		return err
+		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, billingTrustBody(store.Team(authorized.Target.Team), after))
 	return nil

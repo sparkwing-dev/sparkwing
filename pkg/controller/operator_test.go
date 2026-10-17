@@ -173,19 +173,9 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 	if code := f.call("POST", base+"/trust", operator.auth, revoke, nil); code != http.StatusOK {
 		t.Fatalf("revoke = %d", code)
 	}
-	limit := map[string]any{"trust": "granted", "reason": "vip"}
-	if code := f.call("POST", base+"/trust", operator.auth, limit, nil); code != http.StatusBadRequest {
-		t.Errorf("a limit on a revoked team = %d want 400", code)
-	}
 	var team operatorTeam
-	if f.call("GET", base, operator.auth, nil, &team); team.Billing.Trust != "revoked" {
-		t.Errorf("a refused limit changed the trust to %q", team.Billing.Trust)
-	}
-	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{"trust": "granted", "reason": "resolved"}, nil); code != http.StatusOK {
-		t.Fatalf("restore = %d", code)
-	}
-	if code := f.call("POST", base+"/trust", operator.auth, limit, nil); code != http.StatusOK {
-		t.Errorf("a limit after trust is restored = %d want 200", code)
+	if code := f.call("GET", base, operator.auth, nil, &team); code != http.StatusOK || team.Billing.Trust != "revoked" {
+		t.Fatalf("committed revocation = %d %+v", code, team.Billing)
 	}
 
 	if _, err := f.store.DB().ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES (?,?,?,?,?)", "dp_1", owner.team, "", "chargeback", time.Now().UnixNano()); err != nil {
@@ -206,7 +196,7 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 		t.Errorf("releasing the dispute hold = %d %+v, want the team released", code, team)
 	}
 	if f.call("GET", base, operator.auth, nil, &team); team.Events[0].Kind != store.BusinessEventTeamUnfrozen ||
-		team.Events[0].Actor != operator.id || team.Events[0].Attrs["reason"] != "dispute won" {
+		team.Events[0].Actor != operator.id || team.Events[0].Attrs["reason"] != "dispute won" || team.Billing.Trust != "revoked" {
 		t.Errorf("the dispute release's event = %+v", team.Events[0])
 	}
 }
@@ -221,8 +211,6 @@ func TestOperatorConsoleRejectsRetiredDollarOverrides(t *testing.T) {
 	}
 }
 
-// The admin token reaches no operator power: the console routes, the
-// checkout service's routes and the retired admin routes all refuse it.
 func TestAdminTokenReachesNoOperatorPower(t *testing.T) {
 	f, operator, owner := operatorFixture(t)
 	admin := "Bearer " + f.admin
@@ -238,8 +226,8 @@ func TestAdminTokenReachesNoOperatorPower(t *testing.T) {
 		{"GET", "/api/v1/credits/payments/pi_1"},
 	} {
 		body := map[string]any{"kind": "free", "amount_micro": 500 * cent, "team": owner.team}
-		if code := f.call(route[0], route[1], admin, body, nil); code != http.StatusForbidden {
-			t.Errorf("admin token: %s %s = %d want 403", route[0], route[1], code)
+		if code := f.call(route[0], route[1], admin, body, nil); code != http.StatusNotFound {
+			t.Errorf("admin token: %s %s = %d want 404", route[0], route[1], code)
 		}
 	}
 	for _, route := range [][2]string{

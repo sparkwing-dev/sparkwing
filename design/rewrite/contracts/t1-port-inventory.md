@@ -2861,3 +2861,17 @@ tests. No native Stripe or PostgreSQL cell is promoted.
 `TestBillingPaymentModeRefusesInvalidConfigurationProperty` checks that generated
 invalid modes leave operator configuration unchanged. Production constructor
 proofs use the same operator mode setter as controller startup.
+
+
+## W1 selected trigger HTTP ports
+
+TestTrigger_RequiresAGitHubRepositorySlug and
+TestTrigger_ReservesGitHubProvenanceForTheWebhook move from trigger_test.go's
+removed /triggers surface to intake_source_test.go's current /runs request.
+The source URL supplies the GitHub owner/repository shape, and the provider fake
+supplies numeric identity. Malformed paths are refused before provider I/O.
+Generated App facts and default-branch assertions cannot confer verified trust
+on manual admission. Claimed App origin is refused. The real controller policy,
+issuer, request sealer and SQLite intake run. Existing verified-webhook suites
+retain the trusted positive cases. Test names remain discoverable. No acceptance
+registry, skip or native matrix claim is added.

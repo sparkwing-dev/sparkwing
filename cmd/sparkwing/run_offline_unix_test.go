@@ -246,7 +246,7 @@ func offlineBaseEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker s
 		"GOWORK=off",
 		"GOTOOLCHAIN=local",
 		"SPARKWING_HOME=" + sparkwingHome,
-		"SPARKWING_LOG_FORMAT=quiet",
+		"SPARKWING_LOG_FORMAT=plain",
 		offlineMarkerEnv + "=" + marker,
 	}
 }

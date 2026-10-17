@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -22,9 +23,9 @@ func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
 	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "schedule-owner"}
 	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
-		RepoURL: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		Branch: "main",
-		SHA:    "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: "https://git.example.com/acme/widgets.git",
+		Branch:  "main",
+		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
 			Pipeline: "nightly",
 			Name:     store.CronScheduleDefaultName,
@@ -55,10 +56,8 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	// instant exists without the test waiting a minute for the clock.
 	ahead := func() time.Time { return time.Now().Add(2 * time.Minute) }
 	alpha := New(st, nil)
-	ScheduleWriterFixture(t, alpha)
 	alpha.cronHolder, alpha.cronNow = "alpha", ahead
 	beta := New(st, nil)
-	ScheduleWriterFixture(t, beta)
 	beta.cronHolder, beta.cronNow = "beta", ahead
 
 	ctx := context.Background()
@@ -144,7 +143,6 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 	sched := armPushedForTick(t, st)
 
 	srv := New(st, nil)
-	ScheduleWriterFixture(t, srv)
 	launcher := cronLauncher{server: srv}
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
 	first, err := launcher.Launch(context.Background(), sched, due)
@@ -226,9 +224,9 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 		t.Fatalf("ForTeam default: %v", err)
 	}
 	report, err := (&crons.Service{Store: st, Schedules: tenantB, ArmedBy: "team-b-owner"}).ArmPushed(ctx, crons.ArmPush{
-		RepoURL: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		Branch: "main",
-		SHA:    "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: "https://git.example.com/acme/widgets.git",
+		Branch:  "main",
+		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
 			Pipeline: "nightly",
 			Name:     store.CronScheduleDefaultName,
@@ -244,7 +242,6 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 	id := report.Schedules[0].ID
 
 	srv := New(st, nil)
-	ScheduleWriterFixture(t, srv)
 	srv.cronNow = func() time.Time { return time.Now().Add(2 * time.Minute) }
 	srv.cronTickOnce(ctx)
 
@@ -277,7 +274,6 @@ func TestCronLauncherUsesStoredTenantScheduleProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := New(st, nil)
-	ScheduleWriterFixture(t, srv)
 	launcher := srv.ScheduleLauncher()
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
 	first, err := launcher.Launch(t.Context(), sched, due)
@@ -289,18 +285,22 @@ func TestCronLauncherUsesStoredTenantScheduleProperty(t *testing.T) {
 		input.Pipeline, input.RepoPath, input.GitBranch, input.LockedRef, input.ArmedBy = forged, forged, forged, forged, forged
 		input.Args = map[string]string{"forged": forged}
 		runID, err := launcher.Launch(t.Context(), input, due.In(time.FixedZone("offset", 3600)))
-		if err != nil || runID != first {
-			t.Errorf("stored schedule replay = %s: %v", runID, err)
+		if err == nil || runID != "" {
+			t.Errorf("forged schedule admission = %s: %v", runID, err)
 			return false
 		}
-		row, err := teststore.ForTeam(t, st, sched.Team).ReadRun(t.Context(), runID)
+		row, err := teststore.ForTeam(t, st, sched.Team).ReadRun(t.Context(), first)
+		if err != nil {
+			t.Fatal(err)
+		}
 		request := row.Request.Request
-		if err != nil || request.Pipeline != sched.Pipeline || request.Actor.ID != sched.ArmedBy || request.Git.Ref != sched.GitBranch || request.Git.SHA != sched.LockedRef || request.Source.Location.RemoteURL != sched.RepoPath || request.RequestedArgs["forged"] != "" {
+		if request.Pipeline != sched.Pipeline || request.Actor.ID != sched.ArmedBy || request.Git.Ref != sched.GitBranch || request.Git.SHA != sched.LockedRef || request.Source.Location.RemoteURL != sched.RepoPath || request.RequestedArgs["forged"] != "" {
 			t.Errorf("forged launch changed the stored request: %+v: %v", request, err)
 			return false
 		}
+		input = sched
 		input.Team = "other"
-		if id, err := launcher.Launch(t.Context(), input, due); id != "" || !errors.Is(err, store.ErrNotFound) {
+		if id, err := launcher.Launch(t.Context(), input, due); id != "" || !errors.Is(err, sql.ErrNoRows) {
 			t.Errorf("foreign schedule admission = %s: %v", id, err)
 			return false
 		}
@@ -324,7 +324,7 @@ func TestCronLauncherUsesStoredTenantScheduleProperty(t *testing.T) {
 func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
 	st := newStoreForAuth(t)
 	sched := armPushedForTick(t, st)
-	srv := New(st, nil)
+	srv := New(st, nil).WithScheduledRunWriter(func(context.Context, store.Team) (ScheduledRunWriter, error) { return nil, nil })
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
 	_, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due)
 	var missing *apierr.Error

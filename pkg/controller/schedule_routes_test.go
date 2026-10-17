@@ -135,12 +135,12 @@ func (f *scheduleWriterFake) RunAuthorizedSchedule(ctx context.Context, a capabi
 	return sched.ID, admitted.RunID, admitted.Replayed, err
 }
 
-func (f *scheduleWriterFake) AdmitScheduledRun(ctx context.Context, id string, due time.Time) (store.AdmissionResult, error) {
-	sched, err := f.GetCronSchedule(ctx, id)
+func (f *scheduleWriterFake) AdmitScheduledRun(ctx context.Context, schedule store.CronSchedule, due time.Time) (store.AdmissionResult, error) {
+	sched, err := f.GetCronSchedule(ctx, schedule.ID)
 	if err != nil {
 		return store.AdmissionResult{}, err
 	}
-	return f.admit(ctx, sched, id+"@"+due.UTC().Format(time.RFC3339Nano))
+	return f.admit(ctx, sched, schedule.ID+"@"+due.UTC().Format(time.RFC3339Nano))
 }
 
 func (f *scheduleWriterFake) admit(ctx context.Context, sched store.CronSchedule, key string) (store.AdmissionResult, error) {
@@ -160,7 +160,7 @@ func (f *scheduleWriterFake) admit(ctx context.Context, sched store.CronSchedule
 	admitted, err := f.Tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.authority[sched.ID], IdempotencyKey: key, Request: runspec.Request{
 		Version: 1, Team: string(f.Team()), Pipeline: sched.Pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Origin: runspec.OriginSchedule, RequestedArgs: sched.Effective().Args,
-		Git:    runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey("gh:" + strconv.FormatInt(sched.GitHubRepositoryID, 10))}, Ref: sched.GitBranch, SHA: sched.LockedRef},
+		Git:    runspec.Git{Repository: runspec.Repository{Key: sched.RepositoryKey}, Ref: sched.GitBranch, SHA: sched.LockedRef},
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: sched.RepoPath}},
 	}})
 	if err == nil {

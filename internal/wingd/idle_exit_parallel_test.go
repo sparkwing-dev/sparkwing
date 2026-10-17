@@ -18,7 +18,6 @@ func TestIdleExitRegressionsRunInParallel(t *testing.T) {
 		"TestIdleExit_QueryTrafficDoesNotResetIdleClock":       false,
 		"TestIdleExit_SocketSweepProbeDoesNotResetIdleClock":   false,
 		"TestIdleExit_PreHelloConnectionsDoNotResetIdleClock":  false,
-		"TestIdleExit_WaitsForWorkingConnections":              false,
 		"TestIdleExit_GraceThenIdleUnderHealthProbes":          false,
 	}
 	fset := token.NewFileSet()

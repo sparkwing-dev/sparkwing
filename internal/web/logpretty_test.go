@@ -19,7 +19,7 @@ import (
 )
 
 func TestRenderJSONL_FormatsRecord(t *testing.T) {
-	in := []byte("{\"ts\":\"2026-05-04T06:03:16.748Z\",\"level\":\"info\",\"node\":\"docker-version\",\"event\":\"exec_line\",\"msg\":\"Docker version 24.0.7\"}\n")
+	in := []byte("{\"ts\":\"2026-05-04T06:03:16.748Z\",\"level\":\"info\",\"job\":\"docker-version\",\"event\":\"exec_line\",\"msg\":\"Docker version 24.0.7\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatPlain)
 	got := out.String()
@@ -32,7 +32,7 @@ func TestRenderJSONL_FormatsRecord(t *testing.T) {
 }
 
 func TestRenderJSONL_NodeStartEvent(t *testing.T) {
-	in := []byte("{\"ts\":\"2026-05-04T06:03:16.330Z\",\"level\":\"info\",\"node\":\"docker-version\",\"event\":\"node_start\",\"msg\":\"docker --version\"}\n")
+	in := []byte("{\"ts\":\"2026-05-04T06:03:16.330Z\",\"level\":\"info\",\"job\":\"docker-version\",\"event\":\"node_start\",\"msg\":\"docker --version\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatPlain)
 	if !strings.Contains(out.String(), "▶ docker-version") {
@@ -41,7 +41,7 @@ func TestRenderJSONL_NodeStartEvent(t *testing.T) {
 }
 
 func TestRenderJSONL_NonJSONLinesPassThrough(t *testing.T) {
-	in := []byte("plain garbage line\n{\"ts\":\"2026-05-04T06:03:16Z\",\"node\":\"n\",\"msg\":\"ok\"}\n")
+	in := []byte("plain garbage line\n{\"ts\":\"2026-05-04T06:03:16Z\",\"job\":\"n\",\"msg\":\"ok\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatPlain)
 	got := out.String()
@@ -54,7 +54,7 @@ func TestRenderJSONL_NonJSONLinesPassThrough(t *testing.T) {
 }
 
 func TestRenderJSONL_PlainStripsMsgANSI(t *testing.T) {
-	in := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"node\":\"n\",\"msg\":\"\x1b[31mred text\x1b[0m\"}\n")
+	in := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"job\":\"n\",\"msg\":\"\x1b[31mred text\x1b[0m\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatPlain)
 	if strings.ContainsRune(out.String(), 0x1b) {
@@ -75,7 +75,7 @@ func TestRenderJSONL_PlainStripsNonJSONANSI(t *testing.T) {
 }
 
 func TestRenderJSONL_ANSIKeepsRendererSGRAndMsg(t *testing.T) {
-	in := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"level\":\"error\",\"node\":\"n\",\"msg\":\"\x1b[31mred\x1b[0m\"}\n")
+	in := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"level\":\"error\",\"job\":\"n\",\"msg\":\"\x1b[31mred\x1b[0m\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatANSI)
 	if !strings.ContainsRune(out.String(), 0x1b) {
@@ -123,7 +123,7 @@ func TestNegotiateLogFormat(t *testing.T) {
 }
 
 func TestRenderSSELogLine_StructuredRecord(t *testing.T) {
-	payload := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"level\":\"info\",\"node\":\"n\",\"msg\":\"hello\"}")
+	payload := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"level\":\"info\",\"job\":\"n\",\"msg\":\"hello\"}")
 	got := renderSSELogLine(payload, formatPlain)
 	if len(got) == 0 {
 		t.Fatal("expected at least one line")
@@ -139,7 +139,7 @@ func TestRenderSSELogLine_StructuredRecord(t *testing.T) {
 }
 
 func TestRenderSSELogLine_PlainStripsMsgANSI(t *testing.T) {
-	payload := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"node\":\"n\",\"msg\":\"\x1b[31mred\x1b[0m\"}")
+	payload := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"job\":\"n\",\"msg\":\"\x1b[31mred\x1b[0m\"}")
 	got := renderSSELogLine(payload, formatPlain)
 	for _, line := range got {
 		if strings.ContainsRune(line, 0x1b) {
@@ -156,8 +156,8 @@ func TestRenderSSELogLine_NonJSON(t *testing.T) {
 }
 
 func TestServeLogStreamKeepsNDJSONEventsRaw(t *testing.T) {
-	source := "data: {\"ts\":\"2026-08-28T00:00:00Z\",\"level\":\"info\",\"node\":\"verify\",\"event\":\"step_start\",\"msg\":\"tests\"}\n\n" +
-		"data: {\"ts\":\"2026-08-28T00:00:01Z\",\"level\":\"info\",\"node\":\"verify\",\"step\":\"tests\",\"event\":\"exec_line\",\"msg\":\"PASS browser\"}\n\n"
+	source := "data: {\"ts\":\"2026-08-28T00:00:00Z\",\"level\":\"info\",\"job\":\"verify\",\"event\":\"step_start\",\"msg\":\"tests\"}\n\n" +
+		"data: {\"ts\":\"2026-08-28T00:00:01Z\",\"level\":\"info\",\"job\":\"verify\",\"step\":\"tests\",\"event\":\"exec_line\",\"msg\":\"PASS browser\"}\n\n"
 	b := &fakeBackend{streamLog: func(runID, nodeID string) (io.ReadCloser, error) {
 		if runID != "run-one" || nodeID != "verify" {
 			t.Fatalf("stream target = %s/%s", runID, nodeID)

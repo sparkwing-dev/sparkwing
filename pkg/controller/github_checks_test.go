@@ -103,7 +103,7 @@ func TestGitHubAppCheckRunRerequestedRerunsItsPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if trig.Pipeline != "build" || trig.GitSHA != headSHA || trig.GitBranch != "main" || trig.GithubRepo != "widgets" {
+	if trig.Pipeline != "build" || trig.GitSHA != headSHA || trig.GitBranch != "refs/heads/main" || trig.Repo != "acme/widgets" {
 		t.Fatalf("re-run trigger = %+v, want build on main at the same commit", trig)
 	}
 	if _, out := f.deliver("check_run", rerun, ""); out["status"] != "duplicate" {
@@ -305,5 +305,52 @@ func TestGitHubAppRerequestedSpendsTheRunBudget(t *testing.T) {
 	f.reconcileChecks()
 	if code, _ := f.deliver("check_run", checkRunPayload(7, "rerequested", f.app.CheckRunCalls()[0]), ""); code != http.StatusTooManyRequests {
 		t.Fatalf("rerequested past the team's cap = %d, want 429", code)
+	}
+}
+
+func TestGitHubAppRerequestedRetainsTagAndPullRequestFilters(t *testing.T) {
+	for _, kind := range []string{"tag", "pr base", "pr label"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newAppFixture(t)
+			owner := f.ghUser(501, "olga")
+			f.connect(owner, 501, 7, acmeAdmin)
+			event := "pull_request"
+			payload := prPayload(7, 701, "acme/widgets", 701)
+			subscription := map[string]any{"push": false, "pull_request": true, "base_branches": []string{"main"}}
+			switch kind {
+			case "tag":
+				event = "push"
+				payload = pushPayload(7, 701, "acme/widgets", headSHA)
+				payload["ref"] = "refs/tags/v1.0"
+				subscription = map[string]any{"push": false, "tags": []string{"v*"}}
+			case "pr label":
+				payload["action"] = "labeled"
+				payload["label"] = map[string]any{"name": "ship"}
+				subscription["pull_request_labeled"], subscription["pull_request_labels"] = true, []string{"ship"}
+			}
+			if code := f.subscribe(owner, "acme/widgets", "build", subscription); code != http.StatusOK {
+				t.Fatalf("subscribe=%d", code)
+			}
+			_, first := f.deliver(event, payload, "")
+			ids := startedRunIDs(t, first)
+			if len(ids) != 1 {
+				t.Fatalf("initial=%v", first)
+			}
+			original := f.sealedRequest(ids[0])
+			f.reconcileChecks()
+			calls := f.app.CheckRunCalls()
+			if len(calls) != 1 {
+				t.Fatalf("checks=%+v", calls)
+			}
+			_, rerun := f.deliver("check_run", checkRunPayload(7, "rerequested", calls[0]), "")
+			ids = startedRunIDs(t, rerun)
+			if len(ids) != 1 {
+				t.Fatalf("rerun=%v", rerun)
+			}
+			got := f.sealedRequest(ids[0])
+			if got.Git.Ref != original.Git.Ref || got.Git.SHA != original.Git.SHA || got.PullRequest != original.PullRequest || got.Git.App.Value.Event != original.Git.App.Value.Event {
+				t.Fatalf("rerun facts=%+v original=%+v", got, original)
+			}
+		})
 	}
 }

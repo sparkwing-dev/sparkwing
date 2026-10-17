@@ -26,7 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth/googletest"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/runflags"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -77,6 +77,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 		for _, opt := range opts {
 			srv = opt(srv)
 		}
+		configureGitHubClaims(srv, st)
 		ts := httptest.NewServer(srv.Handler())
 		t.Cleanup(ts.Close)
 		return srv, ts.URL
@@ -570,6 +571,23 @@ func (f *appFixture) triggers(team string) []*store.Trigger {
 	return list
 }
 
+func (f *appFixture) sealedRequest(runID string) runspec.Request {
+	f.t.Helper()
+	team, err := f.store.AsOperator().RunTeam(f.t.Context(), runID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(f.t.Context(), team)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	row, err := tenant.ReadRun(f.t.Context(), runID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return row.Request.Request
+}
+
 func TestGitHubAppWebhookSignature(t *testing.T) {
 	f := newAppFixture(t)
 	payload := map[string]any{"zen": "hi"}
@@ -612,7 +630,7 @@ func TestGitHubAppPushRunsOnlyInTheInstallationsTeam(t *testing.T) {
 		t.Fatalf("push = %d %v", code, out)
 	}
 	got := f.triggers(olga.team)
-	if len(got) != 1 || got[0].Pipeline != "build" || got[0].GitSHA != headSHA || got[0].GithubRepo != "widgets" {
+	if len(got) != 1 || got[0].Pipeline != "build" || got[0].GitSHA != headSHA || got[0].Repo != "acme/widgets" {
 		t.Fatalf("olga's triggers = %+v", got)
 	}
 	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
@@ -623,8 +641,8 @@ func TestGitHubAppPushRunsOnlyInTheInstallationsTeam(t *testing.T) {
 	if err != nil || run.Status != "pending" {
 		t.Fatalf("app run = (%+v, %v), want a pending run alongside the trigger", run, err)
 	}
-	if got[0].TriggerEnv["GITHUB_EVENT_NAME"] != "push" {
-		t.Fatalf("app push event = %q, want push", got[0].TriggerEnv["GITHUB_EVENT_NAME"])
+	if request := f.sealedRequest(got[0].ID); request.Git.App.Value.Event != "push" || request.Git.Repository.Key != "gh:701" {
+		t.Fatalf("app push facts = %+v", request.Git)
 	}
 	if n := len(f.triggers(bob.team)); n != 0 {
 		t.Fatalf("a push through olga's installation started %d runs in bob's team", n)
@@ -703,11 +721,14 @@ func TestGitHubAppTagPushRequiresTagSubscription(t *testing.T) {
 		t.Fatalf("tag push = %v", out)
 	}
 	got := f.triggers(olga.team)
-	if len(got) != 1 || got[0].GitBranch != "" || got[0].GitSHA != headSHA ||
-		got[0].TriggerEnv["GITHUB_REF"] != "refs/tags/v1.2.3" ||
-		got[0].TriggerEnv["GITHUB_REF_TYPE"] != "tag" || got[0].TriggerEnv["GITHUB_TAG"] != "v1.2.3" {
-		t.Fatalf("tag trigger = %+v", got)
+	if len(got) != 1 {
+		t.Fatalf("tag runs = %+v", got)
 	}
+	request := f.sealedRequest(got[0].ID)
+	if request.Git.Ref != "refs/tags/v1.2.3" || request.Git.SHA != headSHA || request.Git.App.Value.Event != "push" || request.Git.App.Value.DefaultBranchPush {
+		t.Fatalf("tag request = %+v", request.Git)
+	}
+
 	deleted := pushPayload(7, 701, "acme/widgets", headSHA)
 	deleted["ref"], deleted["deleted"] = "refs/tags/v1.2.4", true
 	if _, out := f.deliver("push", deleted, ""); out["status"] != "ignored" {
@@ -1041,35 +1062,39 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 	}
 	counts := map[string]int{}
 	for _, tr := range got {
-		event := tr.TriggerEnv["GITHUB_EVENT_NAME"]
+		request := f.sealedRequest(tr.ID)
+		event := request.Git.App.Value.Event
 		counts[event]++
-		if tr.Pipeline == "baseline" && tr.TriggerEnv["GITHUB_EVENT_NAME"] != "pull_request" {
-			t.Fatalf("baseline received %v", tr.TriggerEnv)
+		if tr.Pipeline == "baseline" && event != "pull_request" {
+			t.Fatalf("baseline received %s", event)
 		}
-		if tr.Pipeline == "opted" {
-			ref := tr.TriggerEnv["GITHUB_REF"]
-			if ref == "" || tr.TriggerEnv["GITHUB_REF_TYPE"] == "" || tr.GitSHA != headSHA {
-				t.Fatalf("missing ref or resolved commit: %+v", tr)
+		if tr.Pipeline != "opted" {
+			continue
+		}
+		ref := request.Git.Ref
+		if ref == "" || request.Git.SHA != headSHA {
+			t.Fatalf("missing ref or resolved commit: %+v", request.Git)
+		}
+		switch event {
+		case "pull_request":
+			pr := request.PullRequest
+			if ref != "refs/pull/12/head" || !pr.Set || pr.Value.Action == "" {
+				t.Fatalf("PR facts = %+v", request)
 			}
-			switch event {
-			case "pull_request":
-				if ref != "refs/pull/12/head" || tr.TriggerEnv["GITHUB_ACTION"] == "" {
-					t.Fatalf("PR env = %v", tr.TriggerEnv)
-				}
-				if tr.TriggerEnv["GITHUB_ACTION"] == "closed" && tr.TriggerEnv["GITHUB_MERGED"] == "" {
-					t.Fatalf("closed PR env = %v", tr.TriggerEnv)
-				}
-			case "release":
-				if !strings.HasPrefix(ref, "refs/tags/v1-") || tr.TriggerEnv["GITHUB_TAG_NAME"] == "" {
-					t.Fatalf("release env = %v", tr.TriggerEnv)
-				}
-			case "create", "delete":
-				if !strings.HasPrefix(ref, "refs/heads/topic-") {
-					t.Fatalf("branch env = %v", tr.TriggerEnv)
-				}
+			if pr.Value.Action == "closed" && !pr.Value.Merged.Set {
+				t.Fatalf("closed PR facts = %+v", pr.Value)
+			}
+		case "release":
+			if !strings.HasPrefix(ref, "refs/tags/v1-") {
+				t.Fatalf("release ref = %s", ref)
+			}
+		case "create", "delete":
+			if !strings.HasPrefix(ref, "refs/heads/topic-") {
+				t.Fatalf("branch ref = %s", ref)
 			}
 		}
 	}
+
 	if counts["pull_request"] != 5 || counts["release"] != 2 || counts["create"] != 1 || counts["delete"] != 1 {
 		t.Fatalf("event counts = %v", counts)
 	}
@@ -1484,8 +1509,11 @@ func TestGitHubAppBranchDeleteRunsOnGitHubsPayload(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("triggers = %d, want 1", len(got))
 	}
-	if tr := got[0]; tr.Pipeline != "teardown" || tr.GitBranch != "trunk" || tr.GitSHA != headSHA || tr.TriggerEnv["GITHUB_REF"] != "refs/heads/feature-x" {
-		t.Fatalf("branch_delete trigger = branch %q sha %q env %v", tr.GitBranch, tr.GitSHA, tr.TriggerEnv)
+	if tr := got[0]; tr.Pipeline != "teardown" || tr.GitSHA != headSHA {
+		t.Fatalf("branch_delete trigger = %+v", tr)
+	}
+	if request := f.sealedRequest(got[0].ID); request.Git.Ref != "refs/heads/feature-x" || request.Git.DefaultBranch.Value != "trunk" || request.Git.App.Value.Event != "delete" || request.Git.App.Value.DefaultBranchPush {
+		t.Fatalf("branch_delete request = %+v", request.Git)
 	}
 }
 
@@ -1536,11 +1564,11 @@ func TestGitHubAppRunRecordsTheDefaultBranch(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("triggers = %+v, %v", got, err)
 	}
-	run, err := team.GetRun(t.Context(), got[0].ID)
+	run, err := team.ReadRun(t.Context(), got[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if branch := run.Invocation[runflags.DefaultBranchKey]; branch != "trunk" {
-		t.Fatalf("run invocation = %v, want git_default_branch trunk", run.Invocation)
+	if branch := run.Request.Request.Git.DefaultBranch; !branch.Set || branch.Value != "trunk" {
+		t.Fatalf("sealed git = %+v, want default branch trunk", run.Request.Request.Git)
 	}
 }

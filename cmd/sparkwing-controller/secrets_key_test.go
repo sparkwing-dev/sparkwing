@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -45,23 +45,22 @@ func secretsTestServer(t *testing.T, features ...string) (*controller.Server, *s
 	return srv, st
 }
 
-func postSecret(t *testing.T, srv *controller.Server, name, value string) (int, string) {
+func postSecret(t *testing.T, srv *controller.Server, st *store.Store, name, value string) (int, string) {
 	t.Helper()
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	body, _ := json.Marshal(map[string]string{"name": name, "value": value})
-	resp, err := http.Post(ts.URL+"/api/v1/secrets", "application/json", bytes.NewReader(body))
+	raw, _, err := teststore.ProvisionCredential(t.Context(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "secret-owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TeamAdmin}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := io.ReadAll(resp.Body)
-	if cerr := resp.Body.Close(); err == nil {
-		err = cerr
-	}
+	body, err := json.Marshal(map[string]string{"name": name, "value": value})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resp.StatusCode, string(reply)
+	req := httptest.NewRequest("POST", "/api/v1/secrets", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+raw)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	return rec.Code, rec.Body.String()
 }
 
 func keyFileIn(t *testing.T) string {
@@ -92,7 +91,7 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
 		t.Fatalf("stat %s = %v, want no key before any secret is written", keyPath, err)
 	}
-	if code, _ := postSecret(t, srv, "TOKEN", "first-value"); code != http.StatusNoContent {
+	if code, _ := postSecret(t, srv, st, "TOKEN", "first-value"); code != http.StatusNoContent {
 		t.Fatalf("POST secret = %d, want 204", code)
 	}
 	info, err := os.Stat(keyPath)
@@ -108,7 +107,7 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 	if err := configureSecrets(context.Background(), restarted, st, controllerCredentials{}, keyPath); err != nil {
 		t.Fatalf("restart with the generated key: %v", err)
 	}
-	if code, _ := postSecret(t, restarted, "OTHER", "second-value"); code != http.StatusNoContent {
+	if code, _ := postSecret(t, restarted, st, "OTHER", "second-value"); code != http.StatusNoContent {
 		t.Fatalf("POST after restart = %d, want 204", code)
 	}
 }
@@ -119,7 +118,7 @@ func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *test
 	if err := configureSecrets(context.Background(), srv, st, controllerCredentials{}, keyPath); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := postSecret(t, srv, "TOKEN", "v"); code != http.StatusNoContent {
+	if code, _ := postSecret(t, srv, st, "TOKEN", "v"); code != http.StatusNoContent {
 		t.Fatalf("POST secret = %d", code)
 	}
 	if err := os.Remove(keyPath); err != nil {

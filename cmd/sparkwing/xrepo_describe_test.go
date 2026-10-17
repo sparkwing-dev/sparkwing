@@ -17,7 +17,6 @@ func TestXrepoListDescribesEachRepositoryOnce(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	marker := filepath.Join(t.TempDir(), "describes")
-	t.Setenv("SPARKWING_TEST_DESCRIBES", marker)
 	var registry strings.Builder
 	registry.WriteString("fallback_paths: []\nrepos:\n")
 	for i := range 2 {
@@ -27,10 +26,10 @@ func TestXrepoListDescribesEachRepositoryOnce(t *testing.T) {
 		}
 		sw := filepath.Join(root, ".sparkwing")
 		writeRepoFile(t, filepath.Join(sw, "go.mod"), fmt.Sprintf("module example.com/fixture%d\ngo 1.26\n", i))
-		writeRepoFile(t, filepath.Join(sw, "main.go"), `package main
+		writeRepoFile(t, filepath.Join(sw, "main.go"), strings.ReplaceAll(`package main
 import("bufio";"fmt";"os")
 func main(){ f,err:=os.OpenFile(os.Getenv("SPARKWING_TEST_DESCRIBES"),os.O_CREATE|os.O_WRONLY|os.O_APPEND,0600);if err!=nil{panic(err)};fmt.Fprintln(f,"describe");f.Close();_,_=bufio.NewReader(os.NewFile(3,"requests")).ReadString('\n');fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":2,\"sdk\":{\"language\":\"go\",\"version\":\"fixture\"},\"features\":[]}}"); _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n'); fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"2\",\"ok\":true,\"result\":{\"pipelines\":[{\"name\":\"demo\",\"args\":[]}]}}") }
-`)
+`, `os.Getenv("SPARKWING_TEST_DESCRIBES")`, fmt.Sprintf("%q", marker)))
 		if _, err := runGit(root, "add", "."); err != nil {
 			t.Fatal(err)
 		}

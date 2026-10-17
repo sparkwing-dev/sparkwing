@@ -109,3 +109,8 @@ the rewrite. Reinstall units that still invoke the removed `crons` command.
 
 See [CLI schedules](cli-schedules.md) for the generated flag reference and
 [Scheduling](scheduling.md) for runner placement.
+
+Controller fires seal the repository, ref and effective arguments before they
+enter the run queue. Repeating the same due instant returns the original run.
+App-managed schedules require a live installation and repository automation
+consent. A scheduled run does not carry verified-push or default-branch trust.

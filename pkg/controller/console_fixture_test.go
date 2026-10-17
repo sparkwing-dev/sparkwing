@@ -68,12 +68,15 @@ func ConfigureConsoleFixture(s *Server) {
 
 // ConsoleFixtureRequest presents the existing fixture session as a browser would.
 func ConsoleFixtureRequest(s *Server, r *http.Request, raw string) error {
+	r.Header.Del("Authorization")
+	r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return nil
+	}
 	session, err := s.store.LookupSession(r.Context(), raw)
 	if err != nil {
 		return err
 	}
-	r.Header.Del("Authorization")
-	r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
 	r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: session.CSRFToken})
 	r.Header.Set(csrfHeaderName, session.CSRFToken)
 	return nil

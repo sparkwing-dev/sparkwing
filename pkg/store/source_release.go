@@ -36,8 +36,20 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		}
 		credential, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=?`+tx.forUpdate(), t.team, request.Host))
 		if errors.Is(err, sql.ErrNoRows) {
-			return notFound("git credential", request.Host)
+			return errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: "store a git credential for " + request.Host + " in the team's Git credentials"})
 		}
+		if err != nil {
+			return err
+		}
+		chain, err := authorityChainTx(ctx, tx, authorized.Principal.Authority, true)
+		if err != nil {
+			return err
+		}
+		run, err := readRunTx(ctx, tx, t.team, request.Authorization.Binding.RunID)
+		if err != nil {
+			return err
+		}
+		request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run, true)
 		if err != nil {
 			return err
 		}
@@ -66,8 +78,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO git_credential_releases(id,team,credential_id,host,repository_key,run_id,node_id,generation,machine_id,owner_account_id,runner,capability_prefix,released_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, audit.ID, audit.Team, audit.CredentialID, audit.Host, audit.RepositoryKey, audit.RunID, audit.NodeID, audit.Generation, audit.MachineID, audit.OwnerAccountID, request.Executor.MachineID, audit.CapabilityPrefix, audit.ReleasedAt.UnixNano())
-		return err
+		return insertSourceReleaseAuditTx(ctx, tx, audit)
 	})
 	if err != nil {
 		return GitCredential{}, capability.SourceReleaseAudit{}, err
@@ -115,10 +126,8 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	if err != nil {
 		return capability.SourceReleaseRequest{}, authorityError(apierr.Forbidden, "sealed source has no credential host")
 	}
-	executor, err := t.sourceExecutorTx(ctx, tx, chain, run)
-	if err != nil {
-		return capability.SourceReleaseRequest{}, err
-	}
+	root := chain[len(chain)-1].principal.Capability
+	executor := capability.SourceExecutor{Team: string(t.team), MachineID: root.Subject.ID, AuthorizedRepositories: []string{string(run.Request.Request.Git.Repository.Key)}}
 	authorized = capability.Authorized{Principal: p, Binding: b, Target: capability.Target{Team: c.Team, RunID: b.RunID, NodeID: b.NodeID}, Access: capability.AccessRule{Grants: []capability.Grant{capability.SourceRead}, Binding: capability.BindSource, Liveness: capability.LiveSensitive}}
 	return capability.SourceReleaseRequest{Authorization: authorized, Executor: executor, RepositoryKey: string(run.Request.Request.Git.Repository.Key), Host: host}, nil
 }
@@ -137,7 +146,7 @@ func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Ca
 	return nil
 }
 
-func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []authorityNode, run RunRow) (capability.SourceExecutor, error) {
+func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []authorityNode, run RunRow, requireConsent bool) (capability.SourceExecutor, error) {
 	if t.s.claimProfiles == nil {
 		return capability.SourceExecutor{}, authorityError(apierr.Unavailable, "source executor enrollment is unavailable")
 	}
@@ -171,7 +180,7 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 		return capability.SourceExecutor{}, err
 	}
 	executor.OwnerOptedIn = executor.OwnerAccountID != "" && consent == 1
-	if !executor.OwnerOptedIn {
+	if requireConsent && !executor.OwnerOptedIn {
 		return capability.SourceExecutor{}, bindingRefusal()
 	}
 	return executor, nil
@@ -213,4 +222,9 @@ func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capabili
 		_, err = tx.ExecContext(ctx, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) VALUES (?,?,?,?) ON CONFLICT(team,capability_prefix) DO UPDATE SET enabled_by=excluded.enabled_by,enabled_at=excluded.enabled_at`, t.team, machine, owner, tx.now().UnixNano())
 		return err
 	})
+}
+
+func insertSourceReleaseAuditTx(ctx context.Context, tx *storeTx, audit capability.SourceReleaseAudit) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO git_credential_releases(id,team,credential_id,host,repository_key,run_id,node_id,generation,machine_id,owner_account_id,runner,capability_prefix,released_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, audit.ID, audit.Team, audit.CredentialID, audit.Host, audit.RepositoryKey, audit.RunID, audit.NodeID, audit.Generation, audit.MachineID, audit.OwnerAccountID, audit.MachineID, audit.CapabilityPrefix, audit.ReleasedAt.UnixNano())
+	return err
 }

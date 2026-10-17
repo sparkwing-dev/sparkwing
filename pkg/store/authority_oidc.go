@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -133,14 +131,7 @@ func oidcTriggerTx(ctx context.Context, tx *storeTx, team Team, identity runspec
 	if request.Origin != runspec.OriginApp || !app.Set || app.Value.VerifiedAt.IsZero() || app.Value.RepositoryID <= 0 || app.Value.DeliveryKey == "" {
 		return nil
 	}
-	var event string
-	err := tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest=?`, app.Value.DeliveryKey).Scan(&event)
-	if errors.Is(err, sql.ErrNoRows) {
-		return authorityError(apierr.Unavailable, "verified run event is unavailable")
-	}
-	if err != nil {
-		return err
-	}
+	event := app.Value.Event
 	if !slices.Contains([]string{"push", "pull_request", "release", "create", "delete"}, event) {
 		return nil
 	}

@@ -66,7 +66,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		}
 		row.ConnectedBy = p.Capability.Subject.ID
 		var err error
-		out, err = t.bindGitHubAppInstallationTx(ctx, tx, row, tx.now())
+		out, err = t.bindGitHubInstallationTx(ctx, tx, row, tx.now())
 		return err
 	})
 	if err != nil {

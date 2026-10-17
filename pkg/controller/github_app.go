@@ -71,6 +71,8 @@ func (s *Server) githubAppEnabled(w http.ResponseWriter) bool {
 	return false
 }
 
+var errInvalidGitHubCompletion = errors.New("GitHub completion has invalid committed facts")
+
 var errNoGitHubApp = errors.New("this controller has no GitHub App configured")
 
 type githubConnectState struct {
@@ -770,14 +772,14 @@ func (s *Server) githubAppCheckUpdate(ctx context.Context, tenant *store.Tenant,
 	}
 	app := input.Git.App.Value
 	if app.InstallationID <= 0 || app.RepositoryID <= 0 || string(input.Git.Repository.Key) != fmt.Sprintf("gh:%d", app.RepositoryID) || app.DeliveryKey == "" || app.VerifiedAt.IsZero() || app.SHA != input.Git.SHA || app.Ref != input.Git.Ref || !githubCommit(app.SHA) {
-		return githubCheckUpdate{}, false, errors.New("GitHub completion requires sealed verified repository facts")
+		return githubCheckUpdate{}, false, errInvalidGitHubCompletion
 	}
 	sha := app.SHA
 	if input.PullRequest.Set {
 		sha = input.PullRequest.Value.HeadSHA
 	}
 	if !githubCommit(sha) {
-		return githubCheckUpdate{}, false, errors.New("GitHub completion requires a verified commit")
+		return githubCheckUpdate{}, false, errInvalidGitHubCompletion
 	}
 	status := string(effect.State)
 	if effect.State == store.RunFailed && (effect.Reason == "timeout" || effect.Reason == "queue_timeout") {

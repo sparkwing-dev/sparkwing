@@ -36,8 +36,14 @@ func (s *Server) ReconcileRunEffects(ctx context.Context) (err error) {
 		}
 		delivery := store.EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev, Lease: lease}
 		if err := s.deliverRunEffect(ctx, tenant, effect, delivery); err != nil {
-			if retryErr := tenant.RetryRunEffect(ctx, delivery, effect.ObservedAt.Add(time.Second*time.Duration(1<<min(effect.Attempts, 6)))); retryErr != nil {
-				return errors.Join(err, retryErr)
+			var recordErr error
+			if errors.Is(err, errInvalidGitHubCompletion) {
+				recordErr = tenant.RejectRunEffect(ctx, delivery)
+			} else {
+				recordErr = tenant.RetryRunEffect(ctx, delivery, effect.ObservedAt.Add(time.Second*time.Duration(1<<min(effect.Attempts, 6))))
+			}
+			if recordErr != nil {
+				return errors.Join(err, recordErr)
 			}
 			s.logger.Error("deliver run effect", "effect", effect.Effect, "team", effect.Team, "run_id", effect.RunID, "err", err)
 		}

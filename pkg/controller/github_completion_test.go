@@ -127,7 +127,7 @@ func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
 	f.changeRequest(func(input *runspec.Request) {
 		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", VerifiedAt: f.now}}}
 	})
-	if _, err := tenant.BindGitHubAppInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization"}, f.now); err != nil {
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization"}, f.now); err != nil {
 		t.Fatal(err)
 	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -319,7 +319,7 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 		f := newGitHubCompletion(t)
 		f.changeRequest(func(input *runspec.Request) {
 			input.Git.Repository.Display = display
-			switch scenario % 10 {
+			switch scenario % 12 {
 			case 0:
 				input.Git.App.Value.RepositoryID = 43
 			case 1:
@@ -332,16 +332,20 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 				input.Git.App.Value.VerifiedAt = time.Time{}
 			case 5:
 				input.Git.App.Value.InstallationID = 0
+			case 6:
+				input.Git.App.Value.SHA, input.Git.SHA = "invalid", "invalid"
+			case 7:
+				input.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{HeadSHA: "invalid"}}
 			}
 		})
-		switch scenario % 10 {
-		case 6:
-			engineSQL(t, f.server.store, `UPDATE github_app_installations SET suspended=1 WHERE installation_id=7`)
-		case 7:
-			engineSQL(t, f.server.store, `UPDATE github_app_installations SET team='default' WHERE installation_id=7`)
+		switch scenario % 12 {
 		case 8:
-			f.api.repository = 43
+			engineSQL(t, f.server.store, `UPDATE github_app_installations SET suspended=1 WHERE installation_id=7`)
 		case 9:
+			engineSQL(t, f.server.store, `UPDATE github_app_installations SET team='default' WHERE installation_id=7`)
+		case 10:
+			f.api.repository = 43
+		case 11:
 			f.api.before = func(r *http.Request) {
 				if r.URL.Path == "/repositories/42" {
 					engineSQL(t, f.server.store, `UPDATE github_app_installations SET suspended=1 WHERE installation_id=7`)
@@ -349,13 +353,20 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 			}
 		}
 		f.finish(store.RunSuccess)
+		var logs bytes.Buffer
+		f.server.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		f.reconcile()
+		f.now = f.now.Add(time.Hour)
 		f.reconcile()
 		_, delivered, attempts, _ := f.revision()
-		return len(f.api.checks) == 0 && len(f.api.statuses) == 0 && delivered == 0 && attempts == 1
+		if scenario%12 < 8 {
+			return len(f.api.checks) == 0 && len(f.api.statuses) == 0 && delivered == 1 && attempts == 1 && strings.Count(logs.String(), "deliver run effect") == 1
+		}
+		return len(f.api.checks) == 0 && len(f.api.statuses) == 0 && delivered == 0 && attempts == 2
 	}
-	for scenario := range uint8(10) {
+	for scenario := range uint8(12) {
 		if !property(scenario, "untrusted/reused") {
-			t.Fatalf("authority scenario %d sent a foreign check", scenario)
+			t.Fatalf("invalid completion handling in authority scenario %d", scenario)
 		}
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 20}); err != nil {

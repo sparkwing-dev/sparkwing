@@ -26,12 +26,12 @@ func TestGitHubAppInstallationBelongsToOneTeam(t *testing.T) {
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
 	now := time.Now()
 
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 	stolen := acmeInstallation()
 	stolen.ConnectedBy = "acct-evil"
-	if _, err := other.BindGitHubAppInstallation(ctx, stolen, now); !errors.Is(err, store.ErrInstallationBoundElsewhere) {
+	if _, err := other.TestOnlySeedGitHubInstallation(ctx, stolen, now); !errors.Is(err, store.ErrInstallationBoundElsewhere) {
 		t.Fatalf("second team's bind = %v, want ErrInstallationBoundElsewhere", err)
 	}
 	got, err := st.AsOperator().GitHubAppInstallationTeam(ctx, 7)
@@ -44,7 +44,7 @@ func TestGitHubAppInstallationBelongsToOneTeam(t *testing.T) {
 
 	again := acmeInstallation()
 	again.ConnectedBy = "acct-2"
-	if b, err := acme.BindGitHubAppInstallation(ctx, again, now); err != nil || b.ConnectedBy != "acct-2" {
+	if b, err := acme.TestOnlySeedGitHubInstallation(ctx, again, now); err != nil || b.ConnectedBy != "acct-2" {
 		t.Fatalf("acme's reconnect = %+v, %v; want refreshed", b, err)
 	}
 }
@@ -54,7 +54,7 @@ func TestGitHubAppUnbindDropsTheTeamsSubscriptions(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), store.GitHubAppTrigger{
@@ -84,7 +84,7 @@ func TestGitHubAppTagSubscriptionRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}
 	tr := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "release", Tags: []string{"v*"}}
@@ -110,7 +110,7 @@ func TestGitHubAppSubscriptionBranchesRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}
 	tr := store.GitHubAppTrigger{
@@ -147,7 +147,7 @@ func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}
 	base := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "base", Push: true}
@@ -239,7 +239,7 @@ func TestGitHubAppRepositoryKeysSurviveRenamesProperty(t *testing.T) {
 			for j, target := range targets {
 				installation := acmeInstallation()
 				installation.InstallationID += int64(j)
-				if _, err := target.BindGitHubAppInstallation(t.Context(), installation, now); err != nil {
+				if _, err := target.TestOnlySeedGitHubInstallation(t.Context(), installation, now); err != nil {
 					t.Fatal(err)
 				}
 				for _, repository := range []string{"acme/widgets", "renamed/widgets"} {

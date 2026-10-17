@@ -136,6 +136,14 @@ func (t *Tenant) AcknowledgeRunEffect(ctx context.Context, delivery EffectDelive
 	return t.deliverRunEffect(ctx, delivery, nil, nil)
 }
 
+// RejectRunEffect records one failed attempt and consumes only the invalid revision.
+func (t *Tenant) RejectRunEffect(ctx context.Context, delivery EffectDelivery) error {
+	return t.deliverRunEffect(ctx, delivery, nil, func(tx *storeTx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE run_effects SET attempts=attempts+1 WHERE team=? AND run_id=? AND effect=?`, t.team, delivery.RunID, delivery.Effect)
+		return err
+	})
+}
+
 // RetryRunEffect records a failed delivery without overwriting a later desired state or its due work.
 func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, nextAt time.Time) error {
 	if nextAt.IsZero() {

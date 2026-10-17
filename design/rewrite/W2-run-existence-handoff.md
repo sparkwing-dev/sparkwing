@@ -184,6 +184,100 @@ passes, but no full native controller/store pass is claimed. The supplied
 receipt still contains FAIL. No Git write, installed binary, service or pipeline
 ran. Scratch is deleted at handoff and the shared cache is retained.
 
+## Integration merge continuation
+
+Resolved the contents of all 19 conflicted paths. The index remains unmerged
+because the swarm brief forbids Git writes. The lead must stage these
+resolutions and finish the merge. The integration-deleted
+`pkg/controller/trigger_rows_internal_test.go` stays deleted. Removed the
+14-line `triggerRunInvocation` helper and its 19-line retired test. Also
+deleted the unused `runTrigger` and `triggerInTeam` helpers, 19 lines including
+the separator, from `tenant_scope.go`. They were the last production
+`Operator.RunTeam` caller in the controller.
+
+The approved privacy boundary was already committed. Both required test files
+remain byte-for-byte identical to HEAD, and both named privacy tests pass.
+`EngineController.runTarget` remains deleted. No decoder regains a global
+run-team lookup. The existing result digests, expansion generation fences and
+child bindings remain in the post-authentication resolution path.
+
+Amended contracts win in the merge. C2's `ScheduledRunWriter` now takes
+`store.CronSchedule`, matching C1's concrete `Tenant.AdmitScheduledRun`.
+Production composition assigns the tenant directly, preserving compile-time
+conformance and the injectable test seam. Queue activity records only a new
+admission. Tick tests now reach the real committing schedule adapter. Their
+generated property requires changed snapshots to be refused, the original
+seal to stay unchanged and foreign admission to create no run. The missing
+adapter test injects a missing adapter explicitly. Manual schedule HTTP tests
+retain their existing fake boundary.
+
+Kept W2's GitHub connection session/identity rechecks and the integration
+helper name, account-type validation and nanosecond timestamp contract. Kept
+both branches' independent connection tests. Updated the one W2 timestamp
+assertion that expected seconds. The first run failed that assertion with
+the preserved nanosecond value. The corrected connection tests pass.
+
+Verification uses `GOWORK=off GOFLAGS=-buildvcs=false`,
+`GOCACHE=/tmp/sw-gocache`, `GOTMPDIR=/tmp/sw-astra-W2/go-tmp`,
+`TMPDIR=/tmp/sw-astra-W2/tmp` and `-p 4`:
+
+- Whole-repository `go build -p 4 ./...` passes.
+- `go vet -p 4 ./pkg/controller ./pkg/store ./internal/capability ./internal/apierr` passes.
+- Both unchanged privacy tests pass. The controller race selection also passes.
+- Controller merge selection covering CronTick, CronLauncher, ScheduleIntake,
+  ScheduleHTTP, FloodPolicy, ComputeLimits, Trigger and RunIntake passes, 5.167s.
+  After simplifying the schedule fake to use the committed repository key,
+  the schedule/tick selection passes again, 0.563s.
+- Controller GitHubCompletion and GitHubBrowserConnection selection passes,
+  12.192s. Store GitHubConnect, DeclaredRepoGuard, AppAdmission, AppFullRef and
+  FlowNonces selection passes, 7.176s.
+- Full internal/capability and internal/apierr tests pass, 0.301s and 0.020s.
+- Commentcheck against main is clean across 2,698 Go files.
+- `git diff --check` passes.
+
+- Both required privacy tests and both branches' GitHub connection tests pass
+  under `-race`: controller 9.446s, store 68.947s.
+
+The broader acceptance attempt accidentally included `|.` in its filter and ran
+the full package. It exited 1 after 258.244s. Its large output was truncated
+before the failure names were retained. No full acceptance pass is claimed.
+The corrected W2 selection passes, 2.013s:
+`go test -p 4 ./tests/acceptance -run
+'TestCredential|TestAuthority|TestDeployment|TestEngineAuthority|TestLocalNode'
+-count=1`. These are credential, authority, deployment, engine-authority and
+local-node component cells. Native topology cells remain for the lead.
+
+After deleting the unused tenant-scope helpers, the whole-repository build
+and commentcheck pass again. The required privacy tests plus GitHubCompletion
+selection pass, 14.030s.
+
+W2 production is +17,262/-18,167 against main, net -905, within the -250
+budget. These counts exclude client, tests, testdata, acceptance and contract
+declarations. This continuation is +171/-184 W2 production lines relative to HEAD,
+net -13, including integration's changes. No historical test was
+newly ported and no native acceptance cell was unskipped.
+
+Contract changes made: C2 records the amended scheduled-intake signature.
+No new store signature, schema or mechanism was added. Lead-owned handoffs
+and amendment files remain untouched. Shared files resolved are
+`design/rewrite/contracts/c1-data.md`, `design/rewrite/test-reconciliation.md`,
+`pkg/store/github_app.go`, `pkg/store/github_connect.go`,
+`pkg/store/github_connect_test.go` and `pkg/store/declared_repo_guard_test.go`.
+The W2 changes are in `pkg/controller/crons.go`, `crons_tick_test.go` and
+`schedule_routes_test.go`, and `tenant_scope.go`, alongside the other controller conflict resolutions
+and C2's implementation note. No caller outside these paths needed a new
+migration.
+
+The native receipt still reports `TestGitHubAppRerequestedForkOrForeignCommitStartsNothing`
+panicking at `CheckRunCalls()[0]`. Its local attempt stops earlier at
+`googletest.New` with `socket: operation not permitted`. The integration merge
+brings trusted App admission through sealed intake and its completion facts,
+but the original native test still needs the lead's rerun. No native pass is
+claimed. PostgreSQL remains unexercised. All checks have exited. Scratch
+`/tmp/sw-astra-W2` is deleted and `/tmp/sw-gocache` is retained. C1's prior QueuePriorityWriter
+persistence handoff remains open. There is no new contract request or design
+question.
+
 <!-- design:end -->
 
 STATUS: CONTINUE

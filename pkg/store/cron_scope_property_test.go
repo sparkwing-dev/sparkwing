@@ -1,10 +1,13 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"reflect"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -107,6 +110,52 @@ func TestCronSchedulePersistsCanonicalRepository(t *testing.T) {
 		var key string
 		if err := tenant.s.queryRow(t.Context(), `SELECT repo_key FROM cron_schedules WHERE team=? AND id=?`, tenant.team, schedule.ID).Scan(&key); err != nil || key != string(repository.Key) {
 			t.Fatalf("repository key: %q, %v; want %q", key, err, repository.Key)
+		}
+	}
+}
+
+func TestArmCronScheduleDerivesIdentityRatherThanCallerKeyProperty(t *testing.T) {
+	property := func(value uint16) bool {
+		s := authorityStore(t)
+		tenant := &Tenant{s: s, team: "a"}
+		row, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "derived", RepoPath: "https://git.example.com/acme/repo.git", RepositoryKey: runspec.RepoKey(fmt.Sprintf("gh:%d", int(value)+1)), Pipeline: "ci", Cron: "* * * * *", TZ: "UTC"}, time.Now())
+		return err == nil && row.RepositoryKey == "git:git.example.com/acme/repo"
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type scheduleIdentityPolicy struct {
+	fakeIntakePolicy
+	resolve func(context.Context, Team, string) (runspec.Repository, error)
+}
+
+func (p scheduleIdentityPolicy) ResolveScheduleRepository(ctx context.Context, team Team, remote string) (runspec.Repository, error) {
+	return p.resolve(ctx, team, remote)
+}
+
+func TestArmCronScheduleUsesTrustedPolicyIdentityWithoutAppConsent(t *testing.T) {
+	for _, refused := range []bool{false, true} {
+		s := authorityStore(t)
+		tenant := &Tenant{s: s, team: "a"}
+		s.SetIntakePolicy(scheduleIdentityPolicy{resolve: func(_ context.Context, team Team, remote string) (runspec.Repository, error) {
+			if team != "a" || remote != "https://github.com/acme/repo.git" {
+				t.Fatalf("lookup = %s %s", team, remote)
+			}
+			if refused {
+				return runspec.Repository{}, errors.New("lookup failed")
+			}
+			return runspec.Repository{Key: "gh:701"}, nil
+		}})
+		row, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "manual", RepoPath: "https://github.com/acme/repo.git", RepositoryKey: "gh:999", Pipeline: "ci", Cron: "* * * * *", TZ: "UTC"}, time.Now())
+		if refused {
+			if err == nil {
+				t.Fatal("failed identity lookup armed a schedule")
+			}
+			rewriteSchemaCount(t, s.db, "cron_schedules", 0)
+		} else if err != nil || row.RepositoryKey != "gh:701" || row.GitHubInstallationID != 0 || row.GitHubRepositoryID != 0 {
+			t.Fatalf("manual schedule = %+v %v", row, err)
 		}
 	}
 }
