@@ -60,7 +60,7 @@ func TestS3ManifestRequiresCompleteClosedBytes(t *testing.T) {
 					}, nil
 				}),
 			})
-			objects, err := blob.NewS3(client, "bucket")
+			objects, err := blob.NewS3(client, "bucket", "")
 			if err != nil {
 				t.Fatal(err)
 			}

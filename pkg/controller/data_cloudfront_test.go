@@ -39,7 +39,7 @@ func cloudFrontFixture(t *testing.T) (*blob.S3, *rsa.PrivateKey, string) {
 	}
 	encoded := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
 	client := s3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("fixture-access", "fixture-secret", "")})
-	objects, err := blob.NewS3(client, "fixture-bucket")
+	objects, err := blob.NewS3(client, "fixture-bucket", "deployment/nested-root")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestCloudFrontDataBackendSignedObjectProperty(t *testing.T) {
 			return false
 		}
 		u, err := url.Parse(signed.URL)
-		if err != nil || u.Host != "cdn.example.test" || u.Scheme != "https" || u.Path != "/"+path || u.Query().Get("Key-Pair-Id") != "key-id" || len(u.Query()) != 3 || len(signed.Headers) != 0 || signed.Size != object.Size || signed.SHA256 != hash || !signed.ExpiresAt.Equal(object.ExpiresAt) {
+		if err != nil || u.Host != "cdn.example.test" || u.Scheme != "https" || u.Path != "/deployment/nested-root/"+path || u.Query().Get("Key-Pair-Id") != "key-id" || len(u.Query()) != 3 || len(signed.Headers) != 0 || signed.Size != object.Size || signed.SHA256 != hash || !signed.ExpiresAt.Equal(object.ExpiresAt) {
 			return false
 		}
 		policyBytes := cloudFrontDecode(t, u.Query().Get("Policy"))
@@ -89,7 +89,7 @@ func TestCloudFrontDataBackendSignedObjectProperty(t *testing.T) {
 			return false
 		}
 		statement := policy.Statements[0]
-		if statement.Resource != "https://cdn.example.test/"+path || statement.Condition.DateLessThan.Unix() != object.ExpiresAt.Unix() || strings.ContainsAny(statement.Resource, "*?") {
+		if statement.Resource != "https://cdn.example.test/deployment/nested-root/"+path || statement.Condition.DateLessThan.Unix() != object.ExpiresAt.Unix() || strings.ContainsAny(statement.Resource, "*?") {
 			return false
 		}
 		signature := cloudFrontDecode(t, u.Query().Get("Signature"))

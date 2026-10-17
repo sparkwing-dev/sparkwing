@@ -33,6 +33,7 @@ type logDeleteObject struct {
 
 func TestS3LogDeletionScope(t *testing.T) {
 	property := func(seed uint32) bool {
+		prefix := fmt.Sprintf("deployment-%d/nested root/%%2e%%2e/", seed)
 		team, run := fmt.Sprintf("team-%d", seed), fmt.Sprintf("run-%d", seed)
 		objects := map[string]int64{}
 		for _, owner := range []string{team, team + "-other"} {
@@ -44,19 +45,19 @@ func TestS3LogDeletionScope(t *testing.T) {
 							t.Log(err)
 							return false
 						}
-						objects[key] = 7
+						objects[prefix+key] = 7
 					}
 				}
 			}
 		}
-		cas := "teams/" + team + "/cas/" + string(digest("private"))
+		cas := prefix + "teams/" + team + "/cas/" + string(digest("private"))
 		objects[cas] = 11
 		var scope string
-		backend := logS3(t, func(r *http.Request) (*http.Response, error) {
+		backend := logS3Prefix(t, prefix, func(r *http.Request) (*http.Response, error) {
 			response := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}
 			if r.Method == http.MethodDelete {
 				key := strings.TrimPrefix(r.URL.Path, "/bucket/")
-				if !strings.Contains(key, "/teams/"+team+"/") || (scope != "" && !strings.Contains(key, "/runs/"+scope+"/")) {
+				if !strings.HasPrefix(key, prefix+"logs/") || !strings.Contains(key, "/teams/"+team+"/") || (scope != "" && !strings.Contains(key, "/runs/"+scope+"/")) {
 					return nil, errors.New("foreign delete")
 				}
 				delete(objects, key)
@@ -65,16 +66,19 @@ func TestS3LogDeletionScope(t *testing.T) {
 			if r.Method != http.MethodGet || r.URL.Query().Get("list-type") != "2" {
 				return nil, errors.New("unexpected request")
 			}
-			prefix, delimiter, cursor := r.URL.Query().Get("prefix"), r.URL.Query().Get("delimiter"), r.URL.Query().Get("continuation-token")
+			listedPrefix, delimiter, cursor := r.URL.Query().Get("prefix"), r.URL.Query().Get("delimiter"), r.URL.Query().Get("continuation-token")
+			if !strings.HasPrefix(listedPrefix, prefix+"logs/") {
+				return nil, errors.New("listing escaped configured prefix")
+			}
 			entries := map[string]int64{}
 			for key, size := range objects {
-				if !strings.HasPrefix(key, prefix) {
+				if !strings.HasPrefix(key, listedPrefix) {
 					continue
 				}
 				if delimiter == "/" {
-					class, _, ok := strings.Cut(strings.TrimPrefix(key, prefix), "/")
+					class, _, ok := strings.Cut(strings.TrimPrefix(key, listedPrefix), "/")
 					if ok {
-						entries[prefix+class+"/"] = 0
+						entries[listedPrefix+class+"/"] = 0
 					}
 				} else {
 					entries[key] = size
@@ -139,7 +143,9 @@ func TestS3LogDeletionScope(t *testing.T) {
 
 func TestS3LogDeletionRefusesInvalidScopeAndListing(t *testing.T) {
 	for _, fixture := range []struct{ team, run, body string }{
-		{"../acme", "", ""}, {"acme", "../run", ""}, {"", "run", ""},
+		{"../acme", "", ""},
+		{"acme", "../run", ""},
+		{"", "run", ""},
 		{"acme", "run", `<ListBucketResult><IsTruncated>true</IsTruncated></ListBucketResult>`},
 		{"acme", "run", `<ListBucketResult><CommonPrefixes><Prefix>foreign/r90/</Prefix></CommonPrefixes></ListBucketResult>`},
 	} {

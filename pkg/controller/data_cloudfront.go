@@ -58,7 +58,7 @@ func (b *cloudFrontDataBackend) Sign(ctx context.Context, object capability.Obje
 	if err != nil || object.Method != http.MethodGet || !ingress {
 		return signed, err
 	}
-	resource := (&url.URL{Scheme: "https", Host: b.domain, Path: "/" + object.Key}).String()
+	resource := (&url.URL{Scheme: "https", Host: b.domain, Path: "/" + b.PhysicalKey(object.Key)}).String()
 	policy := &sign.Policy{Statements: []sign.Statement{{Resource: resource, Condition: sign.Condition{DateLessThan: sign.NewAWSEpochTime(object.ExpiresAt)}}}}
 	signed.URL, err = b.signer.SignWithPolicy(resource, policy)
 	if err != nil {

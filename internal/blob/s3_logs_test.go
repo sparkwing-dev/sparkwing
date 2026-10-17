@@ -25,18 +25,27 @@ func (b *s3LogBody) Close() error { b.closed = true; return nil }
 
 func logS3(t *testing.T, request s3HTTP) *blob.S3 {
 	t.Helper()
-	client := s3.New(s3.Options{
+	return logS3Prefix(t, "", request)
+}
+
+func logS3Prefix(t *testing.T, prefix string, request s3HTTP) *blob.S3 {
+	t.Helper()
+	client := logS3Client(request)
+	backend, err := blob.NewS3(client, "bucket", prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backend
+}
+
+func logS3Client(request s3HTTP) *s3.Client {
+	return s3.New(s3.Options{
 		Region: "us-east-1", BaseEndpoint: aws.String("https://objects.invalid"), UsePathStyle: true, RetryMaxAttempts: 1,
 		Credentials: aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 			return aws.Credentials{AccessKeyID: "test", SecretAccessKey: "test-secret"}, nil
 		}),
 		HTTPClient: request,
 	})
-	backend, err := blob.NewS3(client, "bucket")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return backend
 }
 
 func TestS3LogReadsExactBoundedObjects(t *testing.T) {

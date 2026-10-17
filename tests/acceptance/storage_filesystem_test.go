@@ -43,7 +43,7 @@ func storageFilesystemHTTP(objects *blob.Filesystem) storageObjectHTTP {
 
 func storageFilesystem(t *testing.T) (*blob.Filesystem, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "deployment", "nested-root")
 	f, err := blob.NewFilesystem(blob.FilesystemOptions{
 		Directory: dir, Endpoint: "https://controller.invalid",
 		SigningKey: []byte(strings.Repeat("k", 32)),

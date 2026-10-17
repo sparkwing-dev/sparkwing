@@ -106,7 +106,7 @@ func TestS3CommitVerifiesStoredBytes(t *testing.T) {
 					return response, nil
 				}),
 			})
-			backend, err := blob.NewS3(client, "bucket")
+			backend, err := blob.NewS3(client, "bucket", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -163,7 +163,7 @@ func TestS3CommitRequiresItsOwnStagedBytes(t *testing.T) {
 				return response, nil
 			}),
 		})
-		backend, err := blob.NewS3(client, "bucket")
+		backend, err := blob.NewS3(client, "bucket", "")
 		if err != nil {
 			t.Fatal(err)
 		}

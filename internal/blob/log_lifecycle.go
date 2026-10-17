@@ -25,7 +25,7 @@ func (s *S3) LogClassReady(ctx context.Context, class string) error {
 	if err != nil && !s3Error(err, "NoSuchLifecycleConfiguration") {
 		return fmt.Errorf("read log lifecycle: %w", err)
 	}
-	prefix := "logs/" + class + "/"
+	prefix := s.PhysicalKey(LogClassPrefix(class))
 	if err == nil && LogLifecycleExpires(out.Rules, prefix, days) {
 		return nil
 	}

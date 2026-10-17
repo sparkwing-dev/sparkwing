@@ -12,6 +12,18 @@ Sparkwing's storage contract separates immutable bytes from the records that
 authorize a job to read them. The controller signs uploads and downloads.
 The object backend is S3 or the filesystem signer.
 
+All physical keys are relative to the configured storage root. For
+`--cache-blob-store=s3://bucket/controller`, CAS blobs, artifact members and
+manifests, source bundles, pipeline binaries, staged uploads and logs live under
+`controller/`. Records remain database rows referring to those bytes. S3 copy
+sources, signed downloads (including CloudFront), log listings and deletion use
+that same prefix. Set bucket measurement to the same URL and scope IAM object
+permissions to `controller/*`. Log lifecycle rules cover
+`controller/logs/<class>/`. CloudFront uses an empty origin path because its
+signed paths include the prefix. The filesystem backend anchors every key to
+its configured data directory through one directory handle.
+
+
 ## Bytes and records
 
 Each object is named by its SHA-256 digest. Uploads verify the expected length

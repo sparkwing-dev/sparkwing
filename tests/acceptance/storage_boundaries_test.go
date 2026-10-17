@@ -368,11 +368,13 @@ func checkStorageMemoFailures(t *testing.T) {
 			digest := storageDigest(body)
 			records := storageMemo{hit: blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: digest}}}
 			download := storageDownload{transfer: blob.SignedTransfer{Digest: digest, Size: int64(len(body))}}
+			var wantErr error
 			switch fault {
 			case "missing_output":
 				records.hit.Output.Set = false
 			case "record_refused":
 				records.err = blob.ErrDigestNotReadable
+				wantErr = blob.ErrDigestNotReadable
 			case "missing_bytes":
 				download.err = blob.ErrNotFound
 			case "corrupt_bytes":
@@ -391,7 +393,7 @@ func checkStorageMemoFailures(t *testing.T) {
 				if err != nil || !result.Hit.Found || !bytes.Equal(result.Output, body) {
 					t.Fatalf("verified memo missed: %+v, %v", result, err)
 				}
-			} else if err != nil || result.Hit.Found || result.Output != nil {
+			} else if !errors.Is(err, wantErr) || result.Hit.Found || result.Output != nil {
 				t.Fatalf("failed materialization returned a hit: %+v, %v", result, err)
 			}
 		})

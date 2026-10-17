@@ -10,9 +10,9 @@ controller:
   credentialsSecret: {name: sparkwing-credentials}
   storage: {type: emptyDir}
   dataStore:
-    s3URL: s3://sparkwing-cloud-data
+    s3URL: s3://sparkwing-cloud-data/controller
   bucketCeiling:
-    store: s3://sparkwing-cloud-data
+    store: s3://sparkwing-cloud-data/controller
   cloudfront:
     domain: data.sparkwing.dev
     keyPairID: REPLACE_PUBLIC_KEY_ID

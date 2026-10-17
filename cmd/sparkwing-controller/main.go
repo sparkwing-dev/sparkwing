@@ -543,13 +543,9 @@ func run(args []string) error {
 	}
 	srv = srv.WithLogRetention(retention)
 	if strings.HasPrefix(*cacheBlobStore, "s3://") {
-		client, bucket, _, err := s3store.Open(ctx, *cacheBlobStore)
+		objects, err := openS3Data(ctx, *cacheBlobStore)
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
-		}
-		objects, err := blob.NewS3(client, bucket)
-		if err != nil {
-			return err
 		}
 		var backend blob.ObjectBackend = objects
 		if *cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "" {

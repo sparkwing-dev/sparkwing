@@ -80,7 +80,7 @@ func TestS3SigningAndCommit(t *testing.T) {
 			return response, nil
 		}),
 	})
-	backend, err := blob.NewS3(client, "bucket")
+	backend, err := blob.NewS3(client, "bucket", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1524,6 +1524,14 @@ leased retention releases uncommitted reservations without deleting a live blob.
 and deletion. Both filesystem and S3 implementations consume stored bytes through
 verified EOF and successful close. S3 fences its copy to the verified source ETag,
 creates the final key only if absent, and verifies final bytes before returning.
+Storage-root amendment: `NewS3(client, bucket, prefix)` requires the parsed URL
+prefix. `S3.PhysicalKey` maps validated relative keys to that root once for every
+signed transfer, read, copy source/destination, deletion, log listing and
+lifecycle check. CloudFront downloads use the same mapping. Filesystem keys stay
+relative to `FilesystemOptions.Directory` through its `os.Root` handle. Logical
+record keys and persisted log references exclude the deployment prefix; records
+remain database metadata. A configured root cannot be bypassed by an object class.
+
 A physical commit grants no record, existence row or receipt. Those remain W1's
 transactional responsibility after the controller repeats authorization.
 
@@ -1975,8 +1983,9 @@ exception to download caps. Persisted segments fill gaps or stalls in the ring.
 log slot. Index zero names the final manifest. Physical segment slots start at
 one in signing and verification.
 `LogSubjectPrefix`, `LogSegmentKey` and `LogManifestKey` are its shared key builders.
-The physical layout is `logs/<class>/teams/<team>/runs/<run>/`, followed by the
-tagged job or unit fence. Persisted references must name those physical objects.
+The backend-relative layout is `logs/<class>/teams/<team>/runs/<run>/`, followed
+by the tagged job or unit fence. Persisted references use this relative key; the
+backend applies the configured storage root when locating the physical object.
 
 The `storage-hasmany-read-set/store-data-sqlite` proof uses exact imported job
 attempts under a preseeded publication capability. It checks hidden unrelated and
