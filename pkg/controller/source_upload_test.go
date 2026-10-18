@@ -64,7 +64,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	repo, sha := sourcetest.Repository(t)
 	sourcetest.Git(t, repo, "bundle", "create", path, "HEAD")
 	input.Git.SHA, input.Source.Ref = sha, sha
-	digest, err := client.UploadSourceSnapshot(t.Context(), options, input.Git, input.Source, source.Publication{Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
+	digest, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	if _, err := c.CreateRun(t.Context(), request); err == nil {
 		t.Fatal("consumed snapshot accepted twice")
 	}
-	if _, err := client.UploadSourceSnapshot(t.Context(), options, input.Git, input.Source, source.Publication{Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}}); err != nil {
+	if _, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}}); err != nil {
 		t.Fatal(err)
 	}
 	request.IdempotencyKey = "deduplicated"
@@ -148,7 +148,7 @@ func TestSourceSnapshotAuthorityAndRevisionProperty(t *testing.T) {
 	if err := os.WriteFile(path, []byte("snapshot bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	digest, err := client.UploadSourceSnapshot(t.Context(), options, input.Git, input.Source, source.Publication{Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
+	digest, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestSourceSnapshotAuthorityAndRevisionProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, s.store, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
-	if _, err := client.UploadSourceSnapshot(t.Context(), options, input.Git, input.Source, source.Publication{Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}}); err == nil {
+	if _, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}}); err == nil {
 		t.Fatal("revoked member uploaded source")
 	}
 }
@@ -218,7 +218,7 @@ func TestSourceSnapshotRevokedBeforeCommitExpiresPhysicalStaging(t *testing.T) {
 	if err := os.WriteFile(path, []byte("private snapshot"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.UploadSourceSnapshot(t.Context(), options, input.Git, input.Source, source.Publication{Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}}); err == nil {
+	if _, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}}); err == nil {
 		t.Fatal("revoked member committed source")
 	}
 	var id string
@@ -260,7 +260,7 @@ func TestSourceSnapshotSigningFailureReleasesReservation(t *testing.T) {
 	if err := os.WriteFile(path, []byte("snapshot"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.UploadSourceSnapshot(t.Context(), options, input.Git, input.Source, source.Publication{Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}}); err == nil {
+	if _, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}}); err == nil {
 		t.Fatal("signer failure was hidden")
 	}
 	var reserved, count int64
@@ -293,7 +293,7 @@ func TestSourceSnapshotPublishesScannedCopyAfterInputChanges(t *testing.T) {
 		}
 		return transport.RoundTrip(r)
 	})
-	digest, err := client.UploadSourceSnapshot(t.Context(), options, input.Git, input.Source, source.Publication{Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{"SIGNING_MATERIAL": "private-value-added-after-scan"}})
+	digest, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{"SIGNING_MATERIAL": "private-value-added-after-scan"}})
 	if err != nil || !changed || digest != fmt.Sprintf("%x", sha256.Sum256(original)) {
 		t.Fatalf("upload differed from scanned source: changed=%t digest=%s err=%v", changed, digest, err)
 	}

@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -31,6 +33,9 @@ var (
 func checkSourceHints(repoRoot string) bool {
 	valid, posArgs := loadRegistry()
 	var hints []sourceHint
+	fset := token.NewFileSet()
+	packages := map[string][]*ast.File{}
+	var directories []string
 	for _, dir := range []string{"cmd", "internal", "pkg"} {
 		// #nosec G703 -- a build-time tool reading paths the operator names
 		err := filepath.WalkDir(filepath.Join(repoRoot, dir), func(path string, d fs.DirEntry, werr error) error {
@@ -47,13 +52,39 @@ func checkSourceHints(repoRoot string) bool {
 			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			found, perr := sourceHintsIn(repoRoot, path)
-			hints = append(hints, found...)
-			return perr
+			file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+			if err != nil {
+				return err
+			}
+			directory := filepath.Dir(path)
+			if _, exists := packages[directory]; !exists {
+				directories = append(directories, directory)
+			}
+			packages[directory] = append(packages[directory], file)
+			return nil
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "doccheck/source-hints:", err)
 			return false
+		}
+	}
+	for _, directory := range directories {
+		files := packages[directory]
+		info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
+		// hack: the scan includes platform variants and incomplete fixture packages.
+		config := types.Config{Error: func(error) {}}
+		_, _ = config.Check(files[0].Name.Name, fset, files, info)
+		used := map[types.Object]bool{}
+		for _, object := range info.Uses {
+			used[object] = true
+		}
+		for _, file := range files {
+			found, err := sourceHintsIn(repoRoot, fset, file, info, used)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "doccheck/source-hints:", err)
+				return false
+			}
+			hints = append(hints, found...)
 		}
 	}
 
@@ -74,13 +105,8 @@ func checkSourceHints(repoRoot string) bool {
 	return len(bad) == 0
 }
 
-func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-	if err != nil {
-		return nil, err
-	}
-	rel, err := filepath.Rel(repoRoot, path)
+func sourceHintsIn(repoRoot string, fset *token.FileSet, file *ast.File, info *types.Info, used map[types.Object]bool) ([]sourceHint, error) {
+	rel, err := filepath.Rel(repoRoot, fset.Position(file.Pos()).Filename)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +121,12 @@ func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
 		if len(stack) > 0 {
 			parent = stack[len(stack)-1]
 		}
+		if declaration, ok := node.(*ast.ValueSpec); ok && slices.ContainsFunc(declaration.Names, func(name *ast.Ident) bool {
+			_, constant := info.Defs[name].(*types.Const)
+			return constant && used[info.Defs[name]]
+		}) {
+			return false
+		}
 		stack = append(stack, node)
 		expression, ok := node.(ast.Expr)
 		if !ok {
@@ -106,7 +138,7 @@ func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
 		if _, nested := parent.(*ast.ParenExpr); nested {
 			return true
 		}
-		text, ok := sourceHintExpression(expression)
+		text, ok := sourceHintExpression(expression, info)
 		if !ok {
 			return true
 		}
@@ -158,7 +190,10 @@ func sourceHintDataLiteral(parent ast.Node, literal ast.Expr) bool {
 	return false
 }
 
-func sourceHintExpression(expression ast.Expr) (string, bool) {
+func sourceHintExpression(expression ast.Expr, info *types.Info) (string, bool) {
+	if value := info.Types[expression].Value; value != nil && value.Kind() == constant.String {
+		return constant.StringVal(value), true
+	}
 	switch expression := expression.(type) {
 	case *ast.BasicLit:
 		if expression.Kind == token.STRING {
@@ -167,8 +202,8 @@ func sourceHintExpression(expression ast.Expr) (string, bool) {
 		}
 	case *ast.BinaryExpr:
 		if expression.Op == token.ADD {
-			left, leftOK := sourceHintExpression(expression.X)
-			right, rightOK := sourceHintExpression(expression.Y)
+			left, leftOK := sourceHintExpression(expression.X, info)
+			right, rightOK := sourceHintExpression(expression.Y, info)
 			if !leftOK {
 				left = "\x00"
 			}
@@ -178,7 +213,7 @@ func sourceHintExpression(expression ast.Expr) (string, bool) {
 			return left + right, leftOK || rightOK
 		}
 	case *ast.ParenExpr:
-		return sourceHintExpression(expression.X)
+		return sourceHintExpression(expression.X, info)
 	}
 	return "", false
 }

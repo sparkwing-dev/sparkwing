@@ -127,7 +127,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 		return result, err
 	}
 	defer closeConnection()
-	digest, err := client.UploadSourceSnapshot(ctx, connection, result.Request.Git, result.Request.Source, source.Publication{Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: environment.held})
+	digest, err := client.UploadSourceSnapshot(ctx, connection, source.Publication{Git: result.Request.Git, Source: result.Request.Source, Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: environment.held})
 	if err != nil {
 		return result, err
 	}

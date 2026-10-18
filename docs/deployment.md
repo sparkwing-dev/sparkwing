@@ -35,7 +35,7 @@ admission, and runs that exact snapshot without pushing it to the origin. The
 capture rejects conflicts, submodules, sparse checkouts, and Git content
 filters. It also requires a complete SHA-1 repository. The default requires an `origin` URL and a pushed commit. `--working-tree`
 needs a local Git checkout with a HEAD commit and an origin URL. It scans the
-final bundle for configured local secret values and uploads the scanned copy
+final bundle and source metadata for configured local secret values and uploads the scanned copy
 through the controller's signed storage binding before admitting the run.
 Source acquisition ignores Git replacement objects, so a selected commit ID
 keeps its original contents.

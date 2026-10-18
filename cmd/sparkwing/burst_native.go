@@ -201,7 +201,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		hold, _ := time.ParseDuration(p.Hold)
 		request.Request.Burst.Preferences = append(request.Request.Burst.Preferences, runspec.PlacementStep{Target: p.Target, Hold: hold})
 	}
-	digest, err := client.UploadSourceSnapshot(ctx, connection, request.Request.Git, request.Request.Source, source.Publication{Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: held})
+	digest, err := client.UploadSourceSnapshot(ctx, connection, source.Publication{Git: request.Request.Git, Source: request.Request.Source, Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: held})
 	if err != nil {
 		return request, &burstBeforeIntakeError{err}
 	}

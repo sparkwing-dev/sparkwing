@@ -269,7 +269,8 @@ files require explicit review through the allowed-file option. Keep credentials
 in ignored files or outside the repository and inspect `git status` before
 submission. Trigger and burst scan the final bundle for configured local secret
 values before uploading it through the controller's signed storage binding.
-The scan includes unchanged blobs and any bundled history.
+The scan includes every object payload and the transported metadata, including
+file names, commit and tag messages, refs, unchanged files and bundled history.
 
 Here execution retains its one-time authority in an owner-only controller/run
 record before hosting. Resume takes only the run selector and connection:
@@ -502,7 +503,7 @@ deletions. Untracked files require their exact repository-relative paths in
 machine `run.routing.source_files`. A repository `source_files` declaration
 requires that machine approval, including for ignored paths. The bundle has
 no parent history. Secret-shaped files are refused before upload. The local
-secret scan checks every blob included in the final bundle, skips values shorter
+secret scan checks every included object and source metadata, skips values shorter
 than eight bytes and ignores PEM armor lines. Log masking keeps its full patterns.
 Trigger and burst upload the private copy that passed the scan through authorized
 content-addressed source storage.

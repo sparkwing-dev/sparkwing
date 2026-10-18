@@ -97,3 +97,44 @@ func FuzzConcatenatedRecoveryCommandsUseCurrentGrammar(f *testing.F) {
 		}
 	})
 }
+
+func FuzzNamedConstantRecoveryCommandsUseCurrentGrammar(f *testing.F) {
+	f.Add(uint8(46), uint8(4))
+	for form := range uint8(7) {
+		f.Add(uint8(10), form)
+	}
+	f.Fuzz(func(t *testing.T, split, form uint8) {
+		for _, command := range []string{"sparkwing serve start", "sparkwing dashboard start"} {
+			root := t.TempDir()
+			point := int(split) % len(command)
+			declarations := "const head = " + strconv.Quote(command[:point]) + "\nconst tail = " + strconv.Quote(command[point:]) + "\n"
+			expression := "head + tail"
+			prefix, suffix := "package main\nvar suffix string\n", ""
+			switch form % 7 {
+			case 1:
+				expression = "head + tail + string(rune(10)) + suffix"
+			case 2:
+				declarations += "const alias = head + (tail)\n"
+				expression = "alias"
+			case 3:
+				declarations += "const (alias = head + tail; repeated)\n"
+				expression = "repeated"
+			case 4:
+				writeSource(t, root, "cmd/tool/constants.go", "package main\n"+declarations)
+				declarations = ""
+			case 5:
+				prefix += "const head = \"unrelated\"\nfunc printHint() {\n"
+				suffix = "}\n"
+			case 6:
+				prefix = "package main\nimport \"fmt\"\nfunc printHint() {\n"
+				expression = "fmt.Sprint(" + expression + ")"
+				suffix = "}\n"
+			}
+			writeSource(t, root, "cmd/tool/hint.go", prefix+declarations+"var hint = "+expression+"\n"+suffix)
+			want := strings.HasPrefix(command, "sparkwing dashboard")
+			if got := checkSourceHints(root); got != want {
+				t.Fatalf("named constant grammar verdict=%t want=%t: form=%d expression=%s", got, want, form%7, expression)
+			}
+		}
+	})
+}

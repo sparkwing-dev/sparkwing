@@ -3,6 +3,7 @@ package source
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -12,18 +13,22 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// Publication binds source bytes to the prepared environment and withheld secret classification.
+// Publication binds source bytes and metadata to the prepared environment and withheld secret classification.
 type Publication struct {
 	Path    string
+	Git     runspec.Git
+	Source  runspec.Source
 	Base    procenv.Base
 	Secrets map[string]string
 }
 
-// OpenPublication copies and scans the final bundle before returning its private upload stream.
+// OpenPublication returns a scanned bundle copy and its cleanup under the platform's private-file policy.
 func OpenPublication(ctx context.Context, publication Publication) (_ *os.File, _ func() error, resultErr error) {
 	if publication.Secrets == nil || publication.Base.Masker == nil {
 		return nil, nil, errors.New("source publication requires prepared secret classification and masker")
@@ -32,7 +37,7 @@ func OpenPublication(ctx context.Context, publication Publication) (_ *os.File, 
 	if err != nil {
 		return nil, nil, err
 	}
-	root, err := os.MkdirTemp("", "sparkwing-publication-")
+	root, err := fssecure.MkdirPrivateTemp("", "sparkwing-publication-")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -53,7 +58,7 @@ func OpenPublication(ctx context.Context, publication Publication) (_ *os.File, 
 	if err != nil {
 		return nil, nil, err
 	}
-	stream, err = os.OpenFile(filepath.Join(root, "source.bundle"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	stream, err = fssecure.OpenFile(filepath.Join(root, "source.bundle"), os.O_CREATE|os.O_EXCL|os.O_RDWR)
 	if err != nil {
 		return nil, nil, errors.Join(err, input.Close())
 	}
@@ -61,7 +66,7 @@ func OpenPublication(ctx context.Context, publication Publication) (_ *os.File, 
 	if err := errors.Join(copyErr, input.Close(), ctx.Err()); err != nil {
 		return nil, nil, err
 	}
-	if err := scanPublication(ctx, root, stream.Name(), environment, publication.Secrets); err != nil {
+	if err := scanPublication(ctx, root, stream, environment, publication); err != nil {
 		return nil, nil, err
 	}
 	if _, err := stream.Seek(0, io.SeekStart); err != nil {
@@ -70,9 +75,9 @@ func OpenPublication(ctx context.Context, publication Publication) (_ *os.File, 
 	return stream, cleanup, nil
 }
 
-func scanPublication(ctx context.Context, root, bundle string, environment []string, values map[string]string) error {
+func scanPublication(ctx context.Context, root string, bundle *os.File, environment []string, publication Publication) error {
 	masker := secrets.NewMasker()
-	for _, value := range values {
+	for _, value := range publication.Secrets {
 		lines := slices.DeleteFunc(strings.Split(value, "\n"), func(line string) bool {
 			line = strings.TrimSpace(line)
 			return strings.HasPrefix(line, "-----BEGIN ") || strings.HasPrefix(line, "-----END ")
@@ -90,12 +95,41 @@ func scanPublication(ctx context.Context, root, bundle string, environment []str
 	if longest == 0 {
 		return nil
 	}
-	client := gitClient{env: gitEnvironment(environment)}
-	checkout := filepath.Join(root, "objects")
-	if err := initCheckout(ctx, &client, checkout, bundle, ""); err != nil {
+	policy := publicationPolicy{patterns: patterns, longest: longest, buffer: make([]byte, 64<<10)}
+	metadata, err := json.Marshal(struct {
+		Git    runspec.Git    `json:"git"`
+		Source runspec.Source `json:"source"`
+	}{publication.Git, publication.Source})
+	if err != nil {
+		return errors.New("read source publication metadata failed")
+	}
+	if err := policy.scan(strings.NewReader(string(metadata))); err != nil {
 		return err
 	}
-	if _, err := client.run(ctx, checkout, "", "bundle", "unbundle", bundle); err != nil {
+	if _, err := bundle.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	reader := bufio.NewReader(bundle)
+	var header strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return errors.New("read source bundle header failed")
+		}
+		header.WriteString(line)
+		if line == "\n" {
+			break
+		}
+	}
+	if err := policy.scan(strings.NewReader(header.String())); err != nil {
+		return err
+	}
+	client := gitClient{env: gitEnvironment(environment)}
+	checkout := filepath.Join(root, "objects")
+	if err := initCheckout(ctx, &client, checkout, bundle.Name(), ""); err != nil {
+		return err
+	}
+	if _, err := client.run(ctx, checkout, "", "bundle", "unbundle", bundle.Name()); err != nil {
 		return err
 	}
 	scanCtx, cancel := context.WithCancel(ctx)
@@ -109,7 +143,7 @@ func scanPublication(ctx context.Context, root, bundle string, environment []str
 	if err := cmd.Start(); err != nil {
 		return errors.New("start source snapshot scan failed")
 	}
-	scanErr := scanPublicationObjects(bufio.NewReader(stdout), patterns, longest)
+	scanErr := policy.scanObjects(bufio.NewReader(stdout))
 	if scanErr != nil {
 		cancel()
 	}
@@ -123,8 +157,13 @@ func scanPublication(ctx context.Context, root, bundle string, environment []str
 	return ctx.Err()
 }
 
-func scanPublicationObjects(reader *bufio.Reader, patterns []string, longest int) error {
-	buffer := make([]byte, 64<<10)
+type publicationPolicy struct {
+	patterns []string
+	longest  int
+	buffer   []byte
+}
+
+func (p publicationPolicy) scanObjects(reader *bufio.Reader) error {
 	for {
 		header, err := reader.ReadString('\n')
 		if errors.Is(err, io.EOF) && header == "" {
@@ -138,23 +177,33 @@ func scanPublicationObjects(reader *bufio.Reader, patterns []string, longest int
 		if err != nil || size < 0 {
 			return errors.New("read source snapshot object size failed")
 		}
-		tail := ""
-		for size > 0 {
-			n, err := io.ReadFull(reader, buffer[:min(int64(len(buffer)), size)])
-			if err != nil {
-				return errors.New("read source snapshot contents failed")
-			}
-			if fields[1] == "blob" {
-				text := tail + string(buffer[:n])
-				if slices.ContainsFunc(patterns, func(pattern string) bool { return strings.Contains(text, pattern) }) {
-					return errors.New("source bundle contains a declared local secret")
-				}
-				tail = text[max(0, len(text)-longest+1):]
-			}
-			size -= int64(n)
+		contents := &io.LimitedReader{R: reader, N: size}
+		if err := p.scan(contents); err != nil {
+			return err
+		}
+		if contents.N != 0 {
+			return errors.New("read source snapshot contents failed")
 		}
 		if end, err := reader.ReadByte(); err != nil || end != '\n' {
 			return errors.New("read source snapshot object end failed")
 		}
+	}
+}
+
+func (p publicationPolicy) scan(reader io.Reader) error {
+	tail := ""
+	for {
+		n, err := io.ReadFull(reader, p.buffer)
+		text := tail + string(p.buffer[:n])
+		if slices.ContainsFunc(p.patterns, func(pattern string) bool { return strings.Contains(text, pattern) }) {
+			return errors.New("source bundle contains a declared local secret")
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil
+		}
+		if err != nil {
+			return errors.New("read source snapshot contents failed")
+		}
+		tail = text[max(0, len(text)-p.longest+1):]
 	}
 }

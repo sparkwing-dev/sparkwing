@@ -253,7 +253,7 @@ func FuzzBurstSnapshotRejectsSecretValues(f *testing.F) {
 	})
 }
 
-func TestBurstSnapshotSecretScanAllowsUnchangedSourceAndNames(t *testing.T) {
+func TestBurstSnapshotSecretScanRejectsSecretNamesAndAllowsAbsentValues(t *testing.T) {
 	repo := initSnapshotRepo(t)
 	writeSnapshotFile(t, repo, "private-token-in-filename.txt", "public", 0o644)
 	runSnapshotGit(t, repo, "add", ".")
@@ -267,8 +267,8 @@ func TestBurstSnapshotSecretScanAllowsUnchangedSourceAndNames(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if err := checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"TOKEN": "private-token"}); err != nil {
-		t.Fatal(err)
+	if err := checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"TOKEN": "private-token"}); err == nil || !strings.Contains(err.Error(), "source bundle contains a declared local secret") {
+		t.Fatalf("secret-bearing file name accepted: %v", err)
 	}
 	if err := checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"TOKEN": "absent-private-token"}); err != nil {
 		t.Fatal(err)

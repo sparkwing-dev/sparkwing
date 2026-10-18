@@ -97,10 +97,13 @@ lookups use the persisted request environment too. Default-branch lookup takes
 the prepared masker so accepted proxy credentials remain supported and masked.
 
 `client.UploadSourceSnapshot` requires `source.Publication`, carrying its final
-bundle path, prepared process base and a nonnil withheld-secret classification.
-`source.OpenPublication` copies the bundle into private storage and scans every
-included blob object, including unchanged files and any bundled history, before
-any upload request. Hashing and transfer read that scanned copy. Trigger passes
+bundle path, Git/source metadata, prepared process base and a nonnil withheld-secret
+classification. The uploader takes its Git/source metadata from that publication.
+`source.OpenPublication` creates its copy root and file through `fssecure` before
+copying bytes. It scans every included object payload, the entire bundle header
+and the serialized Git/source metadata before any upload request. This includes
+tree entry names, commit/tag messages, ref names, prerequisite descriptions,
+unchanged files and any bundled history. Hashing and transfer read that scanned copy. Trigger passes
 all configured held values. Burst passes those values plus resolved local secret
 providers. A missing classification or masker fails closed. The scan retains
 its eight-byte minimum and PEM-armor filtering. It never reports private paths
