@@ -7,6 +7,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -65,11 +66,9 @@ func TestLauncherPodRejectionCommitsFailedAwardW8(t *testing.T) {
 		"added_container": func(p *corev1.Pod) {
 			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "injected", Image: "other"})
 		},
-		"changed_image":          func(p *corev1.Pod) { p.Spec.Containers[0].Image = "other" },
-		"removed_security_field": func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.Privileged = nil },
-		"extra_hostPath": func(p *corev1.Pod) {
-			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}})
-		},
+		"changed_image": func(p *corev1.Pod) { p.Spec.Containers[0].Image = "other" },
+		"changed_size":  func(p *corev1.Pod) { p.Spec.Resources.Limits[corev1.ResourceMemory] = resource.MustParse("1Mi") },
+		"other_team":    func(p *corev1.Pod) { p.Labels[launcher.TeamLabel] = launcher.TeamNodeValue("other-team") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			runtime, kube, server, resources, _ := reservationFixtureW8(t)

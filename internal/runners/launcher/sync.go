@@ -29,7 +29,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	if err := l.validate(); err != nil {
 		return err
 	}
-	return errors.Join(l.verifyLocal(ctx), l.sync(ctx))
+	return l.sync(ctx)
 }
 
 func (l *Launcher) sync(ctx context.Context) error {
@@ -51,12 +51,6 @@ func (l *Launcher) sync(ctx context.Context) error {
 				errs = append(errs, err)
 			}
 			continue
-		}
-		if jobFinished(job) && (job.Spec.Suspend == nil || !*job.Spec.Suspend) {
-			if verifyErr := l.verifyJobPods(ctx, &job); verifyErr != nil {
-				errs = append(errs, l.verificationFailure(ctx, &job, binding, reservation, verifyErr, true))
-				continue
-			}
 		}
 		// safety: a live suspended Job may still be publishing its bootstrap on another launcher.
 		remove := job.DeletionTimestamp != nil || jobFinished(job)
@@ -87,6 +81,7 @@ func (l *Launcher) sync(ctx context.Context) error {
 			job := &jobs.Items[live[observation.JobName]]
 			_, reservation, err := jobOwnership(*job)
 			if err == nil && !retirements[observation.JobName].Delete {
+				errs = append(errs, l.enforceAward(ctx, job, observation.Binding, reservation))
 				continue
 			}
 			if err == nil {
@@ -98,37 +93,6 @@ func (l *Launcher) sync(ctx context.Context) error {
 		}
 	}
 	return errors.Join(append(errs, l.syncReservations(ctx), l.syncCapacity(ctx))...)
-}
-
-func (l *Launcher) verifyLocal(ctx context.Context) error {
-	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
-	if err != nil {
-		return fmt.Errorf("list Cloud Jobs: %w", err)
-	}
-	var errs []error
-	for i := range jobs.Items {
-		job := &jobs.Items[i]
-		if jobFinished(*job) || job.Spec.Suspend != nil && *job.Spec.Suspend {
-			continue
-		}
-		binding, reservation, err := jobOwnership(*job)
-		if err != nil {
-			errs = append(errs, l.discardMalformedJob(ctx, job, err))
-			continue
-		}
-		if job.Annotations[rejectedAnnotation] != "" {
-			_, err := l.containJob(ctx, job, binding, reservation)
-			errs = append(errs, err)
-			continue
-		}
-		if job.DeletionTimestamp != nil {
-			continue
-		}
-		if verifyErr := l.verifyJobPods(ctx, job); verifyErr != nil {
-			errs = append(errs, l.verificationFailure(ctx, job, binding, reservation, verifyErr, false))
-		}
-	}
-	return errors.Join(append(errs, l.verifyCapacity(ctx))...)
 }
 
 func (l *Launcher) syncReservations(ctx context.Context) error {
@@ -241,11 +205,7 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 			return binding, reservation, errors.New("Cloud Job has invalid bootstrap ownership")
 		}
 	}
-	var requested corev1.PodTemplateSpec
-	if err := json.Unmarshal([]byte(job.Annotations[templateAnnotation]), &requested); err != nil {
-		return binding, reservation, fmt.Errorf("Job %s has invalid requested template: %w", job.Name, err)
-	}
-	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.Award != binding.LeaseRef() || reservation.NodeName != requested.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
+	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.Award != binding.LeaseRef() || reservation.NodeName != job.Spec.Template.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
 		return binding, reservation, errors.New("Cloud Job ownership does not match its reservation")
 	}
 	return binding, reservation, nil

@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -18,9 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/rest"
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -80,33 +75,6 @@ func FuzzProductionBoundaryRejectsMetadataInjection(f *testing.F) {
 		pods, err := kube.CoreV1().Pods("cloud").List(t.Context(), metav1.ListOptions{})
 		if err != nil || len(pods.Items) != 0 {
 			t.Fatalf("rejected probe survived: %v, %d pods", err, len(pods.Items))
-		}
-	})
-}
-
-func FuzzAdmittedPodPreservesEmptyMetadata(f *testing.F) {
-	f.Add("empty", false, false)
-	f.Add("empty", true, false)
-	f.Add("empty", false, true)
-	f.Add("empty", true, true)
-	f.Fuzz(func(t *testing.T, suffix string, annotation, remove bool) {
-		if len(suffix) > 20 {
-			t.Skip()
-		}
-		key := "key-x" + hex.EncodeToString([]byte(suffix))
-		requested := corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}, Annotations: map[string]string{}}}
-		pod := &corev1.Pod{ObjectMeta: *requested.ObjectMeta.DeepCopy()}
-		before, after := requested.Labels, pod.Labels
-		if annotation {
-			before, after = requested.Annotations, pod.Annotations
-		}
-		if remove {
-			before[key] = ""
-		} else {
-			after[key] = ""
-		}
-		if err := verifyAdmittedPod(requested, pod, nil); err == nil {
-			t.Fatalf("metadata membership changed: annotation=%v remove=%v", annotation, remove)
 		}
 	})
 }
@@ -215,151 +183,6 @@ func FuzzCapacityIdentityRefusalIsLocal(f *testing.F) {
 		}
 		if _, err := kube.CoreV1().Pods("cloud").Get(t.Context(), capacityName(second.Binding), metav1.GetOptions{}); err != nil {
 			t.Fatalf("other award lost capacity: %v", err)
-		}
-	})
-}
-
-type blockingControl struct {
-	CloudControl
-	entered chan struct{}
-	calls   int
-}
-
-func (c *blockingControl) Sync(ctx context.Context, _ []CloudJobObservation) ([]CloudJobState, error) {
-	c.calls++
-	if c.calls == 1 {
-		close(c.entered)
-	}
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-func TestControllerInFlightCannotPauseLocalEnforcement(t *testing.T) {
-	for _, mode := range []string{"pod", "interrupted-containment", "malformed-ownership"} {
-		t.Run(mode, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				l, p := requestedPod(t)
-				if _, err := l.LaunchOne(t.Context()); err != nil {
-					t.Fatal(err)
-				}
-				kube := l.Kube
-				award := l.Control.(*controlFake).award
-				blocked := &blockingControl{CloudControl: l.Control, entered: make(chan struct{})}
-				l.Control, l.Poll = blocked, time.Second
-				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
-				done := make(chan error, 1)
-				go func() { done <- l.Run(ctx) }()
-				<-blocked.entered
-				synctest.Wait()
-				deletes := 0
-				if mode == "interrupted-containment" {
-					kube.(*fake.Clientset).PrependReactor("delete", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
-						deletes++
-						if deletes == 1 {
-							return true, nil, context.DeadlineExceeded
-						}
-						return false, nil, nil
-					})
-				}
-				if mode == "malformed-ownership" {
-					job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(award.Binding), metav1.GetOptions{})
-					if err != nil {
-						t.Fatal(err)
-					}
-					job.Annotations[bindingAnnotation] = "unreadable"
-					if _, err := kube.BatchV1().Jobs("cloud").Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					p.Spec.Containers[0].Image = "forged"
-					if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
-						t.Fatal(err)
-					}
-				}
-				capacity, err := capacityPod(l.Config, demandFor(*award))
-				if err != nil {
-					t.Fatal(err)
-				}
-				capacity.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "UNEXPECTED", Value: "yes"}}
-				if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), capacity, metav1.CreateOptions{}); err != nil {
-					t.Fatal(err)
-				}
-				<-time.NewTimer(2500 * time.Millisecond).C
-				synctest.Wait()
-				job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(award.Binding), metav1.GetOptions{})
-				if mode == "malformed-ownership" {
-					if !apierrors.IsNotFound(err) {
-						t.Errorf("malformed Job escaped local containment: %v", err)
-					}
-				} else if err != nil || job.DeletionTimestamp == nil || job.Annotations[rejectedAnnotation] == "" || l.Boundary.(*boundaryFake).retirements == 0 {
-					t.Errorf("active Pod escaped local enforcement during a blocked call: error=%v", err)
-				}
-				if mode == "interrupted-containment" && deletes < 2 {
-					t.Errorf("local containment did not retry: deletes=%d", deletes)
-				}
-				if _, err := kube.CoreV1().Pods("cloud").Get(t.Context(), capacity.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-					t.Errorf("capacity Pod escaped local enforcement during a blocked call: %v", err)
-				}
-				if blocked.calls != 1 {
-					t.Errorf("controller did not remain blocked: calls=%d", blocked.calls)
-				}
-				cancel()
-				if err := <-done; err != nil {
-					t.Fatal(err)
-				}
-			})
-		})
-	}
-}
-
-type deadlineTransport struct {
-	started chan time.Time
-	expired chan error
-}
-
-func (d deadlineTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	deadline, local := req.Context().Deadline()
-	if local {
-		d.started <- deadline
-	}
-	<-req.Context().Done()
-	if local {
-		d.expired <- req.Context().Err()
-	}
-	return nil, req.Context().Err()
-}
-
-func TestLocalEnforcementHasItsOwnDeadline(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		transport := deadlineTransport{started: make(chan time.Time, 10), expired: make(chan error, 10)}
-		kube, err := kubernetes.NewForConfigAndClient(&rest.Config{Host: "https://kube.example", QPS: -1}, &http.Client{Transport: transport})
-		if err != nil {
-			t.Fatal(err)
-		}
-		l, _, _, _ := fixture()
-		l.Kube, l.Poll = kube, time.Second
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		done := make(chan error, 1)
-		go func() { done <- l.Run(ctx) }()
-		first := <-transport.started
-		if first.Sub(time.Now()) != time.Second {
-			t.Fatalf("local pass has no independent poll deadline: %v", first)
-		}
-		<-time.NewTimer(2500 * time.Millisecond).C
-		synctest.Wait()
-		if len(transport.expired) != 2 || len(transport.started) != 2 {
-			t.Errorf("Kubernetes stall stopped later local passes: expired=%d later=%d", len(transport.expired), len(transport.started))
-		}
-		cancel()
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
-		for range len(transport.expired) {
-			if err := <-transport.expired; !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
-				t.Fatal(err)
-			}
 		}
 	})
 }

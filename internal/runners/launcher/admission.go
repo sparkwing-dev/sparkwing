@@ -36,6 +36,33 @@ func validateAdmittedJob(expected, admitted *batchv1.Job) error {
 	return nil
 }
 
+func defaultPodSpec(p *corev1.PodSpec) {
+	if p.DNSPolicy == "" {
+		p.DNSPolicy = corev1.DNSClusterFirst
+	}
+	if p.SchedulerName == "" {
+		p.SchedulerName = corev1.DefaultSchedulerName
+	}
+	if p.TerminationGracePeriodSeconds == nil {
+		p.TerminationGracePeriodSeconds = ptr(int64(30))
+	}
+	if p.DeprecatedServiceAccount == "" {
+		p.DeprecatedServiceAccount = p.ServiceAccountName
+	}
+	for _, cs := range [][]corev1.Container{p.Containers, p.InitContainers} {
+		for i := range cs {
+			c := &cs[i]
+			if c.TerminationMessagePath == "" {
+				c.TerminationMessagePath = corev1.TerminationMessagePathDefault
+			}
+			if c.TerminationMessagePolicy == "" {
+				c.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+			}
+			defaultProbe(c.StartupProbe)
+		}
+	}
+}
+
 func defaultProbe(p *corev1.Probe) {
 	if p == nil {
 		return

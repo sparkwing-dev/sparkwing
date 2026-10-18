@@ -2,8 +2,8 @@ package acceptance_test
 
 import (
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,7 +14,26 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 )
+
+func admitW8(kube *fake.Clientset, cfg launcher.CloudJobConfig) *fake.Clientset {
+	const identity = "system:serviceaccount:sparkwing:sparkwing-launcher"
+	kube.PrependReactor("create", "selfsubjectreviews", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, &authenticationv1.SelfSubjectReview{Status: authenticationv1.SelfSubjectReviewStatus{UserInfo: authenticationv1.UserInfo{Username: identity}}}, nil
+	})
+	policies, bindings := launcher.AdmissionPolicies(launcher.AdmissionConfig{Namespace: cfg.Namespace, Launcher: identity, RunnerImage: cfg.RunnerImage, DockerImage: cfg.DockerImage})
+	for i := range policies {
+		if err := kube.Tracker().Add(policies[i]); err != nil {
+			panic(err)
+		}
+		if err := kube.Tracker().Add(bindings[i]); err != nil {
+			panic(err)
+		}
+	}
+	return kube
+}
 
 func cloudKubeW8(objects ...runtime.Object) *fake.Clientset {
 	objects = append(objects, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}})

@@ -91,16 +91,13 @@ func recordedDemand(pod *corev1.Pod) (capacityDemand, error) {
 	return d, nil
 }
 
-func (l *Launcher) verifyCapacityPod(ctx context.Context, pod *corev1.Pod, d capacityDemand) error {
+func (l *Launcher) verifyCapacityPod(pod *corev1.Pod, d capacityDemand) error {
 	expected, err := capacityPod(l.Config, d)
-	if err == nil && (expected.Name != pod.Name || pod.Namespace != l.Config.Namespace || len(pod.OwnerReferences) != 0) {
+	if err == nil && (expected.Name != pod.Name || pod.Namespace != l.Config.Namespace || len(pod.OwnerReferences) != 0 || pod.Annotations[demandAnnotation] != expected.Annotations[demandAnnotation]) {
 		err = errors.New("capacity Pod identity does not match its award")
 	}
 	if err == nil {
-		err = defaultPriority(ctx, l.Kube, &expected.Spec)
-	}
-	if err == nil {
-		err = verifyAdmittedPod(corev1.PodTemplateSpec{ObjectMeta: expected.ObjectMeta, Spec: expected.Spec}, pod, nil)
+		err = awardPod(&corev1.PodTemplateSpec{ObjectMeta: expected.ObjectMeta, Spec: expected.Spec}, &corev1.PodTemplateSpec{ObjectMeta: pod.ObjectMeta, Spec: pod.Spec})
 	}
 	if err != nil {
 		return &podMismatch{message: fmt.Sprintf("capacity Pod %s failed verification: %v", pod.Name, err)}
@@ -108,11 +105,11 @@ func (l *Launcher) verifyCapacityPod(ctx context.Context, pod *corev1.Pod, d cap
 	return nil
 }
 
-func (l *Launcher) authenticateCapacity(ctx context.Context, pod *corev1.Pod, state CloudJobState) error {
+func (l *Launcher) authenticateCapacity(pod *corev1.Pod, state CloudJobState) error {
 	if state.Resources == nil {
 		return &podMismatch{message: fmt.Sprintf("capacity Pod %s has no controller allocation", pod.Name)}
 	}
-	return l.verifyCapacityPod(ctx, pod, capacityDemand{Binding: state.Binding, CPUCores: state.Resources.Cores, Memory: state.Resources.MemoryBytes})
+	return l.verifyCapacityPod(pod, capacityDemand{Binding: state.Binding, CPUCores: state.Resources.Cores, Memory: state.Resources.MemoryBytes})
 }
 
 func (l *Launcher) deleteCapacityPod(ctx context.Context, pod *corev1.Pod) error {
@@ -137,7 +134,7 @@ func (l *Launcher) requestCapacity(ctx context.Context, award CloudJobAward) err
 	if err != nil {
 		return err
 	}
-	if err := l.verifyCapacityPod(ctx, admitted, d); err != nil {
+	if err := l.verifyCapacityPod(admitted, d); err != nil {
 		return errors.Join(err, l.deleteCapacityPod(ctx, admitted))
 	}
 	return nil
@@ -149,33 +146,6 @@ func (l *Launcher) capacityPods(ctx context.Context) ([]corev1.Pod, error) {
 		return nil, err
 	}
 	return pods.Items, nil
-}
-
-func (l *Launcher) verifyCapacity(ctx context.Context) error {
-	pods, err := l.capacityPods(ctx)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for i := range pods {
-		pod := &pods[i]
-		d, err := recordedDemand(pod)
-		if held := l.held(pod.Name); held != nil {
-			d, err = demandFor(*held), nil
-		}
-		// safety: an unheld recorded demand is only checked for shape here; syncCapacity authenticates it.
-		if err == nil {
-			err = l.verifyCapacityPod(ctx, pod, d)
-		}
-		expired := err == nil && !time.Now().Before(demandDeadline(d.Binding))
-		if expired {
-			l.forget(pod.Name)
-		}
-		if err != nil || expired {
-			errs = append(errs, err, l.deleteCapacityPod(ctx, pod))
-		}
-	}
-	return errors.Join(errs...)
 }
 
 func demandDeadline(b CloudJobBinding) time.Time {
@@ -196,12 +166,23 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 	var errs []error
 	for i := range pods {
 		pod := &pods[i]
-		var d capacityDemand
-		if pod.DeletionTimestamp != nil || json.Unmarshal([]byte(pod.Annotations[demandAnnotation]), &d) != nil {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		d, err := recordedDemand(pod)
+		held := l.held(pod.Name)
+		if held != nil && err == nil {
+			err = l.verifyCapacityPod(pod, demandFor(*held))
+		}
+		expired := err == nil && !time.Now().Before(demandDeadline(d.Binding))
+		if expired {
+			l.forget(pod.Name)
+		}
+		if err != nil || expired {
+			errs = append(errs, err, l.deleteCapacityPod(ctx, pod))
 			continue
 		}
 		name := jobName(d.Binding)
-		held := l.held(pod.Name)
 		observation := CloudJobObservation{Binding: d.Binding, JobName: name, NodeUID: string(pod.UID), ReservationID: capacityObservedID + string(pod.UID), Unheld: held == nil || !sameBinding(held.Binding, d.Binding)}
 		states, err := l.retirements(ctx, []CloudJobObservation{observation})
 		if err != nil && !capacityIdentityRefused(err) {
@@ -215,7 +196,7 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 			}
 			logger.Warn("controller refused capacity Pod identity", "pod", pod.Name, "uid", pod.UID, "error", err)
 		} else if state := states[name]; !state.Delete {
-			if err := l.authenticateCapacity(ctx, pod, state); err != nil {
+			if err := l.authenticateCapacity(pod, state); err != nil {
 				errs = append(errs, err)
 			} else {
 				continue

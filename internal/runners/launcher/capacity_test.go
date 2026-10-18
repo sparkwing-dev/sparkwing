@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"testing/quick"
 	"time"
@@ -36,18 +37,11 @@ func capacityPods(t *testing.T, kube *fake.Clientset) []corev1.Pod {
 
 func capacityMutations() map[string]func(*corev1.Pod) {
 	return map[string]func(*corev1.Pod){
-		"secret_env": func(p *corev1.Pod) {
-			p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "TOKEN", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "bootstrap"}, Key: "bootstrap"}}})
-		},
-		"secret_volume": func(p *corev1.Pod) {
-			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "s", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "bootstrap"}}})
-		},
-		"token": func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = ptr(true) },
+		"image": func(p *corev1.Pod) { p.Spec.Containers[0].Image = "registry/other@sha256:" + strings.Repeat("c", 64) },
 		"sidecar": func(p *corev1.Pod) {
 			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar", Image: "other"})
 		},
 		"other_team":   func(p *corev1.Pod) { p.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("other") },
-		"any_taint":    func(p *corev1.Pod) { p.Spec.Tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}} },
 		"other_demand": func(p *corev1.Pod) { p.Annotations[demandAnnotation] = `{"binding":{}}` },
 		"coordinated_size": func(p *corev1.Pod) {
 			var d capacityDemand
@@ -158,7 +152,7 @@ func TestCapacityRequestMutationIsRejected(t *testing.T) {
 			if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if err := l.verifyLocal(t.Context()); err == nil || len(capacityPods(t, kube)) != 0 {
+			if err := l.Sync(t.Context()); err == nil || len(capacityPods(t, kube)) != 0 {
 				t.Fatalf("mutated stored request survived: %v", err)
 			}
 			if len(l.waitingAwards()) != 1 {
@@ -240,7 +234,7 @@ func TestExpiredCapacityRequestIsRemovedWithoutTheController(t *testing.T) {
 	if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.verifyLocal(t.Context()); err != nil || len(capacityPods(t, kube)) != 0 {
+	if err := l.Sync(t.Context()); err != nil || len(capacityPods(t, kube)) != 0 {
 		t.Fatalf("expired demand survived: %v", err)
 	}
 }
@@ -367,7 +361,7 @@ func TestStaleCapacityCleanupSparesTheNewerAward(t *testing.T) {
 			if len(l1.waitingAwards()) != 0 || len(l2.waitingAwards()) != 1 {
 				t.Fatalf("held awards: L1=%d L2=%d", len(l1.waitingAwards()), len(l2.waitingAwards()))
 			}
-			if err := l2.verifyLocal(t.Context()); err != nil || len(capacityPods(t, kube)) != 1 {
+			if err := l2.verifyCapacityPod(&pods[0], demandFor(g2)); err != nil {
 				t.Fatalf("G2's request no longer matches its award: %v", err)
 			}
 		})

@@ -72,9 +72,12 @@ func (l *Launcher) validate() error {
 	return nil
 }
 
-// Run reconciles existing Jobs before claiming further work until ctx is cancelled.
+// Run verifies the job namespace admission policies, then reconciles existing Jobs before claiming further work until ctx is cancelled.
 func (l *Launcher) Run(ctx context.Context) error {
 	if err := l.validate(); err != nil {
+		return err
+	}
+	if err := l.verifyAdmission(ctx); err != nil {
 		return err
 	}
 	poll := l.Poll
@@ -85,16 +88,6 @@ func (l *Launcher) Run(ctx context.Context) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	verified := make(chan struct{})
-	go func() {
-		defer close(verified)
-		l.enforceLocal(ctx, poll, logger)
-	}()
-	defer func() {
-		cancel()
-		<-verified
-	}()
 	var cooldown time.Time
 	for ctx.Err() == nil {
 		if !time.Now().Before(cooldown) {
@@ -115,24 +108,6 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (l *Launcher) enforceLocal(ctx context.Context, poll time.Duration, logger *slog.Logger) {
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
-	for ctx.Err() == nil {
-		pass, cancel := context.WithTimeout(ctx, poll)
-		err := l.verifyLocal(pass)
-		cancel()
-		if err != nil {
-			logger.Warn("launcher verification failed", failureAttrs(err)...)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }
 
 func retryWait(err error, poll time.Duration) time.Duration {
@@ -271,10 +246,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if err := validateAdmittedJob(expected, activated); err != nil {
 		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation))
 	}
-	if err := l.waitForJobPod(ctx, activated); err != nil {
-		return true, l.verificationFailure(ctx, activated, award.Binding, r.Reservation, err, true)
-	}
-	return true, nil
+	return true, l.enforceAward(ctx, activated, award.Binding, r.Reservation)
 }
 
 func (l *Launcher) retainBootstrap(ctx context.Context, job *batchv1.Job, secret *corev1.Secret) (*batchv1.Job, error) {

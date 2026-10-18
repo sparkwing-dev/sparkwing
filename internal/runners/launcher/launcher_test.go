@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -124,7 +125,19 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 		return true, list, nil
 	})
 	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
+	installAdmission(kube, l.Config)
 	return l, kube, boundary, control
+}
+
+func installAdmission(kube *fake.Clientset, cfg CloudJobConfig) {
+	kube.PrependReactor("create", "selfsubjectreviews", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, &authenticationv1.SelfSubjectReview{Status: authenticationv1.SelfSubjectReviewStatus{UserInfo: authenticationv1.UserInfo{Username: testLauncher}}}, nil
+	})
+	policies, bindings := AdmissionPolicies(AdmissionConfig{Namespace: cfg.Namespace, Launcher: testLauncher, RunnerImage: cfg.RunnerImage, DockerImage: cfg.DockerImage})
+	for i := range policies {
+		_ = kube.Tracker().Add(policies[i])
+		_ = kube.Tracker().Add(bindings[i])
+	}
 }
 
 // hack: the fake tracker ignores finalizers; the API server keeps a deleted Job until its last one is removed.
