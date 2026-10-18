@@ -164,5 +164,9 @@ func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView
 		}
 		facts.Notices = notices
 	}
-	return facts, nil
+	unclaimed, err := s.unclaimedNotice(ctx, view)
+	if unclaimed != nil {
+		facts.Notices = append(facts.Notices, *unclaimed)
+	}
+	return facts, err
 }

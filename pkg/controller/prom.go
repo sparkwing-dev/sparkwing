@@ -140,6 +140,14 @@ var (
 		},
 	)
 
+	claimEmptyTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sparkwing_claim_empty_total",
+			Help: "Queued claim polls that matched no unit, by claimant kind. A launcher or runner that only ever polls empty while work waits matches none of it.",
+		},
+		[]string{"claimant"},
+	)
+
 	runnersLiveGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "sparkwing_runners_live",
@@ -209,6 +217,7 @@ var sparkwingCollectors = []prometheus.Collector{
 	queueDepthGauge,
 	claimWaitSeconds,
 	claimUnavailableTotal,
+	claimEmptyTotal,
 	runnersLiveGauge,
 	liveRunnersGauge,
 	requestsByPrincipalTotal,
@@ -237,6 +246,9 @@ func init() {
 func initZeroSeries() {
 	for _, state := range store.QueueStates() {
 		queueDepthGauge.WithLabelValues(state)
+	}
+	for _, claimant := range []string{claimantLauncher, claimantRunner, claimantHere} {
+		claimEmptyTotal.WithLabelValues(claimant)
 	}
 	for _, credential := range []string{
 		string(capability.SubjectAccount), string(capability.SubjectMachine), string(capability.SubjectService),
@@ -327,6 +339,23 @@ func observeHTTPRequest(route, method string, status int, d time.Duration) {
 	if (route == "/api/v1/runners/claim" || route == "/api/v1/launcher/claim" || route == "/api/v1/runs/{run}/claim") && status == http.StatusServiceUnavailable {
 		claimUnavailableTotal.Inc()
 	}
+}
+
+const (
+	claimantLauncher = "launcher"
+	claimantRunner   = "runner"
+	claimantHere     = "here"
+)
+
+func observeEmptyClaim(c capability.Capability) {
+	claimant := claimantRunner
+	switch {
+	case c.Purpose == capability.PurposeHere:
+		claimant = claimantHere
+	case slices.Contains(c.Grants, capability.ClaimsLaunch):
+		claimant = claimantLauncher
+	}
+	claimEmptyTotal.WithLabelValues(claimant).Inc()
 }
 
 func setQueueDepth(counts map[string]int) {

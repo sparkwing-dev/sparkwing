@@ -146,6 +146,7 @@ const (
 	NoticeIndexFallback     NoticeKind = "version_index_fallback"
 	NoticePinDisabled       NoticeKind = "engine_pin_disabled"
 	NoticePolicyUnavailable NoticeKind = "version_policy_unavailable"
+	NoticeUnclaimed         NoticeKind = "unclaimed_work"
 )
 
 // Notice carries actionable policy text without turning a warning into an implicit revocation.

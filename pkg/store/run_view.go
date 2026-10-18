@@ -19,6 +19,7 @@ type RunView struct {
 	Attempts []NodeAttempt
 	Logs     []blob.LogSubject
 	Failures []string
+	Waiting  *UnclaimedUnit
 }
 
 // ReadRunView reads only this tenant's run, without exposing log storage locations.
@@ -51,6 +52,9 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 		return RunView{}, err
 	}
 	if view.Logs, err = readRunLogSubjectsTx(ctx, tx, team, runID); err != nil {
+		return RunView{}, err
+	}
+	if view.Waiting, err = readUnclaimedUnitTx(ctx, tx, team, view.Snapshot.Run); err != nil {
 		return RunView{}, err
 	}
 	return view, nil
