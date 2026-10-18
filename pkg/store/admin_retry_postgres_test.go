@@ -84,7 +84,7 @@ func TestPostgresAdminTransactionsRetryDeadlockVictims(t *testing.T) {
 					return st.AsOperator().PurgeTeam(ctx, tn.Team(), "retry", now, time.Hour)
 				}
 			case "retention":
-				if _, err := st.DB().Exec(`INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES ('retry','expired',1)`); err != nil {
+				if _, err := st.DB().Exec(`INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES ('identity_link','expired',1)`); err != nil {
 					t.Fatal(err)
 				}
 				lease, err := st.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "retry", time.Hour)
@@ -92,7 +92,7 @@ func TestPostgresAdminTransactionsRetryDeadlockVictims(t *testing.T) {
 					t.Fatal(err)
 				}
 				table, event = "flow_nonces", "DELETE"
-				lockQuery = `SELECT nonce FROM flow_nonces WHERE kind='retry' AND nonce='expired' FOR UPDATE`
+				lockQuery = `SELECT nonce FROM flow_nonces WHERE kind='identity_link' AND nonce='expired' FOR UPDATE`
 				action = func(ctx context.Context) error {
 					_, err := st.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 10})
 					return err

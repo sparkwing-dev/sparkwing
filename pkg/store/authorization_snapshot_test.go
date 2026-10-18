@@ -20,8 +20,9 @@ func (c authorizationConnector) Driver() driver.Driver                        { 
 
 type authorizationConnection struct {
 	driver.Conn
-	options driver.TxOptions
-	locks   int
+	options  driver.TxOptions
+	locks    int
+	rowsOpen bool
 }
 
 func (c *authorizationConnection) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
@@ -30,6 +31,9 @@ func (c *authorizationConnection) BeginTx(ctx context.Context, options driver.Tx
 }
 
 func (c *authorizationConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if c.rowsOpen {
+		return nil, errors.New("conn busy: query before closing rows")
+	}
 	for _, suffix := range []string{" FOR NO KEY UPDATE", " FOR UPDATE", " FOR SHARE", " FOR KEY SHARE"} {
 		if strings.HasSuffix(query, suffix) {
 			if c.options.ReadOnly {
@@ -42,7 +46,23 @@ func (c *authorizationConnection) QueryContext(ctx context.Context, query string
 	if query == databaseTimeSQL(DialectPostgres) {
 		query = databaseTimeSQL(DialectSQLite)
 	}
-	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	if err != nil {
+		return nil, err
+	}
+	c.rowsOpen = true
+	return &authorizationRows{Rows: rows, conn: c}, nil
+}
+
+type authorizationRows struct {
+	driver.Rows
+	conn *authorizationConnection
+}
+
+func (r *authorizationRows) Close() error {
+	err := r.Rows.Close()
+	r.conn.rowsOpen = false
+	return err
 }
 
 func (c *authorizationConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -52,7 +72,8 @@ func (c *authorizationConnection) ExecContext(ctx context.Context, query string,
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 }
 
-func TestAuthorizationSnapshotReadsWithoutLocksAndMutationLocksAncestry(t *testing.T) {
+func singleCursorStore(t *testing.T) (*Store, *authorizationConnection) {
+	t.Helper()
 	conn, err := (&modernsqlite.Driver{}).Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -66,8 +87,12 @@ func TestAuthorizationSnapshotReadsWithoutLocksAndMutationLocksAncestry(t *testi
 		}
 	})
 	rewriteSchemaExec(t, db, schemaNeutral)
-	rewriteSchemaExec(t, db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)")
-	s := &Store{db: db, dialect: DialectSQLite}
+	return &Store{db: db, dialect: DialectSQLite}, recording
+}
+
+func TestAuthorizationSnapshotReadsWithoutLocksAndMutationLocksAncestry(t *testing.T) {
+	s, recording := singleCursorStore(t)
+	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)")
 	root := authorityRoot("root", "a")
 	authorityPersist(t, s, root)
 	child := authorityRoot("child", "a")

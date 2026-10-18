@@ -92,17 +92,6 @@ func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
 	return Team(team), err
 }
 
-// TriggerTeam reports which team owns the trigger triggerID, as RunTeam does
-// for runs. [ErrNotFound] when no trigger carries the id.
-func (o *Operator) TriggerTeam(ctx context.Context, triggerID string) (Team, error) {
-	var team string
-	err := o.s.queryRow(ctx, `SELECT team FROM triggers WHERE id = ?`, triggerID).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", notFound("trigger", triggerID)
-	}
-	return Team(team), err
-}
-
 // safety: a type rather than an empty team meaning "all", because that
 // sentinel cannot be told from a team a caller failed to set; the zero
 // value here scopes to the empty team, which matches nothing.

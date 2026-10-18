@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Retired token verifier
+
+Remove `--argon2-memory-budget-mb` from controller arguments and
+`controller.argon2MemoryBudgetMB` from chart values. Capability and session
+authentication use stored digests. The retired Argon2 API has no replacement.
+
+Remove calls to `store.ValidateRunInvocation` and handling for
+`store.ErrSecretInputHash`. Runs enter through sealed intake, which validates
+secret argument classification. `InvocationSecretArgsKey` remains a reporting
+field. `Operator.TriggerTeam` is removed with the retired trigger sweep.
+
 ## Environment and source selections
 
 Requests with nonempty environments set `environment_source` to `captured` for

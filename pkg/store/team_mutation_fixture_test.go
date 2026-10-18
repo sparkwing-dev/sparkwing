@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
 
@@ -95,4 +97,14 @@ func (t *Tenant) MemberCapabilityForTest(test testing.TB, actor string, at time.
 		test.Fatal(err)
 	}
 	return issued
+}
+
+func assertRunBelongsToTeamTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
+	var found int
+	err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM runs WHERE team = ? AND id = ?`, string(team), runID).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound("run", runID)
+	}
+	return err
 }

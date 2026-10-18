@@ -114,7 +114,9 @@ func placementRunnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, policy ClaimPlacement) ([]UnitDemand, error) {
 	var live []UnitDemand
 	if policy.Liveness > 0 {
-		rows, err := tx.QueryContext(ctx, `SELECT prefix,claim_observation_json FROM capabilities WHERE team=? AND last_used_at>=? AND claim_observation_json IS NOT NULL`, team, tx.now().Add(-policy.Liveness).UnixNano())
+		now := tx.now()
+		cutoff := now.Add(-policy.Liveness)
+		rows, err := tx.QueryContext(ctx, `SELECT prefix,claim_observation_json FROM capabilities WHERE team=? AND last_used_at>=? AND claim_observation_json IS NOT NULL`, team, cutoff.UnixNano())
 		if err != nil {
 			return nil, err
 		}
@@ -128,7 +130,7 @@ func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, policy Clai
 			if err := json.Unmarshal(body, &observation); err != nil {
 				return nil, errors.Join(err, rows.Close())
 			}
-			if observation.ObservedAt.Before(tx.now().Add(-policy.Liveness)) || observation.ObservedAt.After(tx.now()) {
+			if observation.ObservedAt.Before(cutoff) || observation.ObservedAt.After(now) {
 				continue
 			}
 			observation.CapabilityPrefix = prefix

@@ -594,6 +594,9 @@ func IsProtocolErr(err error) bool {
 		strings.Contains(msg, "sqlite_protocol")
 }
 
+// InvocationSecretArgsKey labels argument classification in the reporting view.
+const InvocationSecretArgsKey = "secret_args"
+
 // Run is the redacted reporting view of a persisted run.
 type Run struct {
 	RepoInherited   bool              `json:"repo_inherited,omitempty"`
@@ -910,13 +913,6 @@ func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 
 type rowScanner interface {
 	Scan(dest ...any) error
-}
-
-func nullableTimeNS(t *time.Time) any {
-	if t == nil {
-		return nil
-	}
-	return t.UnixNano()
 }
 
 func scanRun(rs rowScanner, tail ...any) (*Run, error) {

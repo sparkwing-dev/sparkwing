@@ -109,9 +109,10 @@ func registeredAgentsTx(ctx context.Context, tx *storeTx, team Team) ([]Register
 }
 
 func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
+	now := tx.now()
 	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at,claim_observation_json FROM capabilities
  WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
- AND (revoked_at IS NULL OR revoked_at>?) AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, tx.now().UnixNano(), tx.now().UnixNano())
+ AND (revoked_at IS NULL OR revoked_at>?) AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 			if err := json.Unmarshal(body, a.poll); err != nil {
 				return nil, err
 			}
-			if !validMatchingResources(a.poll.Capacity) || !validMatchingResources(a.poll.Available) || a.poll.ObservedAt.IsZero() || a.poll.ObservedAt.After(tx.now()) {
+			if !validMatchingResources(a.poll.Capacity) || !validMatchingResources(a.poll.Available) || a.poll.ObservedAt.IsZero() || a.poll.ObservedAt.After(now) {
 				return nil, authorityError(apierr.IntegrityFailure, "invalid runner capacity observation")
 			}
 		}

@@ -501,6 +501,15 @@ Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because leased expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
 
+## Database observations
+
+Completion readers capture one database time before opening their result cursor.
+That time selects due rows and supplies every row's `ObservedAt`. The reader
+closes its cursor before committing and issues no clock query while it is open.
+Runner inventory and placement also capture their validation time before
+opening the observation cursor. Future observations remain invalid, and stale
+polls cannot hold placement for a preferred runner.
+
 ## Lock order
 
 Every store transaction acquires locks in one global order and skips tiers it

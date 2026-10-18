@@ -399,8 +399,8 @@ policies, expiry and RSA signatures. DataReadHTTPChoosesCloudFrontOnlyForIngress
 checks the actual HTTP handoff and charge-before-sign order with fake data facts.
 RequestPrincipalMetricLabelsProperty bounds labels to seven constants, and
 RequestPrincipalMetricsCountsAuthenticatedPolicy checks counting through HTTP.
-The old token-cache/argon2 test retires with the removed cache. W1's retained
-legacy hashing collector is not asserted as final authentication behavior.
+The old token-cache/argon2 tests retire with the removed cache and verifier.
+Capability and session authentication use their persisted digests.
 These are component ports. No native credential-matrix cell is newly completed.
 
 

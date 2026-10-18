@@ -105,8 +105,6 @@ var reviewedUnscopedSQL = map[string]string{
 
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
-	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +
-		"through that team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",
