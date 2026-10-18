@@ -2,8 +2,10 @@ package secrets
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -21,12 +23,12 @@ func TestMaskMergesOverlappingSecrets(t *testing.T) {
 }
 
 func TestMaskHidesEveryJSONEscapeSpelling(t *testing.T) {
-	m := newTestMasker(`p@ss w/rd+"x"é`)
+	m := newTestMasker(`p@ss w/rd+"x"é\k`)
 	for _, line := range []string{
-		`p@ss w\/rd+\"x\"é`,
-		`p@ss w/rd+"x"é`,
-		`p@ss w\/rd+"x"é`,
-		`p@ss w/rd+\"x\"é`,
+		`p@ss w\/rd+\"x\"é\\k`,
+		`p@ss w/rd+\u0022x\u0022\u00e9\u005ck`,
+		`\u0070@ss w\/rd\u002b"x"\u00E9\\k`,
+		`p@ss w/rd+\"x\"\u00e9\\k`,
 	} {
 		if got := m.Mask("msg=" + line + " end"); got != "msg=*** end" {
 			t.Errorf("Mask(%q) = %q", line, got)
@@ -74,12 +76,25 @@ func TestMaskLeavesNoSecretVisibleProperty(t *testing.T) {
 
 func assertNoSecretVisible(t *testing.T, iter int, secrets []string, in, got string) {
 	t.Helper()
-	decoded, _ := unescapeJSON(got)
+	decoded := jsonDecodedView(got)
 	for _, s := range secrets {
 		if strings.Contains(got, s) || strings.Contains(decoded, s) {
 			t.Fatalf("iter %d: secrets %q in %q masked to %q", iter, secrets, in, got)
 		}
 	}
+}
+
+// jsonDecodedView decodes each escape sequence in s with encoding/json and
+// keeps every other byte, so the oracle shares no decoding with the masker.
+func jsonDecodedView(s string) string {
+	escape := regexp.MustCompile(`\\(?:u[dD][89abAB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|["\\/bfnrt])`)
+	return escape.ReplaceAllStringFunc(s, func(sequence string) string {
+		var decoded string
+		if json.Unmarshal([]byte(`"`+sequence+`"`), &decoded) != nil {
+			return sequence
+		}
+		return decoded
+	})
 }
 
 func escapeRandomly(r *rand.Rand, s string) string {

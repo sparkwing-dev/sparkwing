@@ -23,7 +23,7 @@ func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
 	for name, token := range map[string]string{
 		"plain":   splitSecret,
 		"base64":  base64.StdEncoding.EncodeToString([]byte(splitSecret)),
-		"escaped": strings.ReplaceAll(splitSecret, "-", "-"),
+		"escaped": splitSecret,
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, input, deps := maskingExecutorFixture(t)
@@ -32,7 +32,10 @@ func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
 				t.Fatal(err)
 			}
 			if name == "escaped" {
-				output = []byte(strings.ReplaceAll(string(output), "-", `-`))
+				output = []byte(strings.ReplaceAll(string(output), "-", `\u002d`))
+				if strings.Contains(string(output), splitSecret) {
+					t.Fatal("escaped fixture still spells the secret plainly")
+				}
 			}
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {

@@ -258,7 +258,7 @@ func unescapeJSON(s string) (string, []span) {
 	return b.String(), units
 }
 
-var simpleEscapes = map[byte]string{'"': `"`, '\\': `\\`, '/': "/", 'b': "\b", 'f': "\f", 'n': "\n", 'r': "\r", 't': "\t"}
+var simpleEscapes = map[byte]string{'"': `"`, '\\': `\`, '/': "/", 'b': "\b", 'f': "\f", 'n': "\n", 'r': "\r", 't': "\t"}
 
 func unicodeEscape(s string) (rune, int) {
 	r, ok := hex4(s)
