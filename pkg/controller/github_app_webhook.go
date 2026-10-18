@@ -26,7 +26,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const webhookBodyLimit = 25 << 20
+const (
+	webhookBodyLimit   = 25 << 20
+	webhookMemoryLimit = 1 << 20
+)
 
 // EnvDefaultBranch carries the verified GitHub repository default branch.
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
@@ -131,14 +134,28 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 
 const githubDeliverySpools = 4
 
-// safety: the body spools to disk while it is hashed, so an unsigned delivery
-// never holds memory near the body limit, and a few slots bound its disk.
+// safety: a delivery past 1 MiB spools to disk while it is hashed, so an
+// unsigned one never holds memory near the body limit; a few slots bound its disk.
 func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request) (body []byte, status int, err error) {
+	reader := http.MaxBytesReader(w, r.Body, webhookBodyLimit)
+	mac := s.githubApp.client.WebhookMAC()
+	head, err := io.ReadAll(io.LimitReader(reader, webhookMemoryLimit+1))
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	_, _ = mac.Write(head)
+	if len(head) <= webhookMemoryLimit {
+		if !mac.Verify(r.Header.Get("X-Hub-Signature-256")) {
+			return nil, http.StatusUnauthorized, errors.New("signature mismatch")
+		}
+		return head, http.StatusOK, nil
+	}
 	select {
 	case s.deliverySpools <- struct{}{}:
 		defer func() { <-s.deliverySpools }()
 	default:
-		return nil, http.StatusTooManyRequests, errors.New("too many GitHub deliveries are being received; retry")
+		w.Header().Set("Retry-After", "30")
+		return nil, http.StatusServiceUnavailable, errors.New("too many large GitHub deliveries are being received; redeliver this one")
 	}
 	spool, err := os.CreateTemp("", "github-delivery-")
 	if err != nil {
@@ -149,8 +166,10 @@ func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request
 			body, status, err = nil, http.StatusInternalServerError, errors.Join(err, cleanup)
 		}
 	}()
-	mac := s.githubApp.client.WebhookMAC()
-	size, err := io.Copy(io.MultiWriter(mac, spool), http.MaxBytesReader(w, r.Body, webhookBodyLimit))
+	if _, err := spool.Write(head); err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	rest, err := io.Copy(io.MultiWriter(mac, spool), reader)
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
 		return nil, http.StatusRequestEntityTooLarge, err
@@ -161,7 +180,7 @@ func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request
 	if !mac.Verify(r.Header.Get("X-Hub-Signature-256")) {
 		return nil, http.StatusUnauthorized, errors.New("signature mismatch")
 	}
-	body = make([]byte, size)
+	body = make([]byte, int64(len(head))+rest)
 	if _, err := spool.ReadAt(body, 0); err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
