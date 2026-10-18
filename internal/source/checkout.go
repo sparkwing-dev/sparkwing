@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -25,8 +26,8 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	if err := validateSpec(spec); err != nil {
 		return nil, err
 	}
-	if options.LocalBundle != "" && (spec.LocalCheckout == "" || !filepath.IsAbs(options.LocalBundle) || options.PreparedCheckout != "") {
-		return nil, errors.New("local source bundle requires an absolute file and local checkout")
+	if options.LocalBundle != "" && (spec.LocalCheckout == "" || !filepath.IsAbs(options.LocalBundle) || options.PreparedCheckout != "" || !options.LocalReplica) {
+		return nil, errors.New("local source bundle requires an absolute file and local replica")
 	}
 	environment, err := sourceEnvironment(options, procenv.Git)
 	if err != nil {
@@ -142,24 +143,41 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		entry.ownedDirectory = root
 		client.workspace = root
 		selected := filepath.Join(root, "checkout")
+		revision := spec.SHA
+		if revision == "" {
+			revision = actual
+		}
 		local := client
 		local.env = append(append([]string{}, client.env...), "GIT_ALLOW_PROTOCOL=file")
-		if _, err := local.run(ctx, "", "", "clone", "--quiet", "--no-checkout", "--no-hardlinks", "--", checkout, selected); err != nil {
-			return entry, err
+		policy := spec.Checkout.Policy
+		if options.LocalReplica {
+			if _, err := local.run(ctx, "", "", "clone", "--quiet", "--no-checkout", "--no-hardlinks", "--", checkout, selected); err != nil {
+				return entry, err
+			}
+		} else {
+			if err := initCheckout(ctx, &client, selected, checkout, revision); err != nil {
+				return entry, err
+			}
+			if _, err := local.run(ctx, selected, "", append(fetchArgs(policy), "--", checkout, revision)...); err != nil {
+				return entry, err
+			}
+			if entry.DefaultBranch != "" {
+				if _, err := client.run(ctx, selected, "", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+entry.DefaultBranch); err != nil {
+					return entry, err
+				}
+			}
 		}
 		if options.LocalBundle != "" {
 			if _, err := client.run(ctx, selected, "", "bundle", "unbundle", options.LocalBundle); err != nil {
 				return entry, err
 			}
-		}
-		revision := spec.SHA
-		if revision == "" {
-			revision = actual
+			if err := preserveSnapshotBytes(selected); err != nil {
+				return entry, err
+			}
 		}
 		if _, err := client.run(ctx, selected, "", "checkout", "--quiet", "--detach", revision); err != nil {
 			return entry, err
 		}
-		policy := spec.Checkout.Policy
 		if policy.Submodules != nil && *policy.Submodules || policy.LFS != nil && *policy.LFS {
 			remote, err := client.run(ctx, checkout, "", "remote", "get-url", "origin")
 			if err != nil {
@@ -262,35 +280,19 @@ func (g *gitClient) authorizeRemote(ctx context.Context, spec Spec, remote strin
 }
 
 func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, checkout, bundleURL string, access Access) error {
-	format := "sha1"
-	if len(spec.SHA) == 64 {
-		format = "sha256"
-	}
-	if _, err := client.run(ctx, "", "", "init", "--object-format="+format, "--quiet", checkout); err != nil {
-		return err
-	}
-	if _, err := client.run(ctx, checkout, "", "remote", "add", "origin", remote); err != nil {
+	if err := initCheckout(ctx, client, checkout, remote, spec.SHA); err != nil {
 		return err
 	}
 	if spec.BundleDigest != "" {
 		if err := seedBundle(ctx, client, checkout, spec.BundleDigest, bundleURL); err != nil {
 			return err
 		}
+		if err := preserveSnapshotBytes(checkout); err != nil {
+			return err
+		}
 	}
 	policy := spec.Checkout.Policy
-	args := []string{"fetch", "--quiet", "--no-recurse-submodules"}
-	if policy.Tags != nil && *policy.Tags {
-		args = append(args, "--tags")
-	} else {
-		args = append(args, "--no-tags")
-	}
-	if policy.Depth != nil {
-		if *policy.Depth > 0 {
-			args = append(args, "--depth="+strconv.Itoa(*policy.Depth))
-		}
-	} else if policy.FullHistory == nil || !*policy.FullHistory {
-		args = append(args, "--depth=1")
-	}
+	args := fetchArgs(policy)
 	_, presentErr := client.run(ctx, checkout, "", "cat-file", "-e", spec.SHA+"^{commit}")
 	needsFetch := spec.BundleDigest == "" || presentErr != nil
 	needsTags := policy.Tags != nil && *policy.Tags
@@ -315,6 +317,45 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 		return err
 	}
 	return materializePolicy(ctx, client, spec, checkout, remote, spec.SHA)
+}
+
+func initCheckout(ctx context.Context, client *gitClient, checkout, origin, sha string) error {
+	format := "sha1"
+	if len(sha) == 64 {
+		format = "sha256"
+	}
+	if _, err := client.run(ctx, "", "", "init", "--object-format="+format, "--quiet", checkout); err != nil {
+		return err
+	}
+	_, err := client.run(ctx, checkout, "", "remote", "add", "origin", origin)
+	return err
+}
+
+func fetchArgs(policy nodeproto.SourceSpec) []string {
+	args := []string{"fetch", "--quiet", "--no-recurse-submodules"}
+	if policy.Tags != nil && *policy.Tags {
+		args = append(args, "--tags")
+	} else {
+		args = append(args, "--no-tags")
+	}
+	if policy.Depth != nil {
+		if *policy.Depth > 0 {
+			args = append(args, "--depth="+strconv.Itoa(*policy.Depth))
+		}
+	} else if policy.FullHistory == nil || !*policy.FullHistory {
+		args = append(args, "--depth=1")
+	}
+	return args
+}
+
+// safety: snapshot blobs already hold the captured working-tree bytes; info/attributes
+// outranks the tree's .gitattributes, so checkout cannot convert them again.
+func preserveSnapshotBytes(checkout string) error {
+	info := filepath.Join(checkout, ".git", "info")
+	if err := os.MkdirAll(info, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(info, "attributes"), []byte("* -text -filter -ident -working-tree-encoding\n"), 0o600)
 }
 
 func materializePolicy(ctx context.Context, client *gitClient, spec Spec, checkout, remote, sha string) error {

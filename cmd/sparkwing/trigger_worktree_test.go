@@ -74,7 +74,7 @@ func TestTriggerSnapshotIncludesPinnedPipelineRevision(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if err := snapshot.includeRevision(t.Context(), original); err != nil {
+	if err := snapshot.includeRevisions(t.Context(), original); err != nil {
 		t.Fatal(err)
 	}
 	clone := filepath.Join(t.TempDir(), "bundle")

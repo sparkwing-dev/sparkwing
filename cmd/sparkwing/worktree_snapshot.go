@@ -11,6 +11,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -208,13 +209,23 @@ func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotL
 	return snapshot, nil
 }
 
-func (s *worktreeSnapshot) includeRevision(ctx context.Context, sha string) error {
+func (s *worktreeSnapshot) includeRevisions(ctx context.Context, shas ...string) error {
 	gitDir := filepath.Join(s.tempDir, "repo.git")
-	ref := bincache.SeedRef(sha)
-	if _, err := gitDirOutput(ctx, gitDir, "update-ref", ref, sha); err != nil {
-		return err
+	refs := []string{bincache.SeedRef(s.SHA)}
+	for _, sha := range shas {
+		ref := bincache.SeedRef(sha)
+		if slices.Contains(refs, ref) {
+			continue
+		}
+		if _, err := gitDirOutput(ctx, gitDir, "update-ref", ref, sha); err != nil {
+			return err
+		}
+		refs = append(refs, ref)
 	}
-	if _, err := gitDirOutput(ctx, gitDir, "bundle", "create", s.BundlePath, bincache.SeedRef(s.SHA), ref); err != nil {
+	if len(refs) == 1 {
+		return nil
+	}
+	if _, err := gitDirOutput(ctx, gitDir, append([]string{"bundle", "create", s.BundlePath}, refs...)...); err != nil {
 		return err
 	}
 	info, err := os.Stat(s.BundlePath)

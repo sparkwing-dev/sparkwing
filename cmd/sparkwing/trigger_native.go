@@ -85,14 +85,10 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 			return result, branchErr
 		}
 		selected.git.Ref = branch
-		for _, revision := range []string{selected.git.SHA, selected.source.Ref} {
-			if revision != snapshot.SHA {
-				if err := snapshot.includeRevision(ctx, revision); err != nil {
-					return result, err
-				}
-			}
+		if err := snapshot.includeRevisions(ctx, selected.git.SHA, selected.source.Ref); err != nil {
+			return result, err
 		}
-		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, "", snapshot.tempDir)
+		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, snapshot.BundlePath, snapshot.tempDir)
 		if err != nil {
 			return result, err
 		}
@@ -160,7 +156,7 @@ func snapshotTriggerCheckout(ctx context.Context, snapshot *worktreeSnapshot) (s
 
 func triggerInspectionCheckout(ctx context.Context, repo, sha, bundle, workspace string) (string, error) {
 	options := source.Options{Workspace: workspace, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
-	options.LocalBundle = bundle
+	options.LocalReplica, options.LocalBundle = true, bundle
 	entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: sha, CommittedCheckout: true, PipelineDir: "."}, options)
 	if err != nil {
 		return "", err

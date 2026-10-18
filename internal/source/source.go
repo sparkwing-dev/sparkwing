@@ -54,12 +54,14 @@ type EngineResolver interface {
 // Options supplies host-owned workspace and authority separately from sealed source data.
 type Options struct {
 	PreparedCheckout string
-	LocalBundle      string
-	Workspace        string
-	Access           Access
-	Engines          EngineResolver
-	Target           releaseasset.Target
-	SDK              engine.SDKKind
+	// LocalReplica clones every local ref, ignoring checkout policy, for submitter inspection.
+	LocalReplica bool
+	LocalBundle  string
+	Workspace    string
+	Access       Access
+	Engines      EngineResolver
+	Target       releaseasset.Target
+	SDK          engine.SDKKind
 	// ReadPin defaults to engine.ReadPin and must not execute repository code.
 	ReadPin func(string, engine.SDKKind) (engine.Pin, error)
 	// InstallSDK defaults to the verified selected engine's InstallSDK method.
