@@ -144,6 +144,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err != nil {
 			return AdmissionResult{}, err
 		}
+		input.Dispatch = SelectDispatch(policy.CloudDispatch, input)
 		snapshot.request, err = tx.store.intakeServices().SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AllowedPools: pools, AuthorityRef: request.Authority, Ceilings: policy.Ceilings})
 		if err != nil {
 			return AdmissionResult{}, err

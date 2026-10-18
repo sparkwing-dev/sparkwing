@@ -24,6 +24,8 @@ type IntakePolicyFacts struct {
 	Delivery             *VerifiedRunDelivery
 	LogRetentionClass    string
 	LogRetentionDays     int
+	// CloudDispatch hands an execute run that selects no self-hosted runner to the launcher.
+	CloudDispatch bool
 }
 
 // IntakePolicy resolves request options against operator ceilings, retention and verified repository facts.

@@ -57,7 +57,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 		return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.Forbidden, Message: "executable local origin requires local peer authority"}
 	}
 	placement := store.RequestPlacement(request.Request)
-	options, err := settings.ResolveIntake(request.Request.Options, operator, settings.Context{Origin: request.Request.Origin, Local: placement == nodeproto.PlacementLocal, ControllerOwned: request.Request.Dispatch == runspec.DispatchController, Cloud: !localPeer, NumCPU: runtime.NumCPU()})
+	options, err := settings.ResolveIntake(request.Request.Options, operator, settings.Context{Origin: request.Request.Origin, Local: placement == nodeproto.PlacementLocal, ControllerOwned: store.SelectDispatch(s.cloudDeployment, request.Request) == runspec.DispatchController, Cloud: !localPeer, NumCPU: runtime.NumCPU()})
 	if err != nil {
 		return store.IntakePolicyFacts{}, err
 	}
@@ -68,7 +68,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if override := s.logRetention[team]; override > 0 {
 		days = override
 	}
-	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
+	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days, CloudDispatch: s.cloudDeployment}
 	if request.Authority.Kind == "schedule" {
 		location, err := store.VerifiedScheduleIntake(ctx, resolver, request)
 		facts.SourceLocation = &location
