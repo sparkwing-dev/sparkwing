@@ -72,6 +72,27 @@ The release repository needs an `NPM_TOKEN` Actions secret authorized to publish
 definitions and local graph checks do not establish Windows runtime support.
 Both Windows jobs must execute successfully before that evidence is claimed.
 
+### QA pre-releases
+
+Cloud QA installs unreleased engines through the real signed-release path from
+`https://qa-releases.sparkwing.dev`, a private S3 bucket behind CloudFront in
+kikd-infra. Only binaries built with the `qatrust` Go tag trust it: the tag adds
+the QA public key to `internal/releaseauth` and replaces the version index and
+release download origin in `internal/engine`. A QA pre-release version such as
+`v0.68.0-qa.1` enforces the QA index instead of passing as a development build.
+Production builds never carry the tag, and the GitHub release workflow never sets it.
+
+`bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>` archives the commit, builds the
+dashboard and the full release matrix with the tag, signs the assets with the QA
+seed from SSM `/kikd-prod/sparkwing/qa-release-signing-key`, appends the version to
+the signed QA `versions.json`, and uploads both. A published QA version is
+immutable; use the next `-qa.N`.
+
+QA images: `sparkwing run build-images --qatrust --tag vX.Y.Z-qa.N --registry <ecr> --push`
+builds the controller and runner from source with the tag. To package the published QA
+binaries instead, copy the release's `sparkwing-{controller,runner}-linux-<arch>` from the
+bucket into `dist/` and build each Dockerfile's `release` target, as the release workflow does.
+
 ### Check tiers
 
 Canonical hosted jobs retain a `canonical-timings` JSON artifact for 30 days

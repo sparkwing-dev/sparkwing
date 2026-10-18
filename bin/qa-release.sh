@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Publishes a QA pre-release to https://qa-releases.sparkwing.dev, signed with
+# the QA key. Only builds made with the qatrust tag trust it, so production
+# clients never see these releases.
+#
+# usage: bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>
+#
+# Reads the QA signing seed from SSM (AWS_PROFILE, default kikd-prod) straight
+# into the signer's environment; it is never written to disk.
+set -euo pipefail
+
+bucket=kikd-prod-sparkwing-qa-releases
+ssm_key=/kikd-prod/sparkwing/qa-release-signing-key
+region=us-west-2
+export AWS_PROFILE="${AWS_PROFILE:-kikd-prod}"
+
+if (( $# != 3 )); then
+  echo "usage: bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>" >&2
+  exit 2
+fi
+repo=$1 commit=$2 version=$3
+if [[ ! "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-qa\.[1-9][0-9]*$ ]]; then
+  echo "QA versions look like v0.68.0-qa.1, not $version" >&2
+  exit 2
+fi
+sha=$(git -C "$repo" rev-parse --verify "$commit^{commit}")
+published=$(aws s3api list-objects-v2 --region "$region" --bucket "$bucket" --prefix "releases/download/$version/" --max-keys 1 --query KeyCount --output text)
+if [[ "$published" != 0 ]]; then
+  echo "$version is already published; QA releases are immutable, use the next -qa.N" >&2
+  exit 1
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+src=$work/src
+mkdir -p "$src" "$work/previous"
+git -C "$repo" archive "$sha" | tar -x -C "$src"
+echo "==> building $version from $sha"
+
+bash "$src/bin/build-web.sh"
+export GOFLAGS="-tags=qatrust -buildvcs=false"
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+  env -C "$src" GOOS="${target%/*}" GOARCH="${target#*/}" TAG="$version" bash bin/build-release-target.sh
+done
+dist=$src/dist
+cp "$src/install/install.sh" "$dist/install.sh"
+env -C "$dist" bash -c 'sha256sum sparkwing-* > SHA256SUMS'
+
+if aws s3 cp --region "$region" "s3://$bucket/versions.json" "$work/previous/versions.json" --only-show-errors 2>/dev/null; then
+  aws s3 cp --region "$region" "s3://$bucket/versions.json.sig" "$work/previous/versions.json.sig" --only-show-errors
+  previous=$work/previous
+else
+  previous=
+fi
+
+seed=$(aws ssm get-parameter --region "$region" --name "$ssm_key" --with-decryption --query Parameter.Value --output text)
+SPARKWING_RELEASE_SIGNING_KEY=$seed GOWORK=off go -C "$src" run ./cmd/verify-release --dist "$dist"
+SPARKWING_RELEASE_SIGNING_KEY=$seed GOWORK=off go -C "$src" run ./bin/qaindex --version "$version" --previous "$previous" --out "$work"
+unset seed
+GOWORK=off go -C "$src" run ./cmd/verify-release --dist "$dist" --verify
+
+aws s3 cp --region "$region" "$dist/" "s3://$bucket/releases/download/$version/" --recursive --only-show-errors
+aws s3 cp --region "$region" "$work/versions.json.sig" "s3://$bucket/versions.json.sig" --only-show-errors
+aws s3 cp --region "$region" "$work/versions.json" "s3://$bucket/versions.json" --content-type application/json --only-show-errors
+echo "==> published $version ($sha)"
+aws s3 ls --region "$region" "s3://$bucket/releases/download/$version/"
