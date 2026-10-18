@@ -75,6 +75,7 @@ type ExecutorDependencies struct {
 	Validation    nodeproto.ValidationContext
 	PrepareLayer  func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
 	PublishOutput func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
+	Annotate      func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
 	ReadFailure   func(context.Context, store.NodeRef, int64) (*nodeproto.JobFailure, error)
 	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
 	Mask          func(string) string

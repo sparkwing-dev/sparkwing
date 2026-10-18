@@ -195,7 +195,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},
-		Executor: nodehost.ExecutorDependencies{PublishOutput: outputs.PublishOutput, PrepareLayer: func(ctx context.Context, layer nodehost.LayerSpec, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
+		Executor: nodehost.ExecutorDependencies{PublishOutput: outputs.PublishOutput, Annotate: claims.annotate, PrepareLayer: func(ctx context.Context, layer nodehost.LayerSpec, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
 			if layer.Name == "caches" {
 				return caches.Prepare(ctx, layer, input, job)
 			}

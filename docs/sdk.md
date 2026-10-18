@@ -369,6 +369,11 @@ path without echoing the value. Registration also refuses a value contained in
 an already accepted identifier.
 Runtime mask registrations stay on the registering host, so declare a secret if its value may appear in an identifier on another host.
 
+A job output that holds a registered secret value, plainly or base64-, URL- or
+JSON-escaped, is withheld. The job still passes, gets a `warn` annotation
+reading `output withheld: contains a secret`, and logs the same warning.
+Downstream jobs see no output, as if the job returned none.
+
 `sw.OIDCToken(ctx, audience)` requests an identity token through the host.
 Credentials remain in the private process binding rather than the environment
 of commands a step starts.
