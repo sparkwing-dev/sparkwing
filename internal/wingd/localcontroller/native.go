@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -111,6 +113,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	}
 	sourceOptions.Base.Captured, sourceOptions.Base.Masker = captured, masker
 	if !sourceOptions.Base.Local {
+		sourceOptions.Base.Ambient = withoutLocalSecrets(sourceOptions.Base.Ambient, run.Run.Request.Request.LocalSecretNames, masker)
 		if len(run.Run.Request.Request.Env.Names) > 0 || len(cfg.SubmittedEnv) > 0 {
 			if err := runspec.VerifyEnvironment(run.Run.Request.Request.Env, cfg.SubmittedEnv); err != nil {
 				return runners.NativeServices{}, err
@@ -275,4 +278,23 @@ func localStateSubscription(ctx context.Context, _ string) (nodehost.StateSubscr
 		}
 	}()
 	return nodehost.StateSubscription{Changed: changed, Close: func() error { cancel(); <-done; return nil }}, nil
+}
+
+// safety: a remote base inherits the hosting process's tool environment, which
+// can still hold values the run releases only through its local secret registry.
+func withoutLocalSecrets(environment, names []string, masker *secrets.Masker) []string {
+	held := map[string]bool{}
+	for _, name := range names {
+		held[procenv.NameKey(name, runtime.GOOS)] = true
+	}
+	kept := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		name, value, _ := strings.Cut(entry, "=")
+		if held[procenv.NameKey(name, runtime.GOOS)] {
+			masker.Register(value)
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }
