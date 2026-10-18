@@ -364,7 +364,7 @@ func (e *ErrIllegalTransition) Error() string {
 // TransitionNode changes state, attempts, events, expansion barriers, holder release and settlement atomically.
 func (t *Tenant) TransitionNode(ctx context.Context, change NodeTransition) (Applied, error) {
 	var out Applied
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
+	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		var err error
 		out, err = transitionNodeTx(ctx, tx, t.team, change, tx.now())
 		return err

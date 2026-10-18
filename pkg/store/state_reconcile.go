@@ -13,7 +13,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 		return ReconciledNode{}, err
 	}
 	var result ReconciledNode
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
+	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		result = ReconciledNode{}
 		if _, err := controllerOwnerTx(ctx, tx, t.team, request.Ref.RunID, tx.now()); err != nil {
 			return err
