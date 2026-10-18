@@ -194,3 +194,18 @@ func TestFailedProbeLeavesEnvUnchanged(t *testing.T) {
 		t.Fatalf("GOTOOLCHAIN = %q", got)
 	}
 }
+
+func TestExplicitSessionEnvironmentReplacesPreviousSnapshot(t *testing.T) {
+	dir, env, _ := fixture(t, "local", "go1.26.6", "1.26.0", true)
+	captured := append(append([]string{}, env...), "SIGNING_MATERIAL=private-value")
+	ctx := gotoolchain.WithSession(t.Context(), captured, func(string) {})
+	ctx = gotoolchain.WithSession(ctx, env, nil)
+	ctx = gotoolchain.WithSession(ctx, nil, nil)
+	built, err := gotoolchain.BuildEnv(ctx, dir, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value(built, "SIGNING_MATERIAL") != "" {
+		t.Fatal("an inherited session restored a withheld secret")
+	}
+}

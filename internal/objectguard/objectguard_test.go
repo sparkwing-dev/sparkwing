@@ -256,7 +256,7 @@ func TestRefusalNamesBothRemedies(t *testing.T) {
 	}
 	for _, want := range []string{
 		"--object-store-budget put:minute",
-		"sparkwing cluster object-store reset-breaker",
+		"sparkwing operator object-store reset-breaker",
 		"belongs to this process alone",
 	} {
 		if !strings.Contains(err.Error(), want) {

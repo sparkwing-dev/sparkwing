@@ -847,13 +847,15 @@ Query parameters and headers cannot select another tenant or actor.
 Invariant: a request can rotate or inspect credential rows only within its
 authenticated tenant, and private values never enter maintenance responses.
 `CredentialRotator` exposes Team and RotateCredentials(ctx, Authorized,
-secretCallback, gitCallback) (secretCount, gitCount, error). The callbacks
-take store.Secret and store.GitCredential respectively and return replacement
-envelopes. One transaction rechecks ancestry, membership/team.admin or verified
-local authority, selects only that tenant's rows, calls each callback once
-serially and commits both tables together. Counts include all visited rows.
+secretCallback, gitCallback) (store.CredentialRotation, error). The secret
+callback takes store.Secret and returns (value, skip, error). The git callback
+takes store.GitCredential and returns (value, error). One transaction rechecks
+ancestry, membership/team.admin or verified local authority, selects only that
+tenant's rows, calls each callback once serially per attempt and commits both
+tables together. The committed result contains rotated-secret and git counts
+plus skipped name/pipeline identities. Every retry resets all result fields.
 Only values change. Row ownership, access fields, actors and timestamps stay
-unchanged. Any callback or authority error rolls back both tables.
+unchanged. Any error rolls back both tables and returns an empty result.
 
 The controller requires BoundCipher. It opens the current or previous key's
 bound envelope and seals under the current key with the same complete binding.

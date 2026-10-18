@@ -13,7 +13,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error) {
+func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLookup) (hit blob.RecordLookupResult, err error) {
+	err = withBlobIO(ctx, func(reads *blobIO) error {
+		hit, err = r.lookupRecord(ctx, request, reads)
+		return err
+	})
+	return hit, err
+}
+
+func (r *blobRecords) lookupRecord(ctx context.Context, request blob.RecordLookup, reads *blobIO) (blob.RecordLookupResult, error) {
 	if !request.Budget.Deadline.IsZero() && !r.tenant.s.now().Before(request.Budget.Deadline) {
 		return blob.RecordLookupResult{}, blob.ErrBudget
 	}
@@ -22,6 +30,7 @@ func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLooku
 		return blob.RecordLookupResult{}, err
 	}
 	defer rollbackOrLog(tx)
+	tx.blobIO = reads
 	a, err := resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Authority, capability.DataRead)
 	if err != nil {
 		return blob.RecordLookupResult{}, err
@@ -41,19 +50,27 @@ func (r *blobRecords) selectRecordTx(ctx context.Context, tx *storeTx, a blobAct
 		request.VerifiedDefaultOnly = true
 	}
 	if request.VerifiedDefaultOnly && request.Key.Scope.Ref == (blob.RefScope{}) {
+		var pending error
 		for _, ref := range a.capability.Data.ReadRefs {
 			request.Key.Scope.Ref = blob.RefScope{Ref: ref, Verified: true}
-			hit, err := r.lookupRecordTx(ctx, tx, a, request, capability.DataRead)
+			hit, err := r.lookupRecordTx(ctx, tx, a, request)
+			if errors.Is(err, errBlobIOPending) {
+				pending = err
+				continue
+			}
 			if err != nil || hit.Found {
+				if pending != nil {
+					return blob.RecordLookupResult{}, pending
+				}
 				return hit, err
 			}
 		}
-		return blob.RecordLookupResult{}, nil
+		return blob.RecordLookupResult{}, pending
 	}
-	return r.lookupRecordTx(ctx, tx, a, request, capability.DataRead)
+	return r.lookupRecordTx(ctx, tx, a, request)
 }
 
-func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobActor, request blob.RecordLookup, grant capability.Grant) (blob.RecordLookupResult, error) {
+func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobActor, request blob.RecordLookup) (blob.RecordLookupResult, error) {
 	result := blob.RecordLookupResult{}
 	key := request.Key
 	if key.Team != string(r.tenant.team) || key.Scope.Repo != a.authority.Repo {
@@ -97,11 +114,6 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 		}
 	}
 	members, err := r.readMembers(ctx, tx, record)
-	if err != nil {
-		return result, err
-	}
-	// safety: manifest I/O must not carry expired authority into a result.
-	a, err = resolveBlobAuthorityTx(ctx, tx, r.tenant.team, a.authority, grant)
 	if err != nil {
 		return result, err
 	}
@@ -152,7 +164,9 @@ func (r *blobRecords) readMembers(ctx context.Context, tx *storeTx, record blob.
 	if r.manifests == nil {
 		return nil, authorityError(apierr.Unavailable, "verified manifest reader is not configured")
 	}
-	members, err := r.manifests.ReadBlobManifest(ctx, r.tenant.team, manifest.Value)
+	members, err := tx.blobIO.read("read:"+string(manifest.Value), func(ctx context.Context) ([]blob.Member, error) {
+		return r.manifests.ReadBlobManifest(ctx, r.tenant.team, manifest.Value)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -197,12 +211,21 @@ func cacheMissError(err error) bool {
 	return errors.Is(err, blob.ErrNotFound) || errors.Is(err, blob.ErrIntegrity) || errors.Is(err, blob.ErrBudget)
 }
 
-func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error) {
+func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (hit blob.MemoHit, err error) {
+	err = withBlobIO(ctx, func(reads *blobIO) error {
+		hit, err = r.lookupMemo(ctx, request, reads)
+		return err
+	})
+	return hit, err
+}
+
+func (r *blobRecords) lookupMemo(ctx context.Context, request blob.MemoLookup, reads *blobIO) (blob.MemoHit, error) {
 	tx, err := r.tenant.s.beginTx(ctx)
 	if err != nil {
 		return blob.MemoHit{}, err
 	}
 	defer rollbackOrLog(tx)
+	tx.blobIO = reads
 	a, err := resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Authority, capability.DataRead)
 	if err != nil {
 		return blob.MemoHit{}, err
@@ -240,6 +263,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 	} else if a.authority.Ref.DefaultBranch != "" {
 		refs = append(refs, blob.RefScope{Ref: a.authority.Ref.DefaultBranch, Verified: true})
 	}
+	var pending error
 	for _, ref := range refs {
 		if !slices.Contains(a.capability.Data.ReadRefs, ref.CapabilityScope()) {
 			continue
@@ -249,15 +273,25 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				return result, blob.ErrBudget
 			}
 			recordKey := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}, Name: name}
-			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref != a.authority.Ref.Scope}, capability.DataRead)
+			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref != a.authority.Ref.Scope})
+			if errors.Is(err, errBlobIOPending) {
+				pending = err
+				continue
+			}
 			if cacheMissError(err) {
 				continue
 			}
 			if err != nil {
+				if pending != nil {
+					return result, pending
+				}
 				return result, err
 			}
 			if !hit.Found {
 				continue
+			}
+			if pending != nil {
+				return result, pending
 			}
 			if source != nil {
 				*source = hit.Record
@@ -276,16 +310,25 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 			return result, nil
 		}
 	}
-	return result, nil
+	return result, pending
 }
 
-func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error) {
+func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (hit blob.DepcacheHit, err error) {
+	err = withBlobIO(ctx, func(reads *blobIO) error {
+		hit, err = r.lookupDepcache(ctx, request, reads)
+		return err
+	})
+	return hit, err
+}
+
+func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheLookup, reads *blobIO) (blob.DepcacheHit, error) {
 	result := blob.DepcacheHit{}
 	tx, err := r.tenant.s.beginTx(ctx)
 	if err != nil {
 		return result, err
 	}
 	defer rollbackOrLog(tx)
+	tx.blobIO = reads
 	a, err := resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Authority, capability.DataRead)
 	if err != nil {
 		return result, err
@@ -310,6 +353,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 			refs = append(refs, fallback{blob.RefScope{Ref: ref, Verified: true}, blob.RestoreDefaultBranch})
 		}
 	}
+	var pending error
 	for _, fallback := range refs {
 		if !slices.Contains(a.capability.Data.ReadRefs, fallback.ref.CapabilityScope()) {
 			continue
@@ -318,15 +362,25 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 			return result, nil
 		}
 		key := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindDepcache, Scope: blob.Scope{Repo: a.authority.Repo, Ref: fallback.ref, Key: request.Key.Key}, Name: request.Key.Name}
-		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback.source == blob.RestoreDefaultBranch}, capability.DataRead)
+		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback.source == blob.RestoreDefaultBranch})
+		if errors.Is(err, errBlobIOPending) {
+			pending = err
+			continue
+		}
 		if cacheMissError(err) {
 			continue
 		}
 		if err != nil {
+			if pending != nil {
+				return result, pending
+			}
 			return result, err
 		}
 		if !hit.Found || (fallback.source != blob.RestoreOwnRef && !hit.Record.RefFacts.Scope.Verified) {
 			continue
+		}
+		if pending != nil {
+			return result, pending
 		}
 		if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
 			return blob.DepcacheHit{}, nil
@@ -334,15 +388,27 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 		result = blob.DepcacheHit{Found: true, Record: hit.Record, Source: fallback.source, ReadSet: hit.ReadSet}
 		return result, tx.Commit()
 	}
+	if pending != nil {
+		return result, pending
+	}
 	return result, tx.Commit()
 }
 
-func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error) {
+func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (hit blob.MemoHit, err error) {
+	err = withBlobIO(ctx, func(reads *blobIO) error {
+		hit, err = r.copyMemo(ctx, request, reads)
+		return err
+	})
+	return hit, err
+}
+
+func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest, reads *blobIO) (blob.MemoHit, error) {
 	tx, err := r.tenant.s.beginTx(ctx)
 	if err != nil {
 		return blob.MemoHit{}, err
 	}
 	defer rollbackOrLog(tx)
+	tx.blobIO = reads
 	a, err := resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Lookup.Authority, capability.DataWrite)
 	if err != nil {
 		return blob.MemoHit{}, err

@@ -20,8 +20,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -80,8 +80,11 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 }
 
 func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, args []string, route userconfig.RunRouting, connection client.EngineOptions) (_ controllerwire.CreateRunRequest, resultErr error) {
-	captured := os.Environ()
-	masker := secrets.NewMasker()
+	environment := flags.environment
+	if environment == nil {
+		environment = prepareLocalEnvironment(os.Environ(), route.LocalSecrets)
+	}
+	captured, held, masker := environment.captured, environment.held, environment.masker
 	configPath, err := userconfig.Path()
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
@@ -97,12 +100,6 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	submitted, err := procenv.Submit(captured, allow, masker)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
-	}
-	for _, item := range captured {
-		key, value, ok := strings.Cut(item, "=")
-		if ok && slices.Contains(route.LocalSecrets, key) {
-			masker.Register(value)
-		}
 	}
 	defer func() {
 		if resultErr != nil {
@@ -126,19 +123,15 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 			}
 		}
 	}
-	if err := authorizeBurstSource(ctx, filepath.Dir(directory), files, route.SourceFiles); err != nil {
+	if err := authorizeBurstSource(ctx, captured, filepath.Dir(directory), files, route.SourceFiles); err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	snapshot, err := captureBurstSnapshot(ctx, filepath.Dir(directory), route.SourceFiles, nil)
+	snapshot, err := captureBurstSnapshot(ctx, captured, filepath.Dir(directory), route.SourceFiles, nil)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, snapshot.close()) }()
-	checkout, err := snapshotTriggerCheckout(ctx, snapshot)
-	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
-	}
-	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: checkout, pipeline: pipeline, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: snapshot.RepoRoot, snapshot: snapshot, pipeline: pipeline, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
 		return lookupTriggerGitHubID(ctx, remote, captured)
 	}})
 	if err != nil {
@@ -151,7 +144,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	defaultBranch, err := checkoutDefaultBranch(ctx, snapshot.RepoRoot)
+	defaultBranch, err := checkoutDefaultBranch(ctx, captured, snapshot.RepoRoot, masker)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
@@ -167,7 +160,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	options.PreparedCheckout = checkout
+	options.LocalBundle = snapshot.BundlePath
 	options.SDK = ""
 	selected.source.NoBincache, selected.source.HashAllFiles = flags.noBincache, flags.hashAllFiles
 	described, err := inspectTriggerSource(ctx, selected, captured, options)
@@ -191,14 +184,14 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err := enforceRiskGate(pipeline, risksIn(schema), runFlags{allow: request.Request.Options.AllowRisk.Value, dryRun: request.Request.Options.DryRun.Value}); err != nil {
 		return request, err
 	}
-	request.LocalSecrets, err = resolveBurstSecrets(ctx, route.LocalSecrets, schema.Secrets, captured)
+	request.LocalSecrets, err = resolveBurstSecrets(ctx, environment.names, schema.Secrets, held)
 	if err != nil {
 		return request, err
 	}
-	request.Request.LocalSecretNames = slices.Sorted(maps.Keys(request.LocalSecrets))
-	if err := snapshot.rejectSecrets(ctx, request.LocalSecrets); err != nil {
-		return controllerwire.CreateRunRequest{}, err
+	for name, value := range request.LocalSecrets {
+		held[name] = value
 	}
+	request.Request.LocalSecretNames = slices.Sorted(maps.Keys(request.LocalSecrets))
 	request.Request.Burst = &runspec.BurstPlacement{OverflowMinutes: route.OverflowMinutes}
 	prefer := route.Prefer
 	if prefer == nil {
@@ -208,7 +201,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		hold, _ := time.ParseDuration(p.Hold)
 		request.Request.Burst.Preferences = append(request.Request.Burst.Preferences, runspec.PlacementStep{Target: p.Target, Hold: hold})
 	}
-	digest, err := client.UploadSourceSnapshot(ctx, connection, request.Request.Git, request.Request.Source, snapshot.BundlePath)
+	digest, err := client.UploadSourceSnapshot(ctx, connection, source.Publication{Git: request.Request.Git, Source: request.Request.Source, Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: held})
 	if err != nil {
 		return request, &burstBeforeIntakeError{err}
 	}
@@ -227,7 +220,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	return request, nil
 }
 
-func resolveBurstSecrets(ctx context.Context, names []string, declarations []nodeproto.SecretDeclaration, captured []string) (map[string]string, error) {
+func resolveBurstSecrets(ctx context.Context, names []string, declarations []nodeproto.SecretDeclaration, held map[string]string) (map[string]string, error) {
 	selected := []nodeproto.SecretDeclaration{}
 	for _, name := range names {
 		found := false
@@ -242,14 +235,8 @@ func resolveBurstSecrets(ctx context.Context, names []string, declarations []nod
 			return nil, fmt.Errorf("run: local secret %s must be declared by the pipeline", name)
 		}
 	}
-	environment := map[string]string{}
-	for _, item := range captured {
-		if key, value, ok := strings.Cut(item, "="); ok {
-			environment[key] = value
-		}
-	}
 	return client.ResolveLocalSecrets(ctx, selected, func(ctx context.Context, name string) (string, bool, error) {
-		value, present := environment[name]
+		value, present := held[name]
 		return value, present, ctx.Err()
 	})
 }

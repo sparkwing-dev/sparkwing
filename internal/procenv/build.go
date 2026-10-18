@@ -34,8 +34,11 @@ func Lookup(name string) (Var, bool) {
 	return Var{Name: name, Class: User, Owner: "user"}, false
 }
 
-func envKey(name string) string {
-	if runtime.GOOS == "windows" {
+func envKey(name string) string { return NameKey(name, runtime.GOOS) }
+
+// NameKey returns the platform's environment-name comparison key.
+func NameKey(name, goos string) string {
+	if goos == "windows" {
 		return strings.ToUpper(name)
 	}
 	return name
@@ -116,6 +119,9 @@ func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 			}
 			env[envKey(a.Name)] = a.Name + "=" + a.Value
 		}
+	}
+	if k == Git {
+		env[envKey("GIT_NO_REPLACE_OBJECTS")] = "GIT_NO_REPLACE_OBJECTS=1"
 	}
 	result := make([]string, 0, len(env))
 	for _, entry := range env {

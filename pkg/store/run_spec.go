@@ -18,10 +18,13 @@ import (
 // IntakeRequest carries client input and server-derived tagged authority, re-resolved
 // by C2 in the intake transaction. CapabilityPrefix is only a claim fence and
 // cannot replace a session parent. Verified App facts come from the delivery ID.
+// Intent, when set, is Request before server-side source resolution and is the
+// idempotency digest input, so replay never depends on Git state.
 type IntakeRequest struct {
 	SubmittedEnv       map[string][]byte `json:"-"`
 	Authority          capability.AuthorityRef
 	Request            runspec.Request
+	Intent             *runspec.Request
 	IdempotencyKey     string
 	CapabilityPrefix   string
 	LocalSecrets       map[string]string `json:"-"`
@@ -94,26 +97,21 @@ type AcceptedExpansion struct {
 // including when the caller supplies no idempotency key.
 // Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
-	if err := validateLocalSecrets(request.Request.LocalSecretNames, request.LocalSecrets); err != nil {
-		return AdmissionResult{}, err
-	}
 	var result AdmissionResult
 	var installed *localRunSecrets
+	var key localSecretKey
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		t.s.uninstallLocalSecrets(key, &installed)
 		var err error
 		result, err = admitRun(ctx, tx, t.team, request, tx.now())
 		if err == nil {
-			installed, err = t.s.installLocalSecrets(t.team, result, request.LocalSecrets)
-		}
-		if err == nil {
-			err = t.installSubmittedEnvironmentTx(ctx, tx, result, request)
+			key = localSecretKey{t.team, result.RunID}
+			installed, err = t.validateAdmissionInputsTx(ctx, tx, result, request)
 		}
 		return err
 	})
 	if err != nil {
-		if installed != nil {
-			t.s.localSecrets.CompareAndDelete(localSecretKey{t.team, result.RunID}, installed)
-		}
+		t.s.uninstallLocalSecrets(key, &installed)
 		return AdmissionResult{}, err
 	}
 	return result, nil

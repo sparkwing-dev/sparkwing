@@ -22,6 +22,49 @@ type admittedSnapshot struct {
 	retry   *RetrySelection
 }
 
+// ReplayRun validates private inputs and returns a keyed admission before source resolution.
+func (t *Tenant) ReplayRun(ctx context.Context, request IntakeRequest) (AdmissionResult, bool, error) {
+	if request.IdempotencyKey == "" || request.Request.Lineage.RetryOf != "" || request.VerifiedDeliveryID != "" {
+		return AdmissionResult{}, false, nil
+	}
+	var result AdmissionResult
+	var found bool
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		principal, err := intakeAuthorityTx(ctx, tx, t.team, request)
+		if err != nil {
+			return err
+		}
+		digest, err := intakeDigest(tx, request, admittedSnapshot{})
+		if err != nil {
+			return err
+		}
+		scope, err := intakeScope(principal, request.Request.Pipeline)
+		if err != nil {
+			return err
+		}
+		result, found, err = replayAdmissionTx(ctx, tx, t.team, scope, request.IdempotencyKey, string(digest))
+		if err == nil && found {
+			_, err = t.validateAdmissionInputsTx(ctx, tx, result, request)
+		}
+		return err
+	})
+	if err != nil {
+		return AdmissionResult{}, false, err
+	}
+	return result, found, nil
+}
+
+func (t *Tenant) validateAdmissionInputsTx(ctx context.Context, tx *storeTx, result AdmissionResult, request IntakeRequest) (*localRunSecrets, error) {
+	if err := validateLocalSecrets(request.Request.LocalSecretNames, request.LocalSecrets); err != nil {
+		return nil, err
+	}
+	installed, err := t.s.installLocalSecrets(t.team, result, request.LocalSecrets)
+	if err == nil {
+		err = t.installSubmittedEnvironmentTx(ctx, tx, result, request)
+	}
+	return installed, err
+}
+
 func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, now time.Time) (AdmissionResult, error) {
 	principal, err := intakeAuthorityTx(ctx, tx, team, request)
 	if err != nil {
@@ -31,14 +74,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err != nil {
 		return AdmissionResult{}, err
 	}
-	var identity any = struct {
-		Request  runspec.Request
-		Delivery string
-	}{request.Request, request.VerifiedDeliveryID}
-	if snapshot.retry != nil {
-		identity = struct{ SourceRunID, Mode string }{snapshot.lineage.RetryOf, snapshot.retry.Mode}
-	}
-	digest, err := tx.store.planServices().CanonicalHash(identity)
+	digest, err := intakeDigest(tx, request, snapshot)
 	if err != nil {
 		return AdmissionResult{}, err
 	}
@@ -173,6 +209,21 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		return AdmissionResult{}, err
 	}
 	return result, nil
+}
+
+func intakeDigest(tx *storeTx, request IntakeRequest, snapshot admittedSnapshot) (runspec.Hash, error) {
+	intent := request.Request
+	if request.Intent != nil {
+		intent = *request.Intent
+	}
+	var identity any = struct {
+		Request  runspec.Request
+		Delivery string
+	}{intent, request.VerifiedDeliveryID}
+	if snapshot.retry != nil {
+		identity = struct{ SourceRunID, Mode string }{snapshot.lineage.RetryOf, snapshot.retry.Mode}
+	}
+	return tx.store.planServices().CanonicalHash(identity)
 }
 
 func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest) (capability.Principal, error) {

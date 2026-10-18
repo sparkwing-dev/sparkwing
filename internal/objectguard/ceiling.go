@@ -59,7 +59,7 @@ const DefaultCeilingSubject = "the bucket"
 
 func defaultRemedy(r CeilingReason) string {
 	return "Delete objects until the next measurement puts the store under the ceiling, raise " +
-		ceilingFlag(r) + ", or clear the freeze with `sparkwing cluster object-store reset-breaker --profile NAME`"
+		ceilingFlag(r) + ", or clear the freeze with `sparkwing operator object-store reset-breaker --profile NAME`"
 }
 
 func (e *CeilingError) Unwrap() error { return ErrCeilingFrozen }

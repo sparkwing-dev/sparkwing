@@ -23,11 +23,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 type triggerSourceInput struct {
 	checkout, ref, pipeline, pipelineRef string
+	snapshot                             *worktreeSnapshot
 	environment                          []string
 	githubID                             func(context.Context, string) (int64, error)
 	buildEnv                             func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
@@ -124,9 +124,18 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if ref == "" {
 		ref = "HEAD"
 	}
-	sha, err := read("rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-	if err != nil {
-		return result, err
+	options := source.Options{Base: procenv.Base{Local: true, Captured: input.environment, Masker: secrets.NewMasker()}, BuildEnvironment: buildEnv}
+	var sha string
+	if input.snapshot != nil && input.ref == "" {
+		sha = input.snapshot.SHA
+	} else {
+		sha, err = source.ResolveRef(ctx, source.Spec{LocalCheckout: checkout}, ref, options)
+		if err != nil {
+			return result, err
+		}
+	}
+	if input.snapshot != nil {
+		options.LocalBundle = input.snapshot.BundlePath
 	}
 	remote, err := read("remote", "get-url", "origin")
 	if err != nil {
@@ -150,36 +159,19 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if strings.HasPrefix(branch, "refs/remotes/origin/") {
 		git.DefaultBranch = runspec.Optional[string]{Set: true, Value: strings.TrimPrefix(branch, "refs/remotes/origin/")}
 	}
-	configPath := ".sparkwing/" + projectconfig.Filename
-	listed, err := read("ls-tree", "--name-only", sha, "--", configPath)
+	selected := runspec.Source{Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}}
+	git, selected, cfg, err := source.Select(ctx, source.Spec{RepoKey: string(repository.Key), LocalCheckout: checkout}, input.pipeline, git, selected, input.pipelineRef, options)
 	if err != nil {
 		return result, err
-	}
-	var cfg *projectconfig.Config
-	if listed != "" {
-		raw, err := read("show", sha+":"+configPath)
-		if err != nil {
-			return result, err
-		}
-		cfg, err = projectconfig.Parse([]byte(raw))
-		if err != nil {
-			return result, err
-		}
 	}
 	identity, err := clisurface.ResolvePipeline(cfg, input.pipeline)
 	if err != nil {
 		return result, err
 	}
-	selected := runspec.Source{Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}}
+	selected.Entrypoint = identity.Entrypoint
 	profile := ""
 	if entry := cfg.Registry().Find(identity.Name); entry != nil {
-		selected.RequestedRef, profile = entry.Source, entry.Profile
-	}
-	git, selected, err = source.ResolveRevisions(ctx, git, selected, input.pipelineRef, func(ref string) (string, error) {
-		return reader.read(ctx, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-	})
-	if err != nil {
-		return result, err
+		profile = entry.Profile
 	}
 	return preparedTriggerSource{pipeline: identity.Name, profile: profile, git: git, source: selected, checkout: reader}, nil
 }

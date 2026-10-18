@@ -137,7 +137,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 		}
 		if keyErr != nil {
 			// safety: admission remains available through its existing fallback when Jev has no key.
-			d.cfg.logf("jev admission needs the TYPESAFE_API_KEY secret (sparkwing secrets set --name TYPESAFE_API_KEY --file <path>): %v", keyErr)
+			d.cfg.logf("jev admission needs the TYPESAFE_API_KEY secret (sparkwing secrets set --secret TYPESAFE_API_KEY --file <path>): %v", keyErr)
 		} else {
 			d.jevAdvisor = newTypeSafeJevAdvisor(key, d.cfg.admissionPolicy().Jev)
 		}

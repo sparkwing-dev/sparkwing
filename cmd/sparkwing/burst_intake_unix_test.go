@@ -145,7 +145,10 @@ func FuzzBurstHostSourceEnvironmentExcludesRequesterValues(f *testing.F) {
 		t.Setenv("BURST_USER_VALUE", arbitrary)
 		t.Setenv("GOCACHE", "/host/build-cache")
 		t.Setenv("GOMODCACHE", "/host/modules")
-		options, err := hostSourceOptions(t.TempDir(), []string{"TOKEN=" + secret, "BURST_USER_VALUE=" + arbitrary}, secrets.NewMasker(), false)
+		captured := os.Environ()
+		t.Setenv("GOCACHE", "/ambient/build-cache")
+		t.Setenv("GOMODCACHE", "/ambient/modules")
+		options, err := hostSourceOptions(t.TempDir(), captured, secrets.NewMasker(), false)
 		if err != nil {
 			t.Fatal(err)
 		}

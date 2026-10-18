@@ -259,9 +259,9 @@ func printVersionTable(r VersionReport) {
 		fmt.Printf("  latest:   %s %s\n", r.LatestRelease, color.Green("up to date"))
 	}
 	if r.Behind {
-		fmt.Printf("  upgrade:  %s\n", "sparkwing update --cli")
+		fmt.Printf("  upgrade:  %s\n", "sparkwing update")
 	} else {
-		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing update --cli"))
+		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing update"))
 	}
 	if r.Hold != nil && r.Hold.Error != "" {
 		fmt.Printf("  hold:     %s\n", color.Yellow(r.Hold.Error))

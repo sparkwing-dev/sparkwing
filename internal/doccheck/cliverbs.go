@@ -49,8 +49,9 @@ func checkCLIVerbs(contentDir string) bool {
 		rel, _ := filepath.Rel(contentDir, path)
 		doc := string(data)
 		if strings.Contains(filepath.ToSlash(rel), "migrations/") {
-			doc = normalizeMigrationInvocations(migrationDestinations(doc))
+			doc = migrationDestinations(doc)
 		}
+		doc = normalizeUnprefixedInvocations(doc)
 		examples := extractInvocations(rel, doc)
 		if strings.Contains(filepath.ToSlash(rel), "migrations/") {
 			for i := range examples {
@@ -153,19 +154,25 @@ func extractInvocations(file, doc string) []cliVerb {
 		}
 		for _, m := range inlineCodeRE.FindAllStringSubmatch(line, -1) {
 			if inv, ok := parseInvocation(file, start+1, m[1]); ok {
-				args, err := shellExampleArgs(m[1])
-				if err == nil {
-					_, err = clisurface.Parse("sparkwing", append([]string{"--help"}, args...))
-				}
-				var usage *clisurface.UsageError
-				if errors.As(err, &usage) && (strings.HasPrefix(usage.Message, "unknown flag ") || strings.HasPrefix(usage.Message, "unknown short flag ") || strings.HasSuffix(usage.Message, " is not accepted")) {
-					inv.err = err
-				}
+				inv.err = fragmentFlagError(m[1])
 				out = append(out, inv)
 			}
 		}
 	}
 	return out
+}
+
+// hack: --help skips required-flag checks, so fragments that omit required values still pass.
+func fragmentFlagError(command string) error {
+	args, err := shellExampleArgs(command)
+	if err == nil {
+		_, err = clisurface.Parse("sparkwing", append([]string{"--help"}, args...))
+	}
+	var usage *clisurface.UsageError
+	if errors.As(err, &usage) && (strings.HasPrefix(usage.Message, "unknown flag ") || strings.HasPrefix(usage.Message, "unknown short flag ") || strings.HasSuffix(usage.Message, " is not accepted")) {
+		return err
+	}
+	return nil
 }
 
 func shellExampleArgs(line string) ([]string, error) {
@@ -312,7 +319,7 @@ func isGroup(cur string, valid map[string]bool) bool {
 	return false
 }
 
-func normalizeMigrationInvocations(doc string) string {
+func normalizeUnprefixedInvocations(doc string) string {
 	roots := map[string]bool{}
 	for _, command := range clisurface.Registry() {
 		words := strings.Fields(command.Path)

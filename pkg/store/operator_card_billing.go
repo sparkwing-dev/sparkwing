@@ -157,6 +157,7 @@ func (o *Operator) MarkCardRefundMade(
 		return fmt.Errorf("%w: refund key %q", ErrInvalidInput, key)
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
+		status := status
 		if err := lockCreditLedgerTx(ctx, tx); err != nil {
 			return err
 		}

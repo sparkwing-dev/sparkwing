@@ -16,7 +16,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
@@ -117,7 +119,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	sourcetest.Git(t, repo, "bundle", "create", bundle, "HEAD")
 	input.Git.SHA, input.Source.Ref = sha, sha
 	input.Git.Repository.Display = "https://example.test/acme/repo"
-	digest, err := client.UploadSourceSnapshot(t.Context(), options, input.Git, input.Source, bundle)
+	digest, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: bundle, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +279,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	foreign := input
 	foreign.LocalSecretNames = nil
 	foreign.Source.BundleDigest = runspec.Optional[string]{}
-	foreignDigest, err := client.UploadSourceSnapshot(t.Context(), options, foreign.Git, foreign.Source, foreignBundle)
+	foreignDigest, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: foreign.Git, Source: foreign.Source, Path: foreignBundle, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
 	if err != nil {
 		t.Fatal(err)
 	}

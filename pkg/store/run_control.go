@@ -23,6 +23,7 @@ func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Au
 		return ErrInvalidInput
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {
+		expires, reason := expires, reason
 		target := a.Target
 		if target.NodeID != "" && target.NodeID != job {
 			return bindingRefusal()
@@ -85,6 +86,7 @@ func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Aut
 		return out, ErrInvalidInput
 	}
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		out = controllerwire.ApprovalResult{}
 		if a.Target.NodeID == "" {
 			return bindingRefusal()
 		}

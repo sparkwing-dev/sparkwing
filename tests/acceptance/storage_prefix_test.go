@@ -3,12 +3,9 @@ package acceptance_test
 import (
 	"bytes"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
@@ -31,12 +28,19 @@ func TestStoragePrefixSourceBundles(t *testing.T) {
 				signer := &storageMaterializationSigner{storageCacheSigner: storageCacheSigner{objects: objects, team: identity.Team, bodies: make(map[blob.Digest][]byte)}, tickets: make(map[string]blob.UploadIntent)}
 				store := blob.NewSignedStore(blob.SignedStoreOptions{Signer: signer, HTTPClient: transfers})
 				records := &storageMaterializationRecords{results: make(map[blob.RecordKey]blob.RecordLookupResult)}
-				data := &bincache.SourceData{Bytes: store, Records: records, Authority: authority, Identity: identity}
-				file := filepath.Join(t.TempDir(), "snapshot.bundle")
-				if err := os.WriteFile(file, payload, 0o600); err != nil {
+				if err := blob.AuthorizeUpload(authority, identity, blob.KindSourceBundle); err != nil {
 					t.Fatal(err)
 				}
-				record, err := bincache.UploadSourceBundle(t.Context(), data, strings.Repeat("a", 40), file)
+				key, err := blob.ResolveWriteKey(authority, blob.WriteScopeIntent{Kind: blob.KindSourceBundle, Name: strings.Repeat("a", 40)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				digest := storageDigest(payload)
+				receipt, err := store.Put(t.Context(), blob.PutRequest{Identity: identity, Authority: authority, Digest: digest, Size: int64(len(payload)), Body: bytes.NewReader(payload)})
+				if err != nil || receipt.Digest != digest || receipt.Identity != identity {
+					t.Fatalf("source bytes: %+v %v", receipt, err)
+				}
+				record, err := records.CommitRecord(t.Context(), blob.CommitRecordRequest{Source: identity, Authority: authority, Key: key, Digest: digest})
 				if err != nil {
 					t.Fatal(err)
 				}

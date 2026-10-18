@@ -11,7 +11,7 @@ func ResolveAndWrite(ctx context.Context, sparkwingDir string, m *Manifest) (boo
 		return false, nil
 	}
 	ctx = gotoolchain.WithSession(ctx, nil, nil)
-	resolver := NewResolverFromEnv()
+	resolver := NewResolverFromEnv(ctx)
 	resolver.Dir = sparkwingDir
 	resolved, err := resolver.Resolve(ctx, m)
 	if err != nil {

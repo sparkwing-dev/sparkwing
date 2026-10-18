@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -120,19 +119,24 @@ func withPipelineEntryAt(directory, pipeline string, flags runFlags, fn func(con
 			raise()
 		}
 	}()
-	captured := os.Environ()
-	options, err := hostSourceOptions(home, captured, secrets.NewMasker(), true)
+	prepared, err := prepareRunEnvironment(directory, pipeline, os.Environ(), flags)
 	if err != nil {
 		return err
 	}
-	return withLocalPipelineEntry(ctx, home, directory, pipeline, flags, captured, options, fn)
+	flags.environment = prepared
+	options, err := hostSourceOptions(home, prepared.captured, prepared.masker, true)
+	if err != nil {
+		return err
+	}
+	return withLocalPipelineEntry(ctx, home, directory, pipeline, flags, prepared.captured, options, fn)
 }
 
 func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline string, flags runFlags, captured []string, options source.Options, fn func(context.Context, pipelineInspection, string) error) (resultErr error) {
-	masker := options.Base.Masker
-	if masker == nil {
-		masker = secrets.NewMasker()
+	prepared, err := prepareRunEnvironment(directory, pipeline, captured, flags)
+	if err != nil {
+		return err
 	}
+	captured, masker := prepared.captured, prepared.masker
 	defer func() {
 		if resultErr != nil {
 			resultErr = &maskedCLIError{err: resultErr, masker: masker}

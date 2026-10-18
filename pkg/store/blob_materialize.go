@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -128,7 +129,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 	return result, nil
 }
 
-func (r *blobRecords) verifyMaterializedBlobs(ctx context.Context, tx *storeTx, batch []blobRecordMutation) error {
+func (r *blobRecords) verifyMaterializedBlobs(ctx context.Context, tx *storeTx, batch []blobRecordMutation) (pending error) {
 	if len(batch) == 0 {
 		return nil
 	}
@@ -150,11 +151,17 @@ func (r *blobRecords) verifyMaterializedBlobs(ctx context.Context, tx *storeTx, 
 		if err != nil {
 			return err
 		}
-		if err := verifier.VerifyBlob(ctx, blob.Blob{Team: string(r.tenant.team), Digest: digest, Size: size}); err != nil {
+		expected := blob.Blob{Team: string(r.tenant.team), Digest: digest, Size: size}
+		_, err = tx.blobIO.read(fmt.Sprintf("blob:%s:%d", digest, size), func(ctx context.Context) ([]blob.Member, error) {
+			return nil, verifier.VerifyBlob(ctx, expected)
+		})
+		if errors.Is(err, errBlobIOPending) {
+			pending = err
+		} else if err != nil {
 			return err
 		}
 	}
-	return nil
+	return pending
 }
 
 func materializedKey(team Team, a blobActor, row NodeRow, kind blob.Kind) blob.RecordKey {

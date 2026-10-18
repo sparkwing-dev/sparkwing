@@ -69,7 +69,9 @@ type Options struct {
 	// BundleTransport supplies signed-object transfers; the source client always refuses redirects.
 	// Nil uses the standard HTTP transport.
 	BundleTransport http.RoundTripper
-	Base            procenv.Base
+	// ReadFile reads one committed file through host authority; nil fetches it with Access.
+	ReadFile func(ctx context.Context, sha, name string) ([]byte, bool, error)
+	Base     procenv.Base
 }
 
 // Entry contains the acquired checkout and SDK command without protocol arguments.

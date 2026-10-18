@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -34,8 +33,12 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	if err != nil && !os.IsNotExist(err) {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	captured := os.Environ()
-	masker := secrets.NewMasker()
+	var localSecrets []string
+	if machine.Run != nil && machine.Run.Routing != nil {
+		localSecrets = machine.Run.Routing.LocalSecrets
+	}
+	environment := prepareLocalEnvironment(os.Environ(), localSecrets)
+	captured, masker := environment.captured, environment.masker
 	var allow []string
 	if machine.Run != nil {
 		allow = machine.Run.SubmitEnvAllow
@@ -56,17 +59,13 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	var snapshot *worktreeSnapshot
 	originalCheckout := checkout
 	if flags.workingTree {
-		snapshot, err = captureWorktreeSnapshot(ctx, checkout, flags.allowSecretFiles)
+		snapshot, err = captureWorktreeSnapshot(ctx, captured, checkout, flags.allowSecretFiles)
 		if err != nil {
 			return result, err
 		}
 		defer func() { resultErr = errors.Join(resultErr, snapshot.close()) }()
-		checkout, err = snapshotTriggerCheckout(ctx, snapshot)
-		if err != nil {
-			return result, err
-		}
 	}
-	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: checkout, pipeline: flags.pipeline, ref: flags.ref, pipelineRef: flags.pipelineRef, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: originalCheckout, snapshot: snapshot, pipeline: flags.pipeline, ref: flags.ref, pipelineRef: flags.pipelineRef, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
 		return lookupTriggerGitHubID(ctx, remote, captured)
 	}})
 	if err != nil {
@@ -85,18 +84,9 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 			return result, branchErr
 		}
 		selected.git.Ref = branch
-		for _, revision := range []string{selected.git.SHA, selected.source.Ref} {
-			if revision != snapshot.SHA {
-				if err := snapshot.includeRevision(ctx, revision); err != nil {
-					return result, err
-				}
-			}
-		}
-		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, "", snapshot.tempDir)
-		if err != nil {
+		if err := snapshot.includeRevisions(ctx, selected.git.SHA, selected.source.Ref); err != nil {
 			return result, err
 		}
-		selected.checkout.directory = checkout
 	}
 	home, err := wingd.HomeDir("")
 	if err != nil {
@@ -107,18 +97,9 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 		return result, err
 	}
 	options.SDK = ""
-	if snapshot == nil {
-		workspace, err := os.MkdirTemp("", "sparkwing-trigger-inspect-*")
-		if err != nil {
-			return result, err
-		}
-		defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(workspace)) }()
-		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, "", workspace)
-		if err != nil {
-			return result, err
-		}
+	if snapshot != nil {
+		options.LocalBundle = snapshot.BundlePath
 	}
-	options.PreparedCheckout = checkout
 
 	described, err := inspectTriggerSource(ctx, selected, captured, options)
 	if err != nil {
@@ -146,34 +127,10 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 		return result, err
 	}
 	defer closeConnection()
-	digest, err := client.UploadSourceSnapshot(ctx, connection, result.Request.Git, result.Request.Source, snapshot.BundlePath)
+	digest, err := client.UploadSourceSnapshot(ctx, connection, source.Publication{Git: result.Request.Git, Source: result.Request.Source, Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: environment.held})
 	if err != nil {
 		return result, err
 	}
 	result.Request.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: digest}
 	return result, nil
-}
-
-func snapshotTriggerCheckout(ctx context.Context, snapshot *worktreeSnapshot) (string, error) {
-	return triggerInspectionCheckout(ctx, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath, snapshot.tempDir)
-}
-
-func triggerInspectionCheckout(ctx context.Context, repo, sha, bundle, workspace string) (string, error) {
-	options := source.Options{Workspace: workspace, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
-	options.LocalBundle = bundle
-	entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: sha, CommittedCheckout: true, PipelineDir: "."}, options)
-	if err != nil {
-		return "", err
-	}
-	environment, err := procenv.Build(procenv.Git, options.Base, procenv.Runtime{})
-	if err != nil {
-		return "", err
-	}
-	reader := triggerCheckout{directory: entry.CheckoutDirectory(), environment: environment}
-	remote, err := (triggerCheckout{directory: repo, environment: environment}).read(ctx, "remote", "get-url", "origin")
-	if err != nil {
-		return "", err
-	}
-	_, err = reader.read(ctx, "remote", "set-url", "origin", remote)
-	return reader.directory, err
 }

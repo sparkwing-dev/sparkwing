@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -29,32 +30,32 @@ func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorize
 	if c == nil || c.s == nil || c.allowed == nil || a.Principal.Class != capability.CredentialConsole || a.Principal.Capability.Subject.Kind != capability.SubjectOperator {
 		return zero, authorityError(apierr.Forbidden, "direct operator session required")
 	}
-	tx, err := c.s.beginTx(ctx)
+	var result T
+	err := c.s.inTx(ctx, func(tx *storeTx) error {
+		result = zero
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return err
+		}
+		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+		if err != nil {
+			return err
+		}
+		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), tx.now(), 0) || p.Capability.Subject.ID != a.Principal.Capability.Subject.ID || c.s.consolePolicy != nil && !c.s.consolePolicy(p, tx.now()) {
+			return authorityError(apierr.Forbidden, "direct operator session required")
+		}
+		result, err = write(tx, p.Capability.Subject.ID)
+		if err != nil {
+			return err
+		}
+		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), tx.now(), 0) || c.s.consolePolicy != nil && !c.s.consolePolicy(p, tx.now()) {
+			return authorityError(apierr.Forbidden, "operator account was removed")
+		}
+		return nil
+	})
 	if err != nil {
 		return zero, err
 	}
-	defer rollbackOrLog(tx)
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return zero, err
-	}
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
-	if err != nil {
-		return zero, err
-	}
-	if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), tx.now(), 0) || p.Capability.Subject.ID != a.Principal.Capability.Subject.ID || c.s.consolePolicy != nil && !c.s.consolePolicy(p, tx.now()) {
-		return zero, authorityError(apierr.Forbidden, "direct operator session required")
-	}
-	out, err := write(tx, p.Capability.Subject.ID)
-	if err != nil {
-		return zero, err
-	}
-	if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), tx.now(), 0) || c.s.consolePolicy != nil && !c.s.consolePolicy(p, tx.now()) {
-		return zero, authorityError(apierr.Forbidden, "operator account was removed")
-	}
-	if err := tx.Commit(); err != nil {
-		return zero, err
-	}
-	return out, nil
+	return result, nil
 }
 
 func consoleTeamTx(ctx context.Context, tx *storeTx, name string) (*Tenant, error) {
@@ -217,6 +218,7 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 // ConsoleApproveWaitlist admits one stable batch per request key under current operator authority.
 func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Authorized, ids []string, oldest int, key string) ([]Account, error) {
 	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) ([]Account, error) {
+		ids := slices.Clone(ids)
 		if key == "" || oldest < 0 || (len(ids) > 0) == (oldest > 0) {
 			return nil, ErrInvalidInput
 		}

@@ -48,7 +48,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("%s has no runner section; `sparkwing cluster runners add` writes one: %w", path, os.ErrNotExist)
+		return nil, fmt.Errorf("%s has no runner section; `sparkwing runners add` writes one: %w", path, os.ErrNotExist)
 	}
 	if cfg.CredentialsDir != "" {
 		dir, err := credentials.Open(cfg.CredentialsDir)

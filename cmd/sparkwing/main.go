@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
@@ -116,8 +115,13 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if err != nil {
 		return err
 	}
-	captured := os.Environ()
-	selection, err := selectLocalRunSource(context.Background(), home, dir, pipelineName, flags, captured, secrets.NewMasker())
+	route, err := loadRunRouting(dir, pipelineName)
+	if err != nil {
+		return err
+	}
+	flags.environment = prepareLocalEnvironment(os.Environ(), route.LocalSecrets)
+	captured, masker := flags.environment.captured, flags.environment.masker
+	selection, err := selectLocalRunSource(context.Background(), home, dir, pipelineName, flags, captured, masker)
 	if err != nil {
 		return err
 	}
@@ -134,7 +138,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	}
 	var closeErr error
 	beforeExec := func() { closeErr = errors.Join(closeErr, code.Close(), selection.execution.Close()) }
-	route, err := loadRunRouting(selection.execution.Directory, pipelineName)
+	route, err = loadRunRouting(selection.execution.Directory, pipelineName)
 	if err != nil {
 		return err
 	}

@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -100,6 +102,8 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	home, checkout := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	initializeScheduleCheckout(t, checkout)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	service := &crons.Service{Store: st, Schedules: tenant, Side: store.CronWhereLocal, PinRoot: filepath.Join(home, "crons"), LockPath: filepath.Join(home, "crons.lock"), Now: func() time.Time { return now }, ArmedBy: "local:0", Host: "fixture", Version: "fixture"}
@@ -130,7 +134,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	options := client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: transport, Timeout: 5 * time.Second}}
+	options := client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: transport, Timeout: 30 * time.Second}}
 	manager, err := client.NewLocalScheduleManager(options)
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +222,8 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	if _, err := controls.DeleteSchedule(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: "https://gitlab.com/acme/local.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}
+	const remote = "https://192.0.2.1/acme/local.git"
+	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: remote, Branch: "main", SHA: sourcetest.FixedRemote(t, remote)}
 	for i := range 21 {
 		body.Schedules = append(body.Schedules, controllerwire.ScheduleDeclaration{Pipeline: fmt.Sprintf("local-%d", i), Cron: "0 1 * * *"})
 	}
@@ -239,6 +244,10 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	closeErr := response.Body.Close()
 	if response.StatusCode != 200 || readErr != nil || closeErr != nil {
 		t.Fatalf("verified local principal was capped: %d %s %v %v", response.StatusCode, data, readErr, closeErr)
+	}
+	var registered controllerwire.ScheduleRepoWritten
+	if err := json.Unmarshal(data, &registered); err != nil || len(registered.Schedules) != len(body.Schedules) {
+		t.Fatalf("registered %d of %d schedules: %s %v", len(registered.Schedules), len(body.Schedules), data, err)
 	}
 }
 

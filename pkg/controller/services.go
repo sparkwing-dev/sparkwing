@@ -13,11 +13,7 @@ import (
 type ServicesResponse struct {
 	// DataDownloadURL names the authenticated data download endpoint.
 	DataDownloadURL string `json:"data_download_url,omitempty"`
-	// Dashboard is the externally-reachable URL a human opens to watch
-	// this controller's runs. `sparkwing cloud connect` prints it, so an
-	// operator who has just connected reaches the web view without being
-	// told the address out of band. Empty when the controller wasn't
-	// started with --dashboard-url.
+	// Dashboard is the controller's externally reachable web URL.
 	Dashboard string `json:"dashboard,omitempty"`
 
 	// MultiTeam reports a controller that may hold more than one team.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +111,92 @@ func TestBlobRecordsMemoOwnScopePrecedesDefaultWithoutPRBaseFallback(t *testing.
 	hit, err = records.LookupMemo(t.Context(), request)
 	if err != nil || !hit.Found || len(hit.ReadSet.Edges) == 0 || hit.ReadSet.Edges[0].Record.Scope.Ref.Ref != "feature" {
 		t.Fatalf("own memo=%+v: %v", hit, err)
+	}
+}
+
+func TestBlobMemoStableFallbackCompletesProperty(t *testing.T) {
+	for _, copyMemo := range []bool{false, true} {
+		for valid := -1; valid < 4; valid++ {
+			t.Run(fmt.Sprintf("copy=%v/valid=%d", copyMemo, valid), func(t *testing.T) {
+				s, records, intent := blobRestoreFixture(t)
+				var digests []blob.Digest
+				for i := range 4 {
+					object := intent
+					object.Digest = blob.Digest(fmt.Sprintf("%064x", i+1))
+					digests = append(digests, object.Digest)
+					rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,3,1)", object.Digest)
+					ref := "feature"
+					if i >= 2 {
+						ref = "main"
+					}
+					key := plantBlobRestore(t, s, records, object, blob.KindMemo, ref, restoreFacts(ref, ref == "main"), true)
+					if i%2 == 0 {
+						namespace, err := blob.RecordNamespace(key)
+						if err != nil {
+							t.Fatal(err)
+						}
+						rewriteSchemaExec(t, s.db, "UPDATE blob_records SET name='manifest' WHERE kind='memo' AND scope=? AND name='output'", namespace)
+					}
+				}
+				// safety: lookup order is output then manifest in each namespace.
+				digests[0], digests[1], digests[2], digests[3] = digests[1], digests[0], digests[3], digests[2]
+				records.manifests = blobManifestFunc(func(_ context.Context, _ Team, digest blob.Digest) ([]blob.Member, error) {
+					if valid >= 0 && digest == digests[valid] {
+						return nil, nil
+					}
+					if strings.HasSuffix(string(digest), "1") || strings.HasSuffix(string(digest), "3") {
+						return nil, blob.ErrNotFound
+					}
+					return nil, blob.ErrIntegrity
+				})
+				request := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
+				var hit blob.MemoHit
+				var err error
+				if copyMemo {
+					hit, err = records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: request, Destination: intent.Identity.Attempt.Value})
+				} else {
+					hit, err = records.LookupMemo(t.Context(), request)
+				}
+				if err != nil || hit.Found != (valid >= 0) || valid >= 0 && hit.Manifest.Value != digests[valid] {
+					t.Fatalf("stable fallback=%+v: %v", hit, err)
+				}
+			})
+		}
+	}
+}
+
+func TestBlobFallbackPendingCandidatePrecedesUnusedRecordFailure(t *testing.T) {
+	for _, kind := range []blob.Kind{blob.KindMemo, blob.KindDepcache} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, records, intent := blobRestoreFixture(t)
+			records.manifests = fakeBlobManifests{intent.Digest: nil}
+			key := plantBlobRestore(t, s, records, intent, kind, "feature", restoreFacts("feature", false), true)
+			other := intent
+			other.Digest = blob.Digest(strings.Repeat("f", 64))
+			rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,3,1)", other.Digest)
+			fallback := plantBlobRestore(t, s, records, other, kind, "main", restoreFacts("main", true), true)
+			namespace, err := blob.RecordNamespace(fallback)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, s.db, "UPDATE blob_records SET ref_facts_json=? WHERE kind=? AND scope=?", []byte("invalid"), kind, namespace)
+			if kind == blob.KindMemo {
+				request := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: key.Scope.Ref, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
+				hit, err := records.LookupMemo(t.Context(), request)
+				if err != nil || !hit.Found {
+					t.Fatalf("pending own-ref memo lost priority: %+v: %v", hit, err)
+				}
+				hit, err = records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: request, Destination: intent.Identity.Attempt.Value})
+				if err != nil || !hit.Found {
+					t.Fatalf("pending own-ref memo copy lost priority: %+v: %v", hit, err)
+				}
+			} else {
+				hit, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: key.Scope.Ref, Name: "modules", Key: fixtureMemoHash}})
+				if err != nil || !hit.Found || hit.Source != blob.RestoreOwnRef {
+					t.Fatalf("pending own-ref depcache lost priority: %+v: %v", hit, err)
+				}
+			}
+		})
 	}
 }
 

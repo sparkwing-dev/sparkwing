@@ -47,14 +47,14 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 	if err := lockClaimControllerTx(ctx, tx); err != nil {
 		return err
 	}
+	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	if err != nil {
+		return err
+	}
 	if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: capability.UnitTrigger, RunID: a.Target.RunID}); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err := lockStateRunTx(ctx, tx, t.team, a.Target.RunID); err != nil {
-		return err
-	}
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
-	if err != nil {
 		return err
 	}
 	c, b := p.Capability, p.Capability.Binding

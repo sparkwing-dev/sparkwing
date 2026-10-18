@@ -40,12 +40,6 @@ controller:
   metricsPort: 0
 
 
-  # Memory ceiling in MiB for concurrent argon2id token hashing. Each
-  # hash holds 64 MiB while it runs, so the default admits four at a
-  # time and keeps unauthenticated sign-in traffic
-  # inside resources.limits.memory below.
-  argon2MemoryBudgetMB: 256
-
   # Label terms a node whose plan declares no Prefers of its own prefers its
   # runner to advertise, in the Prefers term syntax. Empty leaves such a node
   # to the first claimant.

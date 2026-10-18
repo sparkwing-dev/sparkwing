@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -54,10 +55,15 @@ type session struct {
 	noticeOnce sync.Once
 }
 
-// WithSession shares one environment probe and one notice across a CLI invocation.
+// WithSession shares a probe and notice for one environment, replacing a differing explicit snapshot.
 func WithSession(ctx context.Context, env []string, notice func(string)) context.Context {
-	if _, ok := ctx.Value(sessionKey{}).(*session); ok {
-		return ctx
+	if previous, ok := ctx.Value(sessionKey{}).(*session); ok {
+		if env == nil || slices.Equal(previous.env, env) {
+			return ctx
+		}
+		if notice == nil {
+			notice = previous.notice
+		}
 	}
 	if notice == nil {
 		notice = func(message string) { fmt.Fprintln(os.Stderr, message) }
@@ -70,6 +76,11 @@ func getSession(ctx context.Context, env []string) *session {
 		return s
 	}
 	return &session{env: effectiveEnv(env), notice: func(message string) { fmt.Fprintln(os.Stderr, message) }}
+}
+
+// Environment returns the session's captured environment.
+func Environment(ctx context.Context) []string {
+	return append([]string{}, getSession(ctx, nil).env...)
 }
 
 func effectiveEnv(env []string) []string {

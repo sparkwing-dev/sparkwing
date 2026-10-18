@@ -69,8 +69,7 @@ func run(args []string) error {
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	dashboardURL := fs.String("dashboard-url", "",
 		"externally-reachable URL of the dashboard that watches this controller. "+
-			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
-			"where to watch runs. Empty disables the announcement.")
+			"Announced via GET /api/v1/services. Empty disables the announcement.")
 	billingURL := fs.String("billing-url", "",
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with the "+
@@ -90,13 +89,6 @@ func run(args []string) error {
 		"second address serving the same API, whose requests key login throttling, the bearer "+
 			"failure budget and the request log on X-Real-IP. Only a proxy that overwrites "+
 			"X-Real-IP may reach it. Empty serves only --addr, which ignores X-Real-IP")
-	argonBudgetMB := fs.Int("argon2-memory-budget-mb",
-		int(store.DefaultArgon2MemoryBudget>>20),
-		fmt.Sprintf("memory ceiling in MiB for concurrent argon2id password and "+
-			"token hashing. Each hash holds %d MiB while it runs, so the default "+
-			"admits %d at a time and the rest queue.",
-			store.Argon2HashBytes>>20,
-			store.Argon2Concurrency(store.DefaultArgon2MemoryBudget)))
 	liveLogNodeKB := fs.Int("live-log-node-kb", controller.DefaultLiveLogNodeBytes>>10,
 		"kilobytes of each running node's log the controller keeps in memory for "+
 			"live readers. This is the live view for a deployment whose logs surface "+
@@ -313,9 +305,6 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *argonBudgetMB < 1 {
-		return fmt.Errorf("--argon2-memory-budget-mb must be at least 1")
-	}
 	if *liveLogNodeKB < 1 {
 		return fmt.Errorf("--live-log-node-kb must be at least 1")
 	}
@@ -384,7 +373,6 @@ func run(args []string) error {
 		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
 			*liveLogNodeKB, *liveLogTotalMB)
 	}
-	store.SetArgon2MemoryBudget(int64(*argonBudgetMB) << 20)
 	budget, err := objectguard.ParseBudget(*objectStoreBudget)
 	if err != nil {
 		return err

@@ -242,7 +242,7 @@ func TestGitHubAppAutomationConfigErrorsAndManualOverride(t *testing.T) {
 	if len(f.triggers(olga.team)) != 1 {
 		t.Fatal("same pipeline dispatched twice")
 	}
-	for _, tc := range []struct{ config, status string }{
+	for i, tc := range []struct{ config, status string }{
 		{"pipelines: [invalid", "invalid"},
 		{strings.Replace(automationConfig, "branches: [main]", "paths: [src/*]", 1), "unsupported"},
 		{strings.Replace(automationConfig, "[synchronize]", "[labeled]", 1), "unsupported"},
@@ -260,9 +260,13 @@ func TestGitHubAppAutomationConfigErrorsAndManualOverride(t *testing.T) {
 		}
 		pr := prPayload(7, 701, "acme/widgets", 701)
 		pr["action"] = "synchronize"
-		pr["number"] = 30 + len(f.triggers(olga.team))
-		if _, out := f.deliver("pull_request", pr, ""); out["status"] != "dispatched" {
-			t.Fatalf("bad config suppressed manual row=%+v", out)
+		pr["number"] = 30 + i
+		want := "dispatched"
+		if tc.status == "invalid" {
+			want = "refused"
+		}
+		if _, out := f.deliver("pull_request", pr, ""); out["runs"].([]any)[0].(map[string]any)["status"] != want {
+			t.Fatalf("manual row with %s config=%+v", tc.status, out)
 		}
 	}
 	f.app.SetCommit("acme/widgets", "main", strings.Repeat("a", 40))

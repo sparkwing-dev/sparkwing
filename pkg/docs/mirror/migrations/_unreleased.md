@@ -1,5 +1,30 @@
 # Migrating to the next release
 
+## Credential rotation results and deletion times
+
+Before, `Tenant.RotateCredentials` returned visited secret/git counts and its
+secret callback returned `(value, error)`. It now returns
+`(store.CredentialRotation, error)`. Its secret callback returns
+`(value, skip, error)`, with `skip=true` retaining an unreadable envelope.
+Read rotated-secret and git counts from `Rotated` and `GitCredentials`, and
+skipped name/pipeline identities from `Skipped`. These fields describe only
+the committed attempt. Errors return an empty result. The HTTP response keeps
+its `rotated`, `skipped` and `git_credentials` fields.
+
+Team-deletion request, completion, recheck and lease times use Unix nanoseconds
+throughout the final schema. Update direct SQL integrations that used seconds.
+
+## Retired token verifier
+
+Remove `--argon2-memory-budget-mb` from controller arguments and
+`controller.argon2MemoryBudgetMB` from chart values. Capability and session
+authentication use stored digests. The retired Argon2 API has no replacement.
+
+Remove calls to `store.ValidateRunInvocation` and handling for
+`store.ErrSecretInputHash`. Runs enter through sealed intake, which validates
+secret argument classification. `InvocationSecretArgsKey` remains a reporting
+field. `Operator.TriggerTeam` is removed with the retired trigger sweep.
+
 ## Environment and source selections
 
 Requests with nonempty environments set `environment_source` to `captured` for

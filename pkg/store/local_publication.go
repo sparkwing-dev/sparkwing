@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
@@ -14,12 +15,21 @@ type LocalPublication struct {
 }
 
 // ReadLocalPublication reads the local controller's completed result graph.
-func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (LocalPublication, error) {
+func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (publication LocalPublication, err error) {
+	err = withBlobIO(ctx, func(reads *blobIO) error {
+		publication, err = t.readLocalPublication(ctx, run, reads)
+		return err
+	})
+	return publication, err
+}
+
+func (t *Tenant) readLocalPublication(ctx context.Context, run string, reads *blobIO) (LocalPublication, error) {
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return LocalPublication{}, err
 	}
 	defer rollbackOrLog(tx)
+	tx.blobIO = reads
 	snapshot, err := readSnapshotTx(ctx, tx, t.team, run)
 	if err != nil {
 		return LocalPublication{}, err
@@ -29,6 +39,7 @@ func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (LocalPub
 	}
 	result := LocalPublication{RunSnapshot: snapshot, Records: []blob.RecordLookupResult{}, Results: map[string]NodeResult{}}
 	records := t.BlobRecords(nil).(*blobRecords)
+	pending := false
 	for _, node := range snapshot.Nodes {
 		terminal, err := readStoredNodeResultTx(ctx, tx, t.team, node)
 		if err != nil {
@@ -54,11 +65,18 @@ func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (LocalPub
 				return LocalPublication{}, blob.ErrNotFound
 			}
 			members, err := records.readMembers(ctx, tx, record)
+			if errors.Is(err, errBlobIOPending) {
+				pending = true
+				continue
+			}
 			if err != nil {
 				return LocalPublication{}, err
 			}
 			result.Records = append(result.Records, blob.RecordLookupResult{Found: true, Record: record, Members: members})
 		}
+	}
+	if pending {
+		return LocalPublication{}, errBlobIOPending
 	}
 	return result, tx.Commit()
 }

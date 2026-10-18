@@ -89,7 +89,7 @@ type CredentialIssuer interface {
 }
 type CredentialRotator interface {
 	Team() store.Team
-	RotateCredentials(context.Context, capability.Authorized, func(store.Secret) (string, error), func(store.GitCredential) (string, error)) (int, int, error)
+	RotateCredentials(context.Context, capability.Authorized, func(store.Secret) (string, bool, error), func(store.GitCredential) (string, error)) (store.CredentialRotation, error)
 }
 type CredentialWriter interface {
 	Team() store.Team
@@ -405,6 +405,7 @@ type RunTransactions interface {
 	UpdateMembership(context.Context, store.Actor, store.MembershipUpdate) error
 	Members(context.Context) ([]store.Membership, error)
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
+	ReplayRun(context.Context, store.IntakeRequest) (store.AdmissionResult, bool, error)
 	ReadRun(context.Context, string) (store.RunRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadOwnerSnapshot(context.Context, capability.AuthorityRef, string) (store.RunSnapshot, error)
@@ -582,11 +583,12 @@ type SourceController struct {
 }
 func (s *SourceController) Release(ctx context.Context, a capability.Authorized) (SourceCredentialResponse, error)
 type SourceCredentialResponse struct {
-	Kind       string
-	Host       string
-	Username   string
-	Secret     string
-	KnownHosts string
+	Kind              string
+	Host              string
+	Username          string
+	Secret            string
+	KnownHosts        string
+	ExtraRepositories []string
 }
 type SourceTransactions interface {
 	ReleaseSourceCredential(context.Context, capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error)
@@ -647,6 +649,9 @@ func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
 func (g githubProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
 func (g googleProvider) AuthorizeURL(state, verifier, redirectURI string) string
 func (g googleProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
+func (*intakeRevisionAccess) BundleURL(context.Context, string) (string, error)
+func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error)
+func (e *intakeRunToken) Error() string
 func (l *liveLogs) Append(runID, nodeID string, data []byte)
 func (l *liveLogs) AppendAt(runID, nodeID, attempt string, off int64, data []byte)
 func (l *liveLogs) Finish(runID, nodeID string)

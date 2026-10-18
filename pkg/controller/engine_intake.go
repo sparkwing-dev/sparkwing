@@ -23,6 +23,7 @@ type RunTransactions interface {
 	UpdateMembership(context.Context, store.Actor, store.MembershipUpdate) error
 	Members(context.Context) ([]store.Membership, error)
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
+	ReplayRun(context.Context, store.IntakeRequest) (store.AdmissionResult, bool, error)
 	ReadRun(context.Context, string) (store.RunRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadOwnerSnapshot(context.Context, capability.AuthorityRef, string) (store.RunSnapshot, error)
@@ -102,10 +103,26 @@ func (s *EngineController) admitRun(ctx context.Context, team string, request st
 	if err != nil {
 		return controllerwire.CreateRunResponse{}, engineLookupError(err)
 	}
+	return createRunResponse(admitted), nil
+}
+
+func (s *EngineController) replayRun(ctx context.Context, team string, request store.IntakeRequest) (controllerwire.CreateRunResponse, bool, error) {
+	tenant, err := s.runTransactions(ctx, team)
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, false, err
+	}
+	admitted, found, err := tenant.ReplayRun(ctx, request)
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, false, engineLookupError(err)
+	}
+	return createRunResponse(admitted), found, nil
+}
+
+func createRunResponse(admitted store.AdmissionResult) controllerwire.CreateRunResponse {
 	return controllerwire.CreateRunResponse{
 		RunID: admitted.RunID, Number: admitted.Number, Request: admitted.Request,
 		HereBearer: string(admitted.HereBearer), Replayed: admitted.Replayed,
-	}, nil
+	}
 }
 
 // ExpansionForStore derives the source and actor from authorized resource facts,

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,6 +27,7 @@ import (
 
 type credentialMaintenance struct {
 	team       store.Team
+	rolledBack []store.Secret
 	secrets    []store.Secret
 	git        []store.GitCredential
 	audits     []capability.SourceReleaseAudit
@@ -39,30 +41,42 @@ type credentialMaintenance struct {
 
 func (f *credentialMaintenance) Team() store.Team { return f.team }
 
-func (f *credentialMaintenance) RotateCredentials(_ context.Context, a capability.Authorized, secret func(store.Secret) (string, error), git func(store.GitCredential) (string, error)) (int, int, error) {
+func (f *credentialMaintenance) RotateCredentials(_ context.Context, a capability.Authorized, secret func(store.Secret) (string, bool, error), git func(store.GitCredential) (string, error)) (store.CredentialRotation, error) {
 	f.calls++
 	f.actor = a
 	if f.err != nil {
-		return 0, 0, f.err
+		return store.CredentialRotation{}, f.err
 	}
+	for _, row := range f.rolledBack {
+		if _, _, err := secret(row); err != nil {
+			return store.CredentialRotation{}, err
+		}
+	}
+	result := store.CredentialRotation{Skipped: []store.SecretRotationSkip{}}
 	rows := append([]store.Secret(nil), f.secrets...)
 	creds := append([]store.GitCredential(nil), f.git...)
 	for i := range rows {
-		value, err := secret(rows[i])
+		value, skip, err := secret(rows[i])
 		if err != nil {
-			return 0, 0, err
+			return store.CredentialRotation{}, err
+		}
+		if skip {
+			result.Skipped = append(result.Skipped, store.SecretRotationSkip{Name: rows[i].Name, Pipeline: rows[i].Pipeline})
+			continue
 		}
 		rows[i].Value = value
+		result.Rotated++
 	}
 	for i := range creds {
 		value, err := git(creds[i])
 		if err != nil {
-			return 0, 0, err
+			return store.CredentialRotation{}, err
 		}
 		creds[i].Secret = value
 	}
 	f.secrets, f.git = rows, creds
-	return len(rows), len(creds), nil
+	result.GitCredentials = len(creds)
+	return result, nil
 }
 
 func (f *credentialMaintenance) SourceReleaseAudits(_ context.Context, limit int) ([]capability.SourceReleaseAudit, error) {
@@ -246,6 +260,37 @@ func TestCredentialRotationHTTPSkipsUnreadableSecrets(t *testing.T) {
 	}
 	if value, err := current.OpenBound("team", "GOOD", "", false, true, f.secrets[0].Value); err != nil || value != "readable" || f.secrets[1].Value != lost || f.secrets[2].Value != wrongBinding || f.secrets[3].Value != "enc:v1:not-really-an-envelope" || f.secrets[4].Value != "private-plaintext" {
 		t.Fatalf("rotation changed unreadable rows or lost readable value: %v", err)
+	}
+}
+
+func TestCredentialRotationHTTPReportsOnlyCommittedAttemptProperty(t *testing.T) {
+	old, _, rotating := maintenanceCiphers(t)
+	for discarded := 1; discarded <= 4; discarded++ {
+		for repaired := 0; repaired <= discarded; repaired++ {
+			b := authorityMember()
+			f := &credentialMaintenance{team: "team"}
+			for i := range discarded {
+				row := store.Secret{Name: fmt.Sprintf("SECRET_%d", i), Pipeline: "ci", Masked: true, Value: "corrupt"}
+				f.rolledBack = append(f.rolledBack, row)
+				if i < repaired {
+					var err error
+					row.Value, err = old.SealBound("team", row.Name, "ci", false, true, "private")
+					if err != nil {
+						t.Fatal(err)
+					}
+					f.secrets = append(f.secrets, row)
+				}
+			}
+			f.secrets = append(f.secrets, store.Secret{Name: "STILL_BROKEN", Value: "corrupt"})
+			w := authorityHTTP(maintenanceServer(t, b, f).WithSecretsCipher(rotating).Handler(), b, "POST", "/api/v1/secrets/rotate", "")
+			var body struct {
+				Rotated int
+				Skipped []struct{ Name, Pipeline string }
+			}
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Rotated != repaired || len(body.Skipped) != 1 || body.Skipped[0].Name != "STILL_BROKEN" {
+				t.Fatalf("discarded=%d repaired=%d: HTTP %d %s", discarded, repaired, w.Code, w.Body.String())
+			}
+		}
 	}
 }
 

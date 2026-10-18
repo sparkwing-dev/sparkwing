@@ -11,6 +11,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 const (
@@ -36,15 +39,16 @@ var defaultWorktreeSnapshotLimits = worktreeSnapshotLimits{
 }
 
 type worktreeSnapshot struct {
-	RepoRoot   string
-	BaseSHA    string
-	Baseline   bincache.WorkspaceBaseline
-	SHA        string
-	BundlePath string
-	FileCount  int
-	Size       int64
-	BundleSize int64
-	tempDir    string
+	RepoRoot    string
+	BaseSHA     string
+	Baseline    bincache.WorkspaceBaseline
+	SHA         string
+	BundlePath  string
+	FileCount   int
+	Size        int64
+	BundleSize  int64
+	tempDir     string
+	environment []string
 }
 
 func (s *worktreeSnapshot) close() error {
@@ -57,33 +61,37 @@ func (s *worktreeSnapshot) close() error {
 	return os.RemoveAll(dir)
 }
 
-func captureWorktreeSnapshot(ctx context.Context, start string, allowedSecretFiles []string) (*worktreeSnapshot, error) {
-	return captureWorktreeSnapshotWithLimits(ctx, start, defaultWorktreeSnapshotLimits, allowedSecretFiles)
+func captureWorktreeSnapshot(ctx context.Context, env []string, start string, allowedSecretFiles []string) (*worktreeSnapshot, error) {
+	return captureWorktreeSnapshotWithLimits(ctx, env, start, defaultWorktreeSnapshotLimits, allowedSecretFiles)
 }
 
-func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string) (*worktreeSnapshot, error) {
-	return captureSnapshot(ctx, start, limits, allowedSecretFiles, nil)
+func captureWorktreeSnapshotWithLimits(ctx context.Context, env []string, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string) (*worktreeSnapshot, error) {
+	return captureSnapshot(ctx, env, start, limits, allowedSecretFiles, nil)
 }
 
-func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string, selection *burstSourceSelection) (*worktreeSnapshot, error) {
-	repoRoot, err := gitOutput(ctx, start, nil, "rev-parse", "--show-toplevel")
+func captureSnapshot(ctx context.Context, env []string, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string, selection *burstSourceSelection) (*worktreeSnapshot, error) {
+	env, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
+	if err != nil {
+		return nil, err
+	}
+	repoRoot, err := gitOutput(ctx, start, env, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires a Git checkout: %w", err)
 	}
 	repoRoot = strings.TrimSpace(repoRoot)
-	baseSHA, err := gitOutput(ctx, repoRoot, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	baseSHA, err := gitOutput(ctx, repoRoot, env, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires an existing HEAD commit: %w", err)
 	}
 	baseSHA = strings.TrimSpace(baseSHA)
-	objectFormat, err := gitOutput(ctx, repoRoot, nil, "rev-parse", "--show-object-format")
+	objectFormat, err := gitOutput(ctx, repoRoot, env, "rev-parse", "--show-object-format")
 	if err != nil {
 		return nil, fmt.Errorf("inspect Git object format: %w", err)
 	}
 	if strings.TrimSpace(objectFormat) != "sha1" {
 		return nil, fmt.Errorf("working-tree snapshot supports SHA-1 repositories only; found %s", strings.TrimSpace(objectFormat))
 	}
-	shallow, err := gitOutput(ctx, repoRoot, nil, "rev-parse", "--is-shallow-repository")
+	shallow, err := gitOutput(ctx, repoRoot, env, "rev-parse", "--is-shallow-repository")
 	if err != nil {
 		return nil, fmt.Errorf("inspect shallow checkout: %w", err)
 	}
@@ -91,22 +99,22 @@ func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotL
 		return nil, fmt.Errorf("working-tree snapshot requires a complete repository; deepen this shallow checkout first")
 	}
 
-	if unmerged, uerr := gitOutput(ctx, repoRoot, nil, "ls-files", "-u"); uerr != nil {
+	if unmerged, uerr := gitOutput(ctx, repoRoot, env, "ls-files", "-u"); uerr != nil {
 		return nil, fmt.Errorf("inspect index conflicts: %w", uerr)
 	} else if strings.TrimSpace(unmerged) != "" {
 		return nil, fmt.Errorf("working-tree snapshot refuses an unmerged index; resolve conflicts first")
 	}
-	if sparse, _ := gitOutput(ctx, repoRoot, nil, "config", "--bool", "core.sparseCheckout"); strings.TrimSpace(sparse) == "true" {
+	if sparse, _ := gitOutput(ctx, repoRoot, env, "config", "--bool", "core.sparseCheckout"); strings.TrimSpace(sparse) == "true" {
 		return nil, fmt.Errorf("working-tree snapshot does not support sparse checkouts")
 	}
 	var selectedPaths string
 	if selection != nil {
-		selectedPaths, err = selection.paths(ctx, repoRoot)
+		selectedPaths, err = selection.paths(ctx, env, repoRoot)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if err := rejectSelectedWorktreeFilters(ctx, repoRoot, selectedPaths, selection != nil); err != nil {
+	if err := rejectSelectedWorktreeFilters(ctx, env, repoRoot, selectedPaths, selection != nil); err != nil {
 		return nil, err
 	}
 
@@ -115,10 +123,11 @@ func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotL
 		return nil, fmt.Errorf("create snapshot workspace: %w", err)
 	}
 	snapshot := &worktreeSnapshot{
-		RepoRoot: repoRoot,
-		BaseSHA:  baseSHA,
-		Baseline: resolveSnapshotBaseline(ctx, repoRoot),
-		tempDir:  tempDir,
+		RepoRoot:    repoRoot,
+		BaseSHA:     baseSHA,
+		Baseline:    resolveSnapshotBaseline(ctx, env, repoRoot),
+		tempDir:     tempDir,
+		environment: env,
 	}
 	fail := func(err error) (*worktreeSnapshot, error) {
 		_ = snapshot.close()
@@ -129,10 +138,10 @@ func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotL
 	}
 
 	gitDir := filepath.Join(tempDir, "repo.git")
-	if out, ierr := snapshotGitCommand(ctx, "init", "--bare", "--quiet", gitDir).CombinedOutput(); ierr != nil {
+	if out, ierr := snapshotGitCommand(ctx, env, "init", "--bare", "--quiet", gitDir).CombinedOutput(); ierr != nil {
 		return fail(fmt.Errorf("initialize snapshot object store: %w: %s", ierr, strings.TrimSpace(string(out))))
 	}
-	commonDir, err := gitOutput(ctx, repoRoot, nil, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	commonDir, err := gitOutput(ctx, repoRoot, env, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return fail(fmt.Errorf("resolve Git object store: %w", err))
 	}
@@ -143,11 +152,11 @@ func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotL
 	}
 
 	indexPath := filepath.Join(tempDir, "index")
-	objectEnv := []string{
+	objectEnv := append(append([]string{}, env...), []string{
 		"GIT_INDEX_FILE=" + indexPath,
 		"GIT_OBJECT_DIRECTORY=" + filepath.Join(gitDir, "objects"),
 		"GIT_ALTERNATE_OBJECT_DIRECTORIES=" + filepath.Join(commonDir, "objects"),
-	}
+	}...)
 
 	var tree string
 	for attempt := 0; attempt < 3; attempt++ {
@@ -168,16 +177,16 @@ func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotL
 		return fail(fmt.Errorf("working tree changed while Sparkwing captured it; retry after writes settle"))
 	}
 
-	if err := rejectGitlinks(ctx, gitDir, tree); err != nil {
+	if err := rejectGitlinks(ctx, env, gitDir, tree); err != nil {
 		return fail(err)
 	}
-	if err := rejectUnsafeSymlinks(ctx, gitDir, tree); err != nil {
+	if err := rejectUnsafeSymlinks(ctx, env, gitDir, tree); err != nil {
 		return fail(err)
 	}
-	if err := rejectSecretShapedFiles(ctx, gitDir, tree, baseSHA, allowedSecretFiles); err != nil {
+	if err := rejectSecretShapedFiles(ctx, env, gitDir, tree, baseSHA, allowedSecretFiles); err != nil {
 		return fail(err)
 	}
-	fileCount, sourceBytes, err := measureSnapshotTree(ctx, gitDir, tree, limits)
+	fileCount, sourceBytes, err := measureSnapshotTree(ctx, env, gitDir, tree, limits)
 	if err != nil {
 		return fail(err)
 	}
@@ -186,11 +195,11 @@ func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotL
 		return fail(err)
 	}
 	ref := bincache.SeedRef(sha)
-	if _, err := gitDirOutput(ctx, gitDir, "update-ref", ref, sha); err != nil {
+	if _, err := gitDirOutput(ctx, env, gitDir, "update-ref", ref, sha); err != nil {
 		return fail(fmt.Errorf("name snapshot ref: %w", err))
 	}
 	bundlePath := filepath.Join(tempDir, "snapshot.bundle")
-	if _, err := gitDirOutput(ctx, gitDir, "bundle", "create", bundlePath, ref); err != nil {
+	if _, err := gitDirOutput(ctx, env, gitDir, "bundle", "create", bundlePath, ref); err != nil {
 		return fail(fmt.Errorf("create snapshot bundle: %w", err))
 	}
 	info, err := os.Stat(bundlePath)
@@ -208,13 +217,23 @@ func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotL
 	return snapshot, nil
 }
 
-func (s *worktreeSnapshot) includeRevision(ctx context.Context, sha string) error {
+func (s *worktreeSnapshot) includeRevisions(ctx context.Context, shas ...string) error {
 	gitDir := filepath.Join(s.tempDir, "repo.git")
-	ref := bincache.SeedRef(sha)
-	if _, err := gitDirOutput(ctx, gitDir, "update-ref", ref, sha); err != nil {
-		return err
+	refs := []string{bincache.SeedRef(s.SHA)}
+	for _, sha := range shas {
+		ref := bincache.SeedRef(sha)
+		if slices.Contains(refs, ref) {
+			continue
+		}
+		if _, err := gitDirOutput(ctx, s.environment, gitDir, "update-ref", ref, sha); err != nil {
+			return err
+		}
+		refs = append(refs, ref)
 	}
-	if _, err := gitDirOutput(ctx, gitDir, "bundle", "create", s.BundlePath, bincache.SeedRef(s.SHA), ref); err != nil {
+	if len(refs) == 1 {
+		return nil
+	}
+	if _, err := gitDirOutput(ctx, s.environment, gitDir, append([]string{"bundle", "create", s.BundlePath}, refs...)...); err != nil {
 		return err
 	}
 	info, err := os.Stat(s.BundlePath)
@@ -228,17 +247,17 @@ func (s *worktreeSnapshot) includeRevision(ctx context.Context, sha string) erro
 	return nil
 }
 
-func resolveSnapshotBaseline(ctx context.Context, repoRoot string) bincache.WorkspaceBaseline {
-	ref := strings.TrimSpace(gitOutputOrEmpty(ctx, repoRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"))
+func resolveSnapshotBaseline(ctx context.Context, env []string, repoRoot string) bincache.WorkspaceBaseline {
+	ref := strings.TrimSpace(gitOutputOrEmpty(ctx, env, repoRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"))
 	if ref == "" {
-		if gitOutputOrEmpty(ctx, repoRoot, "rev-parse", "--verify", "--quiet", "origin/main^{commit}") == "" {
+		if gitOutputOrEmpty(ctx, env, repoRoot, "rev-parse", "--verify", "--quiet", "origin/main^{commit}") == "" {
 			return bincache.WorkspaceBaseline{}
 		}
 		ref = "origin/main"
 	}
 	baseline, err := bincache.WorkspaceBaseline{
 		Ref: ref,
-		SHA: strings.TrimSpace(gitOutputOrEmpty(ctx, repoRoot, "merge-base", ref, "HEAD")),
+		SHA: strings.TrimSpace(gitOutputOrEmpty(ctx, env, repoRoot, "merge-base", ref, "HEAD")),
 	}.Resolve()
 	if err != nil {
 		return bincache.WorkspaceBaseline{}
@@ -247,16 +266,16 @@ func resolveSnapshotBaseline(ctx context.Context, repoRoot string) bincache.Work
 }
 
 // safety: an unresolved baseline is absent rather than fatal, so a git failure reads as empty.
-func gitOutputOrEmpty(ctx context.Context, repoRoot string, args ...string) string {
-	out, err := gitOutput(ctx, repoRoot, nil, args...)
+func gitOutputOrEmpty(ctx context.Context, env []string, repoRoot string, args ...string) string {
+	out, err := gitOutput(ctx, repoRoot, env, args...)
 	if err != nil {
 		return ""
 	}
 	return out
 }
 
-func measureSnapshotTree(ctx context.Context, gitDir, tree string, limits worktreeSnapshotLimits) (int, int64, error) {
-	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rlz", "--full-tree", tree)
+func measureSnapshotTree(ctx context.Context, env []string, gitDir, tree string, limits worktreeSnapshotLimits) (int, int64, error) {
+	out, err := gitDirOutput(ctx, env, gitDir, "ls-tree", "-rlz", "--full-tree", tree)
 	if err != nil {
 		return 0, 0, fmt.Errorf("measure snapshot tree: %w", err)
 	}
@@ -297,8 +316,7 @@ func captureSnapshotTree(ctx context.Context, repoRoot, baseSHA, indexPath strin
 	}
 	if selected {
 		if selectedPaths != "" {
-			cmd := snapshotGitCommand(ctx, "--literal-pathspecs", "-C", repoRoot, "-c", "core.safecrlf=false", "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul")
-			cmd.Env = appendGitEnv(env)
+			cmd := snapshotGitCommand(ctx, env, "--literal-pathspecs", "-C", repoRoot, "-c", "core.safecrlf=false", "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul")
 			cmd.Stdin = strings.NewReader(selectedPaths)
 			if _, err := cmd.CombinedOutput(); err != nil {
 				return "", fmt.Errorf("capture burst source: %w", snapshotGitError(err))
@@ -389,8 +407,7 @@ func restoreRawSnapshotBlobs(ctx context.Context, repoRoot string, env []string)
 	if updates.Len() == 0 {
 		return nil
 	}
-	cmd := snapshotGitCommand(ctx, "-C", repoRoot, "update-index", "-z", "--index-info")
-	cmd.Env = appendGitEnv(env)
+	cmd := snapshotGitCommand(ctx, env, "-C", repoRoot, "update-index", "-z", "--index-info")
 	cmd.Stdin = &updates
 	if _, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("restore raw snapshot files: %w", snapshotGitError(err))
@@ -407,8 +424,8 @@ func commitSnapshotTree(ctx context.Context, repoRoot, tree string, env []string
 		"GIT_COMMITTER_EMAIL=workspace@sparkwing.dev",
 		"GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
 	}
-	cmd := snapshotGitCommand(ctx, "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
-	cmd.Env = appendGitEnv(append(env, identity...))
+	cmd := snapshotGitCommand(ctx, env, "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
+	cmd.Env = append(append([]string{}, env...), identity...)
 	cmd.Stdin = strings.NewReader("sparkwing working-tree snapshot\n")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -417,8 +434,8 @@ func commitSnapshotTree(ctx context.Context, repoRoot, tree string, env []string
 	return strings.TrimSpace(string(out)), nil
 }
 
-func rejectGitlinks(ctx context.Context, gitDir, tree string) error {
-	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-r", tree)
+func rejectGitlinks(ctx context.Context, env []string, gitDir, tree string) error {
+	out, err := gitDirOutput(ctx, env, gitDir, "ls-tree", "-r", tree)
 	if err != nil {
 		return fmt.Errorf("inspect snapshot tree: %w", err)
 	}
@@ -430,8 +447,8 @@ func rejectGitlinks(ctx context.Context, gitDir, tree string) error {
 	return nil
 }
 
-func rejectUnsafeSymlinks(ctx context.Context, gitDir, tree string) error {
-	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rz", "--full-tree", tree)
+func rejectUnsafeSymlinks(ctx context.Context, env []string, gitDir, tree string) error {
+	out, err := gitDirOutput(ctx, env, gitDir, "ls-tree", "-rz", "--full-tree", tree)
 	if err != nil {
 		return fmt.Errorf("inspect snapshot symlinks: %w", err)
 	}
@@ -445,7 +462,7 @@ func rejectUnsafeSymlinks(ctx context.Context, gitDir, tree string) error {
 		if len(fields) != 3 || fields[0] != "120000" {
 			continue
 		}
-		target, err := gitDirOutput(ctx, gitDir, "cat-file", "blob", fields[2])
+		target, err := gitDirOutput(ctx, env, gitDir, "cat-file", "blob", fields[2])
 		if err != nil {
 			return fmt.Errorf("read snapshot symlink: %w", snapshotGitError(err))
 		}
@@ -514,18 +531,18 @@ const secretShapedFileReport = 10
 
 // safety: the manifest travels to another machine, so a credential in it leaks
 // to whoever runs the job; the named override keeps the decision per file.
-func rejectSecretShapedFiles(ctx context.Context, gitDir, tree, baseSHA string, allowed []string) error {
+func rejectSecretShapedFiles(ctx context.Context, env []string, gitDir, tree, baseSHA string, allowed []string) error {
 	permitted := map[string]bool{}
 	for _, path := range allowed {
 		if normalized := normalizeSnapshotPath(path); normalized != "" {
 			permitted[normalized] = false
 		}
 	}
-	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rz", "--full-tree", tree)
+	out, err := gitDirOutput(ctx, env, gitDir, "ls-tree", "-rz", "--full-tree", tree)
 	if err != nil {
 		return fmt.Errorf("inspect snapshot manifest: %w", err)
 	}
-	keyBlocks, err := snapshotKeyBlockPaths(ctx, gitDir, tree)
+	keyBlocks, err := snapshotKeyBlockPaths(ctx, env, gitDir, tree)
 	if err != nil {
 		return err
 	}
@@ -554,7 +571,7 @@ func rejectSecretShapedFiles(ctx context.Context, gitDir, tree, baseSHA string, 
 		if !envredact.CredentialFileScannable(path) {
 			continue
 		}
-		content, readErr := snapshotBlobPrefix(ctx, gitDir, fields[2], envredact.CredentialFilePrefixBytes)
+		content, readErr := snapshotBlobPrefix(ctx, env, gitDir, fields[2], envredact.CredentialFilePrefixBytes)
 		if readErr != nil {
 			return fmt.Errorf("read snapshot file: %w", readErr)
 		}
@@ -576,7 +593,7 @@ func rejectSecretShapedFiles(ctx context.Context, gitDir, tree, baseSHA string, 
 	if len(offenders) == 0 {
 		return nil
 	}
-	return secretShapedFileError(ctx, gitDir, baseSHA, offenders)
+	return secretShapedFileError(ctx, env, gitDir, baseSHA, offenders)
 }
 
 type secretShapedFile struct {
@@ -584,8 +601,8 @@ type secretShapedFile struct {
 	reason string
 }
 
-func secretShapedFileError(ctx context.Context, gitDir, baseSHA string, offenders []secretShapedFile) error {
-	tracked := trackedSnapshotPaths(ctx, gitDir, baseSHA)
+func secretShapedFileError(ctx context.Context, env []string, gitDir, baseSHA string, offenders []secretShapedFile) error {
+	tracked := trackedSnapshotPaths(ctx, env, gitDir, baseSHA)
 	listed := offenders
 	if len(listed) > secretShapedFileReport {
 		listed = listed[:secretShapedFileReport]
@@ -610,8 +627,8 @@ func secretShapedFileError(ctx context.Context, gitDir, baseSHA string, offender
 
 // safety: an unreadable base commit leaves every offender described as
 // untracked, which weakens the remedy line but never admits a file.
-func trackedSnapshotPaths(ctx context.Context, gitDir, baseSHA string) map[string]bool {
-	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rz", "--full-tree", "--name-only", baseSHA)
+func trackedSnapshotPaths(ctx context.Context, env []string, gitDir, baseSHA string) map[string]bool {
+	out, err := gitDirOutput(ctx, env, gitDir, "ls-tree", "-rz", "--full-tree", "--name-only", baseSHA)
 	if err != nil {
 		return nil
 	}
@@ -627,12 +644,12 @@ func trackedSnapshotPaths(ctx context.Context, gitDir, baseSHA string) map[strin
 // safety: a key block travels in any text file, and reading every file to find
 // one would cost a process per file; git grep reads the tree once and skips
 // binary blobs itself.
-func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string]bool, error) {
+func snapshotKeyBlockPaths(ctx context.Context, env []string, gitDir, tree string) (map[string]bool, error) {
 	args := []string{"--git-dir", gitDir, "grep", "--full-name", "--files-with-matches", "-I", "-z", "--extended-regexp"}
 	for _, pattern := range envredact.CredentialBlockPatterns() {
 		args = append(args, "-e", pattern)
 	}
-	cmd := snapshotGitCommand(ctx, append(args, tree)...)
+	cmd := snapshotGitCommand(ctx, env, append(args, tree)...)
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -652,10 +669,10 @@ func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string
 	return found, nil
 }
 
-func snapshotBlobPrefix(ctx context.Context, gitDir, sha string, limit int64) ([]byte, error) {
+func snapshotBlobPrefix(ctx context.Context, env []string, gitDir, sha string, limit int64) ([]byte, error) {
 	readCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := snapshotGitCommand(readCtx, "--git-dir", gitDir, "cat-file", "blob", sha)
+	cmd := snapshotGitCommand(readCtx, env, "--git-dir", gitDir, "cat-file", "blob", sha)
 	stdout, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
 		return nil, pipeErr
@@ -683,11 +700,11 @@ func normalizeSnapshotPath(path string) string {
 	return strings.TrimPrefix(cleaned, "/")
 }
 
-func rejectSelectedWorktreeFilters(ctx context.Context, repoRoot, selectedPaths string, selected bool) error {
+func rejectSelectedWorktreeFilters(ctx context.Context, env []string, repoRoot, selectedPaths string, selected bool) error {
 	out := selectedPaths
 	if !selected {
 		var err error
-		out, err = gitOutput(ctx, repoRoot, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+		out, err = gitOutput(ctx, repoRoot, env, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 		if err != nil {
 			return fmt.Errorf("list snapshot files: %w", err)
 		}
@@ -695,7 +712,7 @@ func rejectSelectedWorktreeFilters(ctx context.Context, repoRoot, selectedPaths 
 	if out == "" {
 		return nil
 	}
-	cmd := snapshotGitCommand(ctx, "-C", repoRoot, "check-attr", "-z", "--stdin", "filter", "working-tree-encoding")
+	cmd := snapshotGitCommand(ctx, env, "-C", repoRoot, "check-attr", "-z", "--stdin", "filter", "working-tree-encoding")
 	cmd.Stdin = strings.NewReader(out)
 	checked, err := cmd.Output()
 	if err != nil {
@@ -741,8 +758,7 @@ func snapshotGitError(err error) error {
 func gitOutput(ctx context.Context, repoRoot string, env []string, args ...string) (string, error) {
 	fullArgs := append([]string{"-C", repoRoot}, args...)
 	// #nosec G702 -- Callers fix Git subcommands; repository paths are -C operands and filenames follow --.
-	cmd := snapshotGitCommand(ctx, fullArgs...)
-	cmd.Env = appendGitEnv(env)
+	cmd := snapshotGitCommand(ctx, env, fullArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -750,9 +766,9 @@ func gitOutput(ctx context.Context, repoRoot string, env []string, args ...strin
 	return string(out), nil
 }
 
-func gitDirOutput(ctx context.Context, gitDir string, args ...string) (string, error) {
+func gitDirOutput(ctx context.Context, env []string, gitDir string, args ...string) (string, error) {
 	fullArgs := append([]string{"--git-dir", gitDir}, args...)
-	cmd := snapshotGitCommand(ctx, fullArgs...)
+	cmd := snapshotGitCommand(ctx, env, fullArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -760,29 +776,12 @@ func gitDirOutput(ctx context.Context, gitDir string, args ...string) (string, e
 	return string(out), nil
 }
 
-func appendGitEnv(overrides []string) []string {
-	env := append([]string(nil), os.Environ()...)
-	for _, override := range overrides {
-		key, _, ok := strings.Cut(override, "=")
-		if !ok {
-			continue
-		}
-		prefix := key + "="
-		filtered := env[:0]
-		for _, current := range env {
-			if !strings.HasPrefix(current, prefix) {
-				filtered = append(filtered, current)
-			}
-		}
-		env = append(filtered, override)
-	}
-	return env
-}
-
-func snapshotGitCommand(ctx context.Context, args ...string) *exec.Cmd {
+func snapshotGitCommand(ctx context.Context, env []string, args ...string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		args = append([]string{"-c", "core.longpaths=true"}, args...)
 	}
-	// #nosec G702 -- callers pass fixed Git subcommands with generated or validated operands, and no shell runs.
-	return exec.CommandContext(ctx, "git", args...)
+	// #nosec G702 -- fixed Git argv; Git callbacks receive the filtered environment.
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = append([]string{}, env...)
+	return cmd
 }

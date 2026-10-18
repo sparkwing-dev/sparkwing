@@ -681,7 +681,7 @@ func TestTickFailsAScheduleWhosePinnedBinaryIsGone(t *testing.T) {
 	if len(fires) != 1 || fires[0].Outcome != store.CronOutcomeFailed {
 		t.Fatalf("fires: %+v", fires)
 	}
-	if !strings.Contains(fires[0].Detail, "crons install") {
+	if !strings.Contains(fires[0].Detail, "schedules install") {
 		t.Errorf("the failure does not say how to fix it: %q", fires[0].Detail)
 	}
 	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
@@ -760,7 +760,7 @@ func TestHealthCountsLocksFollowersAndStaleOverrides(t *testing.T) {
 	if health.Locked != 1 || health.Following != 1 || health.Ahead != 1 || health.StaleOverride != 1 {
 		t.Fatalf("counts: %+v", health)
 	}
-	if !strings.Contains(health.Remedy, "crons install") {
+	if !strings.Contains(health.Remedy, "schedules install") {
 		t.Errorf("remedy = %q", health.Remedy)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
@@ -107,6 +108,7 @@ type Store struct {
 	clock            func() time.Time
 	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
 	db               *sql.DB
+	githubLocks      *sql.DB
 	dialect          Dialect
 	cleanup          func() error
 	csrfKeyMu        sync.Mutex
@@ -511,6 +513,15 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 	if err := s.migrate(ctx, remedy); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
+	if dialect == DialectPostgres {
+		s.githubLocks, err = sql.Open(driver, dsn)
+		if err != nil {
+			return nil, errors.Join(err, db.Close())
+		}
+		s.githubLocks.SetMaxOpenConns(2)
+		s.githubLocks.SetMaxIdleConns(2)
+		s.githubLocks.SetConnMaxIdleTime(5 * time.Minute)
+	}
 	return s, nil
 }
 
@@ -518,6 +529,9 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 func (s *Store) Close() error {
 	s.localSecrets.Clear()
 	dbErr := s.db.Close()
+	if s.githubLocks != nil {
+		dbErr = errors.Join(dbErr, s.githubLocks.Close())
+	}
 	if s.cleanup == nil {
 		return dbErr
 	}
@@ -550,10 +564,18 @@ func isBusyErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	if isPGConflict(err) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "database is locked") ||
 		strings.Contains(msg, "sqlite_busy") ||
 		strings.Contains(msg, "database table is locked")
+}
+
+func isPGConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "40P01" || pgErr.Code == "40001")
 }
 
 // IsProtocolErr reports whether err is a SQLite "locking protocol" /
@@ -571,6 +593,9 @@ func IsProtocolErr(err error) bool {
 	return strings.Contains(msg, "locking protocol") ||
 		strings.Contains(msg, "sqlite_protocol")
 }
+
+// InvocationSecretArgsKey labels argument classification in the reporting view.
+const InvocationSecretArgsKey = "secret_args"
 
 // Run is the redacted reporting view of a persisted run.
 type Run struct {
@@ -888,13 +913,6 @@ func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 
 type rowScanner interface {
 	Scan(dest ...any) error
-}
-
-func nullableTimeNS(t *time.Time) any {
-	if t == nil {
-		return nil
-	}
-	return t.UnixNano()
 }
 
 func scanRun(rs rowScanner, tail ...any) (*Run, error) {
@@ -1618,7 +1636,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 7
+const expectedSchemaVersion = 8
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

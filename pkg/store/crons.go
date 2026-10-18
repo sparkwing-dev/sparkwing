@@ -584,6 +584,9 @@ func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error) 
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND id = ?`+tx.forUpdate(), string(t.team), id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM cron_fires WHERE team = ? AND schedule_id = ?`, string(t.team), id); err != nil {
 		return err
@@ -612,6 +615,9 @@ func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string
 		return 0, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ? ORDER BY id`+tx.forUpdate(), string(t.team), repoPath); err != nil {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM cron_fires
           WHERE team = ?

@@ -137,7 +137,7 @@ func TestTeamDeletionUsesCurrentOwnerAndLastTeamGuards(t *testing.T) {
 	now := time.Unix(1800000000, 123).UTC()
 	s.clock = func() time.Time { return now }
 	deletion, err := tenant.DeleteAuthorizedTeam(t.Context(), a)
-	if err != nil || deletion.Team != "a" || deletion.State != TeamDeletionPending || !deletion.RequestedAt.Equal(time.Unix(now.Unix(), 0)) {
+	if err != nil || deletion.Team != "a" || deletion.State != TeamDeletionPending || !deletion.RequestedAt.Equal(now) {
 		t.Fatalf("deletion=%+v: %v", deletion, err)
 	}
 	var requested string

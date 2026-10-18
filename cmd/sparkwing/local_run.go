@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -67,7 +65,13 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	var standalone wingd.LocalLifecycle
 	return localRunRuntime{
 		controller: controller,
-		openCache:  openLocalProfileCache,
+		openCache: func(ctx context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
+			environment, err := snapshots.Load(ctx, request.Env)
+			if err != nil {
+				return nil, nil, err
+			}
+			return openLocalProfileCache(ctx, environment, profile, request)
+		},
 		publish: func(ctx context.Context, profile, run string) error {
 			return publishLocalProfile(ctx, home, transport, profile, run)
 		},
@@ -109,22 +113,22 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	}, nil
 }
 
-func openLocalProfileCache(ctx context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
-	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: request.Source.Location.LocalCheckout, pipeline: request.Pipeline, environment: os.Environ(), githubID: func(ctx context.Context, remote string) (int64, error) {
-		return lookupTriggerGitHubID(ctx, remote, os.Environ())
+func openLocalProfileCache(ctx context.Context, environment []string, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: request.Source.Location.LocalCheckout, pipeline: request.Pipeline, environment: environment, githubID: func(ctx context.Context, remote string) (int64, error) {
+		return lookupTriggerGitHubID(ctx, remote, environment)
 	}})
 	if err != nil {
 		return nil, nil, err
 	}
-	cache, closeCache, err := openProfileCache(ctx, profile, selected.git, request.Source.Location.LocalCheckout)
+	cache, closeCache, err := openProfileCache(ctx, environment, profile, selected.git, request.Source.Location.LocalCheckout)
 	if err == nil {
 		request.Git.Repository, request.Git.Ref, request.Git.DefaultBranch = selected.git.Repository, selected.git.Ref, selected.git.DefaultBranch
 	}
 	return cache, closeCache, err
 }
 
-func openProfileCache(ctx context.Context, profile string, git runspec.Git, checkout string) (blob.RemoteCache, func() error, error) {
-	branch, err := checkoutDefaultBranch(ctx, checkout)
+func openProfileCache(ctx context.Context, environment []string, profile string, git runspec.Git, checkout string) (blob.RemoteCache, func() error, error) {
+	branch, err := checkoutDefaultBranch(ctx, environment, checkout, secrets.NewMasker())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -163,39 +167,31 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 	return source.Options{
 		Engines: engines, SDK: engine.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: os.Environ(), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
+		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: captured, SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
 	}, nil
 }
 
 func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, captured []string, snapshots *nodehost.FileEnvironmentSnapshots, flags runFlags) (_ localRunPreparation, err error) {
-	masker := secrets.NewMasker()
-	var selection localSourceSelection
-	if flags.sourceSelection != nil {
-		selection = *flags.sourceSelection
-	} else {
-		selection, err = selectLocalRunSource(ctx, home, directory, pipeline, flags, captured, masker)
-		if err != nil {
-			return localRunPreparation{}, err
-		}
-		defer func() { err = errors.Join(err, selection.execution.Close()) }()
-	}
-	route, err := loadRunRouting(selection.execution.Directory, pipeline)
+	runEnvironment, err := prepareRunEnvironment(directory, pipeline, captured, flags)
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	environment := slices.DeleteFunc(slices.Clone(captured), func(item string) bool {
-		name, value, _ := strings.Cut(item, "=")
-		if !slices.Contains(route.LocalSecrets, name) {
-			return false
-		}
-		masker.Register(value)
-		return true
-	})
+	environment, held, masker := runEnvironment.captured, runEnvironment.held, runEnvironment.masker
 	defer func() {
 		if err != nil {
 			err = &maskedCLIError{err: err, masker: masker}
 		}
 	}()
+	var selection localSourceSelection
+	if flags.sourceSelection != nil {
+		selection = *flags.sourceSelection
+	} else {
+		selection, err = selectLocalRunSource(ctx, home, directory, pipeline, flags, environment, masker)
+		if err != nil {
+			return localRunPreparation{}, err
+		}
+		defer func() { err = errors.Join(err, selection.execution.Close()) }()
+	}
 	seal, err := captureLocalRunEnvironment(ctx, home, filepath.Dir(directory), flags.index, environment, snapshots, masker)
 	if err != nil {
 		return localRunPreparation{}, err
@@ -262,7 +258,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	localSecrets, err := resolveBurstSecrets(ctx, route.LocalSecrets, prepared.Description.Secrets, captured)
+	localSecrets, err := resolveBurstSecrets(ctx, runEnvironment.names, prepared.Description.Secrets, held)
 	if err != nil {
 		return localRunPreparation{}, err
 	}

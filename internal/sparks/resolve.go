@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"path"
 	"sort"
@@ -40,13 +39,15 @@ type Resolver struct {
 }
 
 func Resolve(ctx context.Context, m *Manifest) (map[string]string, error) {
-	r := NewResolverFromEnv()
+	r := NewResolverFromEnv(ctx)
 	return r.Resolve(ctx, m)
 }
 
-func NewResolverFromEnv() *Resolver {
+// NewResolverFromEnv selects module proxies from the captured toolchain environment.
+func NewResolverFromEnv(ctx context.Context) *Resolver {
+	environment := gotoolchain.Environment(ctx)
 	var proxies []string
-	for _, p := range strings.Split(goEnvValue("GOPROXY"), ",") {
+	for _, p := range strings.Split(goEnvValue(ctx, environment, "GOPROXY"), ",") {
 		p = strings.TrimSpace(p)
 		if p == "" || p == "direct" || p == "off" {
 			continue
@@ -57,7 +58,7 @@ func NewResolverFromEnv() *Resolver {
 		proxies = []string{DefaultGoProxy}
 	}
 	var private []string
-	for _, p := range strings.Split(goEnvValue("GOPRIVATE"), ",") {
+	for _, p := range strings.Split(goEnvValue(ctx, environment, "GOPRIVATE"), ",") {
 		p = strings.TrimSpace(p)
 		if p != "" {
 			private = append(private, p)
@@ -66,11 +67,16 @@ func NewResolverFromEnv() *Resolver {
 	return &Resolver{Proxies: proxies, Private: private}
 }
 
-func goEnvValue(name string) string {
-	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-		return v
+func goEnvValue(ctx context.Context, environment []string, name string) string {
+	if value, ok := gotoolchain.LookupEnv(environment, name); ok && strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
 	}
-	cmd := exec.Command("go", "env", name)
+	executable, err := gotoolchain.Executable(environment)
+	if err != nil {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, executable, "env", name)
+	cmd.Env = environment
 	cmd.Stderr = io.Discard
 	out, err := cmd.Output()
 	if err != nil {
@@ -209,7 +215,7 @@ func (r *Resolver) resolveViaGoList(ctx context.Context, lib Library) (string, e
 	if isRangePrefix(query) && !strings.EqualFold(query, "latest") {
 		query = "latest"
 	}
-	env := os.Environ()
+	env := gotoolchain.Environment(ctx)
 	if r.Dir != "" {
 		var err error
 		if env, err = gotoolchain.BuildEnv(ctx, r.Dir, nil, ""); err != nil {

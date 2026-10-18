@@ -52,7 +52,7 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 	if err := advisoryLockTx(ctx, tx, "blob:"+string(t.team)+":"+string(request.Intent.Digest)); err != nil {
 		return UploadReservation{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", t.team, request.Intent.Digest); err != nil {
+	if err := clearBlobTombstoneTx(ctx, tx, t.team, request.Intent.Digest); err != nil {
 		return UploadReservation{}, err
 	}
 	prior, err := readBlobUploadTx(ctx, tx, t.team, request.ID)
@@ -365,34 +365,4 @@ func releaseBlobQuotaReservationTx(ctx context.Context, tx *storeTx, team Team, 
 	}
 	_, err := tx.ExecContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND id=?", team, reservation)
 	return err
-}
-
-func releaseExpiredBlobUploadQuotasTx(ctx context.Context, tx *storeTx, limit int) error {
-	rows, err := tx.QueryContext(ctx, `SELECT team,id FROM uploads
-WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL AND expires_at<=?
-ORDER BY team,id LIMIT ?`, tx.now().UnixNano(), limit)
-	if err != nil {
-		return err
-	}
-	type expired struct {
-		team Team
-		id   string
-	}
-	var reservations []expired
-	for rows.Next() {
-		var r expired
-		if err := rows.Scan(&r.team, &r.id); err != nil {
-			return errors.Join(err, rows.Close())
-		}
-		reservations = append(reservations, r)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
-	}
-	for _, r := range reservations {
-		if err := abandonBlobUploadTx(ctx, tx, r.team, r.id); err != nil {
-			return err
-		}
-	}
-	return nil
 }

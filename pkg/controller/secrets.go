@@ -131,14 +131,3 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request, a ca
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
-
-type secretsRotateResponse struct {
-	Rotated        int                 `json:"rotated"`
-	Skipped        []secretsRotateSkip `json:"skipped"`
-	GitCredentials int                 `json:"git_credentials"`
-}
-
-type secretsRotateSkip struct {
-	Name     string `json:"name"`
-	Pipeline string `json:"pipeline,omitempty"`
-}

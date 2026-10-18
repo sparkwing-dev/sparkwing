@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"sync"
@@ -104,11 +105,17 @@ func (s *Server) triggerFloodRefusal(ctx context.Context, tenant *store.Tenant, 
 }
 
 func (s *Server) floodRefusal(team store.Team, key, source string, readDepth func() (int, error)) *floodRefusal {
+	if refusal := s.depthRefusal(team, key, source, readDepth); refusal != nil {
+		return refusal
+	}
+	return s.runCapRefusal(key, source)
+}
+
+func (s *Server) depthRefusal(team store.Team, key, source string, readDepth func() (int, error)) *floodRefusal {
 	f := s.flood
 	if f == nil {
 		return nil
 	}
-	now := time.Now()
 	if f.depth != nil {
 		depth, err := readDepth()
 		if err != nil {
@@ -129,6 +136,15 @@ func (s *Server) floodRefusal(team store.Team, key, source string, readDepth fun
 			}
 		}
 	}
+	return nil
+}
+
+func (s *Server) runCapRefusal(key, source string) *floodRefusal {
+	f := s.flood
+	if f == nil {
+		return nil
+	}
+	now := time.Now()
 	if f.runs != nil {
 		allowed, wait := f.runs.AllowWithRetry(key, now)
 		if !allowed {
@@ -276,12 +292,44 @@ func (w *warnEvery) due() bool {
 	return true
 }
 
+type intakeRunToken struct {
+	key string
+}
+
+func (e *intakeRunToken) Error() string { return "intake requires a run-cap token" }
+
+type intakeRunTokenKey struct{}
+
+func (s *Server) admitWithFlood(ctx context.Context, admit func(context.Context) (controllerwire.CreateRunResponse, error)) (controllerwire.CreateRunResponse, error) {
+	response, err := admit(ctx)
+	var pending *intakeRunToken
+	if !errors.As(err, &pending) {
+		return response, err
+	}
+	if err := floodRefusalError(s.runCapRefusal(pending.key, "api")); err != nil {
+		return controllerwire.CreateRunResponse{}, err
+	}
+	return admit(context.WithValue(ctx, intakeRunTokenKey{}, pending.key))
+}
+
 func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest, p capability.Principal) error {
 	if s.flood == nil || request.Authority.Kind == "schedule" || request.VerifiedDeliveryID != "" || request.Request.Lineage.ParentRunID != "" {
 		return nil
 	}
-	team := store.Team(p.Capability.Team)
-	refusal := s.floodRefusal(team, string(p.Authority.Kind)+":"+p.Authority.ID, "api", func() (int, error) { return store.IntakeQueueDepth(ctx, resolver, team) })
+	key := string(p.Authority.Kind) + ":" + p.Authority.ID
+	if s.flood.depth != nil {
+		team := store.Team(p.Capability.Team)
+		if err := floodRefusalError(s.depthRefusal(team, key, "api", func() (int, error) { return store.IntakeQueueDepth(ctx, resolver, team) })); err != nil {
+			return err
+		}
+	}
+	if s.flood.runs != nil && ctx.Value(intakeRunTokenKey{}) != key {
+		return &intakeRunToken{key: key}
+	}
+	return nil
+}
+
+func floodRefusalError(refusal *floodRefusal) error {
 	if refusal == nil {
 		return nil
 	}

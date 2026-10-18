@@ -7,25 +7,24 @@ import (
 	"errors"
 	"io"
 	"net/url"
-	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 // UploadSourceSnapshot commits a private snapshot through the controller's shared storage binding.
-func UploadSourceSnapshot(ctx context.Context, options EngineOptions, git runspec.Git, source runspec.Source, path string) (string, error) {
+func UploadSourceSnapshot(ctx context.Context, options EngineOptions, publication source.Publication) (digestResult string, resultErr error) {
 	c, err := newEngineClient(options)
 	if err != nil {
 		return "", err
 	}
-	f, err := os.Open(path)
+	f, cleanup, err := source.OpenPublication(ctx, publication)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
 	hash := sha256.New()
 	size, err := io.Copy(hash, f)
 	if err != nil {
@@ -33,7 +32,7 @@ func UploadSourceSnapshot(ctx context.Context, options EngineOptions, git runspe
 	}
 	digest := blob.Digest(hex.EncodeToString(hash.Sum(nil)))
 	var ticket controllerwire.DataUploadTicket
-	err = c.request(ctx, "POST", "/api/v1/data/source", "/api/v1/data/source", "", controllerwire.SourceUploadRequest{Git: git, Source: source, Digest: digest, Size: size}, &ticket)
+	err = c.request(ctx, "POST", "/api/v1/data/source", "/api/v1/data/source", "", controllerwire.SourceUploadRequest{Git: publication.Git, Source: publication.Source, Digest: digest, Size: size}, &ticket)
 	if err != nil {
 		return "", err
 	}

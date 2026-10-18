@@ -34,20 +34,6 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 	return t.s.countRuns(ctx, oneTeam(t.team), f)
 }
 
-// safety: every tenant mutator runs this first, because a scoped UPDATE
-// matching nothing cannot be told from one that matched and changed
-// nothing, and a caller told "no error" for another team's id reads and
-// writes two different worlds.
-func assertRunBelongsToTeamTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
-	var found int
-	err := tx.QueryRowContext(ctx,
-		`SELECT 1 FROM runs WHERE team = ? AND id = ?`, string(team), runID).Scan(&found)
-	if errors.Is(err, sql.ErrNoRows) {
-		return notFound("run", runID)
-	}
-	return err
-}
-
 // ListRunRetryTree returns every run of t's team in the retry tree runID
 // belongs to, oldest first: the root found by walking retry_of upward, plus
 // every descendant whose retry_of chain leads back to it. Siblings retried

@@ -54,7 +54,7 @@ func (e *SecretPreflightError) Detail() string {
 	fmt.Fprintf(&b, "pipeline %q did not start: it declares %d required %s this run cannot read.",
 		e.Pipeline, len(e.problems), plural(len(e.problems), "secret", "secrets"))
 	for _, p := range e.problems {
-		set := fmt.Sprintf("sparkwing secrets set --name %s --file <path> --profile <profile>", p.Name)
+		set := fmt.Sprintf("sparkwing secrets set --secret %s --file <path> --profile <profile>", p.Name)
 		switch {
 		case p.Unshared:
 			fmt.Fprintf(&b, "\n- %s is set team-wide but not shared with runs, so only an admin can read it."+

@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 func TestTriggerSnapshotSelectsCapturedPipelineAndLeavesCheckoutUntouched(t *testing.T) {
@@ -13,7 +17,7 @@ func TestTriggerSnapshotSelectsCapturedPipelineAndLeavesCheckoutUntouched(t *tes
 	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: deploy-prod\n    entrypoint: Dirty\n", 0o600)
 	writeSnapshotFile(t, repo, "untracked.txt", "captured", 0o600)
 	before := runSnapshotGit(t, repo, "status", "--porcelain")
-	snapshot, err := captureWorktreeSnapshot(t.Context(), repo, nil)
+	snapshot, err := captureWorktreeSnapshot(t.Context(), os.Environ(), repo, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,12 +26,9 @@ func TestTriggerSnapshotSelectsCapturedPipelineAndLeavesCheckoutUntouched(t *tes
 			t.Error(err)
 		}
 	})
-	directory, err := snapshotTriggerCheckout(t.Context(), snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
+	directory := preparedTriggerCheckout(t, snapshot.environment, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath)
 	input := triggerPreparationInput(repo)
-	input.checkout = directory
+	input.snapshot = snapshot
 	selected, err := prepareTriggerSource(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -47,25 +48,19 @@ func TestTriggerSnapshotSelectsCapturedPipelineAndLeavesCheckoutUntouched(t *tes
 func TestTriggerInspectionCheckoutUsesSelectedCommittedSource(t *testing.T) {
 	repo, sha := triggerPreparationRepo(t)
 	writeSnapshotFile(t, repo, "untracked.txt", "private working copy", 0o600)
-	directory, err := triggerInspectionCheckout(t.Context(), repo, sha, "", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	directory := preparedTriggerCheckout(t, os.Environ(), repo, sha, "")
 	if actual := strings.TrimSpace(runSnapshotGit(t, directory, "rev-parse", "HEAD")); actual != sha {
 		t.Fatalf("inspection SHA=%s, want %s", actual, sha)
 	}
 	if _, err := os.Stat(filepath.Join(directory, "untracked.txt")); !os.IsNotExist(err) {
 		t.Fatal("committed inspection included untracked content")
 	}
-	if origin := strings.TrimSpace(runSnapshotGit(t, directory, "remote", "get-url", "origin")); origin != "https://github.com/acme/app.git" {
-		t.Fatalf("inspection origin=%s", origin)
-	}
 }
 
 func TestTriggerSnapshotIncludesPinnedPipelineRevision(t *testing.T) {
 	repo, original := triggerPreparationRepo(t)
 	writeSnapshotFile(t, repo, "untracked.txt", "captured", 0o600)
-	snapshot, err := captureWorktreeSnapshot(t.Context(), repo, nil)
+	snapshot, err := captureWorktreeSnapshot(t.Context(), os.Environ(), repo, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +69,7 @@ func TestTriggerSnapshotIncludesPinnedPipelineRevision(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if err := snapshot.includeRevision(t.Context(), original); err != nil {
+	if err := snapshot.includeRevisions(t.Context(), original); err != nil {
 		t.Fatal(err)
 	}
 	clone := filepath.Join(t.TempDir(), "bundle")
@@ -96,14 +91,76 @@ func TestTriggerInspectionIgnoresAmbientGitIdentityProperty(t *testing.T) {
 			}
 			return r
 		}, forged))
-		directory, err := triggerInspectionCheckout(t.Context(), repo, sha, "", t.TempDir())
-		if err != nil {
-			t.Log(err)
-			return false
-		}
+		directory := preparedTriggerCheckout(t, os.Environ(), repo, sha, "")
 		actual, err := (triggerCheckout{directory: directory, environment: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()}}).read(t.Context(), "rev-parse", "HEAD")
 		return err == nil && actual == sha
 	}, &quick.Config{MaxCount: 16}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestWorkingTreeTriggerPreservesNamedReferenceIdentity(t *testing.T) {
+	for _, ref := range []string{"release", "origin/main"} {
+		t.Run(ref, func(t *testing.T) {
+			repo, base := triggerPreparationRepo(t)
+			runSnapshotGit(t, repo, "tag", "-d", "release")
+			runSnapshotGit(t, repo, "branch", "-m", "main")
+			runSnapshotGit(t, repo, "checkout", "--quiet", "-b", "release")
+			writeSnapshotFile(t, repo, "selected.txt", "selected code\n", 0o644)
+			runSnapshotGit(t, repo, "add", "selected.txt")
+			runSnapshotGit(t, repo, "commit", "--quiet", "-m", "selected code")
+			selectedSHA := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+			runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/main", selectedSHA)
+			runSnapshotGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+			runSnapshotGit(t, repo, "checkout", "--quiet", "main")
+			if strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD")) != base {
+				t.Fatal("fixture main changed")
+			}
+			writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: deploy-prod\n    entrypoint: Dirty\n    source: "+ref+"\n", 0o600)
+			snapshot, err := captureWorktreeSnapshot(t.Context(), os.Environ(), repo, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := snapshot.close(); err != nil {
+					t.Error(err)
+				}
+			})
+			directory := preparedTriggerCheckout(t, snapshot.environment, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath)
+			if refs := runSnapshotGit(t, directory, "for-each-ref", "--format=%(refname)"); strings.Contains(refs, "refs/heads/release") {
+				t.Fatal("inspection imported an unselected branch")
+			}
+			input := triggerPreparationInput(repo)
+			input.snapshot = snapshot
+			selection, err := prepareTriggerSource(t.Context(), input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if selection.git.SHA != snapshot.SHA || selection.source.Ref != selectedSHA || selection.source.RequestedRef != ref || selection.source.Entrypoint != "Dirty" {
+				t.Fatalf("selection lost named reference identity: execution=%s code=%s intent=%s entry=%s", selection.git.SHA, selection.source.Ref, selection.source.RequestedRef, selection.source.Entrypoint)
+			}
+			if !selection.git.DefaultBranch.Set || selection.git.DefaultBranch.Value != "main" {
+				t.Fatal("inspection lost the original symbolic default branch")
+			}
+			input.ref = ref
+			selection, err = prepareTriggerSource(t.Context(), input)
+			if err != nil || selection.git.SHA != selectedSHA {
+				t.Fatalf("explicit execution reference changed: got=%s want=%s err=%v", selection.git.SHA, selectedSHA, err)
+			}
+		})
+	}
+}
+
+func preparedTriggerCheckout(t *testing.T, captured []string, repo, sha, bundle string) string {
+	t.Helper()
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: sha, CommittedCheckout: true, PipelineDir: "."}, source.Options{Workspace: t.TempDir(), LocalBundle: bundle, Base: procenv.Base{Local: true, Captured: captured, Masker: secrets.NewMasker()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := entry.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return entry.CheckoutDirectory()
 }

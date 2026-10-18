@@ -13,10 +13,8 @@ import (
 // RenewLauncherPreparation extends only live unexchanged bootstrap leases owned by this launcher.
 func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error) {
 	prepared := []capability.LeaseRef{}
-	err := s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockClaimControllerTx(ctx, tx); err != nil {
-			return err
-		}
+	err := s.inLauncherBatchTx(ctx, authority, preparing, true, func(tx *storeTx) error {
+		prepared = prepared[:0]
 		chain, err := authorityChainTx(ctx, tx, authority, true)
 		if err != nil {
 			return err

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
@@ -41,6 +42,15 @@ func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
 			run.Request.Request.Origin = runspec.OriginLocal
 			run.Request.Request.Source.Location.LocalCheckout = repo
 			run.Request.Request.Options.CacheFrom.Value = "cloud"
+			run.Request.Request.EnvironmentSource = runspec.EnvironmentCaptured
+			snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			run.Request.Request.Env, err = snapshots.Capture(t.Context(), []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home})
+			if err != nil {
+				t.Fatal(err)
+			}
 			raw, err := json.Marshal(run.Request)
 			if err != nil {
 				t.Fatal(err)

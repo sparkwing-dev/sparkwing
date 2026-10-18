@@ -46,9 +46,14 @@ func (s *Store) installLocalSecrets(team Team, admitted AdmissionResult, values 
 	}
 	key := localSecretKey{team, admitted.RunID}
 	if admitted.Replayed {
-		if _, present := s.localSecrets.Load(key); !present {
+		previous, present := s.localSecrets.Load(key)
+		if !present {
 			return nil, authorityError(apierr.Unavailable, "requester local secrets are unavailable; submit a new run")
 		}
+		if !maps.Equal(previous.(*localRunSecrets).values, values) {
+			return nil, authorityError(apierr.SpecDrift, "local secret values differ from the original intake")
+		}
+		return nil, nil
 	}
 	entry := &localRunSecrets{values: maps.Clone(values)}
 	previous, loaded := s.localSecrets.LoadOrStore(key, entry)
@@ -85,6 +90,7 @@ func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.Au
 	var installed *localRunSecrets
 	var key localSecretKey
 	err := s.inTx(ctx, func(tx *storeTx) error {
+		s.uninstallLocalSecrets(key, &installed)
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
@@ -130,8 +136,15 @@ func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.Au
 		installed, err = s.installLocalSecrets(tenant.team, AdmissionResult{RunID: run.ID, Request: run.Request}, values)
 		return err
 	})
-	if err != nil && installed != nil {
-		s.localSecrets.CompareAndDelete(key, installed)
+	if err != nil {
+		s.uninstallLocalSecrets(key, &installed)
 	}
 	return err
+}
+
+func (s *Store) uninstallLocalSecrets(key localSecretKey, installed **localRunSecrets) {
+	if *installed != nil {
+		s.localSecrets.CompareAndDelete(key, *installed)
+		*installed = nil
+	}
 }

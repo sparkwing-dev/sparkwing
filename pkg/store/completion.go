@@ -82,10 +82,11 @@ func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effe
 	if err := assertSingletonLeaseTx(ctx, tx, lease, "completion", tx.now()); err != nil {
 		return nil, err
 	}
+	observedAt := tx.now()
 	rows, err := tx.QueryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
 r.pipeline,r.git_sha,r.git_branch,r.error,
 (SELECT v.payload FROM events v WHERE v.team=r.team AND v.run_id=r.id AND v.node_id='' AND v.state_seq=r.state_seq AND v.kind IN ('run_success','run_failed','run_cancelled') ORDER BY v.seq DESC LIMIT 1) FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
-WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?) ORDER BY e.next_at,e.team,e.run_id,e.effect LIMIT ?`, tx.now().UnixNano(), effect, effect, limit)
+WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?) ORDER BY e.next_at,e.team,e.run_id,e.effect LIMIT ?`, observedAt.UnixNano(), effect, effect, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +109,7 @@ WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?
 		}
 		effect.Reason = terminal.Reason
 		effect.NextAt = time.Unix(0, next)
-		effect.ObservedAt = tx.now()
+		effect.ObservedAt = observedAt
 		effect.Phase = effectPhase(effect.State)
 		effect.Payload, err = json.Marshal(struct {
 			Version  int      `json:"version"`

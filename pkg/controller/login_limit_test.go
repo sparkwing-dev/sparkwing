@@ -11,7 +11,6 @@ import (
 	"testing/synctest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: the post carries no CSRF token, so a request the limiter admits answers 403 and never signs in.
@@ -36,25 +35,20 @@ func loginServer(t *testing.T, logger *slog.Logger) *Server {
 
 const loginBodyNoCSRF = "token=swu_nothing"
 
-func TestLoginRequestBudgetDoesNotDependOnHashingMemory(t *testing.T) {
-	slots := store.Argon2Slots()
-	t.Cleanup(func() { store.SetArgon2MemoryBudget(int64(slots) * store.Argon2HashBytes) })
+func TestLoginListenerRequestBudget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		for _, hashingSlots := range []int64{1, 8} {
-			store.SetArgon2MemoryBudget(hashingSlots * store.Argon2HashBytes)
-			limiter := newLoginLimiter()
-			for i := range 2400 {
-				req := httptest.NewRequest(http.MethodPost, "/login", nil)
-				req.RemoteAddr = netip.AddrFrom4([4]byte{198, 51, byte(i / 256), byte(i % 256)}).String() + ":5000"
-				if err := limiter.admit(req); err != nil {
-					t.Fatalf("hashing slots %d: login %d refused: %v", hashingSlots, i+1, err)
-				}
-			}
+		limiter := newLoginLimiter()
+		for i := range 2400 {
 			req := httptest.NewRequest(http.MethodPost, "/login", nil)
-			req.RemoteAddr = "203.0.113.7:5000"
-			if err := limiter.admit(req); err == nil {
-				t.Fatalf("hashing slots %d: listener admitted login 2401", hashingSlots)
+			req.RemoteAddr = netip.AddrFrom4([4]byte{198, 51, byte(i / 256), byte(i % 256)}).String() + ":5000"
+			if err := limiter.admit(req); err != nil {
+				t.Fatalf("login %d refused: %v", i+1, err)
 			}
+		}
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.RemoteAddr = "203.0.113.7:5000"
+		if err := limiter.admit(req); err == nil {
+			t.Fatal("listener admitted login 2401")
 		}
 	})
 }

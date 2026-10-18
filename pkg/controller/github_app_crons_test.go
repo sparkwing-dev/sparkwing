@@ -144,9 +144,10 @@ func TestGitHubAppCronFailureDoesNotSuppressSubscribedPush(t *testing.T) {
 		sha     string
 		content []byte
 		failAPI bool
+		runs    int
 	}{
-		{sha: strings.Repeat("b", 40), content: []byte("pipelines: [invalid")},
-		{sha: strings.Repeat("c", 40), content: []byte(githubCronConfig), failAPI: true},
+		{sha: strings.Repeat("b", 40), content: []byte("pipelines: [invalid"), runs: 0},
+		{sha: strings.Repeat("c", 40), content: []byte(githubCronConfig), failAPI: true, runs: 1},
 	} {
 		f.app.SetCommit("acme/widgets", "main", tc.sha)
 		f.app.SetFile("acme/widgets", tc.sha, ".sparkwing/sparkwing.yaml", tc.content)
@@ -156,8 +157,8 @@ func TestGitHubAppCronFailureDoesNotSuppressSubscribedPush(t *testing.T) {
 		if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", tc.sha, "refs/heads/main"), ""); code != http.StatusAccepted {
 			t.Fatalf("subscribed push with cron failure = %d, want 202", code)
 		}
-		if got := len(f.triggers(olga.team)); got != i+1 {
-			t.Fatalf("push %d started %d subscribed runs, want %d", i, got, i+1)
+		if got := len(f.triggers(olga.team)); got != tc.runs {
+			t.Fatalf("push %d started %d subscribed runs, want %d", i, got, tc.runs)
 		}
 		rows := appCronRows(t, f, olga.team)
 		if len(rows) != 1 || rows[0].LockedRef != headSHA || !rows[0].Declared {
