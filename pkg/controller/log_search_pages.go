@@ -37,7 +37,7 @@ func newLogSearchCursor(team string, q controllerwire.LogSearchQuery) (logSearch
 			return cursor, invalidEngineBody("log search cursor does not match this selection")
 		}
 		cursor = decoded
-		for _, offsets := range []map[string]int64{cursor.Logs.Lines, cursor.Logs.Events, cursor.Logs.Matches} {
+		for _, offsets := range []map[string]int64{cursor.Logs.Lines, cursor.Logs.Offsets, cursor.Logs.Skips, cursor.Logs.Counts, cursor.Logs.Events, cursor.Logs.Matches} {
 			for _, offset := range offsets {
 				if offset < 0 {
 					return cursor, invalidEngineBody("log search cursor contains a negative offset")
@@ -53,8 +53,10 @@ func (c *logSearchCursor) prepareLogs() {
 	if c.Logs.Lines == nil {
 		c.Logs = logPageCursor{Lines: map[string]int64{}, Events: map[string]int64{}, Matches: map[string]int64{}}
 	}
-	if c.Logs.Matches == nil {
-		c.Logs.Matches = map[string]int64{}
+	for _, m := range []*map[string]int64{&c.Logs.Matches, &c.Logs.Offsets, &c.Logs.Skips, &c.Logs.Counts} {
+		if *m == nil {
+			*m = map[string]int64{}
+		}
 	}
 }
 
@@ -86,14 +88,20 @@ func (s *Server) pagedLogSearch(fallback func(http.ResponseWriter, *http.Request
 		if err != nil {
 			return err
 		}
+		principal := egress.TeamPrincipal(a.Target.Team, a.Principal.Capability.Subject.ID)
+		release, ok := s.holdLogScanSlot(w, r, principal)
+		if !ok {
+			return nil
+		}
+		defer release()
 		page, err := s.readLogSearchPage(r.Context(), tenant, a, q, pattern, &cursor)
 		if err != nil {
 			return engineLookupError(err)
 		}
-		s.meterResponse(w, r, egress.ClassLog, egress.SlotDownload, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		s.meterResponse(w, r, egress.ClassLog, egress.SlotNone, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			writeJSON(w, http.StatusOK, page)
-		}), egress.TeamPrincipal(a.Target.Team, a.Principal.Capability.Subject.ID), tenant.Team())
+		}), principal, tenant.Team())
 		return nil
 	}
 }
@@ -101,8 +109,14 @@ func (s *Server) pagedLogSearch(fallback func(http.ResponseWriter, *http.Request
 func (s *Server) readLogSearchPage(ctx context.Context, tenant *store.Tenant, a capability.Authorized, q controllerwire.LogSearchQuery, pattern *regexp.Regexp, cursor *logSearchCursor) (controllerwire.LogSearchPage, error) {
 	page := controllerwire.LogPage{Records: []controllerwire.LogRecord{}}
 	reader := segmentLogs{records: tenant, actor: engineActor(a), objs: s.logObjects()}
+	budget, cancel := newLogBudget(ctx)
+	defer cancel()
 	selected := 0
 	for cursor.Through > q.Runs.AfterNumber && selected < q.Runs.Limit && !page.Truncated {
+		if budget.ctx.Err() != nil {
+			page.Truncated = true
+			break
+		}
 		views, err := tenant.ListRunViews(ctx, q.Runs.AfterNumber, cursor.Through, min(q.Runs.Limit-selected, 100))
 		if err != nil {
 			return controllerwire.LogSearchPage{}, err
@@ -127,7 +141,7 @@ func (s *Server) readLogSearchPage(ctx context.Context, tenant *store.Tenant, a 
 					if q.Job != "" && (subject.Attempt == nil || subject.Attempt.NodeID != q.Job) {
 						continue
 					}
-					if err := appendSubjectPageLimit(ctx, reader, subject, controllerwire.LogQuery{}, q.MaxMatches, pattern, &cursor.Logs, &page); err != nil {
+					if err := appendSubjectLines(reader, subject, controllerwire.LogQuery{}, q.MaxMatches, pattern, &cursor.Logs, &page, budget); err != nil {
 						return controllerwire.LogSearchPage{}, err
 					}
 					if page.Truncated {
@@ -158,6 +172,9 @@ func (s *Server) readLogSearchPage(ctx context.Context, tenant *store.Tenant, a 
 			return result, err
 		}
 		result.NextCursor = base64.RawURLEncoding.EncodeToString(body)
+		if result.NextCursor == q.Runs.Cursor {
+			return result, errLogScanStalled
+		}
 	}
 	return result, result.Validate(q.Runs.Cursor)
 }

@@ -230,7 +230,7 @@ func parseLogCursor(raw, runID, nodeID string) (logCursor, error) {
 	return c, nil
 }
 
-var controllerSearchBounds = web.SearchBounds{MaxBytes: 256 << 20, Timeout: 10 * time.Second}
+var controllerSearchBounds = web.SearchBounds{MaxBytes: limits.LogSearchBytes, Timeout: limits.LogSearchTimeout}
 
 const segmentStreamPoll = 5 * time.Second
 

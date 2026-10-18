@@ -24,6 +24,9 @@ An interrupted or incomplete observation exits 3.
 
 Search several runs with `sparkwing runs grep --grep PATTERN --pipeline check`.
 Search output retains its continuation even when a page has no matching lines.
+Each log read or search request scans at most 256 MiB of log bytes for at most
+10 seconds, and a run selection is capped at 1000 runs. A scan that reaches a
+bound returns a truncated page with a continuation that resumes where it stopped.
 Use `--quiet -o plain` for matching run IDs. Annotation and approval commands
 under `runs` use the same selected controller and preserve structured failures.
 
