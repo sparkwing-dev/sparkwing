@@ -864,10 +864,8 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 		return "", "", nil, err
 	}
 	defer rollbackOrLog(tx)
-	// safety: the session insert takes the team row's key-share lock through its
-	// foreign key, after this transaction holds the account lock, while unlink and
-	// team mutations lock the team and then the account. Taking the same share
-	// lock first keeps one order: team, then account.
+	// safety: the session insert's foreign key takes a team key-share after the
+	// account lock; taking it first keeps team before account (STORE-DATA.md lock order).
 	if team != "" {
 		var name string
 		err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=?`+tx.forKeyShare(), string(team)).Scan(&name)

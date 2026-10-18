@@ -306,8 +306,14 @@ Each deletion rechecks the fence in its own transaction. A supplied expiry canno
 extend an expired lease or revive a generation replaced by the same holder.
 Records and live receipts root the graph, including transitive manifest members.
 Collection waits `limits.BlobGCGrace`, takes the same blob lock as writers,
-rechecks reachability and calls `BlobDeleter`. A deletion failure preserves the
-row and tombstone. A new upload or reference clears its tombstone.
+rechecks reachability and sets the tombstone's `collecting_at` before it commits.
+It then calls `BlobDeleter` outside any transaction and finally deletes the blob
+row under the blob lock. A new upload, source upload or record clears a plain
+tombstone through `clearBlobTombstoneTx`, which refuses a collecting one with a
+conflict, so no reference is published to bytes that may be gone. A deletion
+failure or crash leaves the collecting tombstone, and the next leased pass
+repeats the idempotent deletion. A collecting digest that has gained a reference
+fails the pass loudly.
 
 `RecordSegments` and `ReadLogSegments` accept tagged job or owner-unit subjects.
 `Segment.Size` and `Offset` count decoded bytes. `StoredBytes` counts the
@@ -467,7 +473,9 @@ from the store clock, so a caller cannot supply a stale cancellation timestamp.
 This result path does not implement renewal-time exhaustion or grace policy.
 The unused raw `Store.AccountEmail` read is also removed.
 
-Upload reservation takes the digest lock and clears its tombstone. Pending tickets
+Blob and source upload reservations take the digest lock and clear its
+tombstone. Expiry abandons one ticket per transaction, and source expiry deletes
+staged bytes before a per-ticket transaction releases the ticket. Pending tickets
 protect that tenant's digest until commit or abandonment. Abort and leased expiry
 register possible copied bytes as a tombstoned blob before releasing quota. The
 nullable `uploads.abandoned_at` records that handoff once, including tickets whose
@@ -488,3 +496,73 @@ from each. Every new job attempt clears its job summary and annotations.
 Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because leased expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
+
+## Lock order
+
+Every store transaction acquires locks in one global order and skips tiers it
+does not use. A transaction never takes an earlier-tier lock after a later one,
+never reads a row shared and later writes it, and performs no object-store,
+GitHub or git I/O while it holds locks. Sets such as ancestry, batches and
+migration destinations are discovered without locks, locked complete in this
+order, then reread and validated.
+
+1. Global advisories, in fixed order: credit ledger, settings, compute and free
+   tier, bootstrap and service enrollment, capacity admission.
+2. Singleton lease rows (maintenance, controller owner and reaper).
+3. Settings and signup gate rows.
+4. Teams, sorted.
+5. Accounts, sorted.
+6. Memberships.
+7. The complete authority set: capabilities, then sessions, deepest first and
+   then by kind and key. Authority resolution reads leaf to root, so writers
+   lock leaf to root too. `lockAuthorityTx` takes registered claimants and
+   observation targets `FOR NO KEY UPDATE` on first access and the rest shared.
+8. GitHub installations.
+9. Subscriptions, automation, bindings, pool rules, secrets and credentials.
+10. Schedules, then the intake advisory.
+11. Trigger and eval owner rows (triggers, then evals).
+12. All runs, sorted, `FOR NO KEY UPDATE` on first access.
+13. All nodes, sorted. `lockUnitsTx` takes 11 to 13 for every award load.
+14. Concurrency entries sorted by `(team,key)`, then holders, then waiters.
+15. Upload and source-upload tickets.
+16. Blob digest advisories, sorted and deduplicated.
+17. Quota dimensions: monthly bytes, run bytes, run objects; admission before
+    reservation within each dimension.
+18. Billing awards, intervals, payment rows and storage counters.
+19. Records, manifests, logs, events, effects and invitations.
+
+Hot transaction families:
+
+| Family | Order |
+|---|---|
+| Claim, self-claim, reconcile | controller lease KS, authority set, owner, run, node, billing |
+| Renewal | controller lease KS, authority set, owner, run, node, entries, billing |
+| Exchange | bootstrap authority at write strength, owner, run, node |
+| Launcher preparation | controller lease KS, launcher and award authority, all owners, all runs, all nodes |
+| Release and reporting | authority, owner, run, node, attempt and metadata rows |
+| GitHub source release | installation, then subscription |
+| Blob and source upload | authority, ticket, digest advisory, quota |
+| Blob collection | lease KS, digest advisory; deletion runs between two transactions |
+
+Justified exceptions:
+
+- A concurrency-maintenance entry lock followed by an implicit run key-share is
+  compatible with renewal's run `NO KEY UPDATE`.
+- A team key-share from a foreign key followed by a team update during billing
+  is compatible with other key-share holders.
+- GitHub source release locks its installation after work rows. No transaction
+  holds an installation and then waits on work.
+- Work billing still takes the ledger advisory after work locks, opposite team
+  and account deletion. Rare admin paths that remain out of order (findings 9-15,
+  20, 21 of the 2026-10 lock-order review, and the remaining parts of 22) rely on
+  the retry below.
+
+`inTx` reruns its whole function in a fresh transaction when PostgreSQL reports
+a deadlock (`40P01`) or serialization failure (`40001`): at most five attempts,
+with full-jitter backoff starting at 10 ms and capped at 250 ms. A function
+passed to `inTx` resets any state it shares with its caller on each attempt and
+performs no external I/O, and callbacks it invokes must tolerate a rerun.
+Direct `beginTx` transactions are not retried. Object reads that a transaction
+needs run between attempts through `inBlobTx`/`withBlobIO`, which repeats the
+transaction with the stored result. The GitHub check reporter holds a session
+advisory on a connection with no transaction open.

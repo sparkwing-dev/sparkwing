@@ -209,7 +209,7 @@ func lockCollectedBlobTx(ctx context.Context, tx *storeTx, lease SingletonLease,
 	return advisoryLockTx(ctx, tx, "blob:"+b.Team+":"+string(b.Digest))
 }
 
-// clearBlobTombstoneTx revives a digest for a new reference; callers hold its blob lock.
+// safety: callers hold the digest's blob lock, which orders this check against collection.
 func clearBlobTombstoneTx(ctx context.Context, tx *storeTx, team Team, digest blob.Digest) error {
 	var collecting int
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM blob_tombstones WHERE team=? AND digest=? AND collecting_at IS NOT NULL", team, digest).Scan(&collecting); err != nil {
