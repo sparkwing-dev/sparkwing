@@ -92,6 +92,7 @@ these file names, mounted whole.
 | `oidc-key`, `oidc-key.published` | OIDC signing key and the extra key the key set publishes | no ID tokens; see [OIDC](oidc.md) |
 | `google-client-secret`, `github-client-secret` | OAuth client secrets for sign-in | no sign-in with that provider |
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
+| `github-app-webhook-secret.previous` | Previous webhook secret accepted during a rotation | only the current secret verifies deliveries |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
 | `stripe-api-key` | Stripe API credential matching `--payment-mode test` or `live` | a configured payment callback refuses to start |

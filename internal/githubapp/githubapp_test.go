@@ -195,3 +195,24 @@ func TestFileAtCommit_ReadsAtMostOneByteBeyondTheConfigurationLimit(t *testing.T
 		t.Fatalf("absent file = %v, %v", found, err)
 	}
 }
+
+func TestVerifyWebhook_AcceptsThePreviousSecretDuringRotation(t *testing.T) {
+	gh, _ := fixture(t)
+	body := []byte(`{"action":"opened"}`)
+	for _, previous := range []string{"", "rotated-out-secret"} {
+		cfg := gh.Config()
+		cfg.PreviousWebhookSecret = previous
+		c := githubapp.New(cfg)
+		if !c.VerifyWebhook(githubapptest.Sign(body), body) {
+			t.Fatal("the current secret did not verify")
+		}
+		if got := c.VerifyWebhook(githubapptest.SignWith("rotated-out-secret", body), body); got != (previous != "") {
+			t.Fatalf("previous secret %q verified = %v", previous, got)
+		}
+		for _, other := range []string{"", "other"} {
+			if c.VerifyWebhook(githubapptest.SignWith(other, body), body) {
+				t.Fatalf("a delivery signed with %q verified", other)
+			}
+		}
+	}
+}

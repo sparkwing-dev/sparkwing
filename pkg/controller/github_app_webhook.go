@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -25,7 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const webhookBodyLimit = 1 << 20
+const webhookBodyLimit = 25 << 20
 
 // EnvDefaultBranch carries the verified GitHub repository default branch.
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
@@ -77,13 +78,13 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	if !s.githubAppEnabled(w) {
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, webhookBodyLimit))
+	body, status, err := s.readSignedGitHubDelivery(w, r)
 	if err != nil {
-		writeError(w, http.StatusRequestEntityTooLarge, err)
-		return
-	}
-	if !s.githubApp.client.VerifyWebhook(r.Header.Get("X-Hub-Signature-256"), body) {
-		writeError(w, http.StatusUnauthorized, errors.New("signature mismatch"))
+		if status == http.StatusInternalServerError {
+			s.writeInternalError(w, r, "github app delivery spool", err)
+			return
+		}
+		writeError(w, status, err)
 		return
 	}
 	event := r.Header.Get("X-GitHub-Event")
@@ -126,6 +127,33 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	default:
 		githubAppIgnored(w, "event "+event+" starts nothing")
 	}
+}
+
+// safety: the body spools to disk while it is hashed, so an unsigned delivery
+// never holds memory near the body limit.
+func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request) (_ []byte, _ int, err error) {
+	spool, err := os.CreateTemp("", "github-delivery-")
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	defer func() { err = errors.Join(err, spool.Close(), os.Remove(spool.Name())) }()
+	mac := s.githubApp.client.WebhookMAC()
+	size, err := io.Copy(io.MultiWriter(mac, spool), http.MaxBytesReader(w, r.Body, webhookBodyLimit))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return nil, http.StatusRequestEntityTooLarge, err
+	}
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	if !mac.Verify(r.Header.Get("X-Hub-Signature-256")) {
+		return nil, http.StatusUnauthorized, errors.New("signature mismatch")
+	}
+	body := make([]byte, size)
+	if _, err := spool.ReadAt(body, 0); err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	return body, http.StatusOK, nil
 }
 
 func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery, body []byte) {

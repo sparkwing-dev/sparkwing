@@ -24,6 +24,7 @@ const (
 	credGoogleClientSecret     = "google-client-secret"
 	credGitHubAppKey           = "github-app-key"
 	credGitHubAppWebhookSecret = "github-app-webhook-secret"
+	credGitHubAppPreviousHook  = "github-app-webhook-secret.previous"
 	credCloudFrontKey          = "cloudfront-key"
 	credBillingToken           = "billing-token"
 	credStripeAPIKey           = "stripe-api-key"
@@ -64,6 +65,7 @@ type controllerCredentials struct {
 	GoogleClientSecret     string
 	GitHubAppKey           string
 	GitHubAppWebhookSecret string
+	GitHubAppPreviousHook  string
 	CloudFrontKey          string
 	BillingToken           string
 }
@@ -82,6 +84,7 @@ func readCredentials(path string) (controllerCredentials, error) {
 		credGoogleClientSecret:     &c.GoogleClientSecret,
 		credGitHubAppKey:           &c.GitHubAppKey,
 		credGitHubAppWebhookSecret: &c.GitHubAppWebhookSecret,
+		credGitHubAppPreviousHook:  &c.GitHubAppPreviousHook,
 		credCloudFrontKey:          &c.CloudFrontKey,
 		credBillingToken:           &c.BillingToken,
 	} {

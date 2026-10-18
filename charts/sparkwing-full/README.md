@@ -87,6 +87,7 @@ then enable the launcher. Restarts use the persisted administrator in RDS.
 | `google-client-secret` | Google OAuth client secret |
 | `github-app-key` | GitHub App private key in PEM format |
 | `github-app-webhook-secret` | GitHub App delivery HMAC secret |
+| `github-app-webhook-secret.previous` | Previous delivery HMAC secret during rotation |
 | `cloudfront-key` | CloudFront signing private key in PEM format |
 | `oidc-key` | OIDC signing private key |
 | `oidc-key.published` | Previous OIDC public key during rotation |

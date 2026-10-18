@@ -16,6 +16,7 @@ type githubAppFlags struct {
 	ClientSecret  string
 	PrivateKey    string
 	WebhookSecret string
+	PreviousHook  string
 }
 
 func configureGitHubApp(srv *controller.Server, f githubAppFlags) error {
@@ -25,7 +26,7 @@ func configureGitHubApp(srv *controller.Server, f githubAppFlags) error {
 	}
 	cfg := githubapp.Config{
 		Slug: strings.TrimSpace(f.Slug), ClientID: f.ClientID, ClientSecret: f.ClientSecret,
-		WebhookSecret: f.WebhookSecret,
+		WebhookSecret: f.WebhookSecret, PreviousWebhookSecret: f.PreviousHook,
 	}
 	if f.AppID != "" {
 		id, err := strconv.ParseInt(strings.TrimSpace(f.AppID), 10, 64)

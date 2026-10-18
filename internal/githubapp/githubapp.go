@@ -20,6 +20,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"net/url"
@@ -92,7 +93,9 @@ type Config struct {
 	ClientID      string
 	ClientSecret  string
 	WebhookSecret string
-	PrivateKey    *rsa.PrivateKey
+	// PreviousWebhookSecret also verifies deliveries while a rotation settles; empty disables it.
+	PreviousWebhookSecret string
+	PrivateKey            *rsa.PrivateKey
 	// WebURL is github.com, where browsers install the App and authorize it.
 	WebURL string
 	// APIURL is api.github.com.
@@ -205,6 +208,32 @@ func (c *Client) AuthorizeURL(state, verifier, redirectURI string) string {
 // VerifyWebhook reports whether signature (the X-Hub-Signature-256 header)
 // is the App's HMAC of body.
 func (c *Client) VerifyWebhook(signature string, body []byte) bool {
+	mac := c.WebhookMAC()
+	_, _ = mac.Write(body)
+	return mac.Verify(signature)
+}
+
+// WebhookMAC hashes a streamed delivery body under every accepted webhook secret.
+type WebhookMAC struct{ macs []hash.Hash }
+
+// WebhookMAC starts a delivery hash under the current and any previous secret.
+func (c *Client) WebhookMAC() *WebhookMAC {
+	m := &WebhookMAC{macs: []hash.Hash{hmac.New(sha256.New, []byte(c.cfg.WebhookSecret))}}
+	if c.cfg.PreviousWebhookSecret != "" {
+		m.macs = append(m.macs, hmac.New(sha256.New, []byte(c.cfg.PreviousWebhookSecret)))
+	}
+	return m
+}
+
+func (m *WebhookMAC) Write(p []byte) (int, error) {
+	for _, mac := range m.macs {
+		mac.Write(p)
+	}
+	return len(p), nil
+}
+
+// Verify reports whether signature is the HMAC of the bytes written under any accepted secret.
+func (m *WebhookMAC) Verify(signature string) bool {
 	hexSum, ok := strings.CutPrefix(signature, "sha256=")
 	if !ok {
 		return false
@@ -213,9 +242,11 @@ func (c *Client) VerifyWebhook(signature string, body []byte) bool {
 	if err != nil {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(c.cfg.WebhookSecret))
-	mac.Write(body)
-	return hmac.Equal(want, mac.Sum(nil))
+	verified := false
+	for _, mac := range m.macs {
+		verified = hmac.Equal(want, mac.Sum(nil)) || verified
+	}
+	return verified
 }
 
 // User is a GitHub account as a user token reports it.

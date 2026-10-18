@@ -63,7 +63,7 @@ func run(args []string) error {
 			strings.Join([]string{
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
-				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
+				credGitHubAppKey, credGitHubAppWebhookSecret, credGitHubAppPreviousHook, credCloudFrontKey,
 				credBillingToken, credStripeAPIKey, credStripeWebhookSecret,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
@@ -497,6 +497,7 @@ func run(args []string) error {
 		ClientSecret:  creds.GitHubClientSecret,
 		PrivateKey:    creds.GitHubAppKey,
 		WebhookSecret: creds.GitHubAppWebhookSecret,
+		PreviousHook:  creds.GitHubAppPreviousHook,
 	}); err != nil {
 		return err
 	}

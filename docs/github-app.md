@@ -19,10 +19,13 @@ The App's client id and secret are the ones GitHub sign-in uses, so sign-in and 
 | App slug (the `https://github.com/apps/<slug>` name) | `--github-app-slug` |
 | Private key (PEM) | the `github-app-key` [credential](self-hosting.md#controller-credentials) |
 | Webhook secret | the `github-app-webhook-secret` credential |
+| Previous webhook secret, while a rotation settles | the optional `github-app-webhook-secret.previous` credential |
 | Client id and secret | `--github-client-id` and the `github-client-secret` credential, shared with sign-in |
 | Connect callback | `https://console.sparkwing.dev/github/app/callback`, added to `--oauth-redirect-uris` |
 
 With the `sparkwing-full` chart, the flags are `controller.github.appID`, `controller.github.appSlug`, `controller.github.clientID` and `controller.oauthRedirectURIs`, and the key, webhook secret and client secret are keys of `controller.credentialsSecret`.
+
+To rotate the webhook secret, keep the old one as `github-app-webhook-secret.previous`, put the new one in `github-app-webhook-secret`, restart, change the secret in the App's settings, then remove the previous one. Deliveries signed with either verify meanwhile. A delivery body may be up to 25 MiB, GitHub's own cap; a larger one is refused with HTTP 413.
 
 The controller refuses to start with some of the App settings and not the others. `GET /api/v1/capabilities` reports `github_app.slug` when the App is configured.
 
