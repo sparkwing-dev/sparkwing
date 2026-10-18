@@ -16,9 +16,10 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"releaseExpiredBlobUploadQuotasTx": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
-	"revokeSetupAuthorityTx":           "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
-	"launcherReservationAwardTx":       "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
+	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
+	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
+	"revokeSetupAuthorityTx":                "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
+	"launcherReservationAwardTx":            "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
 	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
 	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",

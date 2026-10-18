@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
@@ -30,59 +32,83 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 	if limit <= 0 {
 		return 0, ErrInvalidInput
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
-		return 0, err
-	}
-	if err := releaseExpiredBlobUploadQuotasTx(ctx, tx, limit); err != nil {
-		return 0, err
-	}
-	rows, err := tx.QueryContext(ctx, reachableBlobsSQL+`SELECT b.team,b.digest FROM blobs b WHERE NOT EXISTS(SELECT 1 FROM reachable r WHERE r.team=b.team AND r.digest=b.digest) AND NOT EXISTS(SELECT 1 FROM blob_tombstones t WHERE t.team=b.team AND t.digest=b.digest) ORDER BY b.team,b.digest LIMIT ?`, limit)
-	if err != nil {
-		return 0, err
-	}
-	type candidate struct {
-		team   Team
-		digest blob.Digest
-	}
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err := rows.Scan(&c.team, &c.digest); err != nil {
-			return 0, errors.Join(err, rows.Close())
-		}
-		candidates = append(candidates, c)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+	if err := o.abandonExpiredBlobUploads(ctx, lease, limit); err != nil {
 		return 0, err
 	}
 	var marked int64
-	for _, c := range candidates {
-		if err := advisoryLockTx(ctx, tx, "blob:"+string(c.team)+":"+string(c.digest)); err != nil {
-			return 0, err
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		marked = 0
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+			return err
 		}
-		reachable, err := blobReachableTx(ctx, tx, c.team, c.digest)
+		candidates, err := teamKeysTx(ctx, tx, reachableBlobsSQL+`SELECT b.team,b.digest FROM blobs b WHERE NOT EXISTS(SELECT 1 FROM reachable r WHERE r.team=b.team AND r.digest=b.digest) AND NOT EXISTS(SELECT 1 FROM blob_tombstones t WHERE t.team=b.team AND t.digest=b.digest) ORDER BY b.team,b.digest LIMIT ?`, limit)
 		if err != nil {
-			return 0, err
+			return err
 		}
-		if reachable {
-			continue
+		for _, c := range candidates {
+			if err := advisoryLockTx(ctx, tx, "blob:"+c.team+":"+c.key); err != nil {
+				return err
+			}
+			reachable, err := blobReachableTx(ctx, tx, Team(c.team), blob.Digest(c.key))
+			if err != nil {
+				return err
+			}
+			if reachable {
+				continue
+			}
+			result, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", c.team, c.key, tx.now().UnixNano())
+			if err != nil {
+				return err
+			}
+			count, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			marked += count
 		}
-		result, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", c.team, c.digest, tx.now().UnixNano())
+		return nil
+	})
+	return marked, err
+}
+
+// safety: one ticket per transaction keeps cleanup from holding one ticket's
+// digest and quota locks while it waits on another (STORE-DATA.md lock order).
+func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, lease SingletonLease, limit int) error {
+	var expired []teamKey
+	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
+		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now().UnixNano(), limit)
+		return err
+	})
+	for _, u := range expired {
 		if err != nil {
-			return 0, err
+			return err
 		}
-		count, err := result.RowsAffected()
-		if err != nil {
-			return 0, err
-		}
-		marked += count
+		err = o.s.inTx(ctx, func(tx *storeTx) error {
+			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+				return err
+			}
+			return abandonBlobUploadTx(ctx, tx, Team(u.team), u.key)
+		})
 	}
-	return marked, tx.Commit()
+	return err
+}
+
+type teamKey struct{ team, key string }
+
+func teamKeysTx(ctx context.Context, tx *storeTx, query string, args ...any) ([]teamKey, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	var out []teamKey
+	for rows.Next() {
+		var b teamKey
+		if err := rows.Scan(&b.team, &b.key); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		out = append(out, b)
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
 }
 
 func blobReachableTx(ctx context.Context, tx *storeTx, team Team, digest blob.Digest) (bool, error) {
@@ -97,35 +123,20 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 	if limit <= 0 || deleter == nil {
 		return 0, ErrInvalidInput
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
-		return 0, err
-	}
-	rows, err := tx.QueryContext(ctx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", tx.now().Add(-limits.BlobGCGrace).UnixNano(), limit)
-	if err != nil {
-		return 0, err
-	}
-	var candidates []blob.Blob
-	for rows.Next() {
-		var b blob.Blob
-		if err := rows.Scan(&b.Team, &b.Digest); err != nil {
-			return 0, errors.Join(err, rows.Close())
+	var candidates []teamKey
+	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+			return err
 		}
-		candidates = append(candidates, b)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
+		candidates, err = teamKeysTx(ctx, tx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", tx.now().Add(-limits.BlobGCGrace).UnixNano(), limit)
+		return err
+	})
+	if err != nil {
 		return 0, err
 	}
 	var removed int64
-	for _, b := range candidates {
-		deleted, err := o.collectBlob(ctx, lease, b, deleter)
+	for _, c := range candidates {
+		deleted, err := o.collectBlob(ctx, lease, blob.Blob{Team: c.team, Digest: blob.Digest(c.key)}, deleter)
 		if err != nil {
 			return removed, err
 		}
@@ -136,49 +147,77 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 	return removed, nil
 }
 
+// safety: collecting_at is the publication fence for the deletion outside the
+// transaction: clearBlobTombstoneTx refuses new references until the row is gone.
 func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob.Blob, deleter BlobDeleter) (bool, error) {
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
-		return false, err
-	}
-	if err := advisoryLockTx(ctx, tx, "blob:"+b.Team+":"+string(b.Digest)); err != nil {
-		return false, err
-	}
-	var marked, created int64
-	err = tx.QueryRowContext(ctx, "SELECT t.marked_at,b.size,b.created_at FROM blob_tombstones t JOIN blobs b ON b.team=t.team AND b.digest=t.digest WHERE t.team=? AND t.digest=?", b.Team, b.Digest).Scan(&marked, &b.Size, &created)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if tx.now().Before(time.Unix(0, marked).Add(limits.BlobGCGrace)) {
-		return false, nil
-	}
-	reachable, err := blobReachableTx(ctx, tx, Team(b.Team), b.Digest)
-	if err != nil {
-		return false, err
-	}
-	if reachable {
-		_, err = tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", b.Team, b.Digest)
-		if err != nil {
-			return false, err
+	var claimed bool
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		claimed = false
+		if err := lockCollectedBlobTx(ctx, tx, lease, b); err != nil {
+			return err
 		}
-		return false, tx.Commit()
+		var marked, created int64
+		var collecting sql.NullInt64
+		err := tx.QueryRowContext(ctx, "SELECT t.marked_at,t.collecting_at,b.size,b.created_at FROM blob_tombstones t JOIN blobs b ON b.team=t.team AND b.digest=t.digest WHERE t.team=? AND t.digest=?", b.Team, b.Digest).Scan(&marked, &collecting, &b.Size, &created)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil || tx.now().Before(time.Unix(0, marked).Add(limits.BlobGCGrace)) {
+			return err
+		}
+		reachable, err := blobReachableTx(ctx, tx, Team(b.Team), b.Digest)
+		switch {
+		case err != nil:
+			return err
+		case reachable && collecting.Valid:
+			return fmt.Errorf("blob %s/%s gained a reference while its bytes were being collected", b.Team, b.Digest)
+		case reachable:
+			_, err = tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", b.Team, b.Digest)
+			return err
+		}
+		b.CreatedAt = time.Unix(0, created).UTC()
+		claimed = true
+		_, err = tx.ExecContext(ctx, "UPDATE blob_tombstones SET collecting_at=? WHERE team=? AND digest=? AND collecting_at IS NULL", tx.now().UnixNano(), b.Team, b.Digest)
+		return err
+	})
+	if err != nil || !claimed {
+		return false, err
 	}
-	b.CreatedAt = time.Unix(0, created).UTC()
 	if err := deleter.DeleteBlob(ctx, b); err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_members WHERE team=? AND (manifest_digest=? OR member_digest=?)", b.Team, b.Digest, b.Digest); err != nil {
-		return false, err
+	err = o.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockCollectedBlobTx(ctx, tx, lease, b); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM blob_members WHERE team=? AND (manifest_digest=? OR member_digest=?)", b.Team, b.Digest, b.Digest); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, "DELETE FROM blobs WHERE team=? AND digest=? AND EXISTS(SELECT 1 FROM blob_tombstones t WHERE t.team=blobs.team AND t.digest=blobs.digest AND t.collecting_at IS NOT NULL)", b.Team, b.Digest)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(result, "blob collection")
+	})
+	return err == nil, err
+}
+
+func lockCollectedBlobTx(ctx context.Context, tx *storeTx, lease SingletonLease, b blob.Blob) error {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM blobs WHERE team=? AND digest=?", b.Team, b.Digest); err != nil {
-		return false, err
+	return advisoryLockTx(ctx, tx, "blob:"+b.Team+":"+string(b.Digest))
+}
+
+// clearBlobTombstoneTx revives a digest for a new reference; callers hold its blob lock.
+func clearBlobTombstoneTx(ctx context.Context, tx *storeTx, team Team, digest blob.Digest) error {
+	var collecting int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM blob_tombstones WHERE team=? AND digest=? AND collecting_at IS NOT NULL", team, digest).Scan(&collecting); err != nil {
+		return err
 	}
-	return true, tx.Commit()
+	if collecting != 0 {
+		return authorityError(apierr.Conflict, "blob bytes are being collected; retry after collection finishes")
+	}
+	_, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", team, digest)
+	return err
 }

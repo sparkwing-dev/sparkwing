@@ -1205,6 +1205,7 @@ CREATE TABLE blob_tombstones (
     team TEXT NOT NULL REFERENCES teams(name),
     digest TEXT NOT NULL,
     marked_at BIGINT NOT NULL,
+    collecting_at BIGINT,
     PRIMARY KEY(team,digest),
     FOREIGN KEY(team,digest) REFERENCES blobs(team,digest) ON DELETE CASCADE
 );
