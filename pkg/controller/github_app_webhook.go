@@ -129,7 +129,6 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// githubDeliverySpools bounds unauthenticated deliveries spooling at once.
 const githubDeliverySpools = 4
 
 // safety: the body spools to disk while it is hashed, so an unsigned delivery
