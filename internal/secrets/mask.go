@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 type Masker struct {
 	mu     sync.RWMutex
 	values []string
+	known  map[string]struct{}
 }
 
 func NewMasker() *Masker { return &Masker{} }
@@ -24,6 +28,9 @@ func (m *Masker) Register(value string) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, ok := m.known[value]; ok {
+		return
+	}
 	values := []string{value}
 	if strings.Contains(value, "\n") {
 		for _, line := range strings.Split(value, "\n") {
@@ -35,14 +42,20 @@ func (m *Masker) Register(value string) {
 	}
 	for _, literal := range values {
 		for _, v := range append([]string{literal}, encodedForms(literal)...) {
-			if !slices.Contains(m.values, v) {
-				m.values = append(m.values, v)
-			}
+			m.add(v)
 		}
 	}
-	// safety: Mask replaces in slice order, so a shorter secret that prefixes a
-	// longer one must not run first or it leaves the longer tail in the clear.
-	slices.SortStableFunc(m.values, func(a, b string) int { return len(b) - len(a) })
+}
+
+func (m *Masker) add(v string) {
+	if m.known == nil {
+		m.known = map[string]struct{}{}
+	}
+	if _, ok := m.known[v]; ok {
+		return
+	}
+	m.known[v] = struct{}{}
+	m.values = append(m.values, v)
 }
 
 // Merge copies already expanded patterns without deriving additional encodings.
@@ -51,11 +64,8 @@ func (m *Masker) Merge(other *Masker) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, value := range values {
-		if !slices.Contains(m.values, value) {
-			m.values = append(m.values, value)
-		}
+		m.add(value)
 	}
-	slices.SortStableFunc(m.values, func(a, b string) int { return len(b) - len(a) })
 }
 
 // safety: shorter encodings of short secrets would mask ordinary log text.
@@ -135,23 +145,143 @@ func embeddedBase64(value string, lead int) string {
 	return encoded[start:end]
 }
 
-// Mask replaces every registered value in s with ***. A nil Masker masks nothing.
+// Mask replaces every registered value in s with ***, also where s spells it
+// with JSON escapes. A nil Masker masks nothing.
 func (m *Masker) Mask(s string) string {
 	if m == nil || s == "" {
 		return s
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if len(m.values) == 0 {
-		return s
-	}
-	for _, v := range m.values {
-		if !strings.Contains(s, v) {
-			continue
+	// safety: a mask can split an escape, so the text left beside it decodes
+	// differently and can spell a value the first pass could not see.
+	for range maxMaskPasses {
+		spans := m.spans(s)
+		if len(spans) == 0 {
+			break
 		}
-		s = strings.ReplaceAll(s, v, "***")
+		s = replaceSpans(s, spans)
 	}
 	return s
+}
+
+const maxMaskPasses = 4
+
+func replaceSpans(s string, spans []span) string {
+	var b strings.Builder
+	prev := 0
+	for _, sp := range spans {
+		b.WriteString(s[prev:sp.lo])
+		b.WriteString("***")
+		prev = sp.hi
+	}
+	b.WriteString(s[prev:])
+	return b.String()
+}
+
+type span struct{ lo, hi int }
+
+// safety: overlapping values merge into one range, so replacing one cannot
+// leave a fragment of the other in the clear.
+func (m *Masker) spans(s string) []span {
+	if len(m.values) == 0 {
+		return nil
+	}
+	var found []span
+	for _, v := range m.values {
+		for at := 0; ; {
+			i := strings.Index(s[at:], v)
+			if i < 0 {
+				break
+			}
+			found = append(found, span{at + i, at + i + len(v)})
+			at += i + len(v)
+		}
+	}
+	if strings.IndexByte(s, '\\') >= 0 {
+		decoded, units := unescapeJSON(s)
+		for _, v := range m.values {
+			for at := 0; ; {
+				i := strings.Index(decoded[at:], v)
+				if i < 0 {
+					break
+				}
+				found = append(found, span{units[at+i].lo, units[at+i+len(v)-1].hi})
+				at += i + len(v)
+			}
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	slices.SortFunc(found, func(a, b span) int { return a.lo - b.lo })
+	merged := found[:1]
+	for _, sp := range found[1:] {
+		last := &merged[len(merged)-1]
+		if sp.lo < last.hi {
+			last.hi = max(last.hi, sp.hi)
+			continue
+		}
+		merged = append(merged, sp)
+	}
+	return merged
+}
+
+func unescapeJSON(s string) (string, []span) {
+	var b strings.Builder
+	units := make([]span, 0, len(s))
+	emit := func(text string, lo, hi int) {
+		b.WriteString(text)
+		for range len(text) {
+			units = append(units, span{lo, hi})
+		}
+	}
+	for i := 0; i < len(s); {
+		if s[i] != '\\' || i+1 >= len(s) {
+			emit(s[i:i+1], i, i+1)
+			i++
+			continue
+		}
+		if c, ok := simpleEscapes[s[i+1]]; ok {
+			emit(c, i, i+2)
+			i += 2
+			continue
+		}
+		if r, n := unicodeEscape(s[i:]); n > 0 {
+			emit(string(r), i, i+n)
+			i += n
+			continue
+		}
+		emit(s[i:i+1], i, i+1)
+		i++
+	}
+	return b.String(), units
+}
+
+var simpleEscapes = map[byte]string{'"': `"`, '\\': `\\`, '/': "/", 'b': "\b", 'f': "\f", 'n': "\n", 'r': "\r", 't': "\t"}
+
+func unicodeEscape(s string) (rune, int) {
+	r, ok := hex4(s)
+	if !ok {
+		return 0, 0
+	}
+	if !utf16.IsSurrogate(r) {
+		return r, 6
+	}
+	if low, ok := hex4(s[6:]); ok {
+		if pair := utf16.DecodeRune(r, low); pair != utf8.RuneError {
+			return pair, 12
+		}
+	}
+	return 0, 0
+}
+
+func hex4(s string) (rune, bool) {
+	if len(s) < 6 || s[0] != '\\' || s[1] != 'u' {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(s[2:6], 16, 16)
+	return rune(n), err == nil
 }
 
 // MaskJSON masks raw's canonical encoding as text, so a value is found in a
@@ -199,12 +329,7 @@ func (m *Masker) Values() []string {
 func (m *Masker) ContainsSecret(identifier string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, value := range m.values {
-		if strings.Contains(identifier, value) {
-			return true
-		}
-	}
-	return false
+	return len(m.spans(identifier)) > 0
 }
 
 // Stream masks one text stream that arrives as lines, and as pieces of a line
@@ -234,25 +359,34 @@ func (s *Stream) Mask(text string, lineEnd bool) string {
 // completes a value the tail starts.
 func (s *Stream) Drop() { s.held = "" }
 
-// safety: the held rest is shorter than the longest value, so the next piece
-// can complete a value it starts; a value straddling the cut moves the cut
-// past its end, which bounds both the hold and the scan.
+// safety: the held rest is shorter than the longest spelling of a value, so
+// the next piece can complete a value it starts; the cut moves past a value
+// straddling it and back to the start of an escape it splits.
 func (s *Stream) safeCut(text string) int {
-	values := s.m.Values()
+	if s.m == nil {
+		return len(text)
+	}
+	s.m.mu.RLock()
 	longest := 0
-	for _, v := range values {
+	for _, v := range s.m.values {
 		longest = max(longest, len(v))
 	}
+	spans := s.m.spans(text)
+	s.m.mu.RUnlock()
+	if strings.IndexByte(text, '\\') >= 0 {
+		longest *= len(`\u0000`)
+	}
 	cut := max(0, len(text)-max(0, longest-1))
-	for moved := true; moved; {
-		moved = false
-		for _, v := range values {
-			lo, hi := max(0, cut-len(v)+1), min(len(text), cut+len(v)-1)
-			if lo >= hi {
-				continue
-			}
-			if i := strings.Index(text[lo:hi], v); i >= 0 && lo+i < cut {
-				cut, moved = lo+i+len(v), true
+	for _, sp := range spans {
+		if sp.lo < cut && cut < sp.hi {
+			cut = sp.hi
+		}
+	}
+	if strings.IndexByte(text, '\\') >= 0 {
+		_, units := unescapeJSON(text)
+		for _, u := range units {
+			if u.lo < cut && cut < u.hi {
+				return u.lo
 			}
 		}
 	}
