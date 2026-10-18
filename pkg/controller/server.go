@@ -339,10 +339,7 @@ func (s *Server) identifyPeer(r *http.Request) (capability.Presentation, error) 
 	return capability.Presentation{}, sessionUnavailable()
 }
 
-// Handler returns the HTTP router. Exposed separately from Serve so
-// tests can wrap it in httptest without binding a real port. Callers using
-// Handler directly must call Shutdown to drain server-owned background work.
-// Engine and operator endpoints use RouteAuthorization. Health stays public.
+// Handler returns the HTTP router; callers must call Shutdown to drain server-owned background work.
 func (s *Server) Handler() http.Handler {
 	var handler http.Handler = s.handler()
 	if s.dashboard != nil {

@@ -303,22 +303,14 @@ done`
 }
 
 func (boundary *productionBoundary) validateCanary(ctx context.Context, expected, admitted *corev1.Pod) error {
-	if admitted == nil || admitted.UID == "" || admitted.Name != expected.Name || admitted.Namespace != expected.Namespace || admitted.DeletionTimestamp != nil || !equality.Semantic.DeepEqual(expected.Labels, admitted.Labels) || !equality.Semantic.DeepDerivative(expected.Annotations, admitted.Annotations) {
+	if admitted == nil || admitted.UID == "" || admitted.Name != expected.Name || admitted.Namespace != expected.Namespace || admitted.DeletionTimestamp != nil {
 		return errors.New("Kubernetes changed Cloud canary identity")
 	}
-	p, q := expected.Spec.DeepCopy(), admitted.Spec.DeepCopy()
-	if err := defaultPriority(ctx, boundary.kube, p); err != nil {
+	requested := corev1.PodTemplateSpec{ObjectMeta: expected.ObjectMeta, Spec: *expected.Spec.DeepCopy()}
+	if err := defaultPriority(ctx, boundary.kube, &requested.Spec); err != nil {
 		return err
 	}
-	if err := removeEKSMutations(p, q); err != nil {
-		return err
-	}
-	defaultPodSpec(p)
-	defaultPodSpec(q)
-	if !equality.Semantic.DeepEqual(p, q) {
-		return errors.New("Kubernetes changed Cloud canary execution")
-	}
-	return nil
+	return verifyAdmittedPod(requested, admitted, nil)
 }
 
 func podReady(pod *corev1.Pod) bool {
