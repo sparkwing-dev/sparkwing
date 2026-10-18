@@ -44,6 +44,12 @@ the files in `--credentials-dir`, so no service configuration appears here.
 |---|---|
 | `SPARKWING_RELEASE_SIGNING_KEY` | [security](security.md) |
 
+## Configuration: controller administration
+
+| Variable | Described in |
+|---|---|
+| `SPARKWING_ADMIN_GRANT_ALLOW_LARGE` | [auth](auth.md); set to `1` in the controller pod to allow a break-glass credit grant above $100 |
+
 ## Runtime
 
 The job protocol supplies runtime identity. These names also have consumers in
