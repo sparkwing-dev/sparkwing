@@ -49,14 +49,14 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 		if err != nil {
 			return err
 		}
-		if !registeredClaimant(principal.Capability) && !here {
-			return authorityError(apierr.Forbidden, "runner observations require an unbound machine claimant")
+		if !observedClaimant(principal.Capability) && !here {
+			return authorityError(apierr.Forbidden, "runner observations require an unbound machine, Actions or launcher claimant")
 		}
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, raw, body, tx.now().UnixNano(), principal.Capability.Team, observation.CapabilityPrefix)
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, tx.now().UnixNano(), principal.Capability.Team, observation.CapabilityPrefix)
 		return err
 	})
 }
@@ -168,6 +168,11 @@ func registeredAgentTx(ctx context.Context, tx *storeTx, team Team, observed Reg
 	profile.Labels = observed.Profile.Labels
 	observed.Name, observed.Profile = profile.Name, profile
 	return &observed, nil
+}
+
+func observedClaimant(c capability.Capability) bool {
+	pushed := c.Subject.Kind == capability.SubjectMachine && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingPush
+	return registeredClaimant(c) || pushed || launcherClaimant(c)
 }
 
 func registeredClaimant(c capability.Capability) bool {

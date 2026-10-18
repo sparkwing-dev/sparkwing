@@ -85,7 +85,9 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 			profile.Capacity = *body.Capacity
 		}
 	}
-	if principal.Capability.Purpose == capability.PurposeHere || principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
+	c := principal.Capability
+	launcher := c.Subject.Kind == capability.SubjectService && c.Binding.Kind == capability.BindingNone && slices.Contains(c.Grants, capability.ClaimsLaunch)
+	if c.Purpose == capability.PurposeHere || c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush) || launcher {
 		if err := s.Store.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
