@@ -20,22 +20,27 @@ type burstSourceSelection struct {
 	exclude []string
 }
 
-func authorizeBurstSource(ctx context.Context, env []string, root string, declared, allowed []string) error {
-	env, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
+func burstSourceSnapshot(ctx context.Context, env []string, root string, declared, approved []string) (*worktreeSnapshot, error) {
+	gitEnv, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	tracked, err := gitOutput(ctx, root, env, "ls-files", "--cached", "-z")
+	tracked, err := gitOutput(ctx, root, gitEnv, "ls-files", "--cached", "-z")
 	if err != nil {
-		return fmt.Errorf("inspect burst source approval: %w", snapshotGitError(err))
+		return nil, fmt.Errorf("inspect burst source approval: %w", snapshotGitError(err))
 	}
 	paths := strings.Split(tracked, "\x00")
+	var include []string
 	for _, name := range declared {
-		if !slices.Contains(paths, name) && !slices.Contains(allowed, name) {
-			return errors.New("run: repository source_files requires approval in machine run.routing.source_files")
+		if slices.Contains(paths, name) {
+			continue
 		}
+		if !slices.Contains(approved, name) {
+			return nil, errors.New("run: repository source_files requires approval in machine run.routing.source_files")
+		}
+		include = append(include, name)
 	}
-	return nil
+	return captureBurstSnapshot(ctx, env, root, include, nil)
 }
 
 func captureBurstSnapshot(ctx context.Context, env []string, start string, includedUntracked, excludedSecretFiles []string) (*worktreeSnapshot, error) {
