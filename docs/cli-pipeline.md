@@ -307,6 +307,8 @@ Flags including --profile may precede the verb; unknown engine flags before -- a
 
 Without --resume, one pipeline positional is required. Runner accepts here, a runner name, or label=<label>.
 
+Against Sparkwing Cloud, a run without --runner executes on Cloud. A runner name or label=<label> keeps it on matching self-hosted runners, and here hosts it in this CLI.
+
 ### Arguments
 
 - `<pipeline>` (optional) -- Pipeline name

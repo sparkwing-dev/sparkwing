@@ -1,5 +1,15 @@
 # Migrating to the next release
 
+## Cloud runs without a runner selector use the launcher
+
+Sparkwing Cloud now dispatches every trigger, App webhook run, schedule and
+child run that names no `--runner`, label, `here` or routed pool to the Cloud
+launcher. Before, CLI triggers and webhook runs waited for a self-hosted
+runner. To keep work on your own machines, pass `--runner NAME` or
+`--runner label=LABEL`, or route the repository to a pool. Unclaimed runs now
+carry an `unclaimed_work` notice, and `sparkwing_claim_empty_total` counts
+claim polls that matched nothing.
+
 ## Job outputs holding a secret are withheld
 
 A job output containing a registered secret value in any encoding is no longer

@@ -143,7 +143,10 @@ rather than treating every `409` as cancellation or lease loss.
 
 `sparkwing run` hosts its run in the CLI. Runner-hosted runs have a run-host
 owner. Launcher placement has a controller owner and separate plan/eval/work
-executors. Owners decide graph readiness. Executors only execute their awards.
+executors. On Sparkwing Cloud, intake selects launcher placement for every
+executable run that names no runner, label, `here` or routed pool; any of those
+selects a runner-hosted or here owner. The local controller keeps the
+submitted dispatch. Owners decide graph readiness. Executors only execute their awards.
 Inline work stays with its run host. Other ready work is self-claimed or awarded
 to a matching runner or launcher.
 
