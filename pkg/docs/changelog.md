@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **schedules:** A run an App-armed schedule with a locked commit starts seals its repository display as `owner/name`, as App push runs do, instead of the clone URL.
 - **runs:** Go toolchain settings (`GOPROXY`, `GOFLAGS`, `GOPATH`, `GOPRIVATE`, `GONOPROXY`, `GONOSUMDB`, `GOSUMDB`, `GOTOOLCHAIN`, `GOINSECURE`) reach pipeline processes on the requester's own machine, with credentials in a `GOPROXY` entry or the `GOSUMDB` URL masked. Cloud and shared runners keep dropping them unless allow-listed. See [environment variables](docs/environment-variables.md#process-environment-policy).
 - **controller:** Remove the unused in-process `EngineController.CreateRun` intake, which admitted a run without verifying its repository display; the HTTP intake is the only run intake.
 - **controller (Breaking):** A verified GitHub push withdraws only the pushing installation's team's schedules on that repository, never another team's. A former team's App schedules stop when its own installation reports the removal, transfer or deletion. See [GitHub App](docs/github-app.md).
