@@ -159,8 +159,8 @@ func FuzzLauncherPreparationBillingAndGrace(f *testing.F) {
 		if prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil || len(prepared) != 1 {
 			t.Fatalf("live preparation: %+v %v", prepared, err)
 		}
-		if total() <= before {
-			t.Fatal("held Cloud preparation stopped financial progression")
+		if total() != before {
+			t.Fatal("Cloud preparation charged before the pod started")
 		}
 		rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=0`)
 		if _, err = s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {

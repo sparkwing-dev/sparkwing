@@ -216,6 +216,9 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 		if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, row.CancelReason, now); err != nil {
 			return Applied{}, err
 		}
+		if err := endUnstartedBillingTx(ctx, tx, team, row.ID, nil); err != nil {
+			return Applied{}, err
+		}
 		kind = "run_cancel_requested"
 	} else {
 		if change.Cause == RunPolicyRefused {

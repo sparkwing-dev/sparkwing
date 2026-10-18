@@ -3506,9 +3506,11 @@ refuse the request. Finished, cancelled, expired, replaced and exchanged own
 awards receive no renewal acknowledgement and do not block cleanup of other Jobs.
 
 Preparation uses the shared capacity renewal and Cloud financial functions.
-Its first renewal opens the held Cloud billing interval, matching ordinary Cloud
-renewal even when no unit execution has started. It never synthesizes a running
+It never opens a billable interval (A59): metering for a launcher award starts
+at the work pod's first renewal or start report. It never synthesizes a running
 transition. Accounting and existing credit grace continue during preparation.
+Cancelling a run, or a claimed node, settles every metered award under it that
+has no billable interval in the same transaction, refunding its reservation.
 At grace expiry the transaction commits accounting and expires only the original
 bootstrap lease, so reconciliation can retire its Job and exchange cannot start
 work. No acknowledgement is returned. No new rate or grace policy is added.

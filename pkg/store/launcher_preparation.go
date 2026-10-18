@@ -82,9 +82,6 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 		return false, bindingRefusal()
 	}
 	unitRef := UnitRef{Kind: award.Claim.Kind, RunID: award.Claim.RunID, NodeID: award.Claim.NodeID, SourceGeneration: award.Claim.SourceGeneration}
-	if err = computeUnitBillingTx(ctx, tx, award.Claim.Team, unitRef, fence.Generation, 0, true); err != nil {
-		return false, err
-	}
 	if err = accountUnitBillingTx(ctx, tx, award.Claim.Team, unitRef, fence.Generation, tx.now(), false); err != nil {
 		return false, err
 	}

@@ -215,8 +215,14 @@ func applyBillingCancellationTx(ctx context.Context, tx *storeTx, team Team, uni
 }
 
 func transitionNodeBillingTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {
-	if edge.RequestOnly || row.ClaimedBy == "" {
+	if row.ClaimedBy == "" {
 		return nil
+	}
+	if edge.RequestOnly {
+		if change.Cause != CauseCancel {
+			return nil
+		}
+		return endUnstartedBillingTx(ctx, tx, team, row.Ref.RunID, &row.Ref.NodeID)
 	}
 	unit := UnitRef{Kind: capability.UnitNode, RunID: row.Ref.RunID, NodeID: row.Ref.NodeID}
 	if change.To == NodeRunning {
@@ -232,6 +238,40 @@ func transitionNodeBillingTx(ctx context.Context, tx *storeTx, team Team, row No
 			now = *row.LeaseExpiresAt
 		}
 		return accountUnitBillingTx(ctx, tx, team, unit, row.Generation, now, true)
+	}
+	return nil
+}
+
+func endUnstartedBillingTx(ctx context.Context, tx *storeTx, team Team, run string, node *string) error {
+	query := `SELECT reservation_id FROM billing_awards a WHERE team=? AND run_id=? AND metered=1 AND settled_at IS NULL AND NOT EXISTS (SELECT 1 FROM billable_intervals i WHERE i.team=a.team AND i.reservation_id=a.reservation_id)`
+	args := []any{team, run}
+	if node != nil {
+		query += ` AND node_id=? AND unit_kind=?`
+		args = append(args, *node, capability.UnitNode)
+	}
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY reservation_id`, args...)
+	if err != nil {
+		return err
+	}
+	var unstarted []string
+	for rows.Next() {
+		var reservation string
+		if err := rows.Scan(&reservation); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		unstarted = append(unstarted, reservation)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	calculate := tx.store.billing
+	if calculate == nil {
+		calculate = capability.SettleBilling
+	}
+	for _, reservation := range unstarted {
+		if _, err := accountBillingAwardTx(ctx, tx, team, reservation, tx.now(), true, calculate); err != nil {
+			return err
+		}
 	}
 	return nil
 }
