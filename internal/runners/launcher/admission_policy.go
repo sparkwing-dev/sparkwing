@@ -43,6 +43,8 @@ func podValidations() []admissionv1.Validation {
 		{Expression: `!variables.create || (variables.shape == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name == 'run-node' && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name == 'docker' && variables.inits[0].image == variables.dockerImage && variables.inits[1].name == 'fetch-source' && variables.inits[1].image == variables.runnerImage : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits) == 0)`, Message: "Pods run only the launcher's container set and pinned images"},
 		{Expression: `!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false) || variables.shape == 'job' && c.name == 'docker' || variables.shape == 'probe' && c.name == 'measure')`, Message: "only the DinD sidecar and the boundary measurement run privileged"},
 		{Expression: `!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([])) == 0)`, Message: "containers cannot add capabilities"},
+		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec) || variables.shape == 'job' && c.name == 'docker' && p == c.?startupProbe && p.value().exec.?command.orValue([]) == ` + celList(dockerProbe) + `))`, Message: "containers run no lifecycle hooks or exec probes beyond the Docker sidecar's readiness check"},
+		{Expression: `!variables.create || variables.shape != 'job' || size(variables.inits) == 0 || variables.inits[0].?command.orValue([]) == ` + celList(dockerCommand) + ` && variables.inits[0].?args.orValue([]) == ` + celList(dockerArgs), Message: "the Docker sidecar runs only the launcher's dockerd command"},
 		{Expression: `!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([])) == 0 && c.?env.orValue([]).all(e, variables.shape == 'job' && e.name in ` + workloadEnv + ` && !has(e.valueFrom)))`, Message: "containers carry only the launcher's environment and EKS region values, never AWS credentials"},
 		{Expression: `!variables.create || variables.team != '' && variables.spec.?nodeSelector.orValue({})[?'` + TeamNodeLabel + `'].orValue('') == variables.team && variables.spec.?tolerations.orValue([]).exists(t, t.?key.orValue('') == '` + TeamNodeLabel + `' && t.?operator.orValue('Equal') == 'Equal' && t.?value.orValue('') == variables.team && t.?effect.orValue('') == 'NoSchedule')`, Message: "Pods select and tolerate only their own team's nodes"},
 		{Expression: `!variables.create || (variables.shape == 'capacity' ? variables.spec.?nodeName.orValue('') == '' : variables.spec.?nodeName.orValue('') != '')`, Message: "Job and probe Pods are bound to their reserved node; capacity requests are not"},
@@ -78,14 +80,18 @@ func admissionMatch(namespace string, rules ...admissionv1.NamedRuleWithOperatio
 	}
 }
 
+func celList(values []string) string {
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = strconv.Quote(v)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
 func probeCommands() string {
 	var shapes []string
 	for name, command := range map[string][]string{"control": listenerCommand, "witness": witnessCommand, "measure": measureCommand} {
-		quoted := make([]string, len(command))
-		for i, part := range command {
-			quoted[i] = strconv.Quote(part)
-		}
-		shapes = append(shapes, fmt.Sprintf("variables.spec.containers[0].name == '%s' && variables.spec.containers[0].?command.orValue([]) == [%s]", name, strings.Join(quoted, ", ")))
+		shapes = append(shapes, fmt.Sprintf("variables.spec.containers[0].name == '%s' && variables.spec.containers[0].?command.orValue([]) == %s", name, celList(command)))
 	}
 	slices.Sort(shapes)
 	return "(" + strings.Join(shapes, " || ") + ")"
@@ -96,7 +102,7 @@ func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPol
 	pods := policyVariables(c, "object")
 	pods = append(pods, admissionv1.Variable{Name: "owners", Expression: `object.metadata.?ownerReferences.orValue([])`}, admissionv1.Variable{Name: "shape", Expression: podShape})
 	podRules := append([]admissionv1.Validation{
-		{Expression: `request.operation != 'CONNECT'`, Message: "exec, attach and port-forward are not allowed in the Sparkwing job namespace"},
+		{Expression: `request.operation != 'CONNECT'`, Message: "exec, attach, port-forward and proxy are not allowed in the Sparkwing job namespace"},
 		{Expression: `!variables.create || (variables.shape == 'job' ? request.userInfo.username == ` + jobController + ` : request.userInfo.username == variables.launcher)`, Message: "only the launcher and the Job controller create Pods here"},
 		{Expression: `request.operation != 'UPDATE' || size(variables.spec.?ephemeralContainers.orValue([])) == 0`, Message: "ephemeral containers are not allowed"},
 		{Expression: `request.operation != 'UPDATE' || object.spec == oldObject.spec && variables.labels == oldObject.metadata.?labels.orValue({})`, Message: "Pod specs and labels are immutable here"},
@@ -108,7 +114,7 @@ func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPol
 		{Expression: `!variables.create || request.userInfo.username == variables.launcher`, Message: "only the launcher creates Jobs here"},
 		{Expression: `!variables.create || object.metadata.name == variables.labels[?'sparkwing.dev/job'].orValue('')`, Message: "the Job template names its own Job"},
 		{Expression: `object.spec.?parallelism.orValue(1) == 1 && object.spec.?completions.orValue(1) == 1 && object.spec.?backoffLimit.orValue(6) == 0 && !has(object.spec.podFailurePolicy) && !has(object.spec.successPolicy) && object.spec.?completionMode.orValue('NonIndexed') == 'NonIndexed'`, Message: "Jobs run exactly one Pod without retries"},
-		{Expression: `request.operation != 'UPDATE' || object.spec.template == oldObject.spec.template && (request.userInfo.username == variables.launcher || object.spec == oldObject.spec)`, Message: "only the launcher changes a Job, and never its template"},
+		{Expression: `request.operation != 'UPDATE' || object.spec.template == oldObject.spec.template && (request.userInfo.username == variables.launcher || object.spec == oldObject.spec && object.metadata.?annotations.orValue({}) == oldObject.metadata.?annotations.orValue({}))`, Message: "only the launcher changes a Job, and never its template"},
 	}, podValidations()...)
 	writes := []admissionv1.OperationType{admissionv1.Create, admissionv1.Update}
 	var policies []*admissionv1.ValidatingAdmissionPolicy
@@ -119,7 +125,7 @@ func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPol
 		variables  []admissionv1.Variable
 		validation []admissionv1.Validation
 	}{
-		{"pods", []admissionv1.NamedRuleWithOperations{admissionRule("", writes, "pods", "pods/ephemeralcontainers", "pods/resize"), admissionRule("", []admissionv1.OperationType{admissionv1.Connect}, "pods/exec", "pods/attach", "pods/portforward")}, pods, podRules},
+		{"pods", []admissionv1.NamedRuleWithOperations{admissionRule("", writes, "pods", "pods/ephemeralcontainers", "pods/resize"), admissionRule("", []admissionv1.OperationType{admissionv1.Connect}, "pods/exec", "pods/attach", "pods/portforward", "pods/proxy")}, pods, podRules},
 		{"jobs", []admissionv1.NamedRuleWithOperations{admissionRule("batch", writes, "jobs")}, jobs, jobRules},
 	} {
 		name := AdmissionPolicyName(p.kind, c.Namespace)

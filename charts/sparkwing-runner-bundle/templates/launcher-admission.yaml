@@ -40,10 +40,12 @@ spec:
       - pods/exec
       - pods/attach
       - pods/portforward
+      - pods/proxy
       scope: Namespaced
   validations:
   - expression: request.operation != 'CONNECT'
-    message: exec, attach and port-forward are not allowed in the Sparkwing job namespace
+    message: exec, attach, port-forward and proxy are not allowed in the Sparkwing
+      job namespace
   - expression: '!variables.create || (variables.shape == ''job'' ? request.userInfo.username
       == ''system:serviceaccount:kube-system:job-controller'' : request.userInfo.username
       == variables.launcher)'
@@ -105,6 +107,18 @@ spec:
   - expression: '!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([]))
       == 0)'
     message: containers cannot add capabilities
+  - expression: '!variables.create || variables.containers.all(c, !has(c.lifecycle)
+      && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue()
+      || !has(p.value().exec) || variables.shape == ''job'' && c.name == ''docker''
+      && p == c.?startupProbe && p.value().exec.?command.orValue([]) == ["docker",
+      "--host=unix:///tmp/docker.sock", "info"]))'
+    message: containers run no lifecycle hooks or exec probes beyond the Docker sidecar's
+      readiness check
+  - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
+      == 0 || variables.inits[0].?command.orValue([]) == ["dockerd"] && variables.inits[0].?args.orValue([])
+      == ["--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec",
+      "--pidfile=/tmp/docker.pid", "--tls=false"]'
+    message: the Docker sidecar runs only the launcher's dockerd command
   - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
       == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && e.name in [''HOME'',
       ''DOCKER_HOST'', ''AWS_REGION'', ''AWS_DEFAULT_REGION'', ''AWS_STS_REGIONAL_ENDPOINTS'']
@@ -215,7 +229,8 @@ spec:
       == 'NonIndexed'
     message: Jobs run exactly one Pod without retries
   - expression: request.operation != 'UPDATE' || object.spec.template == oldObject.spec.template
-      && (request.userInfo.username == variables.launcher || object.spec == oldObject.spec)
+      && (request.userInfo.username == variables.launcher || object.spec == oldObject.spec
+      && object.metadata.?annotations.orValue({}) == oldObject.metadata.?annotations.orValue({}))
     message: only the launcher changes a Job, and never its template
   - expression: '!variables.create || variables.shape != ''other'''
     message: only Cloud Job, capacity and boundary probe Pods run in the Sparkwing
@@ -248,6 +263,18 @@ spec:
   - expression: '!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([]))
       == 0)'
     message: containers cannot add capabilities
+  - expression: '!variables.create || variables.containers.all(c, !has(c.lifecycle)
+      && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue()
+      || !has(p.value().exec) || variables.shape == ''job'' && c.name == ''docker''
+      && p == c.?startupProbe && p.value().exec.?command.orValue([]) == ["docker",
+      "--host=unix:///tmp/docker.sock", "info"]))'
+    message: containers run no lifecycle hooks or exec probes beyond the Docker sidecar's
+      readiness check
+  - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
+      == 0 || variables.inits[0].?command.orValue([]) == ["dockerd"] && variables.inits[0].?args.orValue([])
+      == ["--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec",
+      "--pidfile=/tmp/docker.pid", "--tls=false"]'
+    message: the Docker sidecar runs only the launcher's dockerd command
   - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
       == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && e.name in [''HOME'',
       ''DOCKER_HOST'', ''AWS_REGION'', ''AWS_DEFAULT_REGION'', ''AWS_STS_REGIONAL_ENDPOINTS'']
