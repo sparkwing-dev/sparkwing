@@ -174,6 +174,9 @@ func readKeyFile(path string) ([]byte, error) {
 			fmt.Fprintf(os.Stderr, "sparkwing: close %s: %v\n", path, cerr)
 		}
 	}()
+	if err := ownerOnlyKey(f, path); err != nil {
+		return nil, err
+	}
 	data, err := io.ReadAll(io.LimitReader(f, secrets.KeySize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read the local secrets key: %w", err)
@@ -182,6 +185,21 @@ func readKeyFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("the local secrets key %s holds %d bytes; it must hold exactly %d", path, len(data), secrets.KeySize)
 	}
 	return data, nil
+}
+
+// safety: a key others can read opens every sealed value, so only the local file is held to owner-only; mounted service credentials keep fssecure's policy.
+func ownerOnlyKey(f *os.File, path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("read the local secrets key: %w", err)
+	}
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		return fmt.Errorf("the local secrets key %s is readable by group or others (mode %04o); run chmod 600 %s", path, mode, path)
+	}
+	return nil
 }
 
 // Path reports the key file this keyring reads and creates.
