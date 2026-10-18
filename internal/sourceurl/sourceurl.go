@@ -2,6 +2,7 @@ package sourceurl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -335,6 +336,18 @@ func PinCloneHost(ctx context.Context, remote string, lookup Lookup) (Pin, error
 		pin.Addrs = append(pin.Addrs, addr.IP.String())
 	}
 	return pin, nil
+}
+
+// CheckResolvedHost applies PinCloneHost's address checks for a clone the
+// owning user runs, where git connects by name. A name the resolver does not
+// know passes, since a client-side alias such as an ssh config Host can reach it.
+func CheckResolvedHost(ctx context.Context, remote string, lookup Lookup) error {
+	_, err := PinCloneHost(ctx, remote, lookup)
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+		return nil
+	}
+	return err
 }
 
 func cloneHostPort(raw string) (host, port string, ssh bool) {

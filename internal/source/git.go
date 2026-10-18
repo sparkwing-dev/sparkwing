@@ -15,6 +15,7 @@ import (
 )
 
 type gitClient struct {
+	owner           bool
 	env             []string
 	credential      Credential
 	workspace       string
@@ -34,7 +35,14 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 	commandArgs := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "http.followRedirects=false", "-c", "credential.helper=", "-c", "core.useReplaceRefs=false"}
 	env := append([]string{}, g.env...)
 	if remote != "" {
-		pin, err := sourceurl.PinCloneHost(ctx, remote, net.DefaultResolver.LookupIPAddr)
+		// safety: only the owning user's own clone may reach a host by ssh alias;
+		// a tenant clone connects to the address that passed the check.
+		var pin sourceurl.Pin
+		if g.owner {
+			err = sourceurl.CheckResolvedHost(ctx, remote, net.DefaultResolver.LookupIPAddr)
+		} else {
+			pin, err = sourceurl.PinCloneHost(ctx, remote, net.DefaultResolver.LookupIPAddr)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -44,8 +52,12 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 		}
 		defer func() { err = errors.Join(err, cleanup()) }()
 		commandArgs = append(commandArgs, config...)
-		env = append(env, pinnedEnvironment(pin, fetchEnv)...)
-		if !pin.SSH {
+		if g.owner {
+			env = append(env, fetchEnv...)
+		} else {
+			env = append(env, pinnedEnvironment(pin, fetchEnv)...)
+		}
+		if !g.owner && !pin.SSH {
 			commandArgs = append(commandArgs, "-c", "http.curloptResolve="+pin.Host+":"+pin.Port+":"+curlAddresses(pin.Addrs))
 		}
 	}

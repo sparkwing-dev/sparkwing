@@ -413,3 +413,21 @@ func TestPinCloneHostKeepsEveryValidatedAddress(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckResolvedHostLetsAnOwnerAliasThroughButNotAnInwardName(t *testing.T) {
+	lookup := fakeLookup(map[string][]string{"git.example.com": {"140.82.112.3"}, "inward.example.com": {"10.0.0.5"}}, nil)
+	for remote, wantErr := range map[string]bool{
+		"git@git.example.com:o/r.git":        false,
+		"ssh://git@alias-only/o/r.git":       false,
+		"https://inward.example.com/o/r.git": true,
+		"git@inward.example.com:o/r.git":     true,
+	} {
+		if err := CheckResolvedHost(context.Background(), remote, lookup); (err != nil) != wantErr {
+			t.Errorf("CheckResolvedHost(%q) = %v, want error %v", remote, err, wantErr)
+		}
+	}
+	failing := fakeLookup(nil, errors.New("resolver unreachable"))
+	if err := CheckResolvedHost(context.Background(), "https://git.example.com/o/r.git", failing); err == nil {
+		t.Fatal("a failed lookup let the owner fetch go ahead")
+	}
+}

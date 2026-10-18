@@ -42,7 +42,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		}
 	}()
 	checkout := spec.LocalCheckout
-	client := gitClient{env: gitEnvironment(environment), bundleTransport: options.BundleTransport}
+	client := gitClient{owner: options.Base.Local, env: gitEnvironment(environment), bundleTransport: options.BundleTransport}
 	if options.PreparedCheckout != "" {
 		if spec.LocalCheckout != "" || !filepath.IsAbs(options.PreparedCheckout) || spec.SHA == "" {
 			return entry, errors.New("prepared source requires an absolute checkout and sealed remote commit")

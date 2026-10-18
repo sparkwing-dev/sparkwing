@@ -250,7 +250,7 @@ func gitRecords(t *testing.T, log string) []struct {
 	return out
 }
 
-func TestRemoteGitConnectsToTheValidatedAddress(t *testing.T) {
+func TestTenantRemoteGitConnectsToTheValidatedAddress(t *testing.T) {
 	for _, remote := range []string{"https://8.8.8.8/team/repo", "ssh://git@8.8.8.8:2222/team/repo.git", "git@8.8.8.8:team/repo.git"} {
 		t.Run(remote, func(t *testing.T) {
 			dir, sha := sourcetest.Repository(t)
@@ -260,7 +260,7 @@ func TestRemoteGitConnectsToTheValidatedAddress(t *testing.T) {
 				credential = source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private-source-password"}
 			}
 			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk"},
-				source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{credential: credential}})
+				source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{credential: credential}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -293,12 +293,12 @@ func TestRemoteGitConnectsToTheValidatedAddress(t *testing.T) {
 	}
 }
 
-func TestUncredentialedSSHIgnoresAmbientConfiguration(t *testing.T) {
-	remote := "ssh://git@8.8.8.8:2222/team/repo.git"
+func uncredentialedSSHCommands(t *testing.T, remote string, base procenv.Base) []string {
+	t.Helper()
 	dir, sha := sourcetest.Repository(t)
 	log := sourcetest.Remote(t, map[string]string{remote: dir})
 	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk"},
-		source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
+		source.Options{Base: base, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,20 +307,49 @@ func TestUncredentialedSSHIgnoresAmbientConfiguration(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	checked := false
+	var commands []string
 	for _, record := range gitRecords(t, log) {
-		ssh, ok := record.Env["GIT_SSH_COMMAND"]
-		if !ok {
-			continue
+		if ssh, ok := record.Env["GIT_SSH_COMMAND"]; ok {
+			commands = append(commands, ssh)
 		}
-		checked = true
-		for _, want := range []string{"-F '/dev/null'", "-o IdentitiesOnly=yes", "-o IdentityAgent=none", "-o IdentityFile=none"} {
+	}
+	if len(commands) == 0 {
+		t.Fatal("no SSH command was recorded")
+	}
+	return commands
+}
+
+func TestTenantUncredentialedSSHIgnoresAmbientConfiguration(t *testing.T) {
+	for _, ssh := range uncredentialedSSHCommands(t, "ssh://git@8.8.8.8:2222/team/repo.git", procenv.Base{Ambient: sourcetest.Environment(t)}) {
+		for _, want := range []string{"-F '/dev/null'", "-o IdentitiesOnly=yes", "-o IdentityAgent=none", "-o IdentityFile=none", "-o HostName=8.8.8.8"} {
 			if !strings.Contains(ssh, want) {
-				t.Fatalf("uncredentialed SSH lacks %q: %q", want, ssh)
+				t.Fatalf("tenant SSH lacks %q: %q", want, ssh)
 			}
 		}
 	}
-	if !checked {
-		t.Fatal("no SSH command was recorded")
+}
+
+func TestOwnerSSHKeepsTheUsersConfigurationAndAliases(t *testing.T) {
+	for _, remote := range []string{"ssh://git@8.8.8.8:2222/team/repo.git", "git@sparkwing-alias.invalid:team/repo.git"} {
+		t.Run(remote, func(t *testing.T) {
+			for _, ssh := range uncredentialedSSHCommands(t, remote, procenv.Base{Local: true, Captured: sourcetest.Environment(t)}) {
+				for _, absent := range []string{"-F ", "IdentitiesOnly", "IdentityAgent", "IdentityFile", "HostName=", "HostKeyAlias="} {
+					if strings.Contains(ssh, absent) {
+						t.Fatalf("owner SSH overrides %q: %q", absent, ssh)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestTenantCloneRefusesAHostOnlyAnAliasResolves(t *testing.T) {
+	remote := "git@sparkwing-alias.invalid:team/repo.git"
+	dir, sha := sourcetest.Repository(t)
+	sourcetest.Remote(t, map[string]string{remote: dir})
+	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:sparkwing-alias.invalid/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk"},
+		source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
+	if err == nil || !strings.Contains(err.Error(), "sparkwing-alias.invalid") {
+		t.Fatalf("tenant alias clone = %v", err)
 	}
 }
