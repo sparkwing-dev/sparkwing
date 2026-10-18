@@ -35,7 +35,7 @@ func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore {
 	return &blobRecords{tenant: t, manifests: manifests}
 }
 
-func (r *blobRecords) manifestMembers(ctx context.Context, request blob.CommitRecordRequest) ([]blob.Member, error) {
+func (r *blobRecords) manifestMembers(tx *storeTx, request blob.CommitRecordRequest) ([]blob.Member, error) {
 	manifest := request.ManifestDigest
 	if request.Key.Kind == blob.KindManifest {
 		manifest = runspec.Optional[blob.Digest]{Set: true, Value: request.Digest}
@@ -49,13 +49,72 @@ func (r *blobRecords) manifestMembers(ctx context.Context, request blob.CommitRe
 	if r.manifests == nil {
 		return nil, authorityError(apierr.Unavailable, "verified manifest reader is not configured")
 	}
-	if err := r.manifests.VerifyBlobManifest(ctx, r.tenant.team, manifest.Value, request.Members); err != nil {
+	if _, err := tx.blobIO.read("verify:"+string(manifest.Value), func(ctx context.Context) ([]blob.Member, error) {
+		return nil, r.manifests.VerifyBlobManifest(ctx, r.tenant.team, manifest.Value, request.Members)
+	}); err != nil {
 		return nil, err
 	}
 	return request.Members, nil
 }
 
-func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error) {
+var errBlobIOPending = errors.New("object read deferred past the transaction")
+
+type blobIO struct {
+	done    map[string]blobIOResult
+	pending map[string]func(context.Context) ([]blob.Member, error)
+}
+
+type blobIOResult struct {
+	members []blob.Member
+	err     error
+}
+
+func (reads *blobIO) read(key string, fetch func(context.Context) ([]blob.Member, error)) ([]blob.Member, error) {
+	if reads == nil {
+		return nil, authorityError(apierr.Unavailable, "object reads require a deferred-read transaction")
+	}
+	if result, ok := reads.done[key]; ok {
+		return result.members, result.err
+	}
+	reads.pending[key] = fetch
+	return nil, errBlobIOPending
+}
+
+// safety: digests name immutable bytes, so a read made between attempts stays true; each attempt
+// rereads its records and requires their blob rows, and record writers hold the digest advisories GC takes.
+func withBlobIO(ctx context.Context, fn func(*blobIO) error) error {
+	reads := &blobIO{done: map[string]blobIOResult{}, pending: map[string]func(context.Context) ([]blob.Member, error){}}
+	for range 4 {
+		if err := fn(reads); !errors.Is(err, errBlobIOPending) {
+			return err
+		}
+		for key, fetch := range reads.pending {
+			members, err := fetch(ctx)
+			reads.done[key] = blobIOResult{members, err}
+		}
+		clear(reads.pending)
+	}
+	return authorityError(apierr.Conflict, "blob records changed while their objects were read")
+}
+
+func (s *Store) inBlobTx(ctx context.Context, fn func(*storeTx) error) error {
+	return withBlobIO(ctx, func(reads *blobIO) error {
+		return s.inTx(ctx, func(tx *storeTx) error {
+			tx.blobIO = reads
+			return fn(tx)
+		})
+	})
+}
+
+func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (record blob.Record, err error) {
+	err = withBlobIO(ctx, func(reads *blobIO) error {
+		record, err = r.commitRecord(ctx, request, reads)
+		return err
+	})
+	return record, err
+}
+
+func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecordRequest, reads *blobIO) (blob.Record, error) {
 	if request.ExpiresAt.Set {
 		request.ExpiresAt.Value = request.ExpiresAt.Value.UTC()
 	} else {
@@ -69,6 +128,7 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 		return blob.Record{}, err
 	}
 	defer rollbackOrLog(tx)
+	tx.blobIO = reads
 	a, err := resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Authority, capability.DataWrite)
 	if err != nil {
 		return blob.Record{}, err
@@ -95,7 +155,7 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 			return blob.Record{}, err
 		}
 	}
-	members, err := r.manifestMembers(ctx, request)
+	members, err := r.manifestMembers(tx, request)
 	if err != nil {
 		return blob.Record{}, err
 	}

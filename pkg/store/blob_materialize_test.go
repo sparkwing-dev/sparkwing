@@ -300,7 +300,7 @@ func TestBlobMaterializationReadSelectorsCannotBeAliasedProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		records := &blobRecords{tenant: tenant}
-		hit, err := records.lookupRecordTx(t.Context(), tx, a, blob.RecordLookup{Key: key}, capability.DataRead)
+		hit, err := records.lookupRecordTx(t.Context(), tx, a, blob.RecordLookup{Key: key})
 		return err != nil && !hit.Found
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(719))}); err != nil {

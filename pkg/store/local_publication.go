@@ -14,12 +14,21 @@ type LocalPublication struct {
 }
 
 // ReadLocalPublication reads the local controller's completed result graph.
-func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (LocalPublication, error) {
+func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (publication LocalPublication, err error) {
+	err = withBlobIO(ctx, func(reads *blobIO) error {
+		publication, err = t.readLocalPublication(ctx, run, reads)
+		return err
+	})
+	return publication, err
+}
+
+func (t *Tenant) readLocalPublication(ctx context.Context, run string, reads *blobIO) (LocalPublication, error) {
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return LocalPublication{}, err
 	}
 	defer rollbackOrLog(tx)
+	tx.blobIO = reads
 	snapshot, err := readSnapshotTx(ctx, tx, t.team, run)
 	if err != nil {
 		return LocalPublication{}, err
