@@ -27,7 +27,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 	}
 	var out capability.Rotation
 	err := s.inTx(ctx, func(tx *storeTx) error {
-		expires := expires
+		requested, expires := expires, expires
 		var prefix string
 		if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=? AND COALESCE(team,'')=?`+tx.forUpdate(), a.Target.TokenPrefix, team).Scan(&prefix); err != nil {
 			return err
@@ -55,8 +55,17 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if expires != nil && !expires.After(tx.now()) {
 			return authorityError(apierr.BadRequest, "replacement expiry has passed")
 		}
-		if extendsExpiry(c.ExpiresAt, expires) && !mayExtendExpiry(p, c) {
-			return authorityError(apierr.Forbidden, "only an account session or team administrator can extend a credential's expiry")
+		if !p.DirectAccountSession() && p.Class != capability.CredentialConsole {
+			ceiling, err := rotationExpiryCeilingTx(ctx, tx, p.Authority, c.ExpiresAt)
+			if err != nil {
+				return err
+			}
+			if requested != nil && ceiling != nil && requested.After(*ceiling) {
+				return authorityError(apierr.Forbidden, "only an account or console session can extend a credential's expiry")
+			}
+			if ceiling != nil && (expires == nil || expires.After(*ceiling)) {
+				expires = ceiling
+			}
 		}
 		request, err := rotationRequestTx(ctx, tx, p, c, expires)
 		if err != nil {
@@ -98,15 +107,18 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 	return out, nil
 }
 
-func extendsExpiry(old, next *time.Time) bool {
-	return old != nil && (next == nil || next.After(*old))
-}
-
-func mayExtendExpiry(p capability.Principal, c capability.Capability) bool {
-	if p.DirectAccountSession() || p.Class == capability.CredentialConsole {
-		return true
+func rotationExpiryCeilingTx(ctx context.Context, tx *storeTx, caller capability.AuthorityRef, old *time.Time) (*time.Time, error) {
+	chain, err := authorityChainTx(ctx, tx, caller, false)
+	if err != nil {
+		return nil, err
 	}
-	return slices.Contains(p.Capability.Grants, capability.TeamAdmin) && p.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
+	ceiling := old
+	for _, node := range chain {
+		if at := node.principal.Capability.ExpiresAt; at != nil && (ceiling == nil || at.Before(*ceiling)) {
+			ceiling = at
+		}
+	}
+	return ceiling, nil
 }
 
 func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal, c capability.Capability, expires *time.Time) (capability.IssueRequest, error) {

@@ -724,3 +724,55 @@ func TestCapabilityRotationSessionMayExtendExpiry(t *testing.T) {
 		t.Fatalf("session rotation: %+v %v", rotation.Issued.Capability.ExpiresAt, err)
 	}
 }
+
+func adminRotationToken(t *testing.T, s *Store, owner Actor, expiry time.Time) capability.Issued {
+	t.Helper()
+	p, err := s.ResolveAuthority(t.Context(), owner.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &owner.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, ExpiresAt: &expiry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return issued
+}
+
+func TestCapabilityRotationBearersNeverExtendExpiry(t *testing.T) {
+	for _, shape := range []string{"child rotates parent", "peer admins"} {
+		t.Run(shape, func(t *testing.T) {
+			s := authorityStore(t)
+			owner := authorityMember(t, s, "owner", RoleOwner)
+			hour := s.now().Add(time.Hour).Truncate(time.Second)
+			target := adminRotationToken(t, s, owner, hour)
+			var caller capability.Issued
+			if shape == "child rotates parent" {
+				var err error
+				caller, err = s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: target.Capability.Prefix}, Audience: capability.Controller, Binding: target.Capability.Binding, Grants: target.Capability.Grants, ExpiresAt: &hour})
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				caller = adminRotationToken(t, s, owner, hour.Add(-time.Minute))
+			}
+			bearer := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: caller.Capability.Prefix}}
+			tenant := &Tenant{s: s, team: "a"}
+			a := inventoryAuthorization(t, s, bearer, "a", target.Capability.Prefix)
+			later := hour.Add(30 * 24 * time.Hour)
+			if rotation, err := tenant.RotateCapability(t.Context(), a, time.Minute, &later); err == nil || rotation.Issued.Raw != "" {
+				t.Fatalf("bearer extended expiry: %+v", rotation.Issued.Capability.ExpiresAt)
+			}
+			rotation, err := tenant.RotateCapability(t.Context(), a, time.Minute, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ceiling := hour
+			if shape == "peer admins" {
+				ceiling = hour.Add(-time.Minute)
+			}
+			if next := rotation.Issued.Capability.ExpiresAt; next == nil || next.After(ceiling) {
+				t.Fatalf("replacement expiry %v exceeds %v", next, ceiling)
+			}
+		})
+	}
+}
