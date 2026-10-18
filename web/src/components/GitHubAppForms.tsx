@@ -11,8 +11,10 @@ import {
   type GitHubAppInstallation,
   type GitHubAppRepository,
   type GitHubAppSubscription,
+  type AppRunner,
   type SubscriptionDraft,
   accountTypeLabel,
+  appRunnerChoices,
   connectFormAction,
   emptySubscriptionDraft,
   pullRequestHelp,
@@ -180,6 +182,21 @@ export function SubscriptionForm({
             value={draft.pipeline}
             onChange={(e) => set({ pipeline: e.target.value })}
           />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
+          Runs on
+          <select
+            className={`${inputClass} w-56`}
+            value={draft.runner ?? "cloud"}
+            onChange={(e) => set({ runner: e.target.value as AppRunner })}
+          >
+            {appRunnerChoices.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+            {draft.runner?.startsWith("pool=") && <option value={draft.runner}>{draft.runner}</option>}
+          </select>
         </label>
       </div>
       <fieldset className="flex flex-wrap gap-4 text-sm">

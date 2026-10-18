@@ -516,6 +516,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_queue_depth` | Gauge | `state` | Each unfinished job of an active run counts once: `waiting`, `ready`, `claimed`, `running`, `approval_pending`. A held job stays claimed until recovery commits, including after lease expiry. Jobs retained by a finished run do not count. |
 | `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
+| `sparkwing_claim_empty_total` | Counter | `claimant` | Queued claim polls that matched no unit, by claimant (`launcher`, `runner`, `here`). A launcher that only polls empty while runs wait matches none of their units |
 | `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
 | `sparkwing_live_runners` | Gauge | (none) | Runners that polled for a claim inside the liveness window, across every label set |
 | `sparkwing_node_seconds_total` | Counter | `placement` | Node execution seconds: `cloud` is what the ledger has finished charging for, `local` is what this controller process settled for unmetered credentials |

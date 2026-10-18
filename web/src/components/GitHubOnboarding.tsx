@@ -2,12 +2,13 @@
 
 import { useRef, useState } from "react";
 import { Panel, errorText, quietButtonClass } from "./TeamShell";
-import { type AutomationPreview, type RunnerBindings, previewAutomation, enableAutomation, disableAutomation, getRunnerBindings, enableGitHubRunner, disableGitHubRunner } from "@/lib/githubApp";
+import { type AppRunner, type AutomationPreview, type RunnerBindings, appRunnerChoices, previewAutomation, enableAutomation, disableAutomation, getRunnerBindings, enableGitHubRunner, disableGitHubRunner } from "@/lib/githubApp";
 import { toast } from "./Toasts";
 
 export default function GitHubOnboarding({ repositories, canManage, teamSlug }: { repositories: string[]; canManage: boolean; teamSlug: string }) {
   const [repository, setRepository] = useState("");
   const [preview, setPreview] = useState<AutomationPreview | null>(null);
+  const [runner, setRunner] = useState<AppRunner>("cloud");
   const [runners, setRunners] = useState<RunnerBindings | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,6 +28,7 @@ export default function GitHubOnboarding({ repositories, canManage, teamSlug }: 
       const [nextPreview, nextRunners] = await Promise.all([previewAutomation(selected), getRunnerBindings()]);
       if (request !== generation.current) return;
       setPreview(nextPreview);
+      setRunner(nextPreview.runner ?? "cloud");
       setRunners(nextRunners);
     } catch (err) {
       if (request === generation.current) setError(errorText(err));
@@ -83,7 +85,17 @@ export default function GitHubOnboarding({ repositories, canManage, teamSlug }: 
         </ul>
         <p className="text-xs text-[var(--muted)]">Branch patterns use Go path.Match: * does not cross /. Fork pull requests do not run. Invalid or unsupported configuration stops declaration-based dispatch.</p>
         <p role="status">Repository automation: {preview.enabled ? "enabled" : "not enabled"}</p>
-        {canManage && <button className={controlClass} disabled={busy || (!preview.enabled && (preview.status !== "ready" || preview.pipelines.length === 0))} onClick={() => change(() => preview.enabled ? disableAutomation(preview.repository_id) : enableAutomation(repository))}>
+        <label className="block">Runs on
+          <select className="mt-2 block min-h-11 w-full rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface)] p-2 focus-visible:ring-2 focus-visible:ring-[var(--accent)]" value={runner} disabled={busy || !canManage} onChange={(event) => {
+            const next = event.target.value as AppRunner;
+            setRunner(next);
+            if (preview.enabled) void change(() => enableAutomation(repository, next));
+          }}>
+            {appRunnerChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+            {runner.startsWith("pool=") && <option value={runner}>{runner}</option>}
+          </select>
+        </label>
+        {canManage && <button className={controlClass} disabled={busy || (!preview.enabled && (preview.status !== "ready" || preview.pipelines.length === 0))} onClick={() => change(() => preview.enabled ? disableAutomation(preview.repository_id) : enableAutomation(repository, runner))}>
           {preview.enabled ? "Disable repository automation" : "Enable repository declarations"}
         </button>}
         <h3 className="font-medium">Execution on GitHub Actions</h3>

@@ -49,6 +49,16 @@ Add `--working-tree` to submit an immutable snapshot of tracked and unignored
 untracked files. The controller stores the bundle and seals its digest. Awarded
 workers acquire that exact source through their claim authority.
 
+A trigger, webhook run or schedule that names no self-hosted runner runs on
+Cloud: the launcher takes its plan, evaluation and job units. App runs and
+App-armed schedules take their owner from the repository's App configuration
+(`runner: cloud | github-actions | pool=<name>`). `--runner NAME`
+or `--runner label=LABEL` keeps the run on matching self-hosted runners, as
+does a pool route rule, and `--runner here` hosts it in the submitting CLI.
+Intake seals the choice in the run's request, so retries keep it. A run whose
+work no runner or launcher has claimed after 30 seconds shows a notice in
+`sparkwing runs status`.
+
 ## Self-hosted runners
 
 Enroll a machine into a Cloud team:

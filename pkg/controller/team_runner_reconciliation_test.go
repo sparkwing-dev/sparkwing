@@ -26,7 +26,8 @@ func tenantRunClaim(t *testing.T, f *tenancyFixture) (controllerwire.CreateRunRe
 	t.Helper()
 	f.srv.WithEngineController(&controller.EngineController{Store: f.st, RunnerPolicy: tenantRunnerPolicy{}})
 	body := computeIntake("build-b")
-	body.Request.Git.Repository.Display = "https://github.com/acme/widgets.git"
+	body.Request.Git.Repository = runspec.Repository{}
+	body.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://git.example.test/acme/widgets.git", PipelineDir: ".sparkwing"}
 	if code, response := f.do("POST", "/api/v1/runs", f.runnerB, body); code != http.StatusForbidden {
 		t.Fatalf("runner admitted a run = %d: %s", code, response)
 	}

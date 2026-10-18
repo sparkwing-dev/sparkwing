@@ -88,8 +88,10 @@ event's commit. Feature-branch and PR-head configuration cannot authorize a run.
 
 `GET /api/v1/team/github-app/automation?repository=owner/name` previews the
 configuration, source SHA, default branch, consent state and pipeline filters.
-An owner enables it with `PUT /api/v1/team/github-app/automation {repository}`
+An owner enables it with `PUT /api/v1/team/github-app/automation {repository, runner}`
 and revokes it with `DELETE /api/v1/team/github-app/automation?repository_id=<id>`.
+`runner` selects who owns the repository's automatic runs and its App-armed
+schedules; see [run owner](#run-owner).
 GET without a repository lists enabled repositories. Discovery is read-only.
 
 Supported declarations are `on.push.branches` and
@@ -107,9 +109,24 @@ disconnecting its installation revokes consent; reconnecting requires enabling i
 again. Existing manual subscriptions take precedence for their pipeline name,
 including events their filters exclude. The preview marks these manual overrides.
 
+### Run owner
+
+Automation and every manual subscription take `runner`, which selects the owner
+of the runs they start:
+
+| `runner` | Owner |
+| --- | --- |
+| `cloud` (default) | Sparkwing Cloud's launcher plans and runs the work |
+| `github-actions` | Only a GitHub Actions runner bound to the delivery's push claims the run's trigger, as in [GitHub Actions runners](github-actions-runners.md) |
+| `pool=<name>` | A self-hosted runner reserved for that pool; a pool access rule must still allow the repository. App-armed schedules qualify for the rule through the repository's automation consent |
+
+The selection is read from the saved configuration at intake and sealed in the
+run's request; webhook payloads cannot change it. Retries keep it. Changing
+`runner` affects only runs admitted afterwards.
+
 ### Manual subscriptions
 
-The **Advanced** section retains explicit subscriptions. A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly. Each additional option defaults to `false`:
+The **Advanced** section retains explicit subscriptions. A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, runner, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly. Each additional option defaults to `false`:
 
 | Option | Event |
 | --- | --- |

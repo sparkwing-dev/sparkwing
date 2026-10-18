@@ -95,7 +95,7 @@ func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]Nod
 }
 
 func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, snapshot RunSnapshot, accepted expansionAcceptance) ([]NodeRow, error) {
-	executionSettings, err := tx.store.planServices().ResolveExpansion(settings.ExpansionInputs{Spec: *snapshot.Run.Spec, Plan: accepted.plan, Context: settings.Context{Local: RequestPlacement(snapshot.Run.Request.Request) == nodeproto.PlacementLocal, ControllerOwned: snapshot.Run.Dispatch == string(runspec.DispatchController)}})
+	executionSettings, err := tx.store.planServices().ResolveExpansion(settings.ExpansionInputs{Spec: *snapshot.Run.Spec, Plan: accepted.plan, Context: settings.Context{Local: RequestPlacement(snapshot.Run.Request.Request) == nodeproto.PlacementLocal}})
 	if err != nil {
 		return nil, err
 	}

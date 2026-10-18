@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -26,10 +28,14 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 	}
 	remote := request.Source.Location.RemoteURL
 	if remote == "" {
-		if request.Git.Repository.Key != "" {
-			return nil
+		if request.Git.Repository.Key == "" {
+			return invalidEngineBody("source.location.remote_url is required to resolve repository identity")
 		}
-		return invalidEngineBody("source.location.remote_url is required to resolve repository identity")
+		display, err := s.keyedRepositoryDisplay(ctx, team, *request)
+		if err != nil {
+			return err
+		}
+		return sealDerivedDisplay(&request.Git.Repository, display)
 	}
 	parsed, err := parseIntakeRemote(remote)
 	if err != nil {
@@ -61,6 +67,78 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 	}
 	request.Git.Repository = canonical
 	return nil
+}
+
+func sealDerivedDisplay(repository *runspec.Repository, display string) error {
+	if supplied := repository.Display; supplied != "" && !strings.EqualFold(supplied, display) {
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source repository display does not match its identity")
+	}
+	repository.Display = display
+	return nil
+}
+
+// safety: a keyed request without a remote URL takes its display from the key, never from the caller;
+// only a published local record, which no claimant can take, keeps its own label.
+func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, request runspec.Request) (string, error) {
+	key := string(request.Git.Repository.Key)
+	switch {
+	case strings.HasPrefix(key, "gh:"):
+		display, err := s.githubAppRepositoryDisplay(ctx, team, strings.TrimPrefix(key, "gh:"))
+		if errors.Is(err, errUncoveredGitHubRepository) {
+			return key, nil
+		}
+		return display, err
+	case strings.HasPrefix(key, "git:"):
+		if runspec.ValidateRepoUse(runspec.RepoKey(key), runspec.RepoAccessRule) != nil {
+			return "", invalidEngineBody("invalid git repository key")
+		}
+		return strings.TrimPrefix(key, "git:"), nil
+	case strings.HasPrefix(key, "local:"):
+		if request.Mode == runspec.IntakePublish {
+			return request.Git.Repository.Display, nil
+		}
+		if checkout := request.Source.Location.LocalCheckout; checkout != "" {
+			local, err := runspec.CanonicalRepository(runspec.RepoInput{AbsolutePath: checkout})
+			if err == nil && local.Key == request.Git.Repository.Key {
+				return local.Display, nil
+			}
+		}
+		return key, nil
+	}
+	return "", invalidEngineBody("unknown repository key")
+}
+
+var errUncoveredGitHubRepository = errors.New("no GitHub App installation of this team covers the repository")
+
+func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID string) (string, error) {
+	refused := errUncoveredGitHubRepository
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 || s.githubApp == nil || s.store == nil {
+		return "", refused
+	}
+	tenant, err := s.store.ForTeam(ctx, store.Team(team))
+	if err != nil {
+		return "", engineLookupError(err)
+	}
+	installations, err := tenant.GitHubAppInstallations(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, installation := range installations {
+		if installation.Suspended {
+			continue
+		}
+		repositories, err := s.githubApp.client.InstallationRepositories(ctx, installation.InstallationID)
+		if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
+			return "", errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity could not be verified"}, err)
+		}
+		for _, repository := range repositories {
+			if canonical, valid := store.ParseGitHubRepo(repository.FullName); valid && repository.ID == id {
+				return canonical.Slug(), nil
+			}
+		}
+	}
+	return "", refused
 }
 
 func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string) (int64, error) {

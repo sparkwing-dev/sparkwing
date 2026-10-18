@@ -92,6 +92,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	}
 	claim, err := s.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
+		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil
 	}
 	if err != nil {

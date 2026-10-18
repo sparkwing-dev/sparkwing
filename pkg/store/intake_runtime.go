@@ -140,10 +140,19 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err := validateChildLineageTx(ctx, tx, team, &input); err != nil {
 			return AdmissionResult{}, err
 		}
-		pools, err := intakePoolsTx(ctx, tx, team, &input, policy.RepositoryAuthorized)
+		if err := checkActionsOwnerTx(ctx, tx, team, input); err != nil {
+			return AdmissionResult{}, err
+		}
+		owner, appRepository, err := trustedAppRunnerTx(ctx, tx, request)
 		if err != nil {
 			return AdmissionResult{}, err
 		}
+		owner.apply(&input.Options)
+		pools, err := intakePoolsTx(ctx, tx, team, &input, policy.RepositoryAuthorized || appRepository)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+		input.Dispatch = SelectDispatch(policy.CloudDispatch, input)
 		snapshot.request, err = tx.store.intakeServices().SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AllowedPools: pools, AuthorityRef: request.Authority, Ceilings: policy.Ceilings})
 		if err != nil {
 			return AdmissionResult{}, err
@@ -478,6 +487,9 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 		}
 		if id == input.Lineage.ParentRunID && input.Lineage.RepoInherited && parent.Git.Repository.Key != input.Git.Repository.Key {
 			return authorityError(apierr.BadRequest, "inherited repository differs from its parent")
+		}
+		if id == input.Lineage.ParentRunID && parent.Git.Repository.Key == input.Git.Repository.Key {
+			input.Git.Repository.Display = parent.Git.Repository.Display
 		}
 		if parent.Pipeline == input.Pipeline && parent.Git.Repository.Key == input.Git.Repository.Key {
 			return authorityError(apierr.Conflict, "child pipeline cycle")

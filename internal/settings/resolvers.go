@@ -367,7 +367,7 @@ func Guards(in Inputs) (projectconfig.Guards, Origin, error) {
 func RunnerSelection(in Inputs) (runspec.RunnerSelection, Origin, error) {
 	value, origin, err := pickRun(in, "runner", func(v runspec.Options) runspec.Setting[runspec.RunnerSelection] { return v.Runner }, runspec.RunnerSelection{Kind: runspec.RunnerAny})
 	switch value.Kind {
-	case runspec.RunnerAny, runspec.RunnerHere:
+	case runspec.RunnerAny, runspec.RunnerHere, runspec.RunnerActions:
 		if value.Value != "" {
 			err = invalid("runner", origin, "this selector takes no value")
 		}

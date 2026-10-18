@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -73,6 +74,29 @@ func TestChildIntakeCannotEscapeItsLiveParentProperty(t *testing.T) {
 			}
 			rewriteSchemaCount(t, tenant.s.db, "runs", 1)
 			rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
+		}
+	}
+}
+
+func TestChildIntakeInheritsTheActionsOwnerOnlyFromItsParent(t *testing.T) {
+	for _, parentActions := range []bool{false, true} {
+		tenant, request := childIntakeFixture(t)
+		if parentActions {
+			row, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			row.Request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerActions}}}
+			body, err := json.Marshal(row.Request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
+		}
+		request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerActions}}}
+		_, err := tenant.AdmitRun(t.Context(), request)
+		if parentActions != (err == nil) {
+			t.Fatalf("parent sealed with Actions=%t: child admission error %v", parentActions, err)
 		}
 	}
 }

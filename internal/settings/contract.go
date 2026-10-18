@@ -151,7 +151,6 @@ type Context struct {
 	Origin              runspec.Origin
 	Submitter           bool
 	Local               bool
-	ControllerOwned     bool
 	Detached            bool
 	Cloud               bool
 	NumCPU              int

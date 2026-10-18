@@ -288,7 +288,7 @@ type CheckoutDeclarations struct {
 const CheckoutDeclarationsVersion = 1
 
 // RunnerSelection records the requested route without granting runner identity or pool access.
-// Kind is any, name, label or here; Value is present only for name and label.
+// Kind is any, name, label, here or github-actions; Value is present only for name and label.
 type RunnerSelection struct {
 	Kind  RunnerSelectionKind `json:"kind"`
 	Value string              `json:"value"`
@@ -302,6 +302,8 @@ const (
 	RunnerName  RunnerSelectionKind = "name"
 	RunnerLabel RunnerSelectionKind = "label"
 	RunnerHere  RunnerSelectionKind = "here"
+	// RunnerActions selects a GitHub Actions owner; intake accepts it only from App configuration or a parent sealed with it.
+	RunnerActions RunnerSelectionKind = "github-actions"
 )
 
 // safety: Options carries request winners and resolved values without zero-as-default rules.

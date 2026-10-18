@@ -632,6 +632,7 @@ CREATE TABLE github_app_triggers (
     on_release_prereleased BIGINT NOT NULL DEFAULT 0,
     on_branch_create BIGINT NOT NULL DEFAULT 0,
     on_branch_delete BIGINT NOT NULL DEFAULT 0,
+    runner TEXT NOT NULL DEFAULT 'cloud',
     repo_key TEXT NOT NULL,
     PRIMARY KEY (team, repository_id, pipeline)
 );
@@ -963,6 +964,7 @@ CREATE TABLE github_app_automation (
     installation_id BIGINT NOT NULL,
     enabled_by TEXT NOT NULL,
     enabled_at BIGINT NOT NULL,
+    runner TEXT NOT NULL DEFAULT 'cloud',
     repo_key TEXT NOT NULL,
     PRIMARY KEY (team, repository_id),
     FOREIGN KEY (installation_id) REFERENCES github_app_installations(installation_id) ON DELETE CASCADE

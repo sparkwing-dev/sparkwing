@@ -12,8 +12,7 @@ import (
 )
 
 const (
-	// safety: a node is only asked about once an idle agent would have taken
-	// it, so one about to be claimed is never flagged.
+	// safety: unclaimed work is judged only after it has waited this long.
 	claimAttentionGrace = 30 * time.Second
 	agentOnlineWithin   = 2 * time.Minute
 )

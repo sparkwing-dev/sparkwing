@@ -2,6 +2,7 @@ package capability_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"testing/quick"
 
@@ -41,5 +42,25 @@ func TestRepositoryPatternsKeepHostAndOwnerBoundaries(t *testing.T) {
 	}
 	if !capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "gh:42", Display: "https://github.com/acme/repo.git"}) {
 		t.Fatal("pattern refused repository URL")
+	}
+}
+
+// safety: a bare owner/name display is read as github.com only for an App-verified gh:<id> key.
+func FuzzRepositorySlugDisplayStaysOnItsOwner(f *testing.F) {
+	for _, seed := range []string{"acme/widgets", "acme-evil/widgets", "acme/my.repo", "evil.com/acme", "acme/a/b", "x:y/acme", "acme@evil/widgets"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, display string) {
+		owner, name, _ := strings.Cut(display, "/")
+		app := capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "gh:42", Display: display})
+		if app && (!strings.EqualFold(owner, "acme") || name == "" || strings.ContainsAny(name, "/:")) {
+			t.Fatalf("App slug %q escaped its owner", display)
+		}
+		if capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "git:example.com/acme/widgets", Display: display}) && !strings.Contains(display, "github.com") {
+			t.Fatalf("non-App identity %q was read as github.com", display)
+		}
+	})
+	if !capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "gh:42", Display: "acme/widgets"}) {
+		f.Fatal("App slug display refused by its owner's pattern")
 	}
 }

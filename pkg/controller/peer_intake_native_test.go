@@ -166,7 +166,7 @@ func TestPeerIntakeBudgetsFollowPlacement(t *testing.T) {
 			if (placement == nodeproto.PlacementLocal) != tc.local {
 				t.Fatalf("intake placement=%s local=%v", placement, tc.local)
 			}
-			resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: &timeout}}}, Context: settings.Context{Local: placement == nodeproto.PlacementLocal, ControllerOwned: tc.dispatch == runspec.DispatchController}})
+			resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: &timeout}}}, Context: settings.Context{Local: placement == nodeproto.PlacementLocal}})
 			if err != nil || resolved.Jobs["job"].Timeout.Value != time.Hour {
 				t.Fatalf("admitted budget fails plan acceptance: %v", err)
 			}

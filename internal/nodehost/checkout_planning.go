@@ -150,7 +150,7 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 		Declarations: declarations, Resolved: resolved, Planning: prepared.Input, Functions: prepared.Functions,
 		Resolve: func(plan nodeproto.PlanDoc) (runspec.Resolved, error) {
 			winner := resolved
-			settings, err := settings.ResolvePlan(settings.PlanInputs{Request: input.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: request.Origin == runspec.OriginLocal, ControllerOwned: request.Dispatch == runspec.DispatchController}})
+			settings, err := settings.ResolvePlan(settings.PlanInputs{Request: input.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: request.Origin == runspec.OriginLocal}})
 			winner.Settings = settings
 			return winner, err
 		},

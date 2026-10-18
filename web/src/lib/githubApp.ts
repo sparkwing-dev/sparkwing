@@ -34,11 +34,20 @@ export interface AutomationPipeline {
   manual_override: boolean;
 }
 
+// Who owns an App run: Cloud's launcher, a GitHub Actions runner, or a pool's self-hosted runners.
+export type AppRunner = "cloud" | "github-actions" | `pool=${string}`;
+
+export const appRunnerChoices: { value: AppRunner; label: string }[] = [
+  { value: "cloud", label: "Sparkwing Cloud" },
+  { value: "github-actions", label: "GitHub Actions" },
+];
+
 export interface AutomationPreview {
   repository: string;
   repository_id: number;
   installation_id: number;
   enabled: boolean;
+  runner?: AppRunner;
   default_branch: string;
   source_sha: string;
   status: "ready" | "missing" | "invalid" | "unsupported" | "unavailable";
@@ -63,8 +72,8 @@ export async function previewAutomation(repository: string): Promise<AutomationP
   return await res.json() as AutomationPreview;
 }
 
-export async function enableAutomation(repository: string): Promise<AutomationPreview> {
-  const res = await send("PUT", "/api/v1/team/github-app/automation", "Enable repository automation", { repository });
+export async function enableAutomation(repository: string, runner: AppRunner = "cloud"): Promise<AutomationPreview> {
+  const res = await send("PUT", "/api/v1/team/github-app/automation", "Enable repository automation", { repository, runner });
   return await res.json() as AutomationPreview;
 }
 
@@ -96,6 +105,7 @@ export interface GitHubAppSubscription {
   pull_request: boolean;
   branches: string[];
   base_branches: string[];
+  runner?: AppRunner;
   created_by: string;
   created_at: number;
 }
@@ -107,6 +117,7 @@ export interface SubscriptionDraft {
   pull_request: boolean;
   branches?: string[];
   base_branches?: string[];
+  runner?: AppRunner;
 }
 
 export const emptySubscriptionDraft: SubscriptionDraft = {
@@ -116,6 +127,7 @@ export const emptySubscriptionDraft: SubscriptionDraft = {
   pull_request: true,
   branches: [],
   base_branches: [],
+  runner: "cloud",
 };
 
 // The dashboard server owns the connect flow, because it keeps the state and
@@ -205,6 +217,7 @@ export function subscriptionRequest(
     pull_request: draft.pull_request,
     branches: (draft.branches ?? []).map((v) => v.trim()).filter(Boolean),
     base_branches: (draft.base_branches ?? []).map((v) => v.trim()).filter(Boolean),
+    runner: (draft.runner?.trim() || "cloud") as AppRunner,
   };
 }
 
@@ -218,6 +231,9 @@ export function subscriptionProblem(draft: SubscriptionDraft): string | null {
   }
   if (!req.push && !req.pull_request) {
     return "Run on pushes, pull requests or both.";
+  }
+  if (req.runner !== "cloud" && req.runner !== "github-actions" && !/^pool=[A-Za-z0-9][A-Za-z0-9._-]*$/.test(req.runner ?? "")) {
+    return "Run on Sparkwing Cloud, GitHub Actions or pool=<name>.";
   }
   for (const [label, patterns] of [
     ["Push branches", req.branches],
@@ -241,6 +257,7 @@ export function draftFromSubscription(
     pull_request: sub.pull_request,
     branches: sub.branches ?? [],
     base_branches: sub.base_branches ?? [],
+    runner: sub.runner ?? "cloud",
   };
 }
 

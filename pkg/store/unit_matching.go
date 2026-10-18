@@ -117,6 +117,10 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		if profile.Name != selected.Value {
 			return profile, demand, authorityError(apierr.Forbidden, "work selects another runner")
 		}
+	case runspec.RunnerActions:
+		if (unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan) && !slices.ContainsFunc(chain, func(node authorityNode) bool { return node.principal.Capability.Binding.Kind == capability.BindingPush }) {
+			return profile, demand, authorityError(apierr.Forbidden, "work is reserved for a GitHub Actions runner")
+		}
 	case runspec.RunnerLabel:
 		if selected.Value == "" {
 			return profile, demand, authorityError(apierr.IntegrityFailure, "sealed runner label is empty")

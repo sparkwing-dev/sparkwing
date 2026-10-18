@@ -15,8 +15,9 @@ import (
 )
 
 // RunStatusFacts combines one committed run/job snapshot with complete attempt
-// history and validated log subjects from that read. Notices come from verified
-// engine policy. Private fields stay here until the public display projection.
+// history and validated log subjects from that read. Notices carry engine
+// version policy and unclaimed-work observations. Private fields stay here until
+// the public display projection.
 type RunStatusFacts struct {
 	Snapshot store.RunSnapshot
 	Attempts []store.NodeAttempt
@@ -163,6 +164,9 @@ func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView
 			return RunStatusFacts{}, err
 		}
 		facts.Notices = notices
+	}
+	if unclaimed := unclaimedNotice(view); unclaimed != nil {
+		facts.Notices = append(facts.Notices, *unclaimed)
 	}
 	return facts, nil
 }

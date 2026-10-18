@@ -57,7 +57,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 		return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.Forbidden, Message: "executable local origin requires local peer authority"}
 	}
 	placement := store.RequestPlacement(request.Request)
-	options, err := settings.ResolveIntake(request.Request.Options, operator, settings.Context{Origin: request.Request.Origin, Local: placement == nodeproto.PlacementLocal, ControllerOwned: request.Request.Dispatch == runspec.DispatchController, Cloud: !localPeer, NumCPU: runtime.NumCPU()})
+	options, err := settings.ResolveIntake(request.Request.Options, operator, settings.Context{Origin: request.Request.Origin, Local: placement == nodeproto.PlacementLocal, Cloud: !localPeer, NumCPU: runtime.NumCPU()})
 	if err != nil {
 		return store.IntakePolicyFacts{}, err
 	}
@@ -68,7 +68,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if override := s.logRetention[team]; override > 0 {
 		days = override
 	}
-	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
+	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days, CloudDispatch: s.cloudDeployment}
 	if request.Authority.Kind == "schedule" {
 		location, err := store.VerifiedScheduleIntake(ctx, resolver, request)
 		facts.SourceLocation = &location
@@ -85,6 +85,12 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 		return facts, nil
 	}
 	location := request.Request.Source.Location
+	if strings.HasPrefix(string(request.Request.Git.Repository.Key), "gh:") && !localPeer {
+		verified, ok := ctx.Value(verifiedIntakeSourceKey{}).(verifiedIntakeSource)
+		if !ok || verified.location != location || verified.repository != request.Request.Git.Repository {
+			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "GitHub source requires verified intake repository identity"}
+		}
+	}
 	if location == (runspec.SourceLocation{}) {
 		return facts, nil
 	}
@@ -103,12 +109,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if location.LocalCheckout != "" {
 		return facts, &apierr.Error{Code: apierr.Forbidden, Message: "remote intake cannot name a local checkout"}
 	}
-	if strings.HasPrefix(string(request.Request.Git.Repository.Key), "gh:") {
-		verified, ok := ctx.Value(verifiedIntakeSourceKey{}).(verifiedIntakeSource)
-		if !ok || verified.location != location || verified.repository != request.Request.Git.Repository {
-			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "GitHub source requires verified intake repository identity"}
-		}
-	} else {
+	if !strings.HasPrefix(string(request.Request.Git.Repository.Key), "gh:") {
 		repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: location.RemoteURL})
 		if err != nil || repository.Key != request.Request.Git.Repository.Key {
 			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "source does not match repository identity"}

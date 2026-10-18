@@ -131,7 +131,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 		t.Fatal(err)
 	}
 	f.everyScopeB = "Bearer " + raw
-	raw, _, err = teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*"}, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "b-runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(now, 0), RegistrationID: "runner:" + string(f.teamB.Team()) + ":" + "b-runner"})
+	raw, _, err = teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*", "git.example.test/*/*"}, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "b-runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(now, 0), RegistrationID: "runner:" + string(f.teamB.Team()) + ":" + "b-runner"})
 	if err != nil {
 		t.Fatal(err)
 	}

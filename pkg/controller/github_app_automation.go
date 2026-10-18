@@ -32,6 +32,7 @@ type githubAppAutomationPreview struct {
 	RepositoryID   int64                         `json:"repository_id"`
 	InstallationID int64                         `json:"installation_id"`
 	Enabled        bool                          `json:"enabled"`
+	Runner         store.GitHubAppRunner         `json:"runner"`
 	DefaultBranch  string                        `json:"default_branch"`
 	SourceSHA      string                        `json:"source_sha"`
 	Status         string                        `json:"status"`
@@ -106,8 +107,8 @@ func automationDeclarations(content []byte) ([]githubAppAutomationPipeline, stri
 
 func (s *Server) githubAppAutomationPreview(ctx context.Context, tenant *store.Tenant, in store.GitHubAppInstallation, repo store.GitHubRepo) (githubAppAutomationPreview, error) {
 	out := githubAppAutomationPreview{Repository: repo.Slug(), RepositoryID: repo.ID, InstallationID: in.InstallationID, Pipelines: []githubAppAutomationPipeline{}}
-	if _, err := tenant.GitHubAppAutomation(ctx, in.InstallationID, repo.ID); err == nil {
-		out.Enabled = true
+	if grant, err := tenant.GitHubAppAutomation(ctx, in.InstallationID, repo.ID); err == nil {
+		out.Enabled, out.Runner = true, grant.Runner
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return out, err
 	}
@@ -195,11 +196,16 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 		return nil
 	}
 	slug := r.URL.Query().Get("repository")
+	runner := store.GitHubAppRunnerCloud
 	if r.Method == http.MethodPut {
 		var req struct {
 			Repository string `json:"repository"`
+			Runner     string `json:"runner"`
 		}
 		if err := decodeEngineRequest(r, &req); err != nil {
+			return githubAppRequestError(http.StatusBadRequest, err)
+		}
+		if runner, err = store.ParseGitHubAppRunner(req.Runner); err != nil {
 			return githubAppRequestError(http.StatusBadRequest, err)
 		}
 		slug = req.Repository
@@ -239,10 +245,10 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return err
 		}
-		if err := writer.PutAuthorizedGitHubAutomation(r.Context(), a, store.GitHubAppAutomation{RepositoryID: repo.ID, Repository: repo.Slug(), InstallationID: in.InstallationID}); err != nil {
+		if err := writer.PutAuthorizedGitHubAutomation(r.Context(), a, store.GitHubAppAutomation{RepositoryID: repo.ID, Repository: repo.Slug(), InstallationID: in.InstallationID, Runner: runner}); err != nil {
 			return engineLookupError(err)
 		}
-		out.Enabled = true
+		out.Enabled, out.Runner = true, runner
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil
