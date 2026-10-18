@@ -140,6 +140,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err := validateChildLineageTx(ctx, tx, team, &input); err != nil {
 			return AdmissionResult{}, err
 		}
+		if err := checkActionsOwnerTx(ctx, tx, team, input); err != nil {
+			return AdmissionResult{}, err
+		}
 		owner, appRepository, err := trustedAppRunnerTx(ctx, tx, request)
 		if err != nil {
 			return AdmissionResult{}, err
@@ -349,9 +352,6 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 		return input, authorityError(apierr.Unavailable, "intake settings resolution is unavailable")
 	}
 	input.Options = *policy.Options
-	if input.Options.Runner.Value.Kind == runspec.RunnerActions && input.Lineage.ParentRunID == "" {
-		return input, authorityError(apierr.BadRequest, "the github-actions owner is selected only by GitHub App configuration")
-	}
 	input.Actor = runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}
 	input.Git.App = runspec.Optional[runspec.AppFacts]{}
 	input.Git.DefaultBranch = runspec.Optional[string]{}
@@ -487,6 +487,9 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 		}
 		if id == input.Lineage.ParentRunID && input.Lineage.RepoInherited && parent.Git.Repository.Key != input.Git.Repository.Key {
 			return authorityError(apierr.BadRequest, "inherited repository differs from its parent")
+		}
+		if id == input.Lineage.ParentRunID && parent.Git.Repository.Key == input.Git.Repository.Key {
+			input.Git.Repository.Display = parent.Git.Repository.Display
 		}
 		if parent.Pipeline == input.Pipeline && parent.Git.Repository.Key == input.Git.Repository.Key {
 			return authorityError(apierr.Conflict, "child pipeline cycle")

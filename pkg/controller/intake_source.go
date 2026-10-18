@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -26,6 +28,21 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 	}
 	remote := request.Source.Location.RemoteURL
 	if remote == "" {
+		if id, ok := strings.CutPrefix(string(request.Git.Repository.Key), "gh:"); ok {
+			display, err := s.githubAppRepositoryDisplay(ctx, team, id)
+			if errors.Is(err, errUncoveredGitHubRepository) {
+				request.Git.Repository.Display = string(request.Git.Repository.Key)
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if supplied := request.Git.Repository.Display; supplied != "" && !strings.EqualFold(supplied, display) {
+				return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source repository display does not match its GitHub identity")
+			}
+			request.Git.Repository.Display = display
+			return nil
+		}
 		if request.Git.Repository.Key != "" {
 			return nil
 		}
@@ -61,6 +78,39 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 	}
 	request.Git.Repository = canonical
 	return nil
+}
+
+var errUncoveredGitHubRepository = errors.New("no GitHub App installation of this team covers the repository")
+
+func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID string) (string, error) {
+	refused := errUncoveredGitHubRepository
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 || s.githubApp == nil || s.store == nil {
+		return "", refused
+	}
+	tenant, err := s.store.ForTeam(ctx, store.Team(team))
+	if err != nil {
+		return "", engineLookupError(err)
+	}
+	installations, err := tenant.GitHubAppInstallations(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, installation := range installations {
+		if installation.Suspended {
+			continue
+		}
+		repositories, err := s.githubApp.client.InstallationRepositories(ctx, installation.InstallationID)
+		if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
+			return "", errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity could not be verified"}, err)
+		}
+		for _, repository := range repositories {
+			if canonical, valid := store.ParseGitHubRepo(repository.FullName); valid && repository.ID == id {
+				return canonical.Slug(), nil
+			}
+		}
+	}
+	return "", refused
 }
 
 func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string) (int64, error) {

@@ -21,7 +21,8 @@ func RepositoryAllowed(scope []string, repository RepositoryIdentity) bool {
 		return true
 	}
 	display := repository.Display
-	// safety: an App-verified gh:<id> key names a GitHub repository, so its owner/name display lives on github.com.
+	// safety: intake takes a gh:<id> key's owner/name display from the App delivery or installation record,
+	// never from the caller, so the slug names that repository on github.com.
 	if owner, _, _ := strings.Cut(display, "/"); strings.HasPrefix(repository.Key, "gh:") && strings.Count(display, "/") == 1 && !strings.ContainsAny(owner, ".:") && !strings.Contains(display, ":") {
 		display = "github.com/" + display
 	}

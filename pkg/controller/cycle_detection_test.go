@@ -96,7 +96,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
 	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
-	expected := runspec.Git{Repository: runspec.Repository{Key: "gh:2", Display: "explicit-repo"}, Ref: "feature", SHA: "e0c11c1750000000000000000000000000000000"}
+	expected := runspec.Git{Repository: runspec.Repository{Key: "gh:2", Display: "gh:2"}, Ref: "feature", SHA: "e0c11c1750000000000000000000000000000000"}
 	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", expected), 201)
 	var created struct {
 		RunID string `json:"run_id"`
@@ -117,7 +117,7 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
 	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
-	expected := runspec.Git{Repository: runspec.Repository{Key: "gh:2", Display: "acme/other"}, Ref: "main", SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+	expected := runspec.Git{Repository: runspec.Repository{Key: "gh:2", Display: "gh:2"}, Ref: "main", SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
 	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", expected), 201)
 	var created struct {
 		RunID string `json:"run_id"`

@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -144,5 +145,42 @@ func TestGitHubAppPoolScheduleReachesItsReservedRunner(t *testing.T) {
 	var claimed controllerwire.ClaimResponse
 	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+minted.Capability, githubClaimBody(capability.UnitTrigger, "", ""), &claimed); code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != started.RunID {
 		t.Fatalf("prod runner claim of the pool schedule = %d, claimed=%v", code, claimed.Claim != nil)
+	}
+}
+
+func TestGitHubRepositoryDisplayComesFromTheAppInstallation(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	request := func(key, display string) controllerwire.CreateRunRequest {
+		return controllerwire.CreateRunRequest{IdempotencyKey: key + display, Request: runspec.Request{Version: 1, Pipeline: "build", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey(key), Display: display}, SHA: headSHA}, Source: runspec.Source{Ref: headSHA}}}
+	}
+	for _, forged := range []controllerwire.CreateRunRequest{request("gh:701", "victim/app"), request("gh:701", "https://github.com/victim/app"), request("gh:701", "acme/other")} {
+		if code := f.call("POST", "/api/v1/runs", olga.auth, forged, nil); code != http.StatusForbidden {
+			t.Fatalf("forged GitHub identity %+v = %d, want 403", forged.Request.Git.Repository, code)
+		}
+	}
+	upload := map[string]any{"digest": strings.Repeat("a", 64), "size": 1, "git": map[string]any{"repository": map[string]any{"key": "gh:701", "display": "victim/app"}, "sha": headSHA}, "source": map[string]any{"ref": headSHA}}
+	if code := f.call("POST", "/api/v1/data/source", olga.auth, upload, nil); code != http.StatusForbidden {
+		t.Fatalf("source upload with a forged display = %d, want 403", code)
+	}
+	var created controllerwire.CreateRunResponse
+	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:701", ""), &created); code != http.StatusCreated || created.Request.Request.Git.Repository.Display != "acme/widgets" {
+		t.Fatalf("unlabelled GitHub identity = %d display=%q, want acme/widgets", code, created.Request.Request.Git.Repository.Display)
+	}
+	var uncovered controllerwire.CreateRunResponse
+	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:999", "victim/app"), &uncovered); code != http.StatusCreated || uncovered.Request.Request.Git.Repository.Display != "gh:999" {
+		t.Fatalf("uncovered GitHub identity = %d display=%q, want the key", code, uncovered.Request.Request.Git.Repository.Display)
+	}
+	var victim struct {
+		Capability string `json:"capability"`
+	}
+	if code := f.call("POST", "/api/v1/runners", olga.auth, map[string]any{"name": "victim-box", "repos": []string{"github.com/victim/*"}}, &victim); code != http.StatusCreated {
+		t.Fatalf("enroll victim-scoped runner = %d", code)
+	}
+	for _, run := range []string{created.RunID, uncovered.RunID} {
+		if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+victim.Capability, githubClaimBody(capability.UnitTrigger, run, ""), nil); code != http.StatusForbidden {
+			t.Fatalf("victim-scoped runner claim of another repository's run %s = %d, want 403", run, code)
+		}
 	}
 }
