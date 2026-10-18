@@ -107,6 +107,7 @@ func TestNativeChildBuildToDeployPlansItsOwnSDKEntrypoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent.Request.Request.Pipeline = "Build"
+	parent.Request.Request.LocalSecretNames = []string{"TOKEN"}
 	parent.Request.Request.Source = code
 	parent.Request.Request.Source.Location = runspec.SourceLocation{}
 	parent.Request.Request.Source.Entrypoint = "Build"

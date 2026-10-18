@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/repos"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -174,7 +172,7 @@ func runPipelineDescribe(inv clisurface.Invocation) error {
 	return runPipelineDescribeCommand(inv, withPipelineEntry)
 }
 
-func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string, func(context.Context, pipelineentry.Command, string) error) error) error {
+func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string, func(context.Context, pipelineInspection, string) error) error) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
@@ -191,7 +189,7 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 	name := pipelineName
 	found := Pipeline{PipelineDescription: nodeproto.PipelineDescription{Name: name}}
 	var schema nodeproto.PipelineDescription
-	err = withEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+	err = withEntry(name, func(ctx context.Context, entry pipelineInspection, dir string) error {
 		cfg, err := projectconfig.Load(filepath.Join(dir, ".sparkwing", projectconfig.Filename))
 		if err != nil {
 			return err
@@ -207,11 +205,7 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 				break
 			}
 		}
-		doc, err := repos.Describe(ctx, entry, dir)
-		if err != nil {
-			return err
-		}
-		schema, err = boundPipelineSchema(doc.Pipelines, identity)
+		schema, err = entry.describe(ctx)
 		return err
 	})
 	if err != nil {

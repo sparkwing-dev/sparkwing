@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -73,12 +74,6 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 			if helpErr != nil || !strings.Contains(help, test.want) {
 				t.Fatalf("pipeline help did not use selected build policy: %v: %s", helpErr, help)
 			}
-			if test.flag != "" {
-				cached, err := readDescribeCache(t.Context(), dir)
-				if err != nil || len(cached) != 1 || cached[0].Help != "build-policy-first" {
-					t.Fatalf("selected build policy replaced the default description: %+v: %v", cached, err)
-				}
-			}
 			inv, err := clisurface.Parse("sparkwing", args)
 			if err != nil {
 				t.Fatal(err)
@@ -90,6 +85,20 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 			}
 			if got := prepared.described[0].Help; got != test.want {
 				t.Fatalf("compiled description=%q, want %q", got, test.want)
+			}
+			if test.flag == "" {
+				key, err := bincache.PipelineCacheKey(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: prepared.described}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				cached, err := readDescribeCache(t.Context(), dir)
+				if err != nil || len(cached) != 1 || cached[0].Help != "build-policy-first" {
+					t.Fatalf("selected build policy replaced the default description: %+v: %v", cached, err)
+				}
 			}
 			request, err := prepareLocalRunRequest(t.Context(), prepared, flags, pass)
 			if err != nil {

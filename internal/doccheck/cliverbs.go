@@ -49,7 +49,7 @@ func checkCLIVerbs(contentDir string) bool {
 		rel, _ := filepath.Rel(contentDir, path)
 		doc := string(data)
 		if strings.Contains(filepath.ToSlash(rel), "migrations/") {
-			doc = migrationDestinations(doc)
+			doc = normalizeMigrationInvocations(migrationDestinations(doc))
 		}
 		examples := extractInvocations(rel, doc)
 		if strings.Contains(filepath.ToSlash(rel), "migrations/") {
@@ -310,6 +310,57 @@ func isGroup(cur string, valid map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+func normalizeMigrationInvocations(doc string) string {
+	roots := map[string]bool{}
+	for _, command := range clisurface.Registry() {
+		words := strings.Fields(command.Path)
+		if len(words) > 1 && words[0] == "sparkwing" {
+			roots[words[1]] = true
+		}
+	}
+	for _, root := range strings.Fields("cloud configure cluster serve crons daemon profile") {
+		roots[root] = true
+	}
+	normalize := func(example string) string {
+		command := strings.TrimLeft(example, " \t")
+		if strings.HasPrefix(command, "$ ") || strings.HasPrefix(command, "$\t") {
+			command = strings.TrimLeft(command[1:], " \t")
+		}
+		words := strings.Fields(command)
+		if len(words) > 1 && roots[words[0]] {
+			return "sparkwing " + command
+		}
+		return example
+	}
+	lines := strings.Split(doc, "\n")
+	proseStart := 0
+	prose := func(end int) {
+		chunk := inlineCodeRE.ReplaceAllStringFunc(strings.Join(lines[proseStart:end], "\n"), func(snippet string) string {
+			return "`" + normalize(strings.Trim(snippet, "`")) + "`"
+		})
+		copy(lines[proseStart:end], strings.Split(chunk, "\n"))
+	}
+	fence, shell := false, false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			if fence {
+				proseStart = i + 1
+			} else {
+				prose(i)
+				shell = shellLangs[strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trimmed, "```")))]
+			}
+			fence = !fence
+		} else if fence && shell {
+			lines[i] = normalize(line)
+		}
+	}
+	if !fence {
+		prose(len(lines))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func migrationDestinations(doc string) string {

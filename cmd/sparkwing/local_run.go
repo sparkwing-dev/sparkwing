@@ -215,7 +215,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	}
 	options.SDK = ""
 	options.InstallSDK = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
-		if err := resolveSparks(ctx, filepath.Join(request.Directory, request.PipelineDir), compileOptions{NoUpdate: flags.noUpdate}); err != nil {
+		if err := resolveSparks(ctx, filepath.Join(request.Directory, request.PipelineDir), flags.noUpdate); err != nil {
 			return engine.SDKCommand{}, err
 		}
 		return selected.InstallSDK(ctx, request)

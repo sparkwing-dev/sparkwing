@@ -243,7 +243,15 @@ func runPipelineDescribeCommandArgs(args []string, withEntry func(string, func(c
 	if err != nil {
 		return err
 	}
-	return runPipelineDescribeCommand(inv, withEntry)
+	return runPipelineDescribeCommand(inv, func(name string, inspect func(context.Context, pipelineInspection, string) error) error {
+		return withEntry(name, func(ctx context.Context, command pipelineentry.Command, directory string) error {
+			entry, err := inspectionCommand(command, directory, name)
+			if err != nil {
+				return err
+			}
+			return inspect(ctx, entry, directory)
+		})
+	})
 }
 
 func parseRunFlagsArgs(args []string) (runFlags, []string) {

@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,7 +29,7 @@ exit 1
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SPARKS_GO_BIN", bin)
 	t.Setenv("GOTOOLCHAIN", "local")
-	err := resolveSparks(context.Background(), dir, compileOptions{})
+	err := resolveSparks(context.Background(), dir, false)
 	var floorError *gotoolchain.Error
 	if !errors.As(err, &floorError) {
 		t.Fatalf("error = %v, want toolchain error", err)
@@ -47,7 +49,7 @@ func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
 	// checks its own GOTOOLCHAIN afterwards.
 	if dir := os.Getenv("SPARKWING_TEST_TOOLCHAIN_CHILD_DIR"); dir != "" {
 		uncached := os.Getenv("SPARKWING_TEST_TOOLCHAIN_UNCACHED") == "true"
-		if err := materializeOnly(dir, os.Environ(), compileOptions{NoUpdate: true, NoBincache: uncached}); err != nil {
+		if err := acquireTestSource(dir, uncached); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -63,7 +65,7 @@ func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
 			name = "uncached"
 		}
 		t.Run(name, func(t *testing.T) {
-			root := t.TempDir()
+			root := initSnapshotRepo(t)
 			dir := filepath.Join(root, ".sparkwing")
 			bin := filepath.Join(root, "bin")
 			for _, path := range []string{dir, bin} {
@@ -71,8 +73,15 @@ func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/pipeline\ngo 1.26.8\n")
-			writeFile(t, filepath.Join(dir, "main.go"), "package main\nfunc main() {}\n")
+			writeSDKFixture(t, dir, "package main\nfunc main() {}\n")
+			module, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(dir, "go.mod"), strings.Replace(string(module), "go 1.26.0\n", "go 1.26.8\n", 1))
+			runSnapshotGit(t, root, "add", ".")
+			runSnapshotGit(t, root, "commit", "-qm", "fixture")
+
 			probeLog := filepath.Join(root, "probes")
 			prepareLog := filepath.Join(root, "prepare")
 			buildLog := filepath.Join(root, "build")
@@ -82,7 +91,10 @@ if [ "$1" = env ]; then
  printf 'go1.26.6\ngo1.26.6\noff\n'
  exit 0
 fi
-if [ "$1" = list ]; then printf '%s\n' "$GOTOOLCHAIN" >> "$PREPARE_LOG"; exit 0; fi
+if [ "$1" = list ]; then
+ if [ "$2" = -deps ]; then printf '%s\n' "$GOTOOLCHAIN" >> "$PREPARE_LOG"; else printf '%s\n' "$FIXTURE_SELECTED_MODULE"; fi
+ exit 0
+fi
 printf '%s\n' "$GOTOOLCHAIN" >> "$BUILD_LOG"
 while [ $# -gt 0 ]; do
  if [ "$1" = -o ]; then
@@ -107,6 +119,15 @@ exit 1
 			t.Setenv("PROBE_LOG", probeLog)
 			t.Setenv("PREPARE_LOG", prepareLog)
 			t.Setenv("BUILD_LOG", buildLog)
+			moduleRoot, err := moduleRoot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			selectedModule, err := json.Marshal(map[string]any{"Version": "v0.0.0", "Replace": map[string]string{"Path": moduleRoot}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("FIXTURE_SELECTED_MODULE", string(selectedModule))
 			t.Setenv("SPARKWING_GITCACHE_URL", "")
 			child := exec.Command(os.Args[0], "-test.run=^TestPipelineToolchainOverrideStaysInTheBuild$")
 			child.Env = append(os.Environ(), "SPARKWING_TEST_TOOLCHAIN_CHILD_DIR="+dir,
@@ -127,7 +148,7 @@ exit 1
 				if err != nil {
 					t.Fatal(err)
 				}
-				if strings.TrimSpace(string(data)) != want {
+				if lines := strings.Fields(string(data)); len(lines) == 0 || slices.ContainsFunc(lines, func(line string) bool { return line != want }) {
 					t.Fatalf("%s = %q, want %q", filepath.Base(path), data, want)
 				}
 			}

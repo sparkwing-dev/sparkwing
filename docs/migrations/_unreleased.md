@@ -595,7 +595,8 @@ the awarded execution inputs. Plan awards omit `--job` in `fetch-source` and
 
 ## Daemon event cursors
 
-Replace `daemon events --offset N` with the returned `--cursor`. Repeat the same
+Before: `daemon events --offset N`. Use `sparkwing daemon events` with the returned
+`--cursor` value. Repeat the same
 run, kind, incarnation and since filters on continuation. `--limit` must be
 positive. The default remains 50. Follow cursors until the final page to read
 all matching retained events. Newer arrivals do not shift older pages. Removed or
@@ -665,8 +666,7 @@ No reader imports old per-file settings.
 
 Adding and removing profiles preserves concurrent edits. If a connection
 changes during credential revocation, removal fails and retains that changed
-connection. Reload it before retrying. The removed `configure init` handler
-and its permission-repair behavior are gone.
+connection. Reload it before retrying. Before: `configure init`. Its permission-repair behavior has been removed.
 
 ## Runner enrollment files
 
@@ -1889,10 +1889,9 @@ Nothing converts an old pin.
   `sparkwing repos update --in-place`, or `go get` the SDK version in
   `.sparkwing/go.mod`, then run the pipeline once. A module that replaces
   the SDK with a local checkout needs that checkout at this release.
-- **Refusal:** an old binary fails before the run starts with `pipeline
-  entry exited without answering describe; rebuild .sparkwing against a
-  matching SDK`. A binary that speaks another protocol version names both
-  versions and its SDK.
+- **Refusal:** an old binary that does not answer describe fails before the
+  run starts. Rebuild `.sparkwing` against a matching SDK. A binary that speaks
+  another protocol version names both versions and its SDK.
 - **Plan code must be deterministic.** Every node process plans the run
   again, and a node whose plan entry differs from the one the run accepted
   fails with `plan_drift`. Read time, randomness and the environment in
@@ -1933,7 +1932,7 @@ script that called the binary directly moves to the CLI:
 | `<binary> replay-node`, `sparkwing debug replay` | none; a hosted run records no dispatch snapshot |
 | `<binary> handle-trigger`, `run-node`, `sparkwing handle-trigger` | none; the CLI and `sparkwing-runner` host runs |
 
-`pipeline describe --secrets -o json` prints `{"pipeline": ..., "secrets":
+`sparkwing pipeline describe --pipeline ci --secrets -o json` prints `{"pipeline": ..., "secrets":
 [{"name": ..., "required": true}]}` (or `"optional": true`), read from
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
@@ -2074,7 +2073,7 @@ authentication. Do not automatically replay issuance.
 Go callers use `client.NewRunnerTokenManager(...).EnrollRunner` for enrollment
 and `client.NewTokenManager(..., true).CreateToken` with kind `service` for
 deployment issuance. The legacy `Client.EnrollRunner` and `Client.CreateServiceToken`
-methods are removed. `runners add --reserved-for POOL` forwards the pool proposal
+methods are removed. `sparkwing runners add --runner build --reserved-for POOL` forwards the pool proposal
 to the team-admin enrollment route. Repeated and comma-separated values are
 preserved. Enrollment sends one request and never replays a lost bearer response.
 The legacy `Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`,

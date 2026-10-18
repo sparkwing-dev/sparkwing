@@ -1,20 +1,14 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -116,36 +110,4 @@ func runOutput(inv clisurface.Invocation, environment string, terminal bool) (st
 		return environment, settings.Origin{Source: settings.Env, Key: "SPARKWING_LOG_FORMAT"}
 	}
 	return inv.Output(terminal), settings.Origin{Source: settings.Default, Key: "output"}
-}
-
-func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory string, cleanup func(), err error) {
-	root := filepath.Dir(sparkwingDir)
-	options := source.Options{Base: procenv.Base{Local: true, Captured: os.Environ()}}
-	spec := source.Spec{RepoKey: "inspection", LocalCheckout: root, PipelineDir: ".sparkwing", CommittedCheckout: true}
-	git, _, err := source.ResolveRevisions(context.Background(), runspec.Git{Ref: ref}, runspec.Source{}, "", func(ref string) (string, error) { return source.ResolveRef(context.Background(), spec, ref, options) })
-	if err != nil {
-		return "", "", nil, err
-	}
-	workspace, err := os.MkdirTemp("", "sparkwing-from-*")
-	if err != nil {
-		return "", "", nil, err
-	}
-	options.Workspace = workspace
-	spec.SHA = git.SHA
-	entry, err := source.PrepareCheckout(context.Background(), spec, options)
-	if err != nil {
-		return "", "", nil, errors.Join(err, os.RemoveAll(workspace))
-	}
-	return entry.CheckoutDirectory(), entry.Directory, func() {
-		if wd, e := os.Getwd(); e == nil {
-			if rel, e := filepath.Rel(workspace, wd); e == nil && filepath.IsLocal(rel) {
-				if e := os.Chdir(root); e != nil {
-					slog.Warn("could not leave temporary checkout", "error", e)
-				}
-			}
-		}
-		if e := errors.Join(entry.Close(), os.RemoveAll(workspace)); e != nil {
-			slog.Warn("could not remove temporary checkout", "error", e)
-		}
-	}, nil
 }

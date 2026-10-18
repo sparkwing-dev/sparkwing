@@ -10,14 +10,22 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
 
 func protocolFixture(t *testing.T, path, counter, pipelines string) {
 	t.Helper()
-	writeExec(t, path, "#!/bin/sh\necho x >> "+counter+"\nread -r _ <&3\n"+
-		`printf '{"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}\n' >&4`+"\nread -r _ <&3\n"+
-		`printf '{"reply":"2","ok":true,"result":{"pipelines":`+pipelines+`}}\n' >&4`+"\n")
+	writeExec(t, path, `#!/bin/sh
+echo x >> `+counter+`
+while read -r line <&3; do
+ id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
+ case "$line" in
+ *'"op":"hello"'*) payload='"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}' ;;
+ *'"op":"describe"'*) payload='"ok":true,"result":{"pipelines":`+pipelines+`}}' ;;
+ *) exit 9 ;;
+ esac
+ printf '{"reply":"%s",%s\n' "$id" "$payload" >&4
+done
+`)
 }
 
 func starts(t *testing.T, counter string) int {
@@ -106,58 +114,5 @@ func TestDescribeCacheIgnoresDocumentsOfAnotherShape(t *testing.T) {
 		if got := readDescribeFile(path); got != nil {
 			t.Errorf("%s: readDescribeFile = %+v, want a miss", name, got)
 		}
-	}
-}
-
-func TestEnsureDescribeCacheRewritesALegacyEntry(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	sparkwingDir := filepath.Join(t.TempDir(), ".sparkwing")
-	writeRepoFile(t, filepath.Join(sparkwingDir, "go.mod"), "module fixture\n\ngo 1.26\n")
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeRepoFile(t, describeCachePath(key), `[{"name":"build","args":[]}]`)
-	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
-	protocolFixture(t, fixture, counter, `[{"name":"build","args":[]}]`)
-
-	ensureDescribeCache(context.Background(), sparkwingDir, key, pipelineentry.Binary(fixture))
-	ensureDescribeCache(context.Background(), sparkwingDir, key, pipelineentry.Binary(fixture))
-	if got := readDescribeFile(describeCachePath(key)); len(got) != 1 || got[0].Name != "build" {
-		t.Fatalf("cache after ensure = %+v", got)
-	}
-	if n := starts(t, counter); n != 1 {
-		t.Fatalf("binary started %d times, want once", n)
-	}
-}
-
-func TestSourceRunDescribesWithTheCallersBinding(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	source := filepath.Join(t.TempDir(), "source", ".sparkwing")
-	caller := filepath.Join(t.TempDir(), "caller", ".sparkwing")
-	writeRepoFile(t, filepath.Join(source, "go.mod"), "module fixture\n\ngo 1.26\n")
-	writeRepoFile(t, filepath.Join(caller, "go.mod"), "module fixture\n\ngo 1.26\n")
-	fixture := filepath.Join(t.TempDir(), "pipeline")
-	// safety: the fixture names its one pipeline after the checkout it was
-	// started in, standing in for the YAML binding that checkout declares.
-	writeExec(t, fixture, "#!/bin/sh\nread -r _ <&3\n"+
-		`printf '{"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}\n' >&4`+"\nread -r _ <&3\n"+
-		`printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"%s","args":[]}]}}\n' "$(basename "$PWD")" >&4`+"\n")
-	key, err := bincache.PipelineCacheKey(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeRepoFile(t, describeCachePath(key), `{"pipelines":[{"name":"source","args":[]}]}`)
-
-	run := &pipelineRun{ctx: context.Background(), sparkwingDir: source, entry: pipelineentry.Binary(fixture)}
-	if _, err := run.describedPipeline("source"); err != nil {
-		t.Fatalf("an in-place run: %v", err)
-	}
-	run.opts.ExecutionDir = caller
-	if _, err := run.describedPipeline("caller"); err != nil {
-		t.Fatalf("a source run resolved against the source binding: %v", err)
-	}
-	if _, err := run.describedPipeline("source"); err == nil {
-		t.Fatal("a source run accepted a name only the source binds")
 	}
 }
