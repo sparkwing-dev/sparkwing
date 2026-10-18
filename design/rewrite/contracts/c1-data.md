@@ -3523,14 +3523,25 @@ renewal through exchange and mixed live/ended preparation requests.
 
 ## Credit holds on unclaimed Cloud work
 
-`UnclaimedUnit.CreditHold` is set, for a `dispatch=controller` run, when the
-waiting unit's minimum reservation fails the same frozen-team and headroom
-checks a launcher claim applies. A balance shortfall reads `NoCreditsHold`
+`UnclaimedUnit.CreditHold` is set, for a `dispatch=controller` run, when no
+live unmetered team claimant could take the waiting unit (claim grants,
+`meteredPlacement` false, and the claim's matching inputs and requirements
+evaluate OK) and the unit's minimum reservation fails the same frozen-team and
+headroom checks a launcher claim applies. A balance shortfall reads `NoCreditsHold`
 ("team has no remaining credits; add credits or a payment method"); frozen,
 budget, charge-pending and charge-failed holds read that refusal's own message.
-The controller reports it at once as notice kind `credit_hold` in place of
-`unclaimed_work`. Intake does not refuse: work waits and is claimed as soon as
+The controller reports it as notice kind `credit_hold` in place of
+`unclaimed_work`, after the same 30-second claim attention grace. Intake does not refuse: work waits and is claimed as soon as
 credits or a card cover it (decision 112). An unpriced CPU class reports no hold.
+
+## Break-glass credit grants
+
+Break-glass in-pod grants extend frozen §9's break-glass scope from freeze to
+grants; capped at $100 without the explicit flag. `sparkwing-controller admin
+grant` refuses more than 10,000 cents per grant unless the pod sets
+`SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1`. It grants once per key with reference
+`admin:<key>` and records `credit.granted` with actor `sparkwing-controller
+admin` and the reason. No remote credential reaches it.
 
 ## Integrated working-tree source uploads
 

@@ -671,7 +671,8 @@ kubectl exec -n NAMESPACE deploy/RELEASE-sparkwing-full-controller -- \
 ```
 
 A grant with a `--key` it has seen reports the first grant instead of granting
-again. Each action writes the console's business event with
+again. One grant is capped at 10,000 cents ($100); set
+`SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1` in the controller pod to allow more. Each action writes the console's business event with
 `sparkwing-controller admin` as the actor and the reason.
 
 ## Retained storage

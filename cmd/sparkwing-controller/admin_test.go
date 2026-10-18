@@ -166,7 +166,15 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 	if err := runAdmin([]string{"grant", "--team", "default", "--cents", "700", "--reason", "QA", "--key", "qa-1"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("a reused key with different terms granted")
 	}
-	if fresh, _ := grant(); !fresh.Created || !strings.HasPrefix(fresh.Reference, "admin:") || fresh.BalanceMicro != 1000*store.MicroCreditsPerCent {
+	if err := runAdmin([]string{"grant", "--team", "default", "--cents", "10001", "--reason", "QA", "--key", "big"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1") {
+		t.Fatalf("grant over $100 without the flag = %v", err)
+	}
+	t.Setenv("SPARKWING_ADMIN_GRANT_ALLOW_LARGE", "1")
+	if large, _ := grant("--key", "big", "--cents", "10001"); !large.Created || large.AmountMicro != 10001*store.MicroCreditsPerCent {
+		t.Fatalf("flagged large grant = %+v", large)
+	}
+	t.Setenv("SPARKWING_ADMIN_GRANT_ALLOW_LARGE", "")
+	if fresh, _ := grant(); !fresh.Created || !strings.HasPrefix(fresh.Reference, "admin:") || fresh.BalanceMicro != 11001*store.MicroCreditsPerCent {
 		t.Fatalf("keyless grant = %+v", fresh)
 	}
 	st = openState(t)
@@ -176,7 +184,7 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	events, err := tn.BusinessEvents(context.Background(), store.BusinessEventCreditGranted)
-	if err != nil || len(events) != 2 {
+	if err != nil || len(events) != 3 {
 		t.Fatalf("grant events = %+v, %v", events, err)
 	}
 	for _, ev := range events {

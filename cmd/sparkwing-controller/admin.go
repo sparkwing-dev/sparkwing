@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -33,7 +34,9 @@ released, while work already running finishes. unfreeze releases the holds
 the console and this command placed, or with --hold the one hold it names, a
 payment dispute's included. grant gives the team N cents of free credits,
 once per --key: a rerun with the same key reports the grant it already made,
-and a run without --key grants under a fresh key. Each action commits the
+and a run without --key grants under a fresh key. It refuses more than 10000
+cents ($100) per grant unless SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1 is set in the
+pod. Each action commits the
 business event the console writes (team.frozen, team.unfrozen or
 credit.granted) with the reason and with "sparkwing-controller admin" as the
 actor, prints an audit line to stderr, and prints the team's holds, or the
@@ -42,6 +45,11 @@ grant and the team's balance, as JSON.`
 // safety: every business event this command writes names it as the actor, so a
 // break-glass action never reads as a signed-in operator's.
 const breakGlassActor = "sparkwing-controller admin"
+
+const (
+	adminGrantCapCents   = 10_000
+	adminGrantAllowLarge = "SPARKWING_ADMIN_GRANT_ALLOW_LARGE"
+)
 
 type adminFreezeJSON struct {
 	Team   string   `json:"team"`
@@ -94,6 +102,9 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		}
 		if *cents <= 0 || *cents > store.MaxCreditGrantMicro/store.MicroCreditsPerCent {
 			return errors.New("admin grant needs --cents, a positive amount the credit ledger can hold")
+		}
+		if *cents > adminGrantCapCents && os.Getenv(adminGrantAllowLarge) != "1" {
+			return fmt.Errorf("admin grant refuses more than %d cents ($%d) per grant; set %s=1 in the controller pod to allow a larger break-glass grant", adminGrantCapCents, adminGrantCapCents/100, adminGrantAllowLarge)
 		}
 		if fs.Changed("key") && strings.TrimSpace(*key) == "" {
 			return errors.New("--key names no key; give one, or leave --key out to grant under a fresh key")
