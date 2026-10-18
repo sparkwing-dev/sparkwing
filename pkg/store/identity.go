@@ -384,17 +384,25 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpCond
 }
 
 func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
-	tx, err := s.beginTx(ctx)
+	var result SignInResult
+	err := s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		result, err = resolveSignInTx(ctx, tx, p, c, now)
+		return err
+	})
 	if err != nil {
 		return SignInResult{}, err
 	}
-	defer rollbackOrLog(tx)
+	return result, nil
+}
+
+func resolveSignInTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
 	at := now.UTC().UnixNano()
 
 	var res SignInResult
 	var accountID string
 	var linked int
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT account_id, linked FROM identities WHERE provider = ? AND subject = ?`,
 		p.Provider, p.Subject).Scan(&accountID, &linked)
 	switch {
@@ -509,9 +517,6 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 		return SignInResult{}, err
 	}
 	if res.Account, err = accountTx(ctx, tx, accountID); err != nil {
-		return SignInResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return SignInResult{}, err
 	}
 	return res, nil

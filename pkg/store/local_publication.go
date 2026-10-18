@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
@@ -38,6 +39,7 @@ func (t *Tenant) readLocalPublication(ctx context.Context, run string, reads *bl
 	}
 	result := LocalPublication{RunSnapshot: snapshot, Records: []blob.RecordLookupResult{}, Results: map[string]NodeResult{}}
 	records := t.BlobRecords(nil).(*blobRecords)
+	pending := false
 	for _, node := range snapshot.Nodes {
 		terminal, err := readStoredNodeResultTx(ctx, tx, t.team, node)
 		if err != nil {
@@ -63,11 +65,18 @@ func (t *Tenant) readLocalPublication(ctx context.Context, run string, reads *bl
 				return LocalPublication{}, blob.ErrNotFound
 			}
 			members, err := records.readMembers(ctx, tx, record)
+			if errors.Is(err, errBlobIOPending) {
+				pending = true
+				continue
+			}
 			if err != nil {
 				return LocalPublication{}, err
 			}
 			result.Records = append(result.Records, blob.RecordLookupResult{Found: true, Record: record, Members: members})
 		}
+	}
+	if pending {
+		return LocalPublication{}, errBlobIOPending
 	}
 	return result, tx.Commit()
 }

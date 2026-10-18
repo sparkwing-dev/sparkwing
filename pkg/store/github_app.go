@@ -505,16 +505,7 @@ func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRu
 	return t.GitHubCheckRun(ctx, runID)
 }
 
-// ReportGitHubCheck runs fn while t holds runID's GitHub report lock, so one
-// controller at a time creates or moves the check run or commit status that
-// reports the run. fn gets the recorded check run id, 0 when none is, and
-// returns the id of a check run it created, or 0; that id is recorded before
-// the lock is released. ErrNotFound when t has no trigger runID.
-//
-// safety: fn calls GitHub, so the lock is a mutex rather than a transaction: a
-// Postgres session advisory lock on a dedicated connection, or the Store's
-// mutex on SQLite, whose store serves one controller process. A holder past
-// its deadline cannot record, and a connection whose unlock fails is closed.
+// ReportGitHubCheck serializes fn for runID and records its returned check ID before unlocking.
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error {
 	unlock, err := t.lockGitHubCheck(ctx, runID)
 	if err != nil {
@@ -537,7 +528,8 @@ func (t *Tenant) lockGitHubCheck(ctx context.Context, runID string) (func(), err
 		t.s.githubCheckMu.Lock()
 		return t.s.githubCheckMu.Unlock, nil
 	}
-	conn, err := t.s.db.Conn(ctx)
+	// safety: a separate pool keeps operational connections available to callbacks holding report locks.
+	conn, err := t.s.githubLocks.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}

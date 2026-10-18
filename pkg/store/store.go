@@ -108,6 +108,7 @@ type Store struct {
 	clock            func() time.Time
 	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
 	db               *sql.DB
+	githubLocks      *sql.DB
 	dialect          Dialect
 	cleanup          func() error
 	csrfKeyMu        sync.Mutex
@@ -512,6 +513,15 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 	if err := s.migrate(ctx, remedy); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
+	if dialect == DialectPostgres {
+		s.githubLocks, err = sql.Open(driver, dsn)
+		if err != nil {
+			return nil, errors.Join(err, db.Close())
+		}
+		s.githubLocks.SetMaxOpenConns(2)
+		s.githubLocks.SetMaxIdleConns(2)
+		s.githubLocks.SetConnMaxIdleTime(5 * time.Minute)
+	}
 	return s, nil
 }
 
@@ -519,6 +529,9 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 func (s *Store) Close() error {
 	s.localSecrets.Clear()
 	dbErr := s.db.Close()
+	if s.githubLocks != nil {
+		dbErr = errors.Join(dbErr, s.githubLocks.Close())
+	}
 	if s.cleanup == nil {
 		return dbErr
 	}

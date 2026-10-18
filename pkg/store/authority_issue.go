@@ -1,7 +1,6 @@
 package store
 
 import (
-	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -10,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -181,7 +179,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 // see STORE-DATA.md lock order.
 func lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRef) error {
 	type lock struct {
-		tier       int
+		tier       storeLockTier
 		team, run  string
 		node       string
 		generation int64
@@ -196,29 +194,29 @@ func lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRef) error {
 		if err != nil {
 			return err
 		}
-		locks = append(locks, lock{tier: 2, team: team, run: unit.RunID})
+		locks = append(locks, lock{tier: lockRun, team: team, run: unit.RunID})
 		switch unit.Kind {
 		case capability.UnitTrigger, capability.UnitPlan:
-			locks = append(locks, lock{tier: 0, team: team, run: unit.RunID})
+			locks = append(locks, lock{tier: lockTrigger, team: team, run: unit.RunID})
 		case capability.UnitEval:
-			locks = append(locks, lock{1, team, unit.RunID, unit.NodeID, unit.SourceGeneration})
+			locks = append(locks, lock{lockEval, team, unit.RunID, unit.NodeID, unit.SourceGeneration})
 		case capability.UnitNode:
-			locks = append(locks, lock{tier: 3, team: team, run: unit.RunID, node: unit.NodeID})
+			locks = append(locks, lock{tier: lockNode, team: team, run: unit.RunID, node: unit.NodeID})
 		}
 	}
 	compare := func(a, b lock) int {
-		return cmp.Or(cmp.Compare(a.tier, b.tier), strings.Compare(a.team, b.team), strings.Compare(a.run, b.run), strings.Compare(a.node, b.node), cmp.Compare(a.generation, b.generation))
+		return compareStoreLocks(storeLockKey{tier: a.tier, keys: [3]string{a.team, a.run, a.node}, generation: a.generation}, storeLockKey{tier: b.tier, keys: [3]string{b.team, b.run, b.node}, generation: b.generation})
 	}
 	slices.SortFunc(locks, compare)
 	var held string
 	for _, l := range slices.Compact(locks) {
 		var err error
 		switch l.tier {
-		case 0:
+		case lockTrigger:
 			err = tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), l.team, l.run).Scan(&held)
-		case 1:
+		case lockEval:
 			err = tx.QueryRowContext(ctx, `SELECT run_id FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), l.team, l.run, l.node, l.generation).Scan(&held)
-		case 2:
+		case lockRun:
 			err = tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND id=?`+tx.forNoKeyUpdate(), l.team, l.run).Scan(&held)
 		default:
 			err = tx.QueryRowContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? AND node_id=?`+tx.forUpdate(), l.team, l.run, l.node).Scan(&held)

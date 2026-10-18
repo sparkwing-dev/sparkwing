@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -124,6 +125,67 @@ func TestPostgresRenewalLocksObservedAuthorityBeforeRun(t *testing.T) {
 		}
 	}
 	b.release(1)
+}
+
+func TestPostgresLauncherPreparationLocksExchangedAuthorityBeforeRun(t *testing.T) {
+	st, demand, ctx := lockOrderStore(t)
+	demand.CapabilityPrefix = st.TestOnlyLauncher(t)
+	claim, err := st.ClaimUnit(ctx, demand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
+	bootstrap, err := st.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence := capability.LeaseRef{Kind: bootstrap.Capability.Unit, ID: bootstrap.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	exchanged, err := st.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := blockRun(t, ctx, st)
+	b.start(func() error {
+		_, err := st.RenewLauncherPreparation(ctx, root, []capability.LeaseRef{fence})
+		return err
+	})
+	b.waitBlocked(1)
+	if !b.held(`SELECT 1 FROM capabilities WHERE prefix='` + exchanged.Capability.Prefix + `' FOR NO KEY UPDATE`) {
+		t.Fatal("preparation waits for the run without locking its current exchanged authority")
+	}
+	b.start(func() error { _, err := st.RenewUnit(ctx, exchanged.Capability.Prefix, false); return err })
+	b.waitBlocked(2)
+	b.release(2)
+}
+
+func TestPostgresLauncherPreparationRestartsDiscoveryAfterConcurrentExchange(t *testing.T) {
+	st, demand, ctx := lockOrderStore(t)
+	demand.CapabilityPrefix = st.TestOnlyLauncher(t)
+	claim, err := st.ClaimUnit(ctx, demand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
+	bootstrap, err := st.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence := capability.LeaseRef{Kind: bootstrap.Capability.Unit, ID: bootstrap.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	b := blockRun(t, ctx, st)
+	b.start(func() error {
+		_, err := st.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+		return err
+	})
+	b.waitBlocked(1)
+	b.start(func() error {
+		prepared, err := st.RenewLauncherPreparation(ctx, root, []capability.LeaseRef{fence})
+		if err == nil && len(prepared) != 0 {
+			return fmt.Errorf("preparation retained exchanged authority: %+v", prepared)
+		}
+		return err
+	})
+	b.waitBlocked(2)
+	b.release(2)
 }
 
 func TestPostgresExchangeLocksBootstrapAndRunBeforeJob(t *testing.T) {

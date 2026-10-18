@@ -307,13 +307,17 @@ extend an expired lease or revive a generation replaced by the same holder.
 Records and live receipts root the graph, including transitive manifest members.
 Collection waits `limits.BlobGCGrace`, takes the same blob lock as writers,
 rechecks reachability and sets the tombstone's `collecting_at` before it commits.
-It then calls `BlobDeleter` outside any transaction and finally deletes the blob
-row under the blob lock. A new upload, source upload or record clears a plain
-tombstone through `clearBlobTombstoneTx`, which refuses a collecting one with a
-conflict, so no reference is published to bytes that may be gone. A deletion
-failure or crash leaves the collecting tombstone, and the next leased pass
-repeats the idempotent deletion. A collecting digest that has gained a reference
-fails the pass loudly.
+Immediately before each physical delete, a fresh transaction rechecks the live
+maintenance lease and the same collecting tombstone. It then calls `BlobDeleter`
+outside any transaction and finally deletes the blob row under the blob lock,
+matching the collection timestamp. A new upload, source upload or record clears
+a plain tombstone through `clearBlobTombstoneTx`, which refuses a collecting one with a
+conflict. A deletion failure or crash leaves the collecting tombstone, and the
+next leased pass repeats the idempotent deletion. These checks narrow the window
+for an overlapping collector. S3 uses the observed ETag as `If-Match` on delete.
+Recoverable bytes can still be lost in a rare race, including identical S3
+bytes with the same ETag. A referenced digest with missing bytes fails loudly.
+A collecting digest that has gained a reference fails the pass loudly.
 
 `RecordSegments` and `ReadLogSegments` accept tagged job or owner-unit subjects.
 `Segment.Size` and `Offset` count decoded bytes. `StoredBytes` counts the
@@ -506,6 +510,10 @@ GitHub or git I/O while it holds locks. Sets such as ancestry, batches and
 migration destinations are discovered without locks, locked complete in this
 order, then reread and validated.
 
+`lock_order.go` defines the canonical tiers and comparator. Authority and unit
+batch locking use it. The acquisition-sequence test checks actual SQL against
+that order with shuffled authority and unit inputs.
+
 1. Global advisories, in fixed order: credit ledger, settings, compute and free
    tier, bootstrap and service enrollment, capacity admission.
 2. Singleton lease rows (maintenance, controller owner and reaper).
@@ -513,9 +521,10 @@ order, then reread and validated.
 4. Teams, sorted.
 5. Accounts, sorted.
 6. Memberships.
-7. The complete authority set: capabilities, then sessions, deepest first and
-   then by kind and key. Authority resolution reads leaf to root, so writers
-   lock leaf to root too. `lockAuthorityTx` takes registered claimants and
+7. The complete authority set, deepest first, then by kind and key at equal
+   depth. A delegated session precedes its capability parent. Authority
+   resolution reads leaf to root, so writers lock leaf to root too.
+   `lockAuthorityTx` takes registered claimants and
    observation targets `FOR NO KEY UPDATE` on first access and the rest shared.
 8. GitHub installations.
 9. Subscriptions, automation, bindings, pool rules, secrets and credentials.
@@ -538,11 +547,15 @@ Hot transaction families:
 | Claim, self-claim, reconcile | controller lease KS, authority set, owner, run, node, billing |
 | Renewal | controller lease KS, authority set, owner, run, node, entries, billing |
 | Exchange | bootstrap authority at write strength, owner, run, node |
-| Launcher preparation | controller lease KS, launcher and award authority, all owners, all runs, all nodes |
+| Launcher preparation | controller lease KS, launcher, bootstrap and current unit authority, all owners, all runs, all nodes |
 | Release and reporting | authority, owner, run, node, attempt and metadata rows |
 | GitHub source release | installation, then subscription |
 | Blob and source upload | authority, ticket, digest advisory, quota |
-| Blob collection | lease KS, digest advisory; deletion runs between two transactions |
+| Blob collection | lease KS, digest advisory; deletion runs between transactions |
+
+Launcher preparation and rejection discover bootstrap and current unit
+capability prefixes before authority locking. After locking the units, they
+reread that set. A changed set rolls back the transaction and restarts discovery.
 
 Justified exceptions:
 
@@ -552,17 +565,31 @@ Justified exceptions:
   is compatible with other key-share holders.
 - GitHub source release locks its installation after work rows. No transaction
   holds an installation and then waits on work.
-- Work billing still takes the ledger advisory after work locks, opposite team
-  and account deletion. Rare admin paths that remain out of order (findings 9-15,
-  20, 21 of the 2026-10 lock-order review, and the remaining parts of 22) rely on
-  the retry below.
+- Work billing takes the ledger advisory after work locks, opposite team and
+  account deletion. Tenant and operator revocation, membership changes, team
+  deletion requests, account deletion, purge finalization, leased retention,
+  sign-in and console mutations run their complete transaction bodies through
+  `inTx` because their admin lock order can conflict with live work.
 
 `inTx` reruns its whole function in a fresh transaction when PostgreSQL reports
 a deadlock (`40P01`) or serialization failure (`40001`): at most five attempts,
 with full-jitter backoff starting at 10 ms and capped at 250 ms. A function
 passed to `inTx` resets any state it shares with its caller on each attempt and
 performs no external I/O, and callbacks it invokes must tolerate a rerun.
+These admin bodies perform SQL mutations only. Each attempt rebuilds its result,
+including returned revocations, deletion counts and console approval batches.
+Console callbacks recheck live operator policy on each attempt. Transaction-local
+secret cleanup runs after commit. Sign-in retains its separate retry for uniqueness,
+slug and changed-identity conflicts. The controller acquires a fresh intake's
+run-cap token after rolling back its discovery transaction, then re-enters with
+a request-scoped grant. Conflict retries reuse that grant. Idempotent replays
+return before policy resolution and spend no token.
+
 Direct `beginTx` transactions are not retried. Object reads that a transaction
 needs run between attempts through `inBlobTx`/`withBlobIO`, which repeats the
-transaction with the stored result. The GitHub check reporter holds a session
-advisory on a connection with no transaction open.
+transaction with the stored result. Each publication pass batches every manifest
+in its snapshot. The four-pass bound counts graph changes after those reads,
+so a stable graph completes regardless of its manifest count. The GitHub check
+reporter holds a session advisory with no transaction open in a separate pool
+limited to two connections. Its metadata and callbacks use the operational pool,
+including when that pool permits only one connection.

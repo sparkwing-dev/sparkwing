@@ -160,7 +160,21 @@ func (s *S3) DeleteBlob(ctx context.Context, object Blob) error {
 	if err != nil {
 		return err
 	}
-	return s.DeleteObject(ctx, key)
+	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(key))})
+	if s3Error(err, "NoSuchKey", "NotFound") {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if aws.ToString(head.ETag) == "" {
+		return fmt.Errorf("blob collection requires an object ETag")
+	}
+	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(key)), IfMatch: head.ETag})
+	if s3Error(err, "NoSuchKey", "NotFound") {
+		return nil
+	}
+	return err
 }
 
 // Get opens an exact log key for a controller-authorized read. The committed

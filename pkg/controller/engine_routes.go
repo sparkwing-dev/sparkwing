@@ -181,7 +181,9 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 			return err
 		}
 		ctx := context.WithValue(r.Context(), verifiedIntakeSourceKey{}, verifiedIntakeSource{location: body.Request.Source.Location, repository: body.Request.Git.Repository})
-		response, err := engine.CreateRun(ctx, a, body)
+		response, err := s.admitWithFlood(ctx, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
+			return engine.CreateRun(ctx, a, body)
+		})
 		if err != nil {
 			return err
 		}

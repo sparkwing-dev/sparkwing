@@ -147,10 +147,11 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 	return removed, nil
 }
 
-// safety: collecting_at is the publication fence for the deletion outside the
-// transaction: clearBlobTombstoneTx refuses new references until the row is gone.
+// safety: collecting_at refuses publication until deletion finishes, but the final
+// lease/tombstone check cannot fence a process paused inside a backend delete.
 func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob.Blob, deleter BlobDeleter) (bool, error) {
 	var claimed bool
+	var collectingAt int64
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		claimed = false
 		if err := lockCollectedBlobTx(ctx, tx, lease, b); err != nil {
@@ -177,7 +178,19 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		}
 		b.CreatedAt = time.Unix(0, created).UTC()
 		claimed = true
-		_, err = tx.ExecContext(ctx, "UPDATE blob_tombstones SET collecting_at=? WHERE team=? AND digest=? AND collecting_at IS NULL", tx.now().UnixNano(), b.Team, b.Digest)
+		collectingAt = collecting.Int64
+		if collecting.Valid {
+			return nil
+		}
+		collectingAt = tx.now().UnixNano()
+		_, err = tx.ExecContext(ctx, "UPDATE blob_tombstones SET collecting_at=? WHERE team=? AND digest=? AND collecting_at IS NULL", collectingAt, b.Team, b.Digest)
+		return err
+	})
+	if err != nil || !claimed {
+		return false, err
+	}
+	err = o.s.inTx(ctx, func(tx *storeTx) (err error) {
+		claimed, err = blobCollectionCurrentTx(ctx, tx, lease, b, collectingAt)
 		return err
 	})
 	if err != nil || !claimed {
@@ -187,7 +200,9 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		return false, err
 	}
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockCollectedBlobTx(ctx, tx, lease, b); err != nil {
+		claimed = false
+		current, err := blobCollectionCurrentTx(ctx, tx, lease, b, collectingAt)
+		if err != nil || !current {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM blob_members WHERE team=? AND (manifest_digest=? OR member_digest=?)", b.Team, b.Digest, b.Digest); err != nil {
@@ -197,16 +212,32 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		if err != nil {
 			return err
 		}
-		return requireOneRow(result, "blob collection")
+		if err := requireOneRow(result, "blob collection"); err != nil {
+			return err
+		}
+		claimed = true
+		return nil
 	})
-	return err == nil, err
+	return claimed && err == nil, err
+}
+
+func blobCollectionCurrentTx(ctx context.Context, tx *storeTx, lease SingletonLease, b blob.Blob, collectingAt int64) (bool, error) {
+	if err := lockCollectedBlobTx(ctx, tx, lease, b); err != nil {
+		return false, err
+	}
+	var current int
+	err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM blob_tombstones WHERE team=? AND digest=? AND collecting_at=?", b.Team, b.Digest, collectingAt).Scan(&current)
+	return current == 1, err
 }
 
 func lockCollectedBlobTx(ctx context.Context, tx *storeTx, lease SingletonLease, b blob.Blob) error {
 	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
 		return err
 	}
-	return advisoryLockTx(ctx, tx, "blob:"+b.Team+":"+string(b.Digest))
+	if err := advisoryLockTx(ctx, tx, "blob:"+b.Team+":"+string(b.Digest)); err != nil {
+		return err
+	}
+	return assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now())
 }
 
 // safety: callers hold the digest's blob lock, which orders this check against collection.

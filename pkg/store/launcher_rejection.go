@@ -9,13 +9,7 @@ import (
 
 // RejectLauncherAwards fails only exact awards issued under the authenticated launcher's ancestry.
 func (s *Store) RejectLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef) error {
-	return s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockClaimControllerTx(ctx, tx); err != nil {
-			return err
-		}
-		if err := lockLauncherBatchTx(ctx, tx, authority, fences, false); err != nil {
-			return err
-		}
+	return s.inLauncherBatchTx(ctx, authority, fences, false, func(tx *storeTx) error {
 		chain, err := authorityChainTx(ctx, tx, authority, true)
 		if err != nil {
 			return err

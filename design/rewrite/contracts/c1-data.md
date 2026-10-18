@@ -1,5 +1,21 @@
 # C1 data contract
 
+## Collection and required blob reads
+
+Integration amendment under the store review ruling: collection rechecks the
+maintenance lease after digest-lock waits and verifies the same collecting
+tombstone immediately before physical deletion. Finalization also requires
+that tombstone. S3 deletes use the observed ETag as `If-Match`. Missing ETags,
+failed conditions and backend errors retain the tombstone for another pass.
+No object generation or schema change is introduced. A process paused after
+the final check can still race a later publication, including identical S3
+bytes that retain the same ETag. This recoverable-data loss is accepted.
+
+Required reads return errors for missing bytes and refuse successful partial
+data. Remote memo and depcache lookups propagate physical verification errors
+and grant no artifact edges on failure. An absent logical memo record remains
+a cache miss. Materialization retains its explicit cold-execution miss policy.
+
 ## Submitted environment retention
 
 Integration amendment: IntakeRequest.SubmittedEnv carries private values outside

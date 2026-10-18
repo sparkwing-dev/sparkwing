@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -17,6 +19,49 @@ import (
 type records struct {
 	blob.RecordStore
 	lookup func(context.Context, blob.RecordLookup) (blob.RecordLookupResult, error)
+}
+
+func TestRemoteMemoMissingReferencedBytesFailProperty(t *testing.T) {
+	property := func(body []byte, absent uint8) bool {
+		output, member := string(body), "artifact:"+string(body)
+		outputDigest, memberDigest := digest(output), digest(member)
+		manifestBody := fmt.Sprintf(`{"entries":[{"path":"out","digest":"%s","size":%d,"mode":420}]}`, memberDigest, len(member))
+		manifestDigest := digest(manifestBody)
+		bodies := map[blob.Digest]string{outputDigest: output, manifestDigest: manifestBody, memberDigest: member}
+		missing := []blob.Digest{outputDigest, manifestDigest, memberDigest}[absent%3]
+		bytes := blob.NewSignedStore(blob.SignedStoreOptions{
+			Signer: &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
+				return blob.SignedTransfer{Digest: q.Digest, Size: int64(len(bodies[q.Digest]))}, nil
+			}},
+			HTTPClient: transfer(func(_ context.Context, tr blob.SignedTransfer, _ io.Reader) (io.ReadCloser, error) {
+				if tr.Digest == missing {
+					return nil, blob.ErrNotFound
+				}
+				return io.NopCloser(strings.NewReader(bodies[tr.Digest])), nil
+			}),
+		})
+		r := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
+			key := q.Key
+			key.Team, key.Scope.Ref = "team", blob.RefScope{Ref: "main", Verified: true}
+			return blob.RecordLookupResult{Found: true, VerifiedDefault: true, Record: blob.Record{Key: key, Digest: outputDigest, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifestDigest}}, Members: []blob.Member{{Team: "team", ManifestDigest: manifestDigest, Digest: memberDigest, Path: "out", Size: int64(len(member)), Mode: 0o644}}}, nil
+		}}
+		cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: r}, bytes)
+		if err != nil {
+			return false
+		}
+		hit, err := cache.Memo(t.Context(), blob.MemoKey{Repo: "gh:123", Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, blob.Budget{})
+		if hit.Found || !errors.Is(err, blob.ErrNotFound) {
+			return false
+		}
+		if record, err := cache.Depcache(t.Context(), blob.DepcacheKey{Repo: "gh:123", Name: "modules", Key: "lock"}, blob.Budget{}); record.Digest != "" || !errors.Is(err, blob.ErrNotFound) {
+			return false
+		}
+		_, err = cache.Artifact(t.Context(), outputDigest)
+		return errors.Is(err, blob.ErrDigestNotReadable)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(591))}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (r records) LookupRecord(ctx context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
@@ -62,7 +107,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 		t.Fatal("arbitrary artifact was readable")
 	}
 	budget := blob.Budget{Deadline: time.Now().Add(time.Minute)}
-	if hit, err := cache.Memo(t.Context(), key, blob.Budget{Deadline: time.Now().Add(-time.Second)}); err != nil || hit.Found {
+	if hit, err := cache.Memo(t.Context(), key, blob.Budget{Deadline: time.Now().Add(-time.Second)}); !errors.Is(err, blob.ErrBudget) || hit.Found {
 		t.Fatalf("expired memo budget=%+v %v", hit, err)
 	}
 	hit, err := cache.Memo(t.Context(), key, budget)
@@ -136,7 +181,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 				t.Fatal(err)
 			}
 			hit, err := isolated.Memo(t.Context(), key, budget)
-			if err != nil || hit.Found {
+			if err == nil || hit.Found {
 				t.Fatalf("unsafe memo hit: %+v, %v", hit, err)
 			}
 			if _, err := isolated.Artifact(t.Context(), d); !errors.Is(err, blob.ErrDigestNotReadable) {
@@ -197,7 +242,7 @@ func TestRemoteMemoVerifiesBeforeGrantingArtifacts(t *testing.T) {
 				t.Fatal(err)
 			}
 			hit, err := cache.Memo(ctx, blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, blob.Budget{})
-			if hit.Found || (ctx.Err() != nil && !errors.Is(err, context.Canceled)) || (ctx.Err() == nil && err != nil) {
+			if hit.Found || err == nil || (ctx.Err() != nil && !errors.Is(err, context.Canceled)) {
 				t.Fatalf("failed memo = %+v, %v", hit, err)
 			}
 			if fault != "lookup_cancelled" && !body.closed {

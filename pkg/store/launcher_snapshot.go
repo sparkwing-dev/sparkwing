@@ -139,32 +139,106 @@ func launcherEvalLiveTx(ctx context.Context, tx *storeTx, award LauncherAward) (
 	return live == 1, err
 }
 
-// safety: a caller-ordered batch locks every authority and unit up front, or two batches lock jobs in opposite orders.
+var errLauncherAuthorityChanged = errors.New("launcher authority changed during lock discovery")
+
+func (s *Store) inLauncherBatchTx(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef, observed bool, fn func(*storeTx) error) error {
+	for range 5 {
+		err := s.inTx(ctx, func(tx *storeTx) error {
+			if err := lockClaimControllerTx(ctx, tx); err != nil {
+				return err
+			}
+			if err := lockLauncherBatchTx(ctx, tx, authority, fences, observed); err != nil {
+				return err
+			}
+			return fn(tx)
+		})
+		if !errors.Is(err, errLauncherAuthorityChanged) {
+			return err
+		}
+	}
+	return authorityError(apierr.Conflict, "launcher authority kept changing during lock discovery")
+}
+
 func lockLauncherBatchTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, fences []capability.LeaseRef, observed bool) error {
-	refs := []capability.AuthorityRef{authority}
+	prefixes, err := launcherBatchPrefixesTx(ctx, tx, fences)
+	if err != nil {
+		return err
+	}
+	refs := make([]capability.AuthorityRef, 1, len(prefixes)+1)
+	refs[0] = authority
+	for _, prefix := range prefixes {
+		refs = append(refs, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	}
 	var writes []string
+	if observed {
+		writes = prefixes
+	}
+	if err := lockAuthorityTx(ctx, tx, refs, writes...); err != nil {
+		return err
+	}
 	var units []UnitRef
 	for _, fence := range fences {
 		if unit, err := decodeAwardUnit(fence.Kind, fence.ID); err == nil {
 			units = append(units, unit)
 		}
+	}
+	if err := lockUnitsTx(ctx, tx, units); err != nil {
+		return err
+	}
+	current, err := launcherBatchPrefixesTx(ctx, tx, fences)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(prefixes, current) {
+		return errLauncherAuthorityChanged
+	}
+	return nil
+}
+
+func launcherBatchPrefixesTx(ctx context.Context, tx *storeTx, fences []capability.LeaseRef) ([]string, error) {
+	var prefixes []string
+	for _, fence := range fences {
 		prefix, err := launcherAwardPrefixTx(ctx, tx, fence)
 		var refused *apierr.Error
 		if errors.As(err, &refused) {
 			continue
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
-		refs = append(refs, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
-		if observed {
-			writes = append(writes, prefix)
+		prefixes = append(prefixes, prefix)
+		bootstrap, err := loadCapabilityTx(ctx, tx, prefix)
+		if err != nil {
+			return nil, err
+		}
+		unit, err := decodeAwardUnit(fence.Kind, fence.ID)
+		if err != nil {
+			return nil, err
+		}
+		query, args := "", []any{bootstrap.Team, unit.RunID}
+		switch unit.Kind {
+		case capability.UnitPlan:
+			query = `SELECT capability_prefix FROM triggers WHERE team=? AND id=?`
+		case capability.UnitNode:
+			query, args = `SELECT capability_prefix FROM nodes WHERE team=? AND run_id=? AND node_id=?`, append(args, unit.NodeID)
+		case capability.UnitEval:
+			query, args = `SELECT capability_prefix FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, append(args, unit.NodeID, unit.SourceGeneration)
+		default:
+			return nil, bindingRefusal()
+		}
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&prefix)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if prefix != "" {
+			prefixes = append(prefixes, prefix)
 		}
 	}
-	if err := lockAuthorityTx(ctx, tx, refs, writes...); err != nil {
-		return err
-	}
-	return lockUnitsTx(ctx, tx, units)
+	slices.Sort(prefixes)
+	return slices.Compact(prefixes), nil
 }
 
 func launcherAwardPrefixTx(ctx context.Context, tx *storeTx, lease capability.LeaseRef) (string, error) {

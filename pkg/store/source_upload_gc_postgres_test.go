@@ -8,6 +8,7 @@ import (
 	"errors"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,6 +50,7 @@ func newSourceGCFixture(t *testing.T, ctx context.Context) sourceGCFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.exec(t, ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES ($1,'storage',$2,$3)`, tenant.Team(), now.Format("2006-01"), now.UnixNano())
 	f.exec(t, ctx, `INSERT INTO blobs(team,digest,size,created_at) VALUES ($1,$2,3,1)`, tenant.Team(), f.digest)
 	f.exec(t, ctx, `INSERT INTO blob_tombstones(team,digest,marked_at) VALUES ($1,$2,$3)`, tenant.Team(), f.digest, now.Add(-limits.BlobGCGrace-time.Minute).UnixNano())
 	if f.lease, err = s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "collector", time.Hour); err != nil {
@@ -116,8 +118,9 @@ func TestPostgresSourceReservationWaitsForCollectionDecision(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { _, err := f.reserve(ctx, "racing"); done <- err }()
 	f.blockedBehind(t, ctx, blocker, done)
-	if _, err := blocker.ExecContext(ctx, `SELECT 1 FROM quota_admission WHERE team=$1 FOR UPDATE NOWAIT`, f.tenant.Team()); err != nil {
-		t.Fatalf("reservation locked quota before the digest: %v", err)
+	var quotaRows int
+	if err := blocker.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM quota_admission WHERE team=$1 FOR UPDATE NOWAIT) locked`, f.tenant.Team()).Scan(&quotaRows); err != nil || quotaRows != 1 {
+		t.Fatalf("reservation quota probe selected %d rows: %v", quotaRows, err)
 	}
 	if _, err := blocker.ExecContext(ctx, `UPDATE blob_tombstones SET collecting_at=1 WHERE team=$1 AND digest=$2`, f.tenant.Team(), f.digest); err != nil {
 		t.Fatal(err)
@@ -144,11 +147,12 @@ func TestPostgresSourceCommitLocksDigestBeforeQuota(t *testing.T) {
 	}()
 	f.blockedBehind(t, ctx, blocker, done)
 	for _, query := range []string{
-		`SELECT 1 FROM quota_admission WHERE team=$1 FOR UPDATE NOWAIT`,
-		`SELECT 1 FROM quota_reservations WHERE team=$1 FOR UPDATE NOWAIT`,
+		`SELECT COUNT(*) FROM (SELECT 1 FROM quota_admission WHERE team=$1 FOR UPDATE NOWAIT) locked`,
+		`SELECT COUNT(*) FROM (SELECT 1 FROM quota_reservations WHERE team=$1 FOR UPDATE NOWAIT) locked`,
 	} {
-		if _, err := blocker.ExecContext(ctx, query, f.tenant.Team()); err != nil {
-			t.Fatalf("commit locked quota before the digest: %v", err)
+		var quotaRows int
+		if err := blocker.QueryRowContext(ctx, query, f.tenant.Team()).Scan(&quotaRows); err != nil || quotaRows != 1 {
+			t.Fatalf("commit quota probe selected %d rows: %v", quotaRows, err)
 		}
 	}
 	if err := blocker.Rollback(); err != nil {
@@ -179,6 +183,32 @@ func TestPostgresBlobCollectionFencesSourceReservationDuringDeletion(t *testing.
 	var blobs int
 	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM blobs WHERE team=$1 AND digest=$2`, f.tenant.Team(), f.digest).Scan(&blobs); err != nil || blobs != 0 {
 		t.Fatalf("collected blob row survived: %d: %v", blobs, err)
+	}
+}
+
+func TestPostgresBlobCollectionRechecksLeaseAfterDigestWait(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	f := newSourceGCFixture(t, ctx)
+	blocker := lockBlobDigest(t, ctx, f)
+	var calls atomic.Int32
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.s.AsOperator().CollectBlobTombstones(ctx, f.lease, 10, sourceGCDeleter(func(context.Context, blob.Blob) error {
+			calls.Add(1)
+			return nil
+		}))
+		done <- err
+	}()
+	f.blockedBehind(t, ctx, blocker, done)
+	if _, err := blocker.ExecContext(ctx, `UPDATE leases SET until=0 WHERE name='maintenance'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := blocker.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, store.ErrLockHeld) || calls.Load() != 0 {
+		t.Fatalf("collection after lease expiry: deletes=%d error=%v", calls.Load(), err)
 	}
 }
 

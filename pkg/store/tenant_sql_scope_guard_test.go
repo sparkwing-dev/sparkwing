@@ -35,7 +35,7 @@ var reviewedUnscopedSQL = map[string]string{
 
 	"refundableBillingSecondsTx":        "the deployment credit sampler totals unsettled awards across teams from their immutable billing records",
 	"(*Operator).CollectBlobTombstones": "the elected blob collector visits expired tombstones across teams and deletes each exact tenant digest",
-	"(*Operator).maintainRetention":     "the elected maintenance pass counts retained pins and records across all teams",
+	"maintainRetentionTx":               "the elected maintenance pass counts retained pins and records across all teams",
 	"deleteRetentionRecordsTx":          "the elected maintenance pass selects expired records across teams and deletes exact tenant record keys",
 
 	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
@@ -75,7 +75,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).lookupSession":           "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
 	"(*Store).DeleteSession":           "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Store).mintCSRFKey":             "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
-	"(*Store).resolveSignInOnce":       "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
+	"resolveSignInTx":                  "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"approveOneTx":                     "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",

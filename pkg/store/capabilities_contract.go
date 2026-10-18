@@ -418,15 +418,8 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	return chain, nil
 }
 
-// safety: observation stamps registered claimants, so they and writes lock for update before any work row.
-// Resolution shares leaf to root, so the whole ancestry locks deepest first; see STORE-DATA.md lock order.
 func lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.AuthorityRef, writes ...string) error {
-	type held struct {
-		ref   capability.AuthorityRef
-		depth int
-		write bool
-	}
-	var set []held
+	var set []authorityLock
 	for _, leaf := range leaves {
 		chain, err := authorityChainTx(ctx, tx, leaf, false)
 		var refused *apierr.Error
@@ -439,19 +432,14 @@ func lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.Autho
 		for i, node := range chain {
 			ref := node.principal.Authority
 			write := ref.Kind == capability.AuthorityCapability && (registeredClaimant(node.principal.Capability) || slices.Contains(writes, ref.ID))
-			if at := slices.IndexFunc(set, func(h held) bool { return h.ref == ref }); at >= 0 {
+			if at := slices.IndexFunc(set, func(h authorityLock) bool { return h.ref == ref }); at >= 0 {
 				set[at].write = set[at].write || write
 				continue
 			}
-			set = append(set, held{ref, len(chain) - 1 - i, write})
+			set = append(set, authorityLock{ref, len(chain) - 1 - i, write})
 		}
 	}
-	slices.SortFunc(set, func(a, b held) int {
-		if a.depth != b.depth {
-			return b.depth - a.depth
-		}
-		return strings.Compare(string(a.ref.Kind)+a.ref.ID, string(b.ref.Kind)+b.ref.ID)
-	})
+	slices.SortFunc(set, compareAuthorityLocks)
 	for _, h := range set {
 		query := "SELECT prefix FROM capabilities WHERE prefix=?"
 		if h.ref.Kind == capability.AuthoritySession {
@@ -519,68 +507,62 @@ func resolveActorTx(ctx context.Context, tx *storeTx, actor Actor) (capability.P
 
 // RevokeAuthority revokes a member's own authority or a tenant administrator's target.
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	p, err := resolveActorTx(ctx, tx, actor)
-	if err != nil {
-		return err
-	}
-	if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone {
-		return authorityError(apierr.Forbidden, "revocation requires unbound tenant authority")
-	}
-	targetNode, err := readAuthorityTx(ctx, tx, target, true)
-	if err != nil {
-		return err
-	}
-	if targetNode.principal.Capability.Team != string(t.team) {
-		return authorityError(apierr.Forbidden, "revocation target belongs to another team")
-	}
-	if err := machineAdministrationTx(ctx, tx, p, targetNode.principal.Capability); err != nil {
-		return err
-	}
-	if !slices.Contains(p.Capability.Grants, capability.TeamAdmin) && p.Authority != target {
-		if target.Kind != capability.AuthorityCapability {
-			return bindingRefusal()
-		}
-		if err := bindingTokenTx(ctx, tx, p.Capability, capability.Target{Team: string(t.team), TokenPrefix: target.ID}); err != nil {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		p, err := resolveActorTx(ctx, tx, actor)
+		if err != nil {
 			return err
 		}
-	}
-	if err := revokeAuthorityTx(ctx, tx, target); err != nil {
-		return err
-	}
-	return tx.Commit()
+		if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone {
+			return authorityError(apierr.Forbidden, "revocation requires unbound tenant authority")
+		}
+		targetNode, err := readAuthorityTx(ctx, tx, target, true)
+		if err != nil {
+			return err
+		}
+		if targetNode.principal.Capability.Team != string(t.team) {
+			return authorityError(apierr.Forbidden, "revocation target belongs to another team")
+		}
+		if err := machineAdministrationTx(ctx, tx, p, targetNode.principal.Capability); err != nil {
+			return err
+		}
+		if !slices.Contains(p.Capability.Grants, capability.TeamAdmin) && p.Authority != target {
+			if target.Kind != capability.AuthorityCapability {
+				return bindingRefusal()
+			}
+			if err := bindingTokenTx(ctx, tx, p.Capability, capability.Target{Team: string(t.team), TokenPrefix: target.ID}); err != nil {
+				return err
+			}
+		}
+		if err := revokeAuthorityTx(ctx, tx, target); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // RevokeAuthority limits deployment revocation to service and operator roots.
 func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error {
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	p, err := resolveActorTx(ctx, tx, actor)
-	if err != nil {
-		return err
-	}
-	if !(capability.DeploymentAuthority(p) && slices.Contains(p.Capability.Grants, capability.OperatorTokens)) && !(p.Class == capability.CredentialConsole && slices.Contains(p.Capability.Grants, capability.OperatorConsole)) {
-		return authorityError(apierr.Forbidden, "deployment token authority is required")
-	}
-	node, err := readAuthorityTx(ctx, tx, target, true)
-	if err != nil {
-		return err
-	}
-	c := node.principal.Capability
-	if target.Kind != capability.AuthorityCapability || c.Parent != nil || c.Team != "" || (c.Subject.Kind != capability.SubjectService && c.Subject.Kind != capability.SubjectOperator) {
-		return authorityError(apierr.Forbidden, "target is not a deployment root")
-	}
-	if err := revokeAuthorityTx(ctx, tx, target); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		p, err := resolveActorTx(ctx, tx, actor)
+		if err != nil {
+			return err
+		}
+		if !(capability.DeploymentAuthority(p) && slices.Contains(p.Capability.Grants, capability.OperatorTokens)) && !(p.Class == capability.CredentialConsole && slices.Contains(p.Capability.Grants, capability.OperatorConsole)) {
+			return authorityError(apierr.Forbidden, "deployment token authority is required")
+		}
+		node, err := readAuthorityTx(ctx, tx, target, true)
+		if err != nil {
+			return err
+		}
+		c := node.principal.Capability
+		if target.Kind != capability.AuthorityCapability || c.Parent != nil || c.Team != "" || (c.Subject.Kind != capability.SubjectService && c.Subject.Kind != capability.SubjectOperator) {
+			return authorityError(apierr.Forbidden, "target is not a deployment root")
+		}
+		if err := revokeAuthorityTx(ctx, tx, target); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) error {

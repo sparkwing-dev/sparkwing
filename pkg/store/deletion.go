@@ -96,11 +96,17 @@ type AccountDeletion struct {
 // with no membership check, for a deletion request that arrived by mail.
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error) {
 	t := &Tenant{s: o.s, team: NormalizeTeam(team)}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	defer rollbackOrLog(tx)
+	var result TeamDeletion
+	var revoked []string
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		result, revoked, err = t.requestTeamDeletionTx(ctx, tx, now)
+		return err
+	})
+	return result, revoked, err
+}
+
+func (t *Tenant) requestTeamDeletionTx(ctx context.Context, tx *storeTx, now time.Time) (TeamDeletion, []string, error) {
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return TeamDeletion{}, nil, err
 	}
@@ -115,7 +121,7 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 	if err != nil {
 		return TeamDeletion{}, nil, err
 	}
-	return del, revoked, tx.Commit()
+	return del, revoked, nil
 }
 
 // safety: a payment that completes after the purge finds no team to credit,
@@ -403,31 +409,28 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now 
 	if err := o.deleteTenantRows(ctx, team); err != nil {
 		return err
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	at := now.UTC().Unix()
-	res, err := tx.ExecContext(ctx, `
-		UPDATE team_deletions SET state = ?, finished_at = ?, recheck_at = ?, last_error = '',
-		    lease_holder = '', lease_until = NULL
-		WHERE slug = ? AND state = ? AND lease_holder = ?`,
-		TeamDeletionDone, at, now.Add(recheckAfter).UTC().Unix(), string(team), TeamDeletionPending, holder)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return errors.Join(fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team), err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM teams WHERE name = ?`, string(team)); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE accounts SET active_team = '', updated_at = ? WHERE active_team = ?`, at, string(team)); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		at := now.UTC().Unix()
+		res, err := tx.ExecContext(ctx, `
+			UPDATE team_deletions SET state = ?, finished_at = ?, recheck_at = ?, last_error = '',
+			    lease_holder = '', lease_until = NULL
+			WHERE slug = ? AND state = ? AND lease_holder = ?`,
+			TeamDeletionDone, at, now.Add(recheckAfter).UTC().Unix(), string(team), TeamDeletionPending, holder)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			return errors.Join(fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team), err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM teams WHERE name = ?`, string(team)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE accounts SET active_team = '', updated_at = ? WHERE active_team = ?`, at, string(team)); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // FinishTeamRecheck sweeps a finished deletion's team once more and closes
@@ -490,16 +493,13 @@ func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, er
 // a team that has other members, because deleting it would leave those
 // members in a team nobody can administer.
 func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return AccountDeletion{}, err
-	}
-	defer rollbackOrLog(tx)
-	out, err := s.deleteAccountTx(ctx, tx, accountID, now)
-	if err != nil {
-		return AccountDeletion{}, err
-	}
-	return out, tx.Commit()
+	var result AccountDeletion
+	err := s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		result, err = s.deleteAccountTx(ctx, tx, accountID, now)
+		return err
+	})
+	return result, err
 }
 
 func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (AccountDeletion, error) {
