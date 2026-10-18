@@ -1365,3 +1365,9 @@ rereads its private credential file on every controller request. Charts grant
 NodeClaim get/delete, NodePool get and PriorityClass list. LimitRange list is
 removed. operator teams show --team reports node_label_key and node_label_value
 in JSON and the label assignment in plain/pretty output.
+
+## Launcher admission enforcement (2026-10-18)
+
+Supersedes the Pod-verification parts of the EKS verification amendment and the launcher review reconciliation. Cloud Jobs run in `launcher.jobNamespace` (default `<release>-jobs`, never the release namespace), which holds the customer ServiceAccount, the launcher Role and the egress policies. `launcher.AdmissionPolicies` builds params-free ValidatingAdmissionPolicies for Pods and Jobs (CREATE/UPDATE, failurePolicy Fail), bound with [Deny] to that namespace's `kubernetes.io/metadata.name`; the chart template is generated from it. `Run` refuses to start unless the live objects equal that output for its SelfSubjectReview username, namespace and images.
+
+The launcher keeps a synchronous award backstop. It checks create and patch responses. At activation and on every sync it compares the Job template with the binding and reservation, and each owned Pod with the template (team label, selector, node, images, container and pod resources; VPC ENI is ignored). Only a mismatch rejects: annotation, Retire, UID-fenced delete, then a failed award through `/launcher/sync`. There is no background verifier, activation grace, EKS allow-list or requested-template annotation.
