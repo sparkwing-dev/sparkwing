@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"math"
 	"slices"
 
@@ -44,11 +46,11 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	var team, repo, display string
 	var requestBody, specBody, pools []byte
 	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json,allowed_pools FROM runs WHERE id=?`, unit.RunID).Scan(&team, &repo, &display, &requestBody, &specBody, &pools)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !launcherClaimant(p.Capability) && p.Capability.Team != team {
+		return profile, match.Demand{}, bindingRefusal()
+	}
 	if err != nil {
 		return profile, match.Demand{}, err
-	}
-	if !launcherClaimant(p.Capability) && p.Capability.Team != team {
-		return profile, match.Demand{}, authorityError(apierr.Forbidden, "claimant belongs to another team")
 	}
 	var requestSeal runspec.SealedRequest
 	if err = json.Unmarshal(requestBody, &requestSeal); err != nil {
