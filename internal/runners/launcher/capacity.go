@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
@@ -191,8 +193,7 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var observations []CloudJobObservation
-	byJob := map[string]*corev1.Pod{}
+	var errs []error
 	for i := range pods {
 		pod := &pods[i]
 		var d capacityDemand
@@ -201,29 +202,38 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 		}
 		name := jobName(d.Binding)
 		held := l.held(pod.Name)
-		observations = append(observations, CloudJobObservation{Binding: d.Binding, JobName: name, NodeUID: string(pod.UID), ReservationID: capacityObservedID + string(pod.UID), Unheld: held == nil || !sameBinding(held.Binding, d.Binding)})
-		byJob[name] = pod
-	}
-	if len(observations) == 0 {
-		return nil
-	}
-	states, err := l.retirements(ctx, observations)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for name, state := range states {
-		pod := byJob[name]
-		if state.Delete {
-			l.forget(pod.Name)
-		} else if err := l.authenticateCapacity(ctx, pod, state); err != nil {
+		observation := CloudJobObservation{Binding: d.Binding, JobName: name, NodeUID: string(pod.UID), ReservationID: capacityObservedID + string(pod.UID), Unheld: held == nil || !sameBinding(held.Binding, d.Binding)}
+		states, err := l.retirements(ctx, []CloudJobObservation{observation})
+		if err != nil && !capacityIdentityRefused(err) {
 			errs = append(errs, err)
-		} else {
 			continue
 		}
+		if err != nil {
+			logger := l.Logger
+			if logger == nil {
+				logger = slog.Default()
+			}
+			logger.Warn("controller refused capacity Pod identity", "pod", pod.Name, "uid", pod.UID, "error", err)
+		} else if state := states[name]; !state.Delete {
+			if err := l.authenticateCapacity(ctx, pod, state); err != nil {
+				errs = append(errs, err)
+			} else {
+				continue
+			}
+		}
+		l.forget(pod.Name)
 		errs = append(errs, l.deleteCapacityPod(ctx, pod))
 	}
 	return errors.Join(errs...)
+}
+
+func capacityIdentityRefused(err error) bool {
+	var failure *apierr.Error
+	if !errors.As(err, &failure) {
+		return false
+	}
+	return failure.Code == apierr.LockHeld || failure.Code == apierr.Forbidden &&
+		(failure.Details["reason"] == apierr.ReasonBinding || failure.Details["reason"] == string(apierr.ReasonBinding))
 }
 
 func (l *Launcher) wait(award *CloudJobAward) {

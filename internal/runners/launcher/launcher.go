@@ -85,18 +85,26 @@ func (l *Launcher) Run(ctx context.Context) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	verified := make(chan struct{})
+	go func() {
+		defer close(verified)
+		l.enforceLocal(ctx, poll, logger)
+	}()
+	defer func() {
+		cancel()
+		<-verified
+	}()
 	var cooldown time.Time
 	for ctx.Err() == nil {
-		if time.Now().Before(cooldown) {
-			if err := l.verifyLocal(ctx); err != nil {
-				logger.Warn("launcher verification failed", failureAttrs(err)...)
+		if !time.Now().Before(cooldown) {
+			if err := l.sync(ctx); err != nil {
+				logger.Warn("launcher reconciliation failed", failureAttrs(err)...)
+				cooldown = time.Now().Add(retryWait(err, 0))
+			} else if _, err := l.LaunchOne(ctx); err != nil {
+				logger.Warn("launcher claim failed", failureAttrs(err)...)
+				cooldown = time.Now().Add(retryWait(err, 0))
 			}
-		} else if err := l.Sync(ctx); err != nil {
-			logger.Warn("launcher reconciliation failed", failureAttrs(err)...)
-			cooldown = time.Now().Add(retryWait(err, 0))
-		} else if _, err := l.LaunchOne(ctx); err != nil {
-			logger.Warn("launcher claim failed", failureAttrs(err)...)
-			cooldown = time.Now().Add(retryWait(err, 0))
 		}
 		timer := time.NewTimer(poll)
 		select {
@@ -107,6 +115,24 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (l *Launcher) enforceLocal(ctx context.Context, poll time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		pass, cancel := context.WithTimeout(ctx, poll)
+		err := l.verifyLocal(pass)
+		cancel()
+		if err != nil {
+			logger.Warn("launcher verification failed", failureAttrs(err)...)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func retryWait(err error, poll time.Duration) time.Duration {

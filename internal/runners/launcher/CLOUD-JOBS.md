@@ -53,9 +53,13 @@ policy instead of priority zero. Multiple defaults select the lowest value, as
 Kubernetes does. Other spec differences remain mismatches. Clusters changing the
 standard toleration/grace defaults need matching configuration and native QA.
 All other changes, including missing authored security fields, reject the Pod.
-Containment needs only Kubernetes and runs on every pass, including controller
-cooldowns: the launcher records a rejection annotation, cordons the reserved
-node, UID-fences deletion of its Karpenter NodeClaim and UID-fences Job deletion.
+Run schedules local verification immediately and on an independent poll ticker,
+with one poll interval as each pass's deadline. Controller cooldowns and in-flight
+requests cannot pause it. Shutdown cancels and joins the local goroutine.
+Containment needs only Kubernetes: the launcher records a rejection annotation,
+cordons the reserved node, UID-fences deletion of its Karpenter NodeClaim and
+UID-fences Job deletion. Local passes retry interrupted containment and discard
+malformed Job ownership without waiting for the controller.
 Reconciliation then tells the controller to fail that exact plan, eval or work
 award. The annotation and cleanup finalizer retain ownership until the
 controller acknowledges failure and every container stops. A failed retirement retains cleanup ownership and
@@ -362,11 +366,15 @@ and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
   award requests again.
 - Each launcher pass retries held awards. Reservation may consume the team's
   own requests on a node: it persists the reservation and its taint first, then
-  deletes them and waits for their removal before the Job is created. No Pod
-  occupies the node in between.
+  deletes them and waits for their removal. Boundary probe Pods then occupy
+  the node during measurement and are removed before Job creation. The NodePool's
+  consolidateAfter covers the empty gaps around those probes.
 - Sync observes each request through its recorded award. Awards this launcher
   holds are renewed by that observation; others are only checked. A request
   is deleted when the controller ends its award or the award deadline passes.
+  Requests are reconciled individually. A definitive binding or fence refusal
+  deletes only the refused Pod by UID and lets other requests and claims proceed.
+  Transport, overload and service-credential errors retain the request for retry.
 
 Team NodePools need `disruption: {consolidationPolicy: WhenEmpty,
 consolidateAfter: 10m}` or longer, above the award lease, so a node emptied by

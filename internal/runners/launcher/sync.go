@@ -29,7 +29,11 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	if err := l.validate(); err != nil {
 		return err
 	}
-	errs := []error{l.verifyLocal(ctx)}
+	return errors.Join(l.verifyLocal(ctx), l.sync(ctx))
+}
+
+func (l *Launcher) sync(ctx context.Context) error {
+	var errs []error
 	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
 		return errors.Join(append(errs, fmt.Errorf("list Cloud Jobs: %w", err))...)
@@ -96,8 +100,6 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	return errors.Join(append(errs, l.syncReservations(ctx), l.syncCapacity(ctx))...)
 }
 
-// safety: verification and containment use only Kubernetes, so a controller
-// cooldown or stall never leaves an active Pod unverified; Sync acknowledges rejections.
 func (l *Launcher) verifyLocal(ctx context.Context) error {
 	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
@@ -106,11 +108,20 @@ func (l *Launcher) verifyLocal(ctx context.Context) error {
 	var errs []error
 	for i := range jobs.Items {
 		job := &jobs.Items[i]
-		if job.DeletionTimestamp != nil || job.Annotations[rejectedAnnotation] != "" || jobFinished(*job) || job.Spec.Suspend != nil && *job.Spec.Suspend {
+		if jobFinished(*job) || job.Spec.Suspend != nil && *job.Spec.Suspend {
 			continue
 		}
 		binding, reservation, err := jobOwnership(*job)
 		if err != nil {
+			errs = append(errs, l.discardMalformedJob(ctx, job, err))
+			continue
+		}
+		if job.Annotations[rejectedAnnotation] != "" {
+			_, err := l.containJob(ctx, job, binding, reservation)
+			errs = append(errs, err)
+			continue
+		}
+		if job.DeletionTimestamp != nil {
 			continue
 		}
 		if verifyErr := l.verifyJobPods(ctx, job); verifyErr != nil {

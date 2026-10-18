@@ -12,7 +12,7 @@ hand-made pause pod.
 ## Mechanism
 
 When `Reserve` finds no reservable node for an award, the launcher keeps the
-award and creates one capacity-request pod for its unit. Karpenter sees a
+award and creates one capacity-request pod for that award. Karpenter sees a
 Pending pod that only the team's NodePool can satisfy and adds a node. Every
 launcher pass retries the held awards. Reservation persists on the node first,
 then consumes the team's requests on it and waits for their removal, and the
@@ -41,8 +41,9 @@ job pod is then pre-bound and verified as before.
 - **Verification.** Job pods, capacity requests and boundary probes pass one
   comparison, `verifyAdmittedPod`: the admitted object may differ from the
   request only by API defaults, the named EKS injections, owner labels and, for
-  an unbound request, the scheduler's node. The expected request comes from
-  outside the Pod: `demandFor(award)` on create and adoption, the held award on
+  an unbound request, the scheduler's node. Label and annotation comparisons
+  preserve both key presence and value, including empty values. The expected
+  request comes from outside the Pod: `demandFor(award)` on create and adoption, the held award on
   every launcher pass, and on reconciliation the controller's binding and
   committed allocation (`cloud_resources` on reservation observations). A pass
   checks an unheld request only for shape until reconciliation authenticates
@@ -52,17 +53,23 @@ job pod is then pre-bound and verified as before.
   the existing reservation-only observation shape with `capacity:<pod UID>` as
   the reservation ID and the pod UID as the node UID. Awards this launcher holds
   are renewed by the observation; others, such as after a restart, are only
-  checked. A request goes when the controller ends its award or the award
-  deadline passes, so cancelled or reassigned work stops asking for nodes.
+  checked. Each request is reconciled separately. A definitive binding/fence
+  refusal deletes only that Pod by UID and permits other requests and new claims
+  to proceed. Transport, overload and service-credential errors retain the
+  request for retry. A request also goes when the controller ends its award or
+  the award deadline passes.
 - **Handoff.** A request's container exits after `version`, and reservation
-  removes the request once the reservation and its taint are persisted, so no
-  pod occupies the node until the job pod binds. `consolidateAfter` covers that
-  gap. Removal is awaited, so kubelet has released the request's resources
-  before the job is placed.
-- **Cadence.** Verification and containment of job pods and requests use only
-  Kubernetes and run on every pass. A rejection is recorded on the Job,
-  contained locally and acknowledged to the controller by reconciliation, so a
-  controller Retry-After or stall pauses only controller requests.
+  removes the request once the reservation and its taint are persisted. Boundary
+  probe Pods then occupy the node while networking is measured and are removed
+  before the Job is created. `consolidateAfter` covers the empty gaps before and
+  after those probes. Request removal is awaited so kubelet can release their
+  resources before probing and Job placement.
+- **Cadence.** `Run` schedules Kubernetes verification and containment in a
+  separate goroutine, immediately and on its own poll ticker. Each pass has a
+  deadline of one poll interval. Controller reconciliation and claiming run
+  independently. A rejection is recorded on the Job and contained locally, then
+  acknowledged to the controller by reconciliation. Controller Retry-After and
+  in-flight calls cannot pause the local ticker. Shutdown cancels and joins it.
 
 ## Invariants kept
 

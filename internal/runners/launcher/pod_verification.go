@@ -127,18 +127,18 @@ func validateJobPod(job *batchv1.Job, pod *corev1.Pod) error {
 func verifyAdmittedPod(requested corev1.PodTemplateSpec, pod *corev1.Pod, ownerLabel func(key, value string) bool) error {
 	labels := pod.Labels
 	for key, value := range requested.Labels {
-		if labels[key] != value {
+		if admitted, present := labels[key]; !present || admitted != value {
 			return errors.New("Pod lost its requested labels")
 		}
 	}
 	for key, value := range labels {
-		if requested.Labels[key] != value && (ownerLabel == nil || !ownerLabel(key, value)) {
+		if expected, present := requested.Labels[key]; (!present || expected != value) && (ownerLabel == nil || !ownerLabel(key, value)) {
 			return errors.New("Pod has unexpected labels")
 		}
 	}
 	annotations := pod.Annotations
 	for key, value := range requested.Annotations {
-		if annotations[key] != value {
+		if admitted, present := annotations[key]; !present || admitted != value {
 			return errors.New("Pod lost its requested annotations")
 		}
 	}
@@ -148,7 +148,7 @@ func verifyAdmittedPod(requested corev1.PodTemplateSpec, pod *corev1.Pod, ownerL
 				return err
 			}
 		}
-		if requested.Annotations[key] != value && key != "vpc.amazonaws.com/pod-eni" {
+		if expected, present := requested.Annotations[key]; (!present || expected != value) && key != "vpc.amazonaws.com/pod-eni" {
 			return errors.New("Pod has unexpected annotations")
 		}
 	}
