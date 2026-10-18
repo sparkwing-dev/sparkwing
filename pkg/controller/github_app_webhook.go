@@ -129,14 +129,27 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// githubDeliverySpools bounds unauthenticated deliveries spooling at once.
+const githubDeliverySpools = 4
+
 // safety: the body spools to disk while it is hashed, so an unsigned delivery
-// never holds memory near the body limit.
-func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request) (_ []byte, _ int, err error) {
+// never holds memory near the body limit, and a few slots bound its disk.
+func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request) (body []byte, status int, err error) {
+	select {
+	case s.deliverySpools <- struct{}{}:
+		defer func() { <-s.deliverySpools }()
+	default:
+		return nil, http.StatusTooManyRequests, errors.New("too many GitHub deliveries are being received; retry")
+	}
 	spool, err := os.CreateTemp("", "github-delivery-")
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
-	defer func() { err = errors.Join(err, spool.Close(), os.Remove(spool.Name())) }()
+	defer func() {
+		if cleanup := errors.Join(spool.Close(), os.Remove(spool.Name())); cleanup != nil {
+			body, status, err = nil, http.StatusInternalServerError, errors.Join(err, cleanup)
+		}
+	}()
 	mac := s.githubApp.client.WebhookMAC()
 	size, err := io.Copy(io.MultiWriter(mac, spool), http.MaxBytesReader(w, r.Body, webhookBodyLimit))
 	var tooLarge *http.MaxBytesError
@@ -149,7 +162,7 @@ func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request
 	if !mac.Verify(r.Header.Get("X-Hub-Signature-256")) {
 		return nil, http.StatusUnauthorized, errors.New("signature mismatch")
 	}
-	body := make([]byte, size)
+	body = make([]byte, size)
 	if _, err := spool.ReadAt(body, 0); err != nil {
 		return nil, http.StatusInternalServerError, err
 	}

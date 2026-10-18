@@ -117,6 +117,7 @@ type Server struct {
 
 	metricsAddr       string
 	trustedProxyAddr  string
+	deliverySpools    chan struct{}
 	trustedProxyCIDRs []netip.Prefix
 	metricsLn         net.Listener
 
@@ -174,6 +175,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		logger:             logger,
 		masker:             secrets.NewMasker(),
 		loginLimit:         newLoginLimiter(),
+		deliverySpools:     make(chan struct{}, githubDeliverySpools),
 		queueTimeout:       15 * time.Minute,
 		sessionMaxLifetime: DefaultSessionMaxLifetime,
 		liveLogs:           newLiveLogs(),
