@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -108,5 +109,39 @@ func TestReportGitHubCheckRecordsNothingPastTheHoldersDeadline(t *testing.T) {
 	}
 	if id, err := tenant.GitHubCheckRun(ctx, accepted.RunID); err != nil || id != 0 {
 		t.Fatalf("recorded check run = %d, %v; want none", id, err)
+	}
+}
+
+// The report lock outlives no transaction: while fn would call GitHub, the
+// holder's connection is idle rather than idle in a transaction.
+func TestReportGitHubCheckHoldsNoTransactionDuringFn(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx := context.Background()
+	tenant, accepted, err := storePlanSealRequest(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "sparkwing/github-check/" + string(tenant.Team()) + "/" + accepted.RunID
+	if err := tenant.ReportGitHubCheck(ctx, accepted.RunID, func(ctx context.Context, _ int64) (int64, error) {
+		probe, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		var state string
+		if err := st.DB().QueryRowContext(probe, `SELECT a.state FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+			WHERE l.locktype = 'advisory' AND l.granted
+			  AND l.objid::text::bigint = (hashtext($1)::bigint & 4294967295)`, key).Scan(&state); err != nil {
+			return 0, err
+		}
+		if state != "idle" {
+			t.Errorf("report lock holder is %q while fn runs, want idle", state)
+		}
+		if err := tenant.UseGitHubCommitStatuses(probe, accepted.RunID); err != nil {
+			return 0, err
+		}
+		return 7, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := tenant.GitHubCheckRun(ctx, accepted.RunID); err != nil || id != 7 {
+		t.Fatalf("recorded check run = %d, %v; want 7", id, err)
 	}
 }

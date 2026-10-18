@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -510,52 +511,51 @@ func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRu
 // returns the id of a check run it created, or 0; that id is recorded before
 // the lock is released. ErrNotFound when t has no trigger runID.
 //
-// safety: on Postgres the lock is a transaction-scoped advisory lock and the
-// id is recorded in that transaction, so a holder cut off by its deadline
-// releases the lock and its record together; a SQLite store serves one
-// controller process, so a lock in the Store covers every reporter in it.
+// safety: fn calls GitHub, so the lock is a mutex rather than a transaction: a
+// Postgres session advisory lock on a dedicated connection, or the Store's
+// mutex on SQLite, whose store serves one controller process. A holder past
+// its deadline cannot record, and a connection whose unlock fails is closed.
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error {
+	unlock, err := t.lockGitHubCheck(ctx, runID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	id, err := t.GitHubCheckRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if id, err = fn(ctx, id); err != nil || id == 0 {
+		return err
+	}
+	_, err = t.RecordGitHubCheckRun(ctx, runID, id)
+	return err
+}
+
+func (t *Tenant) lockGitHubCheck(ctx context.Context, runID string) (func(), error) {
 	if t.s.dialect != DialectPostgres {
 		t.s.githubCheckMu.Lock()
-		defer t.s.githubCheckMu.Unlock()
-		id, err := t.GitHubCheckRun(ctx, runID)
-		if err != nil {
-			return err
-		}
-		if id, err = fn(ctx, id); err != nil || id == 0 {
-			return err
-		}
-		_, err = t.RecordGitHubCheckRun(ctx, runID, id)
-		return err
+		return t.s.githubCheckMu.Unlock, nil
 	}
-	tx, err := t.s.beginTx(ctx)
+	conn, err := t.s.db.Conn(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer rollbackOrLog(tx)
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`,
-		"sparkwing/github-check/"+string(t.team)+"/"+runID); err != nil {
-		return err
-	}
-	var id int64
-	err = tx.QueryRowContext(ctx, `SELECT github_check_run_id FROM triggers WHERE team = ? AND id = ?`,
-		string(t.team), runID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return notFound("trigger", runID)
-	}
-	if err != nil {
-		return err
-	}
-	if id, err = fn(ctx, id); err != nil {
-		return err
-	}
-	if id != 0 {
-		if _, err := tx.ExecContext(ctx, `UPDATE triggers SET github_check_run_id = ?
-			WHERE team = ? AND id = ? AND github_check_run_id = 0`, id, string(t.team), runID); err != nil {
-			return err
+	key := "sparkwing/github-check/" + string(t.team) + "/" + runID
+	unlock := func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		var unlocked bool
+		if conn.QueryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key).Scan(&unlocked) != nil || !unlocked {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		}
+		_ = conn.Close()
 	}
-	return tx.Commit()
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, key); err != nil {
+		unlock()
+		return nil, err
+	}
+	return unlock, nil
 }
 
 // GitHubCommitRuns reads sealed App requests by numeric repository identity and exact commit.
