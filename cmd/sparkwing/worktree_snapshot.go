@@ -233,7 +233,15 @@ func (s *worktreeSnapshot) includeRevisions(ctx context.Context, shas ...string)
 	if len(refs) == 1 {
 		return nil
 	}
-	if _, err := gitDirOutput(ctx, s.environment, gitDir, append([]string{"bundle", "create", s.BundlePath}, refs...)...); err != nil {
+	pushed, err := gitOutput(ctx, s.RepoRoot, s.environment, "for-each-ref", "--format=%(objectname)", "refs/remotes")
+	if err != nil {
+		return fmt.Errorf("list remote-tracking refs: %w", err)
+	}
+	args := append([]string{"bundle", "create", s.BundlePath}, refs...)
+	if remote := strings.Fields(pushed); len(remote) > 0 {
+		args = append(append(args, "--not"), remote...)
+	}
+	if _, err := gitDirOutput(ctx, s.environment, gitDir, args...); err != nil {
 		return err
 	}
 	info, err := os.Stat(s.BundlePath)

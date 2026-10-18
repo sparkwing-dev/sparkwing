@@ -129,13 +129,15 @@ func scanPublication(ctx context.Context, root string, bundle *os.File, environm
 	if err := initCheckout(ctx, &client, checkout, bundle.Name(), ""); err != nil {
 		return err
 	}
-	if _, err := client.run(ctx, checkout, "", "bundle", "unbundle", bundle.Name()); err != nil {
+	objects, err := bundleObjects(ctx, &client, checkout, bundle.Name(), publication.Source.Location.LocalCheckout)
+	if err != nil {
 		return err
 	}
 	scanCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(scanCtx, "git", "-C", checkout, "cat-file", "--batch-all-objects", "--batch")
+	cmd := exec.CommandContext(scanCtx, "git", "-C", checkout, "cat-file", "--batch")
 	cmd.Env = client.env
+	cmd.Stdin = strings.NewReader(objects)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return errors.New("open source snapshot scan failed")
@@ -206,4 +208,53 @@ func (p publicationPolicy) scan(reader io.Reader) error {
 		}
 		tail = text[max(0, len(text)-p.longest+1):]
 	}
+}
+
+// safety: a bundle that stops at pushed commits resolves its deltas against the
+// local checkout, but only objects the bundle itself carries are scanned.
+func bundleObjects(ctx context.Context, client *gitClient, checkout, bundle, local string) (string, error) {
+	prerequisites, err := bundlePrerequisites(bundle)
+	if err != nil {
+		return "", err
+	}
+	if len(prerequisites) > 0 {
+		if local == "" {
+			return "", errors.New("source bundle with prerequisites requires its local checkout")
+		}
+		common, err := client.run(ctx, local, "", "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return "", err
+		}
+		alternates := filepath.Join(checkout, ".git", "objects", "info", "alternates")
+		if err := os.WriteFile(alternates, []byte(filepath.Join(strings.TrimSpace(common), "objects")+"\n"), 0o600); err != nil {
+			return "", err
+		}
+	}
+	if _, err := client.run(ctx, checkout, "", "bundle", "unbundle", bundle); err != nil {
+		return "", err
+	}
+	heads, err := client.run(ctx, checkout, "", "bundle", "list-heads", bundle)
+	if err != nil {
+		return "", err
+	}
+	args := []string{"rev-list", "--objects"}
+	for _, line := range strings.Split(strings.TrimSpace(heads), "\n") {
+		if sha, _, _ := strings.Cut(line, " "); gitSHA.MatchString(sha) {
+			args = append(args, sha)
+		}
+	}
+	if len(prerequisites) > 0 {
+		args = append(append(args, "--not"), prerequisites...)
+	}
+	listed, err := client.run(ctx, checkout, "", args...)
+	if err != nil {
+		return "", err
+	}
+	var ids strings.Builder
+	for _, line := range strings.Split(listed, "\n") {
+		if id, _, _ := strings.Cut(line, " "); id != "" {
+			ids.WriteString(id + "\n")
+		}
+	}
+	return ids.String(), nil
 }
