@@ -2,7 +2,6 @@ package runspec
 
 import (
 	"bytes"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -107,15 +106,6 @@ func decodeValue(d *json.Decoder) (any, error) {
 	default:
 		return nil, errors.New("invalid canonical JSON delimiter")
 	}
-}
-
-// NewEnvironmentSalt returns a fresh salt for one environment snapshot.
-func NewEnvironmentSalt() (string, error) {
-	salt := make([]byte, 32)
-	if _, err := rand.Read(salt); err != nil {
-		return "", errors.New("cannot salt environment identity")
-	}
-	return hex.EncodeToString(salt), nil
 }
 
 // EnvironmentDigest leaves captured values in the caller's private storage.

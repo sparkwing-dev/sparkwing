@@ -232,6 +232,7 @@ func triggerRepository(ctx context.Context, remote string, githubID func(context
 }
 
 type triggerRequestInput struct {
+	home           string
 	submittedEnv   map[string][]byte
 	idempotencyKey string
 	reason         string
@@ -276,15 +277,11 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	values := make(map[string]string, len(input.submittedEnv))
+	assignments := make([]string, 0, len(input.submittedEnv))
 	for name, value := range input.submittedEnv {
-		values[name] = string(value)
+		assignments = append(assignments, name+"="+string(value))
 	}
-	salt, err := runspec.NewEnvironmentSalt()
-	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
-	}
-	env, err := runspec.EnvironmentDigest(values, salt)
+	env, err := identifyCapturedEnvironment(input.home, assignments)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

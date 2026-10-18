@@ -253,7 +253,7 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 	password := "private-password"
 	inputs := settings.Inputs{Context: settings.Context{NumCPU: 4}}
 	input := triggerRequestInput{
-		source: selection, settings: inputs,
+		home: t.TempDir(), source: selection, settings: inputs,
 		args: []string{"-r", "us-east", "--image", "release", "--password", password},
 		described: []nodeproto.PipelineDescription{
 			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
@@ -277,7 +277,7 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 	if !reflect.DeepEqual(request.Request.RequestedArgs, map[string]string{"region": "us-east", "image": "release", "password": password}) || !request.Request.SecretArgs.Set || !reflect.DeepEqual(request.Request.SecretArgs.Value, []string{"password"}) {
 		t.Fatalf("selected schema lost: %+v", request.Request)
 	}
-	_, err = prepareTriggerRequest(triggerRequestInput{source: selection, described: input.described[:1]})
+	_, err = prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, described: input.described[:1]})
 	if err == nil || !strings.Contains(err.Error(), "deploy-prod") {
 		t.Fatalf("missing registration used Go type name: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestPrepareTriggerRequestSubmitsThroughTheFinalController(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := prepareTriggerRequest(triggerRequestInput{source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "Deploy"}}, idempotencyKey: "stable-key"})
+	request, err := prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "Deploy"}}, idempotencyKey: "stable-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,6 +331,7 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 	output := "plain"
 	runner := runspec.RunnerSelection{Kind: runspec.RunnerLabel, Value: "desktop"}
 	request, err := prepareTriggerRequest(triggerRequestInput{
+		home:           t.TempDir(),
 		idempotencyKey: "retained",
 		source:         preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
 		described:      []nodeproto.PipelineDescription{{Name: "Deploy"}},
@@ -379,6 +380,7 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 	f.Fuzz(func(t *testing.T, value string) {
 		value = "private-" + value
 		request, err := prepareTriggerRequest(triggerRequestInput{
+			home:      t.TempDir(),
 			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
 			described: []nodeproto.PipelineDescription{{Name: "Deploy"}},
 			settings:  settings.Inputs{Context: settings.Context{NumCPU: 4}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte(value)},
@@ -421,6 +423,7 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 			args = []string{"--password=" + value, "--" + value}
 		}
 		_, err := prepareTriggerRequest(triggerRequestInput{
+			home:      t.TempDir(),
 			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
 			described: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
 			args:      args,
@@ -536,5 +539,32 @@ func TestTriggerGitDiagnosticsRedactCredentials(t *testing.T) {
 	}
 	if long := gitDiagnostic([]byte(strings.Repeat("x", 4096))); len(long) > maxGitDiagnostic+len("...") {
 		t.Fatalf("diagnostic is unbounded: %d bytes", len(long))
+	}
+}
+
+func TestPrepareTriggerRequestSaltsEnvironmentWithTheHostKey(t *testing.T) {
+	repo, _ := triggerPreparationRepo(t)
+	selection, err := prepareTriggerSource(t.Context(), triggerPreparationInput(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepare := func(home string) runspec.EnvSnapshot {
+		t.Helper()
+		request, err := prepareTriggerRequest(triggerRequestInput{home: home, source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "Deploy"}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte("west")}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return request.Request.Env
+	}
+	home := t.TempDir()
+	first, second, other := prepare(home), prepare(home), prepare(t.TempDir())
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("one host salted equal submissions differently: %+v %+v", first, second)
+	}
+	if other.Salt == first.Salt || other.Digest == first.Digest {
+		t.Fatal("two hosts share a submitted environment salt")
+	}
+	if err := runspec.VerifyEnvironment(first, map[string][]byte{"DEPLOY_REGION": []byte("west")}); err != nil {
+		t.Fatal(err)
 	}
 }

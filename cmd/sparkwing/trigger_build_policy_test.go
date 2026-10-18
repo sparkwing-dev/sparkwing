@@ -89,7 +89,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Ma
 			if err != nil || len(described) != 1 || described[0].Name != "ci" || described[0].Help != tc.want {
 				t.Fatalf("selected policy inspection: %+v: %v", described, err)
 			}
-			req, err := prepareTriggerRequest(triggerRequestInput{source: selected, described: described, args: []string{"--region=west", "--password=private-value"}, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}})
+			req, err := prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selected, described: described, args: []string{"--region=west", "--password=private-value"}, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}})
 			if err != nil {
 				t.Fatal(err)
 			}

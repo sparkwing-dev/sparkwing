@@ -1,6 +1,8 @@
 package runspec
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"sort"
 	"strings"
 	"testing"
@@ -24,17 +26,23 @@ func unsaltedEnvironmentDigest(values map[string]string) Hash {
 	return hash
 }
 
+func randomEnvironmentSalt() (string, error) {
+	salt := make([]byte, 32)
+	_, err := rand.Read(salt)
+	return hex.EncodeToString(salt), err
+}
+
 func TestEnvironmentDigestIsSaltedPerSnapshotProperty(t *testing.T) {
 	property := func(name, value string) bool {
 		if name == "" || strings.ContainsAny(name, "=\x00") || strings.ContainsRune(value, 0) {
 			return true
 		}
 		values := map[string]string{name: value}
-		first, err := NewEnvironmentSalt()
+		first, err := randomEnvironmentSalt()
 		if err != nil {
 			return false
 		}
-		second, err := NewEnvironmentSalt()
+		second, err := randomEnvironmentSalt()
 		if err != nil {
 			return false
 		}
