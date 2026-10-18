@@ -670,3 +670,57 @@ func TestCapabilityRotationCannotOutliveTarget(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "capabilities", 1)
 }
+
+func TestCapabilityRotationBearerCannotExtendExpiry(t *testing.T) {
+	s := authorityStore(t)
+	member := authorityMember(t, s, "member", RoleEditor)
+	p, err := s.ResolveAuthority(t.Context(), member.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiry := s.now().Add(time.Hour).Truncate(time.Second)
+	old, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}}
+	tenant := &Tenant{s: s, team: "a"}
+	a := inventoryAuthorization(t, s, bearer, "a", old.Capability.Prefix)
+	for _, later := range []time.Time{expiry.Add(time.Second), expiry.Add(30 * 24 * time.Hour)} {
+		rotation, err := tenant.RotateCapability(t.Context(), a, time.Hour, &later)
+		if err == nil || rotation.Issued.Raw != "" {
+			t.Fatalf("bearer extended expiry to %v: %+v", later, rotation.Issued.Capability.ExpiresAt)
+		}
+	}
+	rewriteSchemaCount(t, s.db, "capabilities", 1)
+	rotation, err := tenant.RotateCapability(t.Context(), a, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := rotation.Issued.Capability.ExpiresAt
+	if next == nil || next.After(expiry) {
+		t.Fatalf("replacement expiry %v exceeds %v", next, expiry)
+	}
+	if !rotation.RevokesAt.After(s.now()) || rotation.RevokesAt.After(expiry) {
+		t.Fatalf("grace deadline %v", rotation.RevokesAt)
+	}
+}
+
+func TestCapabilityRotationSessionMayExtendExpiry(t *testing.T) {
+	s := authorityStore(t)
+	member := authorityMember(t, s, "member", RoleEditor)
+	p, err := s.ResolveAuthority(t.Context(), member.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiry := s.now().Add(time.Hour).Truncate(time.Second)
+	old, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := expiry.Add(24 * time.Hour)
+	rotation, err := (&Tenant{s: s, team: "a"}).RotateCapability(t.Context(), inventoryAuthorization(t, s, member, "a", old.Capability.Prefix), time.Hour, &later)
+	if err != nil || rotation.Issued.Capability.ExpiresAt == nil || !rotation.Issued.Capability.ExpiresAt.Equal(later) {
+		t.Fatalf("session rotation: %+v %v", rotation.Issued.Capability.ExpiresAt, err)
+	}
+}

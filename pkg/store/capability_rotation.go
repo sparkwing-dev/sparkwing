@@ -55,6 +55,9 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if expires != nil && !expires.After(tx.now()) {
 			return authorityError(apierr.BadRequest, "replacement expiry has passed")
 		}
+		if extendsExpiry(c.ExpiresAt, expires) && !mayExtendExpiry(p, c) {
+			return authorityError(apierr.Forbidden, "only an account session or team administrator can extend a credential's expiry")
+		}
 		request, err := rotationRequestTx(ctx, tx, p, c, expires)
 		if err != nil {
 			return err
@@ -93,6 +96,17 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		return capability.Rotation{}, err
 	}
 	return out, nil
+}
+
+func extendsExpiry(old, next *time.Time) bool {
+	return old != nil && (next == nil || next.After(*old))
+}
+
+func mayExtendExpiry(p capability.Principal, c capability.Capability) bool {
+	if p.DirectAccountSession() || p.Class == capability.CredentialConsole {
+		return true
+	}
+	return slices.Contains(p.Capability.Grants, capability.TeamAdmin) && p.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
 }
 
 func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal, c capability.Capability, expires *time.Time) (capability.IssueRequest, error) {
