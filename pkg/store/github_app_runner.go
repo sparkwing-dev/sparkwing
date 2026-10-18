@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -78,4 +79,22 @@ func trustedAppRunnerTx(ctx context.Context, tx *storeTx, request IntakeRequest)
 	}
 	runner, err := ParseGitHubAppRunner(raw)
 	return runner, authorized && err == nil, err
+}
+
+func checkActionsOwnerTx(ctx context.Context, tx *storeTx, team Team, input runspec.Request) error {
+	if input.Options.Runner.Value.Kind != runspec.RunnerActions {
+		return nil
+	}
+	refused := authorityError(apierr.BadRequest, "the github-actions owner is selected only by GitHub App configuration or inherited from its parent run")
+	if input.Lineage.ParentRunID == "" {
+		return refused
+	}
+	parent, err := readRunTx(ctx, tx, team, input.Lineage.ParentRunID)
+	if err != nil {
+		return err
+	}
+	if parent.Request.Request.Options.Runner.Value.Kind != runspec.RunnerActions {
+		return refused
+	}
+	return nil
 }
