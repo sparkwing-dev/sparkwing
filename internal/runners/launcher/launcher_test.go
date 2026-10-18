@@ -3,11 +3,13 @@ package launcher
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -474,4 +476,55 @@ func TestLauncherWaitsOutAControllerRetryAfter(t *testing.T) {
 			t.Fatalf("claims at %v, want the second after the controller's 7s", retrying.claimed)
 		}
 	})
+}
+
+func TestRunStopsClaimingWhenAdmissionDrifts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, control := fixture()
+		control.award = nil
+		l.Poll = time.Second
+		var logs strings.Builder
+		l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+		syncs := 0
+		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+			syncs++
+			return false, nil, nil
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- l.Run(ctx) }()
+		synctest.Wait()
+		if control.claims != 1 {
+			t.Fatalf("claims before drift = %d", control.claims)
+		}
+		if err := kube.Tracker().Delete(admissionv1.SchemeGroupVersion.WithResource("validatingadmissionpolicybindings"), "", AdmissionPolicyName("pods", "cloud")); err != nil {
+			t.Fatal(err)
+		}
+		before := syncs
+		<-time.NewTimer(2500 * time.Millisecond).C
+		synctest.Wait()
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if control.claims != 1 || syncs <= before || !strings.Contains(logs.String(), "do not match this launcher") {
+			t.Fatalf("drifted admission: claims=%d syncs=%d->%d logs=%s", control.claims, before, syncs, logs.String())
+		}
+	})
+}
+
+func TestForeignNamespaceReservationIsReported(t *testing.T) {
+	l, kube, _, _ := fixture()
+	var logs strings.Builder
+	l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "legacy", Annotations: map[string]string{reservationNamespaceAnnotation: "sparkwing-jobs", reservationAnnotation: "{}"}}}
+	if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "another job namespace") || !strings.Contains(logs.String(), "sparkwing-jobs") {
+		t.Fatalf("legacy reservation went unreported: %s", logs.String())
+	}
 }

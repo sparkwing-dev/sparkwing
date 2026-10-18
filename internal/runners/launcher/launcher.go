@@ -58,8 +58,16 @@ type Launcher struct {
 	Poll     time.Duration
 	Logger   *slog.Logger
 
-	mu      sync.Mutex
-	waiting map[string]*CloudJobAward
+	mu       sync.Mutex
+	waiting  map[string]*CloudJobAward
+	identity string
+}
+
+func (l *Launcher) logger() *slog.Logger {
+	if l.Logger == nil {
+		return slog.Default()
+	}
+	return l.Logger
 }
 
 func (l *Launcher) validate() error {
@@ -84,19 +92,22 @@ func (l *Launcher) Run(ctx context.Context) error {
 	if poll <= 0 {
 		poll = 5 * time.Second
 	}
-	logger := l.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger := l.logger()
 	var cooldown time.Time
 	for ctx.Err() == nil {
 		if !time.Now().Before(cooldown) {
+			admitted := l.verifyAdmission(ctx)
+			if admitted != nil {
+				logger.Error("Cloud admission policies do not match this launcher; reconciling without claiming work", failureAttrs(admitted)...)
+			}
 			if err := l.sync(ctx); err != nil {
 				logger.Warn("launcher reconciliation failed", failureAttrs(err)...)
 				cooldown = time.Now().Add(retryWait(err, 0))
-			} else if _, err := l.LaunchOne(ctx); err != nil {
-				logger.Warn("launcher claim failed", failureAttrs(err)...)
-				cooldown = time.Now().Add(retryWait(err, 0))
+			} else if admitted == nil {
+				if _, err := l.LaunchOne(ctx); err != nil {
+					logger.Warn("launcher claim failed", failureAttrs(err)...)
+					cooldown = time.Now().Add(retryWait(err, 0))
+				}
 			}
 		}
 		timer := time.NewTimer(poll)
@@ -244,7 +255,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	expected := created.DeepCopy()
 	expected.Spec.Suspend, expected.Spec.ActiveDeadlineSeconds = ptr(false), &remaining
 	if err := validateAdmittedJob(expected, activated); err != nil {
-		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation))
+		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation, rejectedPod))
 	}
 	return true, l.enforceAward(ctx, activated, award.Binding, r.Reservation)
 }

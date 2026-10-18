@@ -288,3 +288,44 @@ func TestActivationRetriesAPIErrorWithoutRejecting(t *testing.T) {
 		t.Fatalf("reconciliation could not recover: %v", err)
 	}
 }
+
+func TestUpgradedImagesFailUnstartedJobWithoutRetiringItsNode(t *testing.T) {
+	for name, started := range map[string]bool{"unstarted": false, "in_flight": true} {
+		t.Run(name, func(t *testing.T) {
+			l, kube, boundary, control := fixture()
+			if _, err := l.LaunchOne(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if !started {
+				kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+					return true, &corev1.PodList{}, nil
+				})
+			}
+			l.Config.RunnerImage = "registry/upgraded@sha256:" + strings.Repeat("d", 64)
+			rejected := false
+			l.Control = publicationControl{CloudControl: control, sync: func(obs []CloudJobObservation) ([]CloudJobState, error) {
+				for _, o := range obs {
+					rejected = rejected || o.Rejected
+				}
+				return control.Sync(t.Context(), obs)
+			}}
+			err := l.Sync(t.Context())
+			if started {
+				if err != nil || rejected || jobRemoved(t, kube, jobName(control.award.Binding)) {
+					t.Fatalf("a chart upgrade disturbed a running Job: %v rejected=%v", err, rejected)
+				}
+				return
+			}
+			if err == nil || !rejected || !jobRemoved(t, kube, jobName(control.award.Binding)) {
+				t.Fatalf("a Job admission can no longer start kept its award: %v rejected=%v", err, rejected)
+			}
+			job, getErr := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{})
+			if getErr == nil && job.Annotations[rejectedAnnotation] != rejectedUnadmittable {
+				t.Fatalf("rejection reason = %q", job.Annotations[rejectedAnnotation])
+			}
+			if boundary.retirements != 0 {
+				t.Fatal("a node that never ran the Job was retired")
+			}
+		})
+	}
+}

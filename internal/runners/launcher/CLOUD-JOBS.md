@@ -33,29 +33,36 @@ memory across the host and Docker sidecar.
 
 ## Admission enforcement
 
-Cloud Jobs run in a dedicated job namespace. Two ValidatingAdmissionPolicies
-built by `AdmissionPolicies` (one for Pods, `pods/ephemeralcontainers` and
-`pods/resize`, one for Jobs) bind with `validationActions: [Deny]`,
-`failurePolicy: Fail` and a namespace selector on `kubernetes.io/metadata.name`
-of that namespace only. Validating admission runs after every mutating webhook,
-so the rules judge the final object. They take no params: the namespace, the
-launcher's username and the runner and Docker digests are CEL literals.
+Cloud Jobs run in a dedicated job namespace, `<release>-cloud-jobs` by default,
+which the chart owns. Two ValidatingAdmissionPolicies built by
+`AdmissionPolicies` bind with `validationActions: [Deny]`, `failurePolicy: Fail`
+and a namespace selector on `kubernetes.io/metadata.name` of that namespace
+only. The Pod policy covers Pod CREATE and UPDATE, `pods/ephemeralcontainers`,
+`pods/resize` and CONNECT on `pods/exec`, `pods/attach` and `pods/portforward`;
+the Job policy covers Job CREATE and UPDATE. Validating admission runs after
+every mutating webhook, so the rules judge the final object. They take no
+params: the namespace, the launcher's username, the runner and Docker digests
+and the probe commands are CEL literals.
 
 - Only the launcher creates Jobs, capacity requests (`sw-capacity-`) and
-  boundary probes (`sw-boundary-`). Only the Job controller
-  (`system:serviceaccount:kube-system:job-controller` or
-  `system:kube-controller-manager`) creates Pods, each controlled by one
-  `batch/v1` Job named by its `sparkwing.dev/job` label. Every other Pod is refused.
+  boundary probes (`sw-boundary-`). Only
+  `system:serviceaccount:kube-system:job-controller` creates Pods, each
+  controlled by one `batch/v1` Job named by its `sparkwing.dev/job` label. Every
+  other Pod and creator is refused. The policy names the launcher as
+  `system:serviceaccount:<release namespace>:<launcher ServiceAccount>`; an
+  externally managed launcher must run under exactly that identity.
 - Job Pods run exactly `docker` (Docker image), `fetch-source` and `run-node`
-  (runner image). Capacity requests and probes run one runner-image container.
+  (runner image). Capacity requests and probes run one runner-image container,
+  and each probe container runs its pinned listener, witness or measurement
+  command.
 - Environment names are `HOME`, `DOCKER_HOST` and the EKS region values, never
   `valueFrom` or `envFrom`. Capacity requests and probes carry none. AWS role,
   web-identity and container-credential variables are refused, as is any
   projected token volume.
 - Volumes are only the Job's `scratch` emptyDir and its own bootstrap Secret.
   No hostPath, hostNetwork, hostIPC, hostPort or added capability. Only the
-  `docker` sidecar and the `measure` probe run privileged, and only probes use
-  hostPID.
+  `docker` sidecar and the `measure` probe run privileged, and only `measure`
+  uses hostPID.
 - The service account is `sparkwing-customer-job` with
   `automountServiceAccountToken: false`.
 - Every Pod selects `node-restriction.kubernetes.io/sparkwing-team-node` equal
@@ -67,28 +74,45 @@ launcher's username and the runner and Docker digests are CEL literals.
   `vpc.amazonaws.com/pod-eni` requests and annotations pass because neither rule
   inspects them.
 - On UPDATE a Pod's spec and labels are immutable, which also refuses ephemeral
-  containers and in-place resize. A Job's template never changes, only the
-  launcher may change its spec, and it always runs one Pod without retries or a
-  failure or success policy. Shape rules apply at CREATE, so a chart upgrade
-  that changes the pinned images cannot block finalizer or annotation updates
-  on running Pods.
+  containers and in-place resize, and only the Job controller and garbage
+  collector change its owner references. A Job's template never changes, only
+  the launcher may change its spec, and it always runs one Pod without retries
+  or a failure or success policy. Shape rules apply at CREATE, so a chart
+  upgrade that changes the pinned images cannot block finalizer or annotation
+  updates on running Pods.
+- Exec, attach and port-forward are refused for everyone. `nodes/proxy` reaches
+  the kubelet directly and bypasses admission, so grant it to no identity that
+  is not a cluster administrator.
 
 `Run` first reads its own username through a SelfSubjectReview, then refuses to
 start unless both policies and bindings exist with exactly the specs
-`AdmissionPolicies` builds for that username, its job namespace and images. The
-launcher can read only those four objects.
+`AdmissionPolicies` builds for that username, its job namespace and images. It
+repeats the check before every sync. On a mismatch it logs an error, keeps
+reconciling existing Jobs and claims no work until the policies match again.
+The launcher can read only those four objects.
+
+The job namespace must hold no other NetworkPolicies, since an additive policy
+would widen Job egress, and no Pod Security labels besides the chart's
+privileged level.
 
 ## Award backstop
 
 Admission cannot know an award. `LaunchOne` checks every create and patch
-response for the Job and its Secret. After activation, and for each live Job on
-every sync, the launcher compares the Job template with its binding and
-reservation (team label, node selector, node, image digests, container
-resources) and each Pod controlled by that Job UID with the template, including
-the pod-level CPU and memory. The template is checked against `demandFor(award)`
-when the Job is created, and admission keeps it unchanged afterwards. A Pod the
-Job controller has not created yet is not an error. VPC Pod ENI resources are
-ignored.
+response for the Job and its Secret; the activated template must equal the one
+built from the award, including `demandFor(award)` resources. After activation,
+and for each live Job on every sync, the launcher compares the Job template's
+team label, node selector, node, container set and resources with those built
+from the Job's binding and reservation, and each Pod controlled by that Job UID
+with the template, including the pod-level CPU and memory. Sync takes the
+expected size from the template itself: the binding carries no resources, the
+template matched the award at creation and admission keeps it unchanged. A Pod
+the Job controller has not created yet is not an error. VPC Pod ENI resources
+are ignored.
+
+After a chart upgrade changes the pinned digests, admission refuses new Pods for
+Jobs whose templates still name the old images. Sync fails such a Job's award
+as soon as it sees the template on other images with no owned Pod, without
+retiring the node, which never ran it. Jobs whose Pods already run continue.
 
 A mismatch is the only rejection. Pod-list and other API failures retry on the
 next sync. Rejection records `sparkwing.dev/pod-rejected` on the Job, cordons
@@ -107,9 +131,18 @@ ServiceAccount must have no role annotation or Pod Identity association.
 
 RBAC grants Pod and Job creation in the job namespace only to the launcher, and
 admission refuses any other creator. Customer ServiceAccounts receive no API
-credential or role. Team nodes carry a team-specific NoSchedule taint, which
-only launcher-created Pods tolerate: Job Pods, that team's capacity requests and
-boundary probes. Kubernetes administrators remain trusted.
+credential or role. Team nodes carry a team-specific NoSchedule taint. Among
+workload Pods only Job Pods, that team's capacity requests and boundary probes
+tolerate it, but cluster DaemonSets such as `aws-node`, `ebs-csi-node` and
+`kube-proxy` tolerate every taint and run privileged on team nodes. They and
+Kubernetes administrators remain trusted.
+
+Sync skips nodes reserved under another job namespace and logs each one. When
+moving an install to a new job namespace, first let Jobs and reservations
+recorded under the old namespace drain, or delete those Jobs and remove the
+`sparkwing.dev/node-reservation`, `sparkwing.dev/reservation-namespace` and
+`sparkwing.dev/award-binding` annotations and the `sparkwing.dev/cloud-reserved`
+taint from their nodes by hand.
 
 ## Launch and reconciliation
 

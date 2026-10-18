@@ -47,7 +47,7 @@ func (l *Launcher) sync(ctx context.Context) error {
 			continue
 		}
 		if job.Annotations[rejectedAnnotation] != "" {
-			if err := l.rejectJob(ctx, &job, binding, reservation); err != nil {
+			if err := l.rejectJob(ctx, &job, binding, reservation, job.Annotations[rejectedAnnotation]); err != nil {
 				errs = append(errs, err)
 			}
 			continue
@@ -103,7 +103,10 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 	var observations []CloudJobObservation
 	reservations := map[string]CloudNodeReservation{}
 	for _, node := range nodes.Items {
-		if node.Annotations[reservationNamespaceAnnotation] != l.Config.Namespace {
+		if namespace := node.Annotations[reservationNamespaceAnnotation]; namespace != l.Config.Namespace {
+			if namespace != "" {
+				l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
+			}
 			continue
 		}
 		var held CloudNodeReservation

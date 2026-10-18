@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -190,11 +189,7 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 			continue
 		}
 		if err != nil {
-			logger := l.Logger
-			if logger == nil {
-				logger = slog.Default()
-			}
-			logger.Warn("controller refused capacity Pod identity", "pod", pod.Name, "uid", pod.UID, "error", err)
+			l.logger().Warn("controller refused capacity Pod identity", "pod", pod.Name, "uid", pod.UID, "error", err)
 		} else if state := states[name]; !state.Delete {
 			if err := l.authenticateCapacity(pod, state); err != nil {
 				errs = append(errs, err)

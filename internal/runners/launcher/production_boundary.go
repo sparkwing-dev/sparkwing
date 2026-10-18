@@ -30,6 +30,24 @@ import (
 
 const boundaryControlLabel = "sparkwing.dev/boundary-control"
 
+// safety: admission pins these commands, so a probe's result can only come from this script.
+var (
+	listenerCommand = []string{"/bin/bash", "-ceu", "exec nc -lk 18888"}
+	witnessCommand  = []string{"/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"}
+	measureCommand  = []string{"/bin/bash", "-ceu", `command -v nc >/dev/null
+command -v nsenter >/dev/null
+control_host="$1"; control_port="$2"; shift 2
+required_host="$1"; required_port="$2"; shift 2
+nc -z -w 3 "$required_host" "$required_port"
+nsenter -t 1 -n -- nc -z -w 3 "$required_host" "$required_port"
+if nc -z -w 3 "$control_host" "$control_port"; then echo "Cloud default-deny egress is not enforced" >&2; exit 1; fi
+while (( $# )); do
+ host="$1"; port="$2"; shift 2
+ if nc -z -w 3 "$host" "$port"; then echo "Cloud pod egress escaped to $host:$port" >&2; exit 1; fi
+ if nsenter -t 1 -n -- nc -z -w 3 "$host" "$port"; then echo "Cloud node egress escaped to $host:$port" >&2; exit 1; fi
+done`, "boundary-probe"}
+)
+
 // NewProductionBoundary measures networking from root and escaped node contexts before authorizing Cloud execution.
 func NewProductionBoundary(kube kubernetes.Interface, karpenter dynamic.Interface, cfg CloudJobConfig, apiServer string) (*KubernetesBoundary, error) {
 	if err := cfg.Validate(); err != nil {
@@ -268,14 +286,14 @@ func (p *productionBoundary) canary(ctx context.Context, r CloudNodeReservation,
 	raw, _ := json.Marshal(r)
 	deadline, _ := ctx.Deadline()
 	seconds := max(int64(time.Until(deadline).Seconds()), 1)
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "sw-boundary-" + strings.ToLower(rand.Text()), Namespace: p.cfg.Namespace, Labels: map[string]string{boundaryControlLabel: nonce, TeamLabel: labelHash(r.Team)}, Annotations: map[string]string{reservationAnnotation: string(raw), doNotDisrupt: "true"}}, Spec: corev1.PodSpec{NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(r.Team)}, Tolerations: teamTolerations(r.Team), ActiveDeadlineSeconds: &seconds, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever, Containers: []corev1.Container{{Name: "control", Image: p.cfg.RunnerImage, Command: []string{"/bin/bash", "-ceu", "exec nc -lk 18888"}, ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(18888)}}, TimeoutSeconds: 1, PeriodSeconds: 10, SuccessThreshold: 1, FailureThreshold: 3}}}}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "sw-boundary-" + strings.ToLower(rand.Text()), Namespace: p.cfg.Namespace, Labels: map[string]string{boundaryControlLabel: nonce, TeamLabel: labelHash(r.Team)}, Annotations: map[string]string{reservationAnnotation: string(raw), doNotDisrupt: "true"}}, Spec: corev1.PodSpec{NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(r.Team)}, Tolerations: teamTolerations(r.Team), ActiveDeadlineSeconds: &seconds, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever, Containers: []corev1.Container{{Name: "control", Image: p.cfg.RunnerImage, Command: listenerCommand, ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(18888)}}, TimeoutSeconds: 1, PeriodSeconds: 10, SuccessThreshold: 1, FailureThreshold: 3}}}}}
 }
 
 func (p *productionBoundary) witness(ctx context.Context, r CloudNodeReservation, nonce, listener string) *corev1.Pod {
 	pod := p.canary(ctx, r, nonce)
 	container := &pod.Spec.Containers[0]
 	container.Name, container.ReadinessProbe = "witness", nil
-	container.Command = []string{"/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"}
+	container.Command = witnessCommand
 	container.Args = []string{listener}
 	return pod
 }
@@ -288,19 +306,8 @@ func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation
 	container.Name = "measure"
 	container.ReadinessProbe = nil
 	container.SecurityContext = &corev1.SecurityContext{RunAsUser: ptr(int64(0)), Privileged: ptr(true)}
-	script := `command -v nc >/dev/null
-command -v nsenter >/dev/null
-control_host="$1"; control_port="$2"; shift 2
-required_host="$1"; required_port="$2"; shift 2
-nc -z -w 3 "$required_host" "$required_port"
-nsenter -t 1 -n -- nc -z -w 3 "$required_host" "$required_port"
-if nc -z -w 3 "$control_host" "$control_port"; then echo "Cloud default-deny egress is not enforced" >&2; exit 1; fi
-while (( $# )); do
- host="$1"; port="$2"; shift 2
- if nc -z -w 3 "$host" "$port"; then echo "Cloud pod egress escaped to $host:$port" >&2; exit 1; fi
- if nsenter -t 1 -n -- nc -z -w 3 "$host" "$port"; then echo "Cloud node egress escaped to $host:$port" >&2; exit 1; fi
-done`
-	container.Command = []string{"/bin/bash", "-ceu", script, "boundary-probe"}
+
+	container.Command = measureCommand
 	for _, endpoint := range append([]string{control, p.required}, denied...) {
 		host, port, _ := net.SplitHostPort(endpoint)
 		container.Args = append(container.Args, host, port)

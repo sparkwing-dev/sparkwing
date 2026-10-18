@@ -16,7 +16,11 @@ import (
 const podENI corev1.ResourceName = "vpc.amazonaws.com/pod-eni"
 
 // safety: only this error rejects an award; API failures retry on the next sync.
-type podMismatch struct{ message string }
+// An unadmittable Job never ran a Pod, so its rejection leaves the node in service.
+type podMismatch struct {
+	message      string
+	unadmittable bool
+}
 
 func (e *podMismatch) Error() string { return e.message }
 
@@ -59,7 +63,12 @@ func (l *Launcher) checkJob(ctx context.Context, job *batchv1.Job, binding Cloud
 	if template.Spec.Resources == nil {
 		return &podMismatch{message: fmt.Sprintf("Cloud Job %s has no awarded resources", job.Name)}
 	}
-	want := corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{TeamLabel: labelHash(binding.Team), JobLabel: job.Name}}, Spec: cloudPod(l.Config, CloudJobAward{Binding: binding}, r, job.Name, template.Spec.Resources.Requests)}
+	// safety: create-time checks pinned the template to the award and admission keeps it unchanged,
+	// so a chart upgrade's new digests only matter for Pods admission will now refuse.
+	cfg := l.Config
+	cfg.RunnerImage, cfg.DockerImage = templateImage(template, "run-node"), templateImage(template, "docker")
+	current := cfg.RunnerImage == l.Config.RunnerImage && cfg.DockerImage == l.Config.DockerImage
+	want := corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{TeamLabel: labelHash(binding.Team), JobLabel: job.Name}}, Spec: cloudPod(cfg, CloudJobAward{Binding: binding}, r, job.Name, template.Spec.Resources.Requests)}
 	if err := awardPod(&want, template); err != nil {
 		return &podMismatch{message: fmt.Sprintf("Cloud Job %s: %v", job.Name, err)}
 	}
@@ -67,16 +76,30 @@ func (l *Launcher) checkJob(ctx context.Context, job *batchv1.Job, binding Cloud
 	if err != nil {
 		return err
 	}
+	owned := 0
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		if owner := metav1.GetControllerOf(pod); owner == nil || owner.UID != job.UID {
 			continue
 		}
+		owned++
 		if err := awardPod(template, &corev1.PodTemplateSpec{ObjectMeta: pod.ObjectMeta, Spec: pod.Spec}); err != nil {
 			return &podMismatch{message: fmt.Sprintf("Cloud Pod %s: %v", pod.Name, err)}
 		}
 	}
+	if !current && owned == 0 && (job.Spec.Suspend == nil || !*job.Spec.Suspend) {
+		return &podMismatch{message: fmt.Sprintf("Cloud Job %s pins images admission no longer allows", job.Name), unadmittable: true}
+	}
 	return nil
+}
+
+func templateImage(t *corev1.PodTemplateSpec, name string) string {
+	for _, c := range slices.Concat(t.Spec.InitContainers, t.Spec.Containers) {
+		if c.Name == name {
+			return c.Image
+		}
+	}
+	return ""
 }
 
 func (l *Launcher) enforceAward(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, r CloudNodeReservation) error {
@@ -85,5 +108,9 @@ func (l *Launcher) enforceAward(ctx context.Context, job *batchv1.Job, binding C
 	if !errors.As(err, &mismatch) {
 		return err
 	}
-	return errors.Join(err, l.rejectJob(ctx, job, binding, r))
+	reason := rejectedPod
+	if mismatch.unadmittable {
+		reason = rejectedUnadmittable
+	}
+	return errors.Join(err, l.rejectJob(ctx, job, binding, r, reason))
 }
