@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -27,16 +28,9 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
-		resources := run.Request.Request.Options.Resources.Value
-		if run.Spec != nil {
-			resources = run.Spec.Resolved.Settings.Options.Resources.Value
-		}
-		if c.Unit == capability.UnitNode {
-			row, err := readNodeTx(ctx, tx, Team(c.Team), NodeRef{c.Binding.RunID, c.Binding.NodeID})
-			if err != nil {
-				return err
-			}
-			resources = row.Execution.Resources.Value
+		resources, err := unitResourcesTx(ctx, tx, Team(c.Team), run, UnitRef{Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID})
+		if err != nil {
+			return err
 		}
 		price, err = unitBillingPriceTx(ctx, tx, matchingResources(resources))
 		if err != nil {
@@ -56,6 +50,17 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		reservedSeconds = MinBillableSeconds
 	}
 	return recordBillingAwardTx(ctx, tx, c, price, reservedSeconds)
+}
+
+func unitResourcesTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef) (runspec.Resources, error) {
+	if unit.Kind == capability.UnitNode {
+		row, err := readNodeTx(ctx, tx, team, NodeRef{unit.RunID, unit.NodeID})
+		return row.Execution.Resources.Value, err
+	}
+	if run.Spec != nil {
+		return run.Spec.Resolved.Settings.Options.Resources.Value, nil
+	}
+	return run.Request.Request.Options.Resources.Value, nil
 }
 
 func billingUnitKind(kind capability.UnitKind) capability.BillingUnit {
@@ -95,22 +100,26 @@ func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Uni
 			return false, err
 		}
 	}
-	amount, err := billingProduct(MinBillableSeconds, price.MicroPerSecond)
-	if err != nil {
-		return false, err
-	}
-	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil {
-		return false, err
-	}
-	err = refuseFrozenTeamTx(ctx, tx, team, balance, amount, unit.RunID, unit.NodeID)
-	if err == nil {
-		err = refuseAboveHeadroomTx(ctx, tx, team, amount, tx.now(), unit.RunID, unit.NodeID)
-	}
+	err = unitCreditRefusalTx(ctx, tx, team, unit, price)
 	if errors.Is(err, ErrInsufficientCredits) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func unitCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate) error {
+	amount, err := billingProduct(MinBillableSeconds, price.MicroPerSecond)
+	if err != nil {
+		return err
+	}
+	balance, err := creditBalanceTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	if err := refuseFrozenTeamTx(ctx, tx, team, balance, amount, unit.RunID, unit.NodeID); err != nil {
+		return err
+	}
+	return refuseAboveHeadroomTx(ctx, tx, team, amount, tx.now(), unit.RunID, unit.NodeID)
 }
 
 func unitBillingAwardTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64) (*billingAward, error) {

@@ -3521,6 +3521,17 @@ expired lease or renew the SDK's exchanged claim. Property coverage is
 `FuzzLauncherPreparationBillingAndGrace`. Fake-clock tests cover plan/eval/node
 renewal through exchange and mixed live/ended preparation requests.
 
+## Credit holds on unclaimed Cloud work
+
+`UnclaimedUnit.CreditHold` is set, for a `dispatch=controller` run, when the
+waiting unit's minimum reservation fails the same frozen-team and headroom
+checks a launcher claim applies. A balance shortfall reads `NoCreditsHold`
+("team has no remaining credits; add credits or a payment method"); frozen,
+budget, charge-pending and charge-failed holds read that refusal's own message.
+The controller reports it at once as notice kind `credit_hold` in place of
+`unclaimed_work`. Intake does not refuse: work waits and is claimed as soon as
+credits or a card cover it (decision 112). An unpriced CPU class reports no hold.
+
 ## Integrated working-tree source uploads
 
 `source_uploads` is a tenant table. Its primary key is `(team,id)`; it stores

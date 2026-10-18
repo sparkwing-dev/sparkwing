@@ -45,6 +45,11 @@ type cloudDispatch struct {
 
 func cloudDispatchTrigger(t *testing.T, args ...string) cloudDispatch {
 	t.Helper()
+	return cloudDispatchSetup(t, true, args...)
+}
+
+func cloudDispatchSetup(t *testing.T, funded bool, args ...string) cloudDispatch {
+	t.Helper()
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
@@ -103,8 +108,10 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "cloud-dispatch", CreatedBy: "fixture"}); err != nil {
-		t.Fatal(err)
+	if funded {
+		if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "cloud-dispatch", CreatedBy: "fixture"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	flags, err := parseTriggerFlagsArgs(append([]string{"deploy-prod", "--profile=cloud", "--working-tree"}, args...))
 	if err != nil {
@@ -218,6 +225,35 @@ func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
 				t.Fatalf("unclaimed run notice: %+v %v", detail.Notices, err)
 			}
 		})
+	}
+}
+
+func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
+	f := cloudDispatchSetup(t, false)
+	created, err := f.member.CreateRun(t.Context(), f.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poll := controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 64, AvailableMemoryBytes: 64 << 30}
+	if empty, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || empty.Claim != nil {
+		t.Fatalf("launcher claimed unfunded work: %+v %v", empty.Claim, err)
+	}
+	detail, err := f.member.ReadRun(t.Context(), created.RunID)
+	if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeCreditHold || detail.Notices[0].Reason != store.NoCreditsHold {
+		t.Fatalf("unfunded run notice: %+v %v", detail.Notices, err)
+	}
+	tenant, err := f.state.ForTeam(t.Context(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "late-funding", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 0 {
+		t.Fatalf("funded run kept its notice: %+v %v", detail.Notices, err)
+	}
+	if claimed, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || claimed.Claim == nil || claimed.Claim.RunID != created.RunID {
+		t.Fatalf("launcher did not claim funded work: %+v %v", claimed.Claim, err)
 	}
 }
 

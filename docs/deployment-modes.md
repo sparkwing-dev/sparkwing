@@ -57,7 +57,9 @@ or `--runner label=LABEL` keeps the run on matching self-hosted runners, as
 does a pool route rule, and `--runner here` hosts it in the submitting CLI.
 Intake seals the choice in the run's request, so retries keep it. A run whose
 work no runner or launcher has claimed after 30 seconds shows a notice in
-`sparkwing runs status`.
+`sparkwing runs status`. Cloud work the launcher cannot take because the team
+has no credits or payment method left shows a `credit_hold` notice at once,
+naming the hold, and the launcher takes it as soon as credits or a card arrive.
 
 ## Self-hosted runners
 

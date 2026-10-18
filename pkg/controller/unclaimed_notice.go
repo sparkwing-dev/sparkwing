@@ -11,6 +11,9 @@ import (
 
 func unclaimedNotice(view store.RunView) *engine.Notice {
 	unit, run := view.Waiting, view.Snapshot.Run
+	if unit != nil && unit.CreditHold != "" {
+		return &engine.Notice{Kind: engine.NoticeCreditHold, Reason: unit.CreditHold}
+	}
 	if unit == nil || view.Snapshot.StoreNow.Sub(unit.Since) < claimAttentionGrace {
 		return nil
 	}
