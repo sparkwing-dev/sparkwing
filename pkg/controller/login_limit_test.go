@@ -55,14 +55,14 @@ func TestLoginLimiter_IPv6RotationWithinOnePrefixCannotBlockOthers(t *testing.T)
 	srv := multiTeamLoginServer(t)
 	h := srv.Handler()
 	refused := 0
-	for i := range loginGlobalBurst {
+	for i := range 2400 {
 		addr := netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, byte(i / 256), byte(i % 256)})
 		if failedTokenLogin(t, srv, h, netip.AddrPortFrom(addr, 5000).String()) == http.StatusTooManyRequests {
 			refused++
 		}
 	}
-	if refused != loginGlobalBurst-loginClientBurst {
-		t.Fatalf("one /64 was refused %d times, want %d", refused, loginGlobalBurst-loginClientBurst)
+	if refused != 2400-loginClientBurst {
+		t.Fatalf("one /64 was refused %d times, want %d", refused, 2400-loginClientBurst)
 	}
 	for _, other := range []string{"[2001:db8:1:3::1]:5000", "198.51.100.4:5000"} {
 		if code := failedTokenLogin(t, srv, h, other); code == http.StatusTooManyRequests {
@@ -71,43 +71,31 @@ func TestLoginLimiter_IPv6RotationWithinOnePrefixCannotBlockOthers(t *testing.T)
 	}
 }
 
-func TestLoginLimiter_GlobalBucketChargesOnlyFailedTokenLogins(t *testing.T) {
+func TestLoginLimiter_NoListenerBudgetBlocksAFreshClient(t *testing.T) {
 	srv := multiTeamLoginServer(t)
 	h := srv.Handler()
-	for i := range loginGlobalBurst + 100 {
+	for i := range 3000 {
 		addr := netip.AddrFrom4([4]byte{198, 51, byte(i / 256), byte(i % 256)}).String() + ":5000"
-		if rec := postLogin(t, h, addr, "", loginBodyNoCSRF); rec.Code != http.StatusForbidden {
-			t.Fatalf("form refusal %d: status = %d, want %d", i+1, rec.Code, http.StatusForbidden)
-		}
-		oauth := httptest.NewRequest(http.MethodGet, "/auth/github/start", nil)
-		oauth.RemoteAddr = addr
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, oauth)
-		if rec.Code == http.StatusTooManyRequests {
-			t.Fatalf("OAuth start %d was charged to the listener budget", i+1)
-		}
-	}
-	for i := range loginGlobalBurst {
-		addr := netip.AddrFrom4([4]byte{203, 0, byte(i / 256), byte(i % 256)}).String() + ":5000"
 		if code := failedTokenLogin(t, srv, h, addr); code == http.StatusTooManyRequests {
-			t.Fatalf("failed login %d refused before the listener budget was spent", i+1)
+			t.Fatalf("failed login %d from a fresh client was refused", i+1)
 		}
 	}
-	// safety: the bucket refills while the burst is spent, so allow a few extra before the listener must refuse.
-	for i := range 200 {
-		addr := netip.AddrFrom4([4]byte{192, 0, byte(i / 256), byte(i % 256)}).String() + ":5000"
-		if failedTokenLogin(t, srv, h, addr) == http.StatusTooManyRequests {
-			oauth := httptest.NewRequest(http.MethodGet, "/auth/github/start", nil)
-			oauth.RemoteAddr = "192.0.2.250:5000"
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, oauth)
-			if rec.Code == http.StatusTooManyRequests {
-				t.Fatal("spent token-login budget refused OAuth start")
-			}
-			return
-		}
+	oauth := httptest.NewRequest(http.MethodGet, "/auth/github/start", nil)
+	oauth.RemoteAddr = "192.0.2.250:5000"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, oauth)
+	if rec.Code == http.StatusTooManyRequests {
+		t.Fatal("OAuth start was refused by other clients' attempts")
 	}
-	t.Fatal("no fresh client was refused after the failed-login budget was spent")
+}
+
+func TestLoginClientKeyFoldsMappedIPv4(t *testing.T) {
+	if got, want := loginClientKey("::ffff:198.51.100.4"), loginClientKey("198.51.100.4"); got != want {
+		t.Fatalf("mapped IPv4 key %q, want %q", got, want)
+	}
+	if loginClientKey("2001:db8:1:2::9") != loginClientKey("2001:db8:1:2:ffff::1") {
+		t.Fatal("one /64 produced two keys")
+	}
 }
 
 func TestLoginLimiter_PerClientBucketReturns429(t *testing.T) {
