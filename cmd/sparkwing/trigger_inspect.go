@@ -36,6 +36,9 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 	if err != nil {
 		return nil, err
 	}
+	if selection.checkout.directory != "" {
+		spec.LocalCheckout, spec.RemoteURL, spec.CommittedCheckout = selection.checkout.directory, "", true
+	}
 	entry, err := source.Acquire(ctx, spec, options)
 	if entry != nil {
 		defer func() { resultErr = errors.Join(resultErr, entry.Close(), ctx.Err()) }()

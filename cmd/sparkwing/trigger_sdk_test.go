@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 
@@ -89,16 +90,9 @@ func FuzzTriggerSDKIgnoresWorkingTree(f *testing.F) {
 
 func acquiredTriggerSDK(t *testing.T, selected preparedTriggerSource) (engine.SDKKind, error) {
 	t.Helper()
-	selected.source.Location.LocalCheckout = selected.checkout.directory
-	selected.source.Location.RemoteURL = ""
-	selected.source.CommittedCheckout = true
-	spec, err := source.ForRequest(runspec.SealedRequest{Request: runspec.Request{Git: selected.git, Source: selected.source}})
-	if err != nil {
-		return "", err
-	}
 	selectedKind := engine.SDKKind("")
 	boundary := errors.New("SDK selection reached")
-	_, err = source.Acquire(t.Context(), spec, source.Options{Workspace: t.TempDir(), Engines: triggerSDKResolver{}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, ReadPin: func(_ string, kind engine.SDKKind) (engine.Pin, error) {
+	_, err := inspectTriggerSource(t.Context(), selected, os.Environ(), source.Options{Workspace: t.TempDir(), Engines: triggerSDKResolver{}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, ReadPin: func(_ string, kind engine.SDKKind) (engine.Pin, error) {
 		selectedKind = kind
 		return engine.Pin{}, boundary
 	}})
@@ -116,4 +110,67 @@ func (triggerSDKResolver) Resolve(context.Context, engine.Pin, releaseasset.Targ
 
 func (triggerSDKResolver) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("unexpected ensure")
+}
+
+func FuzzTriggerInspectionAcquiresOriginalResolvedPair(f *testing.F) {
+	f.Add("dirty code", false)
+	f.Add("other bytes\n", true)
+	f.Fuzz(func(t *testing.T, dirty string, workingTree bool) {
+		if len(dirty) > 4096 {
+			t.Skip()
+		}
+		repo, _ := triggerPreparationRepo(t)
+		writeSnapshotFile(t, repo, ".sparkwing/payload", "sealed code\n", 0o600)
+		runSnapshotGit(t, repo, "add", ".")
+		runSnapshotGit(t, repo, "commit", "-qm", "code")
+		runSnapshotGit(t, repo, "tag", "code")
+		code := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+		writeSnapshotFile(t, repo, ".sparkwing/payload", "execution code\n", 0o600)
+		runSnapshotGit(t, repo, "commit", "-qam", "execution")
+		head := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+		runSnapshotGit(t, repo, "replace", code, head)
+		writeSnapshotFile(t, repo, ".sparkwing/payload", fmt.Sprintf("%x", dirty), 0o600)
+		input := triggerPreparationInput(repo)
+		input.pipelineRef = "code"
+		bundle := ""
+		if workingTree {
+			snapshot, err := captureWorktreeSnapshot(t.Context(), os.Environ(), repo, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := snapshot.close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := snapshot.includeRevisions(t.Context(), code); err != nil {
+				t.Fatal(err)
+			}
+			input.snapshot, bundle, head = snapshot, snapshot.BundlePath, snapshot.SHA
+		}
+		selected, err := prepareTriggerSource(t.Context(), input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selected.git.SHA != head || selected.source.Ref != code {
+			t.Fatal("selection changed resolved pair")
+		}
+		before := runSnapshotGit(t, repo, "status", "--porcelain=v1")
+		boundary := errors.New("selected code reached engine")
+		options := source.Options{Workspace: t.TempDir(), Engines: triggerSDKResolver{}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, ReadPin: func(dir string, _ engine.SDKKind) (engine.Pin, error) {
+			raw, err := os.ReadFile(filepath.Join(dir, "payload"))
+			if err != nil || string(raw) != "sealed code\n" {
+				t.Fatalf("inspection substituted selected code: %q %v", raw, err)
+			}
+			return engine.Pin{}, boundary
+		}}
+		options.LocalBundle = bundle
+		_, err = inspectTriggerSource(t.Context(), selected, os.Environ(), options)
+		if !errors.Is(err, boundary) {
+			t.Fatalf("original resolved pair did not reach engine: %v", err)
+		}
+		if after := runSnapshotGit(t, repo, "status", "--porcelain=v1"); after != before {
+			t.Fatal("inspection changed original checkout")
+		}
+	})
 }

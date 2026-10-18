@@ -31,16 +31,9 @@ func TestSnapshotAcquisitionKeepsCapturedBytes(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	replica, err := snapshotTriggerCheckout(t.Context(), snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	inspection, err := triggerInspectionCheckout(t.Context(), os.Environ(), replica, snapshot.SHA, snapshot.BundlePath, snapshot.tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inspection := preparedTriggerCheckout(t, snapshot.environment, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath)
 	remote := acquireSnapshotBundle(t, snapshot, source.Spec{SHA: snapshot.SHA, PipelineDir: "."})
-	for name, checkout := range map[string]string{"local replica": replica, "local inspection": inspection, "remote": remote.CheckoutDirectory()} {
+	for name, checkout := range map[string]string{"local inspection": inspection, "remote": remote.CheckoutDirectory()} {
 		for _, file := range []string{"notes.txt", "version.id", ".gitattributes"} {
 			want, err := os.ReadFile(filepath.Join(repo, file))
 			if err != nil {
@@ -77,10 +70,6 @@ func TestSnapshotBundleCarriesEverySelectedRevision(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	_, err = snapshotTriggerCheckout(t.Context(), snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
 	input := triggerPreparationInput(repo)
 	input.snapshot, input.ref, input.pipelineRef = snapshot, execution, code
 	selected, err := prepareTriggerSource(t.Context(), input)

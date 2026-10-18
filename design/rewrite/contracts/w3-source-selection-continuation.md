@@ -37,7 +37,12 @@ Remote bundle acquisition chooses the object format from the sealed object ID.
 Selectors resolve against the original repository, including local branches,
 origin-qualified refs, tags and configured code pins. Working-tree selection
 reads configuration from the captured commit through the same acquisition owner.
-Inspection fetches only resolved commit IDs and the tags an explicit checkout
+Inspection passes the original checkout and resolved execution/code pair to
+`source.Acquire`. Native trigger and burst pass the captured bundle through
+`LocalBundle` when needed. Shared acquisition owns both committed workspaces and
+their cleanup, while the submitted request retains its remote acquisition
+location. There is no execution-only inspection replica or origin rewrite.
+Acquisition fetches only resolved commit IDs and the tags an explicit checkout
 policy requests. It never imports operational reference namespaces.
 `Options.LocalReplica` and the wildcard namespace importer are deleted.
 `procenv.Git` forces `GIT_NO_REPLACE_OBJECTS=1`; source Git also sets

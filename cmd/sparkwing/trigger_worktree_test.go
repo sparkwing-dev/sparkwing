@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 func TestTriggerSnapshotSelectsCapturedPipelineAndLeavesCheckoutUntouched(t *testing.T) {
@@ -22,10 +26,7 @@ func TestTriggerSnapshotSelectsCapturedPipelineAndLeavesCheckoutUntouched(t *tes
 			t.Error(err)
 		}
 	})
-	directory, err := snapshotTriggerCheckout(t.Context(), snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
+	directory := preparedTriggerCheckout(t, snapshot.environment, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath)
 	input := triggerPreparationInput(repo)
 	input.snapshot = snapshot
 	selected, err := prepareTriggerSource(t.Context(), input)
@@ -47,18 +48,12 @@ func TestTriggerSnapshotSelectsCapturedPipelineAndLeavesCheckoutUntouched(t *tes
 func TestTriggerInspectionCheckoutUsesSelectedCommittedSource(t *testing.T) {
 	repo, sha := triggerPreparationRepo(t)
 	writeSnapshotFile(t, repo, "untracked.txt", "private working copy", 0o600)
-	directory, err := triggerInspectionCheckout(t.Context(), os.Environ(), repo, sha, "", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	directory := preparedTriggerCheckout(t, os.Environ(), repo, sha, "")
 	if actual := strings.TrimSpace(runSnapshotGit(t, directory, "rev-parse", "HEAD")); actual != sha {
 		t.Fatalf("inspection SHA=%s, want %s", actual, sha)
 	}
 	if _, err := os.Stat(filepath.Join(directory, "untracked.txt")); !os.IsNotExist(err) {
 		t.Fatal("committed inspection included untracked content")
-	}
-	if origin := strings.TrimSpace(runSnapshotGit(t, directory, "remote", "get-url", "origin")); origin != "https://github.com/acme/app.git" {
-		t.Fatalf("inspection origin=%s", origin)
 	}
 }
 
@@ -96,11 +91,7 @@ func TestTriggerInspectionIgnoresAmbientGitIdentityProperty(t *testing.T) {
 			}
 			return r
 		}, forged))
-		directory, err := triggerInspectionCheckout(t.Context(), os.Environ(), repo, sha, "", t.TempDir())
-		if err != nil {
-			t.Log(err)
-			return false
-		}
+		directory := preparedTriggerCheckout(t, os.Environ(), repo, sha, "")
 		actual, err := (triggerCheckout{directory: directory, environment: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()}}).read(t.Context(), "rev-parse", "HEAD")
 		return err == nil && actual == sha
 	}, &quick.Config{MaxCount: 16}); err != nil {
@@ -135,10 +126,7 @@ func TestWorkingTreeTriggerPreservesNamedReferenceIdentity(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			directory, err := snapshotTriggerCheckout(t.Context(), snapshot)
-			if err != nil {
-				t.Fatal(err)
-			}
+			directory := preparedTriggerCheckout(t, snapshot.environment, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath)
 			if refs := runSnapshotGit(t, directory, "for-each-ref", "--format=%(refname)"); strings.Contains(refs, "refs/heads/release") {
 				t.Fatal("inspection imported an unselected branch")
 			}
@@ -161,4 +149,18 @@ func TestWorkingTreeTriggerPreservesNamedReferenceIdentity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func preparedTriggerCheckout(t *testing.T, captured []string, repo, sha, bundle string) string {
+	t.Helper()
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: sha, CommittedCheckout: true, PipelineDir: "."}, source.Options{Workspace: t.TempDir(), LocalBundle: bundle, Base: procenv.Base{Local: true, Captured: captured, Masker: secrets.NewMasker()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := entry.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return entry.CheckoutDirectory()
 }

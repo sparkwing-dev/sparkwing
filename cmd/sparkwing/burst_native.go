@@ -131,10 +131,6 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		return controllerwire.CreateRunRequest{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, snapshot.close()) }()
-	checkout, err := snapshotTriggerCheckout(ctx, snapshot)
-	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
-	}
 	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: snapshot.RepoRoot, snapshot: snapshot, pipeline: pipeline, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
 		return lookupTriggerGitHubID(ctx, remote, captured)
 	}})
@@ -164,7 +160,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	options.PreparedCheckout = checkout
+	options.LocalBundle = snapshot.BundlePath
 	options.SDK = ""
 	selected.source.NoBincache, selected.source.HashAllFiles = flags.noBincache, flags.hashAllFiles
 	described, err := inspectTriggerSource(ctx, selected, captured, options)

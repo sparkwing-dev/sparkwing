@@ -267,9 +267,7 @@ func FuzzPreparationGitNeverRestoresSigningMaterial(f *testing.F) {
 		if err := checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"SIGNING_MATERIAL": secret}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := snapshotTriggerCheckout(t.Context(), snapshot); err != nil {
-			t.Fatal(err)
-		}
+		preparedTriggerCheckout(t, snapshot.environment, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath)
 		observed, err := os.ReadFile(probe)
 		if err != nil || !bytes.Contains(observed, []byte("seen:")) {
 			t.Fatalf("fsmonitor never ran: %v", err)
