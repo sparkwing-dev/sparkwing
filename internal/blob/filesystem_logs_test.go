@@ -29,19 +29,23 @@ func TestFilesystemLogUploadsAreImmutableAndPutOnly(t *testing.T) {
 	for _, name := range []string{"seg-000001.ndjson.gz", "manifest.json"} {
 		t.Run(name, func(t *testing.T) {
 			key := "logs/r90/teams/acme/runs/run-1/jobs/build/a1-g1/" + name
-			u, _, err := backend.SignLogPut(t.Context(), key, now.Add(15*time.Minute))
+			u, _, err := backend.SignLogPut(t.Context(), key, 11, digest("first bytes"), now.Add(15*time.Minute))
 			if err != nil {
 				t.Fatal(err)
 			}
-			for i, body := range []string{"first bytes", "first bytes", "other bytes"} {
+			other, _, err := backend.SignLogPut(t.Context(), key, 11, digest("other bytes"), now.Add(15*time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, put := range []struct{ url, body string }{{u, "first bytes"}, {u, "first bytes"}, {u, "other bytes"}, {u, "first byte"}, {other, "other bytes"}} {
 				w := httptest.NewRecorder()
-				backend.ServeHTTP(w, httptest.NewRequest(http.MethodPut, u, strings.NewReader(body)))
+				backend.ServeHTTP(w, httptest.NewRequest(http.MethodPut, put.url, strings.NewReader(put.body)))
 				want := http.StatusCreated
-				if i == 2 {
+				if i >= 2 {
 					want = http.StatusBadRequest
 				}
 				if w.Code != want {
-					t.Fatalf("PUT %q = %d: %s", body, w.Code, w.Body)
+					t.Fatalf("PUT %d %q = %d: %s", i, put.body, w.Code, w.Body)
 				}
 			}
 			r, err := backend.Get(t.Context(), key)
@@ -84,7 +88,7 @@ func TestFilesystemLogSigningRejectsInvalidObjects(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = backend.Close() })
 	for _, key := range []string{"teams/acme/cas/" + string(digest("x")), "../escape", "logs/r90/teams/acme/runs/../manifest.json", "logs/r90/teams/acme/runs/run-1/jobs/x/a1-g1/seg-000000.ndjson.gz", "logs/r90/teams/acme/runs/run-1/jobs/x/a1-g1/other", "logs/r90/teams/acme/runs/run-1/jobs/x/a1-g1/manifest.json/../manifest.json", "logs/r90/teams/acme/runs/run-1/jobs/x/a1-g1/seg-1000001.ndjson.gz"} {
-		if _, _, err := backend.SignLogPut(t.Context(), key, now.Add(time.Minute)); err == nil {
+		if _, _, err := backend.SignLogPut(t.Context(), key, 1, digest("x"), now.Add(time.Minute)); err == nil {
 			t.Errorf("signed %q", key)
 		}
 		if _, err := backend.Get(t.Context(), key); err == nil {
@@ -93,13 +97,23 @@ func TestFilesystemLogSigningRejectsInvalidObjects(t *testing.T) {
 	}
 	key := "logs/r90/teams/acme/runs/run-1/units/plan/g1/manifest.json"
 	for _, expiry := range []time.Time{now, now.Add(-time.Second), now.Add(limits.LogUploadURLTTL + time.Nanosecond)} {
-		if _, _, err := backend.SignLogPut(t.Context(), key, expiry); err == nil {
+		if _, _, err := backend.SignLogPut(t.Context(), key, 1, digest("x"), expiry); err == nil {
 			t.Errorf("signed expiry %v", expiry)
+		}
+	}
+	for _, size := range []int64{0, -1, limits.LogManifestBytes + 1} {
+		if _, _, err := backend.SignLogPut(t.Context(), key, size, digest("x"), now.Add(time.Minute)); err == nil {
+			t.Errorf("signed size %d", size)
+		}
+	}
+	for _, d := range []blob.Digest{"", "abc", blob.Digest(strings.ToUpper(string(digest("x"))))} {
+		if _, _, err := backend.SignLogPut(t.Context(), key, 1, d, now.Add(time.Minute)); err == nil {
+			t.Errorf("signed digest %q", d)
 		}
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, _, err := backend.SignLogPut(ctx, key, now.Add(time.Minute)); !errors.Is(err, context.Canceled) {
+	if _, _, err := backend.SignLogPut(ctx, key, 1, digest("x"), now.Add(time.Minute)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled sign = %v", err)
 	}
 	if _, err := backend.Get(ctx, key); !errors.Is(err, context.Canceled) {
@@ -117,7 +131,7 @@ func TestFilesystemLogUploadBoundsAndCancellation(t *testing.T) {
 	t.Cleanup(func() { _ = backend.Close() })
 	for _, name := range []string{"manifest.json", "seg-000001.ndjson.gz"} {
 		key := "logs/r30/teams/acme/runs/run-1/units/trigger/g1/" + name
-		u, _, err := backend.SignLogPut(t.Context(), key, now.Add(time.Minute))
+		u, _, err := backend.SignLogPut(t.Context(), key, 5, digest("bytes"), now.Add(time.Minute))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,9 +171,12 @@ func TestFilesystemConcurrentLogWritesKeepOnePayload(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = backend.Close() })
 	key := "logs/r90/teams/acme/runs/run-1/units/eval/job/s1-g2/seg-000001.ndjson.gz"
-	u, _, err := backend.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatal(err)
+	var urls [2]string
+	for i := range urls {
+		urls[i], _, err = backend.SignLogPut(t.Context(), key, 64, digest(strings.Repeat(string(rune('a'+i)), 64)), time.Now().Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	type result struct {
 		body string
@@ -171,7 +188,7 @@ func TestFilesystemConcurrentLogWritesKeepOnePayload(t *testing.T) {
 		writers.Go(func() {
 			body := strings.Repeat(string(rune('a'+i%2)), 64)
 			w := httptest.NewRecorder()
-			backend.ServeHTTP(w, httptest.NewRequest(http.MethodPut, u, strings.NewReader(body)))
+			backend.ServeHTTP(w, httptest.NewRequest(http.MethodPut, urls[i%2], strings.NewReader(body)))
 			replies <- result{body: body, code: w.Code}
 		})
 	}

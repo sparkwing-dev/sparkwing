@@ -14,6 +14,7 @@ type Defaults struct {
 	Prefers  []string
 }
 func Discover(startDir string) (string, *Config, error)
+var ErrTooLarge = fmt.Errorf("%s is larger than the %d MiB limit", Filename, limits.ProjectConfigBytes>>20)
 type Events struct {
 	Push        *PushEvent
 	PullRequest *PullRequestEvent

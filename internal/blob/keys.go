@@ -11,6 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+// Valid reports whether d is a lowercase hex SHA-256 digest.
+func (d Digest) Valid() bool { return validDigest(d) }
+
 func validDigest(d Digest) bool {
 	if len(d) != 64 || strings.ToLower(string(d)) != string(d) {
 		return false

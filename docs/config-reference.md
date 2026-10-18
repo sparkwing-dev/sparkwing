@@ -2,7 +2,7 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # Config reference
 
-Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated from the Go structs the config parser enforces. `Required` reflects whether the field may be omitted. See [storage backends](backends.md) for profiles and [spark libraries](sparks.md) for library configuration.
+Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated from the Go structs the config parser enforces. `Required` reflects whether the field may be omitted. A `sparkwing.yaml` larger than 1 MiB is refused before it is parsed. See [storage backends](backends.md) for profiles and [spark libraries](sparks.md) for library configuration.
 
 ## Pipeline entry (a `pipelines:` list item)
 

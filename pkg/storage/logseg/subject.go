@@ -61,7 +61,7 @@ type SubjectUploader struct {
 	data Data
 	mu   sync.Mutex
 
-	batch    blob.LogUploadBatch
+	class    string
 	prefix   string
 	segments []Segment
 	bytes    int64
@@ -129,11 +129,11 @@ func (u *SubjectUploader) PutSegment(ctx context.Context, seg Segment, body []by
 	if seg.FirstSeq != u.lastSeq()+1 || seg.Bytes > limits.StoredAttemptLogBytes-u.bytes {
 		return blob.ErrIntegrity
 	}
-	if err := u.sign(ctx, int64(seg.N)); err != nil {
+	slot, err := u.sign(ctx, int64(seg.N), body)
+	if err != nil {
 		return err
 	}
 	u.pending = &seg
-	slot := u.batch.Segments[int64(seg.N)-u.batch.Segments[0].Index]
 	if err := u.put(ctx, int64(seg.N), slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
 		return err
 	}
@@ -173,34 +173,20 @@ func (u *SubjectUploader) lastSeq() int64 {
 	return u.segments[len(u.segments)-1].LastSeq
 }
 
-func (u *SubjectUploader) sign(ctx context.Context, first int64) error {
-	now := time.Now()
-	if len(u.batch.Segments) > 0 && first >= u.batch.Segments[0].Index && first <= u.batch.Segments[len(u.batch.Segments)-1].Index && u.batch.ExpiresAt.After(now) {
-		if u.batch.Segments[first-u.batch.Segments[0].Index].ExpiresAt.After(now) {
-			return nil
-		}
-	}
-	count := min(limits.LogUploadBatch, limits.MaxLogSegmentNumber-int(first)+1)
-	batch, err := u.data.Transport.SignSegments(ctx, blob.LogSigningRequest{Subject: cloneSubject(u.data.Subject), FirstSegment: first, Count: count})
+func (u *SubjectUploader) sign(ctx context.Context, index int64, body []byte) (blob.LogUploadURL, error) {
+	sum := sha256.Sum256(body)
+	slot, err := u.data.Transport.SignUpload(ctx, blob.LogSigningRequest{Subject: cloneSubject(u.data.Subject), Index: index, Size: int64(len(body)), Digest: blob.Digest(hex.EncodeToString(sum[:]))})
 	if err != nil {
-		return err
+		return blob.LogUploadURL{}, err
 	}
-	now = time.Now()
-	prefix, err := blob.LogSubjectPrefix(batch.RetentionClass, batch.Subject)
-	want, wantErr := blob.LogSubjectPrefix(batch.RetentionClass, u.data.Subject)
-	if err != nil || wantErr != nil || prefix != want || len(batch.Segments) != count || !validLogURL(batch.ManifestURL) ||
-		!batch.ExpiresAt.After(now) || (u.prefix != "" && prefix != u.prefix) {
-		return blob.ErrIntegrity
+	prefix, err := blob.LogSubjectPrefix(slot.RetentionClass, slot.Subject)
+	want, wantErr := blob.LogSubjectPrefix(slot.RetentionClass, u.data.Subject)
+	if err != nil || wantErr != nil || prefix != want || slot.Index != index || !validLogURL(slot.URL) ||
+		!slot.ExpiresAt.After(time.Now()) || (u.prefix != "" && prefix != u.prefix) {
+		return blob.LogUploadURL{}, blob.ErrIntegrity
 	}
-	seen := map[string]bool{batch.ManifestURL: true}
-	for i, slot := range batch.Segments {
-		if slot.Index != first+int64(i) || !validLogURL(slot.URL) || seen[slot.URL] || !slot.ExpiresAt.After(now) || slot.ExpiresAt.After(batch.ExpiresAt) {
-			return blob.ErrIntegrity
-		}
-		seen[slot.URL] = true
-	}
-	u.batch, u.prefix = batch, prefix
-	return nil
+	u.class, u.prefix = slot.RetentionClass, prefix
+	return slot, nil
 }
 
 func validLogURL(raw string) bool {
@@ -240,7 +226,7 @@ func (u *SubjectUploader) put(ctx context.Context, index int64, url string, head
 func (u *SubjectUploader) commit(ctx context.Context, segments []store.Segment, final bool, reason string) error {
 	return u.data.Records.RecordSegments(ctx, store.SegmentCommit{
 		Subject: cloneSubject(u.data.Subject), Actor: u.data.Actor,
-		Segments: segments, Final: final, IncompleteReason: reason, RetentionClass: u.batch.RetentionClass,
+		Segments: segments, Final: final, IncompleteReason: reason, RetentionClass: u.class,
 	})
 }
 
@@ -289,12 +275,13 @@ func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error {
 	if u.sealed {
 		return nil
 	}
-	if err := u.sign(ctx, max(1, int64(len(u.segments)))); err != nil {
+	slot, err := u.sign(ctx, 0, raw)
+	if err != nil {
 		return err
 	}
 	// safety: retain the first final payload even after an uncertain PUT so retries cannot overwrite it.
 	u.final = bytes.Clone(raw)
-	if err := u.put(ctx, 0, u.batch.ManifestURL, u.batch.ManifestHeaders, u.batch.ExpiresAt, raw); err != nil {
+	if err := u.put(ctx, 0, slot.URL, slot.Headers, slot.ExpiresAt, raw); err != nil {
 		return err
 	}
 	var records []store.Segment

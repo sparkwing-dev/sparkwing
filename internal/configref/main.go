@@ -40,6 +40,7 @@ func main() {
 	b.WriteString("# Config reference\n\n")
 	b.WriteString("Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated from " +
 		"the Go structs the config parser enforces. `Required` reflects whether the field may be omitted. " +
+		"A `sparkwing.yaml` larger than 1 MiB is refused before it is parsed. " +
 		"See [storage backends](backends.md) for profiles and [spark libraries](sparks.md) for library configuration.\n\n")
 
 	section(&b, "Top level", structFields(cf, "Config"))

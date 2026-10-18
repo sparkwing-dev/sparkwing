@@ -53,10 +53,10 @@ const (
 	LogSearchTimeout time.Duration = 10 * time.Second
 	// LogSegmentBytes bounds log segment cut size.
 	LogSegmentBytes int64 = 1 << 20
+	// ProjectConfigBytes bounds one sparkwing.yaml.
+	ProjectConfigBytes int64 = 1 << 20
 	// LogSearchBytes bounds run-scoped log search bytes.
 	LogSearchBytes int64 = 256 << 20
 	// ProtocolEnvelopeBytes bounds envelope allowance beyond a typed output payload.
 	ProtocolEnvelopeBytes int64 = 1 << 20
-	// LogUploadBatch bounds segment URLs per signing batch, plus manifest URL.
-	LogUploadBatch int = 16
 )

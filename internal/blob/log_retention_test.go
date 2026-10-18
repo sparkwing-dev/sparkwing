@@ -54,7 +54,7 @@ func TestFilesystemLogRetention(t *testing.T) {
 		for i, age := range []time.Duration{time.Duration(days)*24*time.Hour - time.Nanosecond, time.Duration(days) * 24 * time.Hour, time.Duration(days+1) * 24 * time.Hour} {
 			for _, name := range []string{"seg-000001.ndjson.gz", "manifest.json"} {
 				key := fmt.Sprintf("logs/r%d/teams/acme/runs/run-%d/units/plan/g1/%s", days, i, name)
-				u, _, err := backend.SignLogPut(t.Context(), key, now.Add(time.Minute))
+				u, _, err := backend.SignLogPut(t.Context(), key, 9, digest("log bytes"), now.Add(time.Minute))
 				if err != nil {
 					t.Fatal(err)
 				}

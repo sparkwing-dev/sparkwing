@@ -484,6 +484,11 @@ protect that tenant's digest until commit or abandonment. Abort and leased expir
 register possible copied bytes as a tombstoned blob before releasing quota. The
 nullable `uploads.abandoned_at` records that handoff once, including tickets whose
 expired quota was released by another admission. GC tolerates absent object bytes.
+`DeleteExpiredBlobStaging` deletes the staging object of every committed or
+abandoned blob ticket once `limits.BlobGCGrace` has passed since its expiry,
+which also catches a commit whose immediate staging delete failed. It deletes
+outside any transaction, then sets `uploads.staging_deleted_at` in a leased
+transaction. A failed delete leaves the column unset for the next pass.
 Abandonment creates no receipt or successful-upload usage. Live tickets, receipts
 and record graphs still protect a shared digest.
 

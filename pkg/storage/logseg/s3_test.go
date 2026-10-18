@@ -3,6 +3,8 @@ package logseg_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
@@ -102,6 +104,11 @@ func (s *conditionalLogs) request(r *http.Request) (*http.Response, error) {
 		if err != nil || int64(len(raw)) != r.ContentLength {
 			s.t.Fatalf("log upload size = %d, %d, %v", len(raw), r.ContentLength, err)
 		}
+		sum := sha256.Sum256(raw)
+		signed := r.URL.Query().Get("X-Amz-SignedHeaders")
+		if !strings.Contains(signed, "content-length") || !strings.Contains(signed, "x-amz-checksum-sha256") || r.Header.Get("X-Amz-Checksum-Sha256") != base64.StdEncoding.EncodeToString(sum[:]) {
+			s.t.Fatalf("log PUT is not bound to its bytes: %s, %v", signed, r.Header)
+		}
 		if _, exists := s.objects[key]; exists {
 			status = http.StatusPreconditionFailed
 		} else {
@@ -129,7 +136,7 @@ func bindS3Logs(t *testing.T, subject blob.LogSubject) (*logDataFixture, *condit
 	requests := s3LogHTTP(objects.request)
 	backend := s3LogBackend(t, requests)
 	f := &logDataFixture{view: store.LogSegments{Subject: subject}, actor: store.Actor{Holder: "writer", Generation: 7}}
-	f.signer = logseg.BatchSigner{Objects: backend, ClassReady: func(context.Context, string) error { return nil }}
+	f.signer = logseg.Signer{Objects: backend, ClassReady: func(context.Context, string) error { return nil }}
 	f.reader = logseg.CommittedReader{Records: f, Objects: backend}
 	return f, objects, logseg.Data{Subject: subject, Transport: f, Records: f, Actor: f.actor, HTTPClient: blob.TransferClient{Transport: requests}}
 }

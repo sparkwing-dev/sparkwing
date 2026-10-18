@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,76 +16,78 @@ import (
 
 type logPutSigner struct {
 	keys    []string
+	sizes   []int64
+	digests []blob.Digest
 	expires []time.Time
 	err     error
 }
 
-func (s *logPutSigner) SignLogPut(_ context.Context, key string, expiry time.Time) (string, map[string]string, error) {
+func (s *logPutSigner) SignLogPut(_ context.Context, key string, size int64, digest blob.Digest, expiry time.Time) (string, map[string]string, error) {
 	s.keys = append(s.keys, key)
+	s.sizes = append(s.sizes, size)
+	s.digests = append(s.digests, digest)
 	s.expires = append(s.expires, expiry)
 	return "https://objects.test/" + key, map[string]string{"X-Object-Key": key}, s.err
 }
 
-func TestLogBatchSigning(t *testing.T) {
+var signingDigest = blob.Digest(strings.Repeat("ab", 32))
+
+func TestLogSigningBindsOneExactObject(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	for _, subject := range []blob.LogSubject{jobSubject(), ownerSubject(blob.LogTrigger), ownerSubject(blob.LogPlan), ownerSubject(blob.LogEval)} {
 		for _, class := range []string{"r30", "r90", "r120"} {
-			t.Run(fmt.Sprint(subject, class), func(t *testing.T) {
-				backend := &logPutSigner{}
-				var checked []string
-				signer := logseg.BatchSigner{Objects: backend, Now: func() time.Time { return now }, ClassReady: func(_ context.Context, class string) error {
-					checked = append(checked, class)
-					return nil
-				}}
-				req := blob.LogSigningRequest{Subject: subject, FirstSegment: 17, Count: 16}
-				batch, err := signer.Sign(t.Context(), req, class)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if len(batch.Segments) != 16 || !reflect.DeepEqual(batch.Subject, subject) || batch.RetentionClass != class || !batch.ExpiresAt.Equal(now.Add(15*time.Minute)) || !reflect.DeepEqual(checked, []string{class}) {
-					t.Fatalf("batch = %+v, lifecycle = %v", batch, checked)
-				}
-				prefix, err := blob.LogSubjectPrefix(class, subject)
-				if err != nil {
-					t.Fatal(err)
-				}
-				for i, slot := range batch.Segments {
-					key := blob.LogSegmentKey(prefix, 17+i)
-					if slot.Index != int64(17+i) || slot.URL != "https://objects.test/"+key || slot.Headers["X-Object-Key"] != key || !slot.ExpiresAt.Equal(batch.ExpiresAt) || backend.keys[i] != key || !backend.expires[i].Equal(batch.ExpiresAt) {
-						t.Fatalf("slot %d = %+v", i, slot)
+			for _, index := range []int64{0, 17} {
+				t.Run(fmt.Sprint(subject, class, index), func(t *testing.T) {
+					backend := &logPutSigner{}
+					var checked []string
+					signer := logseg.Signer{Objects: backend, Now: func() time.Time { return now }, ClassReady: func(_ context.Context, class string) error {
+						checked = append(checked, class)
+						return nil
+					}}
+					req := blob.LogSigningRequest{Subject: subject, Index: index, Size: 42, Digest: signingDigest}
+					slot, err := signer.Sign(t.Context(), req, class)
+					if err != nil {
+						t.Fatal(err)
 					}
-				}
-				if len(backend.keys) != 17 || backend.keys[16] != blob.LogManifestKey(prefix) || batch.ManifestURL != "https://objects.test/"+backend.keys[16] || batch.ManifestHeaders["X-Object-Key"] != backend.keys[16] {
-					t.Fatalf("manifest = %q, keys = %v", batch.ManifestURL, backend.keys)
-				}
-				if batch.Subject.Attempt != nil {
-					batch.Subject.Attempt.Generation++
-				} else {
-					batch.Subject.Unit.Generation++
-				}
-				if req.Subject.Attempt != nil && req.Subject.Attempt.Generation != 7 || req.Subject.Unit != nil && req.Subject.Unit.Generation != 3 {
-					t.Fatal("returned batch aliases request identity")
-				}
-			})
+					prefix, err := blob.LogSubjectPrefix(class, subject)
+					if err != nil {
+						t.Fatal(err)
+					}
+					key := blob.LogManifestKey(prefix)
+					if index > 0 {
+						key = blob.LogSegmentKey(prefix, int(index))
+					}
+					if !reflect.DeepEqual(slot.Subject, subject) || slot.RetentionClass != class || slot.Index != index || !slot.ExpiresAt.Equal(now.Add(15*time.Minute)) || !reflect.DeepEqual(checked, []string{class}) {
+						t.Fatalf("slot = %+v, lifecycle = %v", slot, checked)
+					}
+					if !reflect.DeepEqual(backend.keys, []string{key}) || backend.sizes[0] != 42 || backend.digests[0] != signingDigest || !backend.expires[0].Equal(slot.ExpiresAt) || slot.URL != "https://objects.test/"+key || slot.Headers["X-Object-Key"] != key {
+						t.Fatalf("signed %+v for slot %+v", backend, slot)
+					}
+					if slot.Subject.Attempt != nil {
+						slot.Subject.Attempt.Generation++
+					} else {
+						slot.Subject.Unit.Generation++
+					}
+					if req.Subject.Attempt != nil && req.Subject.Attempt.Generation != 7 || req.Subject.Unit != nil && req.Subject.Unit.Generation != 3 {
+						t.Fatal("returned slot aliases request identity")
+					}
+				})
+			}
 		}
 	}
 }
 
-func TestLogBatchRejectsBeforeSigning(t *testing.T) {
+func TestLogSigningRejectsBeforeSigning(t *testing.T) {
 	for name, change := range map[string]func(*blob.LogSigningRequest, *string){
-		"zero first":      func(r *blob.LogSigningRequest, _ *string) { r.FirstSegment = 0 },
-		"past last":       func(r *blob.LogSigningRequest, _ *string) { r.FirstSegment = int64(limits.MaxLogSegmentNumber) + 1 },
-		"range overflow":  func(r *blob.LogSigningRequest, _ *string) { r.FirstSegment = int64(limits.MaxLogSegmentNumber) },
-		"zero count":      func(r *blob.LogSigningRequest, _ *string) { r.Count = 0 },
-		"negative count":  func(r *blob.LogSigningRequest, _ *string) { r.Count = -1 },
-		"too many":        func(r *blob.LogSigningRequest, _ *string) { r.Count = 17 },
+		"negative index":  func(r *blob.LogSigningRequest, _ *string) { r.Index = -1 },
+		"past last":       func(r *blob.LogSigningRequest, _ *string) { r.Index = int64(limits.MaxLogSegmentNumber) + 1 },
 		"invalid subject": func(r *blob.LogSigningRequest, _ *string) { r.Subject.Attempt.Generation = 0 },
 		"invalid class":   func(_ *blob.LogSigningRequest, c *string) { *c = "r030" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			backend := &logPutSigner{}
-			signer := logseg.BatchSigner{Objects: backend, ClassReady: func(context.Context, string) error { t.Fatal("checked invalid request"); return nil }}
-			req, class := blob.LogSigningRequest{Subject: jobSubject(), FirstSegment: 1, Count: 16}, "r90"
+			signer := logseg.Signer{Objects: backend, ClassReady: func(context.Context, string) error { t.Fatal("checked invalid request"); return nil }}
+			req, class := blob.LogSigningRequest{Subject: jobSubject(), Index: 1, Size: 1, Digest: signingDigest}, "r90"
 			change(&req, &class)
 			if _, err := signer.Sign(t.Context(), req, class); err == nil || len(backend.keys) != 0 {
 				t.Fatalf("sign = %v, keys = %v", err, backend.keys)
@@ -93,10 +96,10 @@ func TestLogBatchRejectsBeforeSigning(t *testing.T) {
 	}
 }
 
-func TestLogBatchRequiresLifecycleAndPreservesErrors(t *testing.T) {
-	request := blob.LogSigningRequest{Subject: jobSubject(), FirstSegment: 1, Count: 16}
+func TestLogSigningRequiresLifecycleAndPreservesErrors(t *testing.T) {
+	request := blob.LogSigningRequest{Subject: jobSubject(), Index: 1, Size: 1, Digest: signingDigest}
 	backend := &logPutSigner{}
-	signer := logseg.BatchSigner{Objects: backend}
+	signer := logseg.Signer{Objects: backend}
 	if _, err := signer.Sign(t.Context(), request, "r90"); err == nil {
 		t.Fatal("signed without lifecycle check")
 	}
@@ -107,8 +110,8 @@ func TestLogBatchRequiresLifecycleAndPreservesErrors(t *testing.T) {
 	}
 	signer.ClassReady = func(context.Context, string) error { return nil }
 	backend.err = errors.New("backend unavailable")
-	if b, err := signer.Sign(t.Context(), request, "r90"); !errors.Is(err, backend.err) || len(b.Segments) != 0 {
-		t.Fatalf("partial batch = %+v, %v", b, err)
+	if slot, err := signer.Sign(t.Context(), request, "r90"); !errors.Is(err, backend.err) || slot.URL != "" {
+		t.Fatalf("failed slot = %+v, %v", slot, err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

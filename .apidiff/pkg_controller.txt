@@ -652,6 +652,7 @@ func (g googleProvider) SignIn(ctx context.Context, code, verifier, redirectURI 
 func (*intakeRevisionAccess) BundleURL(context.Context, string) (string, error)
 func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error)
 func (e *intakeRunToken) Error() string
+func (l *lineScanner) Write(p []byte) (int, error)
 func (l *liveLogs) Append(runID, nodeID string, data []byte)
 func (l *liveLogs) AppendAt(runID, nodeID, attempt string, off int64, data []byte)
 func (l *liveLogs) Finish(runID, nodeID string)

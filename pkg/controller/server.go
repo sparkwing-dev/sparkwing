@@ -117,6 +117,7 @@ type Server struct {
 
 	metricsAddr       string
 	trustedProxyAddr  string
+	deliverySpools    chan struct{}
 	trustedProxyCIDRs []netip.Prefix
 	metricsLn         net.Listener
 
@@ -174,6 +175,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		logger:             logger,
 		masker:             secrets.NewMasker(),
 		loginLimit:         newLoginLimiter(),
+		deliverySpools:     make(chan struct{}, githubDeliverySpools),
 		queueTimeout:       15 * time.Minute,
 		sessionMaxLifetime: DefaultSessionMaxLifetime,
 		liveLogs:           newLiveLogs(),
@@ -585,29 +587,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 func (s *Server) WithExternalURL(rawURL string) *Server {
 	s.externalURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	return s
-}
-
-func (s *Server) externalBaseURL(r *http.Request) string {
-	base := s.externalURL
-	if base == "" {
-		base = requestBaseURL(r)
-	}
-	return base
-}
-
-// safety: a controller behind TLS termination sees a plain listener, so the
-// forwarded scheme is the only thing that tells the caller's URL from the hop's.
-func requestBaseURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded != "" {
-		if proto, _, _ := strings.Cut(forwarded, ","); proto != "" {
-			scheme = strings.TrimSpace(proto)
-		}
-	}
-	return scheme + "://" + r.Host
 }
 
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {

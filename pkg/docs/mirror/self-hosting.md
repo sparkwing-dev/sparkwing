@@ -92,6 +92,7 @@ these file names, mounted whole.
 | `oidc-key`, `oidc-key.published` | OIDC signing key and the extra key the key set publishes | no ID tokens; see [OIDC](oidc.md) |
 | `google-client-secret`, `github-client-secret` | OAuth client secrets for sign-in | no sign-in with that provider |
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
+| `github-app-webhook-secret.previous` | Previous webhook secret accepted during a rotation | only the current secret verifies deliveries |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
 | `stripe-api-key` | Stripe API credential matching `--payment-mode test` or `live` | a configured payment callback refuses to start |
@@ -119,6 +120,30 @@ the first untrusted address for request logs and per-IP limits. Proxies must
 append the address they observed or replace the header with their verified
 chain. Trust only proxy networks because every address in those networks can
 assert a forwarded client. Malformed hops in the trusted portion fall back to the TCP peer.
+
+On Kubernetes, prefer a dedicated listener over a CIDR when ingress pods share
+an address range with other pods, as they do on a VPC-wide pod network. Set
+`controller.trustedProxyListener.enabled` and a
+`controller.trustedProxyListener.namespaceSelector` that names the ingress
+controller's namespace. The chart passes `--trusted-proxy-addr`, routes the
+Ingress to that port and adds a NetworkPolicy that admits only the selected
+ingress pods to it. Requests on that port key per-IP limits and request logs on
+`X-Real-IP`, so the ingress must overwrite that header with the peer it observed.
+Another NetworkPolicy that allows all ingress to the controller defeats the fence.
+The fence holds only on a CNI that enforces NetworkPolicy, and it cannot
+separate an ingress controller that runs with `hostNetwork`, because its
+traffic arrives from the node address rather than a pod in the selected namespace.
+
+### Outbound source clones
+
+When the controller or a shared runner clones a tenant's repository, it
+resolves the host once, refuses any address inside the local network and makes
+git connect to the address it checked. HTTPS pins the address with
+`http.curloptResolve`; ssh pins it with `HostName` and verifies the host key
+under the repository's name. An operator `HTTPS_PROXY` or `ALL_PROXY` in the
+controller's environment bypasses the pin, because the proxy resolves the name
+itself; restrict such a proxy's destinations at the proxy. Clones the owning
+user runs locally keep their ssh configuration, agent and `Host` aliases.
 
 ### Signed downloads through CloudFront
 

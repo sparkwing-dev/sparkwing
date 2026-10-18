@@ -88,8 +88,12 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	if body.FirstSegment < 1 || body.FirstSegment > int64(limits.MaxLogSegmentNumber) || body.Count < 1 || body.Count > limits.LogUploadBatch || int64(body.Count)-1 > int64(limits.MaxLogSegmentNumber)-body.FirstSegment {
-		return invalidEngineBody("invalid log signing range")
+	limit := limits.LogSegmentUploadBytes
+	if body.Index == 0 {
+		limit = limits.LogManifestBytes
+	}
+	if body.Index < 0 || body.Index > int64(limits.MaxLogSegmentNumber) || body.Size < 1 || body.Size > limit || !body.Digest.Valid() {
+		return invalidEngineBody("invalid log upload index, size or digest")
 	}
 	tenant, subject, err := s.logSubmission(r, a, body.Subject)
 	if err != nil {
@@ -103,11 +107,11 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 	if err != nil {
 		return err
 	}
-	batch, err := (logseg.BatchSigner{Objects: objects, ClassReady: objects.LogClassReady}).Sign(r.Context(), body, class)
+	slot, err := (logseg.Signer{Objects: objects, ClassReady: objects.LogClassReady}).Sign(r.Context(), body, class)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, batch)
+	writeJSON(w, http.StatusOK, slot)
 	return nil
 }
 

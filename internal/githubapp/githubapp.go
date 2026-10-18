@@ -20,6 +20,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"net/url"
@@ -31,6 +32,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // GitHub's production endpoints.
@@ -90,7 +93,9 @@ type Config struct {
 	ClientID      string
 	ClientSecret  string
 	WebhookSecret string
-	PrivateKey    *rsa.PrivateKey
+	// PreviousWebhookSecret also verifies deliveries while a rotation settles; empty disables it.
+	PreviousWebhookSecret string
+	PrivateKey            *rsa.PrivateKey
 	// WebURL is github.com, where browsers install the App and authorize it.
 	WebURL string
 	// APIURL is api.github.com.
@@ -203,6 +208,32 @@ func (c *Client) AuthorizeURL(state, verifier, redirectURI string) string {
 // VerifyWebhook reports whether signature (the X-Hub-Signature-256 header)
 // is the App's HMAC of body.
 func (c *Client) VerifyWebhook(signature string, body []byte) bool {
+	mac := c.WebhookMAC()
+	_, _ = mac.Write(body)
+	return mac.Verify(signature)
+}
+
+// WebhookMAC hashes a streamed delivery body under every accepted webhook secret.
+type WebhookMAC struct{ macs []hash.Hash }
+
+// WebhookMAC starts a delivery hash under the current and any previous secret.
+func (c *Client) WebhookMAC() *WebhookMAC {
+	m := &WebhookMAC{macs: []hash.Hash{hmac.New(sha256.New, []byte(c.cfg.WebhookSecret))}}
+	if c.cfg.PreviousWebhookSecret != "" {
+		m.macs = append(m.macs, hmac.New(sha256.New, []byte(c.cfg.PreviousWebhookSecret)))
+	}
+	return m
+}
+
+func (m *WebhookMAC) Write(p []byte) (int, error) {
+	for _, mac := range m.macs {
+		mac.Write(p)
+	}
+	return len(p), nil
+}
+
+// Verify reports whether signature is the HMAC of the bytes written under any accepted secret.
+func (m *WebhookMAC) Verify(signature string) bool {
 	hexSum, ok := strings.CutPrefix(signature, "sha256=")
 	if !ok {
 		return false
@@ -211,9 +242,11 @@ func (c *Client) VerifyWebhook(signature string, body []byte) bool {
 	if err != nil {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(c.cfg.WebhookSecret))
-	mac.Write(body)
-	return hmac.Equal(want, mac.Sum(nil))
+	verified := false
+	for _, mac := range m.macs {
+		verified = hmac.Equal(want, mac.Sum(nil)) || verified
+	}
+	return verified
 }
 
 // User is a GitHub account as a user token reports it.
@@ -531,29 +564,37 @@ func (c *Client) FileAtCommit(ctx context.Context, installation, repository int6
 }
 
 func (c *Client) fileAt(ctx context.Context, auth, root, sha, file string) ([]byte, bool, error) {
-	var content struct {
-		Encoding string `json:"encoding"`
-		Content  string `json:"content"`
-	}
 	filePath := strings.TrimPrefix(file, "/")
 	if filePath == "" || strings.Contains(filePath, "..") || strings.ContainsAny(filePath, "?#") {
 		return nil, false, errors.New("githubapp: invalid repository file path")
 	}
-	err := c.getJSON(ctx, root+"/contents/"+filePath+"?ref="+url.QueryEscape(sha), auth, &content)
-	if errors.Is(err, errNotFound) {
-		return nil, false, nil
-	}
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.APIURL+root+"/contents/"+filePath+"?ref="+url.QueryEscape(sha), nil)
 	if err != nil {
 		return nil, false, err
 	}
-	if content.Encoding != "base64" {
-		return nil, false, errors.New("githubapp: repository file is not base64 encoded")
-	}
-	decoded, err := base64.StdEncoding.DecodeString(content.Content)
+	c.apiHeaders(req, auth)
+	req.Header.Set("Accept", "application/vnd.github.raw+json")
+	resp, err := c.cfg.HTTP.Do(req)
 	if err != nil {
-		return nil, false, fmt.Errorf("githubapp: decode repository file: %w", err)
+		return nil, false, fmt.Errorf("githubapp: %s: %w", req.URL.Host, err)
 	}
-	return decoded, true, nil
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, false, nil
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return nil, false, fmt.Errorf("%w: %s answered %d", ErrRejected, req.URL.Path, resp.StatusCode)
+	case resp.StatusCode != http.StatusOK:
+		return nil, false, fmt.Errorf("githubapp: %s answered %d", req.URL.Path, resp.StatusCode)
+	}
+	// safety: one byte past the limit lets the configuration parser refuse an oversized file.
+	content, err := io.ReadAll(io.LimitReader(resp.Body, limits.ProjectConfigBytes+1))
+	if err != nil {
+		return nil, false, fmt.Errorf("githubapp: read %s: %w", req.URL.Host, err)
+	}
+	return content, true, nil
 }
 
 // hack: GitHub answers a request for ungranted permissions with the same 422 as a

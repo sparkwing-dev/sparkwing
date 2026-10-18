@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -43,16 +44,6 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	claim := award.Claim
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
-	signing := blob.LogSigningRequest{Subject: subject, FirstSegment: 1, Count: 2}
-	encoded, err := json.Marshal(signing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response = engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), 200)
-	var batch blob.LogUploadBatch
-	if err := json.Unmarshal(response.Body.Bytes(), &batch); err != nil || batch.RetentionClass != "r30" || len(batch.Segments) != 2 || batch.ManifestURL == "" {
-		t.Fatalf("batch=%+v: %v", batch, err)
-	}
 	plain := []byte("masked log\n")
 	var compressed bytes.Buffer
 	z := gzip.NewWriter(&compressed)
@@ -65,15 +56,39 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	digest := sha256.Sum256(compressed.Bytes())
 	first := store.Segment{Index: 1, Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: hex.EncodeToString(digest[:])}
 	second := store.Segment{Index: 2, Offset: int64(len(plain)), Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: first.Digest}
-	for _, slot := range batch.Segments {
+	sign := func(index, size int64, status int) blob.LogUploadURL {
+		encoded, err := json.Marshal(blob.LogSigningRequest{Subject: subject, Index: index, Size: size, Digest: blob.Digest(first.Digest)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), status)
+		var slot blob.LogUploadURL
+		if status == 200 {
+			if err := json.Unmarshal(response.Body.Bytes(), &slot); err != nil || slot.RetentionClass != "r30" || slot.Index != index || slot.URL == "" {
+				t.Fatalf("slot=%+v: %v", slot, err)
+			}
+		}
+		return slot
+	}
+	sign(1, 0, 400)
+	sign(1, limits.LogSegmentUploadBytes+1, 400)
+	sign(0, limits.LogManifestBytes+1, 400)
+	put := func(slot blob.LogUploadURL, body []byte) int {
 		response := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPut, slot.URL, bytes.NewReader(compressed.Bytes()))
+		request := httptest.NewRequest(http.MethodPut, slot.URL, bytes.NewReader(body))
 		for key, value := range slot.Headers {
 			request.Header.Set(key, value)
 		}
 		h.ServeHTTP(response, request)
-		if response.Code != http.StatusCreated {
-			t.Fatalf("log PUT: %d %s", response.Code, response.Body)
+		return response.Code
+	}
+	for _, index := range []int64{1, 2} {
+		slot := sign(index, int64(compressed.Len()), 200)
+		if code := put(slot, append(bytes.Clone(compressed.Bytes()), 0)); code != http.StatusBadRequest {
+			t.Fatalf("log PUT with unsigned length = %d", code)
+		}
+		if code := put(slot, compressed.Bytes()); code != http.StatusCreated {
+			t.Fatalf("log PUT = %d", code)
 		}
 	}
 	for _, segment := range []store.Segment{first, second} {
@@ -84,7 +99,7 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 		engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(encoded), 200)
 	}
 	commit := logCommitRequest{Subject: subject, Segments: []store.Segment{first, second}, Final: true}
-	encoded, err = json.Marshal(commit)
+	encoded, err := json.Marshal(commit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,6 +131,7 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	if !bytes.Equal(response.Body.Bytes(), output.Bytes()) {
 		t.Fatalf("controller log read = %q; want %q", response.Body.Bytes(), output.Bytes())
 	}
+	signing := blob.LogSigningRequest{Subject: subject, Index: 1, Size: first.StoredBytes, Digest: blob.Digest(first.Digest)}
 	property := func(choice uint8, noise string) bool {
 		wrong := signing
 		identity := *signing.Subject.Attempt

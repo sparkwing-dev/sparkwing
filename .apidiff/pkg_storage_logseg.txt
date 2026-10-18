@@ -1,11 +1,5 @@
 # pkg/storage/logseg
 
-type BatchSigner struct {
-	Objects    LogPutSigner
-	ClassReady func(context.Context, string) error
-	Now        func() time.Time
-}
-func (s BatchSigner) Sign(ctx context.Context, request blob.LogSigningRequest, class string) (blob.LogUploadBatch, error)
 const ClassFree = "r30"
 const ClassStandard = "r90"
 type CommittedReader struct {
@@ -39,7 +33,7 @@ type Gap struct {
 	To   int64
 }
 type LogPutSigner interface {
-	SignLogPut(context.Context, string, time.Time) (string, map[string]string, error)
+	SignLogPut(ctx context.Context, key string, size int64, digest blob.Digest, expiry time.Time) (string, map[string]string, error)
 }
 type Manifest struct {
 	Subject      *blob.LogSubject
@@ -111,6 +105,12 @@ type SegmentObjects interface {
 type SegmentRecorder interface {
 	RecordSegments(context.Context, store.SegmentCommit) error
 }
+type Signer struct {
+	Objects    LogPutSigner
+	ClassReady func(context.Context, string) error
+	Now        func() time.Time
+}
+func (s Signer) Sign(ctx context.Context, request blob.LogSigningRequest, class string) (blob.LogUploadURL, error)
 type Sink struct {
 }
 func (s *Sink) Append(data []byte, stream string, first, last int64) error

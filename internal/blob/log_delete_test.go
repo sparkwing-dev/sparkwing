@@ -46,7 +46,7 @@ func TestFilesystemLogDeletionScope(t *testing.T) {
 							t.Log(err)
 							return false
 						}
-						u, _, err := objects.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
+						u, _, err := objects.SignLogPut(t.Context(), key, int64(len(payload)), digest(string(payload[:])), time.Now().Add(time.Minute))
 						if err != nil {
 							t.Log(err)
 							return false
@@ -170,12 +170,16 @@ func TestFilesystemSignedLogSlotHasOneConcurrentWinner(t *testing.T) {
 			}()
 		}
 		key := "logs/r90/teams/acme/runs/run/units/plan/g1/seg-000001.ndjson.gz"
-		signed, _, err := objects[0].SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
-		if err != nil {
-			t.Log(err)
-			return false
-		}
 		bodies := [][]byte{left[:], right[:]}
+		var signed [2]string
+		for i, body := range bodies {
+			var err error
+			signed[i], _, err = objects[0].SignLogPut(t.Context(), key, int64(len(body)), digest(string(body)), time.Now().Add(time.Minute))
+			if err != nil {
+				t.Log(err)
+				return false
+			}
+		}
 		var statuses [2]int
 		start := make(chan struct{})
 		var writers sync.WaitGroup
@@ -183,7 +187,7 @@ func TestFilesystemSignedLogSlotHasOneConcurrentWinner(t *testing.T) {
 			writers.Go(func() {
 				<-start
 				response := httptest.NewRecorder()
-				objects[i].ServeHTTP(response, httptest.NewRequest(http.MethodPut, signed, bytes.NewReader(bodies[i])))
+				objects[i].ServeHTTP(response, httptest.NewRequest(http.MethodPut, signed[i], bytes.NewReader(bodies[i])))
 				statuses[i] = response.Code
 			})
 		}

@@ -64,6 +64,18 @@ func (s *Server) meterResponse(w http.ResponseWriter, r *http.Request, class egr
 	}
 }
 
+func (s *Server) holdLogScanSlot(w http.ResponseWriter, r *http.Request, principal string) (func(), bool) {
+	if egress.Bodyless(r) {
+		return func() {}, true
+	}
+	release, err := s.egress.Open(principal, egress.SlotDownload)
+	if err != nil {
+		s.writeEgressRefusal(w, r, egress.ClassLog, err)
+		return nil, false
+	}
+	return release, true
+}
+
 func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, class egress.Class, err error) {
 	reason := "egress_download_limit"
 	retryAfter := egress.SlotRetryAfter

@@ -203,6 +203,10 @@ func TestPersistedLogPageTimestampFilterAndMissingSegments(t *testing.T) {
 		t.Fatalf("timestamp selection = %+v: %v", page, err)
 	}
 	logs.objs = newScriptedSegmentLogs()
+	cursor, err = newLogPageCursor("", "run", "a", q)
+	if err != nil {
+		t.Fatal(err)
+	}
 	page = controllerwire.LogPage{Complete: true}
 	if err := appendSubjectPage(t.Context(), logs, subject, q, nil, &cursor, &page); err == nil || len(page.Records) > 0 {
 		t.Fatal("missing committed bytes became a successful empty poll")
@@ -266,11 +270,17 @@ func FuzzPersistedLogPageCursorCannotReplaceSubjectAuthority(f *testing.F) {
 		}
 		cursor, _ := newLogPageCursor("", subject.RunID, subject.Team, controllerwire.LogQuery{})
 		key, _ := json.Marshal(subject)
-		cursor.Lines[string(key)] = 1000000
+		cursor.Lines[string(key)], cursor.Offsets = 1000000, map[string]int64{string(key): 1000000}
 		page := controllerwire.LogPage{}
 		err := appendSubjectPage(t.Context(), logs, subject, controllerwire.LogQuery{}, nil, &cursor, &page)
 		if (err == nil) != (!revoked && field%6 == 5) || len(page.Records) != 0 {
 			t.Fatalf("cursor substituted for exact current subject authority: %+v %v", page, err)
 		}
 	})
+}
+
+func appendSubjectPage(ctx context.Context, reader segmentLogs, subject blob.LogSubject, q controllerwire.LogQuery, pattern *regexp.Regexp, cursor *logPageCursor, page *controllerwire.LogPage) error {
+	budget, cancel := newLogBudget(ctx)
+	defer cancel()
+	return appendSubjectLines(reader, subject, q, 0, pattern, cursor, page, budget)
 }

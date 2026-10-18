@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -276,23 +275,11 @@ func scanHostKeyVia(ctx context.Context, host string, port int, lookup sourceurl
 ) (ssh.PublicKey, error) {
 	ctx, cancel := context.WithTimeout(ctx, hostKeyScanTimeout)
 	defer cancel()
-	var resolved []net.IPAddr
-	resolveOnce := func(ctx context.Context, name string) ([]net.IPAddr, error) {
-		addrs, err := lookup(ctx, name)
-		resolved = addrs
-		return addrs, err
-	}
-	if err := sourceurl.CheckResolvedHost(ctx, "ssh://git@"+host+"/scan", resolveOnce); err != nil {
+	pin, err := sourceurl.PinCloneHost(ctx, "ssh://git@"+host+"/scan", lookup)
+	if err != nil {
 		return nil, err
 	}
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	if ip == nil {
-		if len(resolved) == 0 {
-			return nil, fmt.Errorf("%s does not resolve", host)
-		}
-		ip = resolved[0].IP
-	}
-	conn, err := dial(ctx, "tcp", net.JoinHostPort(ip.String(), strconv.Itoa(port)))
+	conn, err := dial(ctx, "tcp", net.JoinHostPort(pin.Addrs[0], strconv.Itoa(port)))
 	if err != nil {
 		return nil, err
 	}

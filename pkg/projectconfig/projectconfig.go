@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
@@ -18,8 +20,14 @@ import (
 // Filename is the project configuration file inside .sparkwing.
 const Filename = "sparkwing.yaml"
 
+// ErrTooLarge refuses a configuration above limits.ProjectConfigBytes.
+var ErrTooLarge = fmt.Errorf("%s is larger than the %d MiB limit", Filename, limits.ProjectConfigBytes>>20)
+
 // Parse validates checkout declarations and preserves explicit empty values.
 func Parse(raw []byte) (*Config, error) {
+	if int64(len(raw)) > limits.ProjectConfigBytes {
+		return nil, ErrTooLarge
+	}
 	var cfg Config
 	doc, err := userconfig.DecodeYAML(Filename, raw, &cfg)
 	if err != nil {
@@ -33,11 +41,15 @@ func Parse(raw []byte) (*Config, error) {
 
 // Load returns nil when the project file is absent.
 func Load(path string) (*Config, error) {
-	raw, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, limits.ProjectConfigBytes+1))
+	if err = errors.Join(err, file.Close()); err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	cfg, err := Parse(raw)

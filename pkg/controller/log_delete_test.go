@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +30,7 @@ func TestDataStorageTeamPurgeDeletesLateSignedLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signed, _, err := objects.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
+	signed, _, err := objects.SignLogPut(t.Context(), key, 8, blob.Digest(fmt.Sprintf("%x", sha256.Sum256([]byte("late log")))), time.Now().Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

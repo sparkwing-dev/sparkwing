@@ -50,6 +50,15 @@ type KeySet struct {
 	keys      map[string]*rsa.PublicKey
 	expires   time.Time
 	fetchedAt time.Time
+	inflight  *fetchCall
+	failures  int
+	retryAt   time.Time
+	lastErr   error
+}
+
+type fetchCall struct {
+	done chan struct{}
+	err  error
 }
 
 // New returns a key set read from url. A nil client gets a ten-second
@@ -113,28 +122,64 @@ func DecodeSegment(seg string, out any) error {
 }
 
 func (k *KeySet) key(ctx context.Context, kid string) (*rsa.PublicKey, error) {
+	for {
+		k.mu.Lock()
+		now := k.now()
+		if key, ok := k.keys[kid]; ok && now.Before(k.expires) {
+			k.mu.Unlock()
+			return key, nil
+		}
+		// safety: an unknown key id refetches at most once a minute, because
+		// providers rotate keys rarely and a forged kid must not turn every
+		// request into a fetch.
+		if now.Before(k.expires) && now.Sub(k.fetchedAt) < minRefetch {
+			k.mu.Unlock()
+			return nil, fmt.Errorf("%w: signed by an unknown key", ErrRejected)
+		}
+		if now.Before(k.retryAt) {
+			err := k.lastErr
+			k.mu.Unlock()
+			return nil, fmt.Errorf("jwks: key endpoint is backing off after a failed fetch: %w", err)
+		}
+		call := k.inflight
+		if call == nil {
+			call = &fetchCall{done: make(chan struct{})}
+			k.inflight = call
+			go k.refresh(call)
+		}
+		k.mu.Unlock()
+		select {
+		case <-call.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if call.err != nil {
+			return nil, call.err
+		}
+	}
+}
+
+func (k *KeySet) refresh(call *fetchCall) {
+	keys, ttl, err := k.fetch(context.Background())
 	k.mu.Lock()
+	defer close(call.done)
 	defer k.mu.Unlock()
 	now := k.now()
-	if key, ok := k.keys[kid]; ok && now.Before(k.expires) {
-		return key, nil
-	}
-	// safety: an unknown key id refetches at most once a minute, because
-	// providers rotate keys rarely and a forged kid must not turn every
-	// request into a fetch.
-	stale := !now.Before(k.expires)
-	if !stale && now.Sub(k.fetchedAt) < minRefetch {
-		return nil, fmt.Errorf("%w: signed by an unknown key", ErrRejected)
-	}
-	keys, ttl, err := k.fetch(ctx)
+	call.err, k.inflight = err, nil
 	if err != nil {
-		return nil, err
+		k.failures++
+		k.retryAt, k.lastErr = now.Add(fetchBackoff(k.failures)), err
+		return
 	}
+	k.failures, k.retryAt, k.lastErr = 0, time.Time{}, nil
 	k.keys, k.fetchedAt, k.expires = keys, now, now.Add(ttl)
-	if key, ok := keys[kid]; ok {
-		return key, nil
+}
+
+func fetchBackoff(failures int) time.Duration {
+	if failures > 6 {
+		return minRefetch
 	}
-	return nil, fmt.Errorf("%w: signed by an unknown key", ErrRejected)
+	return min(time.Second<<(failures-1), minRefetch)
 }
 
 func (k *KeySet) fetch(ctx context.Context) (map[string]*rsa.PublicKey, time.Duration, error) {

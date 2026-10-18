@@ -301,7 +301,11 @@ func (g *GitHub) handleContents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"encoding": "base64", "content": base64.StdEncoding.EncodeToString(data)})
+	if r.Header.Get("Accept") != "application/vnd.github.raw+json" {
+		writeJSON(w, http.StatusNotAcceptable, map[string]string{"message": "the fake serves raw contents only"})
+		return
+	}
+	_, _ = w.Write(data)
 }
 
 func (g *GitHub) handleCommit(w http.ResponseWriter, r *http.Request) {

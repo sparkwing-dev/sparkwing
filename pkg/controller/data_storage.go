@@ -42,6 +42,9 @@ func (s *Server) maintainDataObjects(ctx context.Context, lease store.SingletonL
 	if err != nil {
 		return fmt.Errorf("collect blob tombstones: %w", err)
 	}
+	if err := operator.DeleteExpiredBlobStaging(ctx, lease, 5000, s.dataController.Objects); err != nil {
+		return fmt.Errorf("delete expired blob staging: %w", err)
+	}
 	if marked > 0 || removed > 0 {
 		s.logger.Info("collected unreachable data", "marked", marked, "removed", removed)
 	}

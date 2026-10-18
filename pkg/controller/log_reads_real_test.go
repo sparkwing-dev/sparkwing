@@ -62,7 +62,7 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 		if err != nil {
 			t.Fatal(err)
 		}
-		signed, _, err := objects.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
+		signed, _, err := objects.SignLogPut(t.Context(), key, int64(compressed.Len()), blob.Digest(fmt.Sprintf("%x", sha256.Sum256(compressed.Bytes()))), time.Now().Add(time.Minute))
 		if err != nil {
 			t.Fatal(err)
 		}

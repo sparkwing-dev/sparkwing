@@ -1,6 +1,7 @@
 package githubapp_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -8,10 +9,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func fixture(t *testing.T) (*githubapptest.GitHub, *githubapp.Client) {
@@ -172,6 +175,44 @@ func TestInstallationRepositories_NamesACutList(t *testing.T) {
 		}
 		if err != nil || len(got) != tc.count || got[tc.count-1].ID != int64(10000+tc.count-1) {
 			t.Fatalf("%d repositories = %d listed, %v", tc.count, len(got), err)
+		}
+	}
+}
+
+func TestFileAtCommit_ReadsAtMostOneByteBeyondTheConfigurationLimit(t *testing.T) {
+	gh, c := fixture(t)
+	sha := strings.Repeat("a", 40)
+	for _, size := range []int64{limits.ProjectConfigBytes, 3 * limits.ProjectConfigBytes} {
+		body := bytes.Repeat([]byte{'x'}, int(size))
+		gh.SetFile("acme/widgets", sha, ".sparkwing/sparkwing.yaml", body)
+		got, found, err := c.FileAtCommit(context.Background(), 7, 701, "acme", "widgets", sha, ".sparkwing/sparkwing.yaml")
+		want := body[:min(size, limits.ProjectConfigBytes+1)]
+		if err != nil || !found || !bytes.Equal(got, want) {
+			t.Fatalf("size %d: read %d bytes, found=%v, %v", size, len(got), found, err)
+		}
+	}
+	if _, found, err := c.FileAtCommit(context.Background(), 7, 701, "acme", "widgets", sha, ".sparkwing/absent.yaml"); err != nil || found {
+		t.Fatalf("absent file = %v, %v", found, err)
+	}
+}
+
+func TestVerifyWebhook_AcceptsThePreviousSecretDuringRotation(t *testing.T) {
+	gh, _ := fixture(t)
+	body := []byte(`{"action":"opened"}`)
+	for _, previous := range []string{"", "rotated-out-secret"} {
+		cfg := gh.Config()
+		cfg.PreviousWebhookSecret = previous
+		c := githubapp.New(cfg)
+		if !c.VerifyWebhook(githubapptest.Sign(body), body) {
+			t.Fatal("the current secret did not verify")
+		}
+		if got := c.VerifyWebhook(githubapptest.SignWith("rotated-out-secret", body), body); got != (previous != "") {
+			t.Fatalf("previous secret %q verified = %v", previous, got)
+		}
+		for _, other := range []string{"", "other"} {
+			if c.VerifyWebhook(githubapptest.SignWith(other, body), body) {
+				t.Fatalf("a delivery signed with %q verified", other)
+			}
 		}
 	}
 }
