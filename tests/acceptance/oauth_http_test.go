@@ -34,6 +34,7 @@ type oauthProvider struct {
 	transportError  error
 	userBody        string
 	emailsBody      string
+	onToken         func()
 }
 
 func (p *oauthProvider) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -44,6 +45,9 @@ func (p *oauthProvider) RoundTrip(r *http.Request) (*http.Response, error) {
 	body, status := "", http.StatusOK
 	switch r.URL.Path {
 	case "/token":
+		if p.onToken != nil {
+			p.onToken()
+		}
 		if err := r.ParseForm(); err != nil {
 			return nil, err
 		}

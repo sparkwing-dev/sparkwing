@@ -38,7 +38,7 @@ func TestFlowNoncesAreOneUseAndKindScopedProperty(t *testing.T) {
 		expires := now.Add(time.Duration(i+1) * time.Nanosecond)
 		for _, consume := range []func(string, time.Time, time.Time) (bool, error){
 			func(n string, e, at time.Time) (bool, error) {
-				return s.ConsumeIdentityLinkState(t.Context(), n, e, at)
+				return s.consumeFlowNonce(t.Context(), "identity_link", n, e)
 			},
 			func(n string, e, at time.Time) (bool, error) {
 				return s.consumeFlowNonce(t.Context(), "github_app_connect", n, e)
@@ -69,11 +69,11 @@ func TestFlowNoncesAreOneUseAndKindScopedProperty(t *testing.T) {
 		t.Fatalf("identity link key changed after reopening: %v", err)
 	}
 
-	if ok, err := s.ConsumeIdentityLinkState(t.Context(), "0/'雪\x00", now.Add(time.Nanosecond), now); err != nil || ok {
+	if ok, err := s.consumeFlowNonce(t.Context(), "identity_link", "0/'雪\x00", now.Add(time.Nanosecond)); err != nil || ok {
 		t.Fatalf("restart replay: %v, %v", ok, err)
 	}
 	for _, nonce := range []string{"", "expired"} {
-		if ok, err := s.ConsumeIdentityLinkState(t.Context(), nonce, now, now); err != nil || ok {
+		if ok, err := s.consumeFlowNonce(t.Context(), "identity_link", nonce, now); err != nil || ok {
 			t.Fatalf("invalid flow consumed: %v, %v", ok, err)
 		}
 	}
@@ -82,7 +82,7 @@ func TestFlowNoncesAreOneUseAndKindScopedProperty(t *testing.T) {
 	failures := make(chan error, 8)
 	for range 8 {
 		wg.Go(func() {
-			ok, err := s.ConsumeIdentityLinkState(t.Context(), "racing", now.Add(time.Minute), now)
+			ok, err := s.consumeFlowNonce(t.Context(), "identity_link", "racing", now.Add(time.Minute))
 			results <- ok
 			failures <- err
 		})

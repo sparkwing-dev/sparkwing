@@ -1254,6 +1254,8 @@ CREATE TABLE flow_nonces (
     kind TEXT NOT NULL CHECK(kind IN ('github_app_connect','identity_link')),
     nonce TEXT NOT NULL,
     expires_at BIGINT NOT NULL,
+    binding TEXT NOT NULL DEFAULT '',
+    completed_at BIGINT,
     PRIMARY KEY(kind,nonce)
 );
 

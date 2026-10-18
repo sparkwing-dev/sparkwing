@@ -2,12 +2,15 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -599,5 +602,76 @@ func TestSignInRefusesANewProviderOnAnExistingAccountsAddress(t *testing.T) {
 	fresh := resolve(t, st, gh("gh-bob", "bob@corp.example"))
 	if !fresh.NewAccount || fresh.Account.ID == alice.Account.ID || fresh.PersonalTeam == "" {
 		t.Fatalf("a brand-new address = %+v, want a new account with its own space", fresh)
+	}
+}
+
+func identityLinkClaim(t *testing.T, st *store.Store, account store.SignInResult, nonce string) capability.IdentityLink {
+	t.Helper()
+	raw, _, _, err := st.CreateAccountSession(context.Background(), account.Account, account.PersonalTeam, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(raw))
+	return capability.IdentityLink{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, AccountID: account.Account.ID, Provider: store.ProviderGitHub, Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute)}
+}
+
+func TestLinkAccountIdentityRequiresItsConsumedBinding(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	owner := signIn(t, st, "g-owner", "owner@example.com")
+	other := signIn(t, st, "g-other", "other@example.com")
+	claim := identityLinkClaim(t, st, owner, "bound")
+	profile := gh("gh-bound", "bound@example.com")
+	if _, err := st.LinkAccountIdentity(ctx, claim, profile); err == nil {
+		t.Fatal("unconsumed claim attached an identity")
+	}
+	if err := st.ConsumeIdentityLink(ctx, claim); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ConsumeIdentityLink(ctx, claim); err == nil {
+		t.Fatal("nonce consumed twice")
+	}
+	foreign := identityLinkClaim(t, st, other, "foreign")
+	foreign.AccountID = owner.Account.ID
+	if err := st.ConsumeIdentityLink(ctx, foreign); err == nil {
+		t.Fatal("another account's session consumed a link for this account")
+	}
+	for _, mutate := range []func(*capability.IdentityLink, *store.SignInProfile){
+		func(c *capability.IdentityLink, _ *store.SignInProfile) { c.ExpiresAt = c.ExpiresAt.Add(time.Second) },
+		func(c *capability.IdentityLink, _ *store.SignInProfile) { c.Authority.ID = foreign.Authority.ID },
+		func(_ *capability.IdentityLink, p *store.SignInProfile) { p.Provider = store.ProviderGoogle },
+		func(_ *capability.IdentityLink, p *store.SignInProfile) { p.EmailVerified = false },
+	} {
+		c, p := claim, profile
+		mutate(&c, &p)
+		if _, err := st.LinkAccountIdentity(ctx, c, p); err == nil {
+			t.Fatalf("mismatched claim %+v %+v attached an identity", c, p)
+		}
+	}
+	var wg sync.WaitGroup
+	wins := make(chan bool, 8)
+	for range 8 {
+		wg.Go(func() {
+			_, err := st.LinkAccountIdentity(ctx, claim, profile)
+			wins <- err == nil
+		})
+	}
+	wg.Wait()
+	close(wins)
+	won := 0
+	for ok := range wins {
+		if ok {
+			won++
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d attachments committed for one claim", won)
+	}
+	if ids := identitiesOf(t, st, owner.Account.ID); len(ids) != 2 || ids[1].Subject != "gh-bound" || !ids[1].Linked {
+		t.Fatalf("identities = %+v", ids)
+	}
+	account, err := st.Account(ctx, owner.Account.ID)
+	if err != nil || account.Email != "owner@example.com" {
+		t.Fatalf("account email changed: %+v %v", account, err)
 	}
 }

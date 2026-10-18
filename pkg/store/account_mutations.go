@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -126,7 +125,7 @@ func (s *Store) UnlinkAccountIdentity(ctx context.Context, a capability.Authoriz
 		if err != nil {
 			return err
 		}
-		if tx.now().Before(p.Capability.IssuedAt) || tx.now().Sub(p.Capability.IssuedAt) > 10*time.Minute {
+		if tx.now().Before(p.Capability.IssuedAt) || tx.now().Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
 			return apierr.Authorization(apierr.ReasonReauthRequired, "sign in again before changing sign-in methods")
 		}
 		ended, err = unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now())

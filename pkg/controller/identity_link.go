@@ -20,10 +20,6 @@ const identityLinkStateTTL = 10 * time.Minute
 // one account cannot drive a stream of them.
 const identityLinkAttemptsPerMinute = 10
 
-// safety: a session left open on a shared machine must not be able to add a
-// way into the account or remove its owner's, so both ask for a fresh sign-in.
-const identityChangeSignInWindow = 10 * time.Minute
-
 var providerLabels = map[string]string{store.ProviderGoogle: "Google", store.ProviderGitHub: "GitHub"}
 
 type identityJSON struct {
