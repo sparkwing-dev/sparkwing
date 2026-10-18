@@ -16,7 +16,7 @@ func FuzzConsumerCredentialsMasked(f *testing.F) {
 		if len(secret) == 0 || len(secret) > 128 || len(suffix) > 256 {
 			t.Skip()
 		}
-		for _, name := range []string{"HTTPS_PROXY", "GOPROXY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "npm_config_registry"} {
+		for _, name := range []string{"HTTPS_PROXY", "GOPROXY", "GOSUMDB", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "npm_config_registry"} {
 			password := "credential-" + hex.EncodeToString(secret) + "@inner:part,comma|pipe"
 			rawPassword := "%63" + password[1:]
 			if name == "GOPROXY" {
@@ -30,6 +30,8 @@ func FuzzConsumerCredentialsMasked(f *testing.F) {
 			value := endpoint
 			if name == "GOPROXY" {
 				value = " \thttps://public.example , \n" + value + " | direct "
+			} else if name == "GOSUMDB" {
+				value = "sum.example+key " + value
 			} else if name == "PIP_EXTRA_INDEX_URL" {
 				value = "https://public.example " + value
 			}

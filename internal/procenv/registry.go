@@ -1,5 +1,7 @@
 package procenv
 
+const goToolchainDoc = "Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed."
+
 // Registry is the single classification table for environment generation and reference documentation.
 // Removed names remain deny-only rows so stale parent environments cannot restore a credential transport.
 var Registry = []Var{
@@ -70,12 +72,16 @@ var Registry = []Var{
 	{Name: "GOWORK", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
 	{Name: "GOMODCACHE", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
 	{Name: "GOCACHE", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
-	{Name: "GOPROXY", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
-	{Name: "GOPRIVATE", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
-	{Name: "GONOSUMDB", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
-	{Name: "GONOPROXY", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
+	{Name: "GOPROXY", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
+	{Name: "GOPRIVATE", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
+	{Name: "GONOSUMDB", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
+	{Name: "GONOPROXY", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
 	{Name: "GOBIN", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
-	{Name: "GOPATH", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
+	{Name: "GOPATH", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
+	{Name: "GOFLAGS", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
+	{Name: "GOSUMDB", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
+	{Name: "GOTOOLCHAIN", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
+	{Name: "GOINSECURE", Prefix: false, Class: Tool, Owner: "tool", Doc: goToolchainDoc},
 	{Name: "LOCALAPPDATA", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
 	{Name: "npm_config_cache", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},
 	{Name: "npm_config_registry", Prefix: false, Class: Tool, Owner: "tool", Doc: "Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base."},

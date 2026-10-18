@@ -404,3 +404,51 @@ func TestSubmitEnvMalformedPatternsFailBeforeMatching(t *testing.T) {
 		}
 	}
 }
+
+func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
+	values := map[string]string{
+		"GOPROXY":     "https://public.example,https://alice:proxy-password@proxy.example|direct",
+		"GOSUMDB":     "sum.example+key https://bob:sumdb-password@sum.example",
+		"GOFLAGS":     "-mod=mod -modcacherw",
+		"GOPATH":      "/home/dev/go",
+		"GOPRIVATE":   "git.example/*",
+		"GONOPROXY":   "git.example/*",
+		"GONOSUMDB":   "git.example/*",
+		"GOTOOLCHAIN": "go1.26.0+auto",
+		"GOINSECURE":  "insecure.example/*",
+	}
+	var entries []string
+	for name, value := range values {
+		entries = append(entries, name+"="+value)
+	}
+	for _, kind := range []Kind{Plan, Attempt, Eval, Install} {
+		masker := secrets.NewMasker()
+		env, err := Build(kind, Base{Local: true, Captured: entries, Masker: masker}, Runtime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := envMap(env)
+		for name, value := range values {
+			if got[name] != value {
+				t.Errorf("kind %d owner machine %s = %q, want %q", kind, name, got[name], value)
+			}
+		}
+		for _, credential := range []string{"alice", "proxy-password", "bob", "sumdb-password"} {
+			if strings.Contains(masker.Mask(credential), credential) {
+				t.Errorf("kind %d left Go toolchain credential %q visible", kind, credential)
+			}
+		}
+		if masked := masker.Mask(values["GOPATH"] + " " + values["GOFLAGS"]); masked != values["GOPATH"]+" "+values["GOFLAGS"] {
+			t.Errorf("kind %d masked public Go settings: %q", kind, masked)
+		}
+		remote, err := Build(kind, Base{Ambient: entries, Masker: secrets.NewMasker()}, Runtime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name := range values {
+			if _, present := envMap(remote)[name]; present {
+				t.Errorf("kind %d remote runner inherited %s", kind, name)
+			}
+		}
+	}
+}

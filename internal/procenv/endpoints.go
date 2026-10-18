@@ -19,6 +19,10 @@ func proxyCredentials(name, value string) ([]string, error) {
 		}
 	case "PIP_EXTRA_INDEX_URL":
 		endpoints = strings.Fields(value)
+	case "GOSUMDB":
+		if fields := strings.Fields(value); len(fields) > 1 {
+			endpoints = fields[1:]
+		}
 	}
 	var credentials []string
 	for _, endpoint := range endpoints {
