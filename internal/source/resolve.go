@@ -18,6 +18,9 @@ func ResolveRef(ctx context.Context, spec Spec, ref string, options Options) (st
 	if err != nil {
 		return "", err
 	}
+	if spec.RemoteURL, err = tenantRemote(spec.RemoteURL, options); err != nil {
+		return "", err
+	}
 	client := &gitClient{owner: options.Base.Local, env: gitEnvironment(env), workspace: options.Workspace}
 	ref, origin := normalizeRef(ref)
 	if spec.LocalCheckout != "" {

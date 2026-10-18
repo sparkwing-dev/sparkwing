@@ -39,9 +39,12 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 		// a tenant clone connects to the address that passed the check.
 		var pin sourceurl.Pin
 		if g.owner {
-			err = sourceurl.CheckResolvedHost(ctx, remote, net.DefaultResolver.LookupIPAddr)
+			err = sourceurl.CheckResolvedHost(ctx, remote, lookupHost)
 		} else {
-			pin, err = sourceurl.PinCloneHost(ctx, remote, net.DefaultResolver.LookupIPAddr)
+			remote, args, err = normalizedRemote(remote, args)
+			if err == nil {
+				pin, err = sourceurl.PinCloneHost(ctx, remote, lookupHost)
+			}
 		}
 		if err != nil {
 			return nil, err
@@ -80,6 +83,31 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 	return out, nil
 }
 
+func tenantRemote(remote string, options Options) (string, error) {
+	if remote == "" || options.Base.Local {
+		return remote, nil
+	}
+	return sourceurl.NormalizeCloneHost(remote)
+}
+
+var lookupHost sourceurl.Lookup = net.DefaultResolver.LookupIPAddr
+
+// safety: curl and ssh match the pin by the spelling git dials, so a trailing
+// dot or a capital letter would dial a fresh resolution.
+func normalizedRemote(remote string, args []string) (string, []string, error) {
+	normalized, err := sourceurl.NormalizeCloneHost(remote)
+	if err != nil {
+		return "", nil, err
+	}
+	out := append([]string{}, args...)
+	for i, arg := range out {
+		if arg == remote {
+			out[i] = normalized
+		}
+	}
+	return normalized, out, nil
+}
+
 func pinnedEnvironment(pin sourceurl.Pin, env []string) []string {
 	if !pin.SSH {
 		return env
@@ -87,7 +115,7 @@ func pinnedEnvironment(pin sourceurl.Pin, env []string) []string {
 	out := append([]string{}, env...)
 	for i, item := range out {
 		if command, ok := strings.CutPrefix(item, "GIT_SSH_COMMAND="); ok {
-			out[i] = "GIT_SSH_COMMAND=" + command + " -o CheckHostIP=no -o HostName=" + pin.Addrs[0] + " -o HostKeyAlias=" + pin.Host
+			out[i] = "GIT_SSH_COMMAND=" + command + " -o CheckHostIP=no -o HostName=" + shellQuote(pin.Addrs[0]) + " -o HostKeyAlias=" + shellQuote(pin.Host)
 		}
 	}
 	return out

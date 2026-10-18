@@ -27,6 +27,9 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	if err := validateSpec(spec); err != nil {
 		return nil, err
 	}
+	if spec.RemoteURL, err = tenantRemote(spec.RemoteURL, options); err != nil {
+		return nil, err
+	}
 	if options.LocalBundle != "" && (spec.LocalCheckout == "" || !filepath.IsAbs(options.LocalBundle) || options.PreparedCheckout != "") {
 		return nil, errors.New("local source bundle requires an absolute file and original checkout")
 	}

@@ -1,7 +1,9 @@
 package source_test
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -282,7 +284,7 @@ func TestTenantRemoteGitConnectsToTheValidatedAddress(t *testing.T) {
 					continue
 				}
 				ssh := record.Env["GIT_SSH_COMMAND"]
-				if !strings.Contains(ssh, "-o HostName=8.8.8.8") || !strings.Contains(ssh, "-o HostKeyAlias=8.8.8.8") {
+				if !strings.Contains(ssh, "-o HostName='8.8.8.8'") || !strings.Contains(ssh, "-o HostKeyAlias='8.8.8.8'") {
 					t.Fatalf("SSH fetch is not pinned: %q", ssh)
 				}
 			}
@@ -321,7 +323,7 @@ func uncredentialedSSHCommands(t *testing.T, remote string, base procenv.Base) [
 
 func TestTenantUncredentialedSSHIgnoresAmbientConfiguration(t *testing.T) {
 	for _, ssh := range uncredentialedSSHCommands(t, "ssh://git@8.8.8.8:2222/team/repo.git", procenv.Base{Ambient: sourcetest.Environment(t)}) {
-		for _, want := range []string{"-F '/dev/null'", "-o IdentitiesOnly=yes", "-o IdentityAgent=none", "-o IdentityFile=none", "-o HostName=8.8.8.8"} {
+		for _, want := range []string{"-F '/dev/null'", "-o IdentitiesOnly=yes", "-o IdentityAgent=none", "-o IdentityFile=none", "-o HostName='8.8.8.8'"} {
 			if !strings.Contains(ssh, want) {
 				t.Fatalf("tenant SSH lacks %q: %q", want, ssh)
 			}
@@ -351,5 +353,42 @@ func TestTenantCloneRefusesAHostOnlyAnAliasResolves(t *testing.T) {
 		source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
 	if err == nil || !strings.Contains(err.Error(), "sparkwing-alias.invalid") {
 		t.Fatalf("tenant alias clone = %v", err)
+	}
+}
+
+func TestTenantRemoteGitConnectsByTheNormalisedHost(t *testing.T) {
+	for _, remote := range []string{"https://host.example./team/repo", "ssh://git@host.example.:2222/team/repo.git"} {
+		t.Run(remote, func(t *testing.T) {
+			dir, sha := sourcetest.Repository(t)
+			normalized := strings.Replace(remote, "host.example.", "host.example", 1)
+			log := sourcetest.Remote(t, map[string]string{normalized: dir})
+			source.SetLookupHost(t, func(_ context.Context, host string) ([]net.IPAddr, error) {
+				if host != "host.example" {
+					return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+				}
+				return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
+			})
+			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:host.example/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk"},
+				source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := entry.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			pinned := false
+			for _, record := range gitRecords(t, log) {
+				if slices.ContainsFunc(record.Args, func(a string) bool { return strings.Contains(a, "host.example.") }) {
+					t.Fatalf("git was handed the unnormalised host: %v", record.Args)
+				}
+				pinned = pinned || slices.Contains(record.Args, "http.curloptResolve=host.example:443:8.8.8.8") ||
+					strings.Contains(record.Env["GIT_SSH_COMMAND"], "-o HostKeyAlias='host.example'")
+			}
+			if !pinned {
+				t.Fatal("no pinned connection to the normalised host")
+			}
+		})
 	}
 }

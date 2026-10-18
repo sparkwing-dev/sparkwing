@@ -431,3 +431,19 @@ func TestCheckResolvedHostLetsAnOwnerAliasThroughButNotAnInwardName(t *testing.T
 		t.Fatal("a failed lookup let the owner fetch go ahead")
 	}
 }
+
+func TestNormalizeCloneHostRewritesTheSpellingGitConnectsTo(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://Host.Example./o/r.git":         "https://host.example/o/r.git",
+		"https://host.example.:8443/o/r.git":    "https://host.example:8443/o/r.git",
+		"ssh://git@HOST.example.:2222/o/r.git":  "ssh://git@host.example:2222/o/r.git",
+		"git@host.example.:o/r.git":             "git@host.example:o/r.git",
+		"https://[2606:50c0:8000::153]/o/r.git": "https://[2606:50c0:8000::153]/o/r.git",
+		"https://host.example/o/r.git":          "https://host.example/o/r.git",
+	} {
+		got, err := NormalizeCloneHost(raw)
+		if err != nil || got != want {
+			t.Errorf("NormalizeCloneHost(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+}

@@ -68,6 +68,9 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 	if err != nil {
 		return nil, false, err
 	}
+	if spec.RemoteURL, err = tenantRemote(spec.RemoteURL, options); err != nil {
+		return nil, false, err
+	}
 	parent := options.Workspace
 	if parent == "" {
 		parent = os.TempDir()

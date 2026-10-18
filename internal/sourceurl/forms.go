@@ -62,3 +62,29 @@ func SSHForm(raw string) (string, error) {
 	}
 	return ValidateCloneURL("ssh://git@" + host + "/" + path)
 }
+
+// NormalizeCloneHost is raw with its host lowercased and any trailing dot
+// removed, the spelling a pinned connection is matched by.
+func NormalizeCloneHost(raw string) (string, error) {
+	validated, err := ValidateCloneURL(raw)
+	if err != nil {
+		return "", err
+	}
+	if match := scpLikeRE.FindStringSubmatch(validated); match != nil {
+		user, _, _ := strings.Cut(validated, "@")
+		return user + "@" + strings.TrimRight(strings.ToLower(match[1]), ".") + ":" + match[2], nil
+	}
+	u, err := url.Parse(validated)
+	if err != nil {
+		return "", err
+	}
+	host := strings.TrimRight(strings.ToLower(u.Hostname()), ".")
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port := u.Port(); port != "" {
+		host += ":" + port
+	}
+	u.Host = host
+	return u.String(), nil
+}
