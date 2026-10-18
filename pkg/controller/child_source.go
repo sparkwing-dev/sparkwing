@@ -37,23 +37,24 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	if request.Git.Ref == "" {
 		return invalidEngineBody("fresh child source requires a branch")
 	}
-	spec, err := source.ForRequest(parent.Request)
-	if err != nil {
-		return err
-	}
-	access := &intakeRevisionAccess{server: s, team: store.Team(a.Target.Team)}
-	options := source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: s.masker}}
-	if spec.LocalCheckout != "" {
-		options.Base.Local, options.Base.Captured = true, os.Environ()
-	}
 	request.Source.WorkingTree, request.Source.CommittedCheckout = false, true
 	request.Source.BundleDigest = runspec.Optional[string]{}
-	git, code, err := source.ResolveRevisions(ctx, request.Git, request.Source, "", func(ref string) (string, error) { return source.ResolveRef(ctx, spec, ref, options) })
+	git, code, err := s.selectIntakeSource(ctx, store.Team(a.Target.Team), *request, nil)
 	if err != nil {
 		return err
 	}
 	request.Git, request.Source = git, code
 	return nil
+}
+
+func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, request runspec.Request, read func(context.Context, string, string) ([]byte, bool, error)) (runspec.Git, runspec.Source, error) {
+	spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL, LocalCheckout: request.Source.Location.LocalCheckout}
+	options := source.Options{Access: &intakeRevisionAccess{server: s, team: team}, Base: procenv.Base{Ambient: os.Environ(), Masker: s.masker}, ReadFile: read}
+	if spec.LocalCheckout != "" {
+		options.Base.Local, options.Base.Captured = true, os.Environ()
+	}
+	git, code, _, err := source.Select(ctx, spec, request.Pipeline, request.Git, request.Source, "", options)
+	return git, code, err
 }
 
 type intakeRevisionAccess struct {

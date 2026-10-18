@@ -517,30 +517,43 @@ func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owne
 		return RepositoryFileSnapshot{}, errors.New("githubapp: default branch did not resolve to a commit")
 	}
 	out := RepositoryFileSnapshot{RepositoryID: meta.ID, DefaultBranch: meta.DefaultBranch, HeadSHA: head.SHA}
+	out.Content, out.Found, err = c.fileAt(ctx, auth, root, head.SHA, file)
+	return out, err
+}
+
+// FileAtCommit reads one file at sha with a token restricted to repository and contents:read.
+func (c *Client) FileAtCommit(ctx context.Context, installation, repository int64, owner, repo, sha, file string) ([]byte, bool, error) {
+	tok, err := c.InstallationTokenByIDs(ctx, installation, []int64{repository}, map[string]string{"contents": "read"})
+	if err != nil {
+		return nil, false, err
+	}
+	return c.fileAt(ctx, "Bearer "+tok.Token, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo), sha, file)
+}
+
+func (c *Client) fileAt(ctx context.Context, auth, root, sha, file string) ([]byte, bool, error) {
 	var content struct {
 		Encoding string `json:"encoding"`
 		Content  string `json:"content"`
 	}
 	filePath := strings.TrimPrefix(file, "/")
 	if filePath == "" || strings.Contains(filePath, "..") || strings.ContainsAny(filePath, "?#") {
-		return RepositoryFileSnapshot{}, errors.New("githubapp: invalid repository file path")
+		return nil, false, errors.New("githubapp: invalid repository file path")
 	}
-	err = c.getJSON(ctx, root+"/contents/"+filePath+"?ref="+url.QueryEscape(head.SHA), auth, &content)
+	err := c.getJSON(ctx, root+"/contents/"+filePath+"?ref="+url.QueryEscape(sha), auth, &content)
 	if errors.Is(err, errNotFound) {
-		return out, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return RepositoryFileSnapshot{}, err
+		return nil, false, err
 	}
 	if content.Encoding != "base64" {
-		return RepositoryFileSnapshot{}, errors.New("githubapp: repository file is not base64 encoded")
+		return nil, false, errors.New("githubapp: repository file is not base64 encoded")
 	}
-	out.Content, err = base64.StdEncoding.DecodeString(content.Content)
+	decoded, err := base64.StdEncoding.DecodeString(content.Content)
 	if err != nil {
-		return RepositoryFileSnapshot{}, fmt.Errorf("githubapp: decode repository file: %w", err)
+		return nil, false, fmt.Errorf("githubapp: decode repository file: %w", err)
 	}
-	out.Found = true
-	return out, nil
+	return decoded, true, nil
 }
 
 // hack: GitHub answers a request for ungranted permissions with the same 422 as a

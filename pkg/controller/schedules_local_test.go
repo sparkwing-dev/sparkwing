@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -218,7 +220,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	if _, err := controls.DeleteSchedule(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: "https://gitlab.com/acme/local.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}
+	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: "https://gitlab.com/acme/local.git", Branch: "main", SHA: sourcetest.FixedRemote(t, "https://gitlab.com/acme/local.git")}
 	for i := range 21 {
 		body.Schedules = append(body.Schedules, controllerwire.ScheduleDeclaration{Pipeline: fmt.Sprintf("local-%d", i), Cron: "0 1 * * *"})
 	}

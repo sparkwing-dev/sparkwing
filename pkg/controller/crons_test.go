@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -24,7 +26,7 @@ import (
 
 const cronTestRepoURL = "https://gitlab.com/acme/widgets.git"
 
-const cronTestSHA = "0123456789abcdef0123456789abcdef01234567"
+const cronTestSHA = "cf857896cdbc5330e7600465c2a6dade81d8bcba"
 
 type cronsFixture struct {
 	t       *testing.T
@@ -37,6 +39,13 @@ type cronsFixture struct {
 
 func newCronsFixture(t *testing.T) *cronsFixture {
 	t.Helper()
+	remotes := []string{cronTestRepoURL}
+	for i := range 11 {
+		remotes = append(remotes, fmt.Sprintf("https://gitlab.com/acme/repo-%d.git", i))
+	}
+	if sha := sourcetest.FixedRemote(t, remotes...); sha != cronTestSHA {
+		t.Fatalf("fixed schedule commit = %s", sha)
+	}
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)

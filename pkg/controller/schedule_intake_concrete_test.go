@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -14,9 +16,10 @@ import (
 
 func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 	f := newBrowserFixture(t, nil)
+	sha := sourcetest.FixedRemote(t, "https://gitlab.com/acme/ci.git")
 	now := time.Now().UTC().Add(time.Minute).Truncate(time.Minute)
 	f.st.SetTestClock(t, func() time.Time { return now })
-	body := `{"mode":"replace","repo_url":"https://gitlab.com/acme/ci.git","branch":"main","sha":"0123456789abcdef0123456789abcdef01234567","follow":false,"schedules":[{"pipeline":"nightly","cron":"* * * * *","args":{"channel":"nightly"}}]}`
+	body := `{"mode":"replace","repo_url":"https://gitlab.com/acme/ci.git","branch":"main","sha":"` + sha + `","follow":false,"schedules":[{"pipeline":"nightly","cron":"* * * * *","args":{"channel":"nightly"}}]}`
 	response := f.serve(f.cookieRequest("PUT", "/api/v1/schedules/repos", body))
 	var written controllerwire.ScheduleRepoWritten
 	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &written) != nil || len(written.Schedules) != 1 {
@@ -42,7 +45,7 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := run.Request.Request
-	if run.Request.Hash == "" || request.Origin != runspec.OriginSchedule || request.Dispatch != runspec.DispatchController || request.Actor.ID != "alice" || request.RequestedArgs["channel"] != "nightly" || request.Git.SHA != "0123456789abcdef0123456789abcdef01234567" || request.Source.Location.RemoteURL != "https://gitlab.com/acme/ci.git" || len(run.Request.AllowedPools) != 0 || request.Git.App.Set {
+	if run.Request.Hash == "" || request.Origin != runspec.OriginSchedule || request.Dispatch != runspec.DispatchController || request.Actor.ID != "alice" || request.RequestedArgs["channel"] != "nightly" || request.Git.SHA != sha || request.Source.Location.RemoteURL != "https://gitlab.com/acme/ci.git" || len(run.Request.AllowedPools) != 0 || request.Git.App.Set {
 		t.Fatalf("scheduled Cloud intake lost source or consent: %+v", run.Request)
 	}
 	acquired, err := source.ForRequest(run.Request)

@@ -14,10 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -1058,7 +1059,12 @@ func (s *Server) startGitHubAppRun(
 		},
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/" + repo.Slug() + ".git", PipelineDir: ".sparkwing"}},
 	}
-	git, code, err := source.ResolveRevisions(r.Context(), request.Git, request.Source, "", nil)
+	git, code, err := s.selectIntakeSource(r.Context(), tenant.Team(), request, func(ctx context.Context, sha, name string) ([]byte, bool, error) {
+		return s.githubApp.client.FileAtCommit(ctx, installation.InstallationID, repo.ID, repo.Owner, repo.Name, sha, name)
+	})
+	if refusal := (*apierr.Error)(nil); errors.As(err, &refusal) && refusal.Code == apierr.InvalidArgs {
+		return githubAppRun{Pipeline: plan.pipeline, Status: "refused"}, nil
+	}
 	if err != nil {
 		return githubAppRun{}, err
 	}

@@ -3,14 +3,13 @@ package controller
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -41,14 +40,22 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 		}
 	}
 	request.Git.SHA = row.LockedRef
-	git, code, err := source.ResolveRevisions(ctx, request.Git, request.Source, "", func(ref string) (string, error) {
-		spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL, LocalCheckout: request.Source.Location.LocalCheckout}
-		options := source.Options{Access: &intakeRevisionAccess{server: s, team: row.Team}, Base: procenv.Base{Ambient: os.Environ(), Masker: s.masker}}
-		if row.Where == store.CronWhereLocal {
-			options.Base.Local, options.Base.Captured = true, os.Environ()
+	var read func(context.Context, string, string) ([]byte, bool, error)
+	if row.GitHubInstallationID != 0 && s.githubApp != nil {
+		display, err := sourceurl.Identity(row.RepoPath)
+		if err != nil {
+			return request, err
 		}
-		return source.ResolveRef(ctx, spec, ref, options)
-	})
+		_, slug, _ := strings.Cut(display, "/")
+		repo, valid := store.ParseGitHubRepo(strings.TrimSuffix(slug, ".git"))
+		if !valid {
+			return request, errors.New("schedule GitHub repository is invalid")
+		}
+		read = func(ctx context.Context, sha, name string) ([]byte, bool, error) {
+			return s.githubApp.client.FileAtCommit(ctx, row.GitHubInstallationID, row.GitHubRepositoryID, repo.Owner, repo.Name, sha, name)
+		}
+	}
+	git, code, err := s.selectIntakeSource(ctx, row.Team, request, read)
 	if err != nil {
 		return request, err
 	}
@@ -66,7 +73,7 @@ func (s *Server) commitLocalSchedules(ctx context.Context, a capability.Authoriz
 	for _, row := range rows {
 		request := runspec.Request{Env: registration.Environment, EnvironmentSource: runspec.EnvironmentCaptured, Source: runspec.Source{Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: ".sparkwing"}}}
 		if pipeline := registration.Project.Registry().Find(row.Pipeline); pipeline != nil {
-			request.Source.Entrypoint, request.Source.RequestedRef = pipeline.Entrypoint, pipeline.Source
+			request.Source.Entrypoint = pipeline.Entrypoint
 		}
 		request, err = s.ResolveScheduleSource(ctx, row, request)
 		if err != nil {
