@@ -59,7 +59,8 @@ run:
 
 `pipeline trigger` and Cloud-routed `run` capture only present variables matching
 `run.submit_env_allow`. Empty values remain present. Literal names and terminal
-`_*` prefixes are supported. Credential-shaped and engine-owned names are
+`_*` prefixes are supported; a prefix needs at least two characters and must
+start with a letter, so `_*` and `A_*` are refused as too broad. Credential-shaped and engine-owned names are
 excluded. The controller encrypts the captured values separately from the run
 spec and delivers them only to live execution awards. Retries keep the same
 values. Planning, installation and execution use them, and values of at least
