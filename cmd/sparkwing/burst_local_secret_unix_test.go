@@ -129,7 +129,7 @@ func FuzzWithholdLocalSecretsLeavesNoConfiguredName(f *testing.F) {
 }
 
 func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
-	for _, entry := range []string{"help", "describe", "plan", "preparation", "trigger"} {
+	for _, entry := range []string{"help", "describe", "plan", "preparation", "trigger", "trigger-working-tree"} {
 		t.Run(entry, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
@@ -139,7 +139,7 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", home)
 			config := filepath.Join(home, "config.yaml")
 			t.Setenv("SPARKWING_CONFIG", config)
-			if err := os.WriteFile(config, []byte("run:\n  routing:\n    local_secrets: [SIGNING_MATERIAL]\n"), 0o600); err != nil {
+			if err := os.WriteFile(config, []byte("profiles:\n  cloud:\n    controller:\n      url: https://controller.example\n      token: private-account-credential\nrun:\n  routing:\n    local_secrets: [SIGNING_MATERIAL]\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("SIGNING_MATERIAL", signingMaterial)
@@ -185,10 +185,31 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 				err = runPipelineDescribe(inv)
 			case "plan":
 				err = runPipelinePlan(inv)
-			case "trigger":
+			case "trigger", "trigger-working-tree":
 				runSnapshotGit(t, repo, "add", ".sparkwing")
 				runSnapshotGit(t, repo, "commit", "--quiet", "-m", "trigger pipeline")
 				runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+				if entry == "trigger-working-tree" {
+					if err := os.Remove(filepath.Join(repo, ".env")); err != nil {
+						t.Fatal(err)
+					}
+					writeSnapshotFile(t, repo, "ordinary.txt", "public", 0o600)
+					runSnapshotGit(t, repo, "add", "ordinary.txt")
+					runSnapshotGit(t, repo, "commit", "--quiet", "-m", "ordinary source")
+					writeSnapshotFile(t, repo, "ordinary.txt", signingMaterial, 0o600)
+					previous := http.DefaultTransport
+					requests := 0
+					http.DefaultTransport = logRoundTrip(func(*http.Request) (*http.Response, error) {
+						requests++
+						return nil, fmt.Errorf("unexpected source publication")
+					})
+					defer func() { http.DefaultTransport = previous }()
+					_, err = prepareNativeTrigger(t.Context(), triggerFlags{pipeline: "burst", profile: "cloud", workingTree: true})
+					if err == nil || !strings.Contains(err.Error(), "source bundle contains a declared local secret") || requests != 0 {
+						t.Fatalf("working-tree trigger bypassed known-secret boundary: requests=%d err=%v", requests, err)
+					}
+					return
+				}
 				_, err = prepareNativeTrigger(t.Context(), triggerFlags{pipeline: "burst"})
 			case "preparation":
 				var snapshots *nodehost.FileEnvironmentSnapshots
@@ -243,7 +264,7 @@ func FuzzPreparationGitNeverRestoresSigningMaterial(f *testing.F) {
 				t.Error(err)
 			}
 		}()
-		if err := snapshot.rejectSecrets(t.Context(), map[string]string{"SIGNING_MATERIAL": secret}); err != nil {
+		if err := checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"SIGNING_MATERIAL": secret}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := snapshotTriggerCheckout(t.Context(), snapshot); err != nil {

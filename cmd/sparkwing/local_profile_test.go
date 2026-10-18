@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -26,7 +27,7 @@ func TestProfileCacheBranchIgnoresAmbientRepositoryOverrides(t *testing.T) {
 	property := func(raw []byte) bool {
 		t.Setenv("GIT_DIR", filepath.Join(foreign, hex.EncodeToString(raw)+".git"))
 		t.Setenv("GIT_WORK_TREE", foreign)
-		got, err := checkoutDefaultBranch(t.Context(), os.Environ(), repo)
+		got, err := checkoutDefaultBranch(t.Context(), os.Environ(), repo, secrets.NewMasker())
 		return err == nil && got == "main"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
@@ -111,5 +112,19 @@ func TestProfileCacheConstructionAfterLocalIntake(t *testing.T) {
 	}
 	if issued != 1 || revoked != 1 {
 		t.Fatalf("profile cache credential lifetime: issued=%d revoked=%d", issued, revoked)
+	}
+}
+
+func TestDefaultBranchLookupAcceptsCapturedProxyCredentials(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	runSnapshotGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	environment := append(os.Environ(), "HTTPS_PROXY=http://user:proxy-password-4f1c9e@proxy.example")
+	prepared := prepareLocalEnvironment(environment, nil)
+	branch, err := checkoutDefaultBranch(t.Context(), prepared.captured, repo, prepared.masker)
+	if err != nil || branch != "main" {
+		t.Fatalf("captured proxy blocked branch lookup: %q %v", branch, err)
+	}
+	if strings.Contains(prepared.masker.Mask("proxy-password-4f1c9e"), "proxy-password-4f1c9e") {
+		t.Fatal("proxy password was not registered in prepared masker")
 	}
 }

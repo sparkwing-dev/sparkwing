@@ -27,8 +27,8 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	if err := validateSpec(spec); err != nil {
 		return nil, err
 	}
-	if options.LocalBundle != "" && (spec.LocalCheckout == "" || !filepath.IsAbs(options.LocalBundle) || options.PreparedCheckout != "" || !options.LocalReplica) {
-		return nil, errors.New("local source bundle requires an absolute file and local replica")
+	if options.LocalBundle != "" && (spec.LocalCheckout == "" || !filepath.IsAbs(options.LocalBundle) || options.PreparedCheckout != "") {
+		return nil, errors.New("local source bundle requires an absolute file and original checkout")
 	}
 	environment, err := sourceEnvironment(options, procenv.Git)
 	if err != nil {
@@ -151,31 +151,26 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		local := client
 		local.env = append(append([]string{}, client.env...), "GIT_ALLOW_PROTOCOL=file")
 		policy := spec.Checkout.Policy
-		if options.LocalReplica {
-			if err := initCheckout(ctx, &client, selected, checkout, revision); err != nil {
-				return entry, err
-			}
-			if err := importReferences(ctx, &local, checkout, selected); err != nil {
-				return entry, err
-			}
-		} else {
-			if err := initCheckout(ctx, &client, selected, checkout, revision); err != nil {
-				return entry, err
-			}
-			if _, err := local.run(ctx, selected, "", append(fetchArgs(policy), "--", checkout, revision)...); err != nil {
-				return entry, err
-			}
-			if entry.DefaultBranch != "" {
-				if _, err := client.run(ctx, selected, "", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+entry.DefaultBranch); err != nil {
-					return entry, err
-				}
-			}
+		if err := initCheckout(ctx, &client, selected, checkout, revision); err != nil {
+			return entry, err
 		}
 		if options.LocalBundle != "" {
 			if _, err := client.run(ctx, selected, "", "bundle", "unbundle", options.LocalBundle); err != nil {
 				return entry, err
 			}
 			if err := preserveSnapshotBytes(selected); err != nil {
+				return entry, err
+			}
+		}
+
+		_, presentErr := client.run(ctx, selected, "", "cat-file", "-e", revision+"^{commit}")
+		if presentErr != nil || policy.Tags != nil && *policy.Tags {
+			if _, err := local.run(ctx, selected, "", append(fetchArgs(policy), "--", checkout, revision)...); err != nil {
+				return entry, err
+			}
+		}
+		if entry.DefaultBranch != "" {
+			if _, err := client.run(ctx, selected, "", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+entry.DefaultBranch); err != nil {
 				return entry, err
 			}
 		}
@@ -199,7 +194,11 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		if err := checkoutCommit(ctx, &client, spec, selected, remote, revision); err != nil {
 			return entry, err
 		}
-		checkout, actual = selected, revision
+		checkout = selected
+		actual, err = client.run(ctx, checkout, "", "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil {
+			return entry, err
+		}
 	}
 	if spec.SHA != "" && !strings.EqualFold(actual, spec.SHA) {
 		return entry, errors.New("source checkout HEAD differs from the sealed commit")
@@ -238,25 +237,6 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		entry.Directory, entry.pipelineCheckout = entry.pipelineEntry.Directory, entry.pipelineEntry.CheckoutDirectory()
 	}
 	return entry, nil
-}
-
-func importReferences(ctx context.Context, client *gitClient, original, replica string) error {
-	if _, err := client.run(ctx, replica, "", "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--update-head-ok", "--", original, "+refs/*:refs/*"); err != nil {
-		return err
-	}
-	refs, err := client.run(ctx, original, "", "for-each-ref", "--format=%(refname)%00%(symref)")
-	if err != nil {
-		return err
-	}
-	for _, row := range strings.Split(refs, "\n") {
-		name, target, ok := strings.Cut(row, "\x00")
-		if ok && target != "" {
-			if _, err := client.run(ctx, replica, "", "symbolic-ref", name, target); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func validateSpec(spec Spec) error {

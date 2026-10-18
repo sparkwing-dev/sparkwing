@@ -128,7 +128,7 @@ func openLocalProfileCache(ctx context.Context, environment []string, profile st
 }
 
 func openProfileCache(ctx context.Context, environment []string, profile string, git runspec.Git, checkout string) (blob.RemoteCache, func() error, error) {
-	branch, err := checkoutDefaultBranch(ctx, environment, checkout)
+	branch, err := checkoutDefaultBranch(ctx, environment, checkout, secrets.NewMasker())
 	if err != nil {
 		return nil, nil, err
 	}

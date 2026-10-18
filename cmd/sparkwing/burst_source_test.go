@@ -14,6 +14,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -240,7 +243,7 @@ func FuzzBurstSnapshotRejectsSecretValues(f *testing.F) {
 				t.Error(err)
 			}
 		})
-		err = snapshot.rejectSecrets(t.Context(), map[string]string{"LOCAL_TOKEN": value})
+		err = checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"LOCAL_TOKEN": value})
 		if err == nil {
 			t.Fatal("secret-bearing bundle admitted")
 		}
@@ -264,20 +267,20 @@ func TestBurstSnapshotSecretScanAllowsUnchangedSourceAndNames(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if err := snapshot.rejectSecrets(t.Context(), map[string]string{"TOKEN": "private-token"}); err != nil {
+	if err := checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"TOKEN": "private-token"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := snapshot.rejectSecrets(t.Context(), map[string]string{"TOKEN": "absent-private-token"}); err != nil {
+	if err := checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"TOKEN": "absent-private-token"}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestBurstSecretScanOnlyChecksChangedBlobsAndMeaningfulValues(t *testing.T) {
+func TestBurstSecretScanChecksIncludedBlobsAndMeaningfulValues(t *testing.T) {
 	for _, tc := range []struct {
 		name, committed, edited, value string
 		refuse                         bool
 	}{
-		{"unchanged", "committed-private-token", "", "committed-private-token", false},
+		{"unchanged", "committed-private-token", "", "committed-private-token", true},
 		{"removed historical secret", "historical-private-token", "clean", "historical-private-token", false},
 		{"short value", "base", "go build ./...", "go", false},
 		{"PEM armor", "base", "-----BEGIN PRIVATE KEY-----\npublic fixture\n-----END PRIVATE KEY-----\n", "-----BEGIN PRIVATE KEY-----\nopaque-private-key-material\n-----END PRIVATE KEY-----\n", false},
@@ -301,7 +304,7 @@ func TestBurstSecretScanOnlyChecksChangedBlobsAndMeaningfulValues(t *testing.T) 
 					t.Error(err)
 				}
 			}()
-			if err := snapshot.rejectSecrets(t.Context(), map[string]string{"TOKEN": tc.value}); (err != nil) != tc.refuse {
+			if err := checkSnapshotSecrets(snapshot, t.Context(), map[string]string{"TOKEN": tc.value}); (err != nil) != tc.refuse {
 				t.Fatalf("refuse=%v error=%v", tc.refuse, err)
 			}
 		})
@@ -329,7 +332,7 @@ func TestBurstSnapshotPreservesOriginalBranchFacts(t *testing.T) {
 	if branch, err := snapshot.branch(t.Context()); err != nil || branch != "feature" {
 		t.Fatalf("branch=%q err=%v", branch, err)
 	}
-	if branch, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot); err != nil || branch != "main" {
+	if branch, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot, secrets.NewMasker()); err != nil || branch != "main" {
 		t.Fatalf("default branch=%q err=%v", branch, err)
 	}
 	runSnapshotGit(t, repo, "checkout", "--quiet", "--detach", sha)
@@ -337,14 +340,14 @@ func TestBurstSnapshotPreservesOriginalBranchFacts(t *testing.T) {
 		t.Fatalf("detached branch=%q err=%v", branch, err)
 	}
 	runSnapshotGit(t, repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
-	if branch, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot); err != nil || branch != "" {
+	if branch, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot, secrets.NewMasker()); err != nil || branch != "" {
 		t.Fatalf("absent default branch=%q err=%v", branch, err)
 	}
 	snapshot.RepoRoot = filepath.Join(t.TempDir(), "missing-checkout")
 	if _, err := snapshot.branch(t.Context()); err == nil {
 		t.Fatal("missing original checkout silently became a detached branch")
 	}
-	if _, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot); err == nil {
+	if _, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot, secrets.NewMasker()); err == nil {
 		t.Fatal("missing original checkout silently lost its default branch")
 	}
 }
@@ -364,4 +367,12 @@ func TestBurstSourceRejectsUndeclaredPathsAndMissingDeclarations(t *testing.T) {
 			t.Fatalf("accepted source declaration %q", name)
 		}
 	}
+}
+
+func checkSnapshotSecrets(snapshot *worktreeSnapshot, ctx context.Context, values map[string]string) error {
+	_, cleanup, err := source.OpenPublication(ctx, source.Publication{Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: snapshot.environment, Masker: secrets.NewMasker()}, Secrets: values})
+	if err != nil {
+		return err
+	}
+	return cleanup()
 }

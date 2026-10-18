@@ -96,12 +96,18 @@ func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
 			parent = stack[len(stack)-1]
 		}
 		stack = append(stack, node)
-		lit, ok := node.(*ast.BasicLit)
-		if !ok || lit.Kind != token.STRING {
+		expression, ok := node.(ast.Expr)
+		if !ok {
 			return true
 		}
-		text, err := strconv.Unquote(lit.Value)
-		if err != nil {
+		if _, nested := parent.(*ast.BinaryExpr); nested {
+			return true
+		}
+		if _, nested := parent.(*ast.ParenExpr); nested {
+			return true
+		}
+		text, ok := sourceHintExpression(expression)
+		if !ok {
 			return true
 		}
 		for _, m := range sourceHintRE.FindAllStringSubmatch(text, -1) {
@@ -113,15 +119,15 @@ func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
 				}
 			}
 			command = "sparkwing " + strings.TrimRight(command, ".: ")
-			verb, _ := parseInvocation(rel, fset.Position(lit.Pos()).Line, command)
+			verb, _ := parseInvocation(rel, fset.Position(expression.Pos()).Line, command)
 			if len(verb.tokens) == 0 {
 				continue
 			}
 			verb.err = fragmentFlagError(command)
-			standalone := !sourceHintDataLiteral(parent, lit) && slices.ContainsFunc(strings.Split(text, "\n"), func(line string) bool {
+			standalone := !sourceHintDataLiteral(parent, expression) && slices.ContainsFunc(strings.Split(text, "\n"), func(line string) bool {
 				line = strings.TrimSpace(line)
 				line = strings.TrimPrefix(line, "$ ")
-				return line == command
+				return line == command && !strings.ContainsRune(line, 0)
 			})
 			hints = append(hints, sourceHint{cliVerb: verb, checkPath: standalone || quoted || sourceHintFlagRE.MatchString(command) || sourceHintInstructionRE.MatchString(text)})
 		}
@@ -130,10 +136,8 @@ func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
 	return hints, nil
 }
 
-func sourceHintDataLiteral(parent ast.Node, literal *ast.BasicLit) bool {
+func sourceHintDataLiteral(parent ast.Node, literal ast.Expr) bool {
 	switch parent := parent.(type) {
-	case *ast.BinaryExpr:
-		return true
 	case *ast.CallExpr:
 		if array, ok := parent.Fun.(*ast.ArrayType); ok && array.Len == nil {
 			return true
@@ -152,4 +156,29 @@ func sourceHintDataLiteral(parent ast.Node, literal *ast.BasicLit) bool {
 		}
 	}
 	return false
+}
+
+func sourceHintExpression(expression ast.Expr) (string, bool) {
+	switch expression := expression.(type) {
+	case *ast.BasicLit:
+		if expression.Kind == token.STRING {
+			text, err := strconv.Unquote(expression.Value)
+			return text, err == nil
+		}
+	case *ast.BinaryExpr:
+		if expression.Op == token.ADD {
+			left, leftOK := sourceHintExpression(expression.X)
+			right, rightOK := sourceHintExpression(expression.Y)
+			if !leftOK {
+				left = "\x00"
+			}
+			if !rightOK {
+				right = "\x00"
+			}
+			return left + right, leftOK || rightOK
+		}
+	case *ast.ParenExpr:
+		return sourceHintExpression(expression.X)
+	}
+	return "", false
 }

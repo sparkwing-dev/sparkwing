@@ -22,11 +22,11 @@ type gitClient struct {
 }
 
 func gitEnvironment(base []string) []string {
-	return append(append([]string{}, base...), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh", "GIT_LFS_SKIP_SMUDGE=1")
+	return append(append([]string{}, base...), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_NO_REPLACE_OBJECTS=1", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh", "GIT_LFS_SKIP_SMUDGE=1")
 }
 
 func (g *gitClient) run(ctx context.Context, directory, remote string, args ...string) (output string, err error) {
-	commandArgs := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "http.followRedirects=false", "-c", "credential.helper="}
+	commandArgs := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "http.followRedirects=false", "-c", "credential.helper=", "-c", "core.useReplaceRefs=false"}
 	env := append([]string{}, g.env...)
 	if remote != "" {
 		if err := sourceurl.CheckResolvedHost(ctx, remote, net.DefaultResolver.LookupIPAddr); err != nil {

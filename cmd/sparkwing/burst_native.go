@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -134,7 +135,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: checkout, pipeline: pipeline, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: snapshot.RepoRoot, snapshot: snapshot, pipeline: pipeline, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
 		return lookupTriggerGitHubID(ctx, remote, captured)
 	}})
 	if err != nil {
@@ -147,7 +148,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	defaultBranch, err := checkoutDefaultBranch(ctx, captured, snapshot.RepoRoot)
+	defaultBranch, err := checkoutDefaultBranch(ctx, captured, snapshot.RepoRoot, masker)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
@@ -191,10 +192,10 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return request, err
 	}
-	request.Request.LocalSecretNames = slices.Sorted(maps.Keys(request.LocalSecrets))
-	if err := snapshot.rejectSecrets(ctx, request.LocalSecrets); err != nil {
-		return controllerwire.CreateRunRequest{}, err
+	for name, value := range request.LocalSecrets {
+		held[name] = value
 	}
+	request.Request.LocalSecretNames = slices.Sorted(maps.Keys(request.LocalSecrets))
 	request.Request.Burst = &runspec.BurstPlacement{OverflowMinutes: route.OverflowMinutes}
 	prefer := route.Prefer
 	if prefer == nil {
@@ -204,7 +205,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		hold, _ := time.ParseDuration(p.Hold)
 		request.Request.Burst.Preferences = append(request.Request.Burst.Preferences, runspec.PlacementStep{Target: p.Target, Hold: hold})
 	}
-	digest, err := client.UploadSourceSnapshot(ctx, connection, request.Request.Git, request.Request.Source, snapshot.BundlePath)
+	digest, err := client.UploadSourceSnapshot(ctx, connection, request.Request.Git, request.Request.Source, source.Publication{Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: held})
 	if err != nil {
 		return request, &burstBeforeIntakeError{err}
 	}

@@ -27,7 +27,7 @@ func TestTriggerSnapshotSelectsCapturedPipelineAndLeavesCheckoutUntouched(t *tes
 		t.Fatal(err)
 	}
 	input := triggerPreparationInput(repo)
-	input.checkout = directory
+	input.snapshot = snapshot
 	selected, err := prepareTriggerSource(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -139,8 +139,11 @@ func TestWorkingTreeTriggerPreservesNamedReferenceIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if refs := runSnapshotGit(t, directory, "for-each-ref", "--format=%(refname)"); strings.Contains(refs, "refs/heads/release") {
+				t.Fatal("inspection imported an unselected branch")
+			}
 			input := triggerPreparationInput(repo)
-			input.checkout = directory
+			input.snapshot = snapshot
 			selection, err := prepareTriggerSource(t.Context(), input)
 			if err != nil {
 				t.Fatal(err)

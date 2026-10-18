@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +17,10 @@ func TestRepositorySourceHintsUseCurrentGrammar(t *testing.T) {
 func TestCheckSourceHintsRejectsStaleHints(t *testing.T) {
 	for _, literal := range []string{
 		`"  upgrade:  sparkwing update --cli"`,
+		`("sparkwing serve start")`,
+		`"sparkwing serve " + "start"`,
+		`"sparkwing serve start\n" + suffix`,
+		`prefix + "\nsparkwing serve start\n" + suffix`,
 		"\"run `sparkwing cluster runners add`\"",
 		"\"run `sparkwing unknown-root repair`\"",
 		`"run sparkwing cluster object-store reset-breaker --profile NAME"`,
@@ -47,7 +53,10 @@ func TestCheckSourceHintsAcceptsCurrentHintsAndProse(t *testing.T) {
 	writeSource(t, root, "cmd/tool/notice.go", "package main\n\nvar notice = \"sparkwing changed %s -> %s: see `sparkwing docs read --topic changelog`\"\n")
 	writeSource(t, root, "internal/data/values.go", `package data
 var key = []byte("sparkwing signing domain v1")
-var message = "sparkwing will build with " + "go1.26"
+var message = "sparkwing will build with " + "go1.26."
+var version string
+var fragment = "sparkwing will build with " + version
+var current = "sparkwing dashboard " + "start"
 func data() { run("commit", "-m", "sparkwing sample commit"); strings.NewReader("sparkwing snapshot\n") }
 `)
 	writeSource(t, root, "cmd/tool/hint_test.go", "package main\n\nvar old = \"sparkwing update --cli\"\n")
@@ -66,4 +75,25 @@ func writeSource(t *testing.T, root, rel, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func FuzzConcatenatedRecoveryCommandsUseCurrentGrammar(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(10))
+	f.Add(uint8(20))
+	f.Fuzz(func(t *testing.T, split uint8) {
+		for _, command := range []string{"sparkwing serve start\n", "sparkwing dashboard start\n", "sparkwing serve start", "sparkwing dashboard start"} {
+			root := t.TempDir()
+			point := int(split) % len(command)
+			expression := "(" + strconv.Quote(command[:point]) + " + " + strconv.Quote(command[point:]) + ")"
+			if strings.HasSuffix(command, "\n") {
+				expression += " + suffix"
+			}
+			writeSource(t, root, "cmd/tool/hint.go", "package main\nvar suffix string\nvar hint = "+expression+"\n")
+			want := strings.HasPrefix(command, "sparkwing dashboard")
+			if got := checkSourceHints(root); got != want {
+				t.Fatalf("grammar verdict=%t want=%t: %s", got, want, expression)
+			}
+		}
+	})
 }

@@ -56,7 +56,7 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 	}
 	defer func() { err = errors.Join(err, os.RemoveAll(workspace)) }()
 	spec.SHA, spec.PipelineSHA, spec.PipelineDir, spec.CommittedCheckout = sha, "", ".", true
-	options.Workspace, options.PreparedCheckout, options.LocalReplica = workspace, "", false
+	options.Workspace, options.PreparedCheckout = workspace, ""
 	entry, err := PrepareCheckout(ctx, spec, options)
 	if err != nil {
 		return nil, false, err

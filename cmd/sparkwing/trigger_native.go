@@ -65,12 +65,8 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 			return result, err
 		}
 		defer func() { resultErr = errors.Join(resultErr, snapshot.close()) }()
-		checkout, err = snapshotTriggerCheckout(ctx, snapshot)
-		if err != nil {
-			return result, err
-		}
 	}
-	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: checkout, pipeline: flags.pipeline, ref: flags.ref, pipelineRef: flags.pipelineRef, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: originalCheckout, snapshot: snapshot, pipeline: flags.pipeline, ref: flags.ref, pipelineRef: flags.pipelineRef, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
 		return lookupTriggerGitHubID(ctx, remote, captured)
 	}})
 	if err != nil {
@@ -146,7 +142,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 		return result, err
 	}
 	defer closeConnection()
-	digest, err := client.UploadSourceSnapshot(ctx, connection, result.Request.Git, result.Request.Source, snapshot.BundlePath)
+	digest, err := client.UploadSourceSnapshot(ctx, connection, result.Request.Git, result.Request.Source, source.Publication{Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: environment.held})
 	if err != nil {
 		return result, err
 	}
@@ -160,7 +156,7 @@ func snapshotTriggerCheckout(ctx context.Context, snapshot *worktreeSnapshot) (s
 
 func triggerInspectionCheckout(ctx context.Context, environment []string, repo, sha, bundle, workspace string) (string, error) {
 	options := source.Options{Workspace: workspace, Base: procenv.Base{Local: true, Captured: environment, Masker: secrets.NewMasker()}}
-	options.LocalReplica, options.LocalBundle = true, bundle
+	options.LocalBundle = bundle
 	entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: sha, CommittedCheckout: true, PipelineDir: "."}, options)
 	if err != nil {
 		return "", err

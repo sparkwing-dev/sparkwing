@@ -77,12 +77,12 @@ func TestSnapshotBundleCarriesEverySelectedRevision(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	replica, err := snapshotTriggerCheckout(t.Context(), snapshot)
+	_, err = snapshotTriggerCheckout(t.Context(), snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	input := triggerPreparationInput(repo)
-	input.checkout, input.ref, input.pipelineRef = replica, execution, code
+	input.snapshot, input.ref, input.pipelineRef = snapshot, execution, code
 	selected, err := prepareTriggerSource(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)

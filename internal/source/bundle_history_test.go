@@ -42,7 +42,6 @@ func TestBundleHistoryPolicyPreservesUnpushedExecutionAndCode(t *testing.T) {
 				options := source.Options{Workspace: t.TempDir(), Access: &freshBundleAccess{}, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BundleTransport: bundleResponse(func() io.ReadCloser { return io.NopCloser(bytes.NewReader(body)) })}
 				if local {
 					spec.RemoteURL, spec.LocalCheckout, spec.BundleDigest = "", owner, ""
-					options.LocalReplica = true
 					options.LocalBundle = bundle
 				}
 				entry, err := source.PrepareCheckout(t.Context(), spec, options)

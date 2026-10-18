@@ -74,13 +74,17 @@ func (b *binaryBytes) Transfer(ctx context.Context, _ blob.SignedTransfer, body 
 }
 
 func binaryFixture() (*BinaryData, *binaryRecords, *binaryBytes) {
-	i := blob.UploadIdentity{Kind: blob.UploadOwnerUnit, Team: "team", RunID: "run", Principal: "principal", CapabilityRef: "cap",
-		Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadPlanUnit, ID: "plan", Generation: 3}}}
+	i := blob.UploadIdentity{
+		Kind: blob.UploadOwnerUnit, Team: "team", RunID: "run", Principal: "principal", CapabilityRef: "cap",
+		Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadPlanUnit, ID: "plan", Generation: 3}},
+	}
 	a := blob.Authority{Principal: i.Principal, CapabilityRef: i.CapabilityRef, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}}, Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: i}}
 	b := &binaryBytes{body: []byte("binary"), size: 6, want: blob.Digest(fmt.Sprintf("%x", sha256.Sum256([]byte("binary"))))}
 	r := &binaryRecords{record: blob.Record{Key: blob.RecordKey{Team: "team", Kind: blob.KindBinary, Scope: blob.Scope{Repo: a.Repo, Ref: a.Ref.Scope}, Name: "build-key"}, Digest: b.want, Source: i, Provenance: blob.ProvenanceCloud}}
-	return &BinaryData{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: b, HTTPClient: b}), Records: r, Authority: a, Identity: i,
-		Trust: blob.BuildTrust{Team: "team"}, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}, r, b
+	return &BinaryData{
+		Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: b, HTTPClient: b}), Records: r, Authority: a, Identity: i,
+		Trust: blob.BuildTrust{Team: "team"}, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)},
+	}, r, b
 }
 
 func TestBinaryRecordDownload(t *testing.T) {
@@ -263,5 +267,76 @@ func TestBinaryDownloadDeadlineFailuresAreBudgetFailures(t *testing.T) {
 				t.Fatalf("staging files remain: %v, %v", entries, err)
 			}
 		})
+	}
+}
+
+type binaryRecordResponse struct {
+	blob.RecordStore
+	change func(*blob.Record)
+}
+
+func (r binaryRecordResponse) CommitRecord(ctx context.Context, q blob.CommitRecordRequest) (blob.Record, error) {
+	record, err := r.RecordStore.CommitRecord(ctx, q)
+	r.change(&record)
+	return record, err
+}
+
+type binaryReceiptResponse struct {
+	blob.Store
+	receipt blob.Receipt
+}
+
+func (r binaryReceiptResponse) Put(context.Context, blob.PutRequest) (blob.Receipt, error) {
+	return r.receipt, nil
+}
+
+func TestBinaryRecordUploadRefusesMismatchedResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		change  func(*BinaryData)
+		commits int
+	}{
+		{"receipt digest", func(d *BinaryData) {
+			d.Bytes = binaryReceiptResponse{receipt: blob.Receipt{Identity: d.Identity, Digest: "other"}}
+		}, 0},
+		{"receipt owner", func(d *BinaryData) {
+			sum := sha256.Sum256([]byte("bundle"))
+			i := d.Identity
+			i.RunID = "other"
+			d.Bytes = binaryReceiptResponse{receipt: blob.Receipt{Identity: i, Digest: blob.Digest(fmt.Sprintf("%x", sum[:]))}}
+		}, 0},
+		{"record digest", func(d *BinaryData) {
+			d.Records = binaryRecordResponse{d.Records, func(r *blob.Record) { r.Digest = "other" }}
+		}, 1},
+		{"record scope", func(d *BinaryData) {
+			d.Records = binaryRecordResponse{d.Records, func(r *blob.Record) { r.Key.Scope.Repo = "gh:456" }}
+		}, 1},
+		{"record owner", func(d *BinaryData) {
+			d.Records = binaryRecordResponse{d.Records, func(r *blob.Record) { r.Source.RunID = "other" }}
+		}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, _, _ := binaryFixture()
+			records := &binaryRecords{}
+			data.Records = records
+			tc.change(data)
+			path := filepath.Join(t.TempDir(), "bundle")
+			if err := os.WriteFile(path, []byte("bundle"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := UploadBinary(t.Context(), data, "build-key", path)
+			if !errors.Is(err, blob.ErrIntegrity) || len(records.commits) != tc.commits {
+				t.Fatalf("upload = %v, commits = %d", err, len(records.commits))
+			}
+		})
+	}
+}
+
+func TestBinaryRecordUploadRejectsAnotherOwner(t *testing.T) {
+	data, _, transport := binaryFixture()
+	data.Identity.Unit.Value.Generation++
+	err := UploadBinary(t.Context(), data, "build-key", "must-not-be-opened")
+	if !errors.Is(err, blob.ErrDigestNotReadable) || transport.upload.Identity.Kind != "" {
+		t.Fatalf("upload = %v, byte request = %+v", err, transport.upload)
 	}
 }

@@ -3,7 +3,8 @@
 The five findings in W3-review-1792289092-final.md are implemented in 0d8121455.
 The subsequent native run found two fixture failures. Their fixes and focused
 verification are recorded in [the native validation follow-up](W3-NATIVE-SOURCE-VALIDATION.md).
-Status remains CONTINUE until the lead's native report contains no FAIL.
+The next review's replacement-ref, publication and concatenation findings are
+covered by [the publication and identity follow-up](W3-PUBLICATION-IDENTITY-FOLLOWUP.md).
 
 ## Implementation and invariants
 
@@ -15,9 +16,10 @@ Status remains CONTINUE until the lead's native report contains no FAIL.
    environment. Native trigger inspection also withholds machine-configured
    local secrets before acquisition or SDK installation. Git can execute shell
    callbacks. The old comment claiming otherwise is corrected.
-2. Materialization preserves named-reference identity. Replicas import `refs/*`
-   into the original namespaces and restore symbolic refs before the common
-   checkout-policy finalizer. Tests select a noncurrent local release branch
+2. Materialization preserves named-reference identity. This session's namespace
+   importer was later removed by the publication and identity follow-up because
+   it also imported operational replacement refs. Selection now uses the original
+   repository and acquisition fetches resolved commits. Tests select a noncurrent local release branch
    and origin/main when original local main points elsewhere. They cover code
    pins, execution selectors and the symbolic default branch through working-tree
    trigger selection. The test fixture removes its preexisting release tag so
@@ -34,8 +36,8 @@ Status remains CONTINUE until the lead's native report contains no FAIL.
    shell prompts and bare commands. AST context separates command examples from
    byte-domain constants, commit messages, stdin data and incomplete string
    fragments. The dashboard remedy uses `sparkwing dashboard start`.
-5. LocalReplica's comment describes the initial reference import and the common
-   checkout-policy finalizer. Existing bundle-history tests still cover depth.
+5. The publication and identity follow-up deletes LocalReplica and its reference
+   importer. Existing bundle-history tests still cover depth.
 
 The fsmonitor regression uses a temporary HOME and global core.fsmonitor
 callback that prints SIGNING_MATERIAL into an observed file. It first reproduced

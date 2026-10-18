@@ -34,10 +34,15 @@ preserving the owner's files.
 local snapshot inspection. It requires a local checkout and cannot combine with
 `PreparedCheckout`. It imports objects before the shared committed checkout.
 Remote bundle acquisition chooses the object format from the sealed object ID.
-Inspection replicas import `refs/*` into the same namespace with an explicit
-refspec. A local `release` branch and original `refs/remotes/origin/main` keep
-their identities even when local main differs. The import precedes the common
-checkout policy finalizer.
+Selectors resolve against the original repository, including local branches,
+origin-qualified refs, tags and configured code pins. Working-tree selection
+reads configuration from the captured commit through the same acquisition owner.
+Inspection fetches only resolved commit IDs and the tags an explicit checkout
+policy requests. It never imports operational reference namespaces.
+`Options.LocalReplica` and the wildcard namespace importer are deleted.
+`procenv.Git` forces `GIT_NO_REPLACE_OBJECTS=1`; source Git also sets
+`core.useReplaceRefs=false`. Replacement rules cannot change a sealed commit's
+contents. Acquisition reads the checked-out HEAD after materialization.
 
 The default committed configuration reader acquires the selected execution
 commit through `PrepareCheckout`, then reads through `os.Root` at that acquired
@@ -60,8 +65,9 @@ Its `gitcmd` leaf supplies SDK clone and hook self-test operations without
 importing the host's SDK/engine dependencies back into the SDK. The guard test
 scans production Go packages and exercises its command-argument detector.
 Fixture directories, generated dependencies and test files are excluded.
-Binary-cache bundle acquisition is deleted. Its upload API remains because
-source publication still calls it.
+Binary-cache bundle acquisition and its unused SourceData/UploadSourceBundle
+upload API are deleted. Source publication has one client entry point. Storage
+prefix acceptance exercises the signed byte and record interfaces directly.
 
 The source-credential response adds optional `extra_repositories`. C1 returns
 `source.Credential` with the names from its audited App release. C2 and the
@@ -82,7 +88,18 @@ and retains it for later bundle operations and secret scans. Internal object,
 index and commit-identity overrides are added to that environment. No snapshot
 helper captures ambient values. Git can execute callbacks, so its process
 environment remains filtered even before SDK installation. Profile-cache
-lookups use the persisted request environment too.
+lookups use the persisted request environment too. Default-branch lookup takes
+the prepared masker so accepted proxy credentials remain supported and masked.
+
+`client.UploadSourceSnapshot` requires `source.Publication`, carrying its final
+bundle path, prepared process base and a nonnil withheld-secret classification.
+`source.OpenPublication` copies the bundle into private storage and scans every
+included blob object, including unchanged files and any bundled history, before
+any upload request. Hashing and transfer read that scanned copy. Trigger passes
+all configured held values. Burst passes those values plus resolved local secret
+providers. A missing classification or masker fails closed. The scan retains
+its eight-byte minimum and PEM-armor filtering. It never reports private paths
+or values. The caller-specific changed-blob scanner is deleted.
 
 Help, describe and plan share acquisition and prepared-environment withholding
 with execution. Child local-secret inheritance remains part of the child request

@@ -120,6 +120,9 @@ func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 			env[envKey(a.Name)] = a.Name + "=" + a.Value
 		}
 	}
+	if k == Git {
+		env[envKey("GIT_NO_REPLACE_OBJECTS")] = "GIT_NO_REPLACE_OBJECTS=1"
+	}
 	result := make([]string, 0, len(env))
 	for _, entry := range env {
 		if _, _, err := parseEntry(entry); err != nil {
