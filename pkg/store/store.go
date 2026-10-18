@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
@@ -549,10 +550,18 @@ func isBusyErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	if isPGConflict(err) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "database is locked") ||
 		strings.Contains(msg, "sqlite_busy") ||
 		strings.Contains(msg, "database table is locked")
+}
+
+func isPGConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "40P01" || pgErr.Code == "40001")
 }
 
 // IsProtocolErr reports whether err is a SQLite "locking protocol" /
