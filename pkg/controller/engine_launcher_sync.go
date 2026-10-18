@@ -102,6 +102,12 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 		if award.Claim.Kind != capability.UnitNode {
 			unit.Execution = nil
 		}
+		if observation.ReservationID != "" {
+			unit.CloudResources, err = s.store.CloudAwardResources(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Capability.Prefix})
+			if err != nil {
+				return controllerwire.LauncherSyncResponse{}, err
+			}
+		}
 		response.Awards = append(response.Awards, *unit)
 	}
 	return response, nil

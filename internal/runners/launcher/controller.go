@@ -206,7 +206,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
 			return nil, errors.New("controller sync returned duplicate or changed Cloud bindings")
 		}
-		states[i].Binding = observations[i].Binding
+		states[i].Binding, states[i].Resources = observations[i].Binding, unit.CloudResources
 	}
 	for _, job := range response.Remove {
 		i, ok := byJob[job.Name]

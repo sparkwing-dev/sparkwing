@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // CloudControl supplies awarded bindings from the controller and checks their continued authority.
@@ -41,10 +42,11 @@ type CloudJobObservation struct {
 	Unheld        bool
 }
 
-// CloudJobState carries the controller's teardown decision for one immutable award.
+// CloudJobState carries the controller's teardown decision and committed allocation for one immutable award.
 type CloudJobState struct {
-	Binding CloudJobBinding
-	Delete  bool
+	Binding   CloudJobBinding
+	Delete    bool
+	Resources *match.Resources
 }
 
 // Launcher creates Cloud Jobs without executing pipeline code in the launcher process.
@@ -220,7 +222,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	}
 	// safety: reservation probes and publication may outlive the award's execution authority.
 	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobNamespace: created.Namespace, JobName: created.Name, JobUID: string(created.UID), NodeUID: r.Reservation.NodeUID}})
-	if err == nil && retirements[created.Name] {
+	if err == nil && retirements[created.Name].Delete {
 		err = errors.New("Cloud award ended before Job activation")
 	}
 	if err != nil {

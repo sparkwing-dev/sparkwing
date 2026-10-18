@@ -344,19 +344,25 @@ reconciliation of other live Jobs.
 
 Job pods are pre-bound to a reserved node and never pend, so they cannot make
 Karpenter add one. When reservation finds no vacant Ready team node, the
-launcher keeps the award and creates `sw-capacity-<unit hash>`: an unbound Pod
+launcher keeps the award and creates `sw-capacity-<award hash>`: an unbound Pod
 with the team node selector, the job tolerations, the award's CPU, memory and
 scratch requests, the runner image running `sparkwing-runner version`, and no
 volumes, environment or service account token. The Pod records its unit fence
 and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
 
-- Every admitted request, on create, on adoption by a re-award and on every
-  pass, is recomputed from that record and held to the same comparison as Job
-  Pods. A mismatch deletes it, UID-fenced, and the held award requests again.
+- The hash covers the award generation, so a re-award creates its own request
+  and never rebinds or deletes another generation's. Only the same award adopts
+  an existing request.
+- Every request is held to the same comparison as Job Pods against demand
+  taken from outside the Pod: the award on create and adoption, the held award
+  on every pass, and the controller's binding and committed allocation on every
+  reconciliation. A pass checks a request this launcher does not hold only for
+  shape. A mismatch or an unknown allocation deletes it, UID-fenced, and a held
+  award requests again.
 - Each launcher pass retries held awards. Reservation may consume the team's
-  own requests on a node: it persists the reservation first, then deletes them
-  and waits for their removal before the Job is created, so the node is never
-  empty in between.
+  own requests on a node: it persists the reservation and its taint first, then
+  deletes them and waits for their removal before the Job is created. No Pod
+  occupies the node in between.
 - Sync observes each request through its recorded award. Awards this launcher
   holds are renewed by that observation; others are only checked. A request
   is deleted when the controller ends its award or the award deadline passes.

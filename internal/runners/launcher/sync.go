@@ -82,7 +82,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		for _, observation := range observations {
 			job := &jobs.Items[live[observation.JobName]]
 			_, reservation, err := jobOwnership(*job)
-			if err == nil && !retirements[observation.JobName] {
+			if err == nil && !retirements[observation.JobName].Delete {
 				continue
 			}
 			if err == nil {
@@ -160,8 +160,8 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 		return err
 	}
 	var errs []error
-	for name, remove := range retirements {
-		if !remove {
+	for name, state := range retirements {
+		if !state.Delete {
 			continue
 		}
 		_, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, name, metav1.GetOptions{})
@@ -178,7 +178,7 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObservation) (map[string]bool, error) {
+func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObservation) (map[string]CloudJobState, error) {
 	states, err := l.Control.Sync(ctx, observations)
 	if err != nil {
 		return nil, err
@@ -193,7 +193,7 @@ func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObser
 		}
 		bindings[observation.JobName] = observation.Binding
 	}
-	decisions := make(map[string]bool, len(states))
+	decisions := make(map[string]CloudJobState, len(states))
 	for _, state := range states {
 		name := jobName(state.Binding)
 		binding, found := bindings[name]
@@ -201,7 +201,7 @@ func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObser
 		if !found || duplicate || !sameBinding(state.Binding, binding) {
 			return nil, errors.New("controller sync returned a duplicate or mismatched binding")
 		}
-		decisions[name] = state.Delete
+		decisions[name] = state
 	}
 	return decisions, nil
 }
