@@ -98,7 +98,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 	}
 	w = reviewSessionRequest(t, server, session, csrf, "GET", "/api/v1/runs/run/events", "", http.StatusOK)
 
-	for _, line := range []string{"TEAM_ONLY is set team-wide but not shared with runs", `ELSEWHERE is set only for pipeline \"release\"`, "sparkwing secrets set --name DEPLOY_TOKEN", "--pipeline ci"} {
+	for _, line := range []string{"TEAM_ONLY is set team-wide but not shared with runs", `ELSEWHERE is set only for pipeline \"release\"`, "sparkwing secrets set --secret DEPLOY_TOKEN", "--pipeline ci"} {
 		if !strings.Contains(w.Body.String(), line) {
 			t.Fatalf("team diagnostic lacks %q: %s", line, w.Body)
 		}
