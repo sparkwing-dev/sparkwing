@@ -23,6 +23,15 @@ func TestAdminNeedsATeamAndAReason(t *testing.T) {
 		{"freeze", "--team", "default", "--reason", "   "},
 		{"freeze", "--team", "default", "--reason", strings.Repeat("x", 501)},
 		{"freeze", "--team", "default", "--reason", "abuse", "--hold", "dp_1"},
+		{"grant", "--team", "default", "--reason", "QA"},
+		{"grant", "--team", "default", "--reason", "QA", "--cents", "0"},
+		{"grant", "--team", "default", "--reason", "QA", "--cents", "-5"},
+		{"grant", "--team", "default", "--cents", "500"},
+		{"grant", "--team", "default", "--reason", "QA", "--cents", "500", "--hold", "dp_1"},
+		{"grant", "--team", "default", "--reason", "QA", "--cents", "500", "--key", "  "},
+		{"grant", "--team", "no-such-team", "--reason", "QA", "--cents", "500"},
+		{"freeze", "--team", "default", "--reason", "abuse", "--cents", "500"},
+		{"unfreeze", "--team", "default", "--reason", "abuse", "--key", "k"},
 	} {
 		if err := runAdmin(args, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 			t.Errorf("admin %q succeeded, want a refusal", args)
@@ -112,6 +121,68 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("events = %q\nwant %q", got, want)
+	}
+}
+
+func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	st := openState(t)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	type granted struct {
+		Team         string `json:"team"`
+		GrantID      string `json:"grant_id"`
+		AmountMicro  int64  `json:"amount_micro"`
+		Reference    string `json:"reference"`
+		Created      bool   `json:"created"`
+		BalanceMicro int64  `json:"balance_micro"`
+	}
+	grant := func(args ...string) (granted, string) {
+		t.Helper()
+		var out, audit bytes.Buffer
+		if err := runAdmin(append([]string{"grant", "--team", "default", "--cents", "500", "--reason", "QA fixture"}, args...), &out, &audit); err != nil {
+			t.Fatalf("admin grant %q: %v", args, err)
+		}
+		var g granted
+		if err := json.Unmarshal(out.Bytes(), &g); err != nil {
+			t.Fatalf("admin grant printed %q: %v", out.String(), err)
+		}
+		return g, audit.String()
+	}
+	first, audit := grant("--key", "qa-1")
+	want := granted{Team: "default", GrantID: first.GrantID, AmountMicro: 500 * store.MicroCreditsPerCent, Reference: "admin:qa-1", Created: true, BalanceMicro: 500 * store.MicroCreditsPerCent}
+	if first != want || first.GrantID == "" {
+		t.Fatalf("first grant = %+v, want %+v", first, want)
+	}
+	for _, field := range []string{`"principal_kind":"break-glass"`, `"command":"sparkwing-controller admin grant"`, `"target_team":"default"`, `"amount_micro":5000000`} {
+		if !strings.Contains(audit, field) {
+			t.Errorf("audit line %q lacks %s", audit, field)
+		}
+	}
+	if again, _ := grant("--key", "qa-1"); again.Created || again.GrantID != first.GrantID || again.BalanceMicro != first.BalanceMicro {
+		t.Fatalf("retried grant = %+v, want the first grant unchanged", again)
+	}
+	if err := runAdmin([]string{"grant", "--team", "default", "--cents", "700", "--reason", "QA", "--key", "qa-1"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("a reused key with different terms granted")
+	}
+	if fresh, _ := grant(); !fresh.Created || !strings.HasPrefix(fresh.Reference, "admin:") || fresh.BalanceMicro != 1000*store.MicroCreditsPerCent {
+		t.Fatalf("keyless grant = %+v", fresh)
+	}
+	st = openState(t)
+	defer func() { _ = st.Close() }()
+	tn, err := st.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := tn.BusinessEvents(context.Background(), store.BusinessEventCreditGranted)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("grant events = %+v, %v", events, err)
+	}
+	for _, ev := range events {
+		if ev.Actor != breakGlassActor || ev.Attrs["reason"] != "QA fixture" {
+			t.Errorf("grant event = %+v", ev)
+		}
 	}
 }
 

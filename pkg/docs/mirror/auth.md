@@ -663,7 +663,16 @@ They cannot exchange themselves for console powers.
 When console access is unavailable, the deployment operator can use
 `sparkwing-controller admin` inside the controller pod. This is an in-pod
 administrative path with its own authority and audit. A remote deployment
-credential does not open it.
+credential does not open it. It freezes and releases teams and grants credits:
+
+```bash
+kubectl exec -n NAMESPACE deploy/RELEASE-sparkwing-full-controller -- \
+  sparkwing-controller admin grant --team qa-team --cents 500 --reason "QA fixture" --key qa-1
+```
+
+A grant with a `--key` it has seen reports the first grant instead of granting
+again. Each action writes the console's business event with
+`sparkwing-controller admin` as the actor and the reason.
 
 ## Retained storage
 
