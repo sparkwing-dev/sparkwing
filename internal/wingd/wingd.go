@@ -264,7 +264,7 @@ func socketPathForHome(dir, home string, create bool) (string, error) {
 	}
 	token, err := readSocketToken(filepath.Join(dir, socketTokenFile))
 	if errors.Is(err, fs.ErrNotExist) && !create {
-		return filepath.Join(dir, "unbound", "d.sock"), nil
+		return filepath.Join(dir, unboundSocketDir, "d.sock"), nil
 	}
 	if errors.Is(err, fs.ErrNotExist) {
 		token, err = recordSocketToken(dir)
@@ -281,7 +281,10 @@ func socketPathIn(base, home, token string) string {
 	return filepath.Join(base, socketDirPrefix()+hash+"-"+token, "d.sock")
 }
 
-const socketTokenFile = "socket-id"
+const (
+	socketTokenFile  = "socket-id"
+	unboundSocketDir = "unbound"
+)
 
 var socketTokenPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
 

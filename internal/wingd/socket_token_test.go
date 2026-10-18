@@ -1,6 +1,8 @@
 package wingd
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,4 +45,15 @@ func recordedSocketToken(t *testing.T, home string) string {
 		t.Fatal(err)
 	}
 	return token
+}
+
+func TestDialingAnUnboundDeepHomeReportsNoSocket(t *testing.T) {
+	home := deepHome(t)
+	sock, err := SocketPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DialSocket(t.Context(), sock, 0); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("dial of an unbound home = %v, want not-exist", err)
+	}
 }
