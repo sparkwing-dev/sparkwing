@@ -254,6 +254,8 @@ Same-account processes and root remain inside this trust boundary. Use distinct
 accounts and homes where separate users must be isolated. Browser access follows
 the controller's session and CSRF rules. A separate dashboard bearer, perpetual
 localStorage session and second store opener are not part of that contract.
+The local dashboard's TCP listener answers only loopback Host names and its own
+loopback origin, so a rebound DNS name or another site's page is refused.
 See [local execution](local-execution.md#the-laptop-boundary).
 
 ## Container hardening
