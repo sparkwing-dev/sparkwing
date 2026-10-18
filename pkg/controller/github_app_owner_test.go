@@ -155,22 +155,28 @@ func TestGitHubRepositoryDisplayComesFromTheAppInstallation(t *testing.T) {
 	request := func(key, display string) controllerwire.CreateRunRequest {
 		return controllerwire.CreateRunRequest{IdempotencyKey: key + display, Request: runspec.Request{Version: 1, Pipeline: "build", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey(key), Display: display}, SHA: headSHA}, Source: runspec.Source{Ref: headSHA}}}
 	}
-	for _, forged := range []controllerwire.CreateRunRequest{request("gh:701", "victim/app"), request("gh:701", "https://github.com/victim/app"), request("gh:701", "acme/other")} {
+	for _, forged := range []controllerwire.CreateRunRequest{request("gh:701", "victim/app"), request("gh:701", "https://github.com/victim/app"), request("gh:701", "acme/other"), request("gh:999", "victim/app"), request("git:git.example.test/acme/widgets", "github.com/victim/app")} {
 		if code := f.call("POST", "/api/v1/runs", olga.auth, forged, nil); code != http.StatusForbidden {
 			t.Fatalf("forged GitHub identity %+v = %d, want 403", forged.Request.Git.Repository, code)
 		}
 	}
-	upload := map[string]any{"digest": strings.Repeat("a", 64), "size": 1, "git": map[string]any{"repository": map[string]any{"key": "gh:701", "display": "victim/app"}, "sha": headSHA}, "source": map[string]any{"ref": headSHA}}
-	if code := f.call("POST", "/api/v1/data/source", olga.auth, upload, nil); code != http.StatusForbidden {
-		t.Fatalf("source upload with a forged display = %d, want 403", code)
+	for _, key := range []string{"gh:701", "git:git.example.test/acme/widgets"} {
+		upload := map[string]any{"digest": strings.Repeat("a", 64), "size": 1, "git": map[string]any{"repository": map[string]any{"key": key, "display": "github.com/victim/app"}, "sha": headSHA}, "source": map[string]any{"ref": headSHA}}
+		if code := f.call("POST", "/api/v1/data/source", olga.auth, upload, nil); code != http.StatusForbidden {
+			t.Fatalf("source upload of %s with a forged display = %d, want 403", key, code)
+		}
 	}
 	var created controllerwire.CreateRunResponse
 	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:701", ""), &created); code != http.StatusCreated || created.Request.Request.Git.Repository.Display != "acme/widgets" {
 		t.Fatalf("unlabelled GitHub identity = %d display=%q, want acme/widgets", code, created.Request.Request.Git.Repository.Display)
 	}
 	var uncovered controllerwire.CreateRunResponse
-	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:999", "victim/app"), &uncovered); code != http.StatusCreated || uncovered.Request.Request.Git.Repository.Display != "gh:999" {
+	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:999", ""), &uncovered); code != http.StatusCreated || uncovered.Request.Request.Git.Repository.Display != "gh:999" {
 		t.Fatalf("uncovered GitHub identity = %d display=%q, want the key", code, uncovered.Request.Request.Git.Repository.Display)
+	}
+	var keyed controllerwire.CreateRunResponse
+	if code := f.call("POST", "/api/v1/runs", olga.auth, request("git:git.example.test/acme/widgets", ""), &keyed); code != http.StatusCreated || keyed.Request.Request.Git.Repository.Display != "git.example.test/acme/widgets" {
+		t.Fatalf("keyed git identity = %d display=%q, want the key's path", code, keyed.Request.Request.Git.Repository.Display)
 	}
 	var victim struct {
 		Capability string `json:"capability"`
@@ -178,7 +184,7 @@ func TestGitHubRepositoryDisplayComesFromTheAppInstallation(t *testing.T) {
 	if code := f.call("POST", "/api/v1/runners", olga.auth, map[string]any{"name": "victim-box", "repos": []string{"github.com/victim/*"}}, &victim); code != http.StatusCreated {
 		t.Fatalf("enroll victim-scoped runner = %d", code)
 	}
-	for _, run := range []string{created.RunID, uncovered.RunID} {
+	for _, run := range []string{created.RunID, uncovered.RunID, keyed.RunID} {
 		if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+victim.Capability, githubClaimBody(capability.UnitTrigger, run, ""), nil); code != http.StatusForbidden {
 			t.Fatalf("victim-scoped runner claim of another repository's run %s = %d, want 403", run, code)
 		}
