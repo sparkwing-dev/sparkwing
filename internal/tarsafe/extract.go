@@ -43,6 +43,7 @@ func ExtractInRoot(tr *tar.Reader, dir string, policy Policy) error {
 		mode fs.FileMode
 	}
 	var deferredDirModes []dirMode
+	var links []string
 	var written int64
 
 	for {
@@ -120,11 +121,19 @@ func ExtractInRoot(tr *tar.Reader, dir string, policy Policy) error {
 			if err := root.Symlink(filepath.FromSlash(hdr.Linkname), rel); err != nil {
 				return err
 			}
+			links = append(links, rel)
 
 		default:
 		}
 	}
 
+	// safety: a later link can redirect an earlier one, so containment holds
+	// only once every link exists.
+	for _, rel := range links {
+		if err := resolvesInside(root, rel); err != nil {
+			return err
+		}
+	}
 	// safety: deepest-first restores nested read-only directories
 	// without locking out their own just-extracted contents.
 	for i := len(deferredDirModes) - 1; i >= 0; i-- {
@@ -171,6 +180,47 @@ func symlinkStaysInside(root *os.Root, rel, linkname string) error {
 	target := filepath.Clean(filepath.Join(filepath.Dir(rel), link))
 	if target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("archive symlink %q -> %q escapes the target directory", rel, linkname)
+	}
+	return nil
+}
+
+const maxLinkHops = 255
+
+// safety: a missing component resolves lexically, since a later writer could
+// create it as a directory that the link then climbs out of.
+func resolvesInside(root *os.Root, rel string) error {
+	pending := strings.Split(rel, string(filepath.Separator))
+	var resolved []string
+	for hops := 0; len(pending) > 0; {
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(resolved) == 0 {
+				return fmt.Errorf("archive symlink %q resolves outside the target directory", filepath.ToSlash(rel))
+			}
+			resolved = resolved[:len(resolved)-1]
+			continue
+		}
+		at := filepath.Join(append(resolved, part)...)
+		fi, err := root.Lstat(at)
+		if err != nil || fi.Mode()&fs.ModeSymlink == 0 {
+			resolved = append(resolved, part)
+			continue
+		}
+		if hops++; hops > maxLinkHops {
+			return fmt.Errorf("archive symlink %q has too many levels of links", filepath.ToSlash(rel))
+		}
+		target, err := root.Readlink(at)
+		if err != nil {
+			return err
+		}
+		if filepath.IsAbs(target) || filepath.VolumeName(target) != "" {
+			return fmt.Errorf("archive symlink %q resolves outside the target directory", filepath.ToSlash(rel))
+		}
+		pending = append(strings.Split(target, string(filepath.Separator)), pending...)
 	}
 	return nil
 }
