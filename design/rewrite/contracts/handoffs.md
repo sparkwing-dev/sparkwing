@@ -731,3 +731,16 @@ New design:
 - Keep from the recent rounds: award-scoped capacity pods, the runner backoff fix, demand derived from the award, the NodeRestriction label, and nodes never moving between teams.
 - Admission tests run against a real API server via envtest or a kind cluster if available, otherwise as CEL unit tests with the Kubernetes CEL library, covering every allowed and refused shape, including the EKS webhook mutations seen on kikd.
 Assigned to an Opus implementer (env 1086), with Sol review.
+
+## 2026-10-18 lead decision: Cloud triggers use controller dispatch (placement D)
+
+First real Cloud QA found that no CLI-triggered run can reach the launcher. `cmd/sparkwing/trigger_prepare.go:299` hard-codes `Dispatch: runspec.DispatchHost`, which queues a trigger unit that only a self-hosted runner can claim. Frozen §3.2 placement D (launcher: plan pod for stages 4-6, store for 7, work pods for 9) was unreachable from the CLI.
+
+Ruling:
+- A Cloud trigger (`pipeline trigger` against a Cloud controller with no `--runner` naming a self-hosted pool, a machine or `here`) seals `dispatch=controller`, so the launcher takes the plan, eval and node units.
+- `--runner <pool|machine selector>` keeps `dispatch=host` (placement C), and `--runner here` keeps placement F.
+- The local controller is unchanged.
+- The decision is made from the request at intake, and the sealed request records it.
+- A run whose units no eligible claimant can take within the claim window gets a visible run notice ("no eligible runner or launcher for …") instead of staying silently pending.
+- Empty launcher claim polls are counted in metrics, so a launcher that matches nothing is visible.
+Assigned to an Opus implementer (env 1087).
