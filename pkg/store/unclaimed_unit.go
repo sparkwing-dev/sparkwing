@@ -5,8 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // NoCreditsHold is the credit hold for a team with neither a balance nor a payment method covering Cloud work.
@@ -52,12 +54,55 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 		return nil, err
 	}
 	if run.Dispatch == string(runspec.DispatchController) {
-		var err error
-		if unit.CreditHold, err = unitCreditHoldTx(ctx, tx, team, run, UnitRef{Kind: unit.Kind, RunID: run.ID, NodeID: unit.NodeID}); err != nil {
+		ref := UnitRef{Kind: unit.Kind, RunID: run.ID, NodeID: unit.NodeID}
+		unmetered, err := unmeteredClaimantEligibleTx(ctx, tx, team, ref)
+		if err != nil || unmetered {
+			return &unit, err
+		}
+		if unit.CreditHold, err = unitCreditHoldTx(ctx, tx, team, run, ref); err != nil {
 			return nil, err
 		}
 	}
 	return &unit, nil
+}
+
+func unmeteredClaimantEligibleTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) (bool, error) {
+	agents, err := registeredAgentObservationsTx(ctx, tx, team)
+	if err != nil {
+		return false, err
+	}
+	for _, agent := range agents {
+		chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: agent.CapabilityPrefix}, false)
+		if unavailableRunner(err) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		c := chain[0].principal.Capability
+		if c.Team != string(team) || !registeredClaimant(c) || meteredPlacement(c, chain[len(chain)-1].principal.Capability) {
+			continue
+		}
+		if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil {
+			continue
+		}
+		demand := UnitDemand{CapabilityPrefix: agent.CapabilityPrefix, Labels: agent.Profile.Labels}
+		if agent.poll != nil {
+			demand.OS, demand.Arch, demand.Capacity = agent.poll.OS, agent.poll.Arch, agent.poll.Capacity
+		}
+		profile, requirements, err := readMatchingInputsTx(ctx, tx, demand, unit, false)
+		var denied *apierr.Error
+		if errors.As(err, &denied) && denied.Code == apierr.Forbidden {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if match.Evaluate(profile, requirements).OK() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func unitCreditHoldTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef) (string, error) {

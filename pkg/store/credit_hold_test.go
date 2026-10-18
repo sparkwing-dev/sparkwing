@@ -9,6 +9,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+func meteredRunnerOnly(t *testing.T, s *Store) {
+	t.Helper()
+	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='runner'`)
+	paid := authorityRoot("paid-runner", "a")
+	paid.RootMetered, paid.Grants = true, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
+	authorityPersist(t, s, paid)
+}
+
 func executingRunFixture(t *testing.T) (*Store, UnitDemand) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
@@ -28,6 +36,7 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 			if kind == capability.UnitNode {
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done'`)
+				meteredRunnerOnly(t, s)
 			} else {
 				rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 			}
@@ -51,6 +60,36 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 			}
 			if _, err = s.ClaimUnit(t.Context(), demand); err != nil {
 				t.Fatalf("launcher refused funded work: %v", err)
+			}
+		})
+	}
+}
+
+func TestUnmeteredRunnerJobCarriesNoCreditHold(t *testing.T) {
+	for _, runner := range []string{"unmetered", "metered", "revoked"} {
+		t.Run(runner, func(t *testing.T) {
+			s, demand := executingRunFixture(t)
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan', status='done'`)
+			switch runner {
+			case "metered":
+				meteredRunnerOnly(t, s)
+			case "revoked":
+				rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='runner'`)
+			}
+			view, err := (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
+			if err != nil || view.Waiting == nil || view.Waiting.Kind != capability.UnitNode {
+				t.Fatalf("waiting unit = %+v, %v", view.Waiting, err)
+			}
+			if want := map[string]string{"unmetered": "", "metered": NoCreditsHold, "revoked": NoCreditsHold}[runner]; view.Waiting.CreditHold != want {
+				t.Fatalf("%s runner: credit hold = %q, want %q", runner, view.Waiting.CreditHold, want)
+			}
+			if runner != "unmetered" {
+				return
+			}
+			demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
+			if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+				t.Fatalf("the unmetered runner the notice relied on could not claim the job: %v", err)
 			}
 		})
 	}

@@ -238,6 +238,12 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 	if empty, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || empty.Claim != nil {
 		t.Fatalf("launcher claimed unfunded work: %+v %v", empty.Claim, err)
 	}
+	if detail, err := f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 0 {
+		t.Fatalf("fresh unfunded run already carries notices: %+v %v", detail.Notices, err)
+	}
+	if _, err := f.state.DB().ExecContext(t.Context(), `UPDATE triggers SET available_at=available_at-? WHERE id=?`, int64(time.Minute), created.RunID); err != nil {
+		t.Fatal(err)
+	}
 	detail, err := f.member.ReadRun(t.Context(), created.RunID)
 	if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeCreditHold || detail.Notices[0].Reason != store.NoCreditsHold {
 		t.Fatalf("unfunded run notice: %+v %v", detail.Notices, err)
@@ -249,11 +255,14 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "late-funding", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
-	if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 0 {
-		t.Fatalf("funded run kept its notice: %+v %v", detail.Notices, err)
+	if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeUnclaimed {
+		t.Fatalf("funded but unclaimed run notice: %+v %v", detail.Notices, err)
 	}
 	if claimed, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || claimed.Claim == nil || claimed.Claim.RunID != created.RunID {
 		t.Fatalf("launcher did not claim funded work: %+v %v", claimed.Claim, err)
+	}
+	if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 0 {
+		t.Fatalf("claimed run kept a notice: %+v %v", detail.Notices, err)
 	}
 }
 
