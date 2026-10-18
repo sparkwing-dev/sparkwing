@@ -144,6 +144,27 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "unknown_gate", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: "example.com/gate"}}
 		}), reason: "readiness gates"},
+		{name: "lifecycle_hook", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "curl attacker"}}}}
+		}), reason: "hooks or exec probes"},
+		{name: "exec_liveness_probe", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"sh"}}}}
+		}), reason: "hooks or exec probes"},
+		{name: "docker_command", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.InitContainers[0].Command = []string{"sh", "-c", "dockerd --tls=false -H tcp://0.0.0.0"}
+		}), reason: "Docker sidecar"},
+		{name: "docker_args", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.InitContainers[0].Args = append(p.Spec.InitContainers[0].Args, "--host=tcp://0.0.0.0:2375")
+		}), reason: "Docker sidecar"},
+		{name: "docker_probe", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].StartupProbe.Exec.Command = []string{"sh", "-c", "id"} }), reason: "hooks or exec probes"},
+		{name: "capacity_hook", user: testLauncher, object: capacity(func(p *corev1.Pod) {
+			p.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: []string{"sh"}}}}
+		}), reason: "hooks or exec probes"},
+		{name: "probe_exec_readiness", user: testLauncher, object: func() *corev1.Pod {
+			p := f.probes.canary(f.probeCtx, r, "nonce")
+			p.Spec.Containers[0].ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"sh"}}}}
+			return p
+		}(), reason: "hooks or exec probes"},
 		{name: "launcher_creates_job_pod", user: testLauncher, object: jobPod(job), reason: "only the launcher and the Job controller"},
 		{name: "controller_manager_creates_job_pod", user: "system:kube-controller-manager", object: jobPod(job), reason: "only the launcher and the Job controller"},
 		{name: "other_creates_job_pod", user: testIntruder, object: jobPod(job), reason: "only the launcher and the Job controller"},
@@ -228,6 +249,8 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 		}), reason: "ephemeral containers"},
 		{name: "launcher_activates_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Suspend = ptr(false) })},
 		{name: "collector_marks_job", user: testCollector, old: job, object: jobWith(func(j *batchv1.Job) { j.Finalizers = append(j.Finalizers, "foregroundDeletion") })},
+		{name: "launcher_annotates_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Annotations[rejectedAnnotation] = rejectedPod })},
+		{name: "other_annotates_job", user: testIntruder, old: job, object: jobWith(func(j *batchv1.Job) { j.Annotations[rejectedAnnotation] = rejectedUnadmittable }), reason: "only the launcher changes a Job"},
 		{name: "retemplated_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = labelHash("other-team") }), reason: "never its template"},
 		{name: "other_resumes_job", user: testIntruder, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Suspend = ptr(false) }), reason: "only the launcher changes a Job"},
 		{name: "widened_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Parallelism = ptr(int32(3)) }), reason: "exactly one Pod"},
@@ -235,8 +258,8 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 	for i := range cases {
 		cases[i].operation = string(admissionv1.Update)
 	}
-	for _, sub := range []string{"exec", "attach", "portforward"} {
-		cases = append(cases, admissionCase{name: "connect_" + sub, user: testLauncher, operation: string(admissionv1.Connect), subresource: sub, object: &corev1.PodExecOptions{}, reason: "exec, attach and port-forward"})
+	for _, sub := range []string{"exec", "attach", "portforward", "proxy"} {
+		cases = append(cases, admissionCase{name: "connect_" + sub, user: testLauncher, operation: string(admissionv1.Connect), subresource: sub, object: &corev1.PodExecOptions{}, reason: "exec, attach, port-forward and proxy"})
 	}
 	return cases
 }

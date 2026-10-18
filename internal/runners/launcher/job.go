@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -214,8 +215,14 @@ func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb string) corev1.Cont
 	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0))}}
 }
 
+var (
+	dockerCommand = []string{"dockerd"}
+	dockerArgs    = []string{"--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
+	dockerProbe   = []string{"docker", "--host=unix:///tmp/docker.sock", "info"}
+)
+
 func dockerContainer(cfg CloudJobConfig) corev1.Container {
-	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: []string{"dockerd"}, Args: []string{"--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}, SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0)), Privileged: ptr(true)}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}}, StartupProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"docker", "--host=unix:///tmp/docker.sock", "info"}}}, PeriodSeconds: 1, FailureThreshold: math.MaxInt32}}
+	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: slices.Clone(dockerCommand), Args: slices.Clone(dockerArgs), SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0)), Privileged: ptr(true)}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}}, StartupProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: slices.Clone(dockerProbe)}}, PeriodSeconds: 1, FailureThreshold: math.MaxInt32}}
 }
 
 func jobName(b CloudJobBinding) string {

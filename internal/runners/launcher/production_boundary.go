@@ -30,7 +30,7 @@ import (
 
 const boundaryControlLabel = "sparkwing.dev/boundary-control"
 
-// safety: admission pins these commands, so a probe's result can only come from this script.
+// safety: admission pins these commands, so an admission mutation cannot change what a probe runs.
 var (
 	listenerCommand = []string{"/bin/bash", "-ceu", "exec nc -lk 18888"}
 	witnessCommand  = []string{"/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"}

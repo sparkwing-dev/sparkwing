@@ -159,9 +159,9 @@ func TestAdmissionPolicyOnAPIServer(t *testing.T) {
 		debug.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug", Image: e.l.Config.RunnerImage, TerminationMessagePolicy: corev1.TerminationMessageReadFile, ImagePullPolicy: corev1.PullIfNotPresent}}}
 		_, err = e.as(t, "admin").CoreV1().Pods("cloud").UpdateEphemeralContainers(ctx, debug.Name, debug, metav1.UpdateOptions{})
 		refused(t, err, "ephemeral containers")
-		for _, sub := range []string{"exec", "attach", "portforward"} {
+		for _, sub := range []string{"exec", "attach", "portforward", "proxy"} {
 			err = e.as(t, "admin").CoreV1().RESTClient().Post().Namespace("cloud").Resource("pods").Name(created.Name).SubResource(sub).Param("container", "run-node").Param("command", "sh").Param("stdout", "true").Param("ports", "80").Do(ctx).Error()
-			refused(t, err, "exec, attach and port-forward")
+			refused(t, err, "exec, attach, port-forward and proxy")
 		}
 		created.Finalizers = nil
 		if _, err = e.as(t, testJobController).CoreV1().Pods("cloud").Update(ctx, created, metav1.UpdateOptions{}); err != nil {
