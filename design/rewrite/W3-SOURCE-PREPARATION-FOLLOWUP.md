@@ -1,9 +1,9 @@
 # W3 source preparation follow-up
 
-The five findings in W3-review-1792289092-final.md are implemented. The native
-report contains no FAIL for the last committed state, 04aa1b377. The lead must
-commit this diff and rerun the native suite before this session's changes have
-that evidence. Status remains CONTINUE for that handoff.
+The five findings in W3-review-1792289092-final.md are implemented in 0d8121455.
+The subsequent native run found two fixture failures. Their fixes and focused
+verification are recorded in [the native validation follow-up](W3-NATIVE-SOURCE-VALIDATION.md).
+Status remains CONTINUE until the lead's native report contains no FAIL.
 
 ## Implementation and invariants
 
