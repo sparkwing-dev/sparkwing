@@ -22,6 +22,11 @@ type sourceHint struct {
 
 var sourceHintRE = regexp.MustCompile("(^|[^\\w/.-])sparkwing ([a-z][^`\n,;()\"]*)")
 
+var (
+	sourceHintFlagRE        = regexp.MustCompile(`(?:^| )-{1,2}[a-zA-Z]`)
+	sourceHintInstructionRE = regexp.MustCompile(`(?i)\b(?:run|use|try|execute) sparkwing `)
+)
+
 func checkSourceHints(repoRoot string) bool {
 	valid, posArgs := loadRegistry()
 	var hints []sourceHint
@@ -41,7 +46,7 @@ func checkSourceHints(repoRoot string) bool {
 			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			found, perr := sourceHintsIn(repoRoot, path, valid)
+			found, perr := sourceHintsIn(repoRoot, path)
 			hints = append(hints, found...)
 			return perr
 		})
@@ -68,7 +73,7 @@ func checkSourceHints(repoRoot string) bool {
 	return len(bad) == 0
 }
 
-func sourceHintsIn(repoRoot, path string, valid map[string]bool) ([]sourceHint, error) {
+func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 	if err != nil {
@@ -98,11 +103,11 @@ func sourceHintsIn(repoRoot, path string, valid map[string]bool) ([]sourceHint, 
 			}
 			command = "sparkwing " + strings.TrimRight(command, ".: ")
 			verb, _ := parseInvocation(rel, fset.Position(lit.Pos()).Line, command)
-			if len(verb.tokens) == 0 || !valid["sparkwing "+verb.tokens[0]] {
+			if len(verb.tokens) == 0 {
 				continue
 			}
 			verb.err = fragmentFlagError(command)
-			hints = append(hints, sourceHint{cliVerb: verb, checkPath: quoted || strings.Contains(command, " -")})
+			hints = append(hints, sourceHint{cliVerb: verb, checkPath: quoted || sourceHintFlagRE.MatchString(command) || sourceHintInstructionRE.MatchString(text)})
 		}
 		return true
 	})

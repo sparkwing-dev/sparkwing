@@ -135,7 +135,7 @@ func (h Health) remedy() string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return strings.Join(parts, "; ") + "; re-run `sparkwing crons install` to pin the checkout as it stands"
+	return strings.Join(parts, "; ") + "; re-run `sparkwing schedules install` to pin the checkout as it stands"
 }
 
 func (h Health) describe(now time.Time) string {
@@ -143,18 +143,18 @@ func (h Health) describe(now time.Time) string {
 	case h.Timer.Foreign:
 		return fmt.Sprintf("%s exists but sparkwing did not write it, so the tick is whatever that file runs", h.Timer.Path)
 	case h.Armed == 0 && h.Schedules == 0:
-		return "nothing is armed here; `sparkwing crons install` arms this repository's schedules"
+		return "nothing is armed here; `sparkwing schedules install` arms this repository's schedules"
 	case h.Armed == 0:
 		return fmt.Sprintf("no schedule is armed here (%d paused, %d undeclared)", h.Paused, h.Undeclared)
 	case !h.Timer.Installed && !h.LastTick.At.IsZero() && !h.TickStale:
 		return fmt.Sprintf("no sparkwing timer is installed here, and something ticked %s ago, so %d schedule(s) are being evaluated",
 			roundDuration(now.Sub(h.LastTick.At)), h.Armed)
 	case !h.Timer.Installed:
-		return fmt.Sprintf("%d schedule(s) are armed but no timer runs the tick; `sparkwing crons install` writes one", h.Armed)
+		return fmt.Sprintf("%d schedule(s) are armed but no timer runs the tick; `sparkwing schedules install` writes one", h.Armed)
 	case !h.Timer.Enabled:
 		return fmt.Sprintf("the timer is installed but not running, so the %d armed schedule(s) never fire", h.Armed)
 	case h.Timer.Stale:
-		return fmt.Sprintf("the timer runs %s, which is not this sparkwing; `sparkwing crons install` repoints it", h.Timer.Binary)
+		return fmt.Sprintf("the timer runs %s, which is not this sparkwing; `sparkwing schedules install` repoints it", h.Timer.Binary)
 	case h.TickStale && h.LastTick.At.IsZero():
 		return "the timer is enabled but has never ticked; the log at crons.log says why"
 	case h.TickStale:

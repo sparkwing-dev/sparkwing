@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -80,8 +79,11 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 }
 
 func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, args []string, route userconfig.RunRouting, connection client.EngineOptions) (_ controllerwire.CreateRunRequest, resultErr error) {
-	masker := secrets.NewMasker()
-	captured, held := withholdLocalSecrets(os.Environ(), route.LocalSecrets, masker)
+	environment := flags.environment
+	if environment == nil {
+		environment = prepareLocalEnvironment(os.Environ(), route.LocalSecrets)
+	}
+	captured, held, masker := environment.captured, environment.held, environment.masker
 	configPath, err := userconfig.Path()
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
@@ -185,7 +187,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err := enforceRiskGate(pipeline, risksIn(schema), runFlags{allow: request.Request.Options.AllowRisk.Value, dryRun: request.Request.Options.DryRun.Value}); err != nil {
 		return request, err
 	}
-	request.LocalSecrets, err = resolveBurstSecrets(ctx, route.LocalSecrets, schema.Secrets, held)
+	request.LocalSecrets, err = resolveBurstSecrets(ctx, environment.names, schema.Secrets, held)
 	if err != nil {
 		return request, err
 	}
@@ -240,18 +242,4 @@ func resolveBurstSecrets(ctx context.Context, names []string, declarations []nod
 		value, present := held[name]
 		return value, present, ctx.Err()
 	})
-}
-
-func withholdLocalSecrets(captured, names []string, masker *secrets.Masker) ([]string, map[string]string) {
-	held := map[string]string{}
-	environment := slices.DeleteFunc(slices.Clone(captured), func(item string) bool {
-		name, value, _ := strings.Cut(item, "=")
-		if !slices.Contains(names, name) {
-			return false
-		}
-		masker.Register(value)
-		held[name] = value
-		return true
-	})
-	return environment, held
 }

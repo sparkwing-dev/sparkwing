@@ -161,17 +161,16 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 	return source.Options{
 		Engines: engines, SDK: engine.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: os.Environ(), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
+		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: captured, SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
 	}, nil
 }
 
 func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, captured []string, snapshots *nodehost.FileEnvironmentSnapshots, flags runFlags) (_ localRunPreparation, err error) {
-	masker := secrets.NewMasker()
-	route, err := loadRunRouting(directory, pipeline)
+	runEnvironment, err := prepareRunEnvironment(directory, pipeline, captured, flags)
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	environment, held := withholdLocalSecrets(captured, route.LocalSecrets, masker)
+	environment, held, masker := runEnvironment.captured, runEnvironment.held, runEnvironment.masker
 	defer func() {
 		if err != nil {
 			err = &maskedCLIError{err: err, masker: masker}
@@ -253,7 +252,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	localSecrets, err := resolveBurstSecrets(ctx, route.LocalSecrets, prepared.Description.Secrets, held)
+	localSecrets, err := resolveBurstSecrets(ctx, runEnvironment.names, prepared.Description.Secrets, held)
 	if err != nil {
 		return localRunPreparation{}, err
 	}

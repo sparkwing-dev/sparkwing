@@ -7,7 +7,10 @@
 in `Git.Ref` and `Source.RequestedRef`. `source.ResolveRevisions` chooses the
 execution/code pair. Verified App commits pass through without a branch lookup.
 `source.ResolveRef` supplies local and authenticated remote lookup for that
-resolver. Schedules use it too. An unborn local checkout remains valid for
+resolver. Schedules use it too. Origin-qualified refs use one normalization:
+`origin/main` and `refs/remotes/origin/main` identify `refs/heads/main` remotely
+and the corresponding `refs/remotes/origin/main` locally. Explicit branch and
+tag refs keep their namespaces. An unborn local checkout remains valid for
 unsealed inspection, but cannot pass executable intake without a resolved
 commit. Local working-tree execution with an existing HEAD retains its live
 files and carries that resolved commit in both identities.
@@ -31,6 +34,12 @@ preserving the owner's files.
 local snapshot inspection. It requires a local checkout and cannot combine with
 `PreparedCheckout`. It imports objects before the shared committed checkout.
 Remote bundle acquisition chooses the object format from the sealed object ID.
+Local and remote acquisition finish through one checkout owner. After seeding,
+it applies the accepted depth to the selected commit with a local file-protocol
+fetch from the seeded repository, then checks out that commit and applies
+submodule/LFS policy. Unpushed commits need no remote lookup. Execution and code
+checkouts each apply their depth. Depth zero and full-history policies retain
+the available ancestry.
 Bundle pipeline entries must be directories. Failed transfers and cancelled Git
 processes remove acquisition-owned workspaces.
 
@@ -47,7 +56,16 @@ The source-credential response adds optional `extra_repositories`. C1 returns
 host client preserve that list for acquisition. The release rechecks both IDs
 and names after minting. No route, schema, grant, setting or environment
 variable was added.
-No lead-owned handoff or amendment file changed. W9 owns preview/describe and
-child local-secret inheritance.
+The acquisition owner binds dependency preparation to its projected installation
+environment through the Go toolchain session. Install hooks and dependency tools
+consume that snapshot instead of capturing the calling process again. An explicit
+toolchain session environment replaces an inherited snapshot when they differ.
+Calls without a new environment retain the selected snapshot and notice sink.
+Sparks resolver construction takes that context. Go setting probes and fallback
+resolution read the captured session rather than os.Environ.
+
+Help, describe and plan share acquisition and prepared-environment withholding
+with execution. Child local-secret inheritance remains part of the child request
+contract.
 
 <!-- design:end -->

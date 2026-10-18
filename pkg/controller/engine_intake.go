@@ -106,18 +106,16 @@ func (s *EngineController) admitRun(ctx context.Context, team string, request st
 	return createRunResponse(admitted), nil
 }
 
-// safety: only an authorized committed match answers here;
-// refusals fall through to admission, which derives them again.
-func (s *EngineController) replayRun(ctx context.Context, team string, request store.IntakeRequest) (controllerwire.CreateRunResponse, bool) {
+func (s *EngineController) replayRun(ctx context.Context, team string, request store.IntakeRequest) (controllerwire.CreateRunResponse, bool, error) {
 	tenant, err := s.runTransactions(ctx, team)
 	if err != nil {
-		return controllerwire.CreateRunResponse{}, false
+		return controllerwire.CreateRunResponse{}, false, err
 	}
 	admitted, found, err := tenant.ReplayRun(ctx, request)
-	if err != nil || !found {
-		return controllerwire.CreateRunResponse{}, false
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, false, engineLookupError(err)
 	}
-	return createRunResponse(admitted), true
+	return createRunResponse(admitted), found, nil
 }
 
 func createRunResponse(admitted store.AdmissionResult) controllerwire.CreateRunResponse {

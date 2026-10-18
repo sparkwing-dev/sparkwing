@@ -178,7 +178,11 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err != nil {
 			return err
 		}
-		if replay, found := engine.replayRun(r.Context(), a.Target.Team, intent); found {
+		replay, found, err := engine.replayRun(r.Context(), a.Target.Team, intent)
+		if err != nil {
+			return err
+		}
+		if found {
 			writeJSON(w, http.StatusOK, replay)
 			return nil
 		}

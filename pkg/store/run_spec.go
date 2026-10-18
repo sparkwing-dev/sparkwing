@@ -97,19 +97,13 @@ type AcceptedExpansion struct {
 // including when the caller supplies no idempotency key.
 // Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
-	if err := validateLocalSecrets(request.Request.LocalSecretNames, request.LocalSecrets); err != nil {
-		return AdmissionResult{}, err
-	}
 	var result AdmissionResult
 	var installed *localRunSecrets
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
 		result, err = admitRun(ctx, tx, t.team, request, tx.now())
 		if err == nil {
-			installed, err = t.s.installLocalSecrets(t.team, result, request.LocalSecrets)
-		}
-		if err == nil {
-			err = t.installSubmittedEnvironmentTx(ctx, tx, result, request)
+			installed, err = t.validateAdmissionInputsTx(ctx, tx, result, request)
 		}
 		return err
 	})

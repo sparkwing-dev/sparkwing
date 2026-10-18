@@ -22,8 +22,7 @@ type admittedSnapshot struct {
 	retry   *RetrySelection
 }
 
-// ReplayRun returns the committed admission for a keyed intent without resolving
-// source or taking the intake lock. Retries and App deliveries report a miss.
+// ReplayRun validates private inputs and returns a keyed admission before source resolution.
 func (t *Tenant) ReplayRun(ctx context.Context, request IntakeRequest) (AdmissionResult, bool, error) {
 	if request.IdempotencyKey == "" || request.Request.Lineage.RetryOf != "" || request.VerifiedDeliveryID != "" {
 		return AdmissionResult{}, false, nil
@@ -44,12 +43,26 @@ func (t *Tenant) ReplayRun(ctx context.Context, request IntakeRequest) (Admissio
 			return err
 		}
 		result, found, err = replayAdmissionTx(ctx, tx, t.team, scope, request.IdempotencyKey, string(digest))
+		if err == nil && found {
+			_, err = t.validateAdmissionInputsTx(ctx, tx, result, request)
+		}
 		return err
 	})
 	if err != nil {
 		return AdmissionResult{}, false, err
 	}
 	return result, found, nil
+}
+
+func (t *Tenant) validateAdmissionInputsTx(ctx context.Context, tx *storeTx, result AdmissionResult, request IntakeRequest) (*localRunSecrets, error) {
+	if err := validateLocalSecrets(request.Request.LocalSecretNames, request.LocalSecrets); err != nil {
+		return nil, err
+	}
+	installed, err := t.s.installLocalSecrets(t.team, result, request.LocalSecrets)
+	if err == nil {
+		err = t.installSubmittedEnvironmentTx(ctx, tx, result, request)
+	}
+	return installed, err
 }
 
 func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, now time.Time) (AdmissionResult, error) {

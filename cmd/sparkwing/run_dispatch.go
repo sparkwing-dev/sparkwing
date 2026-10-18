@@ -14,6 +14,7 @@ import (
 )
 
 type runFlags struct {
+	environment             *localRunEnvironment
 	sourceSelection         *localSourceSelection
 	invocation              clisurface.Invocation
 	parseErr                error

@@ -34,8 +34,11 @@ func Lookup(name string) (Var, bool) {
 	return Var{Name: name, Class: User, Owner: "user"}, false
 }
 
-func envKey(name string) string {
-	if runtime.GOOS == "windows" {
+func envKey(name string) string { return NameKey(name, runtime.GOOS) }
+
+// NameKey returns the platform's environment-name comparison key.
+func NameKey(name, goos string) string {
+	if goos == "windows" {
 		return strings.ToUpper(name)
 	}
 	return name

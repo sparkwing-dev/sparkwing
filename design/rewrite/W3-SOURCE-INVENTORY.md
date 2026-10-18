@@ -13,20 +13,21 @@ source acquisition and directory-based SDK/engine selection path found.
 
 | Baseline path | Source operation | Result in this worktree |
 | --- | --- | --- |
-| `internal/source/checkout.go` | Remote init/fetch/checkout, local clone/checkout, prepared checkout and separate pipeline-code checkout | Owns acquisition. Local and remote committed trees share submodule/LFS materialization. |
+| `internal/source/checkout.go` | Remote init/fetch/checkout, local clone/checkout, prepared checkout and separate pipeline-code checkout | Owns acquisition. Local and remote committed trees share depth enforcement and submodule/LFS materialization after seeding. |
 | `internal/source/submodules.go` | Recursive submodule checkout and LFS fetch/checkout | Retained behind shared policy materialization. |
 | `internal/source/bundle.go` | Authorized bundle download, digest verification and object import | Retained. Checkout object format follows the sealed SHA. |
 | `internal/source/git.go`, `credential.go`, `command_unix.go`, `command_windows.go` | Git processes, credential-helper lookup and process joining | Process joining moved to the dependency-free `internal/source/gitcmd` leaf. |
 | `internal/source/acquire.go` | Classifies acquired pipeline code, reads its pin, resolves/verifies its engine and installs its SDK | Owns unaccepted SDK classification. |
 | `internal/source/projection.go`, `revisions.go` | Projects sealed execution/code identity and resolves intent | Retained. New `resolve.go` owns local/remote Git ref lookup. |
 | `cmd/sparkwing/trigger_native.go` | Snapshot inspection, two direct checkouts and temporary inspection materialization | Direct checkouts deleted. Uses `PrepareCheckout` and `Options.LocalBundle`. |
-| `cmd/sparkwing/run_dispatch.go` | Resolves a ref, adds/removes/prunes temporary worktrees | Direct worktree commands deleted. Its preview adapter uses shared resolution and checkout. W9 owns removal of the remaining preview caller. |
+| `cmd/sparkwing/run_dispatch.go` | Resolves a ref, adds/removes/prunes temporary worktrees | Direct worktree commands deleted. Those paths are deleted. Run flags retain the resolved selection and prepared environment. |
 | `cmd/sparkwing/trigger_prepare.go` | Reads Git objects/config and resolves execution/pipeline refs | Uses `ResolveRevisions`. No clone/checkout/worktree command. |
 | `cmd/sparkwing/trigger_inspect.go` | Acquires selected source and inspects its SDK entry | Uses shared acquisition. |
 | `cmd/sparkwing/local_run.go`, `local_run_host.go`, `schedules_local.go` | Native CLI and local-schedule source preparation | Shared-source consumers. |
+| `cmd/sparkwing/local_run_environment.go`, `action_plan.go` | Prepares captured input for help, describe, plan, preparation and burst | Withholds configured local secrets with procenv name identity before selection, acquisition or SDK installation. Run dispatch retains the prepared snapshot. |
 | `cmd/sparkwing/run_source_selection.go` | Local execution/pipeline source selection | Uses shared resolution and acquisition. |
 | `cmd/sparkwing/worktree_snapshot.go` | Captures working/index bytes as a synthetic commit and bundle, adds selected revisions | Retained as input capture. Inspection imports that bundle through `internal/source`. |
-| `internal/orchestrator/ref_resolve.go`, `pipeline_source.go` | Legacy ref lookup and pipeline-source projection | Remaining preview consumers belong to W9. No clone/checkout/worktree command remains here. |
+| `internal/orchestrator/ref_resolve.go`, `pipeline_source.go` | Legacy ref lookup and pipeline-source projection | Deleted after the merged CLI removed their last callers. Remaining ref and option-injection coverage lives in internal/source. |
 | `internal/bincache/source_bundle.go`, `source_import.go`, `source_import_unix.go`, `source_import_windows.go` | Unused alternative bundle downloader/importer/checkouter, snapshot validation and raw-file restoration | Import API and its support files deleted. Upload API retained. No production caller needed migration. |
 | `internal/bincache/materialize.go`, `entry.go`, `bincache.go` | Materializes compiled pipeline entries from supplied source | Retained compiler/cache responsibility. These do not select pipeline commits. |
 | `internal/githooks/fire.go` | Adds/removes/prunes the throwaway worktree used to prove a hook | Delegates worktree acquisition to `source/gitcmd.HookWorktree`. Hook commits stay in githooks. |
@@ -36,7 +37,7 @@ source acquisition and directory-based SDK/engine selection path found.
 | `internal/nodehost/native_host.go`, `owner.go`, `claimed_node.go` | Host acquisition and binding of the selected entry | Retained shared-source consumers. |
 | `internal/runners/repository.go`, `internal/runners/hosting.go`, `internal/runners/launcher/controller.go`, `internal/runners/launcher/source_init.go`, `internal/cluster/production_runtime.go` | Runner/launcher source preparation and SDK entry installation | Shared-source consumers. Production Go ownership guard covers these packages. |
 | `pkg/controller/github_app_webhook.go` | Builds App intake with a branch in Source.Ref | Resolves the verified execution/code pair before admission without looking up a newer branch. |
-| `pkg/controller/schedule_source.go` | Local rev-parse or remote ls-remote followed by pair selection | Bespoke Git lookup deleted. Uses shared `ResolveRef` and `ResolveRevisions`. |
+| `pkg/controller/schedule_source.go` | Local rev-parse or remote ls-remote followed by pair selection | Bespoke Git lookup deleted. Uses shared `Select`, including execution-commit configuration and the configured code pin. |
 | `pkg/store/schedule_intake.go` | Builds pinned scheduled requests and replay digests | Pinned identity resolves through the shared pair selector. Replay carries both committed IDs. |
 | `pkg/controller/client/native_services.go` | Fresh-branch child clears parent SHAs and submits unresolved intent | Fresh source flags are cleared here. Controller child intake resolves against the parent's stored location before sealing. |
 | `pkg/controller/child_source.go` | Added authenticated child-ref resolution and server-private credential lookup | Uses shared ref/pair resolution. Credentials never enter a running parent. |

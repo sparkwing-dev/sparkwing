@@ -15,6 +15,11 @@ func TestRepositorySourceHintsUseCurrentGrammar(t *testing.T) {
 func TestCheckSourceHintsRejectsStaleHints(t *testing.T) {
 	for _, literal := range []string{
 		`"  upgrade:  sparkwing update --cli"`,
+		"\"run `sparkwing cluster runners add`\"",
+		"\"run `sparkwing unknown-root repair`\"",
+		`"run sparkwing cluster object-store reset-breaker --profile NAME"`,
+		`"run sparkwing unknown-root repair"`,
+		`"Try sparkwing unknown-root repair"`,
 		`"install the matching CLI: sparkwing update --cli --version %s"`,
 		"\"no repos registered; run `sparkwing pipeline add <dir>` first\"",
 		`"(sparkwing secrets set --name KEY --file <path>)"`,
@@ -35,6 +40,7 @@ func TestCheckSourceHintsAcceptsCurrentHintsAndProse(t *testing.T) {
 		"\t\"the daemon creates it; sparkwing repos and their SDK pins\",\n"+
 		"\t\"sparkwing-dev/sparkwing update --cli\",\n"+
 		"}\n")
+	writeSource(t, root, "cmd/tool/notice.go", "package main\n\nvar notice = \"sparkwing changed %s -> %s: see `sparkwing docs read --topic changelog`\"\n")
 	writeSource(t, root, "cmd/tool/hint_test.go", "package main\n\nvar old = \"sparkwing update --cli\"\n")
 	writeSource(t, root, "internal/x/testdata/hint.go", "package x\n\nvar old = \"sparkwing update --cli\"\n")
 	if !checkSourceHints(root) {

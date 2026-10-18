@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -175,11 +176,10 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 				return entry, err
 			}
 		}
-		if _, err := client.run(ctx, selected, "", "checkout", "--quiet", "--detach", revision); err != nil {
-			return entry, err
-		}
+
+		remote := checkout
 		if policy.Submodules != nil && *policy.Submodules || policy.LFS != nil && *policy.LFS {
-			remote, err := client.run(ctx, checkout, "", "remote", "get-url", "origin")
+			remote, err = client.run(ctx, checkout, "", "remote", "get-url", "origin")
 			if err != nil {
 				return entry, err
 			}
@@ -192,9 +192,9 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			if _, err := client.run(ctx, selected, "", "remote", "set-url", "origin", remote); err != nil {
 				return entry, err
 			}
-			if err := materializePolicy(ctx, &client, spec, selected, remote, revision); err != nil {
-				return entry, err
-			}
+		}
+		if err := checkoutCommit(ctx, &client, spec, selected, remote, revision); err != nil {
+			return entry, err
 		}
 		checkout, actual = selected, revision
 	}
@@ -313,10 +313,27 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 			return err
 		}
 	}
-	if _, err := client.run(ctx, checkout, "", "checkout", "--quiet", "--detach", strings.ToLower(spec.SHA), "--"); err != nil {
+	return checkoutCommit(ctx, client, spec, checkout, remote, spec.SHA)
+}
+
+func checkoutCommit(ctx context.Context, client *gitClient, spec Spec, checkout, remote, sha string) error {
+	depth := checkoutDepth(spec.Checkout.Policy)
+	if depth > 0 {
+		local := *client
+		local.env = append(append([]string{}, client.env...), "GIT_ALLOW_PROTOCOL=file")
+		path := filepath.ToSlash(checkout)
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		seed := (&url.URL{Scheme: "file", Path: path}).String()
+		if _, err := local.run(ctx, checkout, "", "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--update-shallow", "--depth="+strconv.Itoa(depth), "--", seed, sha); err != nil {
+			return err
+		}
+	}
+	if _, err := client.run(ctx, checkout, "", "checkout", "--quiet", "--detach", strings.ToLower(sha), "--"); err != nil {
 		return err
 	}
-	return materializePolicy(ctx, client, spec, checkout, remote, spec.SHA)
+	return materializePolicy(ctx, client, spec, checkout, remote, sha)
 }
 
 func initCheckout(ctx context.Context, client *gitClient, checkout, origin, sha string) error {
@@ -338,14 +355,20 @@ func fetchArgs(policy nodeproto.SourceSpec) []string {
 	} else {
 		args = append(args, "--no-tags")
 	}
-	if policy.Depth != nil {
-		if *policy.Depth > 0 {
-			args = append(args, "--depth="+strconv.Itoa(*policy.Depth))
-		}
-	} else if policy.FullHistory == nil || !*policy.FullHistory {
-		args = append(args, "--depth=1")
+	if depth := checkoutDepth(policy); depth > 0 {
+		args = append(args, "--depth="+strconv.Itoa(depth))
 	}
 	return args
+}
+
+func checkoutDepth(policy nodeproto.SourceSpec) int {
+	if policy.Depth != nil {
+		return *policy.Depth
+	}
+	if policy.FullHistory != nil && *policy.FullHistory {
+		return 0
+	}
+	return 1
 }
 
 // safety: snapshot blobs already hold the captured working-tree bytes; info/attributes

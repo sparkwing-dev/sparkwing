@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -106,4 +108,78 @@ func FuzzWithholdLocalSecretsLeavesNoConfiguredName(f *testing.F) {
 			t.Fatal("ordinary environment was dropped")
 		}
 	})
+}
+
+func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
+	for _, entry := range []string{"help", "describe", "plan", "preparation"} {
+		t.Run(entry, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			t.Setenv("SPARKWING_HOME", home)
+			config := filepath.Join(home, "config.yaml")
+			t.Setenv("SPARKWING_CONFIG", config)
+			if err := os.WriteFile(config, []byte("run:\n  routing:\n    local_secrets: [SIGNING_MATERIAL]\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SIGNING_MATERIAL", signingMaterial)
+			realGo, err := exec.LookPath("go")
+			if err != nil {
+				t.Fatal(err)
+			}
+			tools := t.TempDir()
+			marker := filepath.Join(tools, "leaked")
+			wrapper := "#!/bin/sh\nif [ -n \"${SIGNING_MATERIAL+set}\" ]; then : > " + marker + "; fi\nif [ \"$1\" = mod ] && [ \"$2\" = download ] && [ \"$4\" = all ]; then exit 0; fi\nexec " + realGo + " \"$@\"\n"
+			if err := os.WriteFile(filepath.Join(tools, "go"), []byte(wrapper), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+			repo := burstIntakeRepository(t)
+			configBody, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "sparkwing.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			configBody = append(configBody, []byte("sparks:\n  - name: sdk\n    source: github.com/sparkwing-dev/sparkwing\n    version: v0.0.0\n")...)
+			writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", string(configBody), 0o600)
+			sums, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeSnapshotFile(t, repo, ".sparkwing/.resolved.sum", string(sums), 0o600)
+			pipeline := strings.ReplaceAll(burstIntakePipeline, "TOKEN", "SIGNING_MATERIAL")
+			pipeline = strings.Replace(pipeline, "func main() {\n", "func main() {\n if _, leaked := os.LookupEnv(\"SIGNING_MATERIAL\"); leaked { os.Exit(97) }\n", 1)
+			writeSnapshotFile(t, repo, ".sparkwing/main.go", pipeline, 0o600)
+			t.Chdir(repo)
+			args := []string{"run", "burst", "--help"}
+			if entry == "describe" || entry == "plan" {
+				args = []string{"pipeline", entry, "--pipeline", "burst"}
+			}
+			inv, err := clisurface.Parse("sparkwing", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch entry {
+			case "help":
+				err = dispatchRunWithEngine(inv, func(string, func()) error { t.Fatal("help selected execution engine"); return nil })
+			case "describe":
+				err = runPipelineDescribe(inv)
+			case "plan":
+				err = runPipelinePlan(inv)
+			case "preparation":
+				var snapshots *nodehost.FileEnvironmentSnapshots
+				snapshots, err = nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
+				if err == nil {
+					_, err = prepareNativeLocalRun(t.Context(), home, filepath.Join(repo, ".sparkwing"), "burst", os.Environ(), snapshots, runFlags{})
+				}
+			}
+			if err != nil {
+				t.Fatalf("%s exposed configured local secret: %v", entry, err)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("configured local secret reached SDK installation")
+			}
+		})
+	}
 }

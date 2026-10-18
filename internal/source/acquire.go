@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -71,7 +72,7 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	if err != nil {
 		return entry, err
 	}
-	command, err := install(ctx, entry.Engine, engine.SDKInstallRequest{
+	command, err := install(gotoolchain.WithSession(ctx, environment, nil), entry.Engine, engine.SDKInstallRequest{
 		Directory: entry.pipelineCheckout, PipelineDir: relative, SDK: options.SDK, Environment: environment, Masker: options.Base.Masker,
 		NoBincache: spec.NoBincache, HashAllFiles: spec.HashAllFiles,
 	})

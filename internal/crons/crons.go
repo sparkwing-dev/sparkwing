@@ -713,7 +713,7 @@ func (s *Service) Resolve(ctx context.Context, name string) (store.CronSchedule,
 			trimmed, ErrAmbiguousName, strings.Join(names, ", "))
 	}
 	return store.CronSchedule{}, fmt.Errorf(
-		"crons: no schedule named %q is armed here; `sparkwing crons list` names them: %w", trimmed, store.ErrNotFound)
+		"crons: no schedule named %q is armed here; `sparkwing schedules list` names them: %w", trimmed, store.ErrNotFound)
 }
 
 // safety: the order matches the CLI's own flags, so a reader sees the fields
@@ -765,8 +765,8 @@ func (s *Service) pinnedBinaryReady(sched store.CronSchedule) error {
 	}
 	if _, err := os.Stat(sched.LockedBinary); err != nil {
 		return fmt.Errorf(
-			"the pinned pipeline binary at %s is gone; re-run `sparkwing crons install` to pin the checkout again, "+
-				"or `sparkwing crons set %s --unpin` to follow it", sched.LockedBinary, DisplayName(sched))
+			"the pinned pipeline binary at %s is gone; re-run `sparkwing schedules install` to pin the checkout again, "+
+				"or `sparkwing schedules set --schedule %s --unpin` to follow it", sched.LockedBinary, DisplayName(sched))
 	}
 	return nil
 }

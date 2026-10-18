@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
@@ -120,8 +119,8 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if err != nil {
 		return err
 	}
-	masker := secrets.NewMasker()
-	captured, _ := withholdLocalSecrets(os.Environ(), route.LocalSecrets, masker)
+	flags.environment = prepareLocalEnvironment(os.Environ(), route.LocalSecrets)
+	captured, masker := flags.environment.captured, flags.environment.masker
 	selection, err := selectLocalRunSource(context.Background(), home, dir, pipelineName, flags, captured, masker)
 	if err != nil {
 		return err

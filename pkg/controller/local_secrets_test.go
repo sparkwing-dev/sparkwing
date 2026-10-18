@@ -264,3 +264,72 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		t.Fatalf("stale release: %d %s", refused.Code, refused.Body)
 	}
 }
+
+func TestHTTPIntakeReplayValidatesPrivateInputs(t *testing.T) {
+	httpIntakeReplayPrivateInputs(t, "original-secret")
+}
+
+func FuzzHTTPIntakeReplayValidatesPrivateInputs(f *testing.F) {
+	f.Add([]byte("signing-material"))
+	f.Add([]byte{0, 255, 34, 10})
+	f.Add([]byte{})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 256 {
+			t.Skip()
+		}
+		httpIntakeReplayPrivateInputs(t, string(data))
+	})
+}
+
+func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
+	t.Helper()
+	s, _, input, bearer := sourceUploadFixture(t)
+	s.WithEngineController(&EngineController{Store: s.store, RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
+	input.LocalSecretNames = []string{"SIGNING_MATERIAL"}
+	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+	input.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}}}
+	input.EnvironmentSource = runspec.EnvironmentSubmitted
+	input.Options.SubmitEnvAllow = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"BUILD_REGION"}}}
+	var err error
+	input.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_REGION": "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "private-replay", LocalSecrets: map[string]string{"SIGNING_MATERIAL": value}, SubmittedEnv: map[string][]byte{"BUILD_REGION": []byte("original")}}
+	send := func(handler http.Handler, req controllerwire.CreateRunRequest, want int) {
+		t.Helper()
+		body, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := sourceUploadHTTP(handler, bearer, "POST", "/api/v1/runs", string(body))
+		if w.Code != want {
+			t.Fatalf("intake HTTP %d, want %d: %s", w.Code, want, w.Body)
+		}
+	}
+	send(s.Handler(), request, http.StatusCreated)
+	send(s.Handler(), request, http.StatusOK)
+	changed := request
+	changed.LocalSecrets = map[string]string{"SIGNING_MATERIAL": value + "changed"}
+	send(s.Handler(), changed, http.StatusConflict)
+	changed.LocalSecrets = nil
+	send(s.Handler(), changed, http.StatusBadRequest)
+	changed = request
+	changed.SubmittedEnv = map[string][]byte{"BUILD_REGION": []byte("changed")}
+	send(s.Handler(), changed, http.StatusConflict)
+	changed.SubmittedEnv = nil
+	send(s.Handler(), changed, http.StatusConflict)
+	var sequence int
+	var database, path string
+	if err := s.store.DB().QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &database, &path); err != nil {
+		t.Fatal(err)
+	}
+	other, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	server := New(other, nil).WithSecretsCipher(s.secretsCipher).WithEngineController(&EngineController{Store: other})
+	send(server.Handler(), request, http.StatusServiceUnavailable)
+	send(server.Handler(), request, http.StatusServiceUnavailable)
+}

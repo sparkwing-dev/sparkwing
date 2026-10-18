@@ -69,8 +69,7 @@ func run(args []string) error {
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	dashboardURL := fs.String("dashboard-url", "",
 		"externally-reachable URL of the dashboard that watches this controller. "+
-			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
-			"where to watch runs. Empty disables the announcement.")
+			"Announced via GET /api/v1/services. Empty disables the announcement.")
 	billingURL := fs.String("billing-url", "",
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with the "+

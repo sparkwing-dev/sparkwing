@@ -46,9 +46,14 @@ func (s *Store) installLocalSecrets(team Team, admitted AdmissionResult, values 
 	}
 	key := localSecretKey{team, admitted.RunID}
 	if admitted.Replayed {
-		if _, present := s.localSecrets.Load(key); !present {
+		previous, present := s.localSecrets.Load(key)
+		if !present {
 			return nil, authorityError(apierr.Unavailable, "requester local secrets are unavailable; submit a new run")
 		}
+		if !maps.Equal(previous.(*localRunSecrets).values, values) {
+			return nil, authorityError(apierr.SpecDrift, "local secret values differ from the original intake")
+		}
+		return nil, nil
 	}
 	entry := &localRunSecrets{values: maps.Clone(values)}
 	previous, loaded := s.localSecrets.LoadOrStore(key, entry)

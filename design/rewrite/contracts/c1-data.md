@@ -3535,6 +3535,11 @@ JSON. Names and values must match exactly. Admission copies values into the
 Store process's run-and-team registry before its transaction commits. Failed
 admission removes only the entry it created. Identical active intake replays
 retain the first values. Changed values refuse with `spec_drift`.
+`Tenant.ReplayRun` and `Tenant.AdmitRun` share private-input validation, including
+local name/value equality, registry availability and submitted-environment
+verification. Replay reads the registry without inserting values. Only a missing
+idempotency record proceeds to source resolution. Replay conflicts and validation
+errors return before source access, including when the repository is unavailable.
 
 Plan acceptance requires every selected local name in the pipeline's declared
 secret names. Local values participate in identifier validation and satisfy

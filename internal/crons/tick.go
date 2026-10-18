@@ -227,7 +227,7 @@ func (s *Service) recordUnevaluable(
 ) {
 	detail := cause.Error()
 	if sched.Override != nil {
-		detail += "; `sparkwing crons set " + DisplayName(sched) + " --reset` drops this host's override"
+		detail += "; `sparkwing schedules set --schedule " + DisplayName(sched) + " --reset` drops this host's override"
 	}
 	report.Errors = append(report.Errors, fmt.Sprintf("%s: %s", DisplayName(sched), detail))
 	if !sched.Declared || sched.Paused {

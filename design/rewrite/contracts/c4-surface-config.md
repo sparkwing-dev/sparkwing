@@ -1010,6 +1010,16 @@ Local preparation, including offline fallback, resolves configured local secret
 names against the selected pipeline's complete declarations and the requesting
 process's captured environment. It excludes those environment entries before
 capturing the private local environment snapshot or starting SDK inspection.
+Help, describe, plan, local preparation and burst consume one prepared environment
+before source selection, acquisition or SDK installation. Run dispatch retains
+that preparation through engine selection and intake preparation. Comparison
+uses `procenv.NameKey(name, goos)`, the same identity used by procenv.Build.
+Windows comparison ignores case. Held values retain their configured declaration
+names for authorized release, and every withheld value is registered for masking.
+Dependency tools read that snapshot through gotoolchain.Environment(ctx).
+Sparks resolver construction accepts the context so its Go setting probes and
+fallback Go commands use the same environment.
+
 Only the input-only `CreateRunRequest.LocalSecrets` map carries values to the
 local controller's existing volatile registry. The request seals resolved names.
 Local preparation and intake diagnostics mask the resolved values. Execution

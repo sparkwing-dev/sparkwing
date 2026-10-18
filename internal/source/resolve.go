@@ -19,7 +19,11 @@ func ResolveRef(ctx context.Context, spec Spec, ref string, options Options) (st
 		return "", err
 	}
 	client := &gitClient{env: gitEnvironment(env), workspace: options.Workspace}
+	ref, origin := normalizeRef(ref)
 	if spec.LocalCheckout != "" {
+		if origin {
+			ref = "refs/remotes/origin/" + strings.TrimPrefix(ref, "refs/heads/")
+		}
 		return client.run(ctx, spec.LocalCheckout, "", "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	}
 	remote := spec.RemoteURL
@@ -30,6 +34,15 @@ func ResolveRef(ctx context.Context, spec Spec, ref string, options Options) (st
 		}
 	}
 	return resolveRemoteRef(ctx, client, remote, ref)
+}
+
+func normalizeRef(ref string) (string, bool) {
+	for _, prefix := range []string{"origin/", "refs/remotes/origin/"} {
+		if branch, ok := strings.CutPrefix(ref, prefix); ok {
+			return "refs/heads/" + branch, true
+		}
+	}
+	return ref, false
 }
 
 func resolveRemoteRef(ctx context.Context, client *gitClient, remote, ref string) (string, error) {

@@ -75,6 +75,7 @@ func TestFreshChildReplayIgnoresBranchMovementAndSourceOutage(t *testing.T) {
 	if err := os.RemoveAll(repo); err != nil {
 		t.Fatal(err)
 	}
+	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", intake(map[string]string{"changed": "after outage"}), http.StatusConflict)
 	replayed = admitted(engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", intake(nil), http.StatusOK).Body)
 	if replayed.RunID != first.RunID || replayed.Request.Request.Git.SHA != selected {
 		t.Fatalf("source outage replay = %+v, want run %s", replayed, first.RunID)

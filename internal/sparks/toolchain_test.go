@@ -117,7 +117,7 @@ func TestResolveAndWriteIgnoresTheFloorOfTheOverlayItReplaces(t *testing.T) {
 
 func TestResolverWithDirUsesTheModuleFloor(t *testing.T) {
 	dir, log := resolveFloorFixture(t, "go1.26.6", "1.26.8", "printf '{\"Version\":\"v1.2.3\"}\\n'; exit 0", "exit 0")
-	resolver := sparks.NewResolverFromEnv()
+	resolver := sparks.NewResolverFromEnv(t.Context())
 	resolver.Dir = dir
 	ctx := gotoolchain.WithSession(context.Background(), os.Environ(), func(string) {})
 	if _, err := resolver.Resolve(ctx, privateManifest()); err != nil {

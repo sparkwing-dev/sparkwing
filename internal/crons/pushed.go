@@ -149,7 +149,7 @@ const ControllerTimerDetail = "controller loop"
 func (h Health) describeController(now time.Time) string {
 	switch {
 	case h.Armed == 0 && h.Schedules == 0:
-		return "no schedule is pushed here; `sparkwing crons install --profile <name>` pushes a repository's"
+		return "no schedule is pushed here; `sparkwing schedules install --profile <name>` pushes a repository's"
 	case h.Armed == 0:
 		return fmt.Sprintf("no schedule is armed here (%d paused, %d undeclared)", h.Paused, h.Undeclared)
 	case h.LastTick.At.IsZero():

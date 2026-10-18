@@ -74,7 +74,7 @@ func runSparksList(inv clisurface.Invocation) error {
 		ctx := gotoolchain.WithSession(context.Background(), nil, nil)
 		var resolver *sparks.Resolver
 		if !noResolve {
-			resolver = sparks.NewResolverFromEnv()
+			resolver = sparks.NewResolverFromEnv(ctx)
 			resolver.Dir = sparkwingDir
 		}
 		for _, lib := range m.Libraries {
