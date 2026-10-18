@@ -47,15 +47,15 @@ type SummaryWrite struct {
 }
 
 func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef, actor Actor) (NodeRow, error) {
-	if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil {
-		return NodeRow{}, err
-	}
 	p, err := resolveActorTx(ctx, tx, actor)
 	if err != nil {
 		return NodeRow{}, err
 	}
 	if !slices.Contains(p.Capability.Grants, capability.NodeReport) {
 		return NodeRow{}, authorityError(apierr.Forbidden, "job reporting grant is required")
+	}
+	if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil {
+		return NodeRow{}, err
 	}
 	row, err := readNodeTx(ctx, tx, team, ref)
 	if err != nil {
