@@ -1081,12 +1081,18 @@ and production boundary probe carries `karpenter.sh/do-not-disrupt=true`.
 Admission validation preserves the Job template annotations as well as placement.
 Each Ready node must carry its exact team's hashed label, and one reservation
 occupies the whole node. When no vacant Ready team node exists, the launcher holds
-the award and creates one unbound capacity-request Pod per unit
-(`sw-capacity-<hash of team/run/job/kind/unit>`) with the team node selector, the
+the award and creates one unbound capacity-request Pod per award
+(`sw-capacity-<Job name award hash>`, which includes the generation and attempt;
+only the same award adopts it and it is never rebound) with the team node selector, the
 job tolerations and the award's CPU, memory and scratch requests, and no volumes,
 environment or service-account token. Its unit fence and size are recorded in
-`sparkwing.dev/capacity-demand`; it is verified like Job Pods on create, adoption
-and every pass; it is observed through `/launcher/sync` as a reservation-only
+`sparkwing.dev/capacity-demand`, which only locates the award. Verification
+compares it with `demandFor(award)` on create and adoption, the held award on every
+pass, and the controller's binding and `cloud_resources` (returned on reservation
+observations by `/launcher/sync`) on reconciliation; a Pod without a matching
+allocation is deleted. Pod rejection is contained using Kubernetes alone and
+acknowledged to the controller through `/launcher/sync` during reconciliation. It
+is observed through `/launcher/sync` as a reservation-only
 observation (`reservation_id` = `capacity:<pod UID>`, `node_uid` = the pod UID,
 sent in `preparing` only by the holding launcher). It is deleted when the award ends
 or its deadline passes, or consumed by a same-team reservation after that
