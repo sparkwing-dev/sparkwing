@@ -186,8 +186,8 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
 The Cloud example enables `volumePermissions` so the controller owns `/data`
 and can set its private mode to `0700`. `fsGroup: 65534` grants group access but
 cannot authorize that mode change on a root-owned emptyDir. The example also
-shows `trustedProxyCIDRs`. Replace the proxy CIDRs with the actual nginx source
-range.
+enables `trustedProxyListener` for the `ingress-nginx` namespace, because a
+VPC-wide pod CIDR would let any pod in the cluster claim a client address.
 
 Infrastructure Pods carry component `app` labels. Customer Pods carry
 `app: sparkwing-job`. Baseline allow-all ingress/egress policies must exclude
@@ -219,6 +219,13 @@ for example `["10.0.0.0/8", "2001:db8:ffff::/48"]`. The chart passes
 address when walking the forwarded chain from the trusted TCP peer toward
 the client. Configure the ingress to append its observed peer or replace the
 header with a verified chain.
+
+`controller.trustedProxyListener.enabled` adds a second controller port that
+reads the client address from `X-Real-IP` (`--trusted-proxy-addr`). The Ingress
+routes to it, and a chart NetworkPolicy admits only pods matching
+`trustedProxyListener.namespaceSelector` and optional `podSelector` to that
+port. Rendering refuses an empty `namespaceSelector`. Baseline policies that
+allow all ingress to the controller must exclude it, or they reopen the port.
 
 Projected credential symlinks are accepted only when their resolved targets
 stay inside `/etc/sparkwing/credentials`. Targets must be regular files owned

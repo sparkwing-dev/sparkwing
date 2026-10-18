@@ -10,6 +10,10 @@
 {{- fail (printf "sparkwing-full: controller.%s was removed with the per-pipeline GitHub webhook; GitHub triggers come from the GitHub App now. Unset it and follow the migration guide section \"Per-pipeline GitHub webhooks are removed\"" $value) -}}
 {{- end -}}
 {{- end -}}
+{{- $listener := .Values.controller.trustedProxyListener -}}
+{{- if and $listener.enabled (empty $listener.namespaceSelector) -}}
+{{- fail "sparkwing-full: controller.trustedProxyListener.enabled needs controller.trustedProxyListener.namespaceSelector naming the ingress controller's namespace; without it any pod could set X-Real-IP" -}}
+{{- end -}}
 {{- if .Values.web -}}
 {{- fail "sparkwing-full: web was removed with the sparkwing-web Deployment; the controller serves the dashboard now. Unset web and follow the migration guide section \"The controller serves the dashboard\"" -}}
 {{- end -}}

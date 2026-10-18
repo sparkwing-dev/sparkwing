@@ -16,7 +16,9 @@ controller:
   cloudfront:
     domain: data.sparkwing.dev
     keyPairID: REPLACE_PUBLIC_KEY_ID
-  trustedProxyCIDRs: [10.0.0.0/16]
+  trustedProxyListener:
+    enabled: true
+    namespaceSelector: {kubernetes.io/metadata.name: ingress-nginx}
   externalURL: https://api.sparkwing.dev
   dashboardURL: https://console.sparkwing.dev
   oauthRedirectURIs: https://console.sparkwing.dev/auth/github/callback,https://console.sparkwing.dev/auth/google/callback

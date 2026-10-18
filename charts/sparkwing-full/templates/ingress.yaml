@@ -30,7 +30,11 @@ spec:
               service:
                 name: {{ include "sparkwing-full.controller.fullname" $ }}
                 port:
+                  {{- if $.Values.controller.trustedProxyListener.enabled }}
+                  name: proxy
+                  {{- else }}
                   number: 80
+                  {{- end }}
           {{- end }}
     {{- end }}
 {{- end }}

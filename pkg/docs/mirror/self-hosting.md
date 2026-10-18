@@ -120,6 +120,16 @@ append the address they observed or replace the header with their verified
 chain. Trust only proxy networks because every address in those networks can
 assert a forwarded client. Malformed hops in the trusted portion fall back to the TCP peer.
 
+On Kubernetes, prefer a dedicated listener over a CIDR when ingress pods share
+an address range with other pods, as they do on a VPC-wide pod network. Set
+`controller.trustedProxyListener.enabled` and a
+`controller.trustedProxyListener.namespaceSelector` that names the ingress
+controller's namespace. The chart passes `--trusted-proxy-addr`, routes the
+Ingress to that port and adds a NetworkPolicy that admits only the selected
+ingress pods to it. Requests on that port key per-IP limits and request logs on
+`X-Real-IP`, so the ingress must overwrite that header with the peer it observed.
+Another NetworkPolicy that allows all ingress to the controller defeats the fence.
+
 ### Signed downloads through CloudFront
 
 For object-store downloads through a public ingress, configure the controller

@@ -28,7 +28,7 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 	assertValidUniqueResourceNames(t, resources)
 	controller := componentResource(t, resources, "Deployment", "controller")
 	args := resourceContainer(t, controller).Args
-	for _, want := range []string{"--require-auth", "--trusted-proxy-cidrs=10.0.0.0/16", "--cache-blob-store=s3://sparkwing-cloud-data/controller", "--bucket-store=s3://sparkwing-cloud-data/controller", "--cloudfront-domain=data.sparkwing.dev", "--cloudfront-key-pair-id=REPLACE_PUBLIC_KEY_ID", "--external-url=https://api.sparkwing.dev", "--github-app-id=123456", "--github-app-slug=sparkwing", "--operator-accounts=operator-account-id", "--credentials-dir=/etc/sparkwing/credentials"} {
+	for _, want := range []string{"--require-auth", "--trusted-proxy-addr=:8081", "--cache-blob-store=s3://sparkwing-cloud-data/controller", "--bucket-store=s3://sparkwing-cloud-data/controller", "--cloudfront-domain=data.sparkwing.dev", "--cloudfront-key-pair-id=REPLACE_PUBLIC_KEY_ID", "--external-url=https://api.sparkwing.dev", "--github-app-id=123456", "--github-app-slug=sparkwing", "--operator-accounts=operator-account-id", "--credentials-dir=/etc/sparkwing/credentials"} {
 		if !containsArg(args, want) {
 			t.Errorf("controller lacks %q: %v", want, args)
 		}

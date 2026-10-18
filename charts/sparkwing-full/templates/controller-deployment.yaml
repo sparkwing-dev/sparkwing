@@ -153,6 +153,9 @@ spec:
             - "--credentials-dir=/etc/sparkwing/credentials"
             {{- end }}
             {{- $c := .Values.controller }}
+            {{- if $c.trustedProxyListener.enabled }}
+            - {{ printf "--trusted-proxy-addr=:%d" (int $c.trustedProxyListener.port) | quote }}
+            {{- end }}
             {{- if $c.trustedProxyCIDRs }}
             - {{ printf "--trusted-proxy-cidrs=%s" (join "," $c.trustedProxyCIDRs) | quote }}
             {{- end }}
@@ -192,6 +195,10 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.controller.port }}
+            {{- if .Values.controller.trustedProxyListener.enabled }}
+            - name: proxy
+              containerPort: {{ .Values.controller.trustedProxyListener.port }}
+            {{- end }}
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - name: metrics
               containerPort: {{ .Values.controller.metricsPort }}

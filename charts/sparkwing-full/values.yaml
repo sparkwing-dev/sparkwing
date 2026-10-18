@@ -237,6 +237,16 @@ controller:
   # Proxy networks allowed to supply X-Forwarded-For for logs and per-IP limits.
   trustedProxyCIDRs: []
 
+  # A second controller listener for the ingress proxy (--trusted-proxy-addr).
+  # Its requests key login throttling, the bearer failure budget and request
+  # logs on X-Real-IP, so the ingress routes to it and a chart NetworkPolicy
+  # admits only pods matching namespaceSelector and podSelector to its port.
+  trustedProxyListener:
+    enabled: false
+    port: 8081
+    namespaceSelector: {}
+    podSelector: {}
+
   # Comma-separated dashboard callback URLs a sign-in may return to
   # (--oauth-redirect-uris).
   oauthRedirectURIs: ""

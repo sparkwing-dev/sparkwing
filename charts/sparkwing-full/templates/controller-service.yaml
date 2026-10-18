@@ -13,3 +13,8 @@ spec:
     - name: http
       port: 80
       targetPort: {{ .Values.controller.port }}
+    {{- if .Values.controller.trustedProxyListener.enabled }}
+    - name: proxy
+      port: {{ .Values.controller.trustedProxyListener.port }}
+      targetPort: proxy
+    {{- end }}
