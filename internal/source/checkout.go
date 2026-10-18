@@ -158,7 +158,10 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			return entry, err
 		}
 		if options.LocalBundle != "" {
-			if _, err := client.run(ctx, selected, "", "bundle", "unbundle", options.LocalBundle); err != nil {
+			if err := unbundle(ctx, &client, selected, options.LocalBundle, func(missing []string) error {
+				_, err := local.run(ctx, selected, "", append(append(fetchArgs(policy), "--", checkout), missing...)...)
+				return err
+			}); err != nil {
 				return entry, err
 			}
 			if err := preserveSnapshotBytes(selected); err != nil {
@@ -288,15 +291,23 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 	if err := initCheckout(ctx, client, checkout, remote, spec.SHA); err != nil {
 		return err
 	}
+	policy := spec.Checkout.Policy
 	if spec.BundleDigest != "" {
-		if err := seedBundle(ctx, client, checkout, spec.BundleDigest, bundleURL); err != nil {
+		if err := seedBundle(ctx, client, checkout, spec.BundleDigest, bundleURL, func(missing []string) error {
+			authorized, err := client.authorizeRemote(ctx, spec, spec.RemoteURL, access)
+			if err != nil {
+				return err
+			}
+			remote = authorized
+			_, err = client.run(ctx, checkout, remote, append(append(fetchArgs(policy), "--", remote), missing...)...)
+			return err
+		}); err != nil {
 			return err
 		}
 		if err := preserveSnapshotBytes(checkout); err != nil {
 			return err
 		}
 	}
-	policy := spec.Checkout.Policy
 	args := fetchArgs(policy)
 	_, presentErr := client.run(ctx, checkout, "", "cat-file", "-e", spec.SHA+"^{commit}")
 	needsFetch := spec.BundleDigest == "" || presentErr != nil

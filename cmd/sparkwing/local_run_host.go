@@ -77,7 +77,7 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 			return &available, err
 		}
 	}
-	sourceOptions, err := hostSourceOptions(home, nil, secrets.NewMasker(), award.Request.Request.Source.Location.LocalCheckout != "")
+	sourceOptions, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), award.Request.Request.Source.Location.LocalCheckout != "")
 	if err != nil {
 		return hereHostSession{}, err
 	}

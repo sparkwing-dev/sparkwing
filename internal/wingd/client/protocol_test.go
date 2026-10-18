@@ -136,7 +136,7 @@ func TestProtocolTooOldNamesBothMajorsAndNoPinTarget(t *testing.T) {
 
 func TestDownLevelServicePreventsLivelock(t *testing.T) {
 	home := shortHome(t)
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

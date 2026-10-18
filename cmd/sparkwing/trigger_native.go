@@ -84,7 +84,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 			return result, branchErr
 		}
 		selected.git.Ref = branch
-		if err := snapshot.includeRevisions(ctx, selected.git.SHA, selected.source.Ref); err != nil {
+		if err := snapshot.includeRevisions(ctx, selected.source.Location.RemoteURL, selected.git.SHA, selected.source.Ref); err != nil {
 			return result, err
 		}
 	}

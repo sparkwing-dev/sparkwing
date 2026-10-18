@@ -58,7 +58,7 @@ func TestHandshakeReportsTheDaemonStoreIsReady(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Runs: &wingd.FuncRunStore{}})
 
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestHandshakeReportsWhyTheStoreIsUnusable(t *testing.T) {
 		Runs: &wingd.FuncRunStore{NotReady: errors.New("database is at schema version 26; this binary expects 17")},
 	})
 
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

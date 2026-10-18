@@ -79,7 +79,7 @@ func ValidateConfig(cfg Config) error {
 			return err
 		}
 		if err := procenv.ValidateSubmitEnvAllow(cfg.Run.SubmitEnvAllow); err != nil {
-			return Invalid("run.submit_env_allow", "use literal environment names or terminal _* prefixes")
+			return Invalid("run.submit_env_allow", strings.TrimPrefix(err.Error(), "run.submit_env_allow "))
 		}
 	}
 	return nil

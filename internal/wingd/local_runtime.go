@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 )
 
 // LocalController supplies the owned store, workers and authorized HTTP handlers to the local process.
@@ -56,7 +58,7 @@ func NewLocalRuntime(cfg LocalRuntimeConfig) (LocalRuntime, error) {
 	if cfg.Open == nil || cfg.Admission.Runs != nil || cfg.Admission.ServeAPI != nil {
 		return nil, errors.New("wingd: local runtime requires one elected controller factory")
 	}
-	lay, err := resolveLayout(cfg.Admission.Home)
+	lay, err := daemonLayout(cfg.Admission.Home)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +241,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		workers.Go(func() {
 			defer ln.Close()
 			serve("dashboard", func() error {
-				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, controller.HTTP().Dashboard, nil, d.dashboardConnection)
+				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, guardDashboard(controller.HTTP().Dashboard, ln.Addr().String()), nil, d.dashboardConnection)
 			})
 		})
 		return nil
@@ -481,4 +483,13 @@ func (r *localRuntime) Drain(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// safety: TCP carries no peer identity, so only the dashboard's own loopback
+// origin may reach it; a rebound DNS name or another site's page is refused.
+func guardDashboard(next http.Handler, addr string) http.Handler {
+	if next == nil {
+		return nil
+	}
+	return originguard.Guard(next, originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), nil))
 }

@@ -143,7 +143,7 @@ func FuzzTriggerInspectionAcquiresOriginalResolvedPair(f *testing.F) {
 					t.Error(err)
 				}
 			})
-			if err := snapshot.includeRevisions(t.Context(), code); err != nil {
+			if err := snapshot.includeRevisions(t.Context(), "", code); err != nil {
 				t.Fatal(err)
 			}
 			input.snapshot, bundle, head = snapshot, snapshot.BundlePath, snapshot.SHA

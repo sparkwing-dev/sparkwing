@@ -2,7 +2,9 @@ package wingd
 
 import (
 	"context"
+	"io/fs"
 	"net"
+	"path/filepath"
 	"time"
 )
 
@@ -10,6 +12,10 @@ import (
 func DialSocket(ctx context.Context, path string, timeout time.Duration) (net.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	// safety: a home no daemon has bound has no socket, however long its path.
+	if filepath.Base(filepath.Dir(path)) == unboundSocketDir {
+		return nil, &net.OpError{Op: "dial", Net: "unix", Err: fs.ErrNotExist}
 	}
 	if err := ValidateSocketDir(path); err != nil {
 		return nil, err

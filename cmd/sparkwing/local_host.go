@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -46,7 +47,7 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 			err = errors.Join(err, private.Close())
 		}
 	}()
-	source, err := hostSourceOptions(home, nil, secrets.NewMasker(), true)
+	source, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), true)
 	if err != nil {
 		return runners.NativeServices{}, err
 	}

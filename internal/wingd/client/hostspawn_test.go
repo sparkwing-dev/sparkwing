@@ -154,7 +154,7 @@ func TestEnsureDaemon_NoTakeoverAcceptsSameSourceDaemon(t *testing.T) {
 
 func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

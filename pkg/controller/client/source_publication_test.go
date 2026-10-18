@@ -137,3 +137,34 @@ func FuzzSourcePublicationRejectsSecretMetadata(f *testing.F) {
 		}
 	})
 }
+
+func TestSourcePublicationScansAThinBundleAgainstItsCheckout(t *testing.T) {
+	const secret = "history-only-private-value"
+	for name, newCommitHoldsSecret := range map[string]bool{"secret in new commit": true, "secret only in pushed history": false} {
+		t.Run(name, func(t *testing.T) {
+			repo, _ := sourcetest.Repository(t)
+			sourcetest.Write(t, filepath.Join(repo, "pushed.txt"), map[bool]string{true: "clean", false: secret}[newCommitHoldsSecret])
+			sourcetest.Git(t, repo, "add", ".")
+			sourcetest.Git(t, repo, "commit", "-qm", "pushed")
+			sourcetest.Write(t, filepath.Join(repo, "pushed.txt"), "clean again")
+			sourcetest.Git(t, repo, "commit", "-qam", "pushed cleanup")
+			sourcetest.Git(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+			sourcetest.Write(t, filepath.Join(repo, "local.txt"), map[bool]string{true: secret, false: "clean"}[newCommitHoldsSecret])
+			sourcetest.Git(t, repo, "add", ".")
+			sourcetest.Git(t, repo, "commit", "-qm", "local")
+			path := filepath.Join(t.TempDir(), "source.bundle")
+			sourcetest.Git(t, repo, "bundle", "create", path, "HEAD", "--not", "refs/remotes/origin/main")
+			requests := 0
+			options := client.EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: publicationTransport(func(*http.Request) (*http.Response, error) {
+				requests++
+				return nil, errors.New("publication reached the network")
+			})}}
+			publication := source.Publication{Path: path, Source: runspec.Source{Location: runspec.SourceLocation{LocalCheckout: repo}}, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{"TOKEN": secret}}
+			_, err := client.UploadSourceSnapshot(t.Context(), options, publication)
+			refused := err != nil && strings.Contains(err.Error(), "source bundle contains a declared local secret")
+			if refused != newCommitHoldsSecret || refused == (requests != 0) {
+				t.Fatalf("refused=%v requests=%d err=%v", refused, requests, err)
+			}
+		})
+	}
+}

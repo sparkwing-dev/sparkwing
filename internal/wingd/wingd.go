@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -10,7 +11,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -212,7 +215,13 @@ type layout struct {
 	log     string
 }
 
-func resolveLayout(home string) (layout, error) {
+func resolveLayout(home string) (layout, error) { return layoutFor(home, false) }
+
+// safety: only a starting daemon or its starter records the socket id, so a
+// path lookup never initializes daemon state.
+func daemonLayout(home string) (layout, error) { return layoutFor(home, true) }
+
+func layoutFor(home string, create bool) (layout, error) {
 	if home == "" {
 		p, err := paths.DefaultPaths()
 		if err != nil {
@@ -225,7 +234,7 @@ func resolveLayout(home string) (layout, error) {
 		return layout{}, fmt.Errorf("wingd: resolve home identity: %w", err)
 	}
 	dir := filepath.Join(home, "wingd")
-	sock, err := socketPathForHome(key)
+	sock, err := socketPathForHome(dir, key, create)
 	if err != nil {
 		return layout{}, err
 	}
@@ -248,18 +257,85 @@ func (l layout) ensureDir() error {
 	return nil
 }
 
-func socketPathForHome(home string) (string, error) {
+func socketPathForHome(dir, home string, create bool) (string, error) {
 	base, err := socketBaseDir()
 	if err != nil {
 		return "", err
 	}
-	return socketPathIn(base, home), nil
+	token, err := readSocketToken(filepath.Join(dir, socketTokenFile))
+	if errors.Is(err, fs.ErrNotExist) && !create {
+		return filepath.Join(dir, unboundSocketDir, "d.sock"), nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		token, err = recordSocketToken(dir)
+	}
+	if err != nil {
+		return "", err
+	}
+	return socketPathIn(base, home, token), nil
 }
 
-func socketPathIn(base, home string) string {
+func socketPathIn(base, home, token string) string {
 	sum := sha256.Sum256([]byte(home))
 	hash := hex.EncodeToString(sum[:])[:12]
-	return filepath.Join(base, socketDirPrefix()+hash, "d.sock")
+	return filepath.Join(base, socketDirPrefix()+hash+"-"+token, "d.sock")
+}
+
+var errUnsafeSocketDir = fmt.Errorf("unsafe socket directory: %w", fs.ErrPermission)
+
+const (
+	socketTokenFile  = "socket-id"
+	unboundSocketDir = "unbound"
+)
+
+var socketTokenPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// safety: a socket directory name derived from the home alone lets another
+// account create it first in the shared base and lock this user out.
+func recordSocketToken(dir string) (string, error) { return writeSocketToken(dir, false) }
+
+// safety: an elected daemon replaces an id whose directory another account
+// planted, so a squatted name delays a start instead of blocking it.
+func rotateSocketToken(dir string) error {
+	_, err := writeSocketToken(dir, true)
+	return err
+}
+
+func writeSocketToken(dir string, replace bool) (string, error) {
+	path := filepath.Join(dir, socketTokenFile)
+	if err := fssecure.EnsureDir(dir); err != nil {
+		return "", fmt.Errorf("wingd: prepare %s: %w", dir, err)
+	}
+	draft, err := os.CreateTemp(dir, socketTokenFile+".*")
+	if err != nil {
+		return "", fmt.Errorf("wingd: record socket id: %w", err)
+	}
+	defer os.Remove(draft.Name())
+	var id [8]byte
+	_, _ = rand.Read(id[:])
+	_, werr := draft.WriteString(hex.EncodeToString(id[:]))
+	if err := errors.Join(werr, draft.Close()); err != nil {
+		return "", fmt.Errorf("wingd: record socket id: %w", err)
+	}
+	publish := os.Link
+	if replace {
+		publish = os.Rename
+	}
+	if err := publish(draft.Name(), path); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", fmt.Errorf("wingd: record socket id: %w", err)
+	}
+	return readSocketToken(path)
+}
+
+func readSocketToken(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	if token := strings.TrimSpace(string(raw)); socketTokenPattern.MatchString(token) {
+		return token, nil
+	}
+	return "", fmt.Errorf("wingd: socket id %s is malformed; remove it to choose a new one", path)
 }
 
 func ensureSocketDir(dir string) error {
@@ -304,10 +380,10 @@ func checkSocketDir(dir string) error {
 		return fmt.Errorf("wingd: inspect socket directory %s: %w", dir, err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("wingd: socket directory %s is unsafe (not a directory): %w", dir, fs.ErrPermission)
+		return fmt.Errorf("wingd: socket directory %s is unsafe (not a directory): %w", dir, errUnsafeSocketDir)
 	}
 	if fault := socketDirFault(info); fault != "" {
-		return fmt.Errorf("wingd: socket directory %s is unsafe (%s): %w", dir, fault, fs.ErrPermission)
+		return fmt.Errorf("wingd: socket directory %s is unsafe (%s): %w", dir, fault, errUnsafeSocketDir)
 	}
 	return nil
 }
@@ -346,6 +422,16 @@ func ValidateSocketPath(sock string) error {
 		return fmt.Errorf("wingd: socket path %q is %d bytes, over the %d-byte OS limit; use a shorter SPARKWING_HOME", sock, len(sock), m)
 	}
 	return nil
+}
+
+// EnsureSocketPath reports the admission socket for home, recording the
+// home's socket id first when no daemon has bound one.
+func EnsureSocketPath(home string) (string, error) {
+	l, err := daemonLayout(home)
+	if err != nil {
+		return "", err
+	}
+	return l.sock, nil
 }
 
 func SocketPath(home string) (string, error) {

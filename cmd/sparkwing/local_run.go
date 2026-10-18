@@ -49,7 +49,8 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		return localRunRuntime{}, err
 	}
 	captured := os.Environ()
-	socket, err := wingd.APISocketPath(home)
+	admission, err := wingd.EnsureSocketPath(home)
+	socket := wingd.APISocketBeside(admission)
 	if err != nil {
 		return localRunRuntime{}, err
 	}

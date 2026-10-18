@@ -134,7 +134,7 @@ func New(cfg Config) (*Daemon, error) {
 			return nil, fmt.Errorf("wingd: Config.Sampler and Config.OwnedCPUSampler both provide owned CPU accounting")
 		}
 	}
-	lay, err := resolveLayout(cfg.Home)
+	lay, err := daemonLayout(cfg.Home)
 	if err != nil {
 		return nil, err
 	}

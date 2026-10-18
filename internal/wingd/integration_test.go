@@ -648,7 +648,7 @@ func TestQueuedSubmitReconnectRejectsMismatchedPID(t *testing.T) {
 
 func openRawQueuedAdmission(t *testing.T, home string, req wingwire.AdmissionRequest) net.Conn {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
@@ -811,7 +811,7 @@ func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t 
 	lease := mustAcquire(t, holder, coreReq("cancel-state-write-failure", 1))
 	cancelled := make(chan wingwire.Cancel, 1)
 	go lease.WatchControl(nil, func(c wingwire.Cancel) { cancelled <- c })
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -856,7 +856,7 @@ func TestCancelledLeaseCannotReattachAfterStateWriteFailureAndRestart(t *testing
 	first := startDaemon(t, cfg)
 	holder := ensure(t, home, "")
 	lease := mustAcquire(t, holder, coreReq("cancelled-token-after-restart", 1))
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

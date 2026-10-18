@@ -143,3 +143,21 @@ func (c *nodeClaims) delegate(ctx context.Context, node string, generation, atte
 func completeServices(s nodehost.ProcessServices) bool {
 	return s.Secret != nil && s.Output != nil && s.Latest != nil && s.OIDC != nil && s.Annotation != nil && s.Summary != nil && s.StartChild != nil && s.AwaitChild != nil
 }
+
+func (c *nodeClaims) annotate(ctx context.Context, input nodehost.NodeInput, body nodeproto.AnnotationRequest) error {
+	principal, err := c.principal(ctx, input.NodeID, input.Generation, input.Attempt)
+	if err != nil {
+		return err
+	}
+	if c.services == nil {
+		return errors.New("local process services are unavailable")
+	}
+	services, err := c.services(ctx, principal, nodeproto.JobSpec{ID: input.NodeID})
+	if err != nil {
+		return err
+	}
+	if services.Annotation == nil {
+		return errors.New("annotation persistence is unavailable")
+	}
+	return services.Annotation(ctx, capability.Authorized{Principal: principal}, body)
+}

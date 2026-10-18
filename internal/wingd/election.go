@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
@@ -65,8 +66,24 @@ func LockHeld(home string) (bool, error) {
 	return false, nil
 }
 
+const maxSocketRotations = 3
+
 func (d *Daemon) bindListener() (net.Listener, error) {
-	return d.bind(d.layout.sock)
+	for rotation := 0; ; rotation++ {
+		ln, err := d.bind(d.layout.sock)
+		if !errors.Is(err, errUnsafeSocketDir) || rotation == maxSocketRotations {
+			return ln, err
+		}
+		if rerr := rotateSocketToken(d.layout.dir); rerr != nil {
+			return nil, errors.Join(err, rerr)
+		}
+		moved, rerr := daemonLayout(d.layout.home)
+		if rerr != nil {
+			return nil, errors.Join(err, rerr)
+		}
+		d.cfg.logf("socket directory %s is unsafe; moving to %s", filepath.Dir(d.layout.sock), filepath.Dir(moved.sock))
+		d.layout.sock, d.layout.apiSock = moved.sock, moved.apiSock
+	}
 }
 
 func (d *Daemon) bind(path string) (net.Listener, error) {
@@ -88,7 +105,7 @@ const (
 // ClaimDaemonStart serializes startup until the socket answers. The daemon
 // acquires its own election lock after spawning, leaving a gap for duplicate starters.
 func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
-	l, err := resolveLayout(home)
+	l, err := daemonLayout(home)
 	if err != nil {
 		return nil, false, err
 	}
@@ -110,7 +127,7 @@ func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
 }
 
 func PrepareDaemonSocket(home string) (SocketPreparation, error) {
-	l, err := resolveLayout(home)
+	l, err := daemonLayout(home)
 	if err != nil {
 		return SocketPreparationUnknown, err
 	}

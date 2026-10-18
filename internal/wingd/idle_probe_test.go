@@ -13,7 +13,7 @@ import (
 )
 
 func probeHome(ctx context.Context, home string) error {
-	socket, err := wingd.SocketPath(home)
+	socket, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func TestIdleExit_SocketSweepProbeDoesNotResetIdleClock(t *testing.T) {
 
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
 
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
 func TestHealthProbeConnectionMayOnlyReadQueueState(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home})
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

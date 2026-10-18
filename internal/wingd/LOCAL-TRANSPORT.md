@@ -2,8 +2,10 @@
 
 `DialSocket` and `ListenSocket` own the local transport for admission and the
 controller API. `SocketPath` and `APISocketPath` select stable home-bound endpoint
-keys. Unix uses those keys as socket paths. Windows hashes the normalized key
-into a local named-pipe name. Environment variables and request fields cannot
+keys. Each key carries a random id recorded in the home's `wingd/socket-id`, so
+another account cannot predict and pre-create it. Unix uses those keys as socket
+paths and, on bind, removes this account's socket directories that hold only
+dead sockets. Windows hashes the normalized key into a local named-pipe name. Environment variables and request fields cannot
 select a peer identity.
 
 `wingd/client.NewAPIClient` carries HTTP to `APISocketPath` through `DialSocket`

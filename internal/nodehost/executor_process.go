@@ -168,6 +168,12 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(afterErr), afterErr
 		}
 	}
+	if result.Outcome == store.NodeSuccess && len(output) > 0 && h.deps.Mask(string(output)) != string(output) {
+		output = nil
+		if err = h.withholdOutput(ctx, input); err != nil {
+			return h.failure(err), err
+		}
+	}
 	if result.Outcome == store.NodeSuccess && len(output) > 0 {
 		if h.deps.PublishOutput == nil {
 			err = errors.New("job output requires a record publisher")
@@ -232,3 +238,15 @@ type executorApplicationError struct{ err error }
 
 func (e *executorApplicationError) Error() string { return e.err.Error() }
 func (e *executorApplicationError) Unwrap() error { return e.err }
+
+const outputWithheld = "output withheld: contains a secret"
+
+func (h *nodeExecutor) withholdOutput(ctx context.Context, input NodeInput) error {
+	attrs := map[string]any{}
+	if h.deps.Annotate == nil {
+		attrs["annotation_error"] = "annotation persistence is unavailable"
+	} else if err := h.deps.Annotate(ctx, input, nodeproto.AnnotationRequest{Level: "warn", Message: outputWithheld}); err != nil {
+		attrs["annotation_error"] = err.Error()
+	}
+	return h.diagnostic(ctx, input, "warn", "output_withheld", "", outputWithheld, attrs)
+}

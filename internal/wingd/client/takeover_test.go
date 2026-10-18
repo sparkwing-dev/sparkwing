@@ -17,7 +17,7 @@ import (
 
 func stuckOlderDaemon(t *testing.T, home, version, buildIdentity string) *atomic.Int64 {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestTakeoverReplacesSameVersionDaemonWithoutNonBlockingAdmission(t *testing
 
 func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
 	home := shortHome(t)
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
 
 func TestAlternatingPredecessorsStillExhaustTheBudget(t *testing.T) {
 	home := shortHome(t)
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

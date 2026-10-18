@@ -41,7 +41,7 @@ func TestProbeAdvertisesTheDaemonStoreSchema(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, StoreSchemaVersion: 17})
 
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

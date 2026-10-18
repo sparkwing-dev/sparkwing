@@ -374,19 +374,19 @@ func TestProxyCredentialsMaskedInConsumerSpellings(t *testing.T) {
 }
 
 func TestSubmitEnvPrefixPatterns(t *testing.T) {
-	b := Base{Ambient: []string{"APP_COLOR=blue", "APP_=empty-suffix", "APP=bare", "APPLICATION=neighbor", "EXACT=literal", "EXACT_MORE=neighbor", "APP_API_TOKEN=secret", "SPARKWING_CUSTOM=public", "SPARKWING_RUN_ID=spoofed", "_CUSTOM=private"}, SubmitEnvAllow: []string{"APP_*", "EXACT", "SPARKWING_*", "_*"}, Masker: secrets.NewMasker()}
+	b := Base{Ambient: []string{"APP_COLOR=blue", "APP_=empty-suffix", "APP=bare", "APPLICATION=neighbor", "EXACT=literal", "EXACT_MORE=neighbor", "APP_API_TOKEN=secret", "SPARKWING_CUSTOM=public", "SPARKWING_RUN_ID=spoofed", "_CUSTOM=private"}, SubmitEnvAllow: []string{"APP_*", "EXACT", "SPARKWING_*"}, Masker: secrets.NewMasker()}
 	for _, kind := range []Kind{Plan, Attempt, Eval, Install} {
 		env, err := Build(kind, b, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		got := envMap(env)
-		for name, want := range map[string]string{"APP_COLOR": "blue", "APP_": "empty-suffix", "EXACT": "literal", "SPARKWING_CUSTOM": "public", "_CUSTOM": "private"} {
+		for name, want := range map[string]string{"APP_COLOR": "blue", "APP_": "empty-suffix", "EXACT": "literal", "SPARKWING_CUSTOM": "public"} {
 			if got[name] != want {
 				t.Errorf("kind %d missing prefix match %s", kind, name)
 			}
 		}
-		for _, name := range []string{"APP", "APPLICATION", "EXACT_MORE", "APP_API_TOKEN", "SPARKWING_RUN_ID"} {
+		for _, name := range []string{"APP", "APPLICATION", "EXACT_MORE", "APP_API_TOKEN", "SPARKWING_RUN_ID", "_CUSTOM"} {
 			if _, ok := got[name]; ok {
 				t.Errorf("kind %d admitted %s", kind, name)
 			}
@@ -395,7 +395,7 @@ func TestSubmitEnvPrefixPatterns(t *testing.T) {
 }
 
 func TestSubmitEnvMalformedPatternsFailBeforeMatching(t *testing.T) {
-	for _, pattern := range []string{"", "*", "APP*", "APP_*_MORE", "APP_**", "APP?", "[APP]", " APP", "APP ", "APP\nOTHER", "APP\x00OTHER", "1APP", "APP=VALUE"} {
+	for _, pattern := range []string{"", "*", "APP*", "APP_*_MORE", "APP_**", "APP?", "[APP]", " APP", "APP ", "APP\nOTHER", "APP\x00OTHER", "1APP", "APP=VALUE", "_*", "A_*"} {
 		for _, input := range [][]string{nil, {"APP_NAME=public"}} {
 			_, err := Build(Plan, Base{Ambient: input, SubmitEnvAllow: []string{pattern}}, Runtime{})
 			if err == nil {

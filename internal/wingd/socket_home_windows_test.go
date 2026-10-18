@@ -102,7 +102,7 @@ func TestWindowsSocketBaseDirIgnoresTheEnvironment(t *testing.T) {
 		t.Fatalf("socketBaseDir() = %q with TEMP, TMP and USERPROFILE moved, want the fixed base %q", got, base)
 	}
 	home := t.TempDir()
-	sock, err := SocketPath(home)
+	sock, err := EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestWindowsSocketBaseDirIgnoresTheEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := socketPathIn(base, identity); sock != want {
+	if want := socketPathIn(base, identity, recordedSocketToken(t, home)); sock != want {
 		t.Fatalf("SocketPath = %q, want the derived path %q", sock, want)
 	}
 }

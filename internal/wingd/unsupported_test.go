@@ -19,7 +19,7 @@ func dialHandshaked(t *testing.T, home string) (net.Conn, *bufio.Scanner) {
 
 func dialAs(t *testing.T, home string, probe bool) (net.Conn, *bufio.Scanner) {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestKnownButUnservedMessageTypeIsAnswered(t *testing.T) {
 
 func dialRaw(t *testing.T, home string) (net.Conn, *bufio.Scanner) {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

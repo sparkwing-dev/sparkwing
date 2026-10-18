@@ -1,5 +1,12 @@
 # Migrating to the next release
 
+## Job outputs holding a secret are withheld
+
+A job output containing a registered secret value in any encoding is no longer
+published. The job passes with a `warn` annotation, `output withheld: contains
+a secret`, and downstream jobs see no output. Return a reference to the secret,
+such as its name, instead of its value.
+
 ## Credential rotation results and deletion times
 
 Before, `Tenant.RotateCredentials` returned visited secret/git counts and its

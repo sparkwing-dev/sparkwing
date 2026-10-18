@@ -33,7 +33,7 @@ func TestSocketPath_StaysShortForDeepHome(t *testing.T) {
 		t.Fatalf("test home not deep enough: under-home socket is %d bytes, need >= %d", len(underHome), maxSunPath())
 	}
 
-	sock, err := SocketPath(home)
+	sock, err := EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +51,8 @@ func TestSocketPath_StaysShortForDeepHome(t *testing.T) {
 }
 
 func TestSocketPath_DistinctPerHome(t *testing.T) {
-	a, _ := SocketPath(t.TempDir())
-	b, _ := SocketPath(t.TempDir())
+	a, _ := EnsureSocketPath(t.TempDir())
+	b, _ := EnsureSocketPath(t.TempDir())
 	if a == b {
 		t.Fatalf("distinct homes shared socket %q", a)
 	}

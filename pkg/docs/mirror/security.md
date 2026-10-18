@@ -260,6 +260,8 @@ as an error or cache miss. See [data uploads](data-uploads.md).
 
 The local controller owns its home's store, queue, admission and dashboard.
 Unix transports require an owner-only socket directory and kernel peer identity.
+The socket directory and Windows pipe names carry a random id kept in the home,
+so another account cannot claim them first.
 Windows uses the authenticated account SID. An unauthenticated or foreign peer
 is refused. A filesystem path alone is not peer authentication.
 
@@ -267,6 +269,8 @@ Same-account processes and root remain inside this trust boundary. Use distinct
 accounts and homes where separate users must be isolated. Browser access follows
 the controller's session and CSRF rules. A separate dashboard bearer, perpetual
 localStorage session and second store opener are not part of that contract.
+The local dashboard's TCP listener answers only loopback Host names and its own
+loopback origin, so a rebound DNS name or another site's page is refused.
 See [local execution](local-execution.md#the-laptop-boundary).
 
 ## Container hardening

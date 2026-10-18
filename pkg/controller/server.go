@@ -25,7 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -38,7 +37,6 @@ type Server struct {
 	resolveQueuePriorityWriter func(context.Context, store.Team) (QueuePriorityWriter, error)
 	store                      *store.Store
 	logger                     *slog.Logger
-	masker                     *secrets.Masker
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
@@ -173,7 +171,6 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		engineController:   &EngineController{Store: st},
 		operatorSettings:   storeOperatorSettings{Store: st, Operator: st.AsOperator()},
 		logger:             logger,
-		masker:             secrets.NewMasker(),
 		loginLimit:         newLoginLimiter(),
 		deliverySpools:     make(chan struct{}, githubDeliverySpools),
 		queueTimeout:       15 * time.Minute,
@@ -303,7 +300,7 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	if s.store != nil {
 		var opener store.PlanSecretOpener
 		if c != nil {
-			opener = planSecretCipher{cipher: c, masker: s.masker}
+			opener = planSecretCipher{cipher: c}
 		}
 		s.store.SetPlanSecretOpener(opener)
 		bound, _ := c.(store.SessionKeyCipher)
@@ -361,7 +358,7 @@ func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(labels...), func(r *http.Request) string {
 			return ratelimit.ClientIP(r)
-		}, s.masker)))
+		})))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.Metering() {
 			r = r.WithContext(store.WithoutCreditMetering(r.Context()))
@@ -694,12 +691,12 @@ func (s *Server) sampleCreditLedger(ctx context.Context) {
 
 func withRequestLog(
 	next http.Handler, logger *slog.Logger, routeLabel, clientIP func(*http.Request) string,
-	masker *secrets.Masker,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := requestID(r)
 		w.Header().Set(RequestIDHeader, id)
-		ctx, rec := withAuditRecord(r.Context(), id, routeLabel(r))
+		ctx, masker := withRequestMasker(r.Context())
+		ctx, rec := withAuditRecord(ctx, id, routeLabel(r))
 		r = r.WithContext(ctx)
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		writer := http.ResponseWriter(rw)

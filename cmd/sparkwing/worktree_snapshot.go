@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
@@ -217,7 +218,7 @@ func captureSnapshot(ctx context.Context, env []string, start string, limits wor
 	return snapshot, nil
 }
 
-func (s *worktreeSnapshot) includeRevisions(ctx context.Context, shas ...string) error {
+func (s *worktreeSnapshot) includeRevisions(ctx context.Context, remote string, shas ...string) error {
 	gitDir := filepath.Join(s.tempDir, "repo.git")
 	refs := []string{bincache.SeedRef(s.SHA)}
 	for _, sha := range shas {
@@ -233,7 +234,11 @@ func (s *worktreeSnapshot) includeRevisions(ctx context.Context, shas ...string)
 	if len(refs) == 1 {
 		return nil
 	}
-	if _, err := gitDirOutput(ctx, s.environment, gitDir, append([]string{"bundle", "create", s.BundlePath}, refs...)...); err != nil {
+	args := append([]string{"bundle", "create", s.BundlePath}, refs...)
+	if present := s.remoteCommits(ctx, remote); len(present) > 0 {
+		args = append(append(args, "--not"), present...)
+	}
+	if _, err := gitDirOutput(ctx, s.environment, gitDir, args...); err != nil {
 		return err
 	}
 	info, err := os.Stat(s.BundlePath)
@@ -246,6 +251,42 @@ func (s *worktreeSnapshot) includeRevisions(ctx context.Context, shas ...string)
 	s.BundleSize = info.Size()
 	return nil
 }
+
+// safety: only commits the run's remote advertises now are left out, so a commit
+// on another remote, behind a stale tracking ref or unreachable offline still ships.
+func (s *worktreeSnapshot) remoteCommits(ctx context.Context, remote string) []string {
+	if remote == "" {
+		return nil
+	}
+	listCtx, cancel := context.WithTimeout(ctx, remoteListTimeout)
+	defer cancel()
+	cmd := snapshotGitCommand(listCtx, append(slices.Clone(s.environment), "GIT_TERMINAL_PROMPT=0"), "-C", s.RepoRoot, "ls-remote", "--", remote)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var advertised strings.Builder
+	for _, line := range strings.Split(string(out), "\n") {
+		if sha, _, ok := strings.Cut(line, "\t"); ok && len(sha) == 40 {
+			advertised.WriteString(sha + "\n")
+		}
+	}
+	check := snapshotGitCommand(ctx, s.environment, "-C", s.RepoRoot, "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	check.Stdin = strings.NewReader(advertised.String())
+	known, err := check.Output()
+	if err != nil {
+		return nil
+	}
+	var present []string
+	for _, line := range strings.Split(string(known), "\n") {
+		if sha, kind, ok := strings.Cut(line, " "); ok && kind == "commit" && !slices.Contains(present, sha) {
+			present = append(present, sha)
+		}
+	}
+	return present
+}
+
+const remoteListTimeout = 30 * time.Second
 
 func resolveSnapshotBaseline(ctx context.Context, env []string, repoRoot string) bincache.WorkspaceBaseline {
 	ref := strings.TrimSpace(gitOutputOrEmpty(ctx, env, repoRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"))

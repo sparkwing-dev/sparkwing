@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,12 +12,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
-func seedBundle(ctx context.Context, client *gitClient, checkout, digest, rawURL string) (err error) {
+func seedBundle(ctx context.Context, client *gitClient, checkout, digest, rawURL string, prerequisites func([]string) error) (err error) {
 	expected, err := hex.DecodeString(strings.TrimPrefix(digest, "sha256:"))
 	if err != nil || len(expected) != sha256.Size {
 		return errors.New("source bundle digest must be SHA-256")
@@ -67,6 +69,52 @@ func seedBundle(ctx context.Context, client *gitClient, checkout, digest, rawURL
 	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), hex.EncodeToString(expected)) {
 		return errors.New("source bundle digest mismatch")
 	}
+	return unbundle(ctx, client, checkout, name, prerequisites)
+}
+
+// safety: a working-tree bundle stops at commits its remote already has, so
+// those must arrive from the remote before the bundle can apply.
+func unbundle(ctx context.Context, client *gitClient, checkout, name string, prerequisites func([]string) error) error {
+	missing, err := bundlePrerequisites(name)
+	if err != nil {
+		return err
+	}
+	if len(missing) > 0 {
+		if err := prerequisites(missing); err != nil {
+			return err
+		}
+	}
 	_, err = client.run(ctx, checkout, "", "bundle", "unbundle", name)
 	return err
 }
+
+func bundlePrerequisites(name string) ([]string, error) {
+	file, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	lines := bufio.NewReader(io.LimitReader(file, 1<<20))
+	var out []string
+	for first := true; ; first = false {
+		line, err := lines.ReadString('\n')
+		if err != nil {
+			return nil, errors.New("source bundle header is malformed")
+		}
+		line = strings.TrimSuffix(line, "\n")
+		switch {
+		case first && line != "# v2 git bundle":
+			return nil, errors.New("source bundle is not a v2 Git bundle")
+		case line == "":
+			return out, nil
+		case strings.HasPrefix(line, "-"):
+			sha, _, _ := strings.Cut(line[1:], " ")
+			if !gitSHA.MatchString(sha) {
+				return nil, errors.New("source bundle prerequisite is malformed")
+			}
+			out = append(out, sha)
+		}
+	}
+}
+
+var gitSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)

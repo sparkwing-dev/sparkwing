@@ -49,7 +49,7 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 
 func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, request runspec.Request, read func(context.Context, string, string) ([]byte, bool, error)) (runspec.Git, runspec.Source, error) {
 	spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL, LocalCheckout: request.Source.Location.LocalCheckout}
-	options := source.Options{Access: &intakeRevisionAccess{server: s, team: team}, Base: procenv.Base{Ambient: os.Environ(), Masker: s.masker}, ReadFile: read}
+	options := source.Options{Access: &intakeRevisionAccess{server: s, team: team}, Base: procenv.Base{Ambient: os.Environ(), Masker: requestMasker(ctx)}, ReadFile: read}
 	if spec.LocalCheckout != "" || s.dashboard != nil && s.dashboard.Local {
 		options.Base.Local, options.Base.Captured = true, os.Environ()
 	}
@@ -92,7 +92,7 @@ func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Sp
 		if err != nil {
 			return source.Credential{}, err
 		}
-		s.masker.Register(token.Token)
+		requestMasker(ctx).Register(token.Token)
 		return source.Credential{Kind: "github_app", Host: host, Secret: token.Token}, nil
 	}
 	return s.intakeStoredCredential(ctx, a.team, host, "")
@@ -121,7 +121,7 @@ func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, ho
 	if err != nil || plain == "" {
 		return source.Credential{}, &apierr.Error{Code: apierr.Unavailable, Message: "source credential could not be opened"}
 	}
-	s.masker.Register(plain)
+	requestMasker(ctx).Register(plain)
 	return source.Credential{Kind: credential.Kind, Host: host, Username: credential.Username, Secret: plain, KnownHosts: credential.KnownHosts}, nil
 }
 
