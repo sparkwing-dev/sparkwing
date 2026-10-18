@@ -590,29 +590,6 @@ func (s *Server) WithExternalURL(rawURL string) *Server {
 	return s
 }
 
-func (s *Server) externalBaseURL(r *http.Request) string {
-	base := s.externalURL
-	if base == "" {
-		base = requestBaseURL(r)
-	}
-	return base
-}
-
-// safety: a controller behind TLS termination sees a plain listener, so the
-// forwarded scheme is the only thing that tells the caller's URL from the hop's.
-func requestBaseURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded != "" {
-		if proto, _, _ := strings.Cut(forwarded, ","); proto != "" {
-			scheme = strings.TrimSpace(proto)
-		}
-	}
-	return scheme + "://" + r.Host
-}
-
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
