@@ -46,6 +46,7 @@ func TestProductionBoundaryRequiresMeasuredCanaries(t *testing.T) {
 					}
 				}
 				created++
+				nodeTopology(pod)
 				pod.UID = types.UID(pod.Name)
 				pod.Status = corev1.PodStatus{PodIP: "10.1.2.3", HostIP: "10.0.0.1", Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
 				if pod.Spec.Containers[0].Name != "control" {
@@ -90,6 +91,31 @@ func TestProductionBoundaryRequiresMeasuredCanaries(t *testing.T) {
 				t.Fatal("finished canaries retained reservation")
 			}
 		})
+	}
+}
+
+func nodeTopology(p *corev1.Pod) {
+	if p.Labels == nil {
+		p.Labels = map[string]string{}
+	}
+	p.Labels[corev1.LabelTopologyRegion], p.Labels[corev1.LabelTopologyZone] = "us-west-2", "us-west-2a"
+}
+
+func TestValidateCanaryAllowsOnlyNodeTopologyLabels(t *testing.T) {
+	f := newAdmissionFixture(t)
+	expected := f.probes.canary(f.probeCtx, f.resources.Reservation, "nonce")
+	admitted := expected.DeepCopy()
+	admitted.UID = "canary"
+	nodeTopology(admitted)
+	if err := f.probes.validateCanary(expected, admitted); err != nil {
+		t.Fatalf("API server topology labels refused: %v", err)
+	}
+	for _, key := range []string{corev1.LabelHostname, "topology.k8s.io/rack", TeamLabel} {
+		changed := admitted.DeepCopy()
+		changed.Labels[key] = "other"
+		if err := f.probes.validateCanary(expected, changed); err == nil {
+			t.Fatalf("label %s accepted", key)
+		}
 	}
 }
 

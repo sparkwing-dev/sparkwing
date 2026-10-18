@@ -45,6 +45,10 @@ func newAdmissionEnv(t *testing.T) *admissionEnv {
 			t.Fatal(err)
 		}
 	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: e.resources.Reservation.NodeName, Labels: map[string]string{corev1.LabelTopologyRegion: "us-west-2", corev1.LabelTopologyZone: "us-west-2a", corev1.LabelHostname: "node", "topology.k8s.io/rack": "r1"}}}
+	if _, err := admin.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	policies, bindings := AdmissionPolicies(AdmissionConfig{Namespace: "cloud", Launcher: testLauncher, RunnerImage: e.l.Config.RunnerImage, DockerImage: testDockerImage})
 	for i := range policies {
 		if _, err := admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, policies[i], metav1.CreateOptions{}); err != nil {
@@ -122,7 +126,11 @@ func TestAdmissionPolicyOnAPIServer(t *testing.T) {
 			var err error
 			switch object := c.object.(type) {
 			case *corev1.Pod:
-				_, err = e.as(t, c.user).CoreV1().Pods("cloud").Create(ctx, object, metav1.CreateOptions{})
+				var admitted *corev1.Pod
+				admitted, err = e.as(t, c.user).CoreV1().Pods("cloud").Create(ctx, object, metav1.CreateOptions{})
+				if err == nil && object.Spec.NodeName != "" && admitted.Labels[corev1.LabelTopologyZone] != "us-west-2a" {
+					t.Fatalf("API server did not copy node topology onto the Pod: %v", admitted.Labels)
+				}
 			case *batchv1.Job:
 				_, err = e.as(t, c.user).BatchV1().Jobs("cloud").Create(ctx, object, metav1.CreateOptions{})
 			}

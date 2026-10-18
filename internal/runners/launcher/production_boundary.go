@@ -321,9 +321,12 @@ func (p *productionBoundary) validateCanary(expected, admitted *corev1.Pod) erro
 	if admitted == nil || admitted.UID == "" || admitted.Name != expected.Name || admitted.Namespace != expected.Namespace || admitted.DeletionTimestamp != nil {
 		return errors.New("Kubernetes changed Cloud canary identity")
 	}
-	annotations := maps.Clone(admitted.Annotations)
+	annotations, labels := maps.Clone(admitted.Annotations), maps.Clone(admitted.Labels)
 	delete(annotations, string(podENI))
-	if !maps.Equal(admitted.Labels, expected.Labels) || !maps.Equal(annotations, expected.Annotations) || admitted.Spec.NodeName != expected.Spec.NodeName || admitted.Spec.HostPID != expected.Spec.HostPID || len(admitted.Spec.Containers) != len(expected.Spec.Containers) {
+	for _, k := range nodeTopologyLabels {
+		delete(labels, k)
+	}
+	if !maps.Equal(labels, expected.Labels) || !maps.Equal(annotations, expected.Annotations) || admitted.Spec.NodeName != expected.Spec.NodeName || admitted.Spec.HostPID != expected.Spec.HostPID || len(admitted.Spec.Containers) != len(expected.Spec.Containers) {
 		return errors.New("Kubernetes changed Cloud canary metadata or placement")
 	}
 	for i, want := range expected.Spec.Containers {

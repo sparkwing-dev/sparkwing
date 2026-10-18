@@ -112,6 +112,16 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "capacity", user: testLauncher, object: f.capacity(t)},
 		{name: "job_pod", user: testJobController, object: jobPod(job)},
 		{name: "eks_mutated_job_pod", user: testJobController, object: pod(eksMutate)},
+		{name: "node_topology_job_pod", user: testJobController, object: pod(nodeTopology)},
+		{name: "node_topology_listener", user: testLauncher, object: func() *corev1.Pod {
+			p := f.probes.canary(f.probeCtx, r, "nonce")
+			nodeTopology(p)
+			return p
+		}()},
+		{name: "node_topology_measure", user: testLauncher, object: measure(nodeTopology)},
+		{name: "hostname_label", user: testJobController, object: pod(func(p *corev1.Pod) { nodeTopology(p); p.Labels[corev1.LabelHostname] = "node" }), reason: "launcher's labels"},
+		{name: "probe_hostname_label", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Labels[corev1.LabelHostname] = "node" }), reason: "launcher's labels"},
+		{name: "capacity_topology", user: testLauncher, object: capacity(nodeTopology), reason: "launcher's labels"},
 		{name: "extra_container", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "injected", Image: f.l.Config.RunnerImage})
 		}), reason: "container set"},
@@ -215,6 +225,7 @@ func (f *admissionFixture) jobCreates() []admissionCase {
 		{name: "template_credentials", user: testLauncher, object: job(func(j *batchv1.Job) {
 			j.Spec.Template.Spec.InitContainers[1].Env = append(j.Spec.Template.Spec.InitContainers[1].Env, corev1.EnvVar{Name: "AWS_WEB_IDENTITY_TOKEN_FILE", Value: "/token"})
 		}), reason: "never AWS credentials"},
+		{name: "template_topology", user: testLauncher, object: job(func(j *batchv1.Job) { j.Spec.Template.Labels[corev1.LabelTopologyZone] = "us-west-2a" }), reason: "launcher's labels"},
 		{name: "template_image", user: testLauncher, object: job(func(j *batchv1.Job) { j.Spec.Template.Spec.Containers[0].Image = testDockerImage }), reason: "container set"},
 	}
 	for i := range cases {

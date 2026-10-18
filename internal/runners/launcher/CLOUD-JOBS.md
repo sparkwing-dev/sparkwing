@@ -69,7 +69,11 @@ and the probe commands are CEL literals.
   to its `sparkwing.dev/team` label and tolerates that team taint. Job and probe
   Pods are bound to a node; capacity requests are not.
 - Labels are limited to the launcher's keys for each shape, and Job and capacity
-  Pods carry the labels that select the default-deny egress policy.
+  Pods carry the labels that select the default-deny egress policy. Job and
+  probe Pods may also carry `topology.kubernetes.io/region` and
+  `topology.kubernetes.io/zone` with any value, because the API server's
+  PodTopologyLabels admission copies them from the Node onto every Pod created
+  with `spec.nodeName`. Job templates and capacity requests may not.
 - Only AWS load-balancer readiness gates are allowed. VPC resource controller
   `vpc.amazonaws.com/pod-eni` requests and annotations pass because neither rule
   inspects them.
@@ -375,8 +379,8 @@ with `nsenter`. DNS ports remain available. Declared UDP ports are inventoried,
 while UDP denial needs protocol-specific native checks.
 
 Probe Pods carry the team label, node selector and team toleration admission
-requires. Canary results require unchanged admitted commands, images, labels,
-annotations, reservation and node. Both listener readiness and a successful measurement Pod are
+requires. Canary results require unchanged admitted commands, images, labels apart
+from the two node topology labels, annotations, reservation and node. Both listener readiness and a successful measurement Pod are
 required. Policy and endpoint snapshots must match after canary cleanup. Probe
 Pods inherit the award deadline. Failures preserve the reservation until cleanup
 can finish. A new launcher can remove only probe Pod and policy instances bound

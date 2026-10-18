@@ -138,15 +138,16 @@ spec:
   - expression: '!variables.create || (variables.shape == ''job'' ? variables.labels.all(k,
       k in [''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'',
       ''batch.kubernetes.io/controller-uid'', ''batch.kubernetes.io/job-name'', ''controller-uid'',
-      ''job-name'']) && variables.labels[?''app''].orValue('''') == ''sparkwing-job''
-      && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''') == ''sparkwing-launcher''
-      && variables.labels[?''sparkwing.dev/job''].orValue('''') != '''' : variables.shape
-      == ''capacity'' ? variables.labels.all(k, k in [''app'', ''app.kubernetes.io/managed-by'',
-      ''sparkwing.dev/capacity-request'', ''sparkwing.dev/team'']) && variables.labels[?''app''].orValue('''')
+      ''job-name''] || k in variables.nodeTopology) && variables.labels[?''app''].orValue('''')
       == ''sparkwing-job'' && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''')
+      == ''sparkwing-launcher'' && variables.labels[?''sparkwing.dev/job''].orValue('''')
+      != '''' : variables.shape == ''capacity'' ? variables.labels.all(k, k in [''app'',
+      ''app.kubernetes.io/managed-by'', ''sparkwing.dev/capacity-request'', ''sparkwing.dev/team''])
+      && variables.labels[?''app''].orValue('''') == ''sparkwing-job'' && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''')
       == ''sparkwing-launcher'' && variables.labels[?''sparkwing.dev/capacity-request''].orValue('''')
       == ''true'' : variables.labels.all(k, k in [''sparkwing.dev/boundary-control'',
-      ''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'']))'
+      ''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'']
+      || k in variables.nodeTopology))'
     message: Pods carry exactly the launcher's labels
   - expression: '!variables.create || variables.spec.?readinessGates.orValue([]).all(g,
       g.conditionType.startsWith(''target-health.elbv2.k8s.aws/''))'
@@ -179,6 +180,8 @@ spec:
       ? ''capacity'' : size(variables.owners) == 0 && object.metadata.name.startsWith(''sw-boundary-'')
       ? ''probe'' : ''other'''
     name: shape
+  - expression: '["topology.kubernetes.io/region", "topology.kubernetes.io/zone"]'
+    name: nodeTopology
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -294,15 +297,16 @@ spec:
   - expression: '!variables.create || (variables.shape == ''job'' ? variables.labels.all(k,
       k in [''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'',
       ''batch.kubernetes.io/controller-uid'', ''batch.kubernetes.io/job-name'', ''controller-uid'',
-      ''job-name'']) && variables.labels[?''app''].orValue('''') == ''sparkwing-job''
-      && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''') == ''sparkwing-launcher''
-      && variables.labels[?''sparkwing.dev/job''].orValue('''') != '''' : variables.shape
-      == ''capacity'' ? variables.labels.all(k, k in [''app'', ''app.kubernetes.io/managed-by'',
-      ''sparkwing.dev/capacity-request'', ''sparkwing.dev/team'']) && variables.labels[?''app''].orValue('''')
+      ''job-name''] || k in variables.nodeTopology) && variables.labels[?''app''].orValue('''')
       == ''sparkwing-job'' && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''')
+      == ''sparkwing-launcher'' && variables.labels[?''sparkwing.dev/job''].orValue('''')
+      != '''' : variables.shape == ''capacity'' ? variables.labels.all(k, k in [''app'',
+      ''app.kubernetes.io/managed-by'', ''sparkwing.dev/capacity-request'', ''sparkwing.dev/team''])
+      && variables.labels[?''app''].orValue('''') == ''sparkwing-job'' && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''')
       == ''sparkwing-launcher'' && variables.labels[?''sparkwing.dev/capacity-request''].orValue('''')
       == ''true'' : variables.labels.all(k, k in [''sparkwing.dev/boundary-control'',
-      ''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'']))'
+      ''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'']
+      || k in variables.nodeTopology))'
     message: Pods carry exactly the launcher's labels
   - expression: '!variables.create || variables.spec.?readinessGates.orValue([]).all(g,
       g.conditionType.startsWith(''target-health.elbv2.k8s.aws/''))'
@@ -328,6 +332,8 @@ spec:
     name: containers
   - expression: '''job'''
     name: shape
+  - expression: '[]'
+    name: nodeTopology
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
