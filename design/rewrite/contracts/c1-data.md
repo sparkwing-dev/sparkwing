@@ -1114,11 +1114,20 @@ remains with C2.
 `Tenant.RotateCredentials` implements the credential-maintenance transaction.
 It reloads persisted account authority and current team-admin membership, selects
 only the authenticated tenant, visits each secret and git credential serially,
-and commits both value-column changes together. Callback, authority and commit
-errors return zero counts and roll back both tables. Metadata stays unchanged.
+and commits both value-column changes together. The secret transform returns
+`(value, skip, error)`. A skipped row retains its envelope. `CredentialRotation`
+returns `Rotated`, `GitCredentials` and safe `Skipped` row identities together
+from the committed attempt. Every retry resets that result. Callback, authority
+and commit errors return an empty result and roll back both tables. Row metadata
+stays unchanged.
 The raw `Store.RotateSecretValues` and `Store.RotateGitCredentialSecrets` APIs
 and their deployment-wide readers are removed. Verified local peer maintenance
 still requires the C2 transport-to-authority integration.
+
+Team-deletion requests, purge completion, recheck deadlines and deletion leases
+store Unix nanoseconds. Their readers and deadline predicates use the same unit.
+Purge's account `updated_at` write also uses nanoseconds. Final-schema stores
+have no seconds-based compatibility reader or data conversion.
 
 `Tenant.SourceReleaseAudits` implements the final tenant-scoped audit projection.
 It reads capability prefixes and nanosecond timestamps, newest first, with the

@@ -76,8 +76,7 @@ type TeamDeletion struct {
 	FinishedAt  *time.Time
 	Attempts    int
 	LastError   string
-	// RecheckAt is when a finished deletion sweeps once more for what a
-	// credential of the team wrote after the purge; nil once it has.
+	// RecheckAt is the final SQL sweep time, or nil after it finishes.
 	RecheckAt *time.Time
 }
 
@@ -174,7 +173,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	if err := refuseDeletionWithMoneyInFlightTx(ctx, tx, t.team, now); err != nil {
 		return nil, err
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO team_deletions (slug, requested_by, requested_at, state, attempts, last_error, finished_at)
 		VALUES (?, ?, ?, ?, 0, '', NULL)
@@ -296,13 +295,13 @@ func scanTeamDeletion(scan func(...any) error) (TeamDeletion, error) {
 		return TeamDeletion{}, err
 	}
 	if recheck.Valid {
-		ts := time.Unix(recheck.Int64, 0).UTC()
+		ts := time.Unix(0, recheck.Int64).UTC()
 		d.RecheckAt = &ts
 	}
 	d.Team = Team(team)
-	d.RequestedAt = time.Unix(requested, 0).UTC()
+	d.RequestedAt = time.Unix(0, requested).UTC()
 	if finished.Valid {
-		ts := time.Unix(finished.Int64, 0).UTC()
+		ts := time.Unix(0, finished.Int64).UTC()
 		d.FinishedAt = &ts
 	}
 	return d, nil
@@ -353,13 +352,13 @@ func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder stri
 	if holder == "" {
 		return false, errors.New("store: a deletion lease needs a holder")
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	res, err := o.s.exec(ctx, `
 		UPDATE team_deletions SET lease_holder = ?, lease_until = ?
 		WHERE slug = ?
 		  AND (state = ? OR (state = ? AND recheck_at IS NOT NULL AND recheck_at <= ?))
 		  AND (lease_until IS NULL OR lease_until < ? OR lease_holder = ?)`,
-		holder, now.Add(lease).UTC().Unix(), string(NormalizeTeam(team)),
+		holder, now.Add(lease).UTC().UnixNano(), string(NormalizeTeam(team)),
 		TeamDeletionPending, TeamDeletionDone, at, at, holder)
 	if err != nil {
 		return false, err
@@ -373,7 +372,7 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 	if err := o.s.queryRow(ctx, `
 		SELECT COUNT(*) FROM team_deletions
 		WHERE slug = ? AND state = ? AND lease_holder = ? AND lease_until >= ?`,
-		string(team), state, holder, now.UTC().Unix()).Scan(&n); err != nil {
+		string(team), state, holder, now.UTC().UnixNano()).Scan(&n); err != nil {
 		return err
 	}
 	if n != 1 {
@@ -410,12 +409,12 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now 
 		return err
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		at := now.UTC().Unix()
+		at := now.UTC().UnixNano()
 		res, err := tx.ExecContext(ctx, `
 			UPDATE team_deletions SET state = ?, finished_at = ?, recheck_at = ?, last_error = '',
 			    lease_holder = '', lease_until = NULL
 			WHERE slug = ? AND state = ? AND lease_holder = ?`,
-			TeamDeletionDone, at, now.Add(recheckAfter).UTC().Unix(), string(team), TeamDeletionPending, holder)
+			TeamDeletionDone, at, now.Add(recheckAfter).UTC().UnixNano(), string(team), TeamDeletionPending, holder)
 		if err != nil {
 			return err
 		}
@@ -433,11 +432,7 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now 
 	})
 }
 
-// FinishTeamRecheck sweeps a finished deletion's team once more and closes
-// the deletion. A credential minted for the team before its deletion, such
-// as a cache grant, can still write under its slug until it expires, and
-// the recheck removes what it wrote. holder must hold the lease. The slug
-// is never registered again, so nothing the sweep finds belongs to anyone.
+// FinishTeamRecheck performs the final SQL sweep under the holder's deletion lease.
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error {
 	team = NormalizeTeam(team)
 	if err := o.requireLease(ctx, team, holder, TeamDeletionDone, now); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -167,6 +168,71 @@ func TestTeamPurgeRefusesATeamNobodyAskedToDelete(t *testing.T) {
 	}
 	if _, _, err := st.AsOperator().RequestTeamDeletion(ctx, store.DefaultTeam, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("deleting the default team = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestTeamDeletionNanosecondTimestampsAndLeaseBoundariesProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(71, 24))
+	for sample := range 8 {
+		t.Run(fmt.Sprint(sample), func(t *testing.T) {
+			st := storetest.Open(t)
+			ctx := t.Context()
+			owner := signIn(t, st, "owner", "owner@example.com")
+			team := owner.PersonalTeam
+			now := time.Date(2040, 2, 3, 4, 5, 6, 1+random.IntN(999999000), time.FixedZone("offset", 7200))
+			op := st.AsOperator()
+			del, _, err := op.RequestTeamDeletion(ctx, team, now)
+			if err != nil || !del.RequestedAt.Equal(now) {
+				t.Fatalf("request time=%s, want %s: %v", del.RequestedAt, now, err)
+			}
+			if ok, err := op.ClaimTeamDeletion(ctx, team, "first", now, 7*time.Nanosecond); err != nil || !ok {
+				t.Fatalf("initial lease=%v: %v", ok, err)
+			}
+			var requested, until int64
+			if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st, "SELECT requested_at,lease_until FROM team_deletions WHERE slug=?"), team).Scan(&requested, &until); err != nil || requested != now.UnixNano() || until != now.Add(7*time.Nanosecond).UnixNano() {
+				t.Fatalf("stored request=%d until=%d: %v", requested, until, err)
+			}
+			if ok, err := op.ClaimTeamDeletion(ctx, team, "second", now.Add(6*time.Nanosecond), time.Nanosecond); err != nil || ok {
+				t.Fatalf("unexpired lease stolen=%v: %v", ok, err)
+			}
+			if err := op.PurgeTeam(ctx, team, "first", now.Add(8*time.Nanosecond), time.Hour); !errors.Is(err, store.ErrDeletionLeaseLost) {
+				t.Fatalf("expired lease purge: %v", err)
+			}
+			if ok, err := op.ClaimTeamDeletion(ctx, team, "second", now.Add(8*time.Nanosecond), time.Minute); err != nil || !ok {
+				t.Fatalf("expired lease takeover=%v: %v", ok, err)
+			}
+			finished := now.Add(20 * time.Nanosecond)
+			due := finished.Add(137 * time.Nanosecond)
+			if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, "UPDATE accounts SET active_team=? WHERE id=?"), team, owner.Account.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := op.PurgeTeam(ctx, team, "second", finished, 137*time.Nanosecond); err != nil {
+				t.Fatal(err)
+			}
+			deletions, err := op.PendingTeamDeletions(ctx)
+			if err != nil || len(deletions) != 1 || deletions[0].FinishedAt == nil || !deletions[0].FinishedAt.Equal(finished) || deletions[0].RecheckAt == nil || !deletions[0].RecheckAt.Equal(due) {
+				t.Fatalf("purged timestamps=%+v: %v", deletions, err)
+			}
+			var finishedNS, recheckNS, accountNS int64
+			if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st, "SELECT finished_at,recheck_at FROM team_deletions WHERE slug=?"), team).Scan(&finishedNS, &recheckNS); err != nil || finishedNS != finished.UnixNano() || recheckNS != due.UnixNano() {
+				t.Fatalf("stored finish=%d recheck=%d: %v", finishedNS, recheckNS, err)
+			}
+			if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st, "SELECT updated_at FROM accounts WHERE id=?"), owner.Account.ID).Scan(&accountNS); err != nil || accountNS != finished.UnixNano() {
+				t.Fatalf("stored account update=%d: %v", accountNS, err)
+			}
+			if ok, err := op.ClaimTeamDeletion(ctx, team, "recheck", due.Add(-time.Nanosecond), time.Minute); err != nil || ok {
+				t.Fatalf("early recheck=%v: %v", ok, err)
+			}
+			if ok, err := op.ClaimTeamDeletion(ctx, team, "recheck", due, time.Minute); err != nil || !ok {
+				t.Fatalf("due recheck=%v: %v", ok, err)
+			}
+			if err := op.FinishTeamRecheck(ctx, team, "recheck", due); err != nil {
+				t.Fatal(err)
+			}
+			if pending, err := op.PendingTeamDeletions(ctx); err != nil || len(pending) != 0 {
+				t.Fatalf("finished recheck pending=%+v: %v", pending, err)
+			}
+		})
 	}
 }
 

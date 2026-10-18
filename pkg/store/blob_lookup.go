@@ -50,14 +50,22 @@ func (r *blobRecords) selectRecordTx(ctx context.Context, tx *storeTx, a blobAct
 		request.VerifiedDefaultOnly = true
 	}
 	if request.VerifiedDefaultOnly && request.Key.Scope.Ref == (blob.RefScope{}) {
+		var pending error
 		for _, ref := range a.capability.Data.ReadRefs {
 			request.Key.Scope.Ref = blob.RefScope{Ref: ref, Verified: true}
 			hit, err := r.lookupRecordTx(ctx, tx, a, request)
+			if errors.Is(err, errBlobIOPending) {
+				pending = err
+				continue
+			}
 			if err != nil || hit.Found {
+				if pending != nil {
+					return blob.RecordLookupResult{}, pending
+				}
 				return hit, err
 			}
 		}
-		return blob.RecordLookupResult{}, nil
+		return blob.RecordLookupResult{}, pending
 	}
 	return r.lookupRecordTx(ctx, tx, a, request)
 }
@@ -255,6 +263,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 	} else if a.authority.Ref.DefaultBranch != "" {
 		refs = append(refs, blob.RefScope{Ref: a.authority.Ref.DefaultBranch, Verified: true})
 	}
+	var pending error
 	for _, ref := range refs {
 		if !slices.Contains(a.capability.Data.ReadRefs, ref.CapabilityScope()) {
 			continue
@@ -265,14 +274,24 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 			}
 			recordKey := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}, Name: name}
 			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref != a.authority.Ref.Scope})
+			if errors.Is(err, errBlobIOPending) {
+				pending = err
+				continue
+			}
 			if cacheMissError(err) {
 				continue
 			}
 			if err != nil {
+				if pending != nil {
+					return result, pending
+				}
 				return result, err
 			}
 			if !hit.Found {
 				continue
+			}
+			if pending != nil {
+				return result, pending
 			}
 			if source != nil {
 				*source = hit.Record
@@ -291,7 +310,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 			return result, nil
 		}
 	}
-	return result, nil
+	return result, pending
 }
 
 func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (hit blob.DepcacheHit, err error) {
@@ -334,6 +353,7 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 			refs = append(refs, fallback{blob.RefScope{Ref: ref, Verified: true}, blob.RestoreDefaultBranch})
 		}
 	}
+	var pending error
 	for _, fallback := range refs {
 		if !slices.Contains(a.capability.Data.ReadRefs, fallback.ref.CapabilityScope()) {
 			continue
@@ -343,20 +363,33 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 		}
 		key := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindDepcache, Scope: blob.Scope{Repo: a.authority.Repo, Ref: fallback.ref, Key: request.Key.Key}, Name: request.Key.Name}
 		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback.source == blob.RestoreDefaultBranch})
+		if errors.Is(err, errBlobIOPending) {
+			pending = err
+			continue
+		}
 		if cacheMissError(err) {
 			continue
 		}
 		if err != nil {
+			if pending != nil {
+				return result, pending
+			}
 			return result, err
 		}
 		if !hit.Found || (fallback.source != blob.RestoreOwnRef && !hit.Record.RefFacts.Scope.Verified) {
 			continue
+		}
+		if pending != nil {
+			return result, pending
 		}
 		if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
 			return blob.DepcacheHit{}, nil
 		}
 		result = blob.DepcacheHit{Found: true, Record: hit.Record, Source: fallback.source, ReadSet: hit.ReadSet}
 		return result, tx.Commit()
+	}
+	if pending != nil {
+		return result, pending
 	}
 	return result, tx.Commit()
 }

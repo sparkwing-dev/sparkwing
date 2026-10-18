@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Return committed credential-rotation results and preserve nanosecond deletion deadlines. Missing or corrupt memo fallback manifests return a cache miss. See [migration](docs/migrations/_unreleased.md#credential-rotation-results-and-deletion-times).
+
 - **store:** Read completion batches and runner observations without nested database clock queries on PostgreSQL.
 - **controller (Breaking):** Remove the unused Argon2 verifier and its `--argon2-memory-budget-mb` flag and chart value. Remove the obsolete raw-run secret-input validator and trigger sweep lookup. See [migration](docs/migrations/_unreleased.md#retired-token-verifier).
 

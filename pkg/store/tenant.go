@@ -80,9 +80,6 @@ func (s *Store) AsOperator() *Operator { return &Operator{s: s} }
 // RunTeam reports which team owns the run runID, for a sweep that found the
 // id across teams and has to act on it through that team's handle.
 // [ErrNotFound] when no run carries the id.
-//
-// safety: runs and triggers are looked up apart, because two teams may each
-// hold one of them under the same id, and a union would answer with either.
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
 	var team string
 	err := o.s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)

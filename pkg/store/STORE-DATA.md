@@ -597,8 +597,20 @@ return before policy resolution and spend no token.
 Direct `beginTx` transactions are not retried. Object reads that a transaction
 needs run between attempts through `inBlobTx`/`withBlobIO`, which repeats the
 transaction with the stored result. Each publication pass batches every manifest
-in its snapshot. The four-pass bound counts graph changes after those reads,
-so a stable graph completes regardless of its manifest count. The GitHub check
+in its snapshot. Fallback readers also batch pending manifests across their
+authorized candidates. They wait for earlier candidates before selecting a hit.
+At most four transaction passes run. A stable fallback graph needs one fetch
+round and one result-consuming pass, regardless of candidate count. Missing or
+corrupt memo manifests return a miss after those results are consumed. The GitHub check
 reporter holds a session advisory with no transaction open in a separate pool
 limited to two connections. Its metadata and callbacks use the operational pool,
 including when that pool permits only one connection.
+
+Credential rotation returns counts and skipped secret identities as one
+`CredentialRotation` result from the committed attempt. Its secret transform
+returns an explicit skip flag. Skips leave the stored envelope unchanged. Each
+retry resets all response metadata, and a failed transaction returns none.
+
+Team deletion stores and reads request, completion, recheck and lease times in
+Unix nanoseconds. Lease expiry and recheck predicates preserve subsecond
+boundaries. Purge's account timestamp uses the same unit.

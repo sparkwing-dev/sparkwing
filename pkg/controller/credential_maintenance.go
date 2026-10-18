@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -16,7 +15,7 @@ import (
 // CredentialRotator rechecks team-admin authority and rotates one tenant's rows in one transaction.
 type CredentialRotator interface {
 	Team() store.Team
-	RotateCredentials(context.Context, capability.Authorized, func(store.Secret) (string, error), func(store.GitCredential) (string, error)) (int, int, error)
+	RotateCredentials(context.Context, capability.Authorized, func(store.Secret) (string, bool, error), func(store.GitCredential) (string, error)) (store.CredentialRotation, error)
 }
 
 // SourceAuditReader supplies one tenant's committed source-release audits.
@@ -97,7 +96,6 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a c
 	if err != nil {
 		return err
 	}
-	skipped := []secretsRotateSkip{}
 	seal := func(binding secretBinding, plain string) (string, error) {
 		sealed, err := sealSecret(cipher, binding, plain)
 		if err != nil && !errors.Is(err, secrets.ErrKeyRefused) {
@@ -105,20 +103,17 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a c
 		}
 		return sealed, err
 	}
-	secret := func(row store.Secret) (string, error) {
+	secret := func(row store.Secret) (string, bool, error) {
 		binding := bindingForRow(rotator.Team(), &row)
 		plain, err := openSecret(cipher, binding, row.Value)
 		if errors.Is(err, secrets.ErrKeyRefused) {
-			return "", err
+			return "", false, err
 		}
 		if err != nil {
-			// safety: a retried store transaction calls this again for the same row.
-			if skip := (secretsRotateSkip{Name: row.Name, Pipeline: row.Pipeline}); !slices.Contains(skipped, skip) {
-				skipped = append(skipped, skip)
-			}
-			return row.Value, nil
+			return "", true, nil
 		}
-		return seal(binding, plain)
+		value, err := seal(binding, plain)
+		return value, false, err
 	}
 	git := func(row store.GitCredential) (string, error) {
 		if row.Team != rotator.Team() {
@@ -134,14 +129,14 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a c
 		}
 		return seal(binding, plain)
 	}
-	secretCount, gitCount, err := rotator.RotateCredentials(r.Context(), a, secret, git)
+	result, err := rotator.RotateCredentials(r.Context(), a, secret, git)
 	if err != nil {
 		return credentialWriteError(err)
 	}
-	if secretCount < len(skipped) || gitCount < 0 {
+	if result.Rotated < 0 || result.GitCredentials < 0 {
 		return errors.New("invalid rotation counts")
 	}
-	writeJSON(w, http.StatusOK, secretsRotateResponse{Rotated: secretCount - len(skipped), Skipped: skipped, GitCredentials: gitCount})
+	writeJSON(w, http.StatusOK, result)
 	return nil
 }
 

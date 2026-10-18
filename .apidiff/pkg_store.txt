@@ -453,6 +453,11 @@ const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
 const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
+type CredentialRotation struct {
+	Rotated        int
+	Skipped        []SecretRotationSkip
+	GitCredentials int
+}
 type CreditCharge struct {
 	ID string
 
@@ -1116,6 +1121,7 @@ type IntakeRequest struct {
 	SubmittedEnv       map[string][]byte
 	Authority          capability.AuthorityRef
 	Request            runspec.Request
+	Intent             *runspec.Request
 	IdempotencyKey     string
 	CapabilityPrefix   string
 	LocalSecrets       map[string]string
@@ -2119,6 +2125,10 @@ type SecretPreflightError struct {
 func (e *SecretPreflightError) Detail() string
 func (e *SecretPreflightError) Error() string
 func (e *SecretPreflightError) Unwrap() error
+type SecretRotationSkip struct {
+	Name     string
+	Pipeline string
+}
 type SecretSealer interface {
 	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
 }
@@ -2685,6 +2695,7 @@ func (t *Tenant) RenewNodeClaim(ctx context.Context, ref NodeRef, actor Actor) (
 func (t *Tenant) RenewOwner(ctx context.Context, actor Actor) (LeaseBeat, error)
 func (t *Tenant) ReplaceAuthorizedLocalSchedules(ctx context.Context, a capability.Authorized, root string, rows []CronSchedule, requests []runspec.Request, replace bool) ([]string, []string, error)
 func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Authorized, body controllerwire.ScheduleRepoRequest) ([]string, []string, error)
+func (t *Tenant) ReplayRun(ctx context.Context, request IntakeRequest) (AdmissionResult, bool, error)
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error
 func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error)
 func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error)
@@ -2702,7 +2713,7 @@ func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, ne
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized, repositoryID int64) error
 func (t *Tenant) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
-func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (string, error), git func(GitCredential) (string, error)) (int, int, error)
+func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (value string, skip bool, err error), git func(GitCredential) (string, error)) (CredentialRotation, error)
 func (t *Tenant) RunAuthorizedSchedule(ctx context.Context, a capability.Authorized, id, key string) (string, string, bool, error)
 func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Authorized, trust bool) error
 func (t *Tenant) SetAuthorizedGitHubExtraRepos(ctx context.Context, a capability.Authorized, repository string, extras []string, ids map[string]int64) ([]string, error)

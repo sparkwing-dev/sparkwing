@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -53,9 +55,9 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	secretCalls, gitCalls := 0, 0
-	n, m, err := tenant.RotateCredentials(t.Context(), a, func(row Secret) (string, error) { secretCalls++; return "new/" + row.Value, nil }, func(row GitCredential) (string, error) { gitCalls++; return "new/" + row.Secret, nil })
-	if err != nil || n != 24 || m != 1 || secretCalls != 24 || gitCalls != 1 {
-		t.Fatalf("rotation counts: %d %d %d %d, %v", n, m, secretCalls, gitCalls, err)
+	result, err := tenant.RotateCredentials(t.Context(), a, func(row Secret) (string, bool, error) { secretCalls++; return "new/" + row.Value, false, nil }, func(row GitCredential) (string, error) { gitCalls++; return "new/" + row.Secret, nil })
+	if err != nil || result.Rotated != 24 || result.GitCredentials != 1 || len(result.Skipped) != 0 || secretCalls != 24 || gitCalls != 1 {
+		t.Fatalf("rotation counts: %+v %d %d, %v", result, secretCalls, gitCalls, err)
 	}
 	for team, rows := range originals {
 		tn := &Tenant{s: tenant.s, team: team}
@@ -105,11 +107,11 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 				a.Access.Grants = []capability.Grant{capability.SecretsRead}
 			}
 			boom := errors.New("cannot transform")
-			n, m, err := tenant.RotateCredentials(t.Context(), a, func(row Secret) (string, error) {
+			result, err := tenant.RotateCredentials(t.Context(), a, func(row Secret) (string, bool, error) {
 				if failure == "secret" && row.Name == "second" {
-					return "", boom
+					return "", false, boom
 				}
-				return "new", nil
+				return "new", false, nil
 			}, func(GitCredential) (string, error) {
 				if failure == "git" {
 					return "", boom
@@ -119,8 +121,8 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 				}
 				return "new", nil
 			})
-			if err == nil || n != 0 || m != 0 {
-				t.Fatalf("failed rotation: %d,%d,%v", n, m, err)
+			if err == nil || result.Rotated != 0 || result.GitCredentials != 0 || result.Skipped != nil {
+				t.Fatalf("failed rotation: %+v,%v", result, err)
 			}
 			for _, name := range []string{"first", "second"} {
 				got, err := tenant.GetSecretRow(name, "")
@@ -138,12 +140,12 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 
 func TestCredentialRotationEmptyAndMissingTransforms(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
-	secret := func(Secret) (string, error) { t.Fatal("empty secret transform"); return "", nil }
+	secret := func(Secret) (string, bool, error) { t.Fatal("empty secret transform"); return "", false, nil }
 	git := func(GitCredential) (string, error) { t.Fatal("empty git transform"); return "", nil }
-	if n, m, err := tenant.RotateCredentials(t.Context(), a, secret, git); err != nil || n != 0 || m != 0 {
-		t.Fatalf("empty rotation: %d,%d,%v", n, m, err)
+	if result, err := tenant.RotateCredentials(t.Context(), a, secret, git); err != nil || result.Rotated != 0 || result.GitCredentials != 0 || result.Skipped == nil || len(result.Skipped) != 0 {
+		t.Fatalf("empty rotation: %+v,%v", result, err)
 	}
-	if _, _, err := tenant.RotateCredentials(t.Context(), a, nil, git); err == nil {
+	if _, err := tenant.RotateCredentials(t.Context(), a, nil, git); err == nil {
 		t.Fatal("missing transform accepted")
 	}
 }
@@ -182,5 +184,41 @@ func seedMaintenanceGit(t *testing.T, tenant *Tenant, row GitCredential) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCredentialRotationCommittedAttemptMetadataProperty(t *testing.T) {
+	for retries := 1; retries <= 4; retries++ {
+		tenant, a := credentialMaintenanceFixture(t)
+		for _, name := range []string{"repaired", "unreadable"} {
+			if err := seedSecret(t, tenant, Secret{Name: name, Value: "old"}, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		seedMaintenanceGit(t, tenant, GitCredential{Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old"})
+		attempts := 0
+		result, err := tenant.RotateCredentials(t.Context(), a, func(row Secret) (string, bool, error) {
+			return "new", attempts < retries || row.Name == "unreadable", nil
+		}, func(row GitCredential) (string, error) {
+			attempts++
+			if attempts <= retries {
+				return "", &pgconn.PgError{Code: "40001"}
+			}
+			return "new", nil
+		})
+		want := CredentialRotation{Rotated: 1, GitCredentials: 1, Skipped: []SecretRotationSkip{{Name: "unreadable"}}}
+		if err != nil || attempts != retries+1 || !reflect.DeepEqual(result, want) {
+			t.Fatalf("retries=%d attempts=%d: got=%+v want=%+v: %v", retries, attempts, result, want, err)
+		}
+		for _, name := range []string{"repaired", "unreadable"} {
+			row, err := tenant.GetSecretRow(name, "")
+			want := "new"
+			if name == "unreadable" {
+				want = "old"
+			}
+			if err != nil || row.Value != want {
+				t.Fatalf("row=%+v want=%s: %v", row, want, err)
+			}
+		}
 	}
 }
