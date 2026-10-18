@@ -76,7 +76,7 @@ func TestSnapshotBundleCarriesEverySelectedRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := snapshot.includeRevisions(t.Context(), selected.git.SHA, selected.source.Ref); err != nil {
+	if err := snapshot.includeRevisions(t.Context(), origin, selected.git.SHA, selected.source.Ref); err != nil {
 		t.Fatal(err)
 	}
 	sourcetest.Remote(t, map[string]string{"https://8.8.8.8/acme/app": origin})
