@@ -226,7 +226,9 @@ reads the client address from `X-Real-IP` (`--trusted-proxy-addr`). The Ingress
 routes to it, and a chart NetworkPolicy admits only pods matching
 `trustedProxyListener.namespaceSelector` and optional `podSelector` to that
 port. Rendering refuses an empty `namespaceSelector`. Baseline policies that
-allow all ingress to the controller must exclude it, or they reopen the port.
+allow all ingress to the controller must exclude it, or they reopen the port. The fence needs a CNI
+that enforces NetworkPolicy and does not cover an ingress controller running
+with `hostNetwork`, whose traffic comes from the node address.
 
 Projected credential symlinks are accepted only when their resolved targets
 stay inside `/etc/sparkwing/credentials`. Targets must be regular files owned

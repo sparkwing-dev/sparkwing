@@ -130,6 +130,20 @@ Ingress to that port and adds a NetworkPolicy that admits only the selected
 ingress pods to it. Requests on that port key per-IP limits and request logs on
 `X-Real-IP`, so the ingress must overwrite that header with the peer it observed.
 Another NetworkPolicy that allows all ingress to the controller defeats the fence.
+The fence holds only on a CNI that enforces NetworkPolicy, and it cannot
+separate an ingress controller that runs with `hostNetwork`, because its
+traffic arrives from the node address rather than a pod in the selected namespace.
+
+### Outbound source clones
+
+When the controller or a shared runner clones a tenant's repository, it
+resolves the host once, refuses any address inside the local network and makes
+git connect to the address it checked. HTTPS pins the address with
+`http.curloptResolve`; ssh pins it with `HostName` and verifies the host key
+under the repository's name. An operator `HTTPS_PROXY` or `ALL_PROXY` in the
+controller's environment bypasses the pin, because the proxy resolves the name
+itself; restrict such a proxy's destinations at the proxy. Clones the owning
+user runs locally keep their ssh configuration, agent and `Host` aliases.
 
 ### Signed downloads through CloudFront
 
