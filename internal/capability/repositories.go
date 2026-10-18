@@ -20,8 +20,13 @@ func RepositoryAllowed(scope []string, repository RepositoryIdentity) bool {
 	if scope == nil {
 		return true
 	}
+	display := repository.Display
+	// safety: an App-verified gh:<id> key names a GitHub repository, so its owner/name display lives on github.com.
+	if owner, _, _ := strings.Cut(display, "/"); strings.HasPrefix(repository.Key, "gh:") && strings.Count(display, "/") == 1 && !strings.ContainsAny(owner, ".:") && !strings.Contains(display, ":") {
+		display = "github.com/" + display
+	}
 	for _, entry := range scope {
-		if entry == repository.Key && repository.Key != "" || repositoryPatternMatches(RepositoryPattern(entry), repository.Display) {
+		if entry == repository.Key && repository.Key != "" || repositoryPatternMatches(RepositoryPattern(entry), display) {
 			return true
 		}
 	}

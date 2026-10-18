@@ -71,3 +71,11 @@ func TestCloudAdmissionSealsDispatchAfterRouteRules(t *testing.T) {
 		})
 	}
 }
+
+func TestPublicIntakeRefusesTheActionsOwner(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerActions}}}
+	if _, err := tenant.AdmitRun(t.Context(), request); err == nil {
+		t.Fatal("a create-run request selected the GitHub Actions owner")
+	}
+}

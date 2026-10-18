@@ -117,8 +117,8 @@ of the runs they start:
 | `runner` | Owner |
 | --- | --- |
 | `cloud` (default) | Sparkwing Cloud's launcher plans and runs the work |
-| `github-actions` | A GitHub Actions runner bound to the repository claims the run's trigger, as in [GitHub Actions runners](github-actions-runners.md) |
-| `pool=<name>` | A self-hosted runner reserved for that pool; a pool access rule must still allow the repository |
+| `github-actions` | Only a GitHub Actions runner bound to the delivery's push claims the run's trigger, as in [GitHub Actions runners](github-actions-runners.md) |
+| `pool=<name>` | A self-hosted runner reserved for that pool; a pool access rule must still allow the repository. App-armed schedules qualify for the rule through the repository's automation consent |
 
 The selection is read from the saved configuration at intake and sealed in the
 run's request; webhook payloads cannot change it. Retries keep it. Changing

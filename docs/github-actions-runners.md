@@ -120,7 +120,9 @@ jobs:
 ## App-triggered runs
 
 On Sparkwing Cloud an App push or pull request run goes to the Cloud launcher
-unless its automation or subscription selects `runner: github-actions`. With that
-selection the run seals host dispatch and its trigger waits for an Actions runner
-whose push binding matches the delivery's repository, ref and commit. See
-[GitHub App run owner](github-app.md#run-owner).
+unless its automation or subscription selects `runner: github-actions` or
+`runner: pool=<name>`, or a repository pool route rule requires a pool. Each of
+those seals host dispatch. With `github-actions`, only an Actions runner whose
+push binding matches the delivery's repository, ref and commit may claim the
+run's trigger; other team machines are refused. A create-run request cannot
+select `github-actions` itself. See [GitHub App run owner](github-app.md#run-owner).

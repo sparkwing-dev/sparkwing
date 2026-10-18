@@ -302,7 +302,7 @@ const (
 	RunnerName  RunnerSelectionKind = "name"
 	RunnerLabel RunnerSelectionKind = "label"
 	RunnerHere  RunnerSelectionKind = "here"
-	// RunnerActions selects a GitHub Actions owner; only trusted App configuration sets it.
+	// RunnerActions selects a GitHub Actions owner; intake refuses it on requests that are not App runs or their children.
 	RunnerActions RunnerSelectionKind = "github-actions"
 )
 

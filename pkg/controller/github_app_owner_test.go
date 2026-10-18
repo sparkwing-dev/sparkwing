@@ -3,14 +3,12 @@ package controller_test
 import (
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc/githuboidctest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestGitHubAppOwnerSelectionSealsDispatchAndActionsClaimsItsTrigger(t *testing.T) {
@@ -55,32 +53,13 @@ func TestGitHubAppOwnerSelectionSealsDispatchAndActionsClaimsItsTrigger(t *testi
 	if code := f.call("POST", "/api/v1/runners/github/exchange", "", map[string]string{"id_token": issuer.Token(job, ghAudience), "team": olga.team}, &credential); code != http.StatusCreated {
 		t.Fatalf("Actions exchange = %d", code)
 	}
-	tenant, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
-	if err != nil {
-		t.Fatal(err)
+	machine, _ := f.teamRunner(olga, "team-box")
+	var queued controllerwire.ClaimResponse
+	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitTrigger, "", ""), &queued); code != http.StatusOK || queued.Claim != nil {
+		t.Fatalf("same-team machine took a queued trigger: %d", code)
 	}
-	eligible := func(run string, kind capability.UnitKind) bool {
-		t.Helper()
-		ok, err := tenant.UnitHasEligibleClaimant(t.Context(), run, store.UnclaimedUnit{Kind: kind}, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return ok
-	}
-	if eligible(actionsRun, capability.UnitTrigger) {
-		t.Fatal("an Actions runner that never polled counts as eligible")
-	}
-	var empty controllerwire.ClaimResponse
-	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+credential.Token, githubClaimBody(capability.UnitNode, "", ""), &empty); code != http.StatusOK || empty.Claim != nil {
-		t.Fatalf("Actions node poll = %d %+v", code, empty.Claim)
-	}
-	if !eligible(actionsRun, capability.UnitTrigger) {
-		t.Fatal("a polling Actions runner bound to the push is not eligible for its trigger")
-	}
-	for _, id := range ids {
-		if sealed := f.sealedRequest(id); sealed.Pipeline == "cloud-build" && eligible(id, capability.UnitPlan) {
-			t.Fatal("an Actions runner counts as eligible for a launcher plan")
-		}
+	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitTrigger, actionsRun, ""), nil); code != http.StatusForbidden {
+		t.Fatalf("same-team machine named claim of the Actions-owned trigger = %d, want 403", code)
 	}
 	var claimed controllerwire.ClaimResponse
 	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+credential.Token, githubClaimBody(capability.UnitTrigger, "", ""), &claimed); code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != actionsRun || claimed.Claim.Unit != capability.UnitTrigger {
@@ -130,5 +109,40 @@ func TestGitHubAppAutomationOwnerSelectionReachesPushesAndArmedSchedules(t *test
 		if sealed := f.sealedRequest(started.RunID); sealed.Dispatch != want {
 			t.Fatalf("App schedule with runner %s sealed dispatch=%s, want %s", runner, sealed.Dispatch, want)
 		}
+	}
+}
+
+func TestGitHubAppPoolScheduleReachesItsReservedRunner(t *testing.T) {
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server { return s.WithCloudDeployment(true) })
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	if code := f.call("PUT", "/api/v1/team/github-app/automation", olga.auth, map[string]string{"repository": "acme/widgets", "runner": "pool=prod"}, nil); code != http.StatusOK {
+		t.Fatalf("enable with pool owner = %d", code)
+	}
+	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusAccepted {
+		t.Fatalf("arming push = %d", code)
+	}
+	if code := f.call("POST", "/api/v1/pools/prod/rules", olga.auth, map[string]any{"repos": []string{"acme/widgets"}}, nil); code != http.StatusOK && code != http.StatusCreated {
+		t.Fatalf("pool access rule = %d", code)
+	}
+	var minted struct {
+		Capability string `json:"capability"`
+	}
+	if code := f.call("POST", "/api/v1/runners", olga.auth, map[string]any{"name": "prod-box", "repos": []string{"github.com/acme/*"}, "reserved_pools": []string{"prod"}}, &minted); code != http.StatusCreated {
+		t.Fatalf("enroll prod runner = %d", code)
+	}
+	rows := appCronRows(t, f, olga.team)
+	if len(rows) != 1 {
+		t.Fatalf("armed schedules = %+v", rows)
+	}
+	var started controllerwire.ScheduleRun
+	if code := f.call("POST", "/api/v1/schedules/"+rows[0].ID+"/run", olga.auth, nil, &started); code != http.StatusOK || started.RunID == "" {
+		t.Fatalf("run App schedule = %d %+v", code, started)
+	}
+	var claimed controllerwire.ClaimResponse
+	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+minted.Capability, githubClaimBody(capability.UnitTrigger, "", ""), &claimed); code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != started.RunID {
+		t.Fatalf("prod runner claim of the pool schedule = %d, claimed=%v", code, claimed.Claim != nil)
 	}
 }
