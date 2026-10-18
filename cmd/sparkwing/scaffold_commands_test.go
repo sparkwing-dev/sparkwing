@@ -19,7 +19,7 @@ func TestScaffoldGuidanceUsesAcceptedCommands(t *testing.T) {
 			t.Setenv("PATH", t.TempDir())
 			var commandErr error
 			output := captureStdout(t, func() {
-				commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "sample", "--template", shape})
+				commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "sample", "--template", shape, "-o", "pretty"})
 			})
 			if commandErr != nil {
 				t.Fatal(commandErr)

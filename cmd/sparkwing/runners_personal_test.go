@@ -92,7 +92,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				for _, args := range [][]string{{"show"}, {"set", "--members-can-add-machines", "false"}, {"show"}} {
 					var callErr error
 					out := captureStdout(t, func() {
-						callErr = dispatchCommand(append([]string{"team", "settings"}, append(args, "--profile", "prod", "--output", "json")...))
+						callErr = runSparkwing(append([]string{"team", "settings"}, append(args, "--profile", "prod", "--output", "json")...))
 					})
 					if callErr != nil || !strings.Contains(out, `"members_can_add_machines":`) {
 						t.Fatalf("settings CLI %v: %s %v", args, out, callErr)
@@ -101,7 +101,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				if _, err := state.DB().ExecContext(t.Context(), `UPDATE memberships SET role='editor'`); err != nil {
 					t.Fatal(err)
 				}
-				if err := dispatchCommand([]string{"team", "settings", "set", "--profile", "prod", "--members-can-add-machines", "true"}); err == nil {
+				if err := runSparkwing([]string{"team", "settings", "set", "--profile", "prod", "--members-can-add-machines", "true"}); err == nil {
 					t.Fatal("demoted admin changed team setting through CLI")
 				}
 				tenant := teststore.ForTeam(t, state, "personal-test")
@@ -120,7 +120,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 			} else {
 				args = append(args, "--no-service")
 			}
-			captureStdout(t, func() { err = runRunnersAdd(args) })
+			captureStdout(t, func() { err = runRunnersAddArgs(args) })
 			if mode == "disabled" || mode == "shared" {
 				want := "members_can_add_machines"
 				if mode == "shared" {

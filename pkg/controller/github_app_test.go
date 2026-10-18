@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth/googletest"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -584,6 +585,12 @@ func (f *appFixture) sealedRequest(runID string) runspec.Request {
 	row, err := tenant.ReadRun(f.t.Context(), runID)
 	if err != nil {
 		f.t.Fatal(err)
+	}
+	if row.Request.Request.Origin == runspec.OriginApp && row.Request.Request.Mode == runspec.IntakeExecute {
+		selected, err := source.ForRequest(row.Request)
+		if err != nil || selected.SHA != row.Request.Request.Git.SHA || !runspec.IsCommitID(selected.PipelineSHA) || row.Request.Request.Source.RequestedRef == "" && selected.PipelineSHA != selected.SHA {
+			f.t.Fatalf("App intake did not seal the verified commit pair: %+v, %v", selected, err)
+		}
 	}
 	return row.Request.Request
 }

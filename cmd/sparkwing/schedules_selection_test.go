@@ -40,7 +40,7 @@ func TestSelectiveScheduleInstallPreservesUnselectedDeclarations(t *testing.T) {
 				return scheduleConnection{repositories: owner, close: func() {}}, nil
 			}
 			var out bytes.Buffer
-			err := runScheduleCommand(t.Context(), []string{"install", "--profile=prod", "--schedule=" + selector, "-o=json"}, &out, f.command)
+			err := runScheduleCommandArgs(t.Context(), []string{"install", "--profile=prod", "--schedule=" + selector, "-o=json"}, &out, f.command)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -29,7 +29,7 @@ func TestDebugResumeUsesObservedIdentityAndCommonOutput(t *testing.T) {
 		reader := debugReaderFixture()
 		calls, closed := 0, false
 		var out bytes.Buffer
-		err := runDebugResume(t.Context(), []string{"--run=412", "--job=build", "--profile=prod", "-o=" + format}, &out, func(_ context.Context, profile string) (debugResumer, error) {
+		err := runDebugResumeArgs(t.Context(), []string{"--run=412", "--job=build", "--profile=prod", "-o=" + format}, &out, func(_ context.Context, profile string) (debugResumer, error) {
 			if profile != "prod" {
 				t.Fatal("changed controller")
 			}
@@ -82,7 +82,7 @@ func TestDebugResumeUsesConfiguredController(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	err := runDebugResume(t.Context(), []string{"--run=412", "--job=build", "--profile=prod", "-o=json"}, &out, resolveDebugResumer)
+	err := runDebugResumeArgs(t.Context(), []string{"--run=412", "--job=build", "--profile=prod", "-o=json"}, &out, resolveDebugResumer)
 	if err != nil || calls != 2 || out.String() != "{\"run_id\":\"run-1\",\"job_id\":\"build\",\"resumed\":true}\n" {
 		t.Fatalf("calls=%d out=%s err=%v", calls, &out, err)
 	}
@@ -93,7 +93,7 @@ func TestDebugResumeUnknownProfileHasNoStoreFallback(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "absent-home")
 	t.Setenv("SPARKWING_HOME", home)
 	var out bytes.Buffer
-	err := runDebugResume(t.Context(), []string{"--run=run-1", "--job=build", "--profile=missing", "-o=json"}, &out, resolveDebugResumer)
+	err := runDebugResumeArgs(t.Context(), []string{"--run=run-1", "--job=build", "--profile=missing", "-o=json"}, &out, resolveDebugResumer)
 	if err == nil || !strings.Contains(err.Error(), `profile "missing" not found`) || out.Len() != 0 {
 		t.Fatalf("out=%s err=%v", &out, err)
 	}
@@ -105,7 +105,7 @@ func TestDebugResumeUnknownProfileHasNoStoreFallback(t *testing.T) {
 func TestDebugResumePreservesWriterFailure(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.Forbidden, Message: "scope missing"}
 	var out bytes.Buffer
-	err := runDebugResume(t.Context(), []string{"--run=412", "--job=build", "-o=json"}, &out, func(context.Context, string) (debugResumer, error) {
+	err := runDebugResumeArgs(t.Context(), []string{"--run=412", "--job=build", "-o=json"}, &out, func(context.Context, string) (debugResumer, error) {
 		return debugResumer{control: debugControlFake{DebugReader: debugReaderFixture(), resume: func(context.Context, string, string) error { return failure }}, close: func() error { return nil }}, nil
 	})
 	if !errors.Is(err, failure) || out.Len() != 0 {
@@ -123,7 +123,7 @@ func FuzzDebugResumeCannotSwitchIdentity(f *testing.F) {
 		view := controllerwire.DebugPauseResult{RunID: returnedRun, Number: 412, JobID: returnedJob}
 		reader := &debugReaderFake{pause: view}
 		writes := 0
-		err := runDebugResume(t.Context(), []string{"--run=" + selector, "--job=" + job, "-o=json"}, io.Discard, func(context.Context, string) (debugResumer, error) {
+		err := runDebugResumeArgs(t.Context(), []string{"--run=" + selector, "--job=" + job, "-o=json"}, io.Discard, func(context.Context, string) (debugResumer, error) {
 			return debugResumer{control: debugControlFake{DebugReader: reader, resume: func(_ context.Context, run, id string) error {
 				writes++
 				if view.Validate(selector, job) != nil || run != returnedRun || id != returnedJob {

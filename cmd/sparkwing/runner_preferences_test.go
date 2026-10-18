@@ -17,7 +17,7 @@ import (
 
 func TestRunnerEnrollmentPreservesUnsetPreferences(t *testing.T) {
 	f := newRunnersFixture(t)
-	enrollment, _, err := prepareRunnerEnrollment([]string{"--profile", "prod", "--runner", "desktop", "--config", f.config, "--no-service"})
+	enrollment, _, err := prepareRunnerEnrollmentArgs([]string{"--profile", "prod", "--runner", "desktop", "--config", f.config, "--no-service"})
 	if err != nil {
 		t.Fatal(err)
 	}

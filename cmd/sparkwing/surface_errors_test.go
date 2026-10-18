@@ -92,7 +92,7 @@ func TestSurfaceConfigErrorsThroughProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failure := runProfiles([]string{"list", "-o=json"})
+	failure := runProfilesArgs([]string{"list", "-o=json"})
 	if failure == nil {
 		t.Fatal("invalid config accepted")
 	}

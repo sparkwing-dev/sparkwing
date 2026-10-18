@@ -101,7 +101,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 				return admissionResultTx(ctx, tx, team, previous)
 			}
 		}
-		if err := validateChildLineageTx(ctx, tx, team, input); err != nil {
+		if err := validateChildLineageTx(ctx, tx, team, &input); err != nil {
 			return AdmissionResult{}, err
 		}
 		pools, err := intakePoolsTx(ctx, tx, team, &input, policy.RepositoryAuthorized)
@@ -404,7 +404,7 @@ func appReplayKey(input runspec.Request) string {
 	return fmt.Sprintf("%s:%s", input.Git.App.Value.DeliveryKey, input.Pipeline)
 }
 
-func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input runspec.Request) error {
+func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request) error {
 	if input.Lineage.RepoInherited && input.Lineage.ParentRunID == "" {
 		return authorityError(apierr.BadRequest, "repository inheritance requires a parent")
 	}
@@ -419,6 +419,12 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input r
 			return err
 		}
 		parent := ancestor.Request.Request
+		if id == input.Lineage.ParentRunID {
+			if input.Env.Digest != "" && (input.Env.Digest != parent.Env.Digest || !slices.Equal(input.Env.Names, parent.Env.Names) || input.EnvironmentSource != parent.EnvironmentSource) {
+				return authorityError(apierr.SpecDrift, "child environment differs from its parent")
+			}
+			input.Env, input.EnvironmentSource = parent.Env, parent.EnvironmentSource
+		}
 		if id == input.Lineage.ParentRunID && input.Lineage.RepoInherited && parent.Git.Repository.Key != input.Git.Repository.Key {
 			return authorityError(apierr.BadRequest, "inherited repository differs from its parent")
 		}

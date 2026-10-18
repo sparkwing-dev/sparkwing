@@ -278,7 +278,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	if err := os.Chmod(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	config := []byte("pipelines:\n  - name: ci\n    entrypoint: CI\n    source: pipeline-source\n    on:\n      schedule:\n        - cron: '* * * * *'\n          where: local\n")
+	config := []byte("pipelines:\n  - name: ci\n    entrypoint: CI\n    source: origin/main\n    on:\n      schedule:\n        - cron: '* * * * *'\n          where: local\n")
 	if err := os.MkdirAll(filepath.Join(checkout, ".sparkwing"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -286,6 +286,9 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 		t.Fatal(err)
 	}
 	initializeScheduleCheckout(t, checkout)
+	if out, err := exec.CommandContext(t.Context(), "git", "-C", checkout, "update-ref", "refs/remotes/origin/main", "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("origin/main: %s %v", out, err)
+	}
 	project, err := projectconfig.Parse(config)
 	if err != nil {
 		t.Fatal(err)
@@ -373,7 +376,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 		t.Fatal(err)
 	}
 	request := sealed.Request.Request
-	if sealed.Request.Hash == "" || !sealed.Request.AdmittedAt.Equal(due) || request.Origin != runspec.OriginSchedule || request.Source.Entrypoint != "CI" || request.Source.Ref != "pipeline-source" || request.Source.Location.LocalCheckout != checkout || request.Env.Digest == "" || request.Actor.ID == "" || request.Git.App.Set || !strings.HasPrefix(request.Actor.ID, "local:") {
+	if sealed.Request.Hash == "" || !sealed.Request.AdmittedAt.Equal(due) || request.Origin != runspec.OriginSchedule || request.Source.Entrypoint != "CI" || request.Source.Ref != request.Git.SHA || request.Source.RequestedRef != "origin/main" || request.Source.Location.LocalCheckout != checkout || request.Env.Digest == "" || request.Actor.ID == "" || request.Git.App.Set || !strings.HasPrefix(request.Actor.ID, "local:") {
 		t.Fatalf("schedule lost sealed source or authority: %+v", sealed.Request)
 	}
 	fires, err := tenant.ListCronFires(t.Context(), row.ID, 10)

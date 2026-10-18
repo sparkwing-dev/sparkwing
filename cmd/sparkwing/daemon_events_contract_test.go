@@ -77,7 +77,7 @@ func TestDaemonEventsCursorKeepsHistoryAcrossAppends(t *testing.T) {
 		if cursor != "" {
 			invocation = append(invocation, "--cursor", cursor)
 		}
-		return decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEvents(invocation) }))
+		return decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEventsArgs(invocation) }))
 	}
 	first := read("")
 	if len(first.Records) != 3 || first.Cursor == "" || !first.Truncated {
@@ -116,7 +116,7 @@ func TestDaemonEventsRejectsLegacyAndExplainPaginationBeforeReading(t *testing.T
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var out, diagnostics bytes.Buffer
 			reads := 0
-			err := runDaemonEventsCommand(args, &out, &diagnostics, time.Now(), func() (string, []journal.Record, int, error) {
+			err := runDaemonEventsCommandArgs(args, &out, &diagnostics, time.Now(), func() (string, []journal.Record, int, error) {
 				reads++
 				return "", nil, 0, fmt.Errorf("must not read")
 			})
@@ -129,7 +129,7 @@ func TestDaemonEventsRejectsLegacyAndExplainPaginationBeforeReading(t *testing.T
 
 func TestDaemonEventsHelpReportsZeroIncarnationBoundWithoutReading(t *testing.T) {
 	var out, diagnostics bytes.Buffer
-	err := runDaemonEventsCommand([]string{"--incarnation", "0", "--help", "-o", "plain"}, &out, &diagnostics, time.Now(), func() (string, []journal.Record, int, error) {
+	err := runDaemonEventsCommandArgs([]string{"--incarnation", "0", "--help", "-o", "plain"}, &out, &diagnostics, time.Now(), func() (string, []journal.Record, int, error) {
 		t.Fatal("help read the journal")
 		return "", nil, 0, nil
 	})
@@ -145,7 +145,7 @@ func TestDaemonEventsHumanPagesExposeUsableCursor(t *testing.T) {
 			read := func() (string, []journal.Record, int, error) { return "journal", rows, 0, nil }
 			var out, diagnostics bytes.Buffer
 			args := []string{"--run", "r", "--limit", "1", "-o", format}
-			if err := runDaemonEventsCommand(args, &out, &diagnostics, time.Now(), read); err != nil {
+			if err := runDaemonEventsCommandArgs(args, &out, &diagnostics, time.Now(), read); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(out.String(), "grant") || strings.Contains(out.String(), "cursor") || !strings.Contains(diagnostics.String(), "--cursor") {
@@ -155,7 +155,7 @@ func TestDaemonEventsHumanPagesExposeUsableCursor(t *testing.T) {
 			args = append(args, "--cursor", fields[len(fields)-1])
 			out.Reset()
 			diagnostics.Reset()
-			if err := runDaemonEventsCommand(args, &out, &diagnostics, time.Now(), read); err != nil {
+			if err := runDaemonEventsCommandArgs(args, &out, &diagnostics, time.Now(), read); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(out.String(), "queued") || diagnostics.Len() != 0 {
@@ -176,7 +176,7 @@ func TestDaemonEventsCursorKeepsSinceCutoffAndKinds(t *testing.T) {
 	read := func() (string, []journal.Record, int, error) { return "journal", records, 0, nil }
 	var out, diagnostics bytes.Buffer
 	args := []string{"--run", "r", "--kind", "queued,grant", "--since", "1d", "--incarnation", "7", "--limit", "1", "-o", "json"}
-	if err := runDaemonEventsCommand(args, &out, &diagnostics, now, read); err != nil {
+	if err := runDaemonEventsCommandArgs(args, &out, &diagnostics, now, read); err != nil {
 		t.Fatal(err)
 	}
 	first := decodeDaemonEventPage(t, out.String())
@@ -185,7 +185,7 @@ func TestDaemonEventsCursorKeepsSinceCutoffAndKinds(t *testing.T) {
 	}
 	args = []string{"--run", "r", "--kind", "grant", "--kind", "queued,grant", "--since", "24h", "--incarnation", "7", "--limit", "2", "--cursor", first.Cursor, "-o", "json"}
 	out.Reset()
-	if err := runDaemonEventsCommand(args, &out, &diagnostics, now.Add(24*time.Hour), read); err != nil {
+	if err := runDaemonEventsCommandArgs(args, &out, &diagnostics, now.Add(24*time.Hour), read); err != nil {
 		t.Fatal(err)
 	}
 	second := decodeDaemonEventPage(t, out.String())
@@ -204,7 +204,7 @@ func TestDaemonEventsCursorRefusesChangedUnreadHistoryAndSelection(t *testing.T)
 			read := func() (string, []journal.Record, int, error) { return dir, records, 0, nil }
 			var out, diagnostics bytes.Buffer
 			args := []string{"--run", "r", "--limit", "1", "-o", "json"}
-			if err := runDaemonEventsCommand(args, &out, &diagnostics, now, read); err != nil {
+			if err := runDaemonEventsCommandArgs(args, &out, &diagnostics, now, read); err != nil {
 				t.Fatal(err)
 			}
 			first := decodeDaemonEventPage(t, out.String())
@@ -230,7 +230,7 @@ func TestDaemonEventsCursorRefusesChangedUnreadHistoryAndSelection(t *testing.T)
 				args = append(args, "--since", "1h")
 			}
 			out.Reset()
-			err := runDaemonEventsCommand(args, &out, &diagnostics, now, read)
+			err := runDaemonEventsCommandArgs(args, &out, &diagnostics, now, read)
 			if err == nil || out.Len() != 0 {
 				t.Fatalf("changed continuation succeeded: %q, %v", out.String(), err)
 			}
@@ -274,7 +274,7 @@ func TestDaemonEventsPropagatesReadAndWriteFailures(t *testing.T) {
 			case "metadata":
 				records, output = nil, daemonEventsBrokenWriter{failed}
 			}
-			err := runDaemonEventsCommand(args, output, notes, time.Now(), func() (string, []journal.Record, int, error) {
+			err := runDaemonEventsCommandArgs(args, output, notes, time.Now(), func() (string, []journal.Record, int, error) {
 				if mode == "read" {
 					return "", nil, 0, failed
 				}

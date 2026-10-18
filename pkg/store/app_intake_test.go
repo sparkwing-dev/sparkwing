@@ -23,8 +23,8 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 	}
 	in := GitHubAppAdmission{Installation: installation, Event: "push", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,
-		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/app"}, Ref: "refs/heads/main", SHA: "commit", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: "refs/heads/main", SHA: "commit", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}},
-		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
+		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/app"}, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}},
+		Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
 	}}
 	if automatic {
 		if err := tenant.PutAuthorizedGitHubAutomation(t.Context(), auth, GitHubAppAutomation{RepositoryID: 701, Repository: "acme/app", InstallationID: 7}); err != nil {

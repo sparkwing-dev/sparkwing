@@ -95,7 +95,9 @@ func TestRunnerListingCommandUsesSelectedProfile(t *testing.T) {
 		return 200, `{"runners":[{"name":"desktop","class":"self_hosted","location":"local","labels":["gpu"],"reserved_pools":["prod"],"repos":[],"last_seen":"","status":"idle","active_jobs":[],"max_concurrent":2,"metered":false,"capacity":{"cores":6.5,"memory_bytes":7516192768}}]}`
 	})
 	var result error
-	out := captureStdout(t, func() { result = dispatchCommand([]string{"runners", "list", "--profile", "prod", "-q", "-o", "json"}) })
+	out := captureStdout(t, func() {
+		result = dispatchCommandArgs([]string{"runners", "list", "--profile", "prod", "-q", "-o", "json"})
+	})
 	if result != nil || calls != 1 || out != "{\"name\":\"desktop\"}\n" {
 		t.Fatalf("runner command: %q %v calls=%d", out, result, calls)
 	}

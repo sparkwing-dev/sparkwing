@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecWindows|ExecError_|NpmCache|DefaultNpmCache|ResolveNpmCache|PublishRunHandle|ProbeQueueReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|QueryReportsNoDaemonForFreshWindowsHome)`
+const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecWindows|ExecError_|NpmCache|DefaultNpmCache|ResolveNpmCache|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|QueryReportsNoDaemonForFreshWindowsHome)`
 
 const windowsVerifyTemplateTests = `^TestTemplateVerify(CLIPath|Windows)`
 

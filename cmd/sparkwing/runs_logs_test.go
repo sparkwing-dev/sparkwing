@@ -99,7 +99,7 @@ func TestRunLogsRejectInvalidUsageBeforeConnecting(t *testing.T) {
 	for _, args := range [][]string{
 		{}, {"--run", "r1", "--pipeline", "build"}, {"--run", "r1", "--tail", "0", "--head", "0"}, {"--run", "r1", "--tail", "-1"}, {"--run", "r1", "--lines", "3:2"}, {"--grep", "fatal", "--follow"}, {"--grep", "fatal", "--max-matches", "-1"},
 	} {
-		if err := runRunsLogs(t.Context(), "logs", args); exitCodeFor(err) != 2 {
+		if err := runRunsLogsArgs(t.Context(), "logs", args); exitCodeFor(err) != 2 {
 			t.Fatalf("args=%v err=%v exit=%d", args, err, exitCodeFor(err))
 		}
 	}

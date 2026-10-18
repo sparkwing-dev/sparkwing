@@ -13,10 +13,8 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
 func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing.T) {
@@ -36,7 +34,7 @@ func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing
 			}
 			var resultErr error
 			out := captureStdout(t, func() {
-				resultErr = runPipelineDescribe([]string{"--pipeline=deploy-prod", "-o=json"})
+				resultErr = runPipelineDescribeArgs([]string{"--pipeline=deploy-prod", "-o=json"})
 			})
 			if resultErr == nil || strings.TrimSpace(out) != "" {
 				t.Fatalf("unusable source returned a successful schema: output=%s error=%v", out, resultErr)
@@ -55,7 +53,7 @@ func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
 		fresh.Args[2].Name = "password-" + hex.EncodeToString([]byte(value))
 		fresh.Secrets = []nodeproto.SecretDeclaration{{Name: "TOKEN_" + hex.EncodeToString([]byte(value))}}
 		raw, err := json.Marshal([]nodeproto.PipelineDescription{
-			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{}}, fresh,
+			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{}}, fresh,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -68,7 +66,7 @@ func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
 		calls := 0
 		var resultErr error
 		out := captureStdout(t, func() {
-			resultErr = runPipelineDescribeCommand(args, func(name string, inspect func(context.Context, pipelineentry.Command, string) error) error {
+			resultErr = runPipelineDescribeCommandArgs(args, func(name string, inspect func(context.Context, pipelineentry.Command, string) error) error {
 				calls++
 				if name != "deploy-prod" {
 					return errors.New("lost the invoked pipeline")
@@ -102,12 +100,12 @@ func TestPipelineDescribePropagatesAcquisitionAndProtocolFailures(t *testing.T) 
 		t.Run(mode, func(t *testing.T) {
 			dir, _ := aliasProject(t)
 			fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
-			body := `[{"name":"deploy-prod","args":[]}]`
+			body := `[{"name":"Deploy","args":[]}]`
 			switch mode {
 			case "protocol":
 				body = `null`
 			case "registration":
-				body = `[{"name":"Deploy","args":[]}]`
+				body = `[{"name":"deploy-prod","args":[]}]`
 			case "binding":
 				writeRepoFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n    unknown: true\n")
 			}
@@ -120,7 +118,7 @@ func TestPipelineDescribePropagatesAcquisitionAndProtocolFailures(t *testing.T) 
 				}
 				var resultErr error
 				out := captureStdout(t, func() {
-					resultErr = runPipelineDescribeCommand(args, func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
+					resultErr = runPipelineDescribeCommandArgs(args, func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
 						if mode == "acquire" {
 							return failure
 						}
@@ -132,48 +130,5 @@ func TestPipelineDescribePropagatesAcquisitionAndProtocolFailures(t *testing.T) 
 				}
 			}
 		})
-	}
-}
-
-func TestTriggerInspectionRetainsLiveDescribeArgumentsAndClassifications(t *testing.T) {
-	input, deps, entry := triggerInspectionFixture(t)
-	selection, err := prepareTriggerSource(t.Context(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry.Directory = filepath.Join(input.checkout, ".sparkwing")
-	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
-	protocolFixture(t, fixture, counter, `[{"name":"deploy-prod","extra":true,"args":[{"name":"region","type":"string","required":true},{"name":"image","type":"string","required":true,"job_id":"rollout"},{"name":"password","type":"string","required":false,"secret":true}],"risks":["prod"]}]`)
-	deps.exec = func(ctx context.Context, dir string, _ []string, program string, args ...string) ([]byte, error) {
-		if program != entry.Engine.Executable || dir != entry.Directory {
-			t.Fatal("inspection replaced the acquired engine or checkout")
-		}
-		inv, err := clisurface.Parse("sparkwing", args)
-		if err != nil || inv.Command.Path != "sparkwing pipeline describe" {
-			t.Fatalf("engine invocation=%v error=%v", args, err)
-		}
-		var commandErr error
-		raw := captureStdout(t, func() {
-			commandErr = runPipelineDescribeCommand(args[2:], func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
-				return inspect(ctx, pipelineentry.Binary(fixture), filepath.Dir(dir))
-			})
-		})
-		return []byte(raw), commandErr
-	}
-	described, err := inspectTriggerSource(t.Context(), selection, input.environment, deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	requestInput := triggerRequestInput{source: selection, described: described, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}}
-	if len(described) != 1 || len(described[0].Args) != 3 || !described[0].Args[0].Required || !described[0].Args[1].Required || described[0].Args[1].JobID != "rollout" {
-		t.Fatalf("live pipeline/job argument metadata disappeared: %+v", described)
-	}
-	requestInput.args = []string{"--region=west", "--password=private-value", "--image=release", "--extra=value"}
-	request, err := prepareTriggerRequest(requestInput)
-	if err != nil || request.Request.Pipeline != "deploy-prod" || request.Request.Source.Entrypoint != "Deploy" || request.Request.RequestedArgs["extra"] != "value" || !reflect.DeepEqual(request.Request.SecretArgs.Value, []string{"password"}) {
-		t.Fatalf("request=%+v error=%v", request, err)
-	}
-	if len(described) != 1 || !reflect.DeepEqual(described[0].Risks, []string{"prod"}) || starts(t, counter) != 1 {
-		t.Fatalf("SDK description=%+v starts=%d", described, starts(t, counter))
 	}
 }

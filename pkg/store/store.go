@@ -90,6 +90,7 @@ const RetrySourceManual = "manual"
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
+	runEnvCipher     SessionKeyCipher
 	localSecrets     sync.Map
 	resultRecords    nodeResultRecords
 	materializations materializationRecords

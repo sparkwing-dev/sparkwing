@@ -1,17 +1,17 @@
 package main
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
@@ -43,9 +43,17 @@ func listCheckouts(outputFormat string, withPipelines bool) error {
 		return ndjson.Write(os.Stdout, rows)
 	}
 
+	if outputFormat == "plain" {
+		for _, row := range rows {
+			if _, err := fmt.Fprintln(os.Stdout, row.Path); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if len(rows) == 0 {
 		fmt.Println("no repos registered")
-		fmt.Println("(register with `sparkwing repos add <path>` or just run `sparkwing run` in a .sparkwing/-bearing repo)")
+		fmt.Println("(register with `sparkwing repos add --checkout <path>` or just run `sparkwing run` in a .sparkwing/-bearing repo)")
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -67,70 +75,64 @@ func listCheckouts(outputFormat string, withPipelines bool) error {
 	return tw.Flush()
 }
 
-func runXrepoAdd(args []string) error {
-	fs := flag.NewFlagSet(cmdReposAdd.Path, flag.ContinueOnError)
-	if err := parseAndCheck(cmdReposAdd, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	target := "."
-	if fs.NArg() > 0 {
-		target = fs.Arg(0)
-	}
-	abs, err := filepath.Abs(target)
-	if err != nil {
-		return fmt.Errorf("absolute %s: %w", target, err)
-	}
-	if err := repos.Add(abs); err != nil {
-		return err
-	}
-	fmt.Printf("registered: %s\n", abs)
-	return nil
-}
-
-func runXrepoRemove(args []string) error {
-	fs := flag.NewFlagSet(cmdReposRemove.Path, flag.ContinueOnError)
-	if err := parseAndCheck(cmdReposRemove, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() == 0 {
-		return errors.New("usage: sparkwing repos remove <path-or-basename>")
-	}
-	match := fs.Arg(0)
-	n, err := repos.Remove(match)
+func runXrepoAdd(inv clisurface.Invocation) error {
+	target, err := invocationCheckout(inv)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("removed %d %s matching %q\n", n, entryWord(n), match)
-	return nil
-}
-
-func runXrepoPrune(args []string) error {
-	fs := flag.NewFlagSet(cmdReposPrune.Path, flag.ContinueOnError)
-	if err := parseAndCheck(cmdReposPrune, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
+	if err := repos.Add(target); err != nil {
 		return err
 	}
+	return writeRepositoryMutation(inv, "registered", target, 1)
+}
+
+func runXrepoRemove(inv clisurface.Invocation) error {
+	target, err := invocationCheckout(inv)
+	if err != nil {
+		return err
+	}
+	count, err := repos.Remove(target)
+	if err != nil {
+		return err
+	}
+	return writeRepositoryMutation(inv, "removed", target, count)
+}
+
+func runXrepoPrune(inv clisurface.Invocation) error {
 	dropped, err := repos.Prune()
 	if err != nil {
 		return err
 	}
-	if len(dropped) == 0 {
-		fmt.Println("registry is clean (no stale entries)")
-		return nil
+	if inv.Output(color.IsInteractiveStdout()) == "json" {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Paths []string `json:"paths"`
+		}{dropped})
 	}
-	fmt.Printf("pruned %d stale %s:\n", len(dropped), entryWord(len(dropped)))
-	for _, p := range dropped {
-		fmt.Printf("  %s\n", p)
+	for _, path := range dropped {
+		if _, err := fmt.Fprintln(os.Stdout, path); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func invocationCheckout(inv clisurface.Invocation) (string, error) {
+	if !inv.Has("checkout") {
+		return "", &clisurface.UsageError{Path: inv.Command.Path, Message: "--checkout is required"}
+	}
+	return os.Getwd()
+}
+
+func writeRepositoryMutation(inv clisurface.Invocation, action, path string, count int) error {
+	if inv.Output(color.IsInteractiveStdout()) == "json" {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Action string `json:"action"`
+			Path   string `json:"path"`
+			Count  int    `json:"count"`
+		}{action, path, count})
+	}
+	_, err := fmt.Fprintln(os.Stdout, path)
+	return err
 }
 
 func entryWord(n int) string {

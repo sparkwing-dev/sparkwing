@@ -3,6 +3,7 @@ package controller_test
 import (
 	"crypto/sha256"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -57,6 +58,9 @@ func TestRunSourceCredential_MintsTheApprovedRepositoriesByID(t *testing.T) {
 	var sc controller.SourceCredentialResponse
 	if code := f.call("POST", "/api/v1/runs/run-renamed/source-credential", "Bearer "+tok, nil, &sc); code != http.StatusOK {
 		t.Fatalf("source credential = %d", code)
+	}
+	if !reflect.DeepEqual(sc.ExtraRepositories, []string{"acme/plans"}) {
+		t.Fatalf("approved source repositories lost: %v", sc.ExtraRepositories)
 	}
 	if !f.app.TokenCovers(sc.Secret, "acme/plans-archive") || f.app.TokenCovers(sc.Secret, "acme/plans") {
 		t.Fatal("the token followed the name to another repository")

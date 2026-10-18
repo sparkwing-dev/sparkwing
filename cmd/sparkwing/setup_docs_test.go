@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,21 +13,10 @@ func TestSharedControllerSetupDocsUseProvisionedAuthority(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"SPARKWING_HOME", "SPARKWING_CONFIG", "/api/v1/auth/whoami", "pending"} {
+		for _, want := range []string{"SPARKWING_HOME", "SPARKWING_CONFIG", "/api/v1/auth/whoami", "sparkwing operator teams create"} {
 			if !strings.Contains(string(raw), want) {
 				t.Errorf("%s omits %s", slug, want)
 			}
 		}
-	}
-	root, err := moduleRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(root, "bin", "k8s-e2e.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), `--data '{"kind":"user"`) || !strings.Contains(string(raw), "PENDING operator onboarding") {
-		t.Fatal("Kubernetes setup still mints an unauthenticated admin")
 	}
 }

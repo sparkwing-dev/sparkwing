@@ -16,8 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-func runOverflow(ctx context.Context, args []string) error {
-	return runOverflowCommand(ctx, args, os.Stdout, func(ctx context.Context, profile string) (controllerwire.OverflowManager, func(), error) {
+func runOverflow(ctx context.Context, inv clisurface.Invocation) error {
+	return runOverflowCommand(ctx, inv, os.Stdout, func(ctx context.Context, profile string) (controllerwire.OverflowManager, func(), error) {
 		options, closeTransport, err := controllerOptions(ctx, profile)
 		if err != nil {
 			return nil, nil, err
@@ -31,11 +31,7 @@ func runOverflow(ctx context.Context, args []string) error {
 	})
 }
 
-func runOverflowCommand(ctx context.Context, args []string, out io.Writer, connect func(context.Context, string) (controllerwire.OverflowManager, func(), error)) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"overflow"}, args...))
-	if err != nil {
-		return err
-	}
+func runOverflowCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, connect func(context.Context, string) (controllerwire.OverflowManager, func(), error)) error {
 	if inv.Help() || inv.Command.Path == "sparkwing overflow" {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, inv.Output(color.IsInteractiveStdout()))
 	}

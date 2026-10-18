@@ -12,15 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-func runTeamSettings(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"team"}, args...))
-	if err != nil {
-		return err
-	}
+func runTeamSettings(ctx context.Context, inv clisurface.Invocation) error {
 	output := inv.Output(color.IsInteractiveStdout())
-	if inv.Help() || inv.Command.Path == "sparkwing team" || inv.Command.Path == "sparkwing team settings" {
-		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)
-	}
 	options, closeTransport, err := controllerOptions(ctx, inv.Value("profile"))
 	if err != nil {
 		return err

@@ -22,11 +22,7 @@ type debugObservation struct {
 	Pause *controllerwire.DebugPause `json:"pause"`
 }
 
-func runDebugRead(ctx context.Context, verb string, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"debug", verb}, args...))
-	if err != nil {
-		return err
-	}
+func runDebugRead(ctx context.Context, inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}

@@ -58,7 +58,7 @@ func TestRetryCommandSelectsModeAndControllerBeforeIntake(t *testing.T) {
 					args = append(args, "--profile", profile)
 				}
 				var out bytes.Buffer
-				if err := runRunsRetryCommand(t.Context(), args, strings.NewReader("run-a\nrun-b\n"), &out, resolve); err != nil {
+				if err := runRunsRetryCommandArgs(t.Context(), args, strings.NewReader("run-a\nrun-b\n"), &out, resolve); err != nil {
 					t.Fatal(err)
 				}
 				if !reflect.DeepEqual(calls, []string{"run-a", "run-b"}) || keys[0] == keys[1] || !closed || out.String() != "new-run-a\nnew-run-b\n" {
@@ -84,7 +84,7 @@ func TestRetryCommandRefusesInvalidSelectionBeforeConnection(t *testing.T) {
 			t.Fatal("invalid invocation connected")
 			return retryConnection{}, nil
 		}
-		err := runRunsRetryCommand(t.Context(), args, strings.NewReader("\n"), &out, resolve)
+		err := runRunsRetryCommandArgs(t.Context(), args, strings.NewReader("\n"), &out, resolve)
 		if exitCodeFor(err) != 2 || out.Len() != 0 {
 			t.Fatalf("args=%v output=%q err=%v", args, out.String(), err)
 		}
@@ -97,12 +97,12 @@ func TestRetryCommandHelpAndCancellationHaveNoSideEffects(t *testing.T) {
 		return retryConnection{}, nil
 	}
 	var out bytes.Buffer
-	if err := runRunsRetryCommand(t.Context(), []string{"--help"}, nil, &out, resolve); err != nil || out.Len() == 0 {
+	if err := runRunsRetryCommandArgs(t.Context(), []string{"--help"}, nil, &out, resolve); err != nil || out.Len() == 0 {
 		t.Fatalf("help: %v %q", err, out.String())
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := runRunsRetryCommand(ctx, []string{"--run", "a", "--failed"}, nil, io.Discard, resolve); !errors.Is(err, context.Canceled) {
+	if err := runRunsRetryCommandArgs(ctx, []string{"--run", "a", "--failed"}, nil, io.Discard, resolve); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled: %v", err)
 	}
 }
@@ -113,7 +113,7 @@ func TestRetryConnectionFailureDoesNotSubmit(t *testing.T) {
 		return retryConnection{}, refusal
 	}
 	var out bytes.Buffer
-	err := runRunsRetryCommand(t.Context(), []string{"--run", "source", "--failed"}, nil, &out, resolve)
+	err := runRunsRetryCommandArgs(t.Context(), []string{"--run", "source", "--failed"}, nil, &out, resolve)
 	if !errors.Is(err, refusal) || out.Len() != 0 {
 		t.Fatalf("output=%q err=%v", out.String(), err)
 	}

@@ -13,7 +13,7 @@ import (
 func TestDocsGuideRejectsIgnoredSourceFlags(t *testing.T) {
 	for _, extra := range [][]string{{"--web"}, {"--version", "v0.1.0"}, {"--no-cache"}} {
 		var err error
-		captureStdout(t, func() { err = runDocsRead(append([]string{"--guide", "authoring"}, extra...)) })
+		captureStdout(t, func() { err = runDocsReadArgs(append([]string{"--guide", "authoring"}, extra...)) })
 		if err == nil || !strings.Contains(err.Error(), "--guide") {
 			t.Fatalf("%v error=%v", extra, err)
 		}
@@ -27,7 +27,7 @@ func TestDocsMigrationsValidatesWebBoundsBeforeFetching(t *testing.T) {
 	docs.SetTestBaseURL(t, srv.URL)
 	for _, args := range [][]string{{"--from", "bogus", "--to", "v1.2.3"}, {"--from", "v1.0.0", "--to", "bogus"}} {
 		var err error
-		captureStdout(t, func() { err = runDocsMigrations(append(args, "--web", "--no-cache")) })
+		captureStdout(t, func() { err = runDocsMigrationsArgs(append(args, "--web", "--no-cache")) })
 		if err == nil || !strings.Contains(err.Error(), "version") {
 			t.Errorf("%v error=%v", args, err)
 		}

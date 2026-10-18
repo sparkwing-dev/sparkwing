@@ -95,7 +95,7 @@ func TestInfoReportsInvalidPipelineConfig(t *testing.T) {
 	for _, args := range [][]string{{"-o", "json"}, {"-o", "pretty"}, {"--for-agent", "-o", "plain"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			out := captureStdout(t, func() {
-				if err := runInfo(args); err != nil {
+				if err := runInfoArgs(args); err != nil {
 					t.Fatal(err)
 				}
 			})

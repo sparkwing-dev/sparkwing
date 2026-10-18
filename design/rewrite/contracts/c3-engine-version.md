@@ -75,6 +75,11 @@ warm reports. It does not authorize execution after the lease is released.
 Real Go fixtures cover missing checksums, overlays, undeclared SDK replacement refusal and
 execution after cache pruning. Native platform evidence remains separate.
 
+`SDKInstallRequest.NoBincache` selects `CompileUncachedPipeline` and returns an
+owned executable with debug information and no `CachedExecutable`.
+`HashAllFiles` passes to `bincache.CompileOptions` for that installation alone.
+The sealed source carries both options through inspection, hosting and retries.
+
 On a cache miss, dependency preparation runs `go list -deps` for the pipeline
 package, using the same workspace selection as compilation. Covering workspaces remain active.
 Unrelated workspaces are disabled for preparation. Outside a covering workspace,

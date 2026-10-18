@@ -47,7 +47,7 @@ func TestProfileCacheConstructionAfterLocalIntake(t *testing.T) {
 	runSnapshotGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	request := controllerwire.CreateRunRequest{IdempotencyKey: "profile-cache", Request: runspec.Request{
 		Version: 1, Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
-		Source: runspec.Source{Location: runspec.SourceLocation{LocalCheckout: repo, PipelineDir: ".sparkwing"}},
+		Source: runspec.Source{Ref: strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD")), Location: runspec.SourceLocation{LocalCheckout: repo, PipelineDir: ".sparkwing"}},
 		Git:    runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, SHA: strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD")), DefaultBranch: runspec.Optional[string]{Set: true, Value: "main"}},
 	}}
 	admitted, err := engine.CreateRun(t.Context(), request)

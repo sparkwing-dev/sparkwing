@@ -1,5 +1,40 @@
 # C4: surface and configuration contracts
 
+## Submitted environment and standalone CI
+
+`procenv.Submit` captures only present user names matching the machine's
+`run.submit_env_allow`; credentials and engine-owned names are dropped. Values
+of at least 12 bytes and embedded proxy credentials are registered before
+inspection or subprocess startup. Empty values and native bytes are retained.
+`runspec.VerifyEnvironment` binds byte-preserving private values to EnvSnapshot's
+sorted names and digest. `procenv.WithSubmitted` supplies the verified values to
+the remote base for installation, planning, attempts and evaluation. Step tools
+and cleanup inherit the attempt environment. Submitted values override ambient
+runner values of the same name.
+
+`--sw-allow-unadmitted` selects decision 91's exclusive in-process local
+controller, rather than the shared machine admission service. The same runtime
+owns the home, store, queue, admission, concurrency and workers. It keeps the
+election lock and startup reconciliation and joins shutdown on command return.
+It refuses detached execution and Cloud routing. A home already owned by a
+controller is refused without opening its store or stopping that owner. CI
+should provide a private SPARKWING_HOME. No resource or concurrency policy is
+silently bypassed.
+
+## Retained run build policy
+
+Trigger and Cloud overflow inspection use the acquired SDK entry through the
+shared SDK planner. There is no second CLI preparation with default policy.
+`Source.NoBincache` and `HashAllFiles` govern that installation, hosting and retries.
+Local and Cloud relative priority use the same queue resolver immediately before
+intake. Overflow preparation resolves its rank after uploading the source bundle.
+
+## Run target selection
+
+`run --target` is removed. Pipeline names select deployment shapes, as recorded
+in the v0.6.0 migration. The registry, help and current run documentation carry
+no target flag. Author arguments named target remain opaque after `--`.
+
 ## Overflow account controls
 
 `sparkwing overflow show --profile NAME` reads the authenticated account's
@@ -44,7 +79,12 @@ enrollment preserves existing machine authority and owner-only claim scope.
   Execution and inactivity budgets remain distinct.
 - `procenv.Runtime.GateIndex` is an optional string path, projected only from
   a verified local snapshot. The path remains in private snapshot storage,
-  never a wire field; remote ambient input cannot bind a hook index.
+  never a wire field; remote ambient input cannot bind a hook index. CLI intake
+  copies `--sw-index` (or the hook index) into private environment storage after
+  Git normalizes it to a self-contained index. Its content hash names the file.
+  Each snapshot load checks its location, ownership, permissions and bytes before
+  process startup. Retries retain the index and environment identity. Cloud routing
+  refuses `--sw-index` because its path is local. Source inputs remain unchanged.
 - Network proxy settings are the existing passed-and-masked exception. Register
   credential components for URL and scheme-less proxy forms, including GOPROXY and
   PIP_INDEX_URL. A mask of only the whole string is insufficient when tools print
@@ -162,6 +202,8 @@ spark, source, version and project-file path. Plain receipts emit the spark name
 Repository updates select the current checkout unless `--all-repos` is set.
 Apply is the default; `--dry-run` previews, including read-only SDK pin inspection
 with `--in-place`. Fleet application requires `--yes` before reading the fleet.
+Every baseline plan must succeed before a repository SDK update can bump or
+commit. The subprocess adapter uses `pipeline plan --pipeline NAME`.
 
 | Concern | Authoritative source |
 | --- | --- |
@@ -271,6 +313,8 @@ three operator sources. File, key and line survive the conversion. A captured
 winner keeps its original origin when another host consumes the sealed request.
 
 `RunnerSelection` chooses any, name, label or here for one run.
+The CLI retains `pipeline trigger --runner here --reason TEXT` as
+`Request.Reason`, which participates in intake hashing and survives replay and retry.
 `RunnerPreferences` resolves the machine's runner configuration at startup.
 Dry-run, no-memo, risk permissions, pause controls, debug, workers, output and
 publication/cache profiles all have request fields. Startup credentials and
@@ -1173,6 +1217,45 @@ Automation discovery reads the current default branch's declarations but cannot
 replace the default branch reported by the signed event. A later default-branch
 change does not remove the original push's default-branch trust.
 
+## Invocation and detached trace integration
+
+Local binary preparation retains `--sw-no-bincache` and
+`--sw-hash-all-files` in `runspec.Source.NoBincache` and `HashAllFiles`.
+Initial inspection and every retained-source acquisition use the same policy,
+including detached hosting and retries. The source adapter passes both fields
+to the verified selected engine's `SDKInstallRequest`. Uncached Go builds keep
+debug information and publish no binary-cache entry. Hash-all is scoped to one
+materialization and includes ignored module and local replacement inputs.
+
+Local relative priority resolves against the controller's machine admission
+queue immediately before intake. `front` ranks above the current highest waiter
+and `back` below the lowest. An empty queue gives +1 or -1. The resulting integer
+keeps flag provenance in the request and survives sealing and retry. A rank
+outside the integer range fails before submission.
+
+All Sparkwing handlers consume the original parsed `Invocation`. Execution
+does not reconstruct arguments or declare another flag parser. Engine handoff
+replays the original arguments from the invoking directory, so a relative
+`--checkout` is applied once by the selected engine. Pipeline arguments retain
+their exact spelling and separators.
+
+Repository add, remove and info require the global `--checkout`. Mutations
+select that absolute checkout, with no positional or basename fallback. Their
+receipts honor the selected output. Version holds, unreadable-state recovery
+and sparks lint/update also emit JSON when piped. Required-flag diagnostics
+retain the registry's explanation when present.
+
+Hook install, uninstall and status, and pipeline scaffolding consume the parsed
+`clisurface.Invocation`. Hook `--all-repos` selects the registered repositories.
+The removed `--fleet` and hooks `--all` spellings are refused. Hook mutations
+report their resulting status in the selected output format. Their progress and
+warnings go to stderr. Pipeline scaffolding emits a JSON pipeline/path receipt,
+a plain pipeline name, or pretty guidance after dependency resolution succeeds.
+
+`--sw-request-id` is retained for detached runs. It becomes optional
+`runspec.Request.RequestID` and survives intake, sealing and retry. The detached
+JSON receipt includes `request_id` when supplied. It is trace metadata. Only
+`--sw-idempotency-key` deduplicates submissions.
 
 ## EKS launcher verification amendment (2026-10-17)
 
@@ -1201,6 +1284,43 @@ seals this intent before reporting it. False is omitted, preserving canonical
 encodings for requests without inherited repository intent. Source authorization
 continues through the current intake policy.
 
+## Pipeline and source selection integration
+
+SDK describe selection, CLI schema binding, initial planning and attempt replans
+select the configured SDK entrypoint. Scaffolds register that entrypoint.
+The invoked alias belongs in run context
+and presentation. `nodeproto.DescribeDoc.Pipeline` owns metadata selection.
+
+The dispatcher, local execution and help resolve `--sw-ref`, `--sw-pipeline-ref` and a configured
+source pin through one selection boundary before inspection or building. The
+execution checkout supplies project configuration. Its exact SHA is sealed in
+`Git.SHA`. Local source selection seals the pipeline code SHA in `Source.Ref`.
+`Source.RequestedRef` preserves the unresolved pipeline ref intent; `Source.Ref`
+contains only the resolved code commit. `source.ResolveRevisions` resolves both
+execution and code identities before intake for runs, triggers, burst and local
+schedules. Inspection and hosting use `source.ForRequest` and shared acquisition.
+`Source.WorkingTree` retains local code from the working tree when no committed
+source was selected.
+`Source.CommittedCheckout` records explicit committed execution, including when
+that revision equals HEAD. Acquisition restores the execution and code checkouts
+separately. SDK installation uses the code checkout, while author code runs in
+the execution checkout. Retry carries these selections unchanged.
+
+Environment provenance is sealed independently of invocation origin. Children
+inherit both the parent's snapshot identity and its storage source. Local
+schedule registration marks captured provenance before saving its request.
+
+Child requests inherit only acquisition, Git, environment, execution location
+and run options. Their entrypoint and secret argument declarations are selected
+for the child pipeline by the shared checkout planner; parent declarations are
+not copied. Environment release uses the live execution unit's own run, holder,
+generation, prefix and lease. Evaluation also checks source and controller
+expansion fences. Reading these environment values does not require or add SourceRead.
+
+The documentation checker checks all current migration instructions. Only
+explicit Before blocks, Before table columns and inline Before references are
+historical. Command names in prose are references; complete shell invocations
+and inline invocations with arguments are parsed against the current grammar.
 
 ## Launcher review reconciliation (2026-10-17, W8 integration)
 

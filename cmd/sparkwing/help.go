@@ -6,12 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"text/tabwriter"
-	"time"
-
-	flag "github.com/spf13/pflag"
 )
 
 type FlagType string
@@ -20,7 +16,6 @@ const (
 	FlagString      FlagType = "string"
 	FlagBool        FlagType = "bool"
 	FlagInt         FlagType = "int"
-	FlagInt64       FlagType = "int64"
 	FlagDuration    FlagType = "duration"
 	FlagStringSlice FlagType = "stringSlice"
 )
@@ -33,15 +28,13 @@ type FlagSpec struct {
 	Group    string
 
 	Required      bool
-	RequiredHint  string
 	RequiredWhen  string
 	RequiresFlags []string
 	ConflictsWith []string
 
 	Default string
 
-	Type         FlagType
-	DefaultValue any
+	Type FlagType
 
 	Hidden bool
 
@@ -98,18 +91,6 @@ var helpFlag = FlagSpec{
 
 var errHelpRequested = errors.New("help requested")
 
-func wantsHelp(args []string) bool {
-	for _, a := range args {
-		if a == "--" {
-			return false
-		}
-		if a == "--help" || a == "-h" {
-			return true
-		}
-	}
-	return false
-}
-
 func (c Command) declaredFlags() map[string]bool {
 	if len(c.Flags) == 0 {
 		return nil
@@ -119,83 +100,6 @@ func (c Command) declaredFlags() map[string]bool {
 		out[f.Name] = true
 	}
 	return out
-}
-
-func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
-	fs.SetOutput(io.Discard)
-	hasOutput := fs.Lookup("output") != nil
-	if !hasOutput {
-		fs.StringP("output", "o", "", "pretty | json | plain")
-	}
-	if fs.Lookup("help") == nil {
-		fs.BoolP("help", "h", false, helpFlag.Desc)
-	}
-	if err := fs.Parse(args); err != nil {
-		if strings.Contains(err.Error(), "needs an argument") && (strings.Contains(err.Error(), "output") || strings.Contains(err.Error(), "-o")) {
-			return fmt.Errorf("%s: --output requires pretty|json|plain", cmd.Path)
-		}
-		return fmt.Errorf("%s: %w", cmd.Path, err)
-	}
-	requested := ""
-	f := fs.Lookup("output")
-	if fs.Changed("output") {
-		requested = f.Value.String()
-		if requested == "" {
-			return fmt.Errorf("%s: --output requires pretty|json|plain", cmd.Path)
-		}
-	}
-	mode, err := resolveOutputFormat(requested, cmd.Path)
-	if err != nil {
-		return err
-	}
-	if err := f.Value.Set(mode); err != nil {
-		return err
-	}
-	if help, err := fs.GetBool("help"); err == nil && help {
-		if err := writeCommandHelp(cmd, os.Stdout, mode); err != nil {
-			return err
-		}
-		return errHelpRequested
-	}
-	if !hasOutput && fs.Changed("output") {
-		return fmt.Errorf("%s: --output is not supported", cmd.Path)
-	}
-	return validateFlagDeps(cmd, fs)
-}
-
-func validateFlagDeps(cmd Command, fs *flag.FlagSet) error {
-	for _, spec := range cmd.Flags {
-		if fs.Lookup(spec.Name) == nil {
-			continue
-		}
-		changed := fs.Changed(spec.Name)
-		if spec.Required && !changed {
-			if spec.RequiredHint != "" {
-				return fmt.Errorf("%s: --%s is required\n  %s", cmd.Path, spec.Name, spec.RequiredHint)
-			}
-			return fmt.Errorf("%s: --%s is required", cmd.Path, spec.Name)
-		}
-		if !changed {
-			continue
-		}
-		for _, req := range spec.RequiresFlags {
-			if fs.Lookup(req) == nil || !fs.Changed(req) {
-				return fmt.Errorf(
-					"%s: --%s was set but --%s is required with it",
-					cmd.Path, spec.Name, req,
-				)
-			}
-		}
-		for _, c := range spec.ConflictsWith {
-			if fs.Lookup(c) != nil && fs.Changed(c) {
-				return fmt.Errorf(
-					"%s: --%s and --%s cannot be used together",
-					cmd.Path, spec.Name, c,
-				)
-			}
-		}
-	}
-	return nil
 }
 
 func PrintHelp(cmd Command, w io.Writer) {
@@ -403,162 +307,6 @@ func hasFlagNamed(flags []FlagSpec, name string) bool {
 		}
 	}
 	return false
-}
-
-type FlagValues map[string]any
-
-func (v FlagValues) String(name string) string {
-	p, ok := v[name].(*string)
-	if !ok {
-		panic(fmt.Sprintf("FlagValues.String: %q not bound as string", name))
-	}
-	return *p
-}
-
-func (v FlagValues) Bool(name string) bool {
-	p, ok := v[name].(*bool)
-	if !ok {
-		panic(fmt.Sprintf("FlagValues.Bool: %q not bound as bool", name))
-	}
-	return *p
-}
-
-func (v FlagValues) Int(name string) int {
-	p, ok := v[name].(*int)
-	if !ok {
-		panic(fmt.Sprintf("FlagValues.Int: %q not bound as int", name))
-	}
-	return *p
-}
-
-func (v FlagValues) Int64(name string) int64 {
-	p, ok := v[name].(*int64)
-	if !ok {
-		panic(fmt.Sprintf("FlagValues.Int64: %q not bound as int64", name))
-	}
-	return *p
-}
-
-func (v FlagValues) Duration(name string) time.Duration {
-	p, ok := v[name].(*time.Duration)
-	if !ok {
-		panic(fmt.Sprintf("FlagValues.Duration: %q not bound as duration", name))
-	}
-	return *p
-}
-
-func (v FlagValues) StringSlice(name string) []string {
-	p, ok := v[name].(*[]string)
-	if !ok {
-		panic(fmt.Sprintf("FlagValues.StringSlice: %q not bound as stringSlice", name))
-	}
-	return *p
-}
-
-func bindFlags(cmd Command, fs *flag.FlagSet) FlagValues {
-	out := FlagValues{}
-	for _, f := range cmd.Flags {
-		if f.Type == "" {
-			continue
-		}
-		switch f.Type {
-		case FlagString:
-			def := defaultAs[string](f, "")
-			if f.Short != "" {
-				out[f.Name] = fs.StringP(f.Name, f.Short, def, f.Desc)
-			} else {
-				out[f.Name] = fs.String(f.Name, def, f.Desc)
-			}
-		case FlagBool:
-			def := defaultAs[bool](f, false)
-			if f.Short != "" {
-				out[f.Name] = fs.BoolP(f.Name, f.Short, def, f.Desc)
-			} else {
-				out[f.Name] = fs.Bool(f.Name, def, f.Desc)
-			}
-		case FlagInt:
-			def := defaultAs[int](f, 0)
-			if f.Short != "" {
-				out[f.Name] = fs.IntP(f.Name, f.Short, def, f.Desc)
-			} else {
-				out[f.Name] = fs.Int(f.Name, def, f.Desc)
-			}
-		case FlagInt64:
-			def := defaultAs[int64](f, 0)
-			if f.Short != "" {
-				out[f.Name] = fs.Int64P(f.Name, f.Short, def, f.Desc)
-			} else {
-				out[f.Name] = fs.Int64(f.Name, def, f.Desc)
-			}
-		case FlagDuration:
-			var def time.Duration
-			switch dv := f.DefaultValue.(type) {
-			case nil:
-			case time.Duration:
-				def = dv
-			case string:
-				d, err := time.ParseDuration(dv)
-				if err != nil {
-					panic(fmt.Sprintf("bindFlags: --%s default %q: %v", f.Name, dv, err))
-				}
-				def = d
-			default:
-				panic(fmt.Sprintf("bindFlags: --%s DefaultValue must be time.Duration or string, got %T", f.Name, f.DefaultValue))
-			}
-			if f.Short != "" {
-				out[f.Name] = fs.DurationP(f.Name, f.Short, def, f.Desc)
-			} else {
-				out[f.Name] = fs.Duration(f.Name, def, f.Desc)
-			}
-		case FlagStringSlice:
-			def := defaultAs[[]string](f, nil)
-			if f.Short != "" {
-				out[f.Name] = fs.StringSliceP(f.Name, f.Short, def, f.Desc)
-			} else {
-				out[f.Name] = fs.StringSlice(f.Name, def, f.Desc)
-			}
-		default:
-			panic(fmt.Sprintf("bindFlags: --%s unknown FlagType %q", f.Name, f.Type))
-		}
-	}
-	return out
-}
-
-func defaultAs[T any](f FlagSpec, fallback T) T {
-	if f.DefaultValue == nil {
-		return fallback
-	}
-	v, ok := f.DefaultValue.(T)
-	if !ok {
-		panic(fmt.Sprintf("bindFlags: --%s DefaultValue type mismatch (got %T)", f.Name, f.DefaultValue))
-	}
-	return v
-}
-
-func handleParentHelp(cmd Command, args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		if err := renderHelp(cmd, args, os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-		return true
-	}
-	return false
-}
-
-func renderHelp(cmd Command, args []string, w io.Writer) error {
-	requested, _, err := requestedOutput(args)
-	if err != nil {
-		return err
-	}
-	mode, err := resolveOutputFormat(requested, cmd.Path)
-	if err != nil {
-		return err
-	}
-	return writeCommandHelp(cmd, w, mode)
 }
 
 func writeCommandHelp(cmd Command, w io.Writer, mode string) error {

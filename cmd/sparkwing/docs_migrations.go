@@ -8,43 +8,25 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
-	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-func runDocsMigrations(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsMigrations.Path, flag.ContinueOnError)
-	from := fs.String("from", "", "exclusive lower bound (default v0.0.0 = every guide up through --to)")
-	to := fs.String("to", "", "inclusive upper bound (default = highest version this CLI knows about)")
-	var output string
-	var wf docsWebFlags
-	fs.StringVarP(&output, "output", "o", "", "pretty | json | plain")
-	registerWebFlags(fs, &wf, true)
-	if err := parseAndCheck(cmdDocsMigrations, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 1 {
-		return fmt.Errorf("docs migrations: unexpected positional %q", fs.Arg(1))
-	}
-	between := fs.Changed("from") || fs.Changed("to")
-	if between && fs.Changed("version") {
-		return errors.New("docs migrations: --version and --from/--to are mutually exclusive")
-	}
-	if fs.NArg() == 1 {
-		if between || wf.version != "" {
-			return fmt.Errorf("docs migrations: unexpected positional %q; --version or --from/--to already pick the guides", fs.Arg(0))
-		}
-		wf.version = fs.Arg(0)
+func runDocsMigrations(inv clisurface.Invocation) error {
+	from, to := inv.Value("from"), inv.Value("to")
+	output := inv.Output(color.IsInteractiveStdout())
+	wf := docsWebFlags{web: inv.Bool("web"), version: inv.Value("version"), noCache: inv.Bool("no-cache")}
+	between := inv.Has("from") || inv.Has("to")
+	if between && inv.Has("version") {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--version and --from/--to are mutually exclusive"}
 	}
 	switch {
 	case between:
-		return docsMigrationsBetween(*from, *to, wf, output)
+		return docsMigrationsBetween(from, to, wf, output)
 	case wf.version != "":
 		return docsMigrationsRead(wf, output)
 	}

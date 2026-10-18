@@ -29,7 +29,7 @@ func TestRepositoryUpdatesApplyToSelectedCheckoutAndPreviewExplicitly(t *testing
 			called := false
 			var commandErr error
 			captureStdout(t, func() {
-				commandErr = runReposUpdateWith(append([]string{"--version", "v1.2.3", "-o=json"}, tc.flags...),
+				commandErr = runReposUpdateWithArgs(append([]string{"--version", "v1.2.3", "-o=json"}, tc.flags...),
 					func(string) ([]repos.Repo, error) { return fleet, nil },
 					func(got []repos.Repo, config repos.UpdateConfig) []repos.Verdict {
 						called = true
@@ -47,7 +47,7 @@ func TestRepositoryUpdatesApplyToSelectedCheckoutAndPreviewExplicitly(t *testing
 }
 
 func TestRepositoryUpdatesRefuseUnconfirmedFleetBeforeReadingIt(t *testing.T) {
-	err := runReposUpdateWith([]string{"--all-repos", "--version", "v1.2.3"},
+	err := runReposUpdateWithArgs([]string{"--all-repos", "--version", "v1.2.3"},
 		func(string) ([]repos.Repo, error) { t.Fatal("read fleet before confirmation"); return nil, nil },
 		func([]repos.Repo, repos.UpdateConfig) []repos.Verdict {
 			t.Fatal("changed unconfirmed fleet")
@@ -71,7 +71,7 @@ func TestRepositoryUpdateSelectionRejectsSiblingPrefixesProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Chdir(checkout)
-		err := runReposUpdateWith([]string{"--version", "v1.2.3"},
+		err := runReposUpdateWithArgs([]string{"--version", "v1.2.3"},
 			func(string) ([]repos.Repo, error) { return []repos.Repo{{Name: "sibling", Primary: primary}}, nil },
 			func([]repos.Repo, repos.UpdateConfig) []repos.Verdict {
 				t.Fatal("updated sibling checkout")

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,9 +12,10 @@ import (
 	"strings"
 	"time"
 
-	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
@@ -53,37 +53,11 @@ const versionFetchTimeout = 3 * time.Second
 
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
-func runVersion(args []string) error {
-	if len(args) > 0 && args[0] == "hold" {
-		return runVersionHold(args[1:])
-	}
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" || args[i] == "--output" {
-			i++
-			continue
-		}
-		if !strings.HasPrefix(args[i], "-") {
-			return fmt.Errorf("version: unexpected positional %q", args[i])
-		}
-	}
-	fs := flag.NewFlagSet(cmdVersion.Path, flag.ContinueOnError)
-	var output string
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	offline := fs.Bool("offline", false, "skip the network fetch for latest release")
-	changelog := fs.Bool("changelog", false, "print the changelog for the installed release")
-	if err := parseAndCheck(cmdVersion, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("version: unexpected positional %q", fs.Arg(0))
-	}
+func runVersion(inv clisurface.Invocation) error {
+	output := inv.Output(color.IsInteractiveStdout())
+	report := gatherVersionReport(inv.Bool("offline"))
 
-	report := gatherVersionReport(*offline)
-
-	if *changelog {
+	if inv.Bool("changelog") {
 		return writeRenderedText(os.Stdout, "document", output, func(w io.Writer) { printVersionChangelog(w, report) })
 	}
 	switch output {

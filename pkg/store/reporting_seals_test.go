@@ -28,7 +28,8 @@ func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
 				in.Request.RequestedArgs = map[string]string{"secret": secret, "public": public}
 				in.Request.SecretArgs = runspec.Optional[[]string]{Set: i%2 == 0, Value: []string{"secret"}}
 				in.Request.Git.Ref = "main"
-				in.Request.Git.SHA = "abcdef1234"
+				in.Request.Git.SHA = "abcdef1234abcdef1234abcdef1234abcdef1234"
+				in.Request.Source.Ref = in.Request.Git.SHA
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -49,7 +50,7 @@ func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
 				if !accepted && i%2 != 0 {
 					wantPublic = runspec.RedactedArgValue
 				}
-				if run.Args["secret"] != runspec.RedactedArgValue || run.Args["public"] != wantPublic || run.GitSHA != "abcdef1234" || run.GitBranch != "main" || run.CreatedAt.IsZero() || !run.StartedAt.IsZero() {
+				if run.Args["secret"] != runspec.RedactedArgValue || run.Args["public"] != wantPublic || run.GitSHA != "abcdef1234abcdef1234abcdef1234abcdef1234" || run.GitBranch != "main" || run.CreatedAt.IsZero() || !run.StartedAt.IsZero() {
 					t.Fatalf("reported run = %+v", run)
 				}
 				body, err := json.Marshal(run)

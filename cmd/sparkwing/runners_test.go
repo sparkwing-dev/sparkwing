@@ -72,13 +72,13 @@ func (f *runnersFixture) run(args []string) error {
 	args = append(args, "--output", "pretty")
 	switch args[0] {
 	case "add":
-		enrollment, _, err := prepareRunnerEnrollment(args[1:])
+		enrollment, _, err := prepareRunnerEnrollmentArgs(args[1:])
 		if err != nil {
 			return err
 		}
 		return enrollRunner(ctx, f, enrollment)
 	case "remove":
-		removal, _, err := prepareRunnerRemoval(args[1:])
+		removal, _, err := prepareRunnerRemovalArgs(args[1:])
 		if err != nil {
 			return err
 		}
@@ -627,7 +627,7 @@ func TestRunnersEnrollmentUsesRegistrationAndPreservesRepeatedSelectors(t *testi
 
 func TestRunnersEnrollmentJSONDoesNotContainBearerOrPrettyProse(t *testing.T) {
 	f := newRunnersFixture(t)
-	enrollment, _, err := prepareRunnerEnrollment([]string{"--profile", "prod", "--runner", "desk", "--config", f.config, "--no-service", "--output", "json"})
+	enrollment, _, err := prepareRunnerEnrollmentArgs([]string{"--profile", "prod", "--runner", "desk", "--config", f.config, "--no-service", "--output", "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +655,7 @@ func TestRunnersRemovalJSONConfirmsRevocation(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	removal, _, err := prepareRunnerRemoval([]string{"--profile", "prod", "--runner", "desk", "--config", f.config, "--no-service", "--output", "json"})
+	removal, _, err := prepareRunnerRemovalArgs([]string{"--profile", "prod", "--runner", "desk", "--config", f.config, "--no-service", "--output", "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +726,7 @@ func TestRunnersEnrollmentRequestsPersonalCapacityOnlyWhenSelected(t *testing.T)
 			if personal {
 				args = append(args, "--personal", "--session-stdin")
 			}
-			enrollment, _, err := prepareRunnerEnrollment(args)
+			enrollment, _, err := prepareRunnerEnrollmentArgs(args)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -765,7 +765,7 @@ func TestRunnersPersonalEnrollmentRequiresIndependentSessionBeforeSideEffects(t 
 		t.Fatal("missing session sent a request")
 		return 500, ""
 	})
-	err := runRunnersAdd([]string{"--profile", "prod", "--runner", "desk", "--personal", "--config", f.config})
+	err := runRunnersAddArgs([]string{"--profile", "prod", "--runner", "desk", "--personal", "--config", f.config})
 	if err == nil || !strings.Contains(err.Error(), "--session-stdin") {
 		t.Fatalf("missing independent session: %v", err)
 	}
@@ -801,7 +801,7 @@ func TestRunnersPersonalEnrollmentUsesEphemeralSession(t *testing.T) {
 		return 201, `{"capability":"swk_12345678_runner-secret","prefix":"swk_12345678","team":"team","grants":["nodes.claim","triggers.claim"]}`
 	})
 	out := captureStdout(t, func() {
-		if err := runRunnersAdd([]string{"--profile", "prod", "--runner", "desk", "--personal", "--session-stdin", "--no-service", "--config", f.config, "--output", "json"}); err != nil {
+		if err := runRunnersAddArgs([]string{"--profile", "prod", "--runner", "desk", "--personal", "--session-stdin", "--no-service", "--config", f.config, "--output", "json"}); err != nil {
 			t.Fatal(err)
 		}
 	})

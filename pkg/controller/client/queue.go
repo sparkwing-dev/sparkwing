@@ -15,11 +15,7 @@ var _ controllerwire.QueueManager = (*engineClient)(nil)
 // NewQueueManager reads queue projections and changes group priority using
 // the authenticated controller transport, including api.sock transports.
 func NewQueueManager(options EngineOptions) (controllerwire.QueueManager, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) ReadQueue(ctx context.Context) (wingwire.QueueState, error) {

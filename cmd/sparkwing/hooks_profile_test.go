@@ -96,3 +96,23 @@ func TestRunPipelineForProof_RunsThePipelinePlainly(t *testing.T) {
 		t.Errorf("proof directory = %q, want %q", cmd.Dir, repo)
 	}
 }
+
+func TestHookInstallationProofUsesRunOutputGrammar(t *testing.T) {
+	t.Setenv("SPARKWING_LOG_FORMAT", "json")
+	command, err := pipelineProofCommand(t.TempDir(), "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range command.Env {
+		if value, ok := strings.CutPrefix(entry, "SPARKWING_LOG_FORMAT="); ok {
+			t.Setenv("SPARKWING_LOG_FORMAT", value)
+		}
+	}
+	flags, _ := parseRunFlagsArgs(command.Args[3:])
+	if flags.parseErr != nil {
+		t.Fatalf("installation proof rejected by run parser: %v", flags.parseErr)
+	}
+	if flags.outputFormat != "plain" {
+		t.Fatalf("proof output = %s, want plain", flags.outputFormat)
+	}
+}

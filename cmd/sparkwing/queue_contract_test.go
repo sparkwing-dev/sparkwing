@@ -65,7 +65,7 @@ func TestQueueCommandUsesOneControllerProjection(t *testing.T) {
 				args = append(args, "--profile", profile)
 			}
 			var out bytes.Buffer
-			if err := runQueueCommand(t.Context(), args, &out, queueDependenciesFor(t, manager, profile)); err != nil {
+			if err := runQueueCommandArgs(t.Context(), args, &out, queueDependenciesFor(t, manager, profile)); err != nil {
 				t.Fatal(err)
 			}
 			if strings.Join(manager.calls, ",") != "queue,close" || !strings.Contains(out.String(), "cores") {
@@ -93,14 +93,14 @@ func TestQueueCommandPreflight(t *testing.T) {
 		{"priority", "--run", "r1", "--set", "2", "extra"},
 	} {
 		var out bytes.Buffer
-		err := runQueueCommand(t.Context(), args, &out, queueDependencies{})
+		err := runQueueCommandArgs(t.Context(), args, &out, queueDependencies{})
 		if err == nil || exitCodeFor(err) != 2 || out.Len() != 0 {
 			t.Fatalf("%v: err=%v output=%s", args, err, &out)
 		}
 	}
 	for _, args := range [][]string{nil, {"list", "--help"}, {"priority", "--help", "-o", "json"}} {
 		var out bytes.Buffer
-		if err := runQueueCommand(t.Context(), args, &out, queueDependencies{}); err != nil || out.Len() == 0 {
+		if err := runQueueCommandArgs(t.Context(), args, &out, queueDependencies{}); err != nil || out.Len() == 0 {
 			t.Fatalf("help: %v %s", err, &out)
 		}
 	}
@@ -115,14 +115,14 @@ func TestQueueCommandKeepsFailureDistinctFromEmptyQueue(t *testing.T) {
 			deps.connect = func(context.Context, string) (controllerwire.QueueManager, func(), error) { return nil, nil, failure }
 		}
 		var out bytes.Buffer
-		err := runQueueCommand(t.Context(), []string{"list", "-o", "json"}, &out, deps)
+		err := runQueueCommandArgs(t.Context(), []string{"list", "-o", "json"}, &out, deps)
 		if !errors.Is(err, failure) || out.Len() != 0 {
 			t.Fatalf("unavailable queue printed success: %v %s", err, &out)
 		}
 	}
 	manager := &queueManagerFake{}
 	var out bytes.Buffer
-	if err := runQueueCommand(t.Context(), []string{"list", "-o", "json"}, &out, queueDependenciesFor(t, manager, "")); err != nil || out.Len() == 0 {
+	if err := runQueueCommandArgs(t.Context(), []string{"list", "-o", "json"}, &out, queueDependenciesFor(t, manager, "")); err != nil || out.Len() == 0 {
 		t.Fatalf("empty queue: %v %s", err, &out)
 	}
 }
@@ -136,7 +136,7 @@ func TestQueueCommandPreservesGroupFacts(t *testing.T) {
 			Waiters: []controllerwire.QueueGroupWaiter{{RunID: "r2", JobID: "job2", Position: 1, Policy: "queue", Cost: 1, ArrivedAt: at}},
 		}}
 		var out bytes.Buffer
-		err := runQueueCommand(t.Context(), []string{"list", "--group", "deploy", "--profile", "prod", "-o", format}, &out, queueDependenciesFor(t, manager, "prod"))
+		err := runQueueCommandArgs(t.Context(), []string{"list", "--group", "deploy", "--profile", "prod", "-o", format}, &out, queueDependenciesFor(t, manager, "prod"))
 		if err != nil || manager.selected != "deploy" || strings.Join(manager.calls, ",") != "group,close" {
 			t.Fatalf("group: %v %+v", err, manager)
 		}
@@ -176,7 +176,7 @@ func TestQueueResolverCancellationSkipsObservation(t *testing.T) {
 		return manager, func() { manager.calls = append(manager.calls, "close") }, nil
 	}}
 	var out bytes.Buffer
-	err := runQueueCommand(ctx, []string{"list"}, &out, deps)
+	err := runQueueCommandArgs(ctx, []string{"list"}, &out, deps)
 	if !errors.Is(err, context.Canceled) || strings.Join(manager.calls, ",") != "close" || out.Len() != 0 {
 		t.Fatalf("canceled resolver reached observation: %v %v %s", err, manager.calls, &out)
 	}
@@ -186,7 +186,7 @@ func TestQueuePriorityCommandKeepsExactAndRelativeValues(t *testing.T) {
 	for _, value := range []string{"0", "-3", "7", "front", "back"} {
 		manager := &queueManagerFake{result: controllerwire.QueuePriorityResult{RunID: "r1", Group: "deploy", SetPriorityAck: wingwire.SetPriorityAck{Found: true, Priority: 7, Previous: 3, Position: 1}, PreviousPosition: 2}}
 		var out bytes.Buffer
-		err := runQueueCommand(t.Context(), []string{"priority", "--group", "deploy", "--profile", "prod", "--run", "r1", "--set", value, "-o", "json"}, &out, queueDependenciesFor(t, manager, "prod"))
+		err := runQueueCommandArgs(t.Context(), []string{"priority", "--group", "deploy", "--profile", "prod", "--run", "r1", "--set", value, "-o", "json"}, &out, queueDependenciesFor(t, manager, "prod"))
 		if err != nil || manager.selected != "deploy" || manager.write.RunID != "r1" || manager.write.Validate() != nil || strings.Join(manager.calls, ",") != "priority,close" {
 			t.Fatalf("priority %s: %v %+v", value, err, manager)
 		}
@@ -217,7 +217,7 @@ func TestQueueLocalPriorityKeepsHolderCaveatAndMissingResult(t *testing.T) {
 			return queuePriorityResult{RunID: run, SetPriorityAck: wingwire.SetPriorityAck{Found: found, Holding: found, Priority: 1}}, nil
 		}}
 		var out bytes.Buffer
-		err := runQueueCommand(t.Context(), []string{"priority", "--run", "r1", "--set", "front", "-o", "pretty"}, &out, deps)
+		err := runQueueCommandArgs(t.Context(), []string{"priority", "--run", "r1", "--set", "front", "-o", "pretty"}, &out, deps)
 		if found && (err != nil || !strings.Contains(out.String(), "already holds a lease")) {
 			t.Fatalf("holder: %v %s", err, &out)
 		}
@@ -231,12 +231,12 @@ func TestQueueCommandCancellationAndWriterErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	var out bytes.Buffer
-	if err := runQueueCommand(ctx, []string{"list"}, &out, queueDependencies{}); !errors.Is(err, context.Canceled) {
+	if err := runQueueCommandArgs(ctx, []string{"list"}, &out, queueDependencies{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation lost: %v", err)
 	}
 	for _, args := range [][]string{{"list", "-o", "plain"}, {"list", "--group", "deploy", "-o", "pretty"}, {"priority", "--group", "deploy", "--run", "r1", "--set", "3", "-o", "plain"}} {
 		manager := &queueManagerFake{queue: sampleQueueState(), group: controllerwire.QueueGroup{Group: "deploy"}, result: controllerwire.QueuePriorityResult{RunID: "r1", SetPriorityAck: wingwire.SetPriorityAck{Found: true}}}
-		err := runQueueCommand(t.Context(), args, doctorFailedWriter{}, queueDependenciesFor(t, manager, ""))
+		err := runQueueCommandArgs(t.Context(), args, doctorFailedWriter{}, queueDependenciesFor(t, manager, ""))
 		if !errors.Is(err, io.ErrClosedPipe) || manager.calls[len(manager.calls)-1] != "close" {
 			t.Fatalf("%v: writer/cleanup lost: %v %v", args, err, manager.calls)
 		}
@@ -245,7 +245,7 @@ func TestQueueCommandCancellationAndWriterErrors(t *testing.T) {
 
 func TestQueueRemoteRunPriorityRequiresAuthorizedRoute(t *testing.T) {
 	var out bytes.Buffer
-	err := runQueueCommand(t.Context(), []string{"priority", "--profile", "prod", "--run", "r1", "--set", "3"}, &out, queueDependencies{})
+	err := runQueueCommandArgs(t.Context(), []string{"priority", "--profile", "prod", "--run", "r1", "--set", "3"}, &out, queueDependencies{})
 	var structured *apierr.Error
 	if !errors.As(err, &structured) || structured.Code != apierr.PolicyMissing || out.Len() != 0 {
 		t.Fatalf("remote priority guessed a route: %v %s", err, &out)
@@ -279,7 +279,7 @@ func TestQueueLocalPriorityResolvesRunNumbersBeforeMutation(t *testing.T) {
 			},
 		}
 		var out bytes.Buffer
-		err := runQueueCommand(t.Context(), []string{"priority", "--run", "412", "--set", "0", "-o", "json"}, &out, deps)
+		err := runQueueCommandArgs(t.Context(), []string{"priority", "--run", "412", "--set", "0", "-o", "json"}, &out, deps)
 		if outcome == "failed" {
 			if !errors.Is(err, failure) || out.Len() != 0 || strings.Join(calls, ",") != "resolve" {
 				t.Fatalf("failed lookup mutated: %v %v %s", calls, err, &out)

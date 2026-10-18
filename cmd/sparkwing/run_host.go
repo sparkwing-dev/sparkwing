@@ -17,16 +17,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 type localRunOptions struct {
 	standaloneReason, stateDB, environmentFile string
+	standalone                                 bool
 }
 
 type localRunRuntime struct {
@@ -66,7 +69,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	runtime, err := deps.resolve(ctx, localRunOptions{})
+	runtime, err := deps.resolve(ctx, localRunOptions{standalone: flags.allowUnadmitted})
 	if err != nil {
 		return err
 	}
@@ -128,6 +131,17 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		if err := runtime.ensureController(ctx); err != nil {
 			return err
 		}
+	}
+	if mode := strings.TrimSpace(flags.priority); mode == wingwire.PriorityFront || mode == wingwire.PriorityBack {
+		queue, ok := runtime.controller.(controllerwire.QueueManager)
+		if !ok {
+			return &apierr.Error{Code: apierr.Unavailable, Message: "run: controller cannot resolve relative priority"}
+		}
+		rank, err := resolveRelativeRunPriority(ctx, mode, queue)
+		if err != nil {
+			return err
+		}
+		request.Request.Options.Priority.Value = rank
 	}
 	response, err := runtime.controller.CreateRun(ctx, request)
 	masker.Register(response.HereBearer)
@@ -213,27 +227,12 @@ func validateLocalRunFlags(flags runFlags) error {
 		return flags.parseErr
 	}
 	if flags.prioritySet || flags.priority != "" {
-		priority, err := validatePriorityFlag(flags.priority)
-		if err != nil {
+		if _, err := validatePriorityFlag(flags.priority); err != nil {
 			return err
 		}
-		if priority == "front" || priority == "back" {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: relative priority requires controller queue resolution before sealing"}
-		}
 	}
-	for _, option := range []struct {
-		name string
-		set  bool
-	}{
-		{"sw-no-bincache", flags.noBincache},
-		{"sw-hash-all-files", flags.hashAllFiles},
-		{"sw-allow-unadmitted", flags.allowUnadmitted},
-		{"sw-index", flags.index != ""},
-		{"target", flags.target != ""},
-	} {
-		if option.set {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --" + option.name + " requires a retained source, admission or private-file binding before intake"}
-		}
+	if flags.allowUnadmitted && flags.detached {
+		return &clisurface.UsageError{Path: "sparkwing run", Message: "--sw-allow-unadmitted uses an in-process controller and cannot detach"}
 	}
 	if !flags.detached {
 		return refuseDetachedOnlyFlags(flags)
@@ -331,9 +330,10 @@ func emitLocalRunReceipt(out io.Writer, response controllerwire.CreateRunRespons
 		return localRunProtocolError("detached submission produced no run ID")
 	}
 	receipt := struct {
-		RunID    string `json:"run_id"`
-		Replayed bool   `json:"replayed"`
-	}{response.RunID, response.Replayed}
+		RunID     string `json:"run_id"`
+		RequestID string `json:"request_id,omitempty"`
+		Replayed  bool   `json:"replayed"`
+	}{response.RunID, response.Request.Request.RequestID, response.Replayed}
 	switch format {
 	case "json":
 		return json.NewEncoder(out).Encode(receipt)
@@ -350,4 +350,18 @@ func runLocalInvocation(pipeline string, flags runFlags, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return runLocalCommand(ctx, pipeline, flags, args, os.Stdout, localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
+}
+
+func resolveRelativeRunPriority(ctx context.Context, mode string, queue controllerwire.QueueManager) (int, error) {
+	state, err := queue.ReadQueue(ctx)
+	if err != nil {
+		return 0, err
+	}
+	rank := wingwire.ResolveRelativePriority(state.Waiters, mode)
+	for _, waiter := range state.Waiters {
+		if mode == wingwire.PriorityFront && rank <= waiter.Priority || mode == wingwire.PriorityBack && rank >= waiter.Priority {
+			return 0, &apierr.Error{Code: apierr.InvalidArgs, Message: "run: relative priority exceeds the integer range"}
+		}
+	}
+	return rank, nil
 }

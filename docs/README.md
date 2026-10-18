@@ -18,13 +18,11 @@ reaches any controller you can reach, including one a team runs itself.
 - **Writing pipelines?** [`sdk.md`](sdk.md) and
   [`pipelines.md`](pipelines.md) cover the Go DSL.
 - **Running in CI?** [`ci-embedded.md`](ci-embedded.md) -- `sparkwing run <pipeline>` inside GHA / Buildkite / GitLab CI.
-- **Hosting the bucket, database, or controller yourself?**
-  [`getting-started.md`](getting-started.md#advanced-deployments) names
-  each shape in a paragraph;
-  [`deployment-modes.md`](deployment-modes.md#advanced-shapes) is the
-  reference and [`self-hosting.md`](self-hosting.md) is the Helm path.
-  [`architecture.md`](architecture.md) and
-  [`deployment.md`](deployment.md) cover the in-cluster picture.
+- **Adding your own machines to Cloud?**
+  [`self-hosting.md`](self-hosting.md#add-workstation-capacity) covers self-hosted
+  runners. [`deployment-modes.md`](deployment-modes.md) compares Local and Cloud.
+  The controller chart is Cloud operator infrastructure. Shared self-hosted
+  controllers are outside the launch offering.
 
 Generated reference (do not hand-edit; regenerated from code and
 drift-gated):

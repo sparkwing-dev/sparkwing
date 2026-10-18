@@ -28,7 +28,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	ctx := t.Context()
 	s := storetest.OpenSQLite(t)
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-		input.Request.Git.Ref, input.Request.Git.SHA = "refs/heads/main", "commit"
+		input.Request.Git.Ref, input.Request.Git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
 		input.Request.Git.Repository.Key = "gh:42"
 		doc.Jobs = []nodeproto.JobSpec{
 			{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}},
@@ -58,7 +58,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	}
 	s.SetProvisionPolicy(storeActionsProof{})
 	until := time.Now().Add(30 * time.Minute)
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: "1000"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
+	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", WorkflowRunID: "1000"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
 	if err != nil {
 		t.Fatal(err)
 	}

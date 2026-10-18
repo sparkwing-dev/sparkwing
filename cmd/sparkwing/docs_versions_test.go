@@ -11,7 +11,7 @@ import (
 
 func TestRunDocsListVersions_EmbeddedOnly(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsList([]string{"--versions", "-o", "json"}); err != nil {
+		if err := runDocsListArgs([]string{"--versions", "-o", "json"}); err != nil {
 			t.Fatalf("docs list --versions: %v", err)
 		}
 	})
@@ -39,7 +39,7 @@ func TestRunDocsListVersions_WebMergesRemote(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
-		if err := runDocsList([]string{"--versions", "--web", "-o", "json"}); err != nil {
+		if err := runDocsListArgs([]string{"--versions", "--web", "-o", "json"}); err != nil {
 			t.Fatalf("docs list --versions --web: %v", err)
 		}
 	})
@@ -73,14 +73,14 @@ func TestRunDocsListVersions_WebFailureNonZeroExit(t *testing.T) {
 	docs.SetTestBaseURL(t, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	err := runDocsList([]string{"--versions", "--web"})
+	err := runDocsListArgs([]string{"--versions", "--web"})
 	if err == nil {
 		t.Fatal("expected error when --web discovery fails")
 	}
 }
 
 func TestRunDocsRead_VersionMismatchSuggestsWeb(t *testing.T) {
-	err := runDocsRead([]string{"--topic", "pipelines", "--version", "v0.1.0"})
+	err := runDocsReadArgs([]string{"--topic", "pipelines", "--version", "v0.1.0"})
 	if err == nil {
 		t.Fatal("expected error for non-embedded version")
 	}
@@ -105,7 +105,7 @@ func TestRunDocsRead_WebFetchesPerVersion(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
-		if err := runDocsRead([]string{"--topic", "pipelines", "--version", "v0.3.0", "--web"}); err != nil {
+		if err := runDocsReadArgs([]string{"--topic", "pipelines", "--version", "v0.3.0", "--web"}); err != nil {
 			t.Fatalf("docs read --web: %v", err)
 		}
 	})
@@ -132,7 +132,7 @@ func TestRunDocsRead_WebLatestUsesUnversionedURL(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
-		if err := runDocsRead([]string{"--topic", "pipelines", "--version", "latest", "--web"}); err != nil {
+		if err := runDocsReadArgs([]string{"--topic", "pipelines", "--version", "latest", "--web"}); err != nil {
 			t.Fatalf("docs read --version latest --web: %v", err)
 		}
 	})
@@ -156,7 +156,7 @@ func TestRunDocsRead_WebUnknownVersionMessagesVersionList(t *testing.T) {
 	docs.SetTestBaseURL(t, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	err := runDocsRead([]string{"--topic", "pipelines", "--version", "v9.9.9", "--web"})
+	err := runDocsReadArgs([]string{"--topic", "pipelines", "--version", "v9.9.9", "--web"})
 	if err == nil {
 		t.Fatal("expected error for unknown version")
 	}
@@ -181,7 +181,7 @@ func TestRunDocsMigrations_VersionWebFetches(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"--version", "v0.5.0", "--web"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"--version", "v0.5.0", "--web"}); err != nil {
 			t.Fatalf("migrations --version --web: %v", err)
 		}
 	})
@@ -192,7 +192,7 @@ func TestRunDocsMigrations_VersionWebFetches(t *testing.T) {
 
 func TestCacheDocs_ClearOnEmptyIsNotAnError(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	if err := runCachePrune([]string{"--docs"}); err != nil {
+	if err := runCachePruneArgs([]string{"--docs"}); err != nil {
 		t.Errorf("clear on empty cache should not error; got %v", err)
 	}
 }
@@ -200,7 +200,7 @@ func TestCacheDocs_ClearOnEmptyIsNotAnError(t *testing.T) {
 func TestCacheDocs_InfoOnEmptyDescribesAbsence(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	out := captureStdout(t, func() {
-		if err := runCacheInfo([]string{"--docs", "--output", "pretty"}); err != nil {
+		if err := runCacheInfoArgs([]string{"--docs", "--output", "pretty"}); err != nil {
 			t.Errorf("info on empty cache: %v", err)
 		}
 	})

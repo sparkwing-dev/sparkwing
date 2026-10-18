@@ -80,7 +80,7 @@ func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunReques
 	if request.Lineage.RetryOf != "" {
 		request.Lineage.Retrier = runspec.Optional[runspec.Actor]{Set: true, Value: request.Actor}
 	}
-	return store.IntakeRequest{Authority: p.Authority, CapabilityPrefix: principalCapabilityPrefix(p), Request: request, IdempotencyKey: body.IdempotencyKey, LocalSecrets: body.LocalSecrets}, nil
+	return store.IntakeRequest{Authority: p.Authority, CapabilityPrefix: principalCapabilityPrefix(p), Request: request, IdempotencyKey: body.IdempotencyKey, LocalSecrets: body.LocalSecrets, SubmittedEnv: body.SubmittedEnv}, nil
 }
 
 // CreateRun calls the sole intake transaction and returns its committed replay

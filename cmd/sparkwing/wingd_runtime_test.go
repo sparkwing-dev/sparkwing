@@ -31,7 +31,7 @@ func TestWingdRunForwardsForegroundOwnership(t *testing.T) {
 	failure := errors.New("runtime stopped")
 	key := struct{}{}
 	ctx := context.WithValue(t.Context(), key, "caller")
-	err := runWingdRunCommand(ctx, []string{"--home", home, "--stay", "--version", "2.1.0", "-o", "json"}, &bytes.Buffer{}, defaults,
+	err := runWingdRunCommandArgs(ctx, []string{"--home", home, "--stay", "--version", "2.1.0", "-o", "json"}, &bytes.Buffer{}, defaults,
 		func(_ context.Context, resolved wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 			if resolved.Home != home || resolved.Version != "2.1.0" || !resolved.Stay {
 				t.Fatalf("resolver received stale start options: %+v", resolved)
@@ -57,7 +57,7 @@ func TestWingdRunWaitsForCancellation(t *testing.T) {
 	entered, done := make(chan struct{}), make(chan error, 1)
 	options := wingd.LocalStartOptions{Home: t.TempDir()}
 	go func() {
-		done <- runWingdRunCommand(ctx, []string{"--stay"}, &bytes.Buffer{}, options,
+		done <- runWingdRunCommandArgs(ctx, []string{"--stay"}, &bytes.Buffer{}, options,
 			func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 				return foregroundRuntimeFake{run: func(runCtx context.Context, _ wingd.LocalStartOptions) error {
 					close(entered)
@@ -84,7 +84,7 @@ func TestWingdRunValidatesBeforeRuntime(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			called := false
-			err := runWingdRunCommand(t.Context(), args, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+			err := runWingdRunCommandArgs(t.Context(), args, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 				called = true
 				return nil, nil
 			})
@@ -99,7 +99,7 @@ func TestWingdRunValidatesBeforeRuntime(t *testing.T) {
 func TestWingdRunRefusesUnrepresentedRuntimeOptions(t *testing.T) {
 	for _, flag := range []string{"--budget=50%", "--headroom=0.2", "--state-db=private.db"} {
 		called := false
-		err := runWingdRunCommand(t.Context(), []string{flag}, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+		err := runWingdRunCommandArgs(t.Context(), []string{flag}, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 			called = true
 			return nil, nil
 		})
@@ -120,7 +120,7 @@ func TestWingdRunHelpAndCancellationAvoidRuntime(t *testing.T) {
 			args = []string{"--help", "-o", "json"}
 		}
 		called := false
-		err := runWingdRunCommand(ctx, args, &output, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+		err := runWingdRunCommandArgs(ctx, args, &output, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 			called = true
 			return nil, nil
 		})
@@ -134,7 +134,7 @@ func TestWingdRunRejectsMissingRuntimeAndKeepsDefaults(t *testing.T) {
 	defaults := wingd.LocalStartOptions{Home: t.TempDir(), Version: "2.0.0", Executable: filepath.Join(t.TempDir(), "sparkwing")}
 	for _, absent := range []bool{false, true} {
 		var got wingd.LocalStartOptions
-		err := runWingdRunCommand(t.Context(), []string{"--stay=false", "--standalone-reason", "CI"}, &bytes.Buffer{}, defaults, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+		err := runWingdRunCommandArgs(t.Context(), []string{"--stay=false", "--standalone-reason", "CI"}, &bytes.Buffer{}, defaults, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 			if absent {
 				return nil, nil
 			}
@@ -162,7 +162,7 @@ func TestWingdRunChecksCancellationAfterConstruction(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	called := false
-	err := runWingdRunCommand(ctx, nil, &bytes.Buffer{}, wingd.LocalStartOptions{Home: t.TempDir()}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+	err := runWingdRunCommandArgs(ctx, nil, &bytes.Buffer{}, wingd.LocalStartOptions{Home: t.TempDir()}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 		cancel()
 		return foregroundRuntimeFake{run: func(context.Context, wingd.LocalStartOptions) error { called = true; return nil }}, nil
 	})
@@ -176,7 +176,7 @@ func TestWingdRunResolvesHomeWithoutChangingEnvironment(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", ambient)
 	for _, args := range [][]string{nil, {"--home", "relative-home"}} {
 		var got wingd.LocalStartOptions
-		err := runWingdRunCommand(t.Context(), args, &bytes.Buffer{}, wingd.LocalStartOptions{Version: "2.0.0"}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+		err := runWingdRunCommandArgs(t.Context(), args, &bytes.Buffer{}, wingd.LocalStartOptions{Version: "2.0.0"}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 			return foregroundRuntimeFake{run: func(_ context.Context, options wingd.LocalStartOptions) error { got = options; return nil }}, nil
 		})
 		want := ambient
@@ -191,7 +191,7 @@ func TestWingdRunResolvesHomeWithoutChangingEnvironment(t *testing.T) {
 
 func TestWingdRunRequiresControllerBeforeOpeningHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "controller")
-	err := runWingdRunCommand(t.Context(), []string{"--home", home, "--version", "test"}, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+	err := runWingdRunCommandArgs(t.Context(), []string{"--home", home, "--version", "test"}, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 		return nil, nil
 	})
 	var structured *apierr.Error
@@ -222,7 +222,7 @@ func TestWingdRunOpensControllerUnderElection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runWingdRunCommand(t.Context(), []string{"--home", home, "--version", "test"}, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+	err = runWingdRunCommandArgs(t.Context(), []string{"--home", home, "--version", "test"}, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 		return runtime, nil
 	})
 	if !called || !errors.Is(err, want) {

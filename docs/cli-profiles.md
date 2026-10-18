@@ -40,7 +40,6 @@ Add a controller connection profile
 | `--controller URL` | Controller URL for this connection profile. (required) |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 | `--token-stdin` | Read the controller credential from standard input. |
-| `--scope SCOPE` | Credential scope. Repeatable; comma-separated values are accepted. |
 | `--force` | Replace an existing object. |
 | `--no-probe` | Skip checking the controller connection. |
 
@@ -86,7 +85,6 @@ Update fields on an existing profile
 | `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
 | `--controller URL` | Controller URL for this connection profile. |
-| `--token TOKEN` | Controller credential. |
 | `--token-stdin` | Read the controller credential from standard input. |
 
 ## `sparkwing profiles show`

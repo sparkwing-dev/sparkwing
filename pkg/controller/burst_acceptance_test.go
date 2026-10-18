@@ -127,6 +127,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	input.LocalSecretNames = []string{"TOKEN"}
 	if proof != nil {
 		input.Pipeline = proof.Pipeline
+		input.Source.Entrypoint = proof.Pipeline
 	}
 	localSecret := "requesting-machine-only-secret"
 	if proof != nil && proof.Secret != "" {
@@ -159,7 +160,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolution := runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}
+	resolution := runspec.Resolved{Entrypoint: input.Source.Entrypoint, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}
 	if proof != nil {
 		resolution.Engine = proof.Engine
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -26,7 +27,7 @@ func FuzzSourceAccessBindsSealedRepository(f *testing.F) {
 			if r.Header.Get("Authorization") != "Bearer award" || r.URL.Path != "/api/v1/runs/run/source-credential" {
 				t.Fatal("source request lost award binding")
 			}
-			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"kind":"ssh","host":"github.com","secret":"private","known_hosts":"confirmed"}`))}, nil
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"kind":"ssh","host":"github.com","secret":"private","known_hosts":"confirmed","extra_repositories":["team/library"]}`))}, nil
 		}}}}, "run", source.Spec{RepoKey: "repo", RemoteURL: "https://github.com/team/repo"})
 		if err != nil {
 			t.Fatal(err)
@@ -36,8 +37,44 @@ func FuzzSourceAccessBindsSealedRepository(f *testing.F) {
 		if called != matches || (err == nil) != matches {
 			t.Fatalf("sealed source relation: called=%v error=%v", called, err)
 		}
-		if matches && credential.KnownHosts != "confirmed" {
+		if matches && (credential.KnownHosts != "confirmed" || !reflect.DeepEqual(credential.ExtraRepositories, []string{"team/library"})) {
 			t.Fatal("source host verification material was lost")
+		}
+	})
+}
+
+func FuzzSourceAccessBindsBothSealedCommits(f *testing.F) {
+	f.Add(false, uint8(0), "different")
+	f.Add(true, uint8(1), "different")
+	f.Fuzz(func(t *testing.T, code bool, field uint8, value string) {
+		calls := 0
+		sealed := source.Spec{RepoKey: "repo", RemoteURL: "https://github.com/team/repo", SHA: strings.Repeat("a", 40), PipelineSHA: strings.Repeat("b", 40)}
+		access, err := NewSourceAccess(EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return "award", nil }, HTTP: &http.Client{Transport: sourceAccessTransport{call: func(r *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"kind":"ssh","host":"github.com","secret":"private","known_hosts":"confirmed","extra_repositories":["team/library"]}`))}, nil
+		}}}}, "run", sealed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := sealed
+		if code {
+			request.SHA, request.PipelineSHA, request.CommittedCheckout = sealed.PipelineSHA, "", true
+		}
+		if _, err := access.GitCredential(t.Context(), request); err != nil {
+			t.Fatal("sealed acquisition projection was refused", err)
+		}
+		switch field % 4 {
+		case 0:
+			request.RepoKey = "forged-" + value
+		case 1:
+			request.RemoteURL = "https://other.example/" + value
+		case 2:
+			request.SHA = "forged-" + value
+		case 3:
+			request.PipelineSHA = "forged-" + value
+		}
+		if _, err := access.GitCredential(t.Context(), request); err == nil || calls != 1 {
+			t.Fatal("source access widened the sealed pair")
 		}
 	})
 }

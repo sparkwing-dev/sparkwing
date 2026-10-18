@@ -184,11 +184,7 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 		if row.RemoteBase {
 			return true
 		}
-		for _, allowed := range b.SubmitEnvAllow {
-			if envKey(allowed) == envKey(name) || (strings.HasSuffix(allowed, "_*") && strings.HasPrefix(envKey(name), envKey(strings.TrimSuffix(allowed, "*")))) {
-				return true
-			}
-		}
+		return submitAllowed(name, b.SubmitEnvAllow)
 	}
 	return false
 }

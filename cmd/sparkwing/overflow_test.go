@@ -92,7 +92,7 @@ func TestOverflowCLIThroughAuthenticatedControllerAndStore(t *testing.T) {
 		{args: []string{"show"}, plain: "uncapped\n"},
 	} {
 		var out bytes.Buffer
-		if err := runOverflowCommand(t.Context(), append(tc.args, "--profile", "work", "-o", "plain"), &out, connect); err != nil || out.String() != tc.plain {
+		if err := runOverflowCommandArgs(t.Context(), append(tc.args, "--profile", "work", "-o", "plain"), &out, connect); err != nil || out.String() != tc.plain {
 			t.Fatalf("overflow %v: %q %v", tc.args, out.String(), err)
 		}
 	}

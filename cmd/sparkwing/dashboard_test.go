@@ -74,7 +74,7 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 			units := &dashboardUnitsFake{}
 			services := dashboardServices{lifecycle: lifecycle, units: units, options: wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2.0.0"}}
 			var output bytes.Buffer
-			err := runDashboardCommand(t.Context(), append(tc.args, "-o", "json"), &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+			err := runDashboardCommandArgs(t.Context(), append(tc.args, "-o", "json"), &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +109,7 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 func TestDashboardDefaultStartDoesNotPinController(t *testing.T) {
 	f := &dashboardLifecycleFake{}
 	var output bytes.Buffer
-	err := runDashboardCommand(t.Context(), []string{"start", "--stay=false", "--read-only=false", "-o", "plain"}, &output, "windows", func(context.Context) (dashboardServices, error) { return dashboardServices{lifecycle: f}, nil })
+	err := runDashboardCommandArgs(t.Context(), []string{"start", "--stay=false", "--read-only=false", "-o", "plain"}, &output, "windows", func(context.Context) (dashboardServices, error) { return dashboardServices{lifecycle: f}, nil })
 	if err != nil || f.options.Stay || f.options.Standalone || f.options.DashboardAddress != "127.0.0.1:4343" {
 		t.Fatalf("options=%+v err=%v", f.options, err)
 	}
@@ -139,7 +139,7 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			var output bytes.Buffer
-			err := runDashboardCommand(t.Context(), tc.args, &output, tc.goos, func(context.Context) (dashboardServices, error) {
+			err := runDashboardCommandArgs(t.Context(), tc.args, &output, tc.goos, func(context.Context) (dashboardServices, error) {
 				t.Fatal("resolved services for rejected invocation")
 				return dashboardServices{}, nil
 			})
@@ -159,7 +159,7 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 func TestDashboardHelpDoesNotResolveRuntime(t *testing.T) {
 	for _, args := range [][]string{nil, {"start", "--help"}, {"install", "--help"}} {
 		var output bytes.Buffer
-		err := runDashboardCommand(t.Context(), args, &output, "windows", func(context.Context) (dashboardServices, error) {
+		err := runDashboardCommandArgs(t.Context(), args, &output, "windows", func(context.Context) (dashboardServices, error) {
 			t.Fatal("help resolved services")
 			return dashboardServices{}, nil
 		})
@@ -176,7 +176,7 @@ func TestDashboardPreservesFailuresWithoutSuccessReceipt(t *testing.T) {
 			lifecycle := &dashboardLifecycleFake{err: failure}
 			units := &dashboardUnitsFake{err: failure}
 			var output bytes.Buffer
-			err := runDashboardCommand(t.Context(), []string{action}, &output, "linux", func(context.Context) (dashboardServices, error) {
+			err := runDashboardCommandArgs(t.Context(), []string{action}, &output, "linux", func(context.Context) (dashboardServices, error) {
 				return dashboardServices{lifecycle: lifecycle, units: units}, nil
 			})
 			if !errors.Is(err, failure) || output.Len() != 0 {
@@ -191,7 +191,7 @@ func TestDashboardPreservesFailuresWithoutSuccessReceipt(t *testing.T) {
 
 func TestDashboardMissingLifecycleFailsWithoutLegacyServiceFallback(t *testing.T) {
 	var output bytes.Buffer
-	err := runDashboardCommand(t.Context(), []string{"start"}, &output, "linux", func(context.Context) (dashboardServices, error) {
+	err := runDashboardCommandArgs(t.Context(), []string{"start"}, &output, "linux", func(context.Context) (dashboardServices, error) {
 		return dashboardServices{}, nil
 	})
 	var failure *apierr.Error
@@ -203,7 +203,7 @@ func TestDashboardMissingLifecycleFailsWithoutLegacyServiceFallback(t *testing.T
 func TestDashboardRefusesAnUndrainedStop(t *testing.T) {
 	fake := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Version: "v1"}, keepUp: true}
 	var out bytes.Buffer
-	err := runDashboardCommand(t.Context(), []string{"stop", "-o", "json"}, &out, "linux", func(context.Context) (dashboardServices, error) {
+	err := runDashboardCommandArgs(t.Context(), []string{"stop", "-o", "json"}, &out, "linux", func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: fake}, nil
 	})
 	if err == nil || out.Len() != 0 {

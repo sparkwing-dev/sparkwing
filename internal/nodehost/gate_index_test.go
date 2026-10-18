@@ -1,13 +1,16 @@
 package nodehost
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
@@ -50,6 +53,14 @@ func TestSDKGateIndexReachesCheckingTools(t *testing.T) {
 	git(index, "add", "alternate")
 	snapshots, err := NewFileEnvironmentSnapshots(t.TempDir())
 	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index = filepath.Join(snapshots.directory, fmt.Sprintf("index-%x", sha256.Sum256(data)))
+	if err := fssecure.WriteFile(index, data); err != nil {
 		t.Fatal(err)
 	}
 	seal, err := snapshots.Capture(t.Context(), []string{"PATH=" + os.Getenv("PATH"), "W6_GATE_CONSUMER=1", gitenv.GateIndexVar + "=" + index})

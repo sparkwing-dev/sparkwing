@@ -67,7 +67,7 @@ func TestOperatorCommandsKeepTypedControllerProjections(t *testing.T) {
 				args = append(args, "--setting", "max_jobs_per_run", "--value", "0")
 			}
 			var out bytes.Buffer
-			err := runOperatorLimitsCommand(t.Context(), args, &out, operatorConnection(t, manager, "deployment"))
+			err := runOperatorLimitsCommandArgs(t.Context(), args, &out, operatorConnection(t, manager, "deployment"))
 			if err != nil || len(manager.calls) != 2 || manager.calls[1] != "close" {
 				t.Fatalf("limits: calls=%v error=%v", manager.calls, err)
 			}
@@ -86,7 +86,7 @@ func TestOperatorCommandsKeepTypedControllerProjections(t *testing.T) {
 		for _, action := range []string{"status", "reset-breaker"} {
 			manager := &operatorManagerFake{state: controllerwire.ObjectStoreBreaker{Enabled: true, Classes: []controllerwire.ObjectStoreClassState{{Class: "download", PerMinute: 10, Allowed: 2}}, Ceiling: controllerwire.ObjectStoreCeiling{Incomplete: true, MeasureError: "backend unavailable"}}}
 			var out bytes.Buffer
-			err := runOperatorObjectStoreCommand(t.Context(), []string{action, "-o", format}, &out, operatorConnection(t, manager, ""))
+			err := runOperatorObjectStoreCommandArgs(t.Context(), []string{action, "-o", format}, &out, operatorConnection(t, manager, ""))
 			if err != nil || len(manager.calls) != 2 || manager.calls[1] != "close" {
 				t.Fatalf("object store: calls=%v error=%v", manager.calls, err)
 			}
@@ -110,8 +110,8 @@ func TestOperatorCommandPreflightHasNoSideEffects(t *testing.T) {
 		run  func(context.Context, []string, io.Writer, operatorConnector) error
 		read string
 	}{
-		{runOperatorLimitsCommand, "show"},
-		{runOperatorObjectStoreCommand, "status"},
+		{runOperatorLimitsCommandArgs, "show"},
+		{runOperatorObjectStoreCommandArgs, "status"},
 	} {
 		for _, args := range [][]string{nil, {"--help"}, {command.read, "--help", "-o", "json"}} {
 			var out bytes.Buffer
@@ -132,7 +132,7 @@ func TestOperatorCommandPreflightHasNoSideEffects(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"set"}, {"set", "--setting", "max_jobs_per_run"}, {"set", "--setting", "max_jobs_per_run", "--value", "-1"}, {"set", "--setting", "", "--value", "1"}, {"set", "--setting", "x", "--value", "9223372036854775808"}} {
-		if err := runOperatorLimitsCommand(t.Context(), args, io.Discard, nil); err == nil || exitCodeFor(err) != 2 {
+		if err := runOperatorLimitsCommandArgs(t.Context(), args, io.Discard, nil); err == nil || exitCodeFor(err) != 2 {
 			t.Fatalf("invalid setting %v: %v", args, err)
 		}
 	}
@@ -143,7 +143,7 @@ func TestOperatorCommandsReturnReadAndWriteFailures(t *testing.T) {
 	for _, write := range []bool{false, true} {
 		manager := &operatorManagerFake{err: failure}
 		var out bytes.Buffer
-		if err := runOperatorLimitsCommand(t.Context(), []string{"show", "-o", "json"}, &out, operatorConnection(t, manager, "")); !errors.Is(err, failure) || out.Len() != 0 {
+		if err := runOperatorLimitsCommandArgs(t.Context(), []string{"show", "-o", "json"}, &out, operatorConnection(t, manager, "")); !errors.Is(err, failure) || out.Len() != 0 {
 			t.Fatalf("refusal lost: %v %s", err, &out)
 		}
 		manager.err = nil
@@ -152,7 +152,7 @@ func TestOperatorCommandsReturnReadAndWriteFailures(t *testing.T) {
 		if write {
 			writer = daemonEventsBrokenWriter{err: failure}
 		}
-		err := runOperatorLimitsCommand(t.Context(), []string{"show", "-o", "plain"}, writer, operatorConnection(t, manager, ""))
+		err := runOperatorLimitsCommandArgs(t.Context(), []string{"show", "-o", "plain"}, writer, operatorConnection(t, manager, ""))
 		if write && !errors.Is(err, failure) || !write && err != nil {
 			t.Fatalf("write error lost: %v", err)
 		}
@@ -164,8 +164,8 @@ func TestOperatorCommandsCloseTransportOnCancellationAndOutputFailure(t *testing
 		run  func(context.Context, []string, io.Writer, operatorConnector) error
 		read string
 	}{
-		{runOperatorLimitsCommand, "show"},
-		{runOperatorObjectStoreCommand, "status"},
+		{runOperatorLimitsCommandArgs, "show"},
+		{runOperatorObjectStoreCommandArgs, "status"},
 	} {
 		ctx, cancel := context.WithCancel(t.Context())
 		closed := false

@@ -53,7 +53,7 @@ func TestDoctorCommandUsesControllerDiagnostics(t *testing.T) {
 			args = append(args, "--dry-run")
 		}
 		var out bytes.Buffer
-		err := runDoctorCommand(t.Context(), args, &out, doctorTestDependencies(local))
+		err := runDoctorCommandArgs(t.Context(), args, &out, doctorTestDependencies(local))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,17 +69,22 @@ func TestDoctorCommandUsesControllerDiagnostics(t *testing.T) {
 
 func TestDoctorCommandPreflightDoesNotResolveDependencies(t *testing.T) {
 	for _, args := range [][]string{
-		{"--timeout", "0s"}, {"--timeout", "-1s"}, {"--timeout", "nope"}, {"--timeout="},
-		{"-o", "yaml"}, {"unexpected"}, {"--unknown"},
+		{"--timeout", "0s"},
+		{"--timeout", "-1s"},
+		{"--timeout", "nope"},
+		{"--timeout="},
+		{"-o", "yaml"},
+		{"unexpected"},
+		{"--unknown"},
 	} {
 		var out bytes.Buffer
-		err := runDoctorCommand(t.Context(), args, &out, doctorDependencies{})
+		err := runDoctorCommandArgs(t.Context(), args, &out, doctorDependencies{})
 		if err == nil || exitCodeFor(err) != 2 || out.Len() != 0 {
 			t.Fatalf("%v: %v %s", args, err, &out)
 		}
 	}
 	var out bytes.Buffer
-	if err := runDoctorCommand(t.Context(), []string{"--help", "-o", "json"}, &out, doctorDependencies{}); err != nil || !strings.Contains(out.String(), "sparkwing doctor") {
+	if err := runDoctorCommandArgs(t.Context(), []string{"--help", "-o", "json"}, &out, doctorDependencies{}); err != nil || !strings.Contains(out.String(), "sparkwing doctor") {
 		t.Fatalf("help resolved dependencies: %v %s", err, &out)
 	}
 }
@@ -93,7 +98,7 @@ func TestDoctorCommandRetainsPartialFindingsAndFailure(t *testing.T) {
 			deps.local = func(context.Context) (dashboardServices, error) { return dashboardServices{}, failure }
 		}
 		var out bytes.Buffer
-		err := runDoctorCommand(t.Context(), []string{"-o", "json"}, &out, deps)
+		err := runDoctorCommandArgs(t.Context(), []string{"-o", "json"}, &out, deps)
 		var got doctorReport
 		if json.Unmarshal(out.Bytes(), &got) != nil || !errors.Is(err, failure) || got.ControllerError != failure.Message {
 			t.Fatalf("partial failure lost: %+v %v %s", got, err, &out)
@@ -108,7 +113,7 @@ func TestDoctorCommandNilLifecycleFailsLoudly(t *testing.T) {
 	deps := doctorTestDependencies(&doctorLifecycleFake{})
 	deps.local = func(context.Context) (dashboardServices, error) { return dashboardServices{}, nil }
 	var out bytes.Buffer
-	err := runDoctorCommand(t.Context(), []string{"-o", "json"}, &out, deps)
+	err := runDoctorCommandArgs(t.Context(), []string{"-o", "json"}, &out, deps)
 	var structured *apierr.Error
 	if !errors.As(err, &structured) || structured.Code != apierr.Unavailable || strings.Contains(out.String(), "healthy") {
 		t.Fatalf("%v %s", err, &out)
@@ -119,7 +124,7 @@ func TestDoctorCommandCancellationPreventsInspection(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	var out bytes.Buffer
-	err := runDoctorCommand(ctx, []string{"-o", "plain"}, &out, doctorDependencies{})
+	err := runDoctorCommandArgs(ctx, []string{"-o", "plain"}, &out, doctorDependencies{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation lost: %v", err)
 	}
@@ -133,7 +138,7 @@ func TestDoctorCommandMachineCancellationSkipsController(t *testing.T) {
 		return doctorReport{GatesSurveyError: "registry could not be read"}
 	}}
 	var out bytes.Buffer
-	err := runDoctorCommand(ctx, []string{"-o", "json"}, &out, deps)
+	err := runDoctorCommandArgs(ctx, []string{"-o", "json"}, &out, deps)
 	var got doctorReport
 	if json.Unmarshal(out.Bytes(), &got) != nil || !errors.Is(err, context.Canceled) || got.ControllerChecked || got.GatesSurveyError != "registry could not be read" {
 		t.Fatalf("machine result or cancellation lost: %+v %v", got, err)
@@ -150,7 +155,7 @@ func TestDoctorCommandResolverCancellationSkipsLifecycle(t *testing.T) {
 		return dashboardServices{lifecycle: local}, nil
 	}
 	var out bytes.Buffer
-	err := runDoctorCommand(ctx, []string{"-o", "json"}, &out, deps)
+	err := runDoctorCommandArgs(ctx, []string{"-o", "json"}, &out, deps)
 	if !errors.Is(err, context.Canceled) || local.calls != 0 {
 		t.Fatalf("cancellation reached lifecycle: %v %+v", err, local)
 	}
@@ -160,7 +165,7 @@ func TestDoctorCommandRejectsIncompleteFindings(t *testing.T) {
 	for _, finding := range []wingd.LocalDoctorFinding{{Message: "missing code"}, {Code: "missing_message"}} {
 		local := &doctorLifecycleFake{findings: []wingd.LocalDoctorFinding{finding}}
 		var out bytes.Buffer
-		err := runDoctorCommand(t.Context(), []string{"-o", "json"}, &out, doctorTestDependencies(local))
+		err := runDoctorCommandArgs(t.Context(), []string{"-o", "json"}, &out, doctorTestDependencies(local))
 		var got doctorReport
 		var structured *apierr.Error
 		if json.Unmarshal(out.Bytes(), &got) != nil || !errors.As(err, &structured) || structured.Code != apierr.ProtocolError || got.ControllerChecked || got.ControllerError == "" {
@@ -184,7 +189,7 @@ func TestDoctorCommandPreservesPrivateStateWithoutOpeningIt(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "absent-config"))
 	for _, args := range [][]string{{"-o", "json"}, {"--dry-run", "-o", "json"}} {
 		var out bytes.Buffer
-		if err := runDoctorCommand(t.Context(), args, &out, doctorTestDependencies(&doctorLifecycleFake{})); err != nil {
+		if err := runDoctorCommandArgs(t.Context(), args, &out, doctorTestDependencies(&doctorLifecycleFake{})); err != nil {
 			t.Fatal(err)
 		}
 		got, err := os.ReadFile(state)
@@ -204,7 +209,7 @@ func TestDoctorCommandPreservesPrivateStateWithoutOpeningIt(t *testing.T) {
 func TestDoctorJSONUsesLowercaseFindingFields(t *testing.T) {
 	local := &doctorLifecycleFake{findings: []wingd.LocalDoctorFinding{{Code: "version_skew", Unit: "controller", Message: "old executable", Hint: "sparkwing update"}}}
 	var out bytes.Buffer
-	if err := runDoctorCommand(t.Context(), []string{"-o", "json"}, &out, doctorTestDependencies(local)); err != nil {
+	if err := runDoctorCommandArgs(t.Context(), []string{"-o", "json"}, &out, doctorTestDependencies(local)); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]json.RawMessage
@@ -224,7 +229,7 @@ func TestDoctorFormatsRetainActionableFindings(t *testing.T) {
 	local := &doctorLifecycleFake{findings: []wingd.LocalDoctorFinding{{Code: "removed_timer_verb", Unit: "nightly", Message: "timer calls crons tick", Hint: "sparkwing schedules install"}}}
 	for _, mode := range []string{"plain", "pretty"} {
 		var out bytes.Buffer
-		if err := runDoctorCommand(t.Context(), []string{"-o", mode}, &out, doctorTestDependencies(local)); err != nil {
+		if err := runDoctorCommandArgs(t.Context(), []string{"-o", mode}, &out, doctorTestDependencies(local)); err != nil {
 			t.Fatal(err)
 		}
 		for _, want := range []string{"removed_timer_verb", "nightly", "crons tick", "sparkwing schedules install"} {
@@ -238,7 +243,7 @@ func TestDoctorFormatsRetainActionableFindings(t *testing.T) {
 func TestDoctorCommandReturnsWriterAndControllerErrors(t *testing.T) {
 	failure := errors.New("controller unavailable")
 	local := &doctorLifecycleFake{err: failure}
-	err := runDoctorCommand(t.Context(), []string{"-o", "json"}, doctorFailedWriter{}, doctorTestDependencies(local))
+	err := runDoctorCommandArgs(t.Context(), []string{"-o", "json"}, doctorFailedWriter{}, doctorTestDependencies(local))
 	if !errors.Is(err, io.ErrClosedPipe) || !errors.Is(err, failure) {
 		t.Fatalf("errors lost: %v", err)
 	}

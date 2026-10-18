@@ -7,42 +7,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
-
-// safety: a cache miss describes the binary again so the reason it cannot
-// describe reaches the operator instead of an empty pipeline list. A run that
-// executes in another checkout binds that checkout's pipeline names, so it is
-// described there and never from the source's cache.
-func (r *pipelineRun) describedPipeline(pipelineName string) (nodeproto.PipelineDescription, error) {
-	var schemas []nodeproto.PipelineDescription
-	bindDir := r.opts.ExecutionDir
-	if bindDir == "" {
-		bindDir = r.sparkwingDir
-		if key, err := bincache.PipelineCacheKey(r.sparkwingDir); err == nil && !r.typescript {
-			schemas = readDescribeFile(describeCachePath(key))
-		}
-	}
-	identity, err := pipelineIdentityAt(bindDir, pipelineName)
-	if err != nil {
-		return nodeproto.PipelineDescription{}, err
-	}
-	if schemas == nil {
-		doc, err := describeEntry(r.ctx, bindDir, r.entry)
-		if err != nil {
-			return nodeproto.PipelineDescription{}, err
-		}
-		schemas = doc.Pipelines
-	}
-	r.pipeline = nodehost.PipelineIdentity{Invoked: identity.Name, Entrypoint: identity.Entrypoint}
-	return boundPipelineSchema(schemas, identity)
-}
 
 func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
 	cfg, err := projectconfig.Load(filepath.Join(dir, projectconfig.Filename))
@@ -53,23 +23,24 @@ func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
 }
 
 func boundPipelineSchema(schemas []nodeproto.PipelineDescription, identity clisurface.PipelineIdentity) (nodeproto.PipelineDescription, error) {
-	schema, err := findPipelineSchema(schemas, identity.Name)
+	schema, err := findPipelineSchema(schemas, identity.Entrypoint)
 	if err != nil {
 		return schema, fmt.Errorf("pipeline %q: %w", identity.Name, err)
 	}
+	schema.Name = identity.Name
 	return schema, nil
 }
 
 func findPipelineSchema(schemas []nodeproto.PipelineDescription, pipelineName string) (nodeproto.PipelineDescription, error) {
-	names := make([]string, 0, len(schemas))
-	for _, s := range schemas {
-		if s.Name == pipelineName {
-			if s.Error != nil {
-				return nodeproto.PipelineDescription{}, s.Error
-			}
-			return s, nil
+	if schema, found := (nodeproto.DescribeDoc{Pipelines: schemas}).Pipeline(pipelineName); found {
+		if schema.Error != nil {
+			return nodeproto.PipelineDescription{}, schema.Error
 		}
-		names = append(names, s.Name)
+		return schema, nil
+	}
+	names := make([]string, 0, len(schemas))
+	for _, schema := range schemas {
+		names = append(names, schema.Name)
 	}
 	msg := fmt.Sprintf("unknown pipeline %q", pipelineName)
 	if suggestion := sparkwingruntime.SuggestClosest(pipelineName, names); suggestion != "" {

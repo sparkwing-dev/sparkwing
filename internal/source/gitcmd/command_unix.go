@@ -1,6 +1,6 @@
 //go:build !windows
 
-package source
+package gitcmd
 
 import (
 	"bytes"
@@ -11,10 +11,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-func commandOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
+// Output runs and joins a Git process and its descendants.
+func Output(ctx context.Context, cmd *exec.Cmd, combined bool) ([]byte, error) {
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = nil
+	if combined {
+		cmd.Stderr = &output
+	}
 	cmd.Cancel = nil
 	group, err := procgroup.Start(cmd)
 	if err != nil {

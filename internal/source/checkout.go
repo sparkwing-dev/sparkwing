@@ -6,16 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
-
-var commitID = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 // PrepareCheckout acquires source without invoking an SDK or an engine. Its Entry
 // has no executable command; callers must resolve the matching engine before installation.
@@ -26,6 +24,9 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	}
 	if err := validateSpec(spec); err != nil {
 		return nil, err
+	}
+	if options.LocalBundle != "" && (spec.LocalCheckout == "" || !filepath.IsAbs(options.LocalBundle) || options.PreparedCheckout != "") {
+		return nil, errors.New("local source bundle requires an absolute file and local checkout")
 	}
 	environment, err := sourceEnvironment(options, procenv.Git)
 	if err != nil {
@@ -76,7 +77,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 				return entry, fmt.Errorf("authorize source bundle: %w", err)
 			}
 		} else {
-			remote, err = client.authorizeRemote(ctx, spec, options.Access)
+			remote, err = client.authorizeRemote(ctx, spec, spec.RemoteURL, options.Access)
 			if err != nil {
 				return entry, err
 			}
@@ -119,10 +120,6 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			return entry, errors.Join(err, refErr)
 		}
 	}
-	if spec.SHA != "" && !strings.EqualFold(actual, spec.SHA) {
-		return entry, errors.New("source checkout HEAD differs from the sealed commit")
-	}
-	entry.SHA = actual
 	if entry.DefaultBranch == "" && (spec.LocalCheckout != "" || options.PreparedCheckout != "") {
 		branch, err := client.run(ctx, checkout, "", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
 		if err == nil {
@@ -131,9 +128,95 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			return entry, err
 		}
 	}
+	if spec.LocalCheckout != "" && (spec.CommittedCheckout || options.LocalBundle != "" || spec.SHA != "" && !strings.EqualFold(actual, spec.SHA)) {
+		if !filepath.IsAbs(options.Workspace) {
+			return entry, errors.New("selected local revision requires an absolute host workspace")
+		}
+		if err := fssecure.EnsureDir(options.Workspace); err != nil {
+			return entry, err
+		}
+		root, err := fssecure.MkdirPrivateTemp(options.Workspace, "revision-")
+		if err != nil {
+			return entry, err
+		}
+		entry.ownedDirectory = root
+		client.workspace = root
+		selected := filepath.Join(root, "checkout")
+		local := client
+		local.env = append(append([]string{}, client.env...), "GIT_ALLOW_PROTOCOL=file")
+		if _, err := local.run(ctx, "", "", "clone", "--quiet", "--no-checkout", "--no-hardlinks", "--", checkout, selected); err != nil {
+			return entry, err
+		}
+		if options.LocalBundle != "" {
+			if _, err := client.run(ctx, selected, "", "bundle", "unbundle", options.LocalBundle); err != nil {
+				return entry, err
+			}
+		}
+		revision := spec.SHA
+		if revision == "" {
+			revision = actual
+		}
+		if _, err := client.run(ctx, selected, "", "checkout", "--quiet", "--detach", revision); err != nil {
+			return entry, err
+		}
+		policy := spec.Checkout.Policy
+		if policy.Submodules != nil && *policy.Submodules || policy.LFS != nil && *policy.LFS {
+			remote, err := client.run(ctx, checkout, "", "remote", "get-url", "origin")
+			if err != nil {
+				return entry, err
+			}
+			if options.Access != nil {
+				remote, err = client.authorizeRemote(ctx, spec, remote, options.Access)
+				if err != nil {
+					return entry, err
+				}
+			}
+			if _, err := client.run(ctx, selected, "", "remote", "set-url", "origin", remote); err != nil {
+				return entry, err
+			}
+			if err := materializePolicy(ctx, &client, spec, selected, remote, revision); err != nil {
+				return entry, err
+			}
+		}
+		checkout, actual = selected, revision
+	}
+	if spec.SHA != "" && !strings.EqualFold(actual, spec.SHA) {
+		return entry, errors.New("source checkout HEAD differs from the sealed commit")
+	}
+	entry.SHA = actual
 	entry.checkoutDirectory = checkout
+	if spec.BundleDigest != "" {
+		relative := spec.PipelineDir
+		if relative == "" {
+			relative = ".sparkwing"
+		}
+		info, err := os.Lstat(filepath.Join(checkout, relative))
+		if err != nil {
+			return entry, err
+		}
+		if !info.IsDir() {
+			return entry, errors.New("source bundle pipeline entry must be a directory")
+		}
+	}
 	entry.Directory, err = pipelineDirectory(checkout, spec.PipelineDir)
-	return entry, err
+	if err != nil {
+		return entry, err
+	}
+	entry.pipelineCheckout = checkout
+	if spec.PipelineSHA != "" && (spec.PipelineSHA != actual || spec.LocalCheckout != "" && !spec.CommittedCheckout) {
+		code := spec.PipelineSource()
+		codeOptions := options
+		if options.PreparedCheckout != "" {
+			code.LocalCheckout, code.RemoteURL = options.PreparedCheckout, ""
+		}
+		codeOptions.PreparedCheckout = ""
+		entry.pipelineEntry, err = PrepareCheckout(ctx, code, codeOptions)
+		if err != nil {
+			return entry, err
+		}
+		entry.Directory, entry.pipelineCheckout = entry.pipelineEntry.Directory, entry.pipelineEntry.CheckoutDirectory()
+	}
+	return entry, nil
 }
 
 func validateSpec(spec Spec) error {
@@ -152,7 +235,10 @@ func validateSpec(spec Spec) error {
 			return errors.New("remote source requires the sealed commit, not a branch head")
 		}
 	}
-	if spec.SHA != "" && !commitID.MatchString(spec.SHA) {
+	if spec.PipelineSHA != "" && !runspec.IsCommitID(spec.PipelineSHA) {
+		return errors.New("pipeline commit must be a full hexadecimal ID")
+	}
+	if spec.SHA != "" && !runspec.IsCommitID(spec.SHA) {
 		return errors.New("source commit must be a full 40 or 64 digit hexadecimal ID")
 	}
 	policy := spec.Checkout.Policy
@@ -162,12 +248,12 @@ func validateSpec(spec Spec) error {
 	return nil
 }
 
-func (g *gitClient) authorizeRemote(ctx context.Context, spec Spec, access Access) (string, error) {
+func (g *gitClient) authorizeRemote(ctx context.Context, spec Spec, remote string, access Access) (string, error) {
 	credential, err := access.GitCredential(ctx, spec)
 	if err != nil {
 		return "", fmt.Errorf("authorize source: %w", err)
 	}
-	remote, err := credentialRemote(spec.RemoteURL, credential)
+	remote, err = credentialRemote(remote, credential)
 	if err != nil {
 		return "", err
 	}
@@ -176,7 +262,11 @@ func (g *gitClient) authorizeRemote(ctx context.Context, spec Spec, access Acces
 }
 
 func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, checkout, bundleURL string, access Access) error {
-	if _, err := client.run(ctx, "", "", "init", "--quiet", checkout); err != nil {
+	format := "sha1"
+	if len(spec.SHA) == 64 {
+		format = "sha256"
+	}
+	if _, err := client.run(ctx, "", "", "init", "--object-format="+format, "--quiet", checkout); err != nil {
 		return err
 	}
 	if _, err := client.run(ctx, checkout, "", "remote", "add", "origin", remote); err != nil {
@@ -206,7 +296,7 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 	needsTags := policy.Tags != nil && *policy.Tags
 	if spec.BundleDigest != "" && (needsFetch || needsTags || policy.Submodules != nil && *policy.Submodules || policy.LFS != nil && *policy.LFS) {
 		var err error
-		remote, err = client.authorizeRemote(ctx, spec, access)
+		remote, err = client.authorizeRemote(ctx, spec, spec.RemoteURL, access)
 		if err != nil {
 			return err
 		}
@@ -224,13 +314,18 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 	if _, err := client.run(ctx, checkout, "", "checkout", "--quiet", "--detach", strings.ToLower(spec.SHA), "--"); err != nil {
 		return err
 	}
+	return materializePolicy(ctx, client, spec, checkout, remote, spec.SHA)
+}
+
+func materializePolicy(ctx context.Context, client *gitClient, spec Spec, checkout, remote, sha string) error {
+	policy := spec.Checkout.Policy
 	if policy.Submodules != nil && *policy.Submodules {
 		if err := checkoutSubmodules(ctx, client, checkout, remote); err != nil {
 			return err
 		}
 	}
 	if policy.LFS != nil && *policy.LFS {
-		return checkoutLFS(ctx, client, checkout, remote, spec.SHA)
+		return checkoutLFS(ctx, client, checkout, remote, sha)
 	}
 	return nil
 }
@@ -287,6 +382,10 @@ func (e *Entry) Close() error {
 	if e.releaseSDK != nil {
 		err = e.releaseSDK()
 		e.releaseSDK = nil
+	}
+	if e.pipelineEntry != nil {
+		err = errors.Join(err, e.pipelineEntry.Close())
+		e.pipelineEntry = nil
 	}
 	if e.ownedDirectory != "" {
 		if removeErr := os.RemoveAll(e.ownedDirectory); removeErr != nil {

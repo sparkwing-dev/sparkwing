@@ -38,9 +38,6 @@ func checkCLIVerbs(contentDir string) bool {
 		if werr != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return werr
 		}
-		if strings.Contains(path, "/migrations/") {
-			return nil
-		}
 		if isGeneratedDoc(path) {
 			return nil
 		}
@@ -50,7 +47,21 @@ func checkCLIVerbs(contentDir string) bool {
 			return rerr
 		}
 		rel, _ := filepath.Rel(contentDir, path)
-		invocations = append(invocations, extractInvocations(rel, string(data))...)
+		doc := string(data)
+		if strings.Contains(filepath.ToSlash(rel), "migrations/") {
+			doc = normalizeMigrationInvocations(migrationDestinations(doc))
+		}
+		examples := extractInvocations(rel, doc)
+		if strings.Contains(filepath.ToSlash(rel), "migrations/") {
+			for i := range examples {
+				if examples[i].args != nil || examples[i].err != nil || valid[examples[i].raw] {
+					continue
+				}
+				raw := strings.NewReplacer("[flags]", "", "[-- pipeline-flags]", "", "[", "", "]", "", "...", "").Replace(examples[i].raw)
+				examples[i].args, examples[i].err = shellExampleArgs(raw)
+			}
+		}
+		invocations = append(invocations, examples...)
 		return nil
 	})
 	if err != nil {
@@ -299,4 +310,118 @@ func isGroup(cur string, valid map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+func normalizeMigrationInvocations(doc string) string {
+	roots := map[string]bool{}
+	for _, command := range clisurface.Registry() {
+		words := strings.Fields(command.Path)
+		if len(words) > 1 && words[0] == "sparkwing" {
+			roots[words[1]] = true
+		}
+	}
+	for _, root := range strings.Fields("cloud configure cluster serve crons daemon profile") {
+		roots[root] = true
+	}
+	normalize := func(example string) string {
+		command := strings.TrimLeft(example, " \t")
+		if strings.HasPrefix(command, "$ ") || strings.HasPrefix(command, "$\t") {
+			command = strings.TrimLeft(command[1:], " \t")
+		}
+		words := strings.Fields(command)
+		if len(words) > 1 && roots[words[0]] {
+			return "sparkwing " + command
+		}
+		return example
+	}
+	lines := strings.Split(doc, "\n")
+	proseStart := 0
+	prose := func(end int) {
+		chunk := inlineCodeRE.ReplaceAllStringFunc(strings.Join(lines[proseStart:end], "\n"), func(snippet string) string {
+			return "`" + normalize(strings.Trim(snippet, "`")) + "`"
+		})
+		copy(lines[proseStart:end], strings.Split(chunk, "\n"))
+	}
+	fence, shell := false, false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			if fence {
+				proseStart = i + 1
+			} else {
+				prose(i)
+				shell = shellLangs[strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trimmed, "```")))]
+			}
+			fence = !fence
+		} else if fence && shell {
+			lines[i] = normalize(line)
+		}
+	}
+	if !fence {
+		prose(len(lines))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func migrationDestinations(doc string) string {
+	historical := regexp.MustCompile("Before: `[^`]*`")
+	lines := strings.Split(doc, "\n")
+	before, fence, column, depth, ended := false, false, -1, 0, false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !fence {
+			heading := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+			if heading > 0 && depth > 0 && heading <= depth {
+				depth = 0
+				before = false
+			}
+			if depth > 0 {
+				lines[i] = ""
+				if strings.HasPrefix(trimmed, "```") {
+					fence = true
+				}
+				continue
+			}
+			if strings.HasPrefix(trimmed, "|") {
+				cells := strings.Split(strings.ReplaceAll(trimmed, `\|`, "\x00"), "|")
+				for j, cell := range cells {
+					if strings.TrimSpace(cell) == "Before" {
+						column = j
+					}
+				}
+				if column >= 0 && column < len(cells) {
+					cells[column] = ""
+					lines[i] = strings.ReplaceAll(strings.Join(cells, "|"), "\x00", "|")
+				}
+				continue
+			}
+			column = -1
+			if before && ended && trimmed != "" && line == trimmed && !strings.HasPrefix(trimmed, "```") {
+				before = false
+			}
+			label := strings.TrimLeft(trimmed, "# *-")
+			if strings.HasPrefix(label, "Before:") || strings.HasPrefix(label, "Before**") || label == "Before" {
+				before = true
+				depth = heading
+				ended = false
+				if heading == 0 && strings.HasPrefix(trimmed, "Before:") && historical.MatchString(trimmed) {
+					before = false
+				}
+			} else if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "- **") || strings.HasPrefix(trimmed, "**") || strings.HasSuffix(trimmed, ":") {
+				before = false
+			}
+		}
+		if before && !fence && trimmed == "" {
+			ended = true
+		}
+		if strings.HasPrefix(trimmed, "```") {
+			fence = !fence
+		}
+		if before {
+			lines[i] = ""
+		} else {
+			lines[i] = historical.ReplaceAllString(lines[i], "")
+		}
+	}
+	return strings.Join(lines, "\n")
 }

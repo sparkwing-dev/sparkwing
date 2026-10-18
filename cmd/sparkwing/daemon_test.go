@@ -20,7 +20,7 @@ func TestDaemonRecoverStateRequiresConsentAndPreservesUnreadableBytes(t *testing
 	}
 
 	t.Setenv("SPARKWING_HOME", home)
-	err := runDaemon([]string{"recover-state"})
+	err := runDaemonArgs([]string{"recover-state"})
 	if err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("recovery without consent error = %v", err)
 	}
@@ -31,7 +31,7 @@ func TestDaemonRecoverStateRequiresConsentAndPreservesUnreadableBytes(t *testing
 	var runErr error
 	captureStdout(t, func() {
 		t.Setenv("SPARKWING_HOME", home)
-		runErr = runDaemon([]string{"recover-state", "--yes"})
+		runErr = runDaemonArgs([]string{"recover-state", "--yes"})
 	})
 	if runErr != nil {
 		t.Fatalf("recover unreadable state: %v", runErr)

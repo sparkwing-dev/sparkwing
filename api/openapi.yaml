@@ -850,6 +850,15 @@ components:
           $ref: '#/components/schemas/internal.nodeproto.RunnerIdentity'
         source_generation:
           type: integer
+        submitted_env:
+          anyOf:
+            - additionalProperties:
+                anyOf:
+                  - contentEncoding: base64
+                    type: string
+                  - type: "null"
+              type: object
+            - type: "null"
         unit:
           type: string
         unit_id:
@@ -900,6 +909,15 @@ components:
             - type: "null"
         request:
           $ref: '#/components/schemas/internal.runspec.Request'
+        submitted_env:
+          anyOf:
+            - additionalProperties:
+                anyOf:
+                  - contentEncoding: base64
+                    type: string
+                  - type: "null"
+              type: object
+            - type: "null"
       required:
         - request
         - idempotency_key
@@ -5230,6 +5248,8 @@ components:
           type: string
         env:
           $ref: '#/components/schemas/internal.runspec.EnvSnapshot'
+        environment_source:
+          type: string
         execution_location:
           type: string
         git:
@@ -5252,6 +5272,10 @@ components:
           type: string
         pull_request:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.'
+        reason:
+          type: string
+        request_id:
+          type: string
         requested_args:
           anyOf:
             - additionalProperties:
@@ -5636,12 +5660,22 @@ components:
       properties:
         bundle_digest:
           $ref: '#/components/schemas/internal.runspec.Optional.string.'
+        committed_checkout:
+          type: boolean
         entrypoint:
           type: string
+        hash_all_files:
+          type: boolean
         location:
           $ref: '#/components/schemas/internal.runspec.SourceLocation'
+        no_bincache:
+          type: boolean
         ref:
           type: string
+        requested_ref:
+          type: string
+        working_tree:
+          type: boolean
       required:
         - ref
         - entrypoint

@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -164,10 +166,25 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "example",
 		Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
 		Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 0}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "priority"}}},
-		Source:  runspec.Source{Location: runspec.SourceLocation{LocalCheckout: checkout, PipelineDir: ".sparkwing"}},
+		Source:  runspec.Source{Ref: entry.SHA, Location: runspec.SourceLocation{LocalCheckout: checkout, PipelineDir: ".sparkwing"}},
 		Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: entry.SHA},
 	}}
 	admitted, err := engine.CreateRun(t.Context(), request)
+	if format == "unborn" {
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || admitted.RunID != "" {
+			t.Fatalf("unresolved local source admitted: %+v: %v", admitted, err)
+		}
+		reader, err := client.NewRunReader(options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, err := reader.ListRuns(t.Context(), controllerwire.RunQuery{Limit: 20})
+		if err != nil || len(page.Runs) != 0 {
+			t.Fatalf("refused source persisted a run: %+v: %v", page, err)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatal("real local controller admission:", err)
 	}
@@ -177,7 +194,7 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 	if admitted.Request.Request.Options.Priority != request.Request.Options.Priority || admitted.Request.Request.Source != request.Request.Source {
 		t.Fatal("local admission lost explicit zero priority or acquisition location")
 	}
-	if admitted.Request.Request.Git.SHA != entry.SHA {
+	if admitted.Request.Request.Git.SHA != entry.SHA || admitted.Request.Request.Source.Ref != entry.SHA {
 		t.Fatal("local admission changed the acquired source commit")
 	}
 	if admitted.RunID == "" || admitted.Request.Request.Pipeline != "example" || admitted.Request.AuthorityRef.ID == "" {

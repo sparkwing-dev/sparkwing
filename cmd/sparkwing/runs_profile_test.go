@@ -23,7 +23,7 @@ func TestRunsList_ProfileNotFound(t *testing.T) {
 profiles:
   prod: { controller: { url: https://api.example.dev } }
 `)
-	err := runJobs([]string{"list", "--profile", "ghost"})
+	err := runJobsArgs([]string{"list", "--profile", "ghost"})
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -34,7 +34,7 @@ profiles:
 
 func TestRunsStatus_OnFlagRetired(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	err := runJobs([]string{"status", "--run", "r1", "--on", "prod"})
+	err := runJobsArgs([]string{"status", "--run", "r1", "--on", "prod"})
 	if err == nil || !strings.Contains(err.Error(), "--on") {
 		t.Fatalf("status: want retired --on pointer, got %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRunsStatus_OnFlagRetired(t *testing.T) {
 
 func TestRunsLogs_OnFlagRetired(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	err := runJobs([]string{"logs", "--run", "r1", "--on", "prod"})
+	err := runJobsArgs([]string{"logs", "--run", "r1", "--on", "prod"})
 	if err == nil || !strings.Contains(err.Error(), "--on") {
 		t.Fatalf("logs: want retired --on pointer, got %v", err)
 	}
@@ -50,7 +50,7 @@ func TestRunsLogs_OnFlagRetired(t *testing.T) {
 
 func TestRunsLogs_ErrorUsesPublicCommandName(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	err := runJobs([]string{"logs", "--run", "r1", "--tail", "1", "--head", "1"})
+	err := runJobsArgs([]string{"logs", "--run", "r1", "--tail", "1", "--head", "1"})
 	if err == nil {
 		t.Fatal("expected conflicting range error")
 	}

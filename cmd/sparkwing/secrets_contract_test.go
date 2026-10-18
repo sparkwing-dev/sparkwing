@@ -29,15 +29,19 @@ type secretManagerFake struct {
 func (f secretManagerFake) ListSecrets(context.Context) (controllerwire.Secrets, error) {
 	return f.list()
 }
+
 func (f secretManagerFake) ReadSecret(_ context.Context, s controllerwire.SecretSelector) (controllerwire.SecretValue, error) {
 	return f.read(s)
 }
+
 func (f secretManagerFake) WriteSecret(_ context.Context, s controllerwire.SecretWrite) (controllerwire.SecretWritten, error) {
 	return f.write(s)
 }
+
 func (f secretManagerFake) DeleteSecret(_ context.Context, s controllerwire.SecretSelector) (controllerwire.SecretDeletion, error) {
 	return f.del(s)
 }
+
 func (f secretManagerFake) RotateSecrets(_ context.Context, s controllerwire.SecretRotationRequest) (controllerwire.SecretRotation, error) {
 	return f.rotate(s)
 }
@@ -228,9 +232,11 @@ func TestSecretManagementRejectsInvalidInputBeforeConnection(t *testing.T) {
 		{"set", "--secret", "../TOKEN", "--value", "secret"},
 		{"set", "--secret", "TOKEN", "--value", "secret", "--file", "missing"},
 		{"set", "--secret", "TOKEN", "--pipeline", "deploy", "--shared"},
-		{"list", "-o", "table"}, {"get"}, {"delete", "TOKEN"},
+		{"list", "-o", "table"},
+		{"get"},
+		{"delete", "TOKEN"},
 	} {
-		if err := runSecret(args); err == nil {
+		if err := runSecretArgs(args); err == nil {
 			t.Fatalf("accepted: %v", args)
 		}
 	}
@@ -258,7 +264,7 @@ func TestSecretManagementCommandUsesFinalControllerAPI(t *testing.T) {
 	})
 	var result error
 	out := captureStdout(t, func() {
-		result = runSecret([]string{"set", "--secret", "TOKEN", "--value", "private-value", "--only-on", "prod", "--profile", "prod", "-o", "json"})
+		result = runSecretArgs([]string{"set", "--secret", "TOKEN", "--value", "private-value", "--only-on", "prod", "--profile", "prod", "-o", "json"})
 	})
 	if result != nil || calls != 1 || strings.Contains(out, "private-value") || strings.Contains(out, "private-credential") || !strings.Contains(out, `"only_on":"prod"`) {
 		t.Fatalf("command: %s %v", out, result)

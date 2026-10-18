@@ -110,6 +110,7 @@
         "cli-repos",
         "cli-run",
         "cli-runners",
+        "cli-team",
         "cli-runs",
         "cli-schedules",
         "cli-secrets",

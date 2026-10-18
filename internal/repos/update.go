@@ -24,13 +24,6 @@ const (
 	VerdictInterrupted VerdictKind = "interrupted"
 )
 
-// UncomparedPipeline is a pipeline whose baseline plan already failed, so
-// the bump could not be judged against it.
-type UncomparedPipeline struct {
-	Pipeline string
-	Reason   string
-}
-
 type PipelineDiff struct {
 	Pipeline string
 	Diff     PlanDiff
@@ -43,17 +36,16 @@ type Guide struct {
 }
 
 type Verdict struct {
-	Repo       string
-	Primary    string
-	Kind       VerdictKind
-	FromPin    string
-	ToPin      string
-	Err        string
-	Diffs      []PipelineDiff
-	Uncompared []UncomparedPipeline
-	Guides     []Guide
-	Committed  bool
-	Detail     string
+	Repo      string
+	Primary   string
+	Kind      VerdictKind
+	FromPin   string
+	ToPin     string
+	Err       string
+	Diffs     []PipelineDiff
+	Guides    []Guide
+	Committed bool
+	Detail    string
 }
 
 type Ops interface {
@@ -171,11 +163,7 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 		return fail("list pipelines: " + err.Error())
 	}
 
-	// A pipeline whose baseline plan already fails -- required inputs, most
-	// often -- says nothing about the bump, so it is set aside rather than
-	// counted against it.
 	before := map[string]Plan{}
-	var compared []string
 	for i, p := range pipelines {
 		if ctx.Err() != nil {
 			return interrupted()
@@ -183,22 +171,15 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 		cfg.progress(name, "plan %d/%d %s (before bump)", i+1, len(pipelines), p)
 		plan, perr := ops.Plan(sparkwingDir, p)
 		if perr != nil {
-			if ctx.Err() != nil {
-				return interrupted()
-			}
-			v.Uncompared = append(v.Uncompared, UncomparedPipeline{Pipeline: p, Reason: perr.Error()})
-			continue
+			return fail("plan " + p + " (before bump): " + perr.Error())
 		}
 		before[p] = plan
-		compared = append(compared, p)
 	}
 
 	cfg.progress(name, "bumping %s -> %s and tidying modules", pin, cfg.Target)
 	if err := ops.Bump(sparkwingDir, cfg.Target); err != nil {
 		return fail("bump pin: " + err.Error())
 	}
-	// Compiling against the new pin is the evidence a repo with nothing
-	// left to compare still needs.
 	cfg.progress(name, "compiling pipelines after bump")
 	if _, err := ops.Pipelines(sparkwingDir); err != nil {
 		return fail("compile after bump: " + err.Error())
@@ -206,11 +187,11 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 
 	var diffs []PipelineDiff
 	allIdentical := true
-	for i, p := range compared {
+	for i, p := range pipelines {
 		if ctx.Err() != nil {
 			return interrupted()
 		}
-		cfg.progress(name, "plan %d/%d %s (after bump)", i+1, len(compared), p)
+		cfg.progress(name, "plan %d/%d %s (after bump)", i+1, len(pipelines), p)
 		after, perr := ops.Plan(sparkwingDir, p)
 		if perr != nil {
 			return fail("plan " + p + " (after bump): " + perr.Error())
@@ -291,9 +272,6 @@ func verdictLine(v Verdict) string {
 			}
 		}
 		line += fmt.Sprintf(" (%d pipeline(s) changed shape)", n)
-	}
-	if len(v.Uncompared) > 0 {
-		line += fmt.Sprintf(" (%d pipeline(s) not compared)", len(v.Uncompared))
 	}
 	if v.Detail != "" {
 		line += ": " + v.Detail

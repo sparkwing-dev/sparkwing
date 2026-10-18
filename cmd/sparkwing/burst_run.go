@@ -66,6 +66,12 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 	if err := validateLocalRunFlags(flags); err != nil {
 		return err
 	}
+	if flags.index != "" {
+		return errors.New("run: --sw-index requires local routing")
+	}
+	if flags.allowUnadmitted {
+		return errors.New("run: --sw-allow-unadmitted requires local routing")
+	}
 	if flags.ref != "" || flags.pipelineRef != "" {
 		return errors.New("run: Cloud overflow captures the working tree; use pipeline trigger to select committed revisions")
 	}
@@ -103,6 +109,9 @@ func runConfiguredInvocation(pipeline string, flags runFlags, args []string) err
 	directory, err := findSparkwingDir()
 	if err != nil {
 		return err
+	}
+	if flags.sourceSelection != nil {
+		directory = flags.sourceSelection.execution.Directory
 	}
 	route, err := loadRunRouting(directory, pipeline)
 	if err != nil {

@@ -1,5 +1,24 @@
 # Migrating to the next release
 
+## Environment and source selections
+
+Requests with nonempty environments set `environment_source` to `captured` for
+private local snapshots or `submitted` for encrypted controller transport. Child
+intake inherits the parent's source and snapshot. Changing invocation origin
+never changes where those values live. Retry retains the original selection.
+
+Local `--sw-ref` selects the execution revision. `--sw-pipeline-ref` selects the
+pipeline code revision. Both resolve before engine selection, inspection and
+building. The sealed request retains the exact execution and code commits.
+`source.working_tree` records local code from the current tree, while
+`source.committed_checkout` distinguishes a requested execution commit from the
+working tree even when that commit equals HEAD.
+
+An alias such as `deploy-prod` with `entrypoint: Deploy` selects the SDK's `Deploy`
+registration. Author code still sees `deploy-prod` in its run context. Scaffolds
+register that configured entrypoint.
+
+
 ## Go SDK replacements
 
 An applicable Go SDK `replace` directive runs with the installed CLI's engine.
@@ -576,7 +595,8 @@ the awarded execution inputs. Plan awards omit `--job` in `fetch-source` and
 
 ## Daemon event cursors
 
-Replace `daemon events --offset N` with the returned `--cursor`. Repeat the same
+Before: `daemon events --offset N`. Use `sparkwing daemon events` with the returned
+`--cursor` value. Repeat the same
 run, kind, incarnation and since filters on continuation. `--limit` must be
 positive. The default remains 50. Follow cursors until the final page to read
 all matching retained events. Newer arrivals do not shift older pages. Removed or
@@ -646,8 +666,7 @@ No reader imports old per-file settings.
 
 Adding and removing profiles preserves concurrent edits. If a connection
 changes during credential revocation, removal fails and retains that changed
-connection. Reload it before retrying. The removed `configure init` handler
-and its permission-repair behavior are gone.
+connection. Reload it before retrying. Before: `configure init`. Its permission-repair behavior has been removed.
 
 ## Runner enrollment files
 
@@ -671,7 +690,7 @@ manual revocation command and returns nonzero.
 ## Queue and concurrency views
 
 Replace bare `sparkwing queue` listings with `sparkwing queue list`.
-Replace `sparkwing cluster concurrency --namespace GROUP --profile P` with
+Before: `sparkwing cluster concurrency --namespace GROUP --profile P`. Use
 `sparkwing queue list --group GROUP --profile P`. Bare `queue` shows help.
 The client uses `/api/v1/queue` and `/api/v1/queue/groups/{group}`.
 Connection failures return nonzero without an empty queue record.
@@ -683,7 +702,7 @@ unfinished native controller integrations.
 
 ## Local cache warming
 
-Before, `sparkwing pipeline sparks warmup` compiled a pipeline and uploaded its
+Before: `sparkwing pipeline sparks warmup` compiled a pipeline and uploaded its
 binary to gitcache. Local execution could also download that binary.
 
 Use `sparkwing cache warm` from the checkout to prepare the local cache.
@@ -1387,7 +1406,7 @@ that keep the logs service running.
 - **Runners and agents:** drop `--logs` from `sparkwing-runner runner` and
   `launch`, `--trigger-runner-logs-url` from `runner`, and the `logs:` key
   from an agent's `config.yaml`, which now fails to load with
-  `field logs not found`. `sparkwing cluster runners add` has no `--logs`.
+  `field logs not found`. `sparkwing runners add --runner NAME --profile PROFILE` has no `--logs`.
   Drop any `SPARKWING_LOGS_EGRESS_*` variables; nothing reads them.
 - **Profiles:** the `logs` and `cache` surfaces are gone; remove them.
 - **Credentials and API:** the `logs.write` and `logs.delete` scopes are
@@ -1399,10 +1418,8 @@ that keep the logs service running.
   of `GET /api/v1/services` and signed `kind=log` downloads are removed;
   read logs through `GET /api/v1/runs/{id}/logs/{node}`. The storage
   counter routes answer only the cache's operator token.
-- **Laptop:** `sparkwing serve` runs no logs service and writes only
-  `SPARKWING_CONTROLLER_URL` to `dev.env`; the dashboard reads node logs
-  from the run directories, and `sparkwing runs prune` removes them through
-  the dashboard.
+- **Laptop:** `sparkwing dashboard start` uses the local controller and its
+  shared log segments. `sparkwing runs prune` removes completed history.
 - **Go packages:** `pkg/logs` and `pkg/storage/sparkwinglogs` are removed.
   Read tagged log pages through `client.NewLogReader` from
   `pkg/controller/client`. Each page reports whether the run and its logs
@@ -1498,14 +1515,10 @@ Before upgrading:
    no identity provider, so the operator token is the dashboard's only sign-in.
 2. Make sure the operator holds an admin token. A controller provisioned with
    `--bootstrap-admin-token-file` (chart: `controller.bootstrapAdminToken.name`)
-   already has one. Otherwise mint one while a password admin can still act:
+   already has one. Otherwise provision the deployment administrator through
+   the controller's private bootstrap credential before upgrading.
 
-   ```bash
-   sparkwing cluster tokens create --type user --principal operator \
-       --scope admin --profile prod
-   ```
-
-3. Remove `sparkwing cluster users` from scripts. A script that used
+3. Before: `sparkwing cluster users`. Remove that command from scripts. A script that used
    `POST /api/v1/auth/login` for a session calls the API with a bearer token
    instead.
 
@@ -1572,9 +1585,10 @@ To upgrade:
   first, or pick another name.
 - The 10 live member tokens per member and 100 live machine tokens per team
   count the old CLI and runner tokens too.
-- Operator tokens (`POST /api/v1/tokens`, `sparkwing cluster tokens`), the
-  bootstrap token and GitHub Actions exchange credentials are unchanged. The dashboard's **Team > Machines** page uses the new routes
-  and works as before.
+- Before: `sparkwing cluster tokens`. Operator credentials now use
+  `sparkwing operator tokens list --profile PROFILE`; the unauthenticated token
+  minting route is removed. The dashboard's **Team > Machines** page uses
+  shared machine-registration routes.
 
 ## Assisted offers, enrollment and the foreground fleet are removed
 
@@ -1593,11 +1607,10 @@ runners, which claim nodes the way warm trigger runners always have.
   and `sparkwing run PIPELINE --sw-fleet` ran a foreground coordinator that
   offered nodes to the helpers that section named.
 - **After:** those routes answer `404`, and `POST /api/v1/nodes/claim`
-  refuses the offer fields as unknown. `sparkwing fleet`, `--sw-fleet` and
-  `sparkwing cluster agents enroll` are gone. Any runner or machine token
-  with `nodes.claim` claims through `POST /api/v1/nodes/claim`, including one
-  that was enrolled. `GET /api/v1/agents` and `sparkwing cluster agents list`
-  show the runners that claimed in the last hour with the labels, slot limit
+  refuses the offer fields as unknown. Before: `sparkwing fleet`.
+  Before: `sparkwing cluster agents enroll`. These commands and `--sw-fleet`
+  are removed. Runners claim through `POST /api/v1/runners/claim`.
+  `sparkwing runners list --profile PROFILE` shows the runners that claimed in the last hour with the labels, slot limit
   and headroom they advertised; `active_slots`, `base_priority`,
   `priority_ceiling`, `budget` and the `gateway` type are gone. The store
   has no executor or offer tables, and an older controller refuses it.
@@ -1608,14 +1621,14 @@ To upgrade:
    command that reads the file stops with
    `unknown section "fleet"`.
 2. For each machine that was an enrolled helper, run it as an ordinary
-   runner: `sparkwing cluster runners add --profile PROFILE --name MACHINE`
+   runner: `sparkwing runners add --profile PROFILE --runner MACHINE`
    on it mints its runner token and starts the service, or deploy the runner
    bundle in Kubernetes. Give it the capabilities its enrollment listed with
    `--labels`, and its `max_concurrent` with `--max-concurrent`. Revoke the
    token the enrollment named once nothing uses it.
 3. Run pipelines without `--sw-fleet` or `--sw-allow-secret-file`; the
    latter only fed the fleet's source snapshot, and
-   `sparkwing pipeline trigger --working-tree --allow-secret-file` keeps it. A foreground `sparkwing run` executes
+   `sparkwing pipeline trigger PIPELINE --profile PROFILE --working-tree --allow-secret-file PATH` keeps it. A foreground `sparkwing run` executes
    on the machine you run it on; to spread a run across machines, trigger it
    on a controller with runners attached.
 4. Code embedding `pkg/controller/client` drops `PrepareExecutorClaim`,
@@ -1663,7 +1676,7 @@ To upgrade:
 
 1. Upgrade the controller and every runner together: the runner bundle, the
    `sparkwing-runner runner` service, GitHub Actions runners and
-   `sparkwing cluster worker`. A runner from this release gets no claim token
+   self-hosted runners registered to Cloud. A runner from this release gets no claim token
    from an older controller, and its nodes fail with `401`.
 2. Leave runner tokens as they are. They keep claiming, heartbeating and
    making the runner's own calls; only the work they claim moves to claim
@@ -1695,7 +1708,7 @@ the run's plan declares and every release is recorded.
   and a team's owner (`team.admin`) still read a row by name; a masked row
   still answers a team owner `403 write_only`. `secrets.read` is no longer a
   machine team token scope: `POST /api/v1/team/tokens` refuses it with
-  `400`, and `sparkwing cluster runners add`, the dashboard and the GitHub
+  `400`, and `sparkwing runners add --runner NAME --profile PROFILE`, the dashboard and the GitHub
   Actions exchange stop granting it. Existing tokens that carry it keep
   authenticating; the scope releases nothing.
 
@@ -1710,7 +1723,7 @@ To upgrade:
    declare now gets `secret_undeclared` on a runner, as it already did on a
    controller-dispatched run.
 3. Move scripts that read secrets with a runner or machine token to an
-   operator token (`sparkwing cluster tokens create`) or a team owner's
+   operator credential (managed with `sparkwing operator tokens create --principal NAME --scope SCOPE --profile PROFILE`) or a team owner's
    credential.
 4. Drop `secrets.read` from scripts that mint machine tokens through
    `POST /api/v1/team/tokens`, and from code that calls
@@ -1818,17 +1831,18 @@ kept for S3 and Postgres state profiles.
 | Before | After |
 |---|---|
 | `sparkwing run build --profile shared` with an S3 or Postgres `state:` | `sparkwing pipeline trigger build --profile prod` to run on a controller, or `sparkwing run build` to run here |
-| `state: {type: s3, ...}` or `state: {type: postgres, ...}` in a machine profile (`~/.config/sparkwing/config.yaml`) | Delete the `state:` key, or the profile, or replace it with a controller profile (`sparkwing cloud connect`). The config fails to load with `state.type: s3 is removed` (or `postgres`) and a pointer to this section. |
+| `state: {type: s3, ...}` or `state: {type: postgres, ...}` in a machine profile (`~/.config/sparkwing/config.yaml`) | Delete the `state:` key, or the profile, or replace it with a controller profile (`sparkwing profiles add --controller URL`). The config fails to load with `state.type: s3 is removed` (or `postgres`) and a pointer to this section. |
 | The same in a project profile (`.sparkwing/sparkwing.yaml`) | A project profile declares all four surfaces, so deleting `state:` alone fails with `state surface is required`. Remove the profile, or set `state: {type: sqlite}` for this machine or `state: {type: controller}` for the profile's controller. Both errors name these choices. |
 | `url_source: env:VAR` on any surface | Delete it; it named the Postgres state DSN. The config fails to load with `field url_source not found`; a Postgres `state:` that carries it fails on that key before its type is checked. |
 | `mirror_local:` on a profile | Delete it. The config fails to load with `field mirror_local not found`. |
 | `cache: {binaries: {...}}` | Delete the `binaries:` block. The config fails to load with `field binaries not found`. Runs fetch prebuilt binaries from the git cache `SPARKWING_GITCACHE_URL` names. |
 | `sparkwing run X --sw-artifact-digest-backfill` | Delete the flag; it applied only to binaries fetched from a profile's cache. `run` refuses it as an unknown runner flag. |
-| `sparkwing serve start --profile P [--no-local-store]` | `sparkwing serve start` for this machine's runs, or the controller's dashboard for shared ones. |
+| `sparkwing serve start --profile P [--no-local-store]` | `sparkwing dashboard start` for this machine's runs, or the controller's dashboard for shared ones. |
 | `guards: {require: [profile:name=prod]}` | `profile:local`, `profile:controller` or an `arg:` token. A run never has a named profile, so the token never matched; a config naming it now fails to load. |
 | `sparkwing runs list --profile shared` against an S3 or Postgres state profile | Nothing reads that history any more. The bucket or database is yours to keep or delete. |
 
-- **Refusal:** `sparkwing run deploy --profile prod` fails before it
+- **Before:** `sparkwing run deploy --profile prod`.
+- **Refusal:** that invocation fails before it
   compiles anything: `run: --profile is removed; sparkwing run executes on
   this machine against its own store, so run on the profile's controller
   with sparkwing pipeline trigger deploy --profile prod`. `--profile`
@@ -1849,7 +1863,7 @@ kept for S3 and Postgres state profiles.
 - **Output:** a run no longer writes `runs/<id>/state.ndjson` into this
   machine's cache directory. `run_start` reports no `backends` or
   `profile` block.
-  `sparkwing configure profiles show -o json` drops `mirror_local`. The
+  `sparkwing profiles show --profile NAME -o json` drops `mirror_local`. The
   controller's health no longer reports `object_store.stalled`.
 - **Go packages:** `pkg/storage/s3state` is removed. `pkg/controller`
   drops `Loopback`, `LoopbackState`, `LoopbackConcurrency` and
@@ -1875,10 +1889,9 @@ Nothing converts an old pin.
   `sparkwing repos update --in-place`, or `go get` the SDK version in
   `.sparkwing/go.mod`, then run the pipeline once. A module that replaces
   the SDK with a local checkout needs that checkout at this release.
-- **Refusal:** an old binary fails before the run starts with `pipeline
-  entry exited without answering describe; rebuild .sparkwing against a
-  matching SDK`. A binary that speaks another protocol version names both
-  versions and its SDK.
+- **Refusal:** an old binary that does not answer describe fails before the
+  run starts. Rebuild `.sparkwing` against a matching SDK. A binary that speaks
+  another protocol version names both versions and its SDK.
 - **Plan code must be deterministic.** Every node process plans the run
   again, and a node whose plan entry differs from the one the run accepted
   fails with `plan_drift`. Read time, randomness and the environment in
@@ -1900,7 +1913,7 @@ Nothing converts an old pin.
   `--sw-dry-run` decisions. An unknown pipeline flag
   fails as invalid arguments instead of being dropped.
 - **Plan document:** dependency caches are listed under `caches` instead
-  of `dir_caches`, including in `sparkwing pipeline plan --static -o json`.
+  of `dir_caches`, including in `sparkwing pipeline plan --pipeline PIPELINE -o json`.
 
 ## The pipeline binary answers only the node protocol
 
@@ -1911,15 +1924,15 @@ script that called the binary directly moves to the CLI:
 | Before | After |
 |---|---|
 | `<binary> <pipeline> [flags]` | `sparkwing run <pipeline> [flags]` |
-| `<binary> <pipeline> --plan`, `sparkwing run <pipeline> --plan` | `sparkwing pipeline plan --name <pipeline>` |
-| `<binary> <pipeline> --explain`, `sparkwing run <pipeline> --explain` | `sparkwing pipeline plan --static --name <pipeline>` |
-| `<binary> <pipeline> config`, `sparkwing run <pipeline> config` | `sparkwing pipeline describe --name <pipeline> --secrets` |
+| `<binary> <pipeline> --plan`, `sparkwing run <pipeline> --plan` | `sparkwing pipeline plan --pipeline <pipeline>` |
+| `<binary> <pipeline> --explain`, `sparkwing run <pipeline> --explain` | `sparkwing pipeline plan --pipeline <pipeline>` |
+| `<binary> <pipeline> config`, `sparkwing run <pipeline> config` | `sparkwing pipeline describe --pipeline <pipeline> --secrets` |
 | `<binary> ops queue`, `ops doctor`, `ops version` | `sparkwing queue`, `sparkwing doctor`, `sparkwing version` |
 | `<binary> ops stats`, `ops stats-reset` | none |
 | `<binary> replay-node`, `sparkwing debug replay` | none; a hosted run records no dispatch snapshot |
 | `<binary> handle-trigger`, `run-node`, `sparkwing handle-trigger` | none; the CLI and `sparkwing-runner` host runs |
 
-`pipeline describe --secrets -o json` prints `{"pipeline": ..., "secrets":
+`sparkwing pipeline describe --pipeline ci --secrets -o json` prints `{"pipeline": ..., "secrets":
 [{"name": ..., "required": true}]}` (or `"optional": true`), read from
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
@@ -2060,7 +2073,7 @@ authentication. Do not automatically replay issuance.
 Go callers use `client.NewRunnerTokenManager(...).EnrollRunner` for enrollment
 and `client.NewTokenManager(..., true).CreateToken` with kind `service` for
 deployment issuance. The legacy `Client.EnrollRunner` and `Client.CreateServiceToken`
-methods are removed. `runners add --reserved-for POOL` forwards the pool proposal
+methods are removed. `sparkwing runners add --runner build --reserved-for POOL` forwards the pool proposal
 to the team-admin enrollment route. Repeated and comma-separated values are
 preserved. Enrollment sends one request and never replays a lost bearer response.
 The legacy `Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`,

@@ -140,7 +140,7 @@ func Parse(binary string, args []string) (Invocation, error) {
 func flagToken(arg string, shorts map[string]string) (name, value string, explicit bool, err error) {
 	if strings.HasPrefix(arg, "--") {
 		name, value, explicit = strings.Cut(arg[2:], "=")
-		return
+		return name, value, explicit, err
 	}
 	if len(arg) < 2 {
 		return "", "", false, fmt.Errorf("unexpected positional argument")
@@ -170,6 +170,9 @@ func (i *Invocation) validate() error {
 	for _, name := range names {
 		f, ok := allowed[name]
 		if !ok {
+			if i.Command.Path == "sparkwing run" && name == "profile" {
+				return i.invalid("--profile is not accepted by local run; use sparkwing pipeline trigger <pipeline> --profile NAME")
+			}
 			return i.invalid("flag --%s is not accepted", name)
 		}
 		if !f.Repeatable && len(i.Flags[name]) > 1 {
@@ -195,6 +198,9 @@ func (i *Invocation) validate() error {
 	}
 	for _, f := range definitions {
 		if f.Required && !i.Has(f.Name) {
+			if f.Meaning != "" {
+				return i.invalid("--%s is required; %s", f.Name, f.Meaning)
+			}
 			return i.invalid("--%s is required", f.Name)
 		}
 		if !i.Has(f.Name) || f.Argument == "" && !i.Bool(f.Name) {

@@ -4,29 +4,24 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result controllerwire.CreateRunRequest, resultErr error) {
 	unavailable := func(message string) (controllerwire.CreateRunRequest, error) {
 		return controllerwire.CreateRunRequest{}, &apierr.Error{Code: apierr.Unavailable, Message: message}
-	}
-	if flags.runner == hereRunnerFlag {
-		return unavailable("here intake requires the reason to survive the sealed request and replay")
 	}
 	if len(flags.allowSecretFiles) != 0 && !flags.workingTree {
 		return unavailable("--allow-secret-file requires --working-tree")
@@ -39,10 +34,21 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	if err != nil && !os.IsNotExist(err) {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	if machine.Run != nil && len(machine.Run.SubmitEnvAllow) != 0 {
-		return unavailable("trigger environment submission requires private captured-value retention at the controller")
-	}
 	captured := os.Environ()
+	masker := secrets.NewMasker()
+	var allow []string
+	if machine.Run != nil {
+		allow = machine.Run.SubmitEnvAllow
+	}
+	submitted, err := procenv.Submit(captured, allow, masker)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		if resultErr != nil {
+			resultErr = &maskedCLIError{err: resultErr, masker: masker}
+		}
+	}()
 	checkout, err := os.Getwd()
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
@@ -79,52 +85,59 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 			return result, branchErr
 		}
 		selected.git.Ref = branch
-		if selected.source.Ref != snapshot.SHA {
-			if err := snapshot.includeRevision(ctx, selected.source.Ref); err != nil {
-				return result, err
+		for _, revision := range []string{selected.git.SHA, selected.source.Ref} {
+			if revision != snapshot.SHA {
+				if err := snapshot.includeRevision(ctx, revision); err != nil {
+					return result, err
+				}
 			}
 		}
-		if _, err := selected.checkout.read(ctx, "checkout", "--quiet", "--detach", selected.source.Ref, "--"); err != nil {
+		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, "", snapshot.tempDir)
+		if err != nil {
 			return result, err
 		}
+		selected.checkout.directory = checkout
 	}
-	sdk, err := selected.sdk(ctx)
+	home, err := wingd.HomeDir("")
 	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
+		return result, err
 	}
-	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
+	options, err := hostSourceOptions(home, captured, masker, false)
 	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
+		return result, err
 	}
-	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode})
-	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
-	}
+	options.SDK = ""
 	if snapshot == nil {
 		workspace, err := os.MkdirTemp("", "sparkwing-trigger-inspect-*")
 		if err != nil {
 			return result, err
 		}
 		defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(workspace)) }()
-		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.source.Ref, "", workspace)
+		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, "", workspace)
 		if err != nil {
 			return result, err
 		}
 	}
-	options := source.Options{SDK: sdk, Engines: engines, PreparedCheckout: checkout, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
-	described, err := inspectTriggerSource(ctx, selected, captured, triggerInspection{options: options})
+	options.PreparedCheckout = checkout
+
+	described, err := inspectTriggerSource(ctx, selected, captured, options)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
 	input := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: settings.Values{Options: runspec.Options{Profile: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: flags.profile}}}}}
+	input.Machine.SubmitEnvAllow.Set, input.Machine.SubmitEnvAllow.Value = allow != nil, allow
+	input.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: path, Key: "run.submit_env_allow"}
 	if flags.runner != "" {
 		selection := runspec.RunnerSelection{Kind: runspec.RunnerName, Value: flags.runner}
+		if flags.runner == hereRunnerFlag {
+			selection.Kind, selection.Value = runspec.RunnerHere, ""
+		}
 		if label, ok := strings.CutPrefix(flags.runner, "label="); ok {
 			selection.Kind, selection.Value = runspec.RunnerLabel, label
 		}
 		input.Flags.Runner.Set, input.Flags.Runner.Value = true, selection
 	}
-	result, err = prepareTriggerRequest(triggerRequestInput{source: selected, settings: input, described: described, args: flags.passthrough, env: map[string]string{}})
+	result, err = prepareTriggerRequest(triggerRequestInput{source: selected, settings: input, described: described, reason: flags.reason, args: flags.passthrough, submittedEnv: submitted})
 	if err != nil || snapshot == nil {
 		return result, err
 	}
@@ -146,31 +159,21 @@ func snapshotTriggerCheckout(ctx context.Context, snapshot *worktreeSnapshot) (s
 }
 
 func triggerInspectionCheckout(ctx context.Context, repo, sha, bundle, workspace string) (string, error) {
-	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: os.Environ()}, procenv.Runtime{})
+	options := source.Options{Workspace: workspace, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
+	options.LocalBundle = bundle
+	entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: sha, CommittedCheckout: true, PipelineDir: "."}, options)
 	if err != nil {
 		return "", err
 	}
-	read := func(directory string, args ...string) (string, error) {
-		return (triggerCheckout{directory: directory, environment: environment}).read(ctx, args...)
-	}
-	directory := filepath.Join(workspace, "checkout")
-	if _, err := read(repo, "clone", "--quiet", "--shared", "--no-checkout", "--", repo, directory); err != nil {
-		return "", err
-	}
-	remote, err := read(repo, "remote", "get-url", "origin")
+	environment, err := procenv.Build(procenv.Git, options.Base, procenv.Runtime{})
 	if err != nil {
 		return "", err
 	}
-	if _, err := read(directory, "remote", "set-url", "origin", strings.TrimSpace(remote)); err != nil {
+	reader := triggerCheckout{directory: entry.CheckoutDirectory(), environment: environment}
+	remote, err := (triggerCheckout{directory: repo, environment: environment}).read(ctx, "remote", "get-url", "origin")
+	if err != nil {
 		return "", err
 	}
-	if bundle != "" {
-		if _, err := read(directory, "bundle", "unbundle", bundle); err != nil {
-			return "", err
-		}
-	}
-	if _, err := read(directory, "checkout", "--quiet", "--detach", sha, "--"); err != nil {
-		return "", err
-	}
-	return directory, nil
+	_, err = reader.read(ctx, "remote", "set-url", "origin", remote)
+	return reader.directory, err
 }

@@ -180,13 +180,11 @@ has already landed, so the hook runs its pipelines, tolerates failures,
 and always exits zero. Keep post-commit pipelines fast or detach their
 slow work; the hook runs in the commit's foreground.
 
-Managed hooks render quietly by default: each run prints one progress
-line and a one-line pass/fail status with the run id, instead of
-streaming every step into the commit or push. On failure the hook
-surfaces the failing step's error; the full log stays retrievable with
-`sparkwing runs logs --run <id>`. The hook sets
-`SPARKWING_LOG_FORMAT=quiet`; export a different value (`pretty` or
-`json`) before the git command to see the full stream.
+Managed hooks use plain output by default. Runs stream their output and print
+start and finish records with the run ID and status. The hook sets
+`SPARKWING_LOG_FORMAT=plain`. Export `pretty` or `json` before the Git command
+to select another format. Installation proofs also use plain output and report
+the last output line when the gate fails.
 
 ### Hooks are per repository, and the repository says so
 
@@ -316,8 +314,9 @@ survey a fleet at all.
 A survey that cannot read the registry says so and exits non-zero. It never
 answers with an empty fleet, because that is what a machine with nothing
 registered answers, and one stray character in the registry used to make an
-unread fleet look like a swept one. `install --fleet` and `fire --fleet` refuse
-for the same reason. `doctor` keeps reporting the rest of its sweep and carries
+unread fleet look like a swept one. `sparkwing pipeline hooks install --all-repos`
+and `sparkwing pipeline hooks status --prove --all-repos` refuse for the same reason. `doctor` keeps reporting the rest of its sweep and
+carries
 the reason in `gates_survey_error`, since the registry says nothing about this
 home's runs, locks or daemon.
 
@@ -333,16 +332,17 @@ sparkwing pipeline hooks status --prove            # this repo: make the gate re
 sparkwing pipeline hooks status --prove --all-repos    # every registered repo
 ```
 
-`fire` stages a file and commits it with the gate told to refuse, then reports
+`sparkwing pipeline hooks status --prove` stages a file and commits it with the
+gate told to refuse, then reports
 whether git refused it and which hook file did. Everything happens in a
 throwaway linked worktree, which shares the repository's config -- so the same
 `core.hooksPath` and the same hooks apply -- while carrying its own index and
 its own detached HEAD, so the repository's working tree, index, branches and
 HEAD are untouched whatever the gate does.
 
-`fire` settles the pre-commit gate only. A pre-push gate needs a remote to fire
+`pipeline hooks status --prove` settles the pre-commit gate only. A pre-push gate needs a remote to fire
 against, so it is left to the push that exercises it, and a repository that
-declares no pre-commit trigger has nothing for `fire` to prove -- `--all-repos`
+declares no pre-commit trigger has nothing for `pipeline hooks status --prove` to prove -- `--all-repos`
 counts it apart from the repositories whose gate refused rather than among
 them.
 
@@ -352,7 +352,7 @@ failed for an unrelated reason reads exactly like a gate doing its job.
 
 Only a hook sparkwing wrote that carries the self-test guard is ever executed.
 A hand-written hook, or a managed one installed before the guard existed, is
-reported `unprovable` and `fire` exits non-zero -- an enforcement question that
+reported `unprovable` and `pipeline hooks status --prove` exits non-zero -- an enforcement question that
 could not be answered is not a pass. Re-run `hooks install` to replace an older
 managed hook with one that can be asked.
 
@@ -370,7 +370,7 @@ than among them, because a sweep that reports it as armed reports a gated
 fleet while every commit in that repository still goes unchecked.
 
 The list is the machine's repo registry -- the `repos` section of
-`~/.config/sparkwing/config.yaml`, which `sparkwing repos add <dir>`
+`~/.config/sparkwing/config.yaml`, which `sparkwing repos add --checkout <dir>`
 writes to and which can name
 `fallback_paths` directories to scan for `*/.sparkwing/`. That is the whole
 extent of the survey: a checkout the registry does not reach is not surveyed,
@@ -495,3 +495,7 @@ func (p *Lint) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunCo
 ```bash
 sparkwing run lint        # runs locally; no git hook required
 ```
+
+Hook installation and removal report the resulting hook status. Piped commands
+emit JSON records by default. Use `-o plain` for hook names or `-o pretty` for a
+readable report. Installation progress and warnings go to stderr.

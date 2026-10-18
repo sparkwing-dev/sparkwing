@@ -57,6 +57,15 @@ run:
   submit_env_allow: [BUILD_REGION, BUILD_*]
 ```
 
+`pipeline trigger` and Cloud-routed `run` capture only present variables matching
+`run.submit_env_allow`. Empty values remain present. Literal names and terminal
+`_*` prefixes are supported. Credential-shaped and engine-owned names are
+excluded. The controller encrypts the captured values separately from the run
+spec and delivers them only to live execution awards. Retries keep the same
+values. Planning, installation and execution use them, and values of at least
+12 characters are masked before processes start. Public run views show only
+names and an environment digest.
+
 Connections come only from this machine file. A project can name a profile but
 cannot define one. A controller observation uses a profile only when selected
 with `--profile`. See [Controller connections](backends.md).

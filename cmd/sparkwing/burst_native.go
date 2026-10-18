@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -81,6 +82,22 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, args []string, route userconfig.RunRouting, connection client.EngineOptions) (_ controllerwire.CreateRunRequest, resultErr error) {
 	captured := os.Environ()
 	masker := secrets.NewMasker()
+	configPath, err := userconfig.Path()
+	if err != nil {
+		return controllerwire.CreateRunRequest{}, err
+	}
+	machine, err := userconfig.ReadConfig(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		return controllerwire.CreateRunRequest{}, err
+	}
+	var allow []string
+	if machine.Run != nil {
+		allow = machine.Run.SubmitEnvAllow
+	}
+	submitted, err := procenv.Submit(captured, allow, masker)
+	if err != nil {
+		return controllerwire.CreateRunRequest{}, err
+	}
 	for _, item := range captured {
 		key, value, ok := strings.Cut(item, "=")
 		if ok && slices.Contains(route.LocalSecrets, key) {
@@ -151,18 +168,19 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		return controllerwire.CreateRunRequest{}, err
 	}
 	options.PreparedCheckout = checkout
-	options.SDK, err = selected.sdk(ctx)
-	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
-	}
-	described, err := inspectTriggerSource(ctx, selected, captured, triggerInspection{options: options})
+	options.SDK = ""
+	selected.source.NoBincache, selected.source.HashAllFiles = flags.noBincache, flags.hashAllFiles
+	described, err := inspectTriggerSource(ctx, selected, captured, options)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
 	values := localRunSettingFlags(flags)
 	values.Profile.Set, values.Profile.Value = true, *route.Profile
 	values.Runner.Set, values.Runner.Value = true, runspec.RunnerSelection{Kind: runspec.RunnerHere}
-	request, err := prepareTriggerRequest(triggerRequestInput{source: selected, settings: settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: values}, described: described, args: args, env: map[string]string{}, idempotencyKey: flags.idempotencyKey})
+	inputs := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: values}
+	inputs.Machine.SubmitEnvAllow.Set, inputs.Machine.SubmitEnvAllow.Value = allow != nil, allow
+	inputs.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: configPath, Key: "run.submit_env_allow"}
+	request, err := prepareTriggerRequest(triggerRequestInput{source: selected, settings: inputs, described: described, args: args, submittedEnv: submitted, idempotencyKey: flags.idempotencyKey})
 	if err != nil {
 		return request, err
 	}
@@ -195,6 +213,17 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		return request, &burstBeforeIntakeError{err}
 	}
 	request.Request.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: digest}
+	if mode := strings.TrimSpace(flags.priority); mode == "front" || mode == "back" {
+		queue, err := client.NewQueueManager(connection)
+		if err != nil {
+			return request, err
+		}
+		rank, err := resolveRelativeRunPriority(ctx, mode, queue)
+		if err != nil {
+			return request, err
+		}
+		request.Request.Options.Priority.Value = rank
+	}
 	return request, nil
 }
 

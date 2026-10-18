@@ -17,7 +17,7 @@ func TestCloudOperationsAreAbsentFromPublicCLI(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"sparkwing cluster credits", "sparkwing cluster tokens set-metered"} {
-		if err := runCommands([]string{"--path", path, "--output", "plain"}); err == nil {
+		if err := runCommandsArgs([]string{"--path", path, "--output", "plain"}); err == nil {
 			t.Errorf("public command index still advertises %s", path)
 		}
 	}

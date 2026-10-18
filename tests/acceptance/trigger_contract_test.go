@@ -17,7 +17,7 @@ import (
 func TestSurfaceInitialTriggerIntakeTransport(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		for _, here := range []bool{false, true} {
-			for _, pipelineSHA := range []string{"exact-commit", "separate-pipeline-commit"} {
+			for _, pipelineSHA := range []string{"0123456789abcdef0123456789abcdef01234567", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"} {
 				env, err := runspec.EnvironmentDigest(map[string]string{"DEPLOY_REGION": "private-environment-value"})
 				if err != nil {
 					t.Fatal(err)
@@ -26,7 +26,7 @@ func TestSurfaceInitialTriggerIntakeTransport(t *testing.T) {
 					Version: 1, Pipeline: "deploy-prod", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
 					SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"password"}}, Env: env,
 					RequestedArgs: map[string]string{"rollout.image": "release", "region": "us-east"},
-					Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:17", Display: "acme/app"}, Ref: "main", SHA: "exact-commit"},
+					Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:17", Display: "acme/app"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"},
 					Source:        runspec.Source{Ref: pipelineSHA, Entrypoint: "Deploy", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
 				}}
 				if here {

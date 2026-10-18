@@ -143,7 +143,11 @@ service, then waits for the successor to acquire the same home and become ready.
 
 ### Running with no daemon available
 
-Standalone CI runs the same controller runtime in process with its own home.
+`sparkwing run <pipeline> --sw-allow-unadmitted` runs the same controller runtime
+in process for standalone CI. Give it a private `SPARKWING_HOME`. Its admission
+queue belongs to that process; it does not join another controller's machine
+admission queue. It retains run and job concurrency rules. It cannot detach or
+use Cloud routing. The CLI drains and joins its controller before returning.
 It must not open a home another controller owns. An unavailable or incompatible
 shared controller is an error, rather than permission to open its database in a
 second process. Startup reconciliation and shutdown draining belong to the
@@ -167,7 +171,8 @@ part of the model. A successful submission receipt identifies the allocated run.
 It does not prove that execution has started.
 
 `--sw-idempotency-key` gives repeated detached submissions one durable identity.
-`--sw-request-id` is a tracing field and does not deduplicate work. JSON receipts
+`--sw-request-id` is a tracing field retained through intake and retry. The
+detached JSON receipt includes it as `request_id`. It does not deduplicate work. JSON receipts
 exclude raw arguments, captured environment values, private bearers and seal
 hashes. A log path is reported only when it exists.
 
@@ -209,6 +214,13 @@ identity identifies the namespace. It does not grant permission to clone it.
 pipeline's source revision. A declared pipeline source and an explicit pipeline
 ref must agree. Resume and retry use the persisted selection. They do not replace
 it with the caller's working tree or current machine settings.
+
+Both flags resolve before inspection and building. The selected execution
+checkout supplies the project configuration. Its configured entrypoint selects
+the SDK declaration, while pipeline code can come from the separate source
+revision. Trigger inspection uses the same execution and code commits as hosting.
+A local schedule resolves pins such as `source: origin/main` before sealing each
+run. The pipeline alias remains in run context and output.
 
 The pinned Go or TypeScript SDK selects its matching verified engine before SDK
 installation, describe, planning or execution. Each machine fetches that release
@@ -304,7 +316,9 @@ membership or repository permission. See [scheduling](scheduling.md),
 
 ## Environment and secrets
 
-A local run captures its environment once. Children inherit that snapshot, and
+A local run captures its environment once. Children retain its captured snapshot
+when their invocation source becomes a child run. Submitted remote values use
+separate encrypted storage. Children inherit the parent's environment source, and
 schedules capture theirs at installation. The daemon's ambient environment never
 replaces accepted values. The sealed spec records names and a digest. Values
 remain in private host storage.

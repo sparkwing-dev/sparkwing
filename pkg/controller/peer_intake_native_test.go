@@ -44,6 +44,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 			Version: 1, Team: string(store.DefaultTeam), Pipeline: "local", Mode: runspec.IntakeExecute,
 			Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
 			Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"},
+			Source:  runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"},
 			Actor:   runspec.Actor{Kind: "account", ID: "forged"},
 			Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 0}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "priority"}}},
 		}}
@@ -141,7 +142,7 @@ func TestPeerIntakeBudgetsFollowPlacement(t *testing.T) {
 		{"here", runspec.DispatchHost, true, false, limits.RunDeadline},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: tc.name, Mode: runspec.IntakeExecute, Dispatch: tc.dispatch, Origin: runspec.OriginLocal, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}}}
+			request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: tc.name, Mode: runspec.IntakeExecute, Dispatch: tc.dispatch, Origin: runspec.OriginLocal, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}}
 			if tc.here {
 				request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "runner"}}
 			}

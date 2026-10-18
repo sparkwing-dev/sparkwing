@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,6 +119,9 @@ func (s *FileEnvironmentSnapshots) Load(ctx context.Context, seal runspec.EnvSna
 		environment = append(environment, string(entry))
 	}
 	environment, err = verifyCapturedEnvironment(ctx, seal, environment)
+	if err == nil {
+		err = s.verifyGateIndex(environment)
+	}
 	return environment, err
 }
 
@@ -211,3 +215,28 @@ func snapshotStorageError(operation string, err error) error {
 }
 
 var _ CapturedEnvironmentLoader = (*FileEnvironmentSnapshots)(nil)
+
+func (s *FileEnvironmentSnapshots) verifyGateIndex(environment []string) error {
+	for _, item := range environment {
+		path, ok := strings.CutPrefix(item, "SPARKWING_GATE_INDEX=")
+		if !ok || path == "" {
+			continue
+		}
+		if filepath.Dir(path) != s.directory {
+			return errors.New("gate index is outside private snapshot storage")
+		}
+		file, err := fssecure.OpenPrivateConfig(path)
+		if err != nil {
+			return snapshotStorageError("open gate index", err)
+		}
+		data, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if err := errors.Join(readErr, closeErr); err != nil {
+			return snapshotStorageError("read gate index", err)
+		}
+		if filepath.Base(path) != fmt.Sprintf("index-%x", sha256.Sum256(data)) {
+			return errors.New("gate index differs from its captured contents")
+		}
+	}
+	return nil
+}

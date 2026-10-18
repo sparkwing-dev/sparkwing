@@ -13,11 +13,7 @@ var _ controllerwire.SizingManager = (*engineClient)(nil)
 
 // NewSizingManager reads measurements through the common authenticated client.
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) ListSizing(ctx context.Context, q controllerwire.SizingQuery) (controllerwire.SizingPage, error) {

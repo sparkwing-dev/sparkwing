@@ -15,11 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-func runRunsLogs(ctx context.Context, verb string, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", verb}, args...))
-	if err != nil {
-		return err
-	}
+func runRunsLogs(ctx context.Context, inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, runLogOutput(inv))
 	}
@@ -39,10 +35,7 @@ func runRunsLogs(ctx context.Context, verb string, args []string) error {
 }
 
 func followControllerRunLogs(ctx context.Context, options client.EngineOptions, run, format string, out io.Writer) error {
-	inv, err := clisurface.Parse("sparkwing", []string{"runs", "logs", "--run", run, "--follow", "-o", format})
-	if err != nil {
-		return err
-	}
+	inv := clisurface.Invocation{Command: clisurface.Command{Path: "sparkwing runs logs"}, Flags: map[string][]string{"run": {run}, "follow": {"true"}, "output": {format}}}
 	reader, err := client.NewLogReader(options)
 	if err != nil {
 		return err

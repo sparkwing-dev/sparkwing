@@ -95,7 +95,7 @@ func TestResolveVersionHold_EnvOverridesFile(t *testing.T) {
 	// and this one keeps the config the test writes inside the home it names.
 	t.Setenv("SPARKWING_HOME", dir)
 	t.Setenv("SPARKWING_VERSION_HOLD", "v0.10")
-	if err := runVersionHold([]string{"--set", "v0.15"}); err != nil {
+	if err := runVersionHoldArgs([]string{"--set", "v0.15"}); err != nil {
 		t.Fatalf("set hold: %v", err)
 	}
 	if h := resolveVersionHold(); h.Value != "v0.15" {
@@ -123,13 +123,13 @@ func TestRunVersionHold_SetClearRoundTrip(t *testing.T) {
 	// safety: version hold refuses a write outside the sparkwing home in use,
 	// and this one keeps the config the test writes inside the home it names.
 	t.Setenv("SPARKWING_HOME", dir)
-	if err := runVersionHold([]string{"--set", "v0.15"}); err != nil {
+	if err := runVersionHoldArgs([]string{"--set", "v0.15"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	if h := resolveVersionHold(); h.Value != "v0.15" {
 		t.Fatalf("after set: %+v", h)
 	}
-	if err := runVersionHold([]string{"--clear"}); err != nil {
+	if err := runVersionHoldArgs([]string{"--clear"}); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	if h := resolveVersionHold(); h.Value != "" {
@@ -172,7 +172,7 @@ func TestInvalidVersionHoldBlocksUpdateBeforeDownload(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid version hold") || downloaded {
 		t.Fatalf("err=%v download=%v", err, downloaded)
 	}
-	if err := runVersionHold(nil); err == nil || !strings.Contains(err.Error(), "invalid version hold") {
+	if err := runVersionHoldArgs(nil); err == nil || !strings.Contains(err.Error(), "invalid version hold") {
 		t.Fatalf("hold inspection=%v", err)
 	}
 }

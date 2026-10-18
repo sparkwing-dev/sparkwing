@@ -97,7 +97,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 			return plan, err
 		},
 		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			process := newCheckoutSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nodeproto.PipelineDescription{Name: request.Pipeline, Args: []nodeproto.ArgumentDescription{{Name: "sdk", Default: &defaultArg}, {Name: "secret", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}})
+			process := newCheckoutSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nodeproto.PipelineDescription{Name: entrypoint, Args: []nodeproto.ArgumentDescription{{Name: "sdk", Default: &defaultArg}, {Name: "secret", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}})
 			processes = append(processes, process)
 			return process, nil
 		},
@@ -139,7 +139,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		t.Fatal("checkout preparation changed the intake or engine identity")
 	}
 	if wantPassed {
-		if len(processes) != 2 || processes[1].requests[len(processes[1].requests)-1].Args["sdk"] != defaultArg || processes[1].requests[len(processes[1].requests)-1].Run.Git.DefaultBranch != resolved.DefaultBranch.Value || processes[1].requests[len(processes[1].requests)-1].Run.RunID != "run" || processes[1].requests[len(processes[1].requests)-1].Run.Pipeline != request.Pipeline || processes[1].requests[len(processes[1].requests)-1].Pipeline != request.Pipeline || resolved.Entrypoint != entrypoint {
+		if len(processes) != 2 || processes[1].requests[len(processes[1].requests)-1].Args["sdk"] != defaultArg || processes[1].requests[len(processes[1].requests)-1].Run.Git.DefaultBranch != resolved.DefaultBranch.Value || processes[1].requests[len(processes[1].requests)-1].Run.RunID != "run" || processes[1].requests[len(processes[1].requests)-1].Run.Pipeline != request.Pipeline || processes[1].requests[len(processes[1].requests)-1].Pipeline != entrypoint || resolved.Entrypoint != entrypoint {
 			t.Fatal("planner did not receive resolved arguments and run facts")
 		}
 		wantPR := &nodeproto.PullRequest{Number: 42, Action: "opened", BaseRef: "trunk", BaseSHA: "base-sha", HeadRef: "feature", HeadSHA: "head-sha"}

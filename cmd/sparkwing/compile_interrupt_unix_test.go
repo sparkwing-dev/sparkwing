@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,33 +18,33 @@ import (
 // stands in for a real compile: the tree the toolchain leaves behind is what
 // this test is about, and a real `go build` cannot be paused mid-link.
 const fakeGoScript = `#!/bin/sh
-if [ "$1" = env ]; then printf 'auto\\ngo1.26.6\\noff\\n'; exit 0; fi
+if [ "$1" = env ]; then printf 'auto\ngo1.26.6\noff\n'; exit 0; fi
 sleep 600 &
-echo $! > "$SPARKWING_TEST_GRANDCHILD_PID"
-echo $$ > "$SPARKWING_TEST_GO_PID"
+echo $! > "$TEST_GRANDCHILD_PID"
+echo $$ > "$TEST_GO_PID"
 wait
 `
 
 func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
 	if os.Getenv("SPARKWING_TEST_COMPILE_INTERRUPT_CHILD") == "1" {
-		_ = materializeOnly(os.Getenv("SPARKWING_TEST_FLEET_COMPILE_DIR"),
-			append(os.Environ(), "GOWORK=off"), compileOptions{NoUpdate: true})
+		err := runSelectedHelp(os.Getenv("SPARKWING_TEST_FLEET_COMPILE_DIR"), "ci", runFlags{noUpdate: true})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
-	scratch := t.TempDir()
-	pipelineDir := filepath.Join(scratch, "pipeline")
+	scratch := initSnapshotRepo(t)
+	pipelineDir := filepath.Join(scratch, ".sparkwing")
 	if err := os.MkdirAll(pipelineDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pipelineDir, "go.mod"),
-		[]byte("module example.test/compileinterrupt\n\ngo 1.26\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pipelineDir, "main.go"),
-		[]byte("package main\nfunc main() {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeSDKFixture(t, pipelineDir, "package main\nfunc main() {}\n")
+	writeRepoFile(t, filepath.Join(pipelineDir, "sparkwing.yaml"), "pipelines:\n  - name: ci\n    entrypoint: CI\n")
+
+	runSnapshotGit(t, scratch, "add", ".")
+	runSnapshotGit(t, scratch, "commit", "-qm", "fixture")
 
 	binDir := filepath.Join(scratch, "bin")
 	if err := os.MkdirAll(binDir, 0o750); err != nil {
@@ -57,14 +58,12 @@ func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
 	grandchildPIDFile := filepath.Join(scratch, "grandchild.pid")
 
 	child := exec.Command(os.Args[0], "-test.run=^TestMaterializeStopsTheToolchainOnTermination$")
-	// safety: two ambient settings route materialize away from the
-	// compile this test drives, so they are cleared rather than inherited.
 	child.Env = append(scrubbed(os.Environ(),
 		"SPARKWING_FLEET", "SPARKWING_GITCACHE_URL"),
 		"SPARKWING_TEST_COMPILE_INTERRUPT_CHILD=1",
 		"SPARKWING_TEST_FLEET_COMPILE_DIR="+pipelineDir,
-		"SPARKWING_TEST_GO_PID="+goPIDFile,
-		"SPARKWING_TEST_GRANDCHILD_PID="+grandchildPIDFile,
+		"TEST_GO_PID="+goPIDFile,
+		"TEST_GRANDCHILD_PID="+grandchildPIDFile,
 		"SPARKWING_HOME="+filepath.Join(scratch, "home"),
 		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"GOWORK=off",

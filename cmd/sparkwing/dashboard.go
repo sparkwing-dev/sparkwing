@@ -26,21 +26,17 @@ type dashboardServices struct {
 	openLog   func(context.Context) (*os.File, error)
 }
 
-func runDashboard(args []string) error {
+func runDashboard(inv clisurface.Invocation) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runDashboardCommand(ctx, args, os.Stdout, runtime.GOOS, resolveLocalServices)
+	return runDashboardCommand(ctx, inv, os.Stdout, runtime.GOOS, resolveLocalServices)
 }
 
 func dashboardUnavailable(dependency string) error {
 	return &apierr.Error{Code: apierr.Unavailable, Message: "dashboard requires " + dependency, Hint: "the local controller integration is unavailable in this build"}
 }
 
-func runDashboardCommand(ctx context.Context, args []string, out io.Writer, goos string, resolve func(context.Context) (dashboardServices, error)) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"dashboard"}, args...))
-	if err != nil {
-		return err
-	}
+func runDashboardCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, goos string, resolve func(context.Context) (dashboardServices, error)) error {
 	mode := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() || inv.Command.Path == "sparkwing dashboard" {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, mode)

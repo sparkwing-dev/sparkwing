@@ -1,13 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
@@ -89,29 +91,12 @@ func holdRefusal(target string, hold versionHold) error {
 		hold.Value, hold.Source, target)
 }
 
-func runVersionHold(args []string) error {
-	fs := flag.NewFlagSet(cmdVersionHold.Path, flag.ContinueOnError)
-	set := fs.String("set", "", "set the hold to this version ceiling (e.g. v0.15 or v0.15.4)")
-	clear := fs.Bool("clear", false, "remove the hold so upgrades are unrestricted")
-	if err := parseAndCheck(cmdVersionHold, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("version hold: unexpected positional %q", fs.Arg(0))
-	}
-	setChanged := fs.Changed("set")
-	if setChanged && *clear {
-		return errors.New("version hold: --set and --clear are mutually exclusive")
-	}
-
+func runVersionHold(inv clisurface.Invocation) error {
 	switch {
-	case setChanged:
-		value, err := normalizeHold(*set)
+	case inv.Has("set"):
+		value, err := normalizeHold(inv.Value("set"))
 		if err != nil {
-			return err
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
 		}
 		path, err := versionHoldPath()
 		if err != nil {
@@ -126,9 +111,7 @@ func runVersionHold(args []string) error {
 		if err := fssecure.WriteFile(path, []byte(value+"\n")); err != nil {
 			return fmt.Errorf("write hold: %w", err)
 		}
-		fmt.Printf("version hold set to %s (%s)\n", value, path)
-		return nil
-	case *clear:
+	case inv.Bool("clear"):
 		path, err := versionHoldPath()
 		if err != nil {
 			return err
@@ -139,18 +122,22 @@ func runVersionHold(args []string) error {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("clear hold: %w", err)
 		}
-		fmt.Println("version hold cleared")
-		return nil
-	default:
-		hold := resolveVersionHold()
-		if hold.Error != "" {
-			return errors.New(hold.Error)
-		}
-		if hold.Value == "" {
-			fmt.Println(color.Dim("no version hold set (CLI upgrades are unrestricted)"))
-			return nil
-		}
-		fmt.Printf("held at %s by operator (%s)\n", hold.Value, hold.Source)
-		return nil
 	}
+	hold := resolveVersionHold()
+	if hold.Error != "" {
+		return errors.New(hold.Error)
+	}
+	switch inv.Output(color.IsInteractiveStdout()) {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(hold)
+	case "plain":
+		_, err := fmt.Fprintln(os.Stdout, hold.Value)
+		return err
+	}
+	if hold.Value == "" {
+		_, err := fmt.Fprintln(os.Stdout, "no version hold set (CLI upgrades are unrestricted)")
+		return err
+	}
+	_, err := fmt.Fprintf(os.Stdout, "held at %s by operator (%s)\n", hold.Value, hold.Source)
+	return err
 }

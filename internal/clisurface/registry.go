@@ -313,7 +313,6 @@ func Registry() []Command {
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "token-stdin"},
-			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "force"},
 			{Name: "no-probe"},
 		}},
@@ -325,8 +324,7 @@ func Registry() []Command {
 		{Path: "sparkwing profiles set", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "controller", Argument: "URL"},
-			{Name: "token", Argument: "TOKEN", Conflicts: []string{"token-stdin"}},
-			{Name: "token-stdin", Conflicts: []string{"token"}},
+			{Name: "token-stdin"},
 		}},
 		{Path: "sparkwing profiles show", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
@@ -366,6 +364,7 @@ func Registry() []Command {
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
 			"--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.",
 			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry.",
+			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
 		}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
 			{Name: "sw-cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
@@ -393,7 +392,6 @@ func Registry() []Command {
 			{Name: "sw-allow-risk", Argument: "LABEL[,LABEL...]", Repeatable: true, CommaList: true},
 			{Name: "sw-index", Argument: "PATH"},
 			{Name: "sw-run-handle-file", Argument: "PATH"},
-			{Name: "target", Argument: "TARGET"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
 		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{

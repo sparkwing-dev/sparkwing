@@ -32,7 +32,7 @@ func TestDashboardLogsBoundsRecordsAndPreservesPlain(t *testing.T) {
 	_, services := dashboardLogFixture(t, body.String())
 	for _, mode := range []string{"json", "plain", "pretty"} {
 		var output bytes.Buffer
-		err := runDashboardCommand(t.Context(), []string{"logs", "-o", mode}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+		err := runDashboardCommandArgs(t.Context(), []string{"logs", "-o", mode}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -77,7 +77,7 @@ func TestDashboardLogsFollowEmitsAppendsAndCancels(t *testing.T) {
 		}
 		return output.Write(p)
 	})
-	err := runDashboardCommand(ctx, []string{"logs", "-f", "-o", "plain"}, observer, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+	err := runDashboardCommandArgs(ctx, []string{"logs", "-f", "-o", "plain"}, observer, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
 	if err != nil || output.String() != "first\npartial\n" {
 		t.Fatalf("output=%q err=%v", &output, err)
 	}
@@ -112,7 +112,7 @@ func TestDashboardLogsZeroSkipsHistoryAndHugeLineIsExplicit(t *testing.T) {
 		count int
 	}{{"0", 0}, {"40", 2}} {
 		var output bytes.Buffer
-		err := runDashboardCommand(t.Context(), []string{"logs", "--tail", tc.tail, "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+		err := runDashboardCommandArgs(t.Context(), []string{"logs", "--tail", tc.tail, "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,17 +129,17 @@ func TestDashboardLogsZeroSkipsHistoryAndHugeLineIsExplicit(t *testing.T) {
 func TestDashboardLogsFailOnMissingSourceOrOutput(t *testing.T) {
 	_, services := dashboardLogFixture(t, "one\n")
 	failure := errors.New("output failed")
-	err := runDashboardCommand(t.Context(), []string{"logs"}, dashboardLogObserver(func([]byte) (int, error) { return 0, failure }), "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+	err := runDashboardCommandArgs(t.Context(), []string{"logs"}, dashboardLogObserver(func([]byte) (int, error) { return 0, failure }), "linux", func(context.Context) (dashboardServices, error) { return services, nil })
 	if !errors.Is(err, failure) {
 		t.Fatalf("output error lost: %v", err)
 	}
-	err = runDashboardCommand(t.Context(), []string{"logs"}, io.Discard, "linux", func(context.Context) (dashboardServices, error) { return dashboardServices{}, nil })
+	err = runDashboardCommandArgs(t.Context(), []string{"logs"}, io.Discard, "linux", func(context.Context) (dashboardServices, error) { return dashboardServices{}, nil })
 	var unavailable *apierr.Error
 	if !errors.As(err, &unavailable) || unavailable.Code != apierr.Unavailable {
 		t.Fatalf("missing source accepted: %v", err)
 	}
 	services.openLog = func(context.Context) (*os.File, error) { return nil, os.ErrNotExist }
-	err = runDashboardCommand(t.Context(), []string{"logs"}, io.Discard, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+	err = runDashboardCommandArgs(t.Context(), []string{"logs"}, io.Discard, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing bytes silently accepted: %v", err)
 	}

@@ -108,16 +108,12 @@ func parseScheduleOptions(inv clisurface.Invocation) (scheduleOptions, error) {
 	return opts, nil
 }
 
-func runSchedules(ctx context.Context, args []string) error {
-	return runScheduleCommand(ctx, args, os.Stdout, defaultScheduleCommand())
+func runSchedules(ctx context.Context, inv clisurface.Invocation) error {
+	return runScheduleCommand(ctx, inv, os.Stdout, defaultScheduleCommand())
 }
 
-func runScheduleCommand(ctx context.Context, args []string, out io.Writer, command scheduleCommand) error {
+func runScheduleCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, command scheduleCommand) error {
 	if err := ctx.Err(); err != nil {
-		return err
-	}
-	inv, err := clisurface.Parse("sparkwing", append([]string{"schedules"}, args...))
-	if err != nil {
 		return err
 	}
 	if inv.Help() || inv.Command.Path == "sparkwing schedules" {

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -111,7 +112,7 @@ func (g *gitClient) ownerHTTPSCredential(ctx context.Context, remote string) (Cr
 	}
 	probe := exec.CommandContext(ctx, "git", "config", "--get-urlmatch", "credential.helper", remote)
 	probe.Env, probe.Dir = ownerEnvironment, g.workspace
-	helper, err := commandOutput(ctx, probe)
+	helper, err := gitcmd.Output(ctx, probe, false)
 	if gitExit(err, 1) || err == nil && strings.TrimSpace(string(helper)) == "" {
 		return Credential{}, nil
 	}
@@ -121,7 +122,7 @@ func (g *gitClient) ownerHTTPSCredential(ctx context.Context, remote string) (Cr
 	cmd := exec.CommandContext(ctx, "git", "credential", "fill")
 	cmd.Env, cmd.Dir = ownerEnvironment, g.workspace
 	cmd.Stdin = strings.NewReader("url=" + remote + "\n\n")
-	out, err := commandOutput(ctx, cmd)
+	out, err := gitcmd.Output(ctx, cmd, false)
 	if err != nil {
 		return Credential{}, errors.New("owner source credential helper failed")
 	}

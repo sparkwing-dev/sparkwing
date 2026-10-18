@@ -33,6 +33,7 @@ func secretArgRun(t *testing.T, f *browserFixture, private string, classified bo
 		Authority: principal.Authority,
 		Request: runspec.Request{
 			Version: 1, Team: string(store.DefaultTeam), Pipeline: "deploy", Mode: runspec.IntakeExecute,
+			Source:   runspec.Source{Ref: strings.Repeat("a", 40)},
 			Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: strings.Repeat("a", 40)},
 			RequestedArgs: map[string]string{"token": private, "env": ctlVisibleValue},
 			SecretArgs:    runspec.Optional[[]string]{Set: classified, Value: []string{"token"}},

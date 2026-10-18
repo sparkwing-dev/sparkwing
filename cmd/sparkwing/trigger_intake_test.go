@@ -40,8 +40,8 @@ func initialTriggerRequest(here bool) controllerwire.CreateRunRequest {
 	request := controllerwire.CreateRunRequest{Request: runspec.Request{
 		Version: 1, Team: "team", Pipeline: "deploy-prod", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
 		RequestedArgs: map[string]string{"rollout.image": "release"},
-		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:17"}, Ref: "main", SHA: "exact-commit"},
-		Source:        runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
+		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:17"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"},
+		Source:        runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
 	}}
 	if here {
 		request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}

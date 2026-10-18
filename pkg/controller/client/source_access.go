@@ -38,21 +38,22 @@ func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (sou
 }
 
 func (s *sourceAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error) {
-	if !reflect.DeepEqual(spec, s.sealed) {
+	if !reflect.DeepEqual(spec, s.sealed) && (s.sealed.PipelineSHA == "" || !reflect.DeepEqual(spec, s.sealed.PipelineSource())) {
 		return source.Credential{}, localHostClientRefusal()
 	}
 	var result struct {
-		Kind       string `json:"kind"`
-		Host       string `json:"host"`
-		Username   string `json:"username,omitempty"`
-		Secret     string `json:"secret"`
-		KnownHosts string `json:"known_hosts,omitempty"`
+		Kind              string   `json:"kind"`
+		Host              string   `json:"host"`
+		Username          string   `json:"username,omitempty"`
+		Secret            string   `json:"secret"`
+		KnownHosts        string   `json:"known_hosts,omitempty"`
+		ExtraRepositories []string `json:"extra_repositories,omitempty"`
 	}
 	err := s.transport.request(ctx, "POST", "/api/v1/runs/{run}/source-credential", "/api/v1/runs/"+url.PathEscape(s.run)+"/source-credential", "", nil, &result)
 	if err != nil {
 		return source.Credential{}, err
 	}
-	return source.Credential{Kind: result.Kind, Host: result.Host, Username: result.Username, Secret: result.Secret, KnownHosts: result.KnownHosts}, nil
+	return source.Credential{Kind: result.Kind, Host: result.Host, Username: result.Username, Secret: result.Secret, KnownHosts: result.KnownHosts, ExtraRepositories: result.ExtraRepositories}, nil
 }
 
 func (s *sourceAccess) BundleURL(ctx context.Context, digest string) (string, error) {

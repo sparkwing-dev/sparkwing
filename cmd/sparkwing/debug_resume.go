@@ -35,11 +35,7 @@ func resolveDebugResumer(ctx context.Context, profile string) (debugResumer, err
 	}}, nil
 }
 
-func runDebugResume(ctx context.Context, args []string, out io.Writer, resolve func(context.Context, string) (debugResumer, error)) (resultErr error) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"debug", "resume"}, args...))
-	if err != nil {
-		return err
-	}
+func runDebugResume(ctx context.Context, inv clisurface.Invocation, out io.Writer, resolve func(context.Context, string) (debugResumer, error)) (resultErr error) {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

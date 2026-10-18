@@ -622,12 +622,13 @@ after that handoff. An empty input provisions nothing. Private routes require
 live credentials even on an empty store. `--require-auth` also refuses startup
 without a live deployment administrator capability.
 
-An operator creates a team and its first team-admin credential atomically with
-`sparkwing operator teams create --team NAME`. Existing teams are refused and
-the transaction audits the operator. A bootstrap seed cannot use the team token
-route to perform that step. The removed unauthenticated `POST /api/v1/tokens` flow is not
-supported. Existing team administrators issue member credentials through the
-team namespace and enroll machines with
+Create a team and its first team-admin credential with
+`sparkwing operator teams create --team support-test --display-name Support --profile deployment -o json`.
+The route is `POST /api/v1/operator/teams` and requires `operator.tokens`, or an
+operator's direct browser session with its CSRF proof. It creates the team,
+owner account, membership and first credential in one audited transaction.
+The credential is returned once. Existing team administrators issue member
+credentials through the team namespace and enroll machines with
 `sparkwing runners add --profile work --runner build-box --repos 'github.com/acme/*'`.
 
 `profiles add` probes `/api/v1/health` and authenticates through

@@ -18,6 +18,11 @@ when stdout is redirected. `--output pretty|json|plain` (or `-o`) overrides
 the default. JSON reports occupy one line; JSON lists emit one object per
 line, with an empty stream for no results. Errors go to stderr.
 
+Repository registration uses `repos add --checkout PATH` and
+`repos remove --checkout PATH`. Their JSON receipts include the action,
+absolute path and affected count. `version hold`, `daemon recover-state` and
+`pipeline sparks lint|update` also honor the selected output format.
+
 Help, documentation, onboarding cards and completion scripts emit records
 with `kind` and `text` in JSON mode. Help also carries command metadata.
 Use explicit plain output when consuming their original text:
@@ -50,7 +55,15 @@ sparkwing run deploy --sw-output json -- --environment staging
 
 Unknown engine flags fail before execution setup. Local `run` accepts no
 connection profile. Use `pipeline trigger --profile NAME` to submit to a remote
-controller. `--target` is an engine control, rather than an author argument.
+controller. The pipeline name selects the deployment shape.
+
+For local execution, `--sw-no-bincache` compiles a fresh Go pipeline executable with debug information.
+`--sw-hash-all-files` includes Git-ignored files in binary-cache keys, including
+local replacement modules. Both options apply to initial inspection and retained
+execution, including detached runs and retries.
+
+Local `--sw-priority front|back` resolves once against the controller's current
+machine queue before submission. The sealed request retains the numeric rank.
 
 The CLI resolves the configured pipeline name and SDK entrypoint separately.
 The invoked alias remains visible to author code. `--sw-allow-risk` authorizes

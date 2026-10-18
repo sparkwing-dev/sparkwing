@@ -193,5 +193,5 @@ func buildableGoFiles(all []string) []string {
 }
 
 func init() {
-	sparkwing.Register("pre-push", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PrePush{} })
+	sparkwing.Register("PrePush", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PrePush{} })
 }

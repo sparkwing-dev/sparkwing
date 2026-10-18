@@ -39,7 +39,7 @@ func TestAdmissionAndRetryPreserveVerifiedAcquisitionLocation(t *testing.T) {
 	}
 	request := IntakeRequest{Authority: in.Authority, Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: admitted.RunID}, Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://changed.example/repo"}}}}
 	retry, err := tenant.AdmitRun(t.Context(), request)
-	if err != nil || retry.Request.Request.Source.Location != want || retry.Request.Request.Git.SHA != "original" {
+	if err != nil || retry.Request.Request.Source.Location != want || retry.Request.Request.Git.SHA != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("retry source drift: %+v, %v", retry.Request.Request.Source, err)
 	}
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,9 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 // A run's compile and binary-cache fill stay on this machine even when the
@@ -18,8 +23,17 @@ func TestMaterialize_ColdCacheContactsNoController(t *testing.T) {
 		t.Skip("slow: compiles a pipeline module; the fast class runs under -short")
 	}
 	if os.Getenv("SPARKWING_TEST_OFFLINE_CHILD") == "1" {
-		if err := materializeOnly(os.Getenv("SPARKWING_TEST_OFFLINE_DIR"),
-			append(os.Environ(), "SPARKWING_FLEET=1", "GOWORK=off"), compileOptions{NoUpdate: true}); err != nil {
+		directory := os.Getenv("SPARKWING_TEST_OFFLINE_DIR")
+		home := os.Getenv("SPARKWING_HOME")
+		options, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), true)
+		if err == nil {
+			var entry *source.Entry
+			entry, err = source.Acquire(context.Background(), source.Spec{RepoKey: "local:" + filepath.Dir(directory), LocalCheckout: filepath.Dir(directory), PipelineDir: ".sparkwing"}, options)
+			if entry != nil {
+				err = errors.Join(err, entry.Close())
+			}
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "materialize: %v\n", err)
 			os.Exit(19)
 		}
@@ -33,13 +47,14 @@ func TestMaterialize_ColdCacheContactsNoController(t *testing.T) {
 	}))
 	defer controller.Close()
 
-	moduleDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte("module example.test/offline\n\ngo 1.26\n"), 0o600); err != nil {
+	repo := initSnapshotRepo(t)
+	moduleDir := filepath.Join(repo, ".sparkwing")
+	if err := os.Mkdir(moduleDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(moduleDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeSDKFixture(t, moduleDir, "package main\nfunc main(){}\n")
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-qm", "fixture")
 	config := filepath.Join(t.TempDir(), "config.yaml")
 	body := fmt.Sprintf("profiles:\n  remote:\n    controller: { url: %s, token: swu_test }\n", controller.URL)
 	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
