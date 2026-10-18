@@ -12,10 +12,16 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// currentMatrixSince is the first release published without sparkwing-cache, including its pre-releases.
+const currentMatrixSince = "v0.68.0-0"
+
 // NamesForVersion preserves the published asset matrix independently of today's publishers.
 func NamesForVersion(version string) ([]string, error) {
 	if !semver.IsValid(version) || semver.Canonical(version) != version || semver.Build(version) != "" || module.IsPseudoVersion(version) {
 		return nil, fmt.Errorf("invalid release version %q", version)
+	}
+	if semver.Compare(version, currentMatrixSince) >= 0 {
+		return Names(), nil
 	}
 	var names []string
 	for _, binary := range []Binary{Sparkwing, "sparkwing-cache", SparkwingController, SparkwingRunner} {
