@@ -335,14 +335,17 @@ describe("API helpers", () => {
     respond = () =>
       new Response(
         JSON.stringify({
-          error: "secrets_key_required",
-          message: "the controller has no secrets key",
+          error: {
+            code: "unavailable",
+            message: "bound secret encryption is unavailable",
+            details: { reason: "secrets_key_required" },
+          },
         }),
-        { status: 409 },
+        { status: 503 },
       );
     await assert.rejects(
       lib.putGitCredential({ host: "gitlab.com", kind: "https", token: "t" }),
-      /Save the credential for gitlab.com: the controller has no secrets key/,
+      /Save the credential for gitlab.com: bound secret encryption is unavailable$/,
     );
   });
 });

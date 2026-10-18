@@ -200,7 +200,15 @@ describe("GitHub App calls", () => {
 
   it("surfaces the controller's refusal", async () => {
     respond = () =>
-      json({ error: "no installation this team holds covers a/b" }, 404);
+      json(
+        {
+          error: {
+            code: "not_found",
+            message: "no installation this team holds covers a/b",
+          },
+        },
+        404,
+      );
     await assert.rejects(
       lib.putSubscription({
         repository: "a/b",
@@ -208,7 +216,7 @@ describe("GitHub App calls", () => {
         push: true,
         pull_request: false,
       }),
-      /Save subscription: no installation this team holds covers a\/b/,
+      /Save subscription: no installation this team holds covers a\/b$/,
     );
   });
 });

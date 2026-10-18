@@ -276,8 +276,10 @@ describe("API helpers", () => {
     respond = () =>
       new Response(
         JSON.stringify({
-          error: "missing_scope",
-          message: "token lacks required scope: admin",
+          error: {
+            code: "forbidden",
+            message: "token lacks required scope: admin",
+          },
         }),
         { status: 403 },
       );
@@ -288,7 +290,7 @@ describe("API helpers", () => {
         masked: true,
         shared: true,
       }),
-      /Save R: token lacks required scope/,
+      /Save R: token lacks required scope: admin$/,
     );
   });
 });
