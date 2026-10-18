@@ -292,3 +292,35 @@ func TestRemoteGitConnectsToTheValidatedAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestUncredentialedSSHIgnoresAmbientConfiguration(t *testing.T) {
+	remote := "ssh://git@8.8.8.8:2222/team/repo.git"
+	dir, sha := sourcetest.Repository(t)
+	log := sourcetest.Remote(t, map[string]string{remote: dir})
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk"},
+		source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := entry.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	checked := false
+	for _, record := range gitRecords(t, log) {
+		ssh, ok := record.Env["GIT_SSH_COMMAND"]
+		if !ok {
+			continue
+		}
+		checked = true
+		for _, want := range []string{"-F '/dev/null'", "-o IdentitiesOnly=yes", "-o IdentityAgent=none", "-o IdentityFile=none"} {
+			if !strings.Contains(ssh, want) {
+				t.Fatalf("uncredentialed SSH lacks %q: %q", want, ssh)
+			}
+		}
+	}
+	if !checked {
+		t.Fatal("no SSH command was recorded")
+	}
+}
