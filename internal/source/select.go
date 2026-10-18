@@ -3,10 +3,17 @@ package source
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -50,26 +57,66 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 	if (spec.LocalCheckout == "") == (spec.RemoteURL == "") {
 		return nil, false, errors.New("source selection requires exactly one acquisition location")
 	}
-	workspace, err := os.MkdirTemp(options.Workspace, "selection-")
+	environment, err := sourceEnvironment(options, procenv.Git)
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() { err = errors.Join(err, os.RemoveAll(workspace)) }()
-	spec.SHA, spec.PipelineSHA, spec.PipelineDir, spec.CommittedCheckout = sha, "", ".", true
-	options.Workspace, options.PreparedCheckout = workspace, ""
-	entry, err := PrepareCheckout(ctx, spec, options)
+	client := &gitClient{env: gitEnvironment(environment), workspace: options.Workspace}
+	repository, remote := spec.LocalCheckout, ""
+	if repository == "" {
+		if options.Access == nil || !filepath.IsAbs(options.Workspace) {
+			return nil, false, errors.New("remote source selection requires live source access and an absolute workspace")
+		}
+		if err := fssecure.EnsureDir(options.Workspace); err != nil {
+			return nil, false, err
+		}
+		workspace, err := fssecure.MkdirPrivateTemp(options.Workspace, "selection-")
+		if err != nil {
+			return nil, false, err
+		}
+		defer func() { err = errors.Join(err, os.RemoveAll(workspace)) }()
+		client.workspace, repository = workspace, filepath.Join(workspace, "objects.git")
+		if remote, err = client.authorizeRemote(ctx, spec, spec.RemoteURL, options.Access); err != nil {
+			return nil, false, err
+		}
+		format := "sha1"
+		if len(sha) == 64 {
+			format = "sha256"
+		}
+		if _, err := client.run(ctx, "", "", "init", "--bare", "--quiet", "--object-format="+format, repository); err != nil {
+			return nil, false, err
+		}
+		if _, err := client.run(ctx, repository, remote, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--filter=blob:none", "--", remote, sha); err != nil {
+			return nil, false, err
+		}
+	}
+	return readCommittedBlob(ctx, client, repository, remote, sha+":"+name)
+}
+
+func readCommittedBlob(ctx context.Context, client *gitClient, repository, remote, object string) ([]byte, bool, error) {
+	out, err := client.output(ctx, repository, remote, object+"\n", "cat-file", "--batch-check", "--follow-symlinks")
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() { err = errors.Join(err, entry.Close()) }()
-	root, err := os.OpenRoot(entry.CheckoutDirectory())
-	if err != nil {
-		return nil, false, err
-	}
-	defer func() { err = errors.Join(err, root.Close()) }()
-	content, err := root.ReadFile(name)
-	if errors.Is(err, os.ErrNotExist) {
+	header, _, _ := strings.Cut(string(out), "\n")
+	fields := strings.Fields(header)
+	switch {
+	case len(fields) == 3 && fields[1] == "blob":
+		size, err := strconv.ParseInt(fields[2], 10, 64)
+		if err != nil {
+			return nil, false, fmt.Errorf("source git reported an invalid object size")
+		}
+		if size > limits.ProjectConfigBytes {
+			return nil, false, &apierr.Error{Code: apierr.InvalidArgs, Message: "execution commit configuration is invalid: " + projectconfig.ErrTooLarge.Error()}
+		}
+		content, err := client.output(ctx, repository, remote, "", "cat-file", "blob", fields[0])
+		if err == nil && int64(len(content)) != size {
+			err = fmt.Errorf("source git returned a configuration of the wrong size")
+		}
+		return content, err == nil, err
+	case len(fields) == 2 && fields[1] == "missing", len(fields) == 2 && fields[0] == "dangling":
 		return nil, false, nil
+	default:
+		return nil, false, fmt.Errorf("source configuration is not a file inside the commit")
 	}
-	return content, err == nil, err
 }

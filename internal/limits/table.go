@@ -89,6 +89,7 @@ func Table() []Limit {
 		{Name: "WatchedLogPushInterval", Value: WatchedLogPushInterval, Class: Internal, Doc: "Watched live-log push cadence.", Refusal: "Flush watched progress."},
 		{Name: "LogSearchTimeout", Value: LogSearchTimeout, Class: Internal, Doc: "Run-scoped log search budget.", Refusal: "Stop search at bound."},
 		{Name: "LogSegmentBytes", Value: LogSegmentBytes, Class: Internal, Doc: "Log segment cut size.", Refusal: "Flush at size or interval."},
+		{Name: "ProjectConfigBytes", Value: ProjectConfigBytes, Class: Author, Doc: "Largest sparkwing.yaml a run or local command reads.", Refusal: "Refuse the configuration before reading it."},
 		{Name: "LogSearchBytes", Value: LogSearchBytes, Class: Internal, Doc: "Run-scoped log search bytes.", Refusal: "Stop at bound."},
 		{Name: "ProtocolEnvelopeBytes", Value: ProtocolEnvelopeBytes, Class: Internal, Doc: "Envelope allowance beyond a typed output payload.", Refusal: "Refuse oversized protocol frame."},
 		{Name: "DefaultLease", Value: DefaultLease, Class: Operator, Doc: "Default work lease.", Refusal: "Validate renewal configuration; never silently default invalid values."},

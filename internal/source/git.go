@@ -25,16 +25,21 @@ func gitEnvironment(base []string) []string {
 	return append(append([]string{}, base...), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_NO_REPLACE_OBJECTS=1", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh", "GIT_LFS_SKIP_SMUDGE=1")
 }
 
-func (g *gitClient) run(ctx context.Context, directory, remote string, args ...string) (output string, err error) {
+func (g *gitClient) run(ctx context.Context, directory, remote string, args ...string) (string, error) {
+	out, err := g.output(ctx, directory, remote, "", args...)
+	return strings.TrimSpace(string(out)), err
+}
+
+func (g *gitClient) output(ctx context.Context, directory, remote, input string, args ...string) (_ []byte, err error) {
 	commandArgs := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "http.followRedirects=false", "-c", "credential.helper=", "-c", "core.useReplaceRefs=false"}
 	env := append([]string{}, g.env...)
 	if remote != "" {
 		if err := sourceurl.CheckResolvedHost(ctx, remote, net.DefaultResolver.LookupIPAddr); err != nil {
-			return "", err
+			return nil, err
 		}
 		config, fetchEnv, cleanup, err := g.authentication(ctx, remote)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		defer func() { err = errors.Join(err, cleanup()) }()
 		commandArgs = append(commandArgs, config...)
@@ -45,15 +50,18 @@ func (g *gitClient) run(ctx context.Context, directory, remote string, args ...s
 	}
 	cmd := exec.CommandContext(ctx, "git", append(commandArgs, args...)...)
 	cmd.Env = env
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	out, err := gitcmd.Output(ctx, cmd, false)
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		}
 		// safety: remote failures can echo credentials, signed URLs and helper output.
-		return "", fmt.Errorf("source git %s failed: %w", args[0], err)
+		return nil, fmt.Errorf("source git %s failed: %w", args[0], err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 func gitExit(err error, code int) bool {

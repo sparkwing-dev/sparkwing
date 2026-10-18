@@ -31,6 +31,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // GitHub's production endpoints.
@@ -531,29 +533,37 @@ func (c *Client) FileAtCommit(ctx context.Context, installation, repository int6
 }
 
 func (c *Client) fileAt(ctx context.Context, auth, root, sha, file string) ([]byte, bool, error) {
-	var content struct {
-		Encoding string `json:"encoding"`
-		Content  string `json:"content"`
-	}
 	filePath := strings.TrimPrefix(file, "/")
 	if filePath == "" || strings.Contains(filePath, "..") || strings.ContainsAny(filePath, "?#") {
 		return nil, false, errors.New("githubapp: invalid repository file path")
 	}
-	err := c.getJSON(ctx, root+"/contents/"+filePath+"?ref="+url.QueryEscape(sha), auth, &content)
-	if errors.Is(err, errNotFound) {
-		return nil, false, nil
-	}
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.APIURL+root+"/contents/"+filePath+"?ref="+url.QueryEscape(sha), nil)
 	if err != nil {
 		return nil, false, err
 	}
-	if content.Encoding != "base64" {
-		return nil, false, errors.New("githubapp: repository file is not base64 encoded")
-	}
-	decoded, err := base64.StdEncoding.DecodeString(content.Content)
+	c.apiHeaders(req, auth)
+	req.Header.Set("Accept", "application/vnd.github.raw+json")
+	resp, err := c.cfg.HTTP.Do(req)
 	if err != nil {
-		return nil, false, fmt.Errorf("githubapp: decode repository file: %w", err)
+		return nil, false, fmt.Errorf("githubapp: %s: %w", req.URL.Host, err)
 	}
-	return decoded, true, nil
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, false, nil
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return nil, false, fmt.Errorf("%w: %s answered %d", ErrRejected, req.URL.Path, resp.StatusCode)
+	case resp.StatusCode != http.StatusOK:
+		return nil, false, fmt.Errorf("githubapp: %s answered %d", req.URL.Path, resp.StatusCode)
+	}
+	// safety: one byte past the limit lets the configuration parser refuse an oversized file.
+	content, err := io.ReadAll(io.LimitReader(resp.Body, limits.ProjectConfigBytes+1))
+	if err != nil {
+		return nil, false, fmt.Errorf("githubapp: read %s: %w", req.URL.Host, err)
+	}
+	return content, true, nil
 }
 
 // hack: GitHub answers a request for ungranted permissions with the same 422 as a
