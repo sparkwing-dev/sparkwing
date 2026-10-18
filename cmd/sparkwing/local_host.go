@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -68,7 +69,15 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 		return runners.NativeServices{}, errors.Join(err, services.Close())
 	}
 	if profile := run.Request.Request.Options.CacheFrom.Value; profile != "" && run.Request.Request.Origin == runspec.OriginLocal {
-		cache, closeCache, err := openProfileCache(ctx, profile, run.Request.Request.Git, run.Request.Request.Source.Location.LocalCheckout)
+		snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
+		if err != nil {
+			return runners.NativeServices{}, errors.Join(err, services.Close())
+		}
+		environment, err := snapshots.Load(ctx, run.Request.Request.Env)
+		if err != nil {
+			return runners.NativeServices{}, errors.Join(err, services.Close())
+		}
+		cache, closeCache, err := openProfileCache(ctx, environment, profile, run.Request.Request.Git, run.Request.Request.Source.Location.LocalCheckout)
 		if err != nil {
 			return runners.NativeServices{}, errors.Join(err, services.Close())
 		}

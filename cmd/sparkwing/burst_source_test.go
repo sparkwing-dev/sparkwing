@@ -41,7 +41,7 @@ func TestBurstSourceBundleTrackedEditsAndDeclaredFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := runSnapshotGit(t, repo, "status", "--porcelain")
-	snapshot, err := captureBurstSnapshot(t.Context(), repo, []string{"declared.txt", "ignored.txt", "secret.conf"}, []string{"secret.conf"})
+	snapshot, err := captureBurstSnapshot(t.Context(), os.Environ(), repo, []string{"declared.txt", "ignored.txt", "secret.conf"}, []string{"secret.conf"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestBurstBundleRemotePoliciesRequireLiveCredentialAuthority(t *testing.T) {
 	writeSnapshotFile(t, repo, "public.txt", "public\n", 0o644)
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-m", "base")
-	snapshot, err := captureBurstSnapshot(t.Context(), repo, nil, nil)
+	snapshot, err := captureBurstSnapshot(t.Context(), os.Environ(), repo, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func (b burstBundleTransport) RoundTrip(*http.Request) (*http.Response, error) {
 
 func snapshotObjectExists(t *testing.T, checkout, sha string) bool {
 	t.Helper()
-	cmd := snapshotGitCommand(t.Context(), "-C", checkout, "cat-file", "-e", sha)
+	cmd := snapshotGitCommand(t.Context(), os.Environ(), "-C", checkout, "cat-file", "-e", sha)
 	return cmd.Run() == nil
 }
 
@@ -189,7 +189,7 @@ func FuzzBurstBundleSecretExclusion(f *testing.F) {
 		writeSnapshotFile(t, repo, name, value, 0o600)
 		runSnapshotGit(t, repo, "add", ".")
 		runSnapshotGit(t, repo, "commit", "-m", "base")
-		snapshot, err := captureBurstSnapshot(t.Context(), repo, []string{name}, []string{name})
+		snapshot, err := captureBurstSnapshot(t.Context(), os.Environ(), repo, []string{name}, []string{name})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -231,7 +231,7 @@ func FuzzBurstSnapshotRejectsSecretValues(f *testing.F) {
 		runSnapshotGit(t, repo, "add", ".")
 		runSnapshotGit(t, repo, "commit", "-m", "base")
 		writeSnapshotFile(t, repo, "ordinary.dat", payload+"changed", 0o644)
-		snapshot, err := captureBurstSnapshot(t.Context(), repo, nil, nil)
+		snapshot, err := captureBurstSnapshot(t.Context(), os.Environ(), repo, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -255,7 +255,7 @@ func TestBurstSnapshotSecretScanAllowsUnchangedSourceAndNames(t *testing.T) {
 	writeSnapshotFile(t, repo, "private-token-in-filename.txt", "public", 0o644)
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-m", "base")
-	snapshot, err := captureBurstSnapshot(t.Context(), repo, nil, nil)
+	snapshot, err := captureBurstSnapshot(t.Context(), os.Environ(), repo, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestBurstSecretScanOnlyChecksChangedBlobsAndMeaningfulValues(t *testing.T) 
 			if tc.edited != "" {
 				writeSnapshotFile(t, repo, "input.txt", tc.edited, 0o644)
 			}
-			snapshot, err := captureSnapshot(t.Context(), repo, defaultWorktreeSnapshotLimits, []string{"input.txt"}, &burstSourceSelection{})
+			snapshot, err := captureSnapshot(t.Context(), os.Environ(), repo, defaultWorktreeSnapshotLimits, []string{"input.txt"}, &burstSourceSelection{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -317,7 +317,7 @@ func TestBurstSnapshotPreservesOriginalBranchFacts(t *testing.T) {
 	sha := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
 	runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/main", sha)
 	runSnapshotGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-	snapshot, err := captureBurstSnapshot(t.Context(), repo, nil, nil)
+	snapshot, err := captureBurstSnapshot(t.Context(), os.Environ(), repo, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestBurstSnapshotPreservesOriginalBranchFacts(t *testing.T) {
 	if branch, err := snapshot.branch(t.Context()); err != nil || branch != "feature" {
 		t.Fatalf("branch=%q err=%v", branch, err)
 	}
-	if branch, err := checkoutDefaultBranch(t.Context(), snapshot.RepoRoot); err != nil || branch != "main" {
+	if branch, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot); err != nil || branch != "main" {
 		t.Fatalf("default branch=%q err=%v", branch, err)
 	}
 	runSnapshotGit(t, repo, "checkout", "--quiet", "--detach", sha)
@@ -337,14 +337,14 @@ func TestBurstSnapshotPreservesOriginalBranchFacts(t *testing.T) {
 		t.Fatalf("detached branch=%q err=%v", branch, err)
 	}
 	runSnapshotGit(t, repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
-	if branch, err := checkoutDefaultBranch(t.Context(), snapshot.RepoRoot); err != nil || branch != "" {
+	if branch, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot); err != nil || branch != "" {
 		t.Fatalf("absent default branch=%q err=%v", branch, err)
 	}
 	snapshot.RepoRoot = filepath.Join(t.TempDir(), "missing-checkout")
 	if _, err := snapshot.branch(t.Context()); err == nil {
 		t.Fatal("missing original checkout silently became a detached branch")
 	}
-	if _, err := checkoutDefaultBranch(t.Context(), snapshot.RepoRoot); err == nil {
+	if _, err := checkoutDefaultBranch(t.Context(), os.Environ(), snapshot.RepoRoot); err == nil {
 		t.Fatal("missing original checkout silently lost its default branch")
 	}
 }
@@ -355,7 +355,7 @@ func TestBurstSourceRejectsUndeclaredPathsAndMissingDeclarations(t *testing.T) {
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-m", "base")
 	for _, name := range []string{"../outside", "/etc/passwd", ".git/config", "nested/.git/config", ":(glob)*", "missing.txt"} {
-		if snapshot, err := captureBurstSnapshot(t.Context(), repo, []string{name}, nil); err == nil {
+		if snapshot, err := captureBurstSnapshot(t.Context(), os.Environ(), repo, []string{name}, nil); err == nil {
 			if snapshot != nil {
 				if err := snapshot.close(); err != nil {
 					t.Error(err)

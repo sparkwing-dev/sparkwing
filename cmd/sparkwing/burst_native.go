@@ -122,10 +122,10 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 			}
 		}
 	}
-	if err := authorizeBurstSource(ctx, filepath.Dir(directory), files, route.SourceFiles); err != nil {
+	if err := authorizeBurstSource(ctx, captured, filepath.Dir(directory), files, route.SourceFiles); err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	snapshot, err := captureBurstSnapshot(ctx, filepath.Dir(directory), route.SourceFiles, nil)
+	snapshot, err := captureBurstSnapshot(ctx, captured, filepath.Dir(directory), route.SourceFiles, nil)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
@@ -147,7 +147,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	defaultBranch, err := checkoutDefaultBranch(ctx, snapshot.RepoRoot)
+	defaultBranch, err := checkoutDefaultBranch(ctx, captured, snapshot.RepoRoot)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

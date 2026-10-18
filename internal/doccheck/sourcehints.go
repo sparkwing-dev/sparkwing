@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -84,7 +85,17 @@ func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
 		return nil, err
 	}
 	var hints []sourceHint
+	var stack []ast.Node
 	ast.Inspect(file, func(node ast.Node) bool {
+		if node == nil {
+			stack = stack[:len(stack)-1]
+			return true
+		}
+		var parent ast.Node
+		if len(stack) > 0 {
+			parent = stack[len(stack)-1]
+		}
+		stack = append(stack, node)
 		lit, ok := node.(*ast.BasicLit)
 		if !ok || lit.Kind != token.STRING {
 			return true
@@ -107,9 +118,38 @@ func sourceHintsIn(repoRoot, path string) ([]sourceHint, error) {
 				continue
 			}
 			verb.err = fragmentFlagError(command)
-			hints = append(hints, sourceHint{cliVerb: verb, checkPath: quoted || sourceHintFlagRE.MatchString(command) || sourceHintInstructionRE.MatchString(text)})
+			standalone := !sourceHintDataLiteral(parent, lit) && slices.ContainsFunc(strings.Split(text, "\n"), func(line string) bool {
+				line = strings.TrimSpace(line)
+				line = strings.TrimPrefix(line, "$ ")
+				return line == command
+			})
+			hints = append(hints, sourceHint{cliVerb: verb, checkPath: standalone || quoted || sourceHintFlagRE.MatchString(command) || sourceHintInstructionRE.MatchString(text)})
 		}
 		return true
 	})
 	return hints, nil
+}
+
+func sourceHintDataLiteral(parent ast.Node, literal *ast.BasicLit) bool {
+	switch parent := parent.(type) {
+	case *ast.BinaryExpr:
+		return true
+	case *ast.CallExpr:
+		if array, ok := parent.Fun.(*ast.ArrayType); ok && array.Len == nil {
+			return true
+		}
+		if function, ok := parent.Fun.(*ast.SelectorExpr); ok {
+			if name, ok := function.X.(*ast.Ident); ok && name.Name == "strings" && function.Sel.Name == "NewReader" {
+				return true
+			}
+		}
+		for i, arg := range parent.Args {
+			if arg == literal && i > 0 {
+				if previous, ok := parent.Args[i-1].(*ast.BasicLit); ok && previous.Value == `"-m"` {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

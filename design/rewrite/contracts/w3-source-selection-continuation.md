@@ -34,6 +34,18 @@ preserving the owner's files.
 local snapshot inspection. It requires a local checkout and cannot combine with
 `PreparedCheckout`. It imports objects before the shared committed checkout.
 Remote bundle acquisition chooses the object format from the sealed object ID.
+Inspection replicas import `refs/*` into the same namespace with an explicit
+refspec. A local `release` branch and original `refs/remotes/origin/main` keep
+their identities even when local main differs. The import precedes the common
+checkout policy finalizer.
+
+The default committed configuration reader acquires the selected execution
+commit through `PrepareCheckout`, then reads through `os.Root` at that acquired
+root. It follows contained directory and file symlinks, including `.sparkwing`
+pointing at `ci`, and refuses reads outside the checkout. Configuration reads
+never install an SDK. The trusted `ReadFile` adapter must provide the same
+committed-path semantics.
+
 Local and remote acquisition finish through one checkout owner. After seeding,
 it applies the accepted depth to the selected commit with a local file-protocol
 fetch from the seeded repository, then checks out that commit and applies
@@ -63,6 +75,14 @@ toolchain session environment replaces an inherited snapshot when they differ.
 Calls without a new environment retain the selected snapshot and notice sink.
 Sparks resolver construction takes that context. Go setting probes and fallback
 resolution read the captured session rather than os.Environ.
+
+Source approval, snapshot capture, inspection and scanning require the prepared
+environment. Snapshot capture builds its Git environment through `procenv.Git`
+and retains it for later bundle operations and secret scans. Internal object,
+index and commit-identity overrides are added to that environment. No snapshot
+helper captures ambient values. Git can execute callbacks, so its process
+environment remains filtered even before SDK installation. Profile-cache
+lookups use the persisted request environment too.
 
 Help, describe and plan share acquisition and prepared-environment withholding
 with execution. Child local-secret inheritance remains part of the child request

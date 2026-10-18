@@ -54,7 +54,7 @@ type EngineResolver interface {
 // Options supplies host-owned workspace and authority separately from sealed source data.
 type Options struct {
 	PreparedCheckout string
-	// LocalReplica clones every local ref, ignoring checkout policy, for submitter inspection.
+	// LocalReplica imports original ref namespaces before applying the common checkout policy.
 	LocalReplica bool
 	LocalBundle  string
 	Workspace    string

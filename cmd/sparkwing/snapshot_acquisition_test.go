@@ -22,7 +22,7 @@ func TestSnapshotAcquisitionKeepsCapturedBytes(t *testing.T) {
 	runSnapshotGit(t, repo, "commit", "--quiet", "-m", "attributes")
 	writeSnapshotFile(t, repo, "notes.txt", "first\nsecond\n", 0o644)
 	writeSnapshotFile(t, repo, "version.id", "$Id$\n", 0o644)
-	snapshot, err := captureWorktreeSnapshot(t.Context(), repo, nil)
+	snapshot, err := captureWorktreeSnapshot(t.Context(), os.Environ(), repo, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestSnapshotAcquisitionKeepsCapturedBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inspection, err := triggerInspectionCheckout(t.Context(), replica, snapshot.SHA, snapshot.BundlePath, snapshot.tempDir)
+	inspection, err := triggerInspectionCheckout(t.Context(), os.Environ(), replica, snapshot.SHA, snapshot.BundlePath, snapshot.tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestSnapshotBundleCarriesEverySelectedRevision(t *testing.T) {
 	execution, code := commit("execution", "execution.txt"), commit("code", "code.txt")
 	runSnapshotGit(t, repo, "checkout", "--quiet", "-b", "work", base)
 	writeSnapshotFile(t, repo, "dirty.txt", "dirty\n", 0o644)
-	snapshot, err := captureWorktreeSnapshot(t.Context(), repo, nil)
+	snapshot, err := captureWorktreeSnapshot(t.Context(), os.Environ(), repo, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

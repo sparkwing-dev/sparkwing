@@ -34,8 +34,12 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	if err != nil && !os.IsNotExist(err) {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	captured := os.Environ()
-	masker := secrets.NewMasker()
+	var localSecrets []string
+	if machine.Run != nil && machine.Run.Routing != nil {
+		localSecrets = machine.Run.Routing.LocalSecrets
+	}
+	environment := prepareLocalEnvironment(os.Environ(), localSecrets)
+	captured, masker := environment.captured, environment.masker
 	var allow []string
 	if machine.Run != nil {
 		allow = machine.Run.SubmitEnvAllow
@@ -56,7 +60,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	var snapshot *worktreeSnapshot
 	originalCheckout := checkout
 	if flags.workingTree {
-		snapshot, err = captureWorktreeSnapshot(ctx, checkout, flags.allowSecretFiles)
+		snapshot, err = captureWorktreeSnapshot(ctx, captured, checkout, flags.allowSecretFiles)
 		if err != nil {
 			return result, err
 		}
@@ -88,7 +92,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 		if err := snapshot.includeRevisions(ctx, selected.git.SHA, selected.source.Ref); err != nil {
 			return result, err
 		}
-		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, snapshot.BundlePath, snapshot.tempDir)
+		checkout, err = triggerInspectionCheckout(ctx, captured, selected.checkout.directory, selected.git.SHA, snapshot.BundlePath, snapshot.tempDir)
 		if err != nil {
 			return result, err
 		}
@@ -109,7 +113,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 			return result, err
 		}
 		defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(workspace)) }()
-		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, "", workspace)
+		checkout, err = triggerInspectionCheckout(ctx, captured, selected.checkout.directory, selected.git.SHA, "", workspace)
 		if err != nil {
 			return result, err
 		}
@@ -151,17 +155,17 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 }
 
 func snapshotTriggerCheckout(ctx context.Context, snapshot *worktreeSnapshot) (string, error) {
-	return triggerInspectionCheckout(ctx, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath, snapshot.tempDir)
+	return triggerInspectionCheckout(ctx, snapshot.environment, snapshot.RepoRoot, snapshot.SHA, snapshot.BundlePath, snapshot.tempDir)
 }
 
-func triggerInspectionCheckout(ctx context.Context, repo, sha, bundle, workspace string) (string, error) {
-	options := source.Options{Workspace: workspace, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
+func triggerInspectionCheckout(ctx context.Context, environment []string, repo, sha, bundle, workspace string) (string, error) {
+	options := source.Options{Workspace: workspace, Base: procenv.Base{Local: true, Captured: environment, Masker: secrets.NewMasker()}}
 	options.LocalReplica, options.LocalBundle = true, bundle
 	entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: sha, CommittedCheckout: true, PipelineDir: "."}, options)
 	if err != nil {
 		return "", err
 	}
-	environment, err := procenv.Build(procenv.Git, options.Base, procenv.Runtime{})
+	environment, err = procenv.Build(procenv.Git, options.Base, procenv.Runtime{})
 	if err != nil {
 		return "", err
 	}

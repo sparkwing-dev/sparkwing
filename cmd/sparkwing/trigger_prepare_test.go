@@ -494,7 +494,7 @@ func TestTriggerCheckoutsAcceptAuthenticatedProxy(t *testing.T) {
 	if selected.source.Ref != sha {
 		t.Fatal("proxy changed source revision")
 	}
-	checkout, err := triggerInspectionCheckout(t.Context(), repo, sha, "", t.TempDir())
+	checkout, err := triggerInspectionCheckout(t.Context(), os.Environ(), repo, sha, "", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

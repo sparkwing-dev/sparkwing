@@ -65,7 +65,13 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	var standalone wingd.LocalLifecycle
 	return localRunRuntime{
 		controller: controller,
-		openCache:  openLocalProfileCache,
+		openCache: func(ctx context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
+			environment, err := snapshots.Load(ctx, request.Env)
+			if err != nil {
+				return nil, nil, err
+			}
+			return openLocalProfileCache(ctx, environment, profile, request)
+		},
 		publish: func(ctx context.Context, profile, run string) error {
 			return publishLocalProfile(ctx, home, transport, profile, run)
 		},
@@ -107,22 +113,22 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	}, nil
 }
 
-func openLocalProfileCache(ctx context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
-	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: request.Source.Location.LocalCheckout, pipeline: request.Pipeline, environment: os.Environ(), githubID: func(ctx context.Context, remote string) (int64, error) {
-		return lookupTriggerGitHubID(ctx, remote, os.Environ())
+func openLocalProfileCache(ctx context.Context, environment []string, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: request.Source.Location.LocalCheckout, pipeline: request.Pipeline, environment: environment, githubID: func(ctx context.Context, remote string) (int64, error) {
+		return lookupTriggerGitHubID(ctx, remote, environment)
 	}})
 	if err != nil {
 		return nil, nil, err
 	}
-	cache, closeCache, err := openProfileCache(ctx, profile, selected.git, request.Source.Location.LocalCheckout)
+	cache, closeCache, err := openProfileCache(ctx, environment, profile, selected.git, request.Source.Location.LocalCheckout)
 	if err == nil {
 		request.Git.Repository, request.Git.Ref, request.Git.DefaultBranch = selected.git.Repository, selected.git.Ref, selected.git.DefaultBranch
 	}
 	return cache, closeCache, err
 }
 
-func openProfileCache(ctx context.Context, profile string, git runspec.Git, checkout string) (blob.RemoteCache, func() error, error) {
-	branch, err := checkoutDefaultBranch(ctx, checkout)
+func openProfileCache(ctx context.Context, environment []string, profile string, git runspec.Git, checkout string) (blob.RemoteCache, func() error, error) {
+	branch, err := checkoutDefaultBranch(ctx, environment, checkout)
 	if err != nil {
 		return nil, nil, err
 	}

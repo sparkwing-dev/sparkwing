@@ -152,7 +152,10 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		local.env = append(append([]string{}, client.env...), "GIT_ALLOW_PROTOCOL=file")
 		policy := spec.Checkout.Policy
 		if options.LocalReplica {
-			if _, err := local.run(ctx, "", "", "clone", "--quiet", "--no-checkout", "--no-hardlinks", "--", checkout, selected); err != nil {
+			if err := initCheckout(ctx, &client, selected, checkout, revision); err != nil {
+				return entry, err
+			}
+			if err := importReferences(ctx, &local, checkout, selected); err != nil {
 				return entry, err
 			}
 		} else {
@@ -235,6 +238,25 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		entry.Directory, entry.pipelineCheckout = entry.pipelineEntry.Directory, entry.pipelineEntry.CheckoutDirectory()
 	}
 	return entry, nil
+}
+
+func importReferences(ctx context.Context, client *gitClient, original, replica string) error {
+	if _, err := client.run(ctx, replica, "", "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--update-head-ok", "--", original, "+refs/*:refs/*"); err != nil {
+		return err
+	}
+	refs, err := client.run(ctx, original, "", "for-each-ref", "--format=%(refname)%00%(symref)")
+	if err != nil {
+		return err
+	}
+	for _, row := range strings.Split(refs, "\n") {
+		name, target, ok := strings.Cut(row, "\x00")
+		if ok && target != "" {
+			if _, err := client.run(ctx, replica, "", "symbolic-ref", name, target); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func validateSpec(spec Spec) error {

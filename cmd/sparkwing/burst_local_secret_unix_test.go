@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -49,6 +51,15 @@ func TestBurstPreparationWithholdsConfiguredLocalSecretFromInstallAndPlan(t *tes
 	pipeline := strings.ReplaceAll(burstIntakePipeline, "TOKEN", "SIGNING_MATERIAL")
 	pipeline = strings.Replace(pipeline, "func main() {\n", "func main() {\n    if _, leaked := os.LookupEnv(\"SIGNING_MATERIAL\"); leaked { os.Exit(97) }\n", 1)
 	writeSnapshotFile(t, repo, ".sparkwing/main.go", pipeline, 0o600)
+	probe := filepath.Join(t.TempDir(), "fsmonitor-output")
+	monitor := filepath.Join(t.TempDir(), "fsmonitor")
+	callback := "#!/bin/sh\nprintf 'seen:%s\\n' \"${SIGNING_MATERIAL-}\" >> '" + probe + "'\nprintf 'token\\0/\\0'\n"
+	if err := os.WriteFile(monitor, []byte(callback), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), ".gitconfig"), []byte("[core]\n fsmonitor = "+strconv.Quote(monitor)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(repo)
 	_, server, bearer := burstIntakeController(t, "http://controller.test")
 	handler := server.Handler()
@@ -69,6 +80,13 @@ func TestBurstPreparationWithholdsConfiguredLocalSecretFromInstallAndPlan(t *tes
 	options := client.EngineOptions{URL: "http://controller.test", Bearer: func(context.Context) (string, error) { return bearer, nil }, HTTP: &http.Client{Transport: transport}}
 	route := userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"SIGNING_MATERIAL"}, SourceFiles: []string{"declared.txt"}}
 	prepared, err := prepareNativeBurst(t.Context(), "burst", runFlags{}, nil, route, options)
+	observed, readErr := os.ReadFile(probe)
+	if readErr != nil || !bytes.Contains(observed, []byte("seen:")) {
+		t.Fatalf("Git did not execute the global fsmonitor callback: %v", readErr)
+	}
+	if bytes.Contains(observed, []byte(signingMaterial)) {
+		t.Fatal("configured local secret reached Git's global fsmonitor callback")
+	}
 	if err != nil {
 		t.Fatalf("burst preparation exposed or lost the configured local secret: %v", err)
 	}
@@ -111,7 +129,7 @@ func FuzzWithholdLocalSecretsLeavesNoConfiguredName(f *testing.F) {
 }
 
 func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
-	for _, entry := range []string{"help", "describe", "plan", "preparation"} {
+	for _, entry := range []string{"help", "describe", "plan", "preparation", "trigger"} {
 		t.Run(entry, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
@@ -167,6 +185,11 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 				err = runPipelineDescribe(inv)
 			case "plan":
 				err = runPipelinePlan(inv)
+			case "trigger":
+				runSnapshotGit(t, repo, "add", ".sparkwing")
+				runSnapshotGit(t, repo, "commit", "--quiet", "-m", "trigger pipeline")
+				runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+				_, err = prepareNativeTrigger(t.Context(), triggerFlags{pipeline: "burst"})
 			case "preparation":
 				var snapshots *nodehost.FileEnvironmentSnapshots
 				snapshots, err = nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
@@ -182,4 +205,56 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 			}
 		})
 	}
+}
+
+func FuzzPreparationGitNeverRestoresSigningMaterial(f *testing.F) {
+	f.Add([]byte("opaque-value"))
+	f.Add([]byte{0, 255, '\n', '\''})
+	f.Fuzz(func(t *testing.T, value []byte) {
+		if len(value) > 128 {
+			t.Skip()
+		}
+		secret := "signing-" + fmt.Sprintf("%x", value)
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		repo, _ := triggerPreparationRepo(t)
+		probe := filepath.Join(t.TempDir(), "fsmonitor-output")
+		monitor := filepath.Join(t.TempDir(), "fsmonitor")
+		callback := "#!/bin/sh\nprintf 'seen:%s\\n' \"${SIGNING_MATERIAL-}\" >> '" + probe + "'\nprintf 'token\\0/\\0'\n"
+		if err := os.WriteFile(monitor, []byte(callback), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), ".gitconfig"), []byte("[core]\n fsmonitor = "+strconv.Quote(monitor)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("SIGNING_MATERIAL", secret)
+		prepared := prepareLocalEnvironment(os.Environ(), []string{"SIGNING_MATERIAL"})
+		t.Setenv("SIGNING_MATERIAL", secret+"-ambient")
+		t.Setenv("GIT_INDEX_FILE", filepath.Join(t.TempDir(), "foreign-index"))
+		if err := authorizeBurstSource(t.Context(), prepared.captured, repo, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := captureBurstSnapshot(t.Context(), prepared.captured, repo, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := snapshot.close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		if err := snapshot.rejectSecrets(t.Context(), map[string]string{"SIGNING_MATERIAL": secret}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := snapshotTriggerCheckout(t.Context(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+		observed, err := os.ReadFile(probe)
+		if err != nil || !bytes.Contains(observed, []byte("seen:")) {
+			t.Fatalf("fsmonitor never ran: %v", err)
+		}
+		if bytes.Contains(observed, []byte(secret)) {
+			t.Fatal("preparation restored a withheld secret")
+		}
+	})
 }

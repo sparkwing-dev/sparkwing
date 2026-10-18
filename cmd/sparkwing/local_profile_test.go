@@ -26,7 +26,7 @@ func TestProfileCacheBranchIgnoresAmbientRepositoryOverrides(t *testing.T) {
 	property := func(raw []byte) bool {
 		t.Setenv("GIT_DIR", filepath.Join(foreign, hex.EncodeToString(raw)+".git"))
 		t.Setenv("GIT_WORK_TREE", foreign)
-		got, err := checkoutDefaultBranch(t.Context(), repo)
+		got, err := checkoutDefaultBranch(t.Context(), os.Environ(), repo)
 		return err == nil && got == "main"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
@@ -98,7 +98,7 @@ func TestProfileCacheConstructionAfterLocalIntake(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	cache, closeCache, err := openProfileCache(ctx, "cloud", admitted.Request.Request.Git, admitted.Request.Request.Source.Location.LocalCheckout)
+	cache, closeCache, err := openProfileCache(ctx, os.Environ(), "cloud", admitted.Request.Request.Git, admitted.Request.Request.Source.Location.LocalCheckout)
 	if err != nil {
 		t.Fatal("queued host could not construct its sealed profile cache:", err)
 	}

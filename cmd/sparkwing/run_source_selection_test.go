@@ -140,7 +140,7 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 					t.Fatal(err)
 				}
 				options.SDK = ""
-				options.PreparedCheckout, err = triggerInspectionCheckout(t.Context(), repo, head, "", t.TempDir())
+				options.PreparedCheckout, err = triggerInspectionCheckout(t.Context(), os.Environ(), repo, head, "", t.TempDir())
 				if err != nil {
 					t.Fatal(err)
 				}

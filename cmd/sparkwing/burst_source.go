@@ -23,8 +23,12 @@ type burstSourceSelection struct {
 	exclude []string
 }
 
-func authorizeBurstSource(ctx context.Context, root string, declared, allowed []string) error {
-	tracked, err := gitOutput(ctx, root, nil, "ls-files", "--cached", "-z")
+func authorizeBurstSource(ctx context.Context, env []string, root string, declared, allowed []string) error {
+	env, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
+	if err != nil {
+		return err
+	}
+	tracked, err := gitOutput(ctx, root, env, "ls-files", "--cached", "-z")
 	if err != nil {
 		return fmt.Errorf("inspect burst source approval: %w", snapshotGitError(err))
 	}
@@ -37,23 +41,23 @@ func authorizeBurstSource(ctx context.Context, root string, declared, allowed []
 	return nil
 }
 
-func captureBurstSnapshot(ctx context.Context, start string, includedUntracked, excludedSecretFiles []string) (*worktreeSnapshot, error) {
-	return captureSnapshot(ctx, start, defaultWorktreeSnapshotLimits, nil, &burstSourceSelection{include: includedUntracked, exclude: excludedSecretFiles})
+func captureBurstSnapshot(ctx context.Context, env []string, start string, includedUntracked, excludedSecretFiles []string) (*worktreeSnapshot, error) {
+	return captureSnapshot(ctx, env, start, defaultWorktreeSnapshotLimits, nil, &burstSourceSelection{include: includedUntracked, exclude: excludedSecretFiles})
 }
 
 func (s *worktreeSnapshot) branch(ctx context.Context) (string, error) {
-	branch, err := gitOutput(ctx, s.RepoRoot, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
+	branch, err := gitOutput(ctx, s.RepoRoot, s.environment, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if gitExitCode(err, 1) {
 		return "", nil
 	}
 	return strings.TrimSpace(branch), err
 }
 
-func checkoutDefaultBranch(ctx context.Context, root string) (string, error) {
+func checkoutDefaultBranch(ctx context.Context, env []string, root string) (string, error) {
 	if !filepath.IsAbs(root) {
 		return "", errors.New("default branch lookup requires an absolute checkout")
 	}
-	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: os.Environ()}, procenv.Runtime{})
+	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env}, procenv.Runtime{})
 	if err != nil {
 		return "", err
 	}
@@ -65,13 +69,13 @@ func checkoutDefaultBranch(ctx context.Context, root string) (string, error) {
 	return strings.TrimPrefix(strings.TrimSpace(branch), "refs/remotes/origin/"), err
 }
 
-func (s burstSourceSelection) paths(ctx context.Context, repoRoot string) (string, error) {
+func (s burstSourceSelection) paths(ctx context.Context, env []string, repoRoot string) (string, error) {
 	for _, names := range [][]string{s.include, s.exclude} {
 		if err := projectconfig.ValidateSourceFiles(names); err != nil {
 			return "", err
 		}
 	}
-	tracked, err := gitOutput(ctx, repoRoot, nil, "ls-files", "--cached", "-z")
+	tracked, err := gitOutput(ctx, repoRoot, env, "ls-files", "--cached", "-z")
 	if err != nil {
 		return "", fmt.Errorf("list tracked burst source: %w", snapshotGitError(err))
 	}
@@ -140,7 +144,7 @@ func (s *worktreeSnapshot) rejectSecrets(ctx context.Context, values map[string]
 		return nil
 	}
 	gitDir := filepath.Join(s.tempDir, "repo.git")
-	changed, err := gitDirOutput(ctx, gitDir, "diff-tree", "-r", "--no-commit-id", "--no-renames", "--diff-filter=ACMT", "--raw", "-z", s.BaseSHA, s.SHA)
+	changed, err := gitDirOutput(ctx, s.environment, gitDir, "diff-tree", "-r", "--no-commit-id", "--no-renames", "--diff-filter=ACMT", "--raw", "-z", s.BaseSHA, s.SHA)
 	if err != nil {
 		return errors.New("inspect source snapshot objects failed")
 	}
@@ -155,7 +159,7 @@ func (s *worktreeSnapshot) rejectSecrets(ctx context.Context, values map[string]
 	}
 	objects := ids.String()
 	scanCtx, cancel := context.WithCancel(ctx)
-	cmd := snapshotGitCommand(scanCtx, "--git-dir", gitDir, "cat-file", "--batch")
+	cmd := snapshotGitCommand(scanCtx, s.environment, "--git-dir", gitDir, "cat-file", "--batch")
 	cmd.Stdin = strings.NewReader(objects)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
