@@ -53,11 +53,12 @@ policy instead of priority zero. Multiple defaults select the lowest value, as
 Kubernetes does. Other spec differences remain mismatches. Clusters changing the
 standard toleration/grace defaults need matching configuration and native QA.
 All other changes, including missing authored security fields, reject the Pod.
-The launcher logs rejection, UID-fences Job deletion and tells the controller to
-fail that exact plan, eval or work award. A rejection annotation and cleanup
-finalizer retain ownership until the controller acknowledges failure and every
-container stops. Rejection first cordons the reserved node and UID-fences deletion
-of its Karpenter NodeClaim. A failed retirement retains cleanup ownership and
+Containment needs only Kubernetes and runs on every pass, including controller
+cooldowns: the launcher records a rejection annotation, cordons the reserved
+node, UID-fences deletion of its Karpenter NodeClaim and UID-fences Job deletion.
+Reconciliation then tells the controller to fail that exact plan, eval or work
+award. The annotation and cleanup finalizer retain ownership until the
+controller acknowledges failure and every container stops. A failed retirement retains cleanup ownership and
 cannot release capacity. Restart reconciliation repeats pending rejection reports.
 Malformed ownership, deadline or bootstrap annotations trigger UID-fenced Job
 deletion. Garbage collection owns its Secrets. The node's persisted reservation

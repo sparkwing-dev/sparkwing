@@ -92,6 +92,7 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 		}
 		return false, nil, nil
 	})
+	retainFinalizedJobs(kube)
 	kube.PrependReactor("list", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
 		namespace := action.GetNamespace()
 		pods, err := kube.Tracker().List(corev1.SchemeGroupVersion.WithResource("pods"), corev1.SchemeGroupVersion.WithKind("Pod"), namespace)
@@ -124,6 +125,37 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 	})
 	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
 	return l, kube, boundary, control
+}
+
+// hack: the fake tracker ignores finalizers; the API server keeps a deleted Job until its last one is removed.
+func retainFinalizedJobs(kube *fake.Clientset) {
+	jobs := batchv1.SchemeGroupVersion.WithResource("jobs")
+	tracker := kube.Tracker()
+	kube.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		obj, err := tracker.Get(jobs, action.GetNamespace(), action.(ktesting.DeleteAction).GetName())
+		if apierrors.IsNotFound(err) {
+			return false, nil, nil
+		}
+		if err != nil {
+			return true, nil, err
+		}
+		if len(obj.(*batchv1.Job).Finalizers) == 0 {
+			return false, nil, nil
+		}
+		job := obj.(*batchv1.Job).DeepCopy()
+		if job.DeletionTimestamp != nil {
+			return true, nil, nil
+		}
+		job.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		return true, nil, tracker.Update(jobs, job, job.Namespace)
+	})
+	kube.PrependReactor("patch", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		handled, obj, err := ktesting.ObjectReaction(tracker)(action)
+		if job, ok := obj.(*batchv1.Job); err == nil && ok && job.DeletionTimestamp != nil && len(job.Finalizers) == 0 {
+			return true, job, tracker.Delete(jobs, job.Namespace, job.Name)
+		}
+		return handled, obj, err
+	})
 }
 
 func TestLauncherCreatesSecretBeforeAllowingExecution(t *testing.T) {

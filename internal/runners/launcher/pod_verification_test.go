@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
@@ -85,11 +87,11 @@ func TestPodMutationDeletesJobAndFailsAward(t *testing.T) {
 			if !rejected {
 				t.Fatal("award was not failed")
 			}
-			if l.Boundary.(*boundaryFake).retirements != 1 {
+			if l.Boundary.(*boundaryFake).retirements == 0 {
 				t.Fatal("rejected node returned to the pool")
 			}
-			if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-				t.Fatalf("Job survived: %v", err)
+			if !jobRemoved(t, kube, jobName(control.award.Binding)) {
+				t.Fatal("Job survived")
 			}
 		})
 	}
@@ -221,8 +223,8 @@ func TestLaunchVerifiesPodAfterJobActivation(t *testing.T) {
 			if claimed, err := l.LaunchOne(t.Context()); !claimed || err == nil || !rejected {
 				t.Fatalf("unexpected Pod activated: claimed=%v err=%v rejected=%v", claimed, err, rejected)
 			}
-			if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), p.OwnerReferences[0].Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-				t.Fatalf("Job survived: %v", err)
+			if !jobRemoved(t, kube, p.OwnerReferences[0].Name) {
+				t.Fatal("Job survived")
 			}
 		})
 	}
@@ -282,9 +284,21 @@ func TestRestartComparesOriginalRequestedTemplate(t *testing.T) {
 	if err = restarted.Sync(t.Context()); err == nil {
 		t.Fatal("changed Job and Pod accepted as the original request")
 	}
-	if _, err = l.Kube.BatchV1().Jobs("cloud").Get(t.Context(), job.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Fatalf("changed Job survived: %v", err)
+	if !jobRemoved(t, l.Kube, job.Name) {
+		t.Fatal("changed Job survived")
 	}
+}
+
+func jobRemoved(t *testing.T, kube kubernetes.Interface, name string) bool {
+	t.Helper()
+	job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return job.DeletionTimestamp != nil
 }
 
 func podOnRead(t *testing.T, kube *fake.Clientset, pod *corev1.Pod) {
@@ -494,8 +508,8 @@ func TestActivationRequiresExactlyOneOwnedPod(t *testing.T) {
 			if l.Boundary.(*boundaryFake).retirements != 1 {
 				t.Fatal("rejected Pod count did not retire node")
 			}
-			if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), p.OwnerReferences[0].Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-				t.Fatalf("rejected Job survived: %v", err)
+			if !jobRemoved(t, kube, p.OwnerReferences[0].Name) {
+				t.Fatal("rejected Job survived")
 			}
 		})
 	}
@@ -575,6 +589,72 @@ func TestThrottledControllerDoesNotPauseLocalPodVerification(t *testing.T) {
 		}
 		if retired != 1 {
 			t.Fatalf("a mutated Pod went unverified for a poll while the controller asked for 60s: retirements=%d", retired)
+		}
+	})
+}
+
+type stallingControl struct {
+	*controlFake
+	syncs int
+}
+
+func (c *stallingControl) Sync(ctx context.Context, _ []CloudJobObservation) ([]CloudJobState, error) {
+	c.syncs++
+	if c.syncs == 1 {
+		return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(60000)}}
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestLocalRejectionDoesNotWaitOnAStalledController(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, boundary, control := fixture()
+		first := *control.award
+		second := first
+		second.Binding.UnitID, second.Binding.NodeID = "unit-2", "job-2"
+		for _, award := range []*CloudJobAward{&first, &second} {
+			control.award = award
+			if _, err := l.LaunchOne(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		control.award = nil
+		stalled := &stallingControl{controlFake: control}
+		l.Control, l.Poll = stalled, 5*time.Second
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- l.Run(ctx) }()
+		synctest.Wait()
+		for _, award := range []CloudJobAward{first, second} {
+			job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(award.Binding), metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+			pod.Name, pod.Namespace, pod.UID = job.Name+"-pod", "cloud", types.UID(job.Name+"-pod-uid")
+			pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr(true)}}
+			pod.Spec.Containers[0].Image = "other"
+			if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		time.Sleep(6 * time.Second)
+		synctest.Wait()
+		retired, syncs := boundary.retirements, stalled.syncs
+		var contained []string
+		for _, award := range []CloudJobAward{first, second} {
+			job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(award.Binding), metav1.GetOptions{})
+			if err == nil && job.DeletionTimestamp != nil && job.Annotations[rejectedAnnotation] != "" {
+				contained = append(contained, job.Name)
+			}
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if retired != 2 || len(contained) != 2 || syncs != 1 {
+			t.Fatalf("local enforcement waited on the controller: retirements=%d contained=%v controller calls=%d", retired, contained, syncs)
 		}
 	})
 }

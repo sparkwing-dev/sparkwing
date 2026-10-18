@@ -246,7 +246,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation))
 	}
 	if err := l.waitForJobPod(ctx, activated); err != nil {
-		return true, l.verificationFailure(ctx, activated, award.Binding, r.Reservation, err)
+		return true, l.verificationFailure(ctx, activated, award.Binding, r.Reservation, err, true)
 	}
 	return true, nil
 }

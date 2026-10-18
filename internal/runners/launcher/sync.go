@@ -50,7 +50,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		}
 		if jobFinished(job) && (job.Spec.Suspend == nil || !*job.Spec.Suspend) {
 			if verifyErr := l.verifyJobPods(ctx, &job); verifyErr != nil {
-				errs = append(errs, l.verificationFailure(ctx, &job, binding, reservation, verifyErr))
+				errs = append(errs, l.verificationFailure(ctx, &job, binding, reservation, verifyErr, true))
 				continue
 			}
 		}
@@ -96,8 +96,8 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	return errors.Join(append(errs, l.syncReservations(ctx), l.syncCapacity(ctx))...)
 }
 
-// safety: Kubernetes-only checks run on every pass, so neither a controller
-// cooldown nor a failed controller reconciliation leaves an active Pod unverified.
+// safety: verification and containment use only Kubernetes, so a controller
+// cooldown or stall never leaves an active Pod unverified; Sync acknowledges rejections.
 func (l *Launcher) verifyLocal(ctx context.Context) error {
 	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
@@ -114,7 +114,7 @@ func (l *Launcher) verifyLocal(ctx context.Context) error {
 			continue
 		}
 		if verifyErr := l.verifyJobPods(ctx, job); verifyErr != nil {
-			errs = append(errs, l.verificationFailure(ctx, job, binding, reservation, verifyErr))
+			errs = append(errs, l.verificationFailure(ctx, job, binding, reservation, verifyErr, false))
 		}
 	}
 	return errors.Join(append(errs, l.verifyCapacity(ctx))...)

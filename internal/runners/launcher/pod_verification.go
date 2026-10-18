@@ -40,12 +40,16 @@ func (l *Launcher) waitForJobPod(ctx context.Context, job *batchv1.Job) error {
 	return err
 }
 
-func (l *Launcher) verificationFailure(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, r CloudNodeReservation, err error) error {
+func (l *Launcher) verificationFailure(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, r CloudNodeReservation, err error, acknowledge bool) error {
 	var mismatch *podMismatch
 	if !errors.As(err, &mismatch) {
 		return err
 	}
-	return errors.Join(err, l.rejectJob(ctx, job, binding, r))
+	if acknowledge {
+		return errors.Join(err, l.rejectJob(ctx, job, binding, r))
+	}
+	_, containErr := l.containJob(ctx, job, binding, r)
+	return errors.Join(err, containErr)
 }
 
 func (l *Launcher) verifyJobPods(ctx context.Context, job *batchv1.Job) error {

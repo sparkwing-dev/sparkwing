@@ -54,11 +54,15 @@ job pod is then pre-bound and verified as before.
   are renewed by the observation; others, such as after a restart, are only
   checked. A request goes when the controller ends its award or the award
   deadline passes, so cancelled or reassigned work stops asking for nodes.
-- **Handoff.** A request stays on its node until an award reserves that node.
-  The reservation taint keeps further requests off it, and removal is graceful,
-  so kubelet has released the request's resources before the job is placed.
-- **Cadence.** Kubernetes-only verification of job pods and requests runs on
-  every pass. A controller Retry-After pauses only controller requests.
+- **Handoff.** A request's container exits after `version`, and reservation
+  removes the request once the reservation and its taint are persisted, so no
+  pod occupies the node until the job pod binds. `consolidateAfter` covers that
+  gap. Removal is awaited, so kubelet has released the request's resources
+  before the job is placed.
+- **Cadence.** Verification and containment of job pods and requests use only
+  Kubernetes and run on every pass. A rejection is recorded on the Job,
+  contained locally and acknowledged to the controller by reconciliation, so a
+  controller Retry-After or stall pauses only controller requests.
 
 ## Invariants kept
 
