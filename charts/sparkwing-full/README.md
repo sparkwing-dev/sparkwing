@@ -10,7 +10,7 @@ own controller is outside the launch offering.
 [examples/cloud.yaml](examples/cloud.yaml) is a secret-free input for ArgoCD on
 `kikd-prod`. It renders the controller, Service, nginx Ingress for
 `api.sparkwing.dev` and `console.sparkwing.dev`, launcher Deployment, the
-`sparkwing-jobs` namespace with its customer ServiceAccount, RBAC, Job egress
+`sparkwing-cloud-jobs` namespace with its customer ServiceAccount, RBAC, Job egress
 policies and admission policies. It uses
 the existing `sparkwing-database` Secret's `dsn` key for RDS PostgreSQL.
 
@@ -175,8 +175,11 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars, `PodLevelResources` and
   `admissionregistration.k8s.io/v1` ValidatingAdmissionPolicy (Kubernetes 1.30+).
-- Jobs run in `<release namespace>-jobs` (`launcher.jobNamespace`), which the
-  chart creates with privileged Pod Security. Its admission policies admit only
+- Jobs run in `<release namespace>-cloud-jobs` (`launcher.jobNamespace`), which
+  the chart owns and creates with privileged Pod Security
+  (`launcher.createNamespace`). Keep other NetworkPolicies and Pod Security
+  labels out of it. Before moving Jobs from an older namespace, drain its Jobs
+  and node reservations as the runner-bundle README describes. Its admission policies admit only
   launcher-created Jobs, capacity requests and probes and Job-controller Pods of
   the launcher's exact shape, after every mutating webhook. VPC resource
   controller ENI edits and load-balancer readiness gates pass; AWS credential

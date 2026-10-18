@@ -48,7 +48,7 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 			t.Errorf("launcher lacks pinned %s: %v", prefix, c.Args)
 		}
 	}
-	for _, want := range []string{"--namespace=sparkwing-jobs", "--controller=https://api.sparkwing.dev", "--credentials-dir=/etc/sparkwing/credentials", "--cpu-ceiling=2", "--memory-ceiling=8Gi"} {
+	for _, want := range []string{"--namespace=sparkwing-cloud-jobs", "--controller=https://api.sparkwing.dev", "--credentials-dir=/etc/sparkwing/credentials", "--cpu-ceiling=2", "--memory-ceiling=8Gi"} {
 		if !containsArg(c.Args, want) {
 			t.Errorf("launcher lacks %q", want)
 		}

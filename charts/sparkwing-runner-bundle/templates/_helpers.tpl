@@ -167,7 +167,7 @@ deployment template stays readable.
 {{- end }}
 
 {{- define "sparkwing-runner-bundle.jobNamespace" -}}
-{{- $jobs := default (printf "%s-jobs" .Release.Namespace) .Values.launcher.jobNamespace -}}
+{{- $jobs := default (printf "%s-cloud-jobs" .Release.Namespace) .Values.launcher.jobNamespace -}}
 {{- if eq $jobs .Release.Namespace -}}
 {{- fail "sparkwing-runner-bundle: launcher.jobNamespace must differ from the release namespace, because its admission policies admit only launcher-created Pods and Jobs" -}}
 {{- end -}}

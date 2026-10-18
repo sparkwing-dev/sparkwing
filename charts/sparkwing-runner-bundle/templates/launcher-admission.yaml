@@ -30,16 +30,50 @@ spec:
       - pods/ephemeralcontainers
       - pods/resize
       scope: Namespaced
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CONNECT
+      resources:
+      - pods/exec
+      - pods/attach
+      - pods/portforward
+      scope: Namespaced
   validations:
+  - expression: request.operation != 'CONNECT'
+    message: exec, attach and port-forward are not allowed in the Sparkwing job namespace
   - expression: '!variables.create || (variables.shape == ''job'' ? request.userInfo.username
-      in [''system:serviceaccount:kube-system:job-controller'', ''system:kube-controller-manager'']
-      : request.userInfo.username == variables.launcher)'
+      == ''system:serviceaccount:kube-system:job-controller'' : request.userInfo.username
+      == variables.launcher)'
     message: only the launcher and the Job controller create Pods here
-  - expression: size(variables.spec.?ephemeralContainers.orValue([])) == 0
+  - expression: request.operation != 'UPDATE' || size(variables.spec.?ephemeralContainers.orValue([]))
+      == 0
     message: ephemeral containers are not allowed
   - expression: request.operation != 'UPDATE' || object.spec == oldObject.spec &&
       variables.labels == oldObject.metadata.?labels.orValue({})
     message: Pod specs and labels are immutable here
+  - expression: request.operation != 'UPDATE' || variables.owners == oldObject.metadata.?ownerReferences.orValue([])
+      || request.userInfo.username in ['system:serviceaccount:kube-system:job-controller',
+      'system:serviceaccount:kube-system:generic-garbage-collector']
+    message: only the Job controller and garbage collector change Pod ownership
+  - expression: '!variables.create || variables.shape != ''probe'' || (variables.spec.containers[0].name
+      == ''control'' && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash",
+      "-ceu", "exec nc -lk 18888"] || variables.spec.containers[0].name == ''measure''
+      && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash", "-ceu",
+      "command -v nc >/dev/null\ncommand -v nsenter >/dev/null\ncontrol_host=\"$1\";
+      control_port=\"$2\"; shift 2\nrequired_host=\"$1\"; required_port=\"$2\"; shift
+      2\nnc -z -w 3 \"$required_host\" \"$required_port\"\nnsenter -t 1 -n -- nc -z
+      -w 3 \"$required_host\" \"$required_port\"\nif nc -z -w 3 \"$control_host\"
+      \"$control_port\"; then echo \"Cloud default-deny egress is not enforced\" >&2;
+      exit 1; fi\nwhile (( $# )); do\n host=\"$1\"; port=\"$2\"; shift 2\n if nc -z
+      -w 3 \"$host\" \"$port\"; then echo \"Cloud pod egress escaped to $host:$port\"
+      >&2; exit 1; fi\n if nsenter -t 1 -n -- nc -z -w 3 \"$host\" \"$port\"; then
+      echo \"Cloud node egress escaped to $host:$port\" >&2; exit 1; fi\ndone", "boundary-probe"]
+      || variables.spec.containers[0].name == ''witness'' && variables.spec.containers[0].?command.orValue([])
+      == ["/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"])'
+    message: boundary probes run only the launcher's measurement commands
   - expression: '!variables.create || variables.shape != ''other'''
     message: only Cloud Job, capacity and boundary probe Pods run in the Sparkwing
       job namespace
@@ -48,8 +82,9 @@ spec:
     message: Pods use the customer job service account without an API token
   - expression: '!variables.create || !variables.spec.?hostNetwork.orValue(false)
       && !variables.spec.?hostIPC.orValue(false) && (!variables.spec.?hostPID.orValue(false)
-      || variables.shape == ''probe'') && variables.containers.all(c, c.?ports.orValue([]).all(p,
-      p.?hostPort.orValue(0) == 0))'
+      || variables.shape == ''probe'' && variables.spec.containers[0].name == ''measure'')
+      && variables.containers.all(c, c.?ports.orValue([]).all(p, p.?hostPort.orValue(0)
+      == 0))'
     message: Pods cannot share host namespaces or ports
   - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
       == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
@@ -190,8 +225,9 @@ spec:
     message: Pods use the customer job service account without an API token
   - expression: '!variables.create || !variables.spec.?hostNetwork.orValue(false)
       && !variables.spec.?hostIPC.orValue(false) && (!variables.spec.?hostPID.orValue(false)
-      || variables.shape == ''probe'') && variables.containers.all(c, c.?ports.orValue([]).all(p,
-      p.?hostPort.orValue(0) == 0))'
+      || variables.shape == ''probe'' && variables.spec.containers[0].name == ''measure'')
+      && variables.containers.all(c, c.?ports.orValue([]).all(p, p.?hostPort.orValue(0)
+      == 0))'
     message: Pods cannot share host namespaces or ports
   - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
       == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''

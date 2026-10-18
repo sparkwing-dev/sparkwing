@@ -1,5 +1,6 @@
 {{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
 {{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
+{{- if .Values.launcher.createNamespace }}
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -7,6 +8,7 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: privileged
 ---
+{{- end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

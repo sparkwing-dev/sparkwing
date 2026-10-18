@@ -2252,11 +2252,11 @@ func TestCloudLauncherPermissionsStayScoped(t *testing.T) {
 					for _, rule := range resource.Rules {
 						if slices.Contains(rule.APIGroups, want.group) && slices.Contains(rule.Resources, want.resource) {
 							found = true
-							if want.group == "admissionregistration.k8s.io" && !reflect.DeepEqual(rule.ResourceNames, []string{"sparkwing-cloud-pods-cloud-jobs", "sparkwing-cloud-jobs-cloud-jobs"}) {
+							if want.group == "admissionregistration.k8s.io" && !reflect.DeepEqual(rule.ResourceNames, []string{"sparkwing-cloud-pods-cloud-cloud-jobs", "sparkwing-cloud-jobs-cloud-cloud-jobs"}) {
 								t.Errorf("admission reads cover %v, want only the job namespace policies", rule.ResourceNames)
 							}
-							if want.kind == "Role" && resource.Metadata.Namespace != "cloud-jobs" {
-								t.Errorf("namespace permission in %q, want cloud-jobs", resource.Metadata.Namespace)
+							if want.kind == "Role" && resource.Metadata.Namespace != "cloud-cloud-jobs" {
+								t.Errorf("namespace permission in %q, want cloud-cloud-jobs", resource.Metadata.Namespace)
 							}
 							if !reflect.DeepEqual(rule.Verbs, want.verbs) {
 								t.Errorf("%s grants %v on %s, want only %v", want.kind, rule.Verbs, want.resource, want.verbs)

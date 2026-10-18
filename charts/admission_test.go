@@ -85,7 +85,7 @@ func TestChartInstallsTheLaunchersAdmissionPolicies(t *testing.T) {
 			append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher"),
 			append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher", prefix+"launcher.jobNamespace=customer-jobs"),
 		} {
-			jobs := "cloud-jobs"
+			jobs := "cloud-cloud-jobs"
 			if slices.Contains(settings, prefix+"launcher.jobNamespace=customer-jobs") {
 				jobs = "customer-jobs"
 			}
@@ -140,5 +140,23 @@ func TestJobNamespaceMustBeDedicated(t *testing.T) {
 	settings := append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher", "launcher.jobNamespace=default")
 	if out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", settings...); !strings.Contains(out, "launcher.jobNamespace must differ from the release namespace") {
 		t.Fatalf("shared job namespace render error = %s", out)
+	}
+}
+
+func TestJobNamespaceCreationCanBeHandedOff(t *testing.T) {
+	for _, create := range []bool{true, false} {
+		settings := append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher")
+		if !create {
+			settings = append(settings, "launcher.createNamespace=false")
+		}
+		found := false
+		for _, r := range renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", settings...)) {
+			if r.Kind == "Namespace" {
+				found = r.Metadata.Name == "cloud-cloud-jobs"
+			}
+		}
+		if found != create {
+			t.Errorf("createNamespace=%v rendered the job namespace: %v", create, found)
+		}
 	}
 }

@@ -48,7 +48,9 @@ in its credentials directory and needs the deployment `claims.launch` grant.
 `launcher.serviceAccountName` selects its separate Kubernetes identity. An empty
 name generates one from the release. Setting a name with the launcher disabled
 provisions only the job namespace, RBAC and admission policies for an externally
-managed launcher, which still needs `jobImage` and `dockerImage`.
+managed launcher, which still needs `jobImage` and `dockerImage` and must run as
+`system:serviceaccount:<release namespace>:<launcher.serviceAccountName>`, the
+only launcher identity the policies admit.
 Set `runner.enabled=false` when all work goes through Cloud Jobs.
 
 `launcher.networkPolicy.egress` supplies allowed Job destinations alongside the
@@ -56,32 +58,46 @@ selecting default-deny policy. The [Cloud example](../sparkwing-full/examples/cl
 and [Cloud prerequisites](../sparkwing-full/README.md#cloud-node-and-network-prerequisites)
 describe team-node labels, CPU-band taints, disruption protection, native
 sidecars, PodLevelResources and node-level network enforcement.
-Cloud Jobs run in `launcher.jobNamespace`, `<release namespace>-jobs` when
-empty, which must differ from the release namespace. The chart creates it with
-the customer ServiceAccount, launcher Role and egress policies, plus two
+Cloud Jobs run in `launcher.jobNamespace`, `<release namespace>-cloud-jobs` when
+empty, which must differ from the release namespace. The chart owns that
+namespace and creates it with privileged Pod Security unless
+`launcher.createNamespace=false`. Keep every other NetworkPolicy and Pod
+Security label out of it: an additive egress policy there widens Job egress.
+The chart adds the customer ServiceAccount, launcher Role and egress policies, plus two
 ValidatingAdmissionPolicies with Deny bindings selecting only that namespace.
 They admit launcher-created Jobs, capacity requests and boundary probes and
 Job-controller Pods of the launcher's exact container set, pinned images,
 volumes, environment, team placement and labels, judged after every mutating
 webhook. EKS region values, VPC resource controller ENI data and load-balancer
 readiness gates pass. AWS credential injection, host access, extra capabilities,
-service account tokens and ephemeral containers are refused. The policy
+service account tokens, ephemeral containers and exec, attach or port-forward
+are refused. `nodes/proxy` reaches the kubelet without admission; grant it only
+to cluster administrators. The policy
 template is generated from `launcher.AdmissionPolicies`; regenerate it with
 `GOWORK=off go test ./charts -run TestLauncherAdmissionTemplateIsGenerated -update`.
 
 The launcher refuses to start unless those policies and bindings match its
-identity, namespace and images. It then checks each Job's award fields (team
+identity, namespace and images, and stops claiming work while they do not. It then checks each Job's award fields (team
 placement, node, images and resources) at activation and on every sync. A
 mismatch deletes the Job, fails its exact award, cordons the node and deletes
 its Karpenter NodeClaim. Nodes keep their first team assignment through
 reservation cleanup. Do not annotate the customer ServiceAccount with an IRSA
 role or create a Pod Identity association for it.
 
+Upgrading from an install whose Jobs ran in another namespace: let Jobs and node
+reservations recorded under the old namespace drain first, or delete those Jobs
+and remove the `sparkwing.dev/node-reservation`, `sparkwing.dev/reservation-namespace`
+and `sparkwing.dev/award-binding` annotations and the `sparkwing.dev/cloud-reserved`
+taint from their nodes. The launcher logs every node still reserved under
+another namespace and never reuses it.
+
 Grant Pod and Job creation in the job namespace only to the launcher
 ServiceAccount. Kubernetes administrators and the Job controller remain trusted.
 Do not bind namespace edit/admin roles to customer accounts. Customer Job and
 runner ServiceAccounts receive no such rights. Keep team nodes tainted and keep
-other workloads from tolerating those taints. No RoleBinding can revoke a grant
+other workloads from tolerating those taints. Cluster DaemonSets such as
+`aws-node`, `ebs-csi-node` and `kube-proxy` tolerate every taint and run
+privileged there; they remain trusted. No RoleBinding can revoke a grant
 made by another RoleBinding, so audit existing namespace and cluster bindings.
 
 The chart labels infrastructure Pods `app: sparkwing-controller`,
