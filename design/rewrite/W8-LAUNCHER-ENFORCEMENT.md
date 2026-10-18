@@ -1,9 +1,10 @@
 # W8 launcher enforcement continuation - 2026-10-17
 
-Continues committed HEAD 919b32e37. The lead's latest launcher-native report has
-nine passing packages and no FAIL. It describes the previous committed state.
-This worker leaves that report unchanged. The lead owns committing, independent
-review, the whole-repository suite and the native rerun of this change.
+The launcher fixes below are committed in 37ed391e6. The lead's native report
+after that commit contains FAIL, including build failures and a burst CLI SDK
+installation failure. Completion remains blocked on a passing harness report.
+The lead owns commits, independent review, the whole-repository suite and native
+verification. This worker leaves the harness report unchanged.
 
 ## Implemented
 
@@ -106,17 +107,18 @@ proofs for the lead. Windows/macOS and real-repository QA remain native lanes.
 
 ## Deletion, budget and handoff
 
-This session changes production Go by +86/-39, net +47. No whole production file
-was deleted. The synchronous enforcement scheduling and batch-wide capacity
+The implementation session changed production Go by +86/-39, net +47. No whole
+production file was deleted. The synchronous enforcement scheduling and batch-wide capacity
 failure path were replaced. Removed the 65-line fake/test that claimed to stall
 but only exercised cooldown. Prior legacy runtime and admission-policy cuts stay
 deleted. No compatibility surface was added.
 
-W8-owned production Go against main, excluding tests, testdata and contract
-scaffolding: +13,200/-7,161, net +6,039. Directory net: cluster -1,535,
-runners +2,933, engine +2,552, wingd +2,089, charts 0. The -2,300 budget remains
-unmet. This session's extra loop and per-request refusal handling were explicitly
-assigned and add 47 lines. A synchronous loop cannot satisfy controller-independent
+W8-owned production Go against main (244d71bd2), using the lead's filter excluding
+tests, testdata, acceptance and contract paths: +13,215/-6,898, net +6,317.
+Directory net: cluster -1,535, runners +2,933, engine +2,552, wingd +2,367,
+charts 0. The -2,300 budget remains unmet. The implementation's extra loop and
+per-request refusal handling were explicitly assigned and add 47 lines.
+A synchronous loop cannot satisfy controller-independent
 cadence. Existing signed-engine materialization, local-controller lifecycles,
 Karpenter proof, probes and reservation cleanup remain required implementations
 behind the earlier budget justification. Removing them would reopen assigned
@@ -139,5 +141,45 @@ dependencies. The sandbox cannot run native listeners or commit Git metadata.
 Overwing discovery works but reports an older installed binary. No pipeline,
 installation, service, deployment, release or Git write ran. Worker scratch is
 removed after verification; the shared cache is retained.
+
+## Follow-up at 37ed391e6
+
+All five assigned review fixes are already committed. The remaining W8 launcher
+handoffs retain their implementations. No runtime code, test, shared file or
+lead-owned contract changes in this follow-up. Production lines added/deleted
+are 0/0. The W8 net delta is +6,317 against main using the lead's filter, correcting
+this report's earlier +6,039 count. No new acceptance cell or historical test port
+is claimed.
+
+The native report contains package build failures without their compiler
+diagnostics. The one detailed failure is
+`TestBurstCLIRejectsNonPreferredAndTeamClaimants/{false_false_false}`. Its selected
+engine SDK installer reports missing standard-library packages under the host's
+Go 1.26.9 installation, including `math/rand/v2`, `encoding/asn1`,
+`crypto/tls/internal/fips140tls` and `net/netip`.
+
+Those directories exist in this session. Whole-repository `go build -p 4 ./...`
+passes. The exact reported subtest passes with
+`go test -p 4 ./cmd/sparkwing -run '^TestBurstCLIRejectsNonPreferredAndTeamClaimants$/\{false_false_false\}$' -count=1`.
+The full `TestBurstCLIRejectsNonPreferredAndTeamClaimants` test also passes,
+including all four sequential subcases.
+The full `internal/engine/...` suites pass, including real SDK materialization.
+Launcher and engine vet pass. The full launcher suite passes with the race
+detector, including the production-boundary metadata properties, restarted
+forged-holder refusals and tests that block controller requests. Focused launcher
+tests in cluster, controller and acceptance pass, using the test selection
+recorded above. Commentcheck is clean across 2,881 Go files.
+The reported failure has not reproduced, so there is no demonstrated runtime
+cause to patch. The lead needs a native rerun and compiler diagnostics for any
+remaining package build failures. Local passes do not supersede that report.
+
+The C4 capacity identity proposal remains in "Contract text for the lead" above.
+Real EKS admission, RBAC, network enforcement, DinD teardown and scratch cleanup,
+plus the native placement and platform lanes, remain integration evidence for
+the lead. No foreign implementation stub blocks the five assigned fixes.
+
+`git diff --check` passes. Only this report changed. Worker scratch is removed
+and `/tmp/sw-gocache` is retained. No Git write, pipeline, deployment or release
+ran.
 
 STATUS: CONTINUE
