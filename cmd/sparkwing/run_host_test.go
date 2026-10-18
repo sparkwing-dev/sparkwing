@@ -363,7 +363,7 @@ func TestLocalRunMasksEvenARejectedIntakeBearer(t *testing.T) {
 
 func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localRunPreparation {
 	t.Helper()
-	env, err := runspec.EnvironmentDigest(map[string]string{})
+	env, err := runspec.EnvironmentDigest(map[string]string{}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}

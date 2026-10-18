@@ -280,7 +280,11 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 	for name, value := range input.submittedEnv {
 		values[name] = string(value)
 	}
-	env, err := runspec.EnvironmentDigest(values)
+	salt, err := runspec.NewEnvironmentSalt()
+	if err != nil {
+		return controllerwire.CreateRunRequest{}, err
+	}
+	env, err := runspec.EnvironmentDigest(values, salt)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

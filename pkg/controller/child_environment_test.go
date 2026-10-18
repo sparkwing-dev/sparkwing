@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"testing/quick"
 
@@ -24,7 +25,7 @@ func TestNativeChildIntakeInheritsCapturedEnvironment(t *testing.T) {
 			t.Fatal(err)
 		}
 		values := map[string]string{"APP_EMPTY": "", "APP_VALUE": string(rune('a' + seed%26))}
-		parent.Request.Request.Env, err = runspec.EnvironmentDigest(values)
+		parent.Request.Request.Env, err = runspec.EnvironmentDigest(values, strings.Repeat("5", 64))
 		if err != nil {
 			t.Fatal(err)
 		}

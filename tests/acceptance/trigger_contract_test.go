@@ -18,7 +18,7 @@ func TestSurfaceInitialTriggerIntakeTransport(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		for _, here := range []bool{false, true} {
 			for _, pipelineSHA := range []string{"0123456789abcdef0123456789abcdef01234567", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"} {
-				env, err := runspec.EnvironmentDigest(map[string]string{"DEPLOY_REGION": "private-environment-value"})
+				env, err := runspec.EnvironmentDigest(map[string]string{"DEPLOY_REGION": "private-environment-value"}, strings.Repeat("5", 64))
 				if err != nil {
 					t.Fatal(err)
 				}

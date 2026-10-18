@@ -2,6 +2,7 @@ package runspec
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -108,8 +109,21 @@ func decodeValue(d *json.Decoder) (any, error) {
 	}
 }
 
+// NewEnvironmentSalt returns a fresh salt for one environment snapshot.
+func NewEnvironmentSalt() (string, error) {
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return "", errors.New("cannot salt environment identity")
+	}
+	return hex.EncodeToString(salt), nil
+}
+
 // EnvironmentDigest leaves captured values in the caller's private storage.
-func EnvironmentDigest(values map[string]string) (EnvSnapshot, error) {
+// The salt keeps equal values in different snapshots from sharing a digest a reader could test guesses against.
+func EnvironmentDigest(values map[string]string, salt string) (EnvSnapshot, error) {
+	if raw, err := hex.DecodeString(salt); err != nil || len(raw) != 32 || hex.EncodeToString(raw) != salt {
+		return EnvSnapshot{}, errors.New("invalid environment salt")
+	}
 	if values == nil {
 		values = map[string]string{}
 	}
@@ -127,9 +141,10 @@ func EnvironmentDigest(values map[string]string) (EnvSnapshot, error) {
 	}
 	hash, err := CanonicalHash(struct {
 		Version int      `json:"version"`
+		Salt    string   `json:"salt"`
 		Entries [][]byte `json:"entries"`
-	}{2, entries})
-	return EnvSnapshot{Names: names, Digest: hash}, err
+	}{3, salt, entries})
+	return EnvSnapshot{Names: names, Salt: salt, Digest: hash}, err
 }
 
 func clone[T any](v T) (T, error) {

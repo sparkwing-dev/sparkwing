@@ -202,15 +202,15 @@ func TestSecretClassificationCannotShrinkAtSecondSeal(t *testing.T) {
 }
 
 func TestEnvironmentDigest(t *testing.T) {
-	a, err := EnvironmentDigest(map[string]string{"B": "secret", "A": "value"})
+	a, err := EnvironmentDigest(map[string]string{"B": "secret", "A": "value"}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := EnvironmentDigest(map[string]string{"A": "value", "B": "secret"})
+	b, _ := EnvironmentDigest(map[string]string{"A": "value", "B": "secret"}, strings.Repeat("5", 64))
 	if !reflect.DeepEqual(a, b) || !reflect.DeepEqual(a.Names, []string{"A", "B"}) {
 		t.Fatal("unstable snapshot")
 	}
-	b, _ = EnvironmentDigest(map[string]string{"A": "value", "B": "different"})
+	b, _ = EnvironmentDigest(map[string]string{"A": "value", "B": "different"}, strings.Repeat("5", 64))
 	if a.Digest == b.Digest {
 		t.Fatal("values not bound")
 	}
@@ -313,12 +313,12 @@ func TestSealRefusals(t *testing.T) {
 		t.Fatal("unknown use allowed")
 	}
 	for _, values := range []map[string]string{{"": "value"}, {"A=B": "value"}, {"A": "bad\x00value"}} {
-		if _, err := EnvironmentDigest(values); err == nil {
+		if _, err := EnvironmentDigest(values, strings.Repeat("5", 64)); err == nil {
 			t.Fatal("invalid env allowed")
 		}
 	}
-	nilEnv, _ := EnvironmentDigest(nil)
-	emptyEnv, _ := EnvironmentDigest(map[string]string{})
+	nilEnv, _ := EnvironmentDigest(nil, strings.Repeat("5", 64))
+	emptyEnv, _ := EnvironmentDigest(map[string]string{}, strings.Repeat("5", 64))
 	if !reflect.DeepEqual(nilEnv, emptyEnv) {
 		t.Fatal("empty environment digest depends on map allocation")
 	}

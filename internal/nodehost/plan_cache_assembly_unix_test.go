@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -17,7 +18,7 @@ import (
 func TestNativePlanningAssemblesDefaultCacheFromAcquisition(t *testing.T) {
 	root, sha := hostSourceCheckout(t)
 	environment := []string{"PATH=" + os.Getenv("PATH")}
-	seal, err := runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")})
+	seal, err := runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}

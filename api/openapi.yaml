@@ -4768,6 +4768,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        salt:
+          type: string
       required:
         - names
         - digest

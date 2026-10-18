@@ -118,6 +118,9 @@ func burstLocalFallbackSecrets(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	for _, file := range files {
+		if file.Name() == "salt.key" {
+			continue
+		}
 		body, err := os.ReadFile(filepath.Join(home, "environments", file.Name()))
 		var entries [][]byte
 		if err != nil || json.Unmarshal(body, &entries) != nil {

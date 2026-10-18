@@ -399,7 +399,7 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 		if strings.Contains(string(raw), value) {
 			t.Fatal("private environment escaped intake projection")
 		}
-		want, err := runspec.EnvironmentDigest(map[string]string{"DEPLOY_REGION": value})
+		want, err := runspec.EnvironmentDigest(map[string]string{"DEPLOY_REGION": value}, request.Request.Env.Salt)
 		if err != nil || !reflect.DeepEqual(request.Request.Env, want) {
 			t.Fatal("private environment identity changed")
 		}

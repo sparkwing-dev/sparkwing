@@ -151,9 +151,10 @@ type Git struct {
 	App           Optional[AppFacts] `json:"app"`
 }
 
-// safety: EnvSnapshot persists only names and a digest; values remain in private host storage.
+// safety: EnvSnapshot persists only names, a salt and a salted digest; values remain in private host storage.
 type EnvSnapshot struct {
 	Names  []string `json:"names"`
+	Salt   string   `json:"salt,omitempty"`
 	Digest Hash     `json:"digest"`
 }
 

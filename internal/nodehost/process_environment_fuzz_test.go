@@ -24,7 +24,7 @@ func FuzzSDKCleanupEnvironment(f *testing.F) {
 			t.Fatal(err)
 		}
 		captured := []string{"CAPTURED=original", "API_TOKEN=private-base-credential"}
-		spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original", "API_TOKEN": "private-base-credential"})
+		spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original", "API_TOKEN": "private-base-credential"}, strings.Repeat("5", 64))
 		input.Accepted.Spec, _ = json.Marshal(spec)
 		job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{name: {Value: value, Startup: startup}}}
 		st.row.Spec, _ = json.Marshal(job)

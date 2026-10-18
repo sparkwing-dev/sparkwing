@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -21,7 +22,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 	}
 	spec.Request.Request.Git = runspec.Git{Ref: "feature", SHA: "sealed-sha", Repository: runspec.Repository{Display: "acme/repo"}}
 	spec.Request.Request.Origin = runspec.OriginApp
-	spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "snapshot"})
+	spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "snapshot"}, strings.Repeat("5", 64))
 	spec.Resolved.Settings.Options.DryRun.Set, spec.Resolved.Settings.Options.DryRun.Value = true, true
 	input.Accepted.Spec, _ = json.Marshal(spec)
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "awarded", Type: "cloud", Labels: []string{"gpu"}}

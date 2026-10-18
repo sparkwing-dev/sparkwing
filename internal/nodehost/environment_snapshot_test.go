@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestCapturedEnvironmentSurvivesRepeatedReadsAndPreservesExactValues(t *test
 					loaded[0] = "MUTATED=caller"
 				}
 			}
-			files, err := os.ReadDir(directory)
+			files, err := snapshotFiles(directory)
 			if err != nil || len(files) != 1 {
 				t.Fatalf("snapshot leaked temporary files: %v %v", files, err)
 			}
@@ -68,6 +69,11 @@ func TestCapturedEnvironmentSurvivesRepeatedReadsAndPreservesExactValues(t *test
 			}
 		})
 	}
+}
+
+func snapshotFiles(directory string) ([]os.DirEntry, error) {
+	files, err := os.ReadDir(directory)
+	return slices.DeleteFunc(files, func(file os.DirEntry) bool { return file.Name() == snapshotSaltKeyName }), err
 }
 
 func TestCapturedEnvironmentRefusesAmbiguousAssignmentsWithoutWriting(t *testing.T) {
@@ -85,7 +91,7 @@ func TestCapturedEnvironmentRefusesAmbiguousAssignmentsWithoutWriting(t *testing
 		if err == nil || seal.Digest != "" || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "second") {
 			t.Fatalf("invalid capture: seal=%+v error=%v", seal, err)
 		}
-		files, err := os.ReadDir(directory)
+		files, err := snapshotFiles(directory)
 		if err != nil || len(files) != 0 {
 			t.Fatalf("invalid capture wrote files: %v %v", files, err)
 		}
@@ -167,7 +173,7 @@ func (f capturedLoaderFunc) Load(ctx context.Context, seal runspec.EnvSnapshot) 
 }
 
 func TestSDKEnvironmentRechecksLoadedSnapshotBeforeBuilding(t *testing.T) {
-	seal, err := runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original"})
+	seal, err := runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original"}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +228,7 @@ func TestSDKEnvironmentRechecksLoadedSnapshotBeforeBuilding(t *testing.T) {
 
 func TestClaimedNodeHostRefusesChangedCapturedValuesBeforeAcquisition(t *testing.T) {
 	input, state, host, processes := claimedNodeFixture(t)
-	state.run.Spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original"})
+	state.run.Spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original"}, strings.Repeat("5", 64))
 	input.Accepted.Spec, _ = json.Marshal(state.run.Spec)
 	host.Source.Base = procenv.Base{Local: true, Captured: []string{"CAPTURED=changed"}}
 	host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
@@ -240,7 +246,7 @@ func TestOwnerHostRefusesChangedCapturedValuesBeforeSourceEnvironment(t *testing
 	request := &state.snapshot.Run.Request.Request
 	request.Git.Repository.Key, request.Git.SHA = "git:example.com/acme/repo", strings.Repeat("a", 40)
 	request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}
-	request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original"})
+	request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original"}, strings.Repeat("5", 64))
 	input.SealedRequest, _ = json.Marshal(request)
 	host.Acquire = nil
 	host.Source.Base = procenv.Base{Local: true, Captured: []string{"CAPTURED=changed"}}
@@ -251,5 +257,42 @@ func TestOwnerHostRefusesChangedCapturedValuesBeforeSourceEnvironment(t *testing
 	_, err := host.Run(t.Context(), input)
 	if err == nil || state.finished.Transition.To != store.RunFailed || state.accepted.RunID != "" {
 		t.Fatalf("changed snapshot: finish=%v error=%v", state.finished, err)
+	}
+}
+
+func TestCapturedEnvironmentSaltIsHostPrivateAndStable(t *testing.T) {
+	environment := []string{"API_TOKEN=low-entropy", "PATH=/bin"}
+	directory := t.TempDir()
+	first, err := NewFileEnvironmentSnapshots(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := first.Capture(t.Context(), environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewFileEnvironmentSnapshots(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := reopened.Capture(t.Context(), environment)
+	if err != nil || !reflect.DeepEqual(a, b) {
+		t.Fatalf("equal inputs on one host changed identity: %+v %+v %v", a, b, err)
+	}
+	other, err := NewFileEnvironmentSnapshots(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := other.Capture(t.Context(), environment)
+	if err != nil || c.Salt == a.Salt || c.Digest == a.Digest {
+		t.Fatalf("another host shares the salted identity: %+v %+v %v", a, c, err)
+	}
+	for _, guess := range []string{strings.Repeat("0", 64), strings.Repeat("f", 64)} {
+		if guessed, _ := runspec.EnvironmentDigest(map[string]string{"API_TOKEN": "low-entropy", "PATH": "/bin"}, guess); guessed.Digest == a.Digest {
+			t.Fatal("a guessed salt reproduces the captured digest")
+		}
+	}
+	if loaded, err := first.Load(t.Context(), a); err != nil || len(loaded) != 2 {
+		t.Fatalf("load: %v %v", loaded, err)
 	}
 }

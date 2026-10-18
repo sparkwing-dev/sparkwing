@@ -192,7 +192,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
-	run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": string(values["BUILD_NOTE"])})
+	run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": string(values["BUILD_NOTE"])}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}

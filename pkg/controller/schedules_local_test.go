@@ -59,7 +59,7 @@ func (s *localScheduleSnapshots) Capture(_ context.Context, environment []string
 		name, value, _ := strings.Cut(entry, "=")
 		values[name] = value
 	}
-	seal, err := runspec.EnvironmentDigest(values)
+	seal, err := runspec.EnvironmentDigest(values, strings.Repeat("5", 64))
 	if err == nil {
 		s.values[seal.Digest] = slices.Clone(environment)
 	}
