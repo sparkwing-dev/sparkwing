@@ -1035,9 +1035,19 @@ BuildJob retains the exact TeamNodeValue label and adds a NoSchedule CPU-band
 Exists toleration, so the existing small-band nodes remain usable. Every Job Pod
 and production boundary probe carries `karpenter.sh/do-not-disrupt=true`.
 Admission validation preserves the Job template annotations as well as placement.
-NodePool provisioning stays an infrastructure prerequisite: each Ready node must
-carry its exact team's hashed label, and one reservation occupies the whole node.
-The launcher does not induce Karpenter scale-up. Native sidecars,
+Each Ready node must carry its exact team's hashed label, and one reservation
+occupies the whole node. When no vacant Ready team node exists, the launcher holds
+the award and creates one unbound capacity-request Pod per unit
+(`sw-capacity-<hash of team/run/job/kind/unit>`) with the team node selector, the
+job tolerations and the award's CPU, memory and scratch requests, and no volumes,
+environment or service-account token. Its unit fence and size are recorded in
+`sparkwing.dev/capacity-demand`; it is verified like Job Pods on create, adoption
+and every pass; it is observed through `/launcher/sync` as a reservation-only
+observation (`reservation_id` = `capacity:<pod UID>`, `node_uid` = the pod UID,
+sent in `preparing` only by the holding launcher). It is deleted when the award ends
+or its deadline passes, or consumed by a same-team reservation after that
+reservation is persisted. Team NodePools use `consolidationPolicy: WhenEmpty` with
+`consolidateAfter` above the award lease. Native sidecars,
 PodLevelResources and escaped-node network enforcement must be
 verified on the target cluster. A Helm render establishes no native proof.
 
