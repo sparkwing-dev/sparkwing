@@ -59,7 +59,7 @@ const snapshotSaltKeyName = "salt.key"
 
 // safety: the salt derives from a host-private key, so equal local inputs keep one identity
 // while readers of the run cannot test guesses against its digest.
-func loadSnapshotSaltKey(directory string) ([]byte, error) {
+func loadSnapshotSaltKey(directory string) (_ []byte, err error) {
 	path := filepath.Join(directory, snapshotSaltKeyName)
 	if key, err := readSnapshotSaltKey(path); !errors.Is(err, fs.ErrNotExist) {
 		return key, err
@@ -72,7 +72,9 @@ func loadSnapshotSaltKey(directory string) ([]byte, error) {
 	if err != nil {
 		return nil, snapshotStorageError("create salt key", err)
 	}
-	defer func() { _ = os.RemoveAll(temporary) }()
+	defer func() {
+		err = errors.Join(err, snapshotStorageError("remove incomplete salt key", os.RemoveAll(temporary)))
+	}()
 	file := filepath.Join(temporary, "key")
 	if err := fssecure.WriteFile(file, key); err != nil {
 		return nil, snapshotStorageError("write salt key", err)

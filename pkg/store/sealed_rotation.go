@@ -36,20 +36,18 @@ type sealedRotationTx struct {
 	out    SealedRotation
 }
 
-func (r *sealedRotationTx) reseal(purpose secrets.Purpose, team Team, name, scope string, shared, masked bool, envelope string) (string, bool, error) {
+var errSealedUnreadable = errors.New("sealed value opens under no configured key")
+
+func (r *sealedRotationTx) reseal(purpose secrets.Purpose, team Team, name, scope string, shared, masked bool, envelope string) (string, error) {
 	plain, err := r.cipher.OpenBound(purpose, string(team), name, scope, shared, masked, envelope)
-	if errors.Is(err, secrets.ErrKeyRefused) {
-		return "", false, err
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, secrets.ErrKeyRefused) {
 		r.out.Unreadable = append(r.out.Unreadable, SealedRowName{Purpose: purpose, Team: team, Name: name, Pipeline: scopeName(purpose, scope)})
-		return "", false, nil
+		return "", errSealedUnreadable
 	}
-	sealed, err := r.cipher.SealBound(purpose, string(team), name, scope, shared, masked, plain)
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
-	return sealed, true, nil
+	return r.cipher.SealBound(purpose, string(team), name, scope, shared, masked, plain)
 }
 
 func scopeName(purpose secrets.Purpose, scope string) string {
@@ -166,12 +164,12 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 		return err
 	}
 	for _, row := range rows {
-		value, ok, err := r.reseal(secrets.PurposeSecret, t.team, row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+		value, err := r.reseal(secrets.PurposeSecret, t.team, row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+		if errors.Is(err, errSealedUnreadable) {
+			continue
+		}
 		if err != nil {
 			return err
-		}
-		if !ok {
-			continue
 		}
 		if _, err := r.tx.ExecContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND pipeline=?`, value, t.team, row.Name, row.Pipeline); err != nil {
 			return err
@@ -183,12 +181,12 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 		return err
 	}
 	for _, row := range credentials {
-		value, ok, err := r.reseal(secrets.PurposeGitCredential, t.team, "git-credential:"+row.Host, "git-credential", false, true, row.Secret)
+		value, err := r.reseal(secrets.PurposeGitCredential, t.team, "git-credential:"+row.Host, "git-credential", false, true, row.Secret)
+		if errors.Is(err, errSealedUnreadable) {
+			continue
+		}
 		if err != nil {
 			return err
-		}
-		if !ok {
-			continue
 		}
 		if _, err := r.tx.ExecContext(ctx, `UPDATE git_credentials SET secret=? WHERE team=? AND id=?`, value, t.team, row.ID); err != nil {
 			return err
@@ -208,8 +206,7 @@ func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after
 	for rows.Next() {
 		var e envelope
 		if err := rows.Scan(&e.run, &e.value); err != nil {
-			_ = rows.Close()
-			return after, false, err
+			return after, false, errors.Join(err, rows.Close())
 		}
 		page = append(page, e)
 	}
@@ -217,12 +214,12 @@ func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after
 		return after, false, err
 	}
 	for _, e := range page {
-		value, ok, err := r.reseal(secrets.PurposeRunEnvironment, team, e.run, "run-environment", false, true, e.value)
+		value, err := r.reseal(secrets.PurposeRunEnvironment, team, e.run, "run-environment", false, true, e.value)
+		if errors.Is(err, errSealedUnreadable) {
+			continue
+		}
 		if err != nil {
 			return after, false, err
-		}
-		if !ok {
-			continue
 		}
 		if _, err := r.tx.ExecContext(ctx, `UPDATE runs SET submitted_env=? WHERE team=? AND id=?`, value, team, e.run); err != nil {
 			return after, false, err
@@ -244,8 +241,11 @@ func (r *sealedRotationTx) sessionKey(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	value, ok, err := r.reseal(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, string(envelope))
-	if err != nil || !ok {
+	value, err := r.reseal(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, string(envelope))
+	if errors.Is(err, errSealedUnreadable) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
 	if _, err := r.tx.ExecContext(ctx, `UPDATE settings SET value=? WHERE key=? AND sealed=1`, []byte(value), metaKeySessionCSRFKey); err != nil {

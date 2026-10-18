@@ -41,7 +41,7 @@ func keyRotationCipher(t *testing.T, fill byte, previous ...byte) *secrets.Ciphe
 	return c
 }
 
-func seal(t *testing.T, c *secrets.Cipher, purpose secrets.Purpose, team store.Team, name, scope string, plain string) string {
+func seal(t *testing.T, c *secrets.Cipher, purpose secrets.Purpose, team store.Team, name, scope, plain string) string {
 	t.Helper()
 	v, err := c.SealBound(purpose, string(team), name, scope, false, true, plain)
 	if err != nil {
@@ -95,7 +95,7 @@ func (f *keyRotationFixture) server(t *testing.T, c *secrets.Cipher) http.Handle
 
 func (f *keyRotationFixture) rotate(t *testing.T, h http.Handler, auth string) (int, map[string]any) {
 	t.Helper()
-	r := httptest.NewRequest("POST", "https://controller.test/api/v1/operator/secrets/rotate", nil)
+	r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/operator/secrets/rotate", nil)
 	r.Header.Set("Authorization", auth)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)

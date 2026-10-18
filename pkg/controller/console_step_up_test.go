@@ -17,7 +17,7 @@ func TestConsoleWritesRequireARecentSignIn(t *testing.T) {
 	creditPolicyWrite(t, h, raw, csrf, `{"grace_seconds":1}`, http.StatusOK)
 	engineSQL(t, s.store, `UPDATE sessions SET created_at=?`, time.Now().Add(-11*time.Minute).UnixNano())
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "https://controller.test/api/v1/operator/tokens", nil)
+	r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/operator/tokens", nil)
 	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {

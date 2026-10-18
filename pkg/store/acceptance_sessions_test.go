@@ -192,7 +192,7 @@ func checkRolelessStoreSession(ctx context.Context, s *store.Store, team store.T
 	digest := sha256.Sum256([]byte(raw))
 	claim := capability.IdentityLink{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, AccountID: member.Account.ID, Provider: store.ProviderGoogle, Nonce: "roleless-link", ExpiresAt: time.Now().Add(time.Minute)}
 	if err := s.ConsumeIdentityLink(ctx, claim); err != nil {
-		return fmt.Errorf("link nonce did not commit: %v", err)
+		return fmt.Errorf("link nonce did not commit: %w", err)
 	}
 	if err := s.ConsumeIdentityLink(ctx, claim); err == nil {
 		return errors.New("link nonce replayed")
