@@ -258,18 +258,27 @@ func inheritAttempt(env []string, masker *secrets.Masker) ([]string, error) {
 	return slices.Clone(env), nil
 }
 
-var submitEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var (
+	submitEnvName   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	submitEnvPrefix = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]+_\*$`)
+)
 
-// ValidateSubmitEnvAllow accepts literal names and terminal _* prefix patterns.
+// ValidateSubmitEnvAllow accepts literal names and terminal _* patterns whose
+// prefix starts with a letter and has at least two characters.
 // Credentials remain excluded by Build even when a pattern would match them.
 func ValidateSubmitEnvAllow(patterns []string) error {
 	for _, pattern := range patterns {
-		literal := pattern
-		if strings.HasSuffix(pattern, "_*") {
-			literal = strings.TrimSuffix(pattern, "*")
+		if !strings.HasSuffix(pattern, "_*") {
+			if !submitEnvName.MatchString(pattern) {
+				return errors.New("run.submit_env_allow requires literal environment names or terminal _* prefixes")
+			}
+			continue
 		}
-		if !submitEnvName.MatchString(literal) {
+		if !submitEnvName.MatchString(strings.TrimSuffix(pattern, "*")) {
 			return errors.New("run.submit_env_allow requires literal environment names or terminal _* prefixes")
+		}
+		if !submitEnvPrefix.MatchString(pattern) {
+			return fmt.Errorf("run.submit_env_allow pattern %q is too broad: name a prefix of at least two characters starting with a letter, such as BUILD_*", pattern)
 		}
 	}
 	return nil
