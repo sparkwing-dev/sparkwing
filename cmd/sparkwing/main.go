@@ -116,8 +116,13 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if err != nil {
 		return err
 	}
-	captured := os.Environ()
-	selection, err := selectLocalRunSource(context.Background(), home, dir, pipelineName, flags, captured, secrets.NewMasker())
+	route, err := loadRunRouting(dir, pipelineName)
+	if err != nil {
+		return err
+	}
+	masker := secrets.NewMasker()
+	captured, _ := withholdLocalSecrets(os.Environ(), route.LocalSecrets, masker)
+	selection, err := selectLocalRunSource(context.Background(), home, dir, pipelineName, flags, captured, masker)
 	if err != nil {
 		return err
 	}
@@ -134,7 +139,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	}
 	var closeErr error
 	beforeExec := func() { closeErr = errors.Join(closeErr, code.Close(), selection.execution.Close()) }
-	route, err := loadRunRouting(selection.execution.Directory, pipelineName)
+	route, err = loadRunRouting(selection.execution.Directory, pipelineName)
 	if err != nil {
 		return err
 	}

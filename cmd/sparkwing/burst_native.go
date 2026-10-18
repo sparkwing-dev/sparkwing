@@ -80,8 +80,8 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 }
 
 func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, args []string, route userconfig.RunRouting, connection client.EngineOptions) (_ controllerwire.CreateRunRequest, resultErr error) {
-	captured := os.Environ()
 	masker := secrets.NewMasker()
+	captured, held := withholdLocalSecrets(os.Environ(), route.LocalSecrets, masker)
 	configPath, err := userconfig.Path()
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
@@ -97,12 +97,6 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	submitted, err := procenv.Submit(captured, allow, masker)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
-	}
-	for _, item := range captured {
-		key, value, ok := strings.Cut(item, "=")
-		if ok && slices.Contains(route.LocalSecrets, key) {
-			masker.Register(value)
-		}
 	}
 	defer func() {
 		if resultErr != nil {
@@ -191,7 +185,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err := enforceRiskGate(pipeline, risksIn(schema), runFlags{allow: request.Request.Options.AllowRisk.Value, dryRun: request.Request.Options.DryRun.Value}); err != nil {
 		return request, err
 	}
-	request.LocalSecrets, err = resolveBurstSecrets(ctx, route.LocalSecrets, schema.Secrets, captured)
+	request.LocalSecrets, err = resolveBurstSecrets(ctx, route.LocalSecrets, schema.Secrets, held)
 	if err != nil {
 		return request, err
 	}
@@ -227,7 +221,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	return request, nil
 }
 
-func resolveBurstSecrets(ctx context.Context, names []string, declarations []nodeproto.SecretDeclaration, captured []string) (map[string]string, error) {
+func resolveBurstSecrets(ctx context.Context, names []string, declarations []nodeproto.SecretDeclaration, held map[string]string) (map[string]string, error) {
 	selected := []nodeproto.SecretDeclaration{}
 	for _, name := range names {
 		found := false
@@ -242,14 +236,22 @@ func resolveBurstSecrets(ctx context.Context, names []string, declarations []nod
 			return nil, fmt.Errorf("run: local secret %s must be declared by the pipeline", name)
 		}
 	}
-	environment := map[string]string{}
-	for _, item := range captured {
-		if key, value, ok := strings.Cut(item, "="); ok {
-			environment[key] = value
-		}
-	}
 	return client.ResolveLocalSecrets(ctx, selected, func(ctx context.Context, name string) (string, bool, error) {
-		value, present := environment[name]
+		value, present := held[name]
 		return value, present, ctx.Err()
 	})
+}
+
+func withholdLocalSecrets(captured, names []string, masker *secrets.Masker) ([]string, map[string]string) {
+	held := map[string]string{}
+	environment := slices.DeleteFunc(slices.Clone(captured), func(item string) bool {
+		name, value, _ := strings.Cut(item, "=")
+		if !slices.Contains(names, name) {
+			return false
+		}
+		masker.Register(value)
+		held[name] = value
+		return true
+	})
+	return environment, held
 }

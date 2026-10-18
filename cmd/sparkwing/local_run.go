@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -169,33 +167,26 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 
 func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, captured []string, snapshots *nodehost.FileEnvironmentSnapshots, flags runFlags) (_ localRunPreparation, err error) {
 	masker := secrets.NewMasker()
-	var selection localSourceSelection
-	if flags.sourceSelection != nil {
-		selection = *flags.sourceSelection
-	} else {
-		selection, err = selectLocalRunSource(ctx, home, directory, pipeline, flags, captured, masker)
-		if err != nil {
-			return localRunPreparation{}, err
-		}
-		defer func() { err = errors.Join(err, selection.execution.Close()) }()
-	}
-	route, err := loadRunRouting(selection.execution.Directory, pipeline)
+	route, err := loadRunRouting(directory, pipeline)
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	environment := slices.DeleteFunc(slices.Clone(captured), func(item string) bool {
-		name, value, _ := strings.Cut(item, "=")
-		if !slices.Contains(route.LocalSecrets, name) {
-			return false
-		}
-		masker.Register(value)
-		return true
-	})
+	environment, held := withholdLocalSecrets(captured, route.LocalSecrets, masker)
 	defer func() {
 		if err != nil {
 			err = &maskedCLIError{err: err, masker: masker}
 		}
 	}()
+	var selection localSourceSelection
+	if flags.sourceSelection != nil {
+		selection = *flags.sourceSelection
+	} else {
+		selection, err = selectLocalRunSource(ctx, home, directory, pipeline, flags, environment, masker)
+		if err != nil {
+			return localRunPreparation{}, err
+		}
+		defer func() { err = errors.Join(err, selection.execution.Close()) }()
+	}
 	seal, err := captureLocalRunEnvironment(ctx, home, filepath.Dir(directory), flags.index, environment, snapshots, masker)
 	if err != nil {
 		return localRunPreparation{}, err
@@ -262,7 +253,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	localSecrets, err := resolveBurstSecrets(ctx, route.LocalSecrets, prepared.Description.Secrets, captured)
+	localSecrets, err := resolveBurstSecrets(ctx, route.LocalSecrets, prepared.Description.Secrets, held)
 	if err != nil {
 		return localRunPreparation{}, err
 	}
