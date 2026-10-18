@@ -1,5 +1,7 @@
 # W8 launcher enforcement continuation - 2026-10-17
 
+Superseded on 2026-10-18: job namespace Pods are enforced at admission and the launcher keeps only a synchronous award backstop. See `internal/runners/launcher/CLOUD-JOBS.md`.
+
 The launcher fixes below are committed in 37ed391e6. The lead's native report
 after that commit contains FAIL, including build failures and a burst CLI SDK
 installation failure. Completion remains blocked on a passing harness report.

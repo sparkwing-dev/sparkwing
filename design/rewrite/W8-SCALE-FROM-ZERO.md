@@ -16,7 +16,7 @@ award and creates one capacity-request pod for that award. Karpenter sees a
 Pending pod that only the team's NodePool can satisfy and adds a node. Every
 launcher pass retries the held awards. Reservation persists on the node first,
 then consumes the team's requests on it and waits for their removal, and the
-job pod is then pre-bound and verified as before.
+job pod is then pre-bound and checked as before.
 
 - **Name.** `sw-capacity-` plus the Job name's award hash (unit, team, run,
   job, kind, generation, attempt and eval source). Only the same award gets
@@ -38,17 +38,15 @@ job pod is then pre-bound and verified as before.
 
 ## Lifecycle
 
-- **Verification.** Job pods, capacity requests and boundary probes pass one
-  comparison, `verifyAdmittedPod`: the admitted object may differ from the
-  request only by API defaults, the named EKS injections, owner labels and, for
-  an unbound request, the scheduler's node. Label and annotation comparisons
-  preserve both key presence and value, including empty values. The expected
-  request comes from outside the Pod: `demandFor(award)` on create and adoption, the held award on
-  every launcher pass, and on reconciliation the controller's binding and
-  committed allocation (`cloud_resources` on reservation observations). A pass
-  checks an unheld request only for shape until reconciliation authenticates
-  it. A mismatch or a missing allocation deletes the request, UID-fenced, and
-  the held award asks again.
+- **Verification.** The job namespace admission policy enforces the request's
+  shape: launcher creator, no owner, one runner-image container, no volumes,
+  environment or service account token, unbound, team selector and toleration.
+  The launcher compares only award fields (name, demand record, team placement,
+  image and resources). The expected request comes from outside the Pod:
+  `demandFor(award)` on create and adoption, the held award on every sync, and
+  on reconciliation the controller's binding and committed allocation
+  (`cloud_resources` on reservation observations). A mismatch or a missing
+  allocation deletes the request, UID-fenced, and the held award asks again.
 - **Liveness.** Sync observes each request through its recorded award, using
   the existing reservation-only observation shape with `capacity:<pod UID>` as
   the reservation ID and the pod UID as the node UID. Awards this launcher holds
@@ -64,12 +62,9 @@ job pod is then pre-bound and verified as before.
   before the Job is created. `consolidateAfter` covers the empty gaps before and
   after those probes. Request removal is awaited so kubelet can release their
   resources before probing and Job placement.
-- **Cadence.** `Run` schedules Kubernetes verification and containment in a
-  separate goroutine, immediately and on its own poll ticker. Each pass has a
-  deadline of one poll interval. Controller reconciliation and claiming run
-  independently. A rejection is recorded on the Job and contained locally, then
-  acknowledged to the controller by reconciliation. Controller Retry-After and
-  in-flight calls cannot pause the local ticker. Shutdown cancels and joins it.
+- **Cadence.** Every check runs synchronously inside the existing sync pass.
+  There is no separate verification loop: admission refuses a wrong shape
+  before it exists, so a controller stall delays only the award backstop.
 
 ## Invariants kept
 
@@ -80,7 +75,7 @@ job pod is then pre-bound and verified as before.
   reservation consumes only requests in the launcher namespace that carry the
   same team's label and no owner.
 - No secrets in a request: the property test covers the outbound object and
-  admitted-object verification covers what Kubernetes stores.
+  admission refuses any environment, volume or token on what Kubernetes stores.
 - Cost is bounded by the NodePool `limits`, at most one request per live award.
 
 ## NodePool contract

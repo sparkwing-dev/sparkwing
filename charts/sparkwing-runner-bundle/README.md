@@ -47,7 +47,8 @@ Set `launcher.enabled=true` to run a Cloud launcher Deployment. Supply its
 in its credentials directory and needs the deployment `claims.launch` grant.
 `launcher.serviceAccountName` selects its separate Kubernetes identity. An empty
 name generates one from the release. Setting a name with the launcher disabled
-provisions only RBAC for an externally managed launcher.
+provisions only the job namespace, RBAC and admission policies for an externally
+managed launcher, which still needs `jobImage` and `dockerImage`.
 Set `runner.enabled=false` when all work goes through Cloud Jobs.
 
 `launcher.networkPolicy.egress` supplies allowed Job destinations alongside the
@@ -55,16 +56,28 @@ selecting default-deny policy. The [Cloud example](../sparkwing-full/examples/cl
 and [Cloud prerequisites](../sparkwing-full/README.md#cloud-node-and-network-prerequisites)
 describe team-node labels, CPU-band taints, disruption protection, native
 sidecars, PodLevelResources and node-level network enforcement.
-The launcher reads each created Job's Pods and compares them with the requested
-spec. Kubernetes defaults, EKS region settings, validated VPC resource controller
-ENI data and load-balancer readiness gates are allowed. Customer Pods must not
-carry AWS credentials. Do not annotate their ServiceAccount with an IRSA role
-or create a Pod Identity association for it. Any other change deletes
-the Job, fails its exact award, cordons the node and deletes its Karpenter
-NodeClaim. Nodes keep their first team assignment through reservation cleanup. Reconciliation repeats the check, including
-after launcher restart. Kubernetes admission policy APIs are not required.
+Cloud Jobs run in `launcher.jobNamespace`, `<release namespace>-jobs` when
+empty, which must differ from the release namespace. The chart creates it with
+the customer ServiceAccount, launcher Role and egress policies, plus two
+ValidatingAdmissionPolicies with Deny bindings selecting only that namespace.
+They admit launcher-created Jobs, capacity requests and boundary probes and
+Job-controller Pods of the launcher's exact container set, pinned images,
+volumes, environment, team placement and labels, judged after every mutating
+webhook. EKS region values, VPC resource controller ENI data and load-balancer
+readiness gates pass. AWS credential injection, host access, extra capabilities,
+service account tokens and ephemeral containers are refused. The policy
+template is generated from `launcher.AdmissionPolicies`; regenerate it with
+`GOWORK=off go test ./charts -run TestLauncherAdmissionTemplateIsGenerated -update`.
 
-Use a dedicated Job namespace. Grant Pod and Job creation only to the launcher
+The launcher refuses to start unless those policies and bindings match its
+identity, namespace and images. It then checks each Job's award fields (team
+placement, node, images and resources) at activation and on every sync. A
+mismatch deletes the Job, fails its exact award, cordons the node and deletes
+its Karpenter NodeClaim. Nodes keep their first team assignment through
+reservation cleanup. Do not annotate the customer ServiceAccount with an IRSA
+role or create a Pod Identity association for it.
+
+Grant Pod and Job creation in the job namespace only to the launcher
 ServiceAccount. Kubernetes administrators and the Job controller remain trusted.
 Do not bind namespace edit/admin roles to customer accounts. Customer Job and
 runner ServiceAccounts receive no such rights. Keep team nodes tainted and keep
