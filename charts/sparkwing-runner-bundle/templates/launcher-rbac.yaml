@@ -1,4 +1,14 @@
 {{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
+{{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
+{{- if .Values.launcher.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $jobs | quote }}
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+{{- end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -9,14 +19,14 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: sparkwing-customer-job
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $jobs | quote }}
 automountServiceAccountToken: false
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $jobs | quote }}
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -35,7 +45,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $jobs | quote }}
 subjects:
   - kind: ServiceAccount
     name: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . | quote }}
@@ -56,18 +66,15 @@ rules:
   - apiGroups: ["karpenter.sh"]
     resources: ["nodepools"]
     verbs: ["get"]
-  - apiGroups: ["scheduling.k8s.io"]
-    resources: ["priorityclasses"]
-    verbs: ["list"]
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "update"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list"]
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    resourceNames: [{{ .Release.Namespace | quote }}]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingadmissionpolicies", "validatingadmissionpolicybindings"]
+    resourceNames: [{{ printf "sparkwing-cloud-pods-%s" $jobs | quote }}, {{ printf "sparkwing-cloud-jobs-%s" $jobs | quote }}]
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

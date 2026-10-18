@@ -2,11 +2,10 @@ package launcher
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -14,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
@@ -34,9 +34,10 @@ func demandFor(award CloudJobAward) capacityDemand {
 	return capacityDemand{Binding: award.Binding, CPUCores: award.CPUCores, Memory: award.Memory}
 }
 
+// safety: the name carries the award generation, so a request is never rebound
+// and cleanup of a stale award cannot reach a newer award's request.
 func capacityName(b CloudJobBinding) string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%q/%q/%q/%q/%q", b.Team, b.RunID, b.NodeID, b.Kind, b.UnitID))
-	return capacityPrefix + hex.EncodeToString(sum[:24])
+	return capacityPrefix + strings.TrimPrefix(jobName(b), "sw-")
 }
 
 func teamTolerations(team string) []corev1.Toleration {
@@ -81,25 +82,33 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 	}, nil
 }
 
-func (l *Launcher) verifyCapacityPod(ctx context.Context, pod *corev1.Pod) (capacityDemand, error) {
+func recordedDemand(pod *corev1.Pod) (capacityDemand, error) {
 	var d capacityDemand
 	if err := json.Unmarshal([]byte(pod.Annotations[demandAnnotation]), &d); err != nil {
 		return d, &podMismatch{message: fmt.Sprintf("capacity Pod %s has no readable demand", pod.Name)}
 	}
+	return d, nil
+}
+
+func (l *Launcher) verifyCapacityPod(pod *corev1.Pod, d capacityDemand) error {
 	expected, err := capacityPod(l.Config, d)
-	if err == nil && (expected.Name != pod.Name || pod.Namespace != l.Config.Namespace || len(pod.OwnerReferences) != 0) {
-		err = errors.New("capacity Pod identity does not match its demand")
+	if err == nil && (expected.Name != pod.Name || pod.Namespace != l.Config.Namespace || len(pod.OwnerReferences) != 0 || pod.Annotations[demandAnnotation] != expected.Annotations[demandAnnotation]) {
+		err = errors.New("capacity Pod identity does not match its award")
 	}
 	if err == nil {
-		err = defaultPriority(ctx, l.Kube, &expected.Spec)
-	}
-	if err == nil {
-		err = verifyAdmittedPod(corev1.PodTemplateSpec{ObjectMeta: expected.ObjectMeta, Spec: expected.Spec}, pod, nil)
+		err = awardPod(&corev1.PodTemplateSpec{ObjectMeta: expected.ObjectMeta, Spec: expected.Spec}, &corev1.PodTemplateSpec{ObjectMeta: pod.ObjectMeta, Spec: pod.Spec})
 	}
 	if err != nil {
-		return d, &podMismatch{message: fmt.Sprintf("capacity Pod %s failed verification: %v", pod.Name, err)}
+		return &podMismatch{message: fmt.Sprintf("capacity Pod %s failed verification: %v", pod.Name, err)}
 	}
-	return d, nil
+	return nil
+}
+
+func (l *Launcher) authenticateCapacity(pod *corev1.Pod, state CloudJobState) error {
+	if state.Resources == nil {
+		return &podMismatch{message: fmt.Sprintf("capacity Pod %s has no controller allocation", pod.Name)}
+	}
+	return l.verifyCapacityPod(pod, capacityDemand{Binding: state.Binding, CPUCores: state.Resources.Cores, Memory: state.Resources.MemoryBytes})
 }
 
 func (l *Launcher) deleteCapacityPod(ctx context.Context, pod *corev1.Pod) error {
@@ -119,32 +128,15 @@ func (l *Launcher) requestCapacity(ctx context.Context, award CloudJobAward) err
 	pods := l.Kube.CoreV1().Pods(l.Config.Namespace)
 	admitted, err := pods.Create(ctx, pod, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		admitted, err = l.adoptCapacity(ctx, pod, d)
+		admitted, err = pods.Get(ctx, pod.Name, metav1.GetOptions{})
 	}
 	if err != nil {
 		return err
 	}
-	if _, err := l.verifyCapacityPod(ctx, admitted); err != nil {
+	if err := l.verifyCapacityPod(admitted, d); err != nil {
 		return errors.Join(err, l.deleteCapacityPod(ctx, admitted))
 	}
 	return nil
-}
-
-func (l *Launcher) adoptCapacity(ctx context.Context, pod *corev1.Pod, d capacityDemand) (*corev1.Pod, error) {
-	existing, err := l.Kube.CoreV1().Pods(l.Config.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	held, err := l.verifyCapacityPod(ctx, existing)
-	if err != nil {
-		return nil, errors.Join(err, l.deleteCapacityPod(ctx, existing))
-	}
-	if sameBinding(held.Binding, d.Binding) {
-		return existing, nil
-	}
-	rebound := existing.DeepCopy()
-	rebound.Annotations[demandAnnotation], rebound.Annotations[deadlineAnnotation] = pod.Annotations[demandAnnotation], pod.Annotations[deadlineAnnotation]
-	return l.Kube.CoreV1().Pods(l.Config.Namespace).Update(ctx, rebound, metav1.UpdateOptions{})
 }
 
 func (l *Launcher) capacityPods(ctx context.Context) ([]corev1.Pod, error) {
@@ -153,26 +145,6 @@ func (l *Launcher) capacityPods(ctx context.Context) ([]corev1.Pod, error) {
 		return nil, err
 	}
 	return pods.Items, nil
-}
-
-func (l *Launcher) verifyCapacity(ctx context.Context) error {
-	pods, err := l.capacityPods(ctx)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for i := range pods {
-		pod := &pods[i]
-		d, err := l.verifyCapacityPod(ctx, pod)
-		expired := err == nil && !time.Now().Before(demandDeadline(d.Binding))
-		if expired {
-			l.forget(pod.Name)
-		}
-		if err != nil || expired {
-			errs = append(errs, err, l.deleteCapacityPod(ctx, pod))
-		}
-	}
-	return errors.Join(errs...)
 }
 
 func demandDeadline(b CloudJobBinding) time.Time {
@@ -190,33 +162,54 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var observations []CloudJobObservation
-	byJob := map[string]*corev1.Pod{}
+	var errs []error
 	for i := range pods {
 		pod := &pods[i]
-		var d capacityDemand
-		if pod.DeletionTimestamp != nil || json.Unmarshal([]byte(pod.Annotations[demandAnnotation]), &d) != nil {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		d, err := recordedDemand(pod)
+		held := l.held(pod.Name)
+		if held != nil && err == nil {
+			err = l.verifyCapacityPod(pod, demandFor(*held))
+		}
+		expired := err == nil && !time.Now().Before(demandDeadline(d.Binding))
+		if expired {
+			l.forget(pod.Name)
+		}
+		if err != nil || expired {
+			errs = append(errs, err, l.deleteCapacityPod(ctx, pod))
 			continue
 		}
 		name := jobName(d.Binding)
-		observations = append(observations, CloudJobObservation{Binding: d.Binding, JobName: name, NodeUID: string(pod.UID), ReservationID: capacityObservedID + string(pod.UID), Unheld: !l.holds(pod.Name, d.Binding)})
-		byJob[name] = pod
-	}
-	if len(observations) == 0 {
-		return nil
-	}
-	retirements, err := l.retirements(ctx, observations)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for name, remove := range retirements {
-		if remove {
-			l.forget(byJob[name].Name)
-			errs = append(errs, l.deleteCapacityPod(ctx, byJob[name]))
+		observation := CloudJobObservation{Binding: d.Binding, JobName: name, NodeUID: string(pod.UID), ReservationID: capacityObservedID + string(pod.UID), Unheld: held == nil || !sameBinding(held.Binding, d.Binding)}
+		states, err := l.retirements(ctx, []CloudJobObservation{observation})
+		if err != nil && !capacityIdentityRefused(err) {
+			errs = append(errs, err)
+			continue
 		}
+		if err != nil {
+			l.logger().Warn("controller refused capacity Pod identity", "pod", pod.Name, "uid", pod.UID, "error", err)
+		} else if state := states[name]; !state.Delete {
+			if err := l.authenticateCapacity(pod, state); err != nil {
+				errs = append(errs, err)
+			} else {
+				continue
+			}
+		}
+		l.forget(pod.Name)
+		errs = append(errs, l.deleteCapacityPod(ctx, pod))
 	}
 	return errors.Join(errs...)
+}
+
+func capacityIdentityRefused(err error) bool {
+	var failure *apierr.Error
+	if !errors.As(err, &failure) {
+		return false
+	}
+	return failure.Code == apierr.LockHeld || failure.Code == apierr.Forbidden &&
+		(failure.Details["reason"] == apierr.ReasonBinding || failure.Details["reason"] == string(apierr.ReasonBinding))
 }
 
 func (l *Launcher) wait(award *CloudJobAward) {
@@ -234,11 +227,10 @@ func (l *Launcher) forget(name string) {
 	delete(l.waiting, name)
 }
 
-func (l *Launcher) holds(name string, b CloudJobBinding) bool {
+func (l *Launcher) held(name string) *CloudJobAward {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	award, ok := l.waiting[name]
-	return ok && sameBinding(award.Binding, b)
+	return l.waiting[name]
 }
 
 func (l *Launcher) waitingAwards() []*CloudJobAward {

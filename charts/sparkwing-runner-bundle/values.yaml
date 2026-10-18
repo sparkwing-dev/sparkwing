@@ -42,6 +42,13 @@ controller:
 launcher:
   enabled: false
   serviceAccountName: ""
+  # Cloud Jobs run in this dedicated namespace, <release namespace>-cloud-jobs
+  # when empty. Its admission policies admit only launcher-created Pods and Jobs.
+  # Keep other NetworkPolicies and Pod Security labels out of it.
+  jobNamespace: ""
+  # The chart owns the job namespace. Disable only when the namespace is
+  # created elsewhere with privileged Pod Security and nothing else in it.
+  createNamespace: true
   image:
     pullPolicy: IfNotPresent
   tokenSecret:

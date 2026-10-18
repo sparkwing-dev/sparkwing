@@ -54,10 +54,27 @@ require (
 	golang.org/x/term v0.46.0
 	k8s.io/api v0.36.0
 	k8s.io/apimachinery v0.36.0
+	k8s.io/apiserver v0.36.0
 	k8s.io/client-go v0.36.0
 	modernc.org/sqlite v1.50.0
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730
 	sigs.k8s.io/yaml v1.6.0
+)
+
+require (
+	cel.dev/expr v0.25.2 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/blang/semver/v4 v4.0.0 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/google/cel-go v0.26.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/spf13/cobra v1.10.2 // indirect
+	github.com/stoewer/go-strcase v1.3.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.40.0 // indirect
+	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
+	k8s.io/component-base v0.36.0 // indirect
+	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0 // indirect
 )
 
 require (

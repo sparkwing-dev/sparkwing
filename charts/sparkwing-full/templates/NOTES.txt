@@ -13,7 +13,7 @@ Components:
 {{- end }}
 {{- if index $bundle "launcher" "enabled" }}
   Cloud launcher: 1 replica. Jobs run root + DinD on team-dedicated nodes.
-  Preserve launcher-only Pod/Job RBAC and the team-node/network prerequisites
+  Preserve the job namespace admission policies, launcher-only RBAC and the team-node/network prerequisites
   described in charts/sparkwing-full/README.md before starting customer work.
 {{- end }}
 {{- else }}

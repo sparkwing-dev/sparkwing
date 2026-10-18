@@ -166,6 +166,14 @@ deployment template stays readable.
 {{- default (include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "launcher")) .Values.launcher.serviceAccountName -}}
 {{- end }}
 
+{{- define "sparkwing-runner-bundle.jobNamespace" -}}
+{{- $jobs := default (printf "%s-cloud-jobs" .Release.Namespace) .Values.launcher.jobNamespace -}}
+{{- if eq $jobs .Release.Namespace -}}
+{{- fail "sparkwing-runner-bundle: launcher.jobNamespace must differ from the release namespace, because its admission policies admit only launcher-created Pods and Jobs" -}}
+{{- end -}}
+{{- $jobs -}}
+{{- end }}
+
 {{- define "sparkwing-runner-bundle.digestImage" -}}
 {{- $image := include "sparkwing-runner-bundle.image" (dict "img" .) -}}
 {{- $digest := required "launcher jobImage/dockerImage.digest is required" .digest -}}

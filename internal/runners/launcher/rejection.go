@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"slices"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -13,47 +12,53 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-const rejectedAnnotation = "sparkwing.dev/pod-rejected"
+const (
+	rejectedAnnotation   = "sparkwing.dev/pod-rejected"
+	rejectedPod          = "true"
+	rejectedUnadmittable = "unadmittable"
+)
 
-func (l *Launcher) rejectJob(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, reservation CloudNodeReservation) error {
+// safety: the persisted annotation makes every later sync repeat rejection until teardown succeeds.
+func (l *Launcher) rejectJob(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, reservation CloudNodeReservation, reason string) error {
+	job, containErr := l.containJob(ctx, job, reservation, reason)
+	l.logger().Error("Cloud Pod rejected; deleting Job and failing award", "job", job.Name, "unit", binding.UnitID, "generation", binding.Generation, "reason", job.Annotations[rejectedAnnotation], "error", containErr)
+	states, err := l.Control.Sync(ctx, []CloudJobObservation{{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID, Rejected: true}})
+	if err == nil && (len(states) != 1 || !sameBinding(states[0].Binding, binding) || !states[0].Delete) {
+		err = errors.New("controller did not retire rejected Cloud award")
+	}
+	if err := errors.Join(containErr, err); err != nil {
+		return err
+	}
+	return l.teardown(ctx, job, reservation)
+}
+
+func (l *Launcher) containJob(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation, reason string) (*batchv1.Job, error) {
 	if job.Annotations[rejectedAnnotation] == "" {
-		patch, _ := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "resourceVersion": job.ResourceVersion, "annotations": map[string]string{rejectedAnnotation: "true"}}})
-		retained, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Patch(ctx, job.Name, types.MergePatchType, patch, metav1.PatchOptions{})
-		if err != nil {
-			return err
+		patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "annotations": map[string]string{rejectedAnnotation: reason}}})
+		var recorded *batchv1.Job
+		if err == nil {
+			recorded, err = l.Kube.BatchV1().Jobs(l.Config.Namespace).Patch(ctx, job.Name, types.MergePatchType, patch, metav1.PatchOptions{})
 		}
-		job = retained
+		if err != nil {
+			// safety: deleting an unrecorded rejection would let teardown release the node.
+			return job, errors.Join(err, l.Boundary.Retire(ctx, reservation))
+		}
+		job = recorded
 	}
-	logger := l.Logger
-	if logger == nil {
-		logger = slog.Default()
+	var retireErr error
+	if job.Annotations[rejectedAnnotation] != rejectedUnadmittable {
+		retireErr = l.Boundary.Retire(ctx, reservation)
 	}
-	logger.Error("Cloud Pod rejected; deleting Job and failing award", "job", job.Name, "unit", binding.UnitID, "generation", binding.Generation)
-	retireErr := l.Boundary.Retire(ctx, reservation)
 	foreground := metav1.DeletePropagationForeground
 	deleteErr := l.Kube.BatchV1().Jobs(l.Config.Namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}})
 	if apierrors.IsNotFound(deleteErr) {
 		deleteErr = nil
 	}
-	states, err := l.Control.Sync(ctx, []CloudJobObservation{{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID, Rejected: true}})
-	if err != nil {
-		return errors.Join(retireErr, deleteErr, err)
-	}
-	if len(states) != 1 || !sameBinding(states[0].Binding, binding) || !states[0].Delete {
-		return errors.Join(retireErr, deleteErr, errors.New("controller did not retire rejected Cloud award"))
-	}
-	if retireErr != nil {
-		return errors.Join(retireErr, deleteErr)
-	}
-	return errors.Join(deleteErr, l.teardown(ctx, job, reservation))
+	return job, errors.Join(retireErr, deleteErr)
 }
 
 func (l *Launcher) discardMalformedJob(ctx context.Context, job *batchv1.Job, cause error) error {
-	logger := l.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-	logger.Error("deleting malformed Cloud Job", "job", job.Name, "error", cause)
+	l.logger().Error("deleting malformed Cloud Job", "job", job.Name, "error", cause)
 	foreground := metav1.DeletePropagationForeground
 	err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}})
 	if apierrors.IsNotFound(err) {

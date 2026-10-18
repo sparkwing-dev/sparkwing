@@ -29,7 +29,11 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	if err := l.validate(); err != nil {
 		return err
 	}
-	errs := []error{l.verifyLocal(ctx)}
+	return l.sync(ctx)
+}
+
+func (l *Launcher) sync(ctx context.Context) error {
+	var errs []error
 	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
 		return errors.Join(append(errs, fmt.Errorf("list Cloud Jobs: %w", err))...)
@@ -43,16 +47,10 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			continue
 		}
 		if job.Annotations[rejectedAnnotation] != "" {
-			if err := l.rejectJob(ctx, &job, binding, reservation); err != nil {
+			if err := l.rejectJob(ctx, &job, binding, reservation, job.Annotations[rejectedAnnotation]); err != nil {
 				errs = append(errs, err)
 			}
 			continue
-		}
-		if jobFinished(job) && (job.Spec.Suspend == nil || !*job.Spec.Suspend) {
-			if verifyErr := l.verifyJobPods(ctx, &job); verifyErr != nil {
-				errs = append(errs, l.verificationFailure(ctx, &job, binding, reservation, verifyErr))
-				continue
-			}
 		}
 		// safety: a live suspended Job may still be publishing its bootstrap on another launcher.
 		remove := job.DeletionTimestamp != nil || jobFinished(job)
@@ -82,7 +80,8 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		for _, observation := range observations {
 			job := &jobs.Items[live[observation.JobName]]
 			_, reservation, err := jobOwnership(*job)
-			if err == nil && !retirements[observation.JobName] {
+			if err == nil && !retirements[observation.JobName].Delete {
+				errs = append(errs, l.enforceAward(ctx, job, observation.Binding, reservation))
 				continue
 			}
 			if err == nil {
@@ -96,30 +95,6 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	return errors.Join(append(errs, l.syncReservations(ctx), l.syncCapacity(ctx))...)
 }
 
-// safety: Kubernetes-only checks run on every pass, so neither a controller
-// cooldown nor a failed controller reconciliation leaves an active Pod unverified.
-func (l *Launcher) verifyLocal(ctx context.Context) error {
-	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
-	if err != nil {
-		return fmt.Errorf("list Cloud Jobs: %w", err)
-	}
-	var errs []error
-	for i := range jobs.Items {
-		job := &jobs.Items[i]
-		if job.DeletionTimestamp != nil || job.Annotations[rejectedAnnotation] != "" || jobFinished(*job) || job.Spec.Suspend != nil && *job.Spec.Suspend {
-			continue
-		}
-		binding, reservation, err := jobOwnership(*job)
-		if err != nil {
-			continue
-		}
-		if verifyErr := l.verifyJobPods(ctx, job); verifyErr != nil {
-			errs = append(errs, l.verificationFailure(ctx, job, binding, reservation, verifyErr))
-		}
-	}
-	return errors.Join(append(errs, l.verifyCapacity(ctx))...)
-}
-
 func (l *Launcher) syncReservations(ctx context.Context) error {
 	nodes, err := l.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -128,7 +103,10 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 	var observations []CloudJobObservation
 	reservations := map[string]CloudNodeReservation{}
 	for _, node := range nodes.Items {
-		if node.Annotations[reservationNamespaceAnnotation] != l.Config.Namespace {
+		if namespace := node.Annotations[reservationNamespaceAnnotation]; namespace != l.Config.Namespace {
+			if namespace != "" {
+				l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
+			}
 			continue
 		}
 		var held CloudNodeReservation
@@ -160,8 +138,8 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 		return err
 	}
 	var errs []error
-	for name, remove := range retirements {
-		if !remove {
+	for name, state := range retirements {
+		if !state.Delete {
 			continue
 		}
 		_, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, name, metav1.GetOptions{})
@@ -178,7 +156,7 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObservation) (map[string]bool, error) {
+func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObservation) (map[string]CloudJobState, error) {
 	states, err := l.Control.Sync(ctx, observations)
 	if err != nil {
 		return nil, err
@@ -193,7 +171,7 @@ func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObser
 		}
 		bindings[observation.JobName] = observation.Binding
 	}
-	decisions := make(map[string]bool, len(states))
+	decisions := make(map[string]CloudJobState, len(states))
 	for _, state := range states {
 		name := jobName(state.Binding)
 		binding, found := bindings[name]
@@ -201,7 +179,7 @@ func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObser
 		if !found || duplicate || !sameBinding(state.Binding, binding) {
 			return nil, errors.New("controller sync returned a duplicate or mismatched binding")
 		}
-		decisions[name] = state.Delete
+		decisions[name] = state
 	}
 	return decisions, nil
 }
@@ -230,11 +208,7 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 			return binding, reservation, errors.New("Cloud Job has invalid bootstrap ownership")
 		}
 	}
-	var requested corev1.PodTemplateSpec
-	if err := json.Unmarshal([]byte(job.Annotations[templateAnnotation]), &requested); err != nil {
-		return binding, reservation, fmt.Errorf("Job %s has invalid requested template: %w", job.Name, err)
-	}
-	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.Award != binding.LeaseRef() || reservation.NodeName != requested.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
+	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.Award != binding.LeaseRef() || reservation.NodeName != job.Spec.Template.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
 		return binding, reservation, errors.New("Cloud Job ownership does not match its reservation")
 	}
 	return binding, reservation, nil

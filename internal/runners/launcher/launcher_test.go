@@ -3,11 +3,14 @@ package launcher
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	admissionv1 "k8s.io/api/admissionregistration/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -92,6 +95,7 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 		}
 		return false, nil, nil
 	})
+	retainFinalizedJobs(kube)
 	kube.PrependReactor("list", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
 		namespace := action.GetNamespace()
 		pods, err := kube.Tracker().List(corev1.SchemeGroupVersion.WithResource("pods"), corev1.SchemeGroupVersion.WithKind("Pod"), namespace)
@@ -123,7 +127,50 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 		return true, list, nil
 	})
 	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
+	installAdmission(kube, l.Config)
 	return l, kube, boundary, control
+}
+
+func installAdmission(kube *fake.Clientset, cfg CloudJobConfig) {
+	kube.PrependReactor("create", "selfsubjectreviews", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, &authenticationv1.SelfSubjectReview{Status: authenticationv1.SelfSubjectReviewStatus{UserInfo: authenticationv1.UserInfo{Username: testLauncher}}}, nil
+	})
+	policies, bindings := AdmissionPolicies(AdmissionConfig{Namespace: cfg.Namespace, Launcher: testLauncher, RunnerImage: cfg.RunnerImage, DockerImage: cfg.DockerImage})
+	for i := range policies {
+		_ = kube.Tracker().Add(policies[i])
+		_ = kube.Tracker().Add(bindings[i])
+	}
+}
+
+// hack: the fake tracker ignores finalizers; the API server keeps a deleted Job until its last one is removed.
+func retainFinalizedJobs(kube *fake.Clientset) {
+	jobs := batchv1.SchemeGroupVersion.WithResource("jobs")
+	tracker := kube.Tracker()
+	kube.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		obj, err := tracker.Get(jobs, action.GetNamespace(), action.(ktesting.DeleteAction).GetName())
+		if apierrors.IsNotFound(err) {
+			return false, nil, nil
+		}
+		if err != nil {
+			return true, nil, err
+		}
+		if len(obj.(*batchv1.Job).Finalizers) == 0 {
+			return false, nil, nil
+		}
+		job := obj.(*batchv1.Job).DeepCopy()
+		if job.DeletionTimestamp != nil {
+			return true, nil, nil
+		}
+		job.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		return true, nil, tracker.Update(jobs, job, job.Namespace)
+	})
+	kube.PrependReactor("patch", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		handled, obj, err := ktesting.ObjectReaction(tracker)(action)
+		if job, ok := obj.(*batchv1.Job); err == nil && ok && job.DeletionTimestamp != nil && len(job.Finalizers) == 0 {
+			return true, job, tracker.Delete(jobs, job.Namespace, job.Name)
+		}
+		return handled, obj, err
+	})
 }
 
 func TestLauncherCreatesSecretBeforeAllowingExecution(t *testing.T) {
@@ -429,4 +476,55 @@ func TestLauncherWaitsOutAControllerRetryAfter(t *testing.T) {
 			t.Fatalf("claims at %v, want the second after the controller's 7s", retrying.claimed)
 		}
 	})
+}
+
+func TestRunStopsClaimingWhenAdmissionDrifts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, control := fixture()
+		control.award = nil
+		l.Poll = time.Second
+		var logs strings.Builder
+		l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+		syncs := 0
+		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+			syncs++
+			return false, nil, nil
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- l.Run(ctx) }()
+		synctest.Wait()
+		if control.claims != 1 {
+			t.Fatalf("claims before drift = %d", control.claims)
+		}
+		if err := kube.Tracker().Delete(admissionv1.SchemeGroupVersion.WithResource("validatingadmissionpolicybindings"), "", AdmissionPolicyName("pods", "cloud")); err != nil {
+			t.Fatal(err)
+		}
+		before := syncs
+		<-time.NewTimer(2500 * time.Millisecond).C
+		synctest.Wait()
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if control.claims != 1 || syncs <= before || !strings.Contains(logs.String(), "do not match this launcher") {
+			t.Fatalf("drifted admission: claims=%d syncs=%d->%d logs=%s", control.claims, before, syncs, logs.String())
+		}
+	})
+}
+
+func TestForeignNamespaceReservationIsReported(t *testing.T) {
+	l, kube, _, _ := fixture()
+	var logs strings.Builder
+	l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "legacy", Annotations: map[string]string{reservationNamespaceAnnotation: "sparkwing-jobs", reservationAnnotation: "{}"}}}
+	if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "another job namespace") || !strings.Contains(logs.String(), "sparkwing-jobs") {
+		t.Fatalf("legacy reservation went unreported: %s", logs.String())
+	}
 }

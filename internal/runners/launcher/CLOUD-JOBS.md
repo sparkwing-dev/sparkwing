@@ -31,43 +31,120 @@ ceiling, the builder refuses it before reserving a node. Exact values such as
 2.007 cores stay exact through conversion. The pod shares its awarded CPU and
 memory across the host and Docker sidecar.
 
-The Job retains its requested template before API defaulting. The launcher
-verifies Pods against that template after activation
-and on each reconciliation. Activation polls for up to two seconds for exactly
-one owned Pod. An active, unsuspended Job with zero or multiple Pods is rejected.
-Pod-list and PriorityClass API failures retry on reconciliation without failing
-the award. Only a typed spec mismatch starts rejection.
+## Admission enforcement
 
-Allowed EKS changes are region environment values, the VPC controller's unit
-Pod ENI resource and validated ENI annotation, and load-balancer readiness gates.
-Customer Pods cannot receive IRSA or Pod Identity credentials, projected tokens
-or token mounts. Their ServiceAccount must have no role annotation or Pod Identity
-association. Infrastructure probes use the same account and restriction.
+Cloud Jobs run in a dedicated job namespace, `<release>-cloud-jobs` by default,
+which the chart owns. Two ValidatingAdmissionPolicies built by
+`AdmissionPolicies` bind with `validationActions: [Deny]`, `failurePolicy: Fail`
+and a namespace selector on `kubernetes.io/metadata.name` of that namespace
+only. The Pod policy covers Pod CREATE and UPDATE, `pods/ephemeralcontainers`,
+`pods/resize` and CONNECT on `pods/exec`, `pods/attach` and `pods/portforward`;
+the Job policy covers Job CREATE and UPDATE. Validating admission runs after
+every mutating webhook, so the rules judge the final object. They take no
+params: the namespace, the launcher's username, the runner and Docker digests
+and the probe commands are CEL literals.
 
-The explicit defaults are DNSClusterFirst, default-scheduler, a 30-second
-termination grace, the serviceAccount alias, PreemptLowerPriority, priority zero,
-container termination-message path/policy, startup-probe timeout/success threshold,
-and the standard 300-second not-ready/unreachable NoExecute tolerations.
-The cluster's globalDefault PriorityClass supplies its name, value and preemption
-policy instead of priority zero. Multiple defaults select the lowest value, as
-Kubernetes does. Other spec differences remain mismatches. Clusters changing the
-standard toleration/grace defaults need matching configuration and native QA.
-All other changes, including missing authored security fields, reject the Pod.
-The launcher logs rejection, UID-fences Job deletion and tells the controller to
-fail that exact plan, eval or work award. A rejection annotation and cleanup
-finalizer retain ownership until the controller acknowledges failure and every
-container stops. Rejection first cordons the reserved node and UID-fences deletion
-of its Karpenter NodeClaim. A failed retirement retains cleanup ownership and
-cannot release capacity. Restart reconciliation repeats pending rejection reports.
-Malformed ownership, deadline or bootstrap annotations trigger UID-fenced Job
-deletion. Garbage collection owns its Secrets. The node's persisted reservation
-still requires current award retirement and container vacancy before cleanup.
+- Only the launcher creates Jobs, capacity requests (`sw-capacity-`) and
+  boundary probes (`sw-boundary-`). Only
+  `system:serviceaccount:kube-system:job-controller` creates Pods, each
+  controlled by one `batch/v1` Job named by its `sparkwing.dev/job` label. Every
+  other Pod and creator is refused. The policy names the launcher as
+  `system:serviceaccount:<release namespace>:<launcher ServiceAccount>`; an
+  externally managed launcher must run under exactly that identity.
+- Job Pods run exactly `docker` (Docker image), `fetch-source` and `run-node`
+  (runner image). Capacity requests and probes run one runner-image container,
+  and each probe container runs its pinned listener, witness or measurement
+  command.
+- Environment names are `HOME`, `DOCKER_HOST` and the EKS region values, never
+  `valueFrom` or `envFrom`. Capacity requests and probes carry none. AWS role,
+  web-identity and container-credential variables are refused, as is any
+  projected token volume.
+- Volumes are only the Job's `scratch` emptyDir and its own bootstrap Secret.
+  No hostPath, hostNetwork, hostIPC, hostPort or added capability. Only the
+  `docker` sidecar and the `measure` probe run privileged, and only `measure`
+  uses hostPID.
+- The service account is `sparkwing-customer-job` with
+  `automountServiceAccountToken: false`.
+- Every Pod selects `node-restriction.kubernetes.io/sparkwing-team-node` equal
+  to its `sparkwing.dev/team` label and tolerates that team taint. Job and probe
+  Pods are bound to a node; capacity requests are not.
+- Labels are limited to the launcher's keys for each shape, and Job and capacity
+  Pods carry the labels that select the default-deny egress policy.
+- Only AWS load-balancer readiness gates are allowed. VPC resource controller
+  `vpc.amazonaws.com/pod-eni` requests and annotations pass because neither rule
+  inspects them.
+- On UPDATE a Pod's spec and labels are immutable, which also refuses ephemeral
+  containers and in-place resize, and only the Job controller and garbage
+  collector change its owner references. A Job's template never changes, only
+  the launcher may change its spec, and it always runs one Pod without retries
+  or a failure or success policy. Shape rules apply at CREATE, so a chart
+  upgrade that changes the pinned images cannot block finalizer or annotation
+  updates on running Pods.
+- Exec, attach and port-forward are refused for everyone. `nodes/proxy` reaches
+  the kubelet directly and bypasses admission, so grant it to no identity that
+  is not a cluster administrator.
 
-RBAC grants Pod/Job creation only to the launcher. Operators must keep other
-bindings from granting those rights. Customer ServiceAccounts receive no API
-credential or role. Team nodes carry a team-specific NoSchedule taint, which
-only launcher-created Pods tolerate: Job Pods and that team's capacity requests. Kubernetes administrators remain trusted.
-The launcher requires no Kubernetes admission policy API or webhook exclusions.
+`Run` first reads its own username through a SelfSubjectReview, then refuses to
+start unless both policies and bindings exist with exactly the specs
+`AdmissionPolicies` builds for that username, its job namespace and images. It
+repeats the check before every sync. On a mismatch it logs an error, keeps
+reconciling existing Jobs and claims no work until the policies match again.
+The launcher can read only those four objects.
+
+The job namespace must hold no other NetworkPolicies, since an additive policy
+would widen Job egress, and no Pod Security labels besides the chart's
+privileged level.
+
+## Award backstop
+
+Admission cannot know an award. `LaunchOne` checks every create and patch
+response for the Job and its Secret; the activated template must equal the one
+built from the award, including `demandFor(award)` resources. After activation,
+and for each live Job on every sync, the launcher compares the Job template's
+team label, node selector, node, container set and resources with those built
+from the Job's binding and reservation, and each Pod controlled by that Job UID
+with the template, including the pod-level CPU and memory. Sync takes the
+expected size from the template itself: the binding carries no resources, the
+template matched the award at creation and admission keeps it unchanged. A Pod
+the Job controller has not created yet is not an error. VPC Pod ENI resources
+are ignored.
+
+After a chart upgrade changes the pinned digests, admission refuses new Pods for
+Jobs whose templates still name the old images. Sync fails such a Job's award
+as soon as it sees the template on other images with no owned Pod, without
+retiring the node, which never ran it. Jobs whose Pods already run continue.
+
+A mismatch is the only rejection. Pod-list and other API failures retry on the
+next sync. Rejection records `sparkwing.dev/pod-rejected` on the Job, cordons
+the node and UID-fences deletion of its Karpenter NodeClaim and of the Job, then
+tells the controller to fail that exact award. An unrecorded rejection deletes
+nothing. The annotation and cleanup finalizer retain ownership until the
+controller acknowledges failure, retirement succeeds and every container stops,
+so a failed retirement cannot release capacity. Every sync repeats a pending
+rejection, including after restart. Malformed ownership, deadline or bootstrap
+annotations trigger UID-fenced Job deletion. Garbage collection owns its
+Secrets. The node's persisted reservation still requires current award
+retirement and container vacancy before cleanup.
+
+Customer Pods cannot receive IRSA or Pod Identity credentials. Their
+ServiceAccount must have no role annotation or Pod Identity association.
+
+RBAC grants Pod and Job creation in the job namespace only to the launcher, and
+admission refuses any other creator. Customer ServiceAccounts receive no API
+credential or role. Team nodes carry a team-specific NoSchedule taint. Among
+workload Pods only Job Pods, that team's capacity requests and boundary probes
+tolerate it, but cluster DaemonSets such as `aws-node`, `ebs-csi-node` and
+`kube-proxy` tolerate every taint and run privileged on team nodes. They and
+Kubernetes administrators remain trusted.
+
+Sync skips nodes reserved under another job namespace and logs each one. When
+moving an install to a new job namespace, first let Jobs and reservations
+recorded under the old namespace drain, or delete those Jobs and remove the
+`sparkwing.dev/node-reservation`, `sparkwing.dev/reservation-namespace` and
+`sparkwing.dev/award-binding` annotations and the `sparkwing.dev/cloud-reserved`
+taint from their nodes by hand.
+
+## Launch and reconciliation
 
 `Launcher.LaunchOne` persists a suspended Job and checks the admitted response
 before creating the bootstrap Secret. Kubernetes defaults may fill unset fields.
@@ -297,8 +374,9 @@ endpoints. It repeats the cluster endpoint checks from the node network namespac
 with `nsenter`. DNS ports remain available. Declared UDP ports are inventoried,
 while UDP denial needs protocol-specific native checks.
 
-Canary results require unchanged admitted commands, images, labels, reservation
-and node UID. Both listener readiness and a successful measurement Pod are
+Probe Pods carry the team label, node selector and team toleration admission
+requires. Canary results require unchanged admitted commands, images, labels,
+annotations, reservation and node. Both listener readiness and a successful measurement Pod are
 required. Policy and endpoint snapshots must match after canary cleanup. Probe
 Pods inherit the award deadline. Failures preserve the reservation until cleanup
 can finish. A new launcher can remove only probe Pod and policy instances bound
@@ -344,22 +422,32 @@ reconciliation of other live Jobs.
 
 Job pods are pre-bound to a reserved node and never pend, so they cannot make
 Karpenter add one. When reservation finds no vacant Ready team node, the
-launcher keeps the award and creates `sw-capacity-<unit hash>`: an unbound Pod
+launcher keeps the award and creates `sw-capacity-<award hash>`: an unbound Pod
 with the team node selector, the job tolerations, the award's CPU, memory and
 scratch requests, the runner image running `sparkwing-runner version`, and no
 volumes, environment or service account token. The Pod records its unit fence
 and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
 
-- Every admitted request, on create, on adoption by a re-award and on every
-  pass, is recomputed from that record and held to the same comparison as Job
-  Pods. A mismatch deletes it, UID-fenced, and the held award requests again.
+- The hash covers the award generation, so a re-award creates its own request
+  and never rebinds or deletes another generation's. Only the same award adopts
+  an existing request.
+- Admission enforces the request's shape. The launcher compares its award
+  fields (name, demand record, team placement, image and resources) with demand
+  taken from outside the Pod: the award on create and adoption, the held award
+  on every sync, and the controller's binding and committed allocation on every
+  reconciliation. A mismatch or an unknown allocation deletes it, UID-fenced,
+  and a held award requests again.
 - Each launcher pass retries held awards. Reservation may consume the team's
-  own requests on a node: it persists the reservation first, then deletes them
-  and waits for their removal before the Job is created, so the node is never
-  empty in between.
+  own requests on a node: it persists the reservation and its taint first, then
+  deletes them and waits for their removal. Boundary probe Pods then occupy
+  the node during measurement and are removed before Job creation. The NodePool's
+  consolidateAfter covers the empty gaps around those probes.
 - Sync observes each request through its recorded award. Awards this launcher
   holds are renewed by that observation; others are only checked. A request
   is deleted when the controller ends its award or the award deadline passes.
+  Requests are reconciled individually. A definitive binding or fence refusal
+  deletes only the refused Pod by UID and lets other requests and claims proceed.
+  Transport, overload and service-credential errors retain the request for retry.
 
 Team NodePools need `disruption: {consolidationPolicy: WhenEmpty,
 consolidateAfter: 10m}` or longer, above the award lease, so a node emptied by

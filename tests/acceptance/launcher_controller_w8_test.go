@@ -65,7 +65,7 @@ func TestLauncherPollingW8Components(t *testing.T) {
 					want = time.Second
 				}
 				err = cluster.RunLaunchCLI(ctx, args, func(_ context.Context, cfg launcher.CloudJobConfig, _ func(context.Context) (string, error)) (*launcher.Launcher, error) {
-					return &launcher.Launcher{Config: cfg, Kube: cloudKubeW8(), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil
+					return &launcher.Launcher{Config: cfg, Kube: admitW8(cloudKubeW8(), cfg), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil
 				})
 				if err != nil {
 					t.Fatal(err)

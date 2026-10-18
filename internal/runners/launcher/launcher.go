@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // CloudControl supplies awarded bindings from the controller and checks their continued authority.
@@ -41,10 +42,11 @@ type CloudJobObservation struct {
 	Unheld        bool
 }
 
-// CloudJobState carries the controller's teardown decision for one immutable award.
+// CloudJobState carries the controller's teardown decision and committed allocation for one immutable award.
 type CloudJobState struct {
-	Binding CloudJobBinding
-	Delete  bool
+	Binding   CloudJobBinding
+	Delete    bool
+	Resources *match.Resources
 }
 
 // Launcher creates Cloud Jobs without executing pipeline code in the launcher process.
@@ -56,8 +58,16 @@ type Launcher struct {
 	Poll     time.Duration
 	Logger   *slog.Logger
 
-	mu      sync.Mutex
-	waiting map[string]*CloudJobAward
+	mu       sync.Mutex
+	waiting  map[string]*CloudJobAward
+	identity string
+}
+
+func (l *Launcher) logger() *slog.Logger {
+	if l.Logger == nil {
+		return slog.Default()
+	}
+	return l.Logger
 }
 
 func (l *Launcher) validate() error {
@@ -70,31 +80,35 @@ func (l *Launcher) validate() error {
 	return nil
 }
 
-// Run reconciles existing Jobs before claiming further work until ctx is cancelled.
+// Run verifies the job namespace admission policies, then reconciles existing Jobs before claiming further work until ctx is cancelled.
 func (l *Launcher) Run(ctx context.Context) error {
 	if err := l.validate(); err != nil {
+		return err
+	}
+	if err := l.verifyAdmission(ctx); err != nil {
 		return err
 	}
 	poll := l.Poll
 	if poll <= 0 {
 		poll = 5 * time.Second
 	}
-	logger := l.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger := l.logger()
 	var cooldown time.Time
 	for ctx.Err() == nil {
-		if time.Now().Before(cooldown) {
-			if err := l.verifyLocal(ctx); err != nil {
-				logger.Warn("launcher verification failed", failureAttrs(err)...)
+		if !time.Now().Before(cooldown) {
+			admitted := l.verifyAdmission(ctx)
+			if admitted != nil {
+				logger.Error("Cloud admission policies do not match this launcher; reconciling without claiming work", failureAttrs(admitted)...)
 			}
-		} else if err := l.Sync(ctx); err != nil {
-			logger.Warn("launcher reconciliation failed", failureAttrs(err)...)
-			cooldown = time.Now().Add(retryWait(err, 0))
-		} else if _, err := l.LaunchOne(ctx); err != nil {
-			logger.Warn("launcher claim failed", failureAttrs(err)...)
-			cooldown = time.Now().Add(retryWait(err, 0))
+			if err := l.sync(ctx); err != nil {
+				logger.Warn("launcher reconciliation failed", failureAttrs(err)...)
+				cooldown = time.Now().Add(retryWait(err, 0))
+			} else if admitted == nil {
+				if _, err := l.LaunchOne(ctx); err != nil {
+					logger.Warn("launcher claim failed", failureAttrs(err)...)
+					cooldown = time.Now().Add(retryWait(err, 0))
+				}
+			}
 		}
 		timer := time.NewTimer(poll)
 		select {
@@ -220,7 +234,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	}
 	// safety: reservation probes and publication may outlive the award's execution authority.
 	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobNamespace: created.Namespace, JobName: created.Name, JobUID: string(created.UID), NodeUID: r.Reservation.NodeUID}})
-	if err == nil && retirements[created.Name] {
+	if err == nil && retirements[created.Name].Delete {
 		err = errors.New("Cloud award ended before Job activation")
 	}
 	if err != nil {
@@ -241,12 +255,9 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	expected := created.DeepCopy()
 	expected.Spec.Suspend, expected.Spec.ActiveDeadlineSeconds = ptr(false), &remaining
 	if err := validateAdmittedJob(expected, activated); err != nil {
-		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation))
+		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation, rejectedPod))
 	}
-	if err := l.waitForJobPod(ctx, activated); err != nil {
-		return true, l.verificationFailure(ctx, activated, award.Binding, r.Reservation, err)
-	}
-	return true, nil
+	return true, l.enforceAward(ctx, activated, award.Binding, r.Reservation)
 }
 
 func (l *Launcher) retainBootstrap(ctx context.Context, job *batchv1.Job, secret *corev1.Secret) (*batchv1.Job, error) {

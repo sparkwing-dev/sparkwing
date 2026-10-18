@@ -1,5 +1,7 @@
 # W8 EKS launcher continuation - 2026-10-17
 
+Superseded on 2026-10-18: job namespace Pods are enforced at admission and the launcher keeps only a synchronous award backstop. See `internal/runners/launcher/CLOUD-JOBS.md`.
+
 Implemented the 07:30 lead decision in launcher and charts. This report covers
 the uncommitted work after 8a7a9ed68. The lead owns review and commits.
 

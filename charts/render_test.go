@@ -2220,13 +2220,13 @@ func TestRunnerMetricsFlagFollowsMetricsPort(t *testing.T) {
 	}
 }
 
-func TestCloudLauncherCanReadBoundaryNamespace(t *testing.T) {
+func TestCloudLauncherPermissionsStayScoped(t *testing.T) {
 	for chart, settings := range map[string][]string{
-		"./sparkwing-runner-bundle": {"launcher.serviceAccountName=cloud-launcher"},
-		"./sparkwing-full":          {"sparkwing-runner-bundle.launcher.serviceAccountName=cloud-launcher"},
+		"./sparkwing-runner-bundle": append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher"),
+		"./sparkwing-full":          append(launcherImages("sparkwing-runner-bundle."), "sparkwing-runner-bundle.launcher.serviceAccountName=cloud-launcher"),
 	} {
 		t.Run(chart, func(t *testing.T) {
-			resources := renderedResources(t, helmRenderAll(t, chart, "sparkwing", "cloud-jobs", settings...))
+			resources := renderedResources(t, helmRenderAll(t, chart, "sparkwing", "cloud", settings...))
 			for _, resource := range resources {
 				for _, rule := range resource.Rules {
 					if slices.Contains(rule.Resources, "mutatingadmissionpolicies") {
@@ -2238,10 +2238,11 @@ func TestCloudLauncherCanReadBoundaryNamespace(t *testing.T) {
 				kind, group, resource string
 				verbs                 []string
 			}{
-				{"ClusterRole", "", "namespaces", []string{"get"}},
+				{"ClusterRole", "admissionregistration.k8s.io", "validatingadmissionpolicies", []string{"get"}},
+				{"ClusterRole", "admissionregistration.k8s.io", "validatingadmissionpolicybindings", []string{"get"}},
 				{"ClusterRole", "karpenter.sh", "nodeclaims", []string{"get", "delete"}},
 				{"ClusterRole", "karpenter.sh", "nodepools", []string{"get"}},
-				{"ClusterRole", "scheduling.k8s.io", "priorityclasses", []string{"list"}},
+				{"Role", "batch", "jobs", []string{"create", "get", "list", "patch", "delete"}},
 			} {
 				found := false
 				for _, resource := range resources {
@@ -2251,12 +2252,11 @@ func TestCloudLauncherCanReadBoundaryNamespace(t *testing.T) {
 					for _, rule := range resource.Rules {
 						if slices.Contains(rule.APIGroups, want.group) && slices.Contains(rule.Resources, want.resource) {
 							found = true
-							if want.resource == "namespaces" && !reflect.DeepEqual(rule.ResourceNames, []string{"cloud-jobs"}) {
-								t.Errorf("namespace reads cover %v, want only cloud-jobs", rule.ResourceNames)
+							if want.group == "admissionregistration.k8s.io" && !reflect.DeepEqual(rule.ResourceNames, []string{"sparkwing-cloud-pods-cloud-cloud-jobs", "sparkwing-cloud-jobs-cloud-cloud-jobs"}) {
+								t.Errorf("admission reads cover %v, want only the job namespace policies", rule.ResourceNames)
 							}
-
-							if want.kind == "Role" && resource.Metadata.Namespace != "cloud-jobs" {
-								t.Errorf("namespace permission in %q, want cloud-jobs", resource.Metadata.Namespace)
+							if want.kind == "Role" && resource.Metadata.Namespace != "cloud-cloud-jobs" {
+								t.Errorf("namespace permission in %q, want cloud-cloud-jobs", resource.Metadata.Namespace)
 							}
 							if !reflect.DeepEqual(rule.Verbs, want.verbs) {
 								t.Errorf("%s grants %v on %s, want only %v", want.kind, rule.Verbs, want.resource, want.verbs)

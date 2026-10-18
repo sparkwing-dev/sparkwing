@@ -37,7 +37,6 @@ const (
 	doNotDisrupt          = "karpenter.sh/do-not-disrupt"
 	bootstrapPath         = "/etc/sparkwing/bootstrap/bootstrap"
 	bootstrapAnnotation   = "sparkwing.dev/bootstrap-cleanup"
-	templateAnnotation    = "sparkwing.dev/requested-template"
 )
 
 var digestPinned = regexp.MustCompile(`^[a-z0-9][a-z0-9.:/_-]*@sha256:[0-9a-f]{64}$`)
@@ -109,11 +108,6 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: map[string]string{doNotDisrupt: "true"}}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
-	requested, err := json.Marshal(job.Spec.Template)
-	if err != nil {
-		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
-	}
-	job.Annotations[templateAnnotation] = string(requested)
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...), awardFileName: metadata}}
 	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline}, nil
 }

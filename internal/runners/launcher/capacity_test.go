@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"testing/quick"
 	"time"
@@ -18,9 +19,11 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func capacityPods(t *testing.T, kube *fake.Clientset) []corev1.Pod {
@@ -34,19 +37,26 @@ func capacityPods(t *testing.T, kube *fake.Clientset) []corev1.Pod {
 
 func capacityMutations() map[string]func(*corev1.Pod) {
 	return map[string]func(*corev1.Pod){
-		"secret_env": func(p *corev1.Pod) {
-			p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "TOKEN", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "bootstrap"}, Key: "bootstrap"}}})
-		},
-		"secret_volume": func(p *corev1.Pod) {
-			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "s", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "bootstrap"}}})
-		},
-		"token": func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = ptr(true) },
+		"image": func(p *corev1.Pod) { p.Spec.Containers[0].Image = "registry/other@sha256:" + strings.Repeat("c", 64) },
 		"sidecar": func(p *corev1.Pod) {
 			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar", Image: "other"})
 		},
 		"other_team":   func(p *corev1.Pod) { p.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("other") },
-		"any_taint":    func(p *corev1.Pod) { p.Spec.Tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}} },
 		"other_demand": func(p *corev1.Pod) { p.Annotations[demandAnnotation] = `{"binding":{}}` },
+		"coordinated_size": func(p *corev1.Pod) {
+			var d capacityDemand
+			if err := json.Unmarshal([]byte(p.Annotations[demandAnnotation]), &d); err != nil {
+				panic(err)
+			}
+			d.CPUCores = 0.5
+			raw, err := json.Marshal(d)
+			if err != nil {
+				panic(err)
+			}
+			p.Annotations[demandAnnotation] = string(raw)
+			c := &p.Spec.Containers[0]
+			c.Resources.Requests[corev1.ResourceCPU], c.Resources.Limits[corev1.ResourceCPU] = resource.MustParse("500m"), resource.MustParse("500m")
+		},
 	}
 }
 
@@ -142,7 +152,7 @@ func TestCapacityRequestMutationIsRejected(t *testing.T) {
 			if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if err := l.verifyLocal(t.Context()); err == nil || len(capacityPods(t, kube)) != 0 {
+			if err := l.Sync(t.Context()); err == nil || len(capacityPods(t, kube)) != 0 {
 				t.Fatalf("mutated stored request survived: %v", err)
 			}
 			if len(l.waitingAwards()) != 1 {
@@ -191,13 +201,10 @@ func TestCapacityRequestLivesExactlyAsLongAsItsAward(t *testing.T) {
 	}
 	var observed []CloudJobObservation
 	ended := false
+	decide := awardedStates(*control.award, func(CloudJobBinding) bool { return ended })
 	l.Control = publicationControl{CloudControl: control, sync: func(obs []CloudJobObservation) ([]CloudJobState, error) {
-		states := make([]CloudJobState, len(obs))
-		for i, o := range obs {
-			observed = append(observed, o)
-			states[i] = CloudJobState{Binding: o.Binding, Delete: ended}
-		}
-		return states, nil
+		observed = append(observed, obs...)
+		return decide(obs)
 	}}
 	if err := l.Sync(t.Context()); err != nil || len(capacityPods(t, kube)) != 1 {
 		t.Fatalf("a Ready node lost its request before an award reserved it: %v", err)
@@ -227,7 +234,7 @@ func TestExpiredCapacityRequestIsRemovedWithoutTheController(t *testing.T) {
 	if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.verifyLocal(t.Context()); err != nil || len(capacityPods(t, kube)) != 0 {
+	if err := l.Sync(t.Context()); err != nil || len(capacityPods(t, kube)) != 0 {
 		t.Fatalf("expired demand survived: %v", err)
 	}
 }
@@ -298,5 +305,92 @@ func TestUnheldObservationDoesNotRenewTheAward(t *testing.T) {
 		if renewed := len(preparing) == 1; renewed == unheld {
 			t.Fatalf("unheld=%t renewed=%t", unheld, renewed)
 		}
+	}
+}
+
+func awardedStates(award CloudJobAward, ended func(CloudJobBinding) bool) func([]CloudJobObservation) ([]CloudJobState, error) {
+	return func(obs []CloudJobObservation) ([]CloudJobState, error) {
+		states := make([]CloudJobState, len(obs))
+		for i, o := range obs {
+			states[i] = CloudJobState{Binding: o.Binding, Delete: ended(o.Binding), Resources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}}
+		}
+		return states, nil
+	}
+}
+
+func TestStaleCapacityCleanupSparesTheNewerAward(t *testing.T) {
+	for _, path := range []string{"release", "retirement"} {
+		t.Run(path, func(t *testing.T) {
+			l1, kube, boundary, control := fixture()
+			boundary.reserveErr = ErrNoDedicatedNode
+			g1 := *control.award
+			if _, err := l1.LaunchOne(t.Context()); !errors.Is(err, ErrNoDedicatedNode) {
+				t.Fatal(err)
+			}
+			g2 := g1
+			g2.Binding.Generation, g2.Binding.Holder = 2, "holder-2"
+			l2 := &Launcher{Kube: kube, Control: &controlFake{award: &g2}, Config: l1.Config, Boundary: boundary}
+			resume := func() {
+				if _, err := l2.LaunchOne(t.Context()); !errors.Is(err, ErrNoDedicatedNode) {
+					t.Error(err)
+				}
+			}
+			switch path {
+			case "release":
+				l1.Control = preparationControl{CloudControl: &controlFake{}, prepare: func(context.Context, []capability.LeaseRef) error {
+					resume()
+					return &apierr.Error{Code: apierr.LockHeld, Message: "award exchanged"}
+				}}
+				if _, err := l1.LaunchOne(t.Context()); err == nil {
+					t.Fatal("a lapsed award was placed")
+				}
+			case "retirement":
+				decide := awardedStates(g1, func(b CloudJobBinding) bool { return b.Generation == 1 })
+				l1.Control = publicationControl{CloudControl: control, sync: func(obs []CloudJobObservation) ([]CloudJobState, error) {
+					resume()
+					return decide(obs)
+				}}
+				if err := l1.Sync(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pods := capacityPods(t, kube)
+			if len(pods) != 1 || pods[0].Name != capacityName(g2.Binding) || pods[0].Annotations[demandAnnotation] == "" {
+				t.Fatalf("G1 cleanup removed G2's request: %d requests", len(pods))
+			}
+			if len(l1.waitingAwards()) != 0 || len(l2.waitingAwards()) != 1 {
+				t.Fatalf("held awards: L1=%d L2=%d", len(l1.waitingAwards()), len(l2.waitingAwards()))
+			}
+			if err := l2.verifyCapacityPod(&pods[0], demandFor(g2)); err != nil {
+				t.Fatalf("G2's request no longer matches its award: %v", err)
+			}
+		})
+	}
+}
+
+func TestCapacityDemandIsAuthenticatedOutsideTheAdmittedPod(t *testing.T) {
+	for name, resources := range map[string]*match.Resources{"awarded": {Cores: 1.5, MemoryBytes: 2 << 30}, "unknown": nil} {
+		t.Run(name, func(t *testing.T) {
+			l, kube, boundary, control := fixture()
+			boundary.reserveErr = ErrNoDedicatedNode
+			if _, err := l.LaunchOne(t.Context()); !errors.Is(err, ErrNoDedicatedNode) {
+				t.Fatal(err)
+			}
+			pod := capacityPods(t, kube)[0]
+			capacityMutations()["coordinated_size"](&pod)
+			if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			restarted := &Launcher{Kube: kube, Config: l.Config, Boundary: boundary, Control: publicationControl{CloudControl: control, sync: func(obs []CloudJobObservation) ([]CloudJobState, error) {
+				states := make([]CloudJobState, len(obs))
+				for i, o := range obs {
+					states[i] = CloudJobState{Binding: o.Binding, Resources: resources}
+				}
+				return states, nil
+			}}}
+			if err := restarted.Sync(t.Context()); err == nil || len(capacityPods(t, kube)) != 0 {
+				t.Fatalf("an unauthenticated demand survived reconciliation: %v", err)
+			}
+		})
 	}
 }

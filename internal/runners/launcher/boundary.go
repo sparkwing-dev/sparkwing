@@ -210,9 +210,10 @@ func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) (
 	return requests, nil
 }
 
-// safety: requests leave only after the reservation is persisted, so the node
-// is never empty between provisioning and its first job, and the wait for
-// their removal lets kubelet release their resources before the job is placed.
+// safety: requests leave only after the reservation and its taint are persisted,
+// so no other award can take the node. consolidateAfter must outlast empty gaps
+// before and after boundary probes. Waiting for removal frees the requests'
+// resources before probing and Job placement.
 func (b *KubernetesBoundary) consumeCapacity(ctx context.Context, node, team string) error {
 	requests, err := b.occupants(ctx, node, team)
 	if err != nil {
