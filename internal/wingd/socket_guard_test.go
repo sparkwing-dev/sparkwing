@@ -201,7 +201,7 @@ func TestCheckSocketBase_RefusesAWritableBaseWithoutTheStickyBit(t *testing.T) {
 	}
 }
 
-func TestDaemon_RefusesAForeignDirectoryAtTheDerivedPath(t *testing.T) {
+func TestClients_RefuseAForeignDirectoryAtTheDerivedPath(t *testing.T) {
 	home := t.TempDir()
 	sock, err := EnsureSocketPath(home)
 	if err != nil {
@@ -235,20 +235,6 @@ func TestDaemon_RefusesAForeignDirectoryAtTheDerivedPath(t *testing.T) {
 	}
 	if !strings.Contains(derr.Error(), dir) {
 		t.Errorf("dial refusal %v does not name the directory %q", derr, dir)
-	}
-
-	d, err := New(Config{Home: home, Version: "v1.0.0"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	rerr := d.Run(ctx)
-	if rerr == nil {
-		t.Fatal("daemon bound inside a foreign socket directory")
-	}
-	if !strings.Contains(rerr.Error(), dir) {
-		t.Errorf("bind refusal %v does not name the directory %q", rerr, dir)
 	}
 }
 
@@ -317,7 +303,7 @@ func TestDaemon_BindsAPrivateSocket(t *testing.T) {
 	}
 }
 
-func TestDaemon_RefusesToBindInAnExposedDirectory(t *testing.T) {
+func TestDaemon_NeverBindsInAnExposedDirectory(t *testing.T) {
 	home := t.TempDir()
 	d, err := New(Config{Home: home, Version: "v1.0.0"})
 	if err != nil {
@@ -332,13 +318,15 @@ func TestDaemon_RefusesToBindInAnExposedDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	err = d.Run(ctx)
-	if err == nil {
-		t.Fatal("daemon served out of a world-writable socket directory")
+	ln, err := d.bindListener()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "socket directory") {
-		t.Errorf("error %v does not name the socket directory", err)
+	t.Cleanup(func() {
+		_ = ln.Close()
+		_ = os.RemoveAll(filepath.Dir(d.SocketPath()))
+	})
+	if filepath.Dir(ln.Addr().String()) == dir || ValidateSocketDir(ln.Addr().String()) != nil {
+		t.Fatalf("daemon served %s out of the world-writable directory %s", ln.Addr(), dir)
 	}
 }

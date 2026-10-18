@@ -281,6 +281,8 @@ func socketPathIn(base, home, token string) string {
 	return filepath.Join(base, socketDirPrefix()+hash+"-"+token, "d.sock")
 }
 
+var errUnsafeSocketDir = fmt.Errorf("unsafe socket directory: %w", fs.ErrPermission)
+
 const (
 	socketTokenFile  = "socket-id"
 	unboundSocketDir = "unbound"
@@ -290,7 +292,16 @@ var socketTokenPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
 // safety: a socket directory name derived from the home alone lets another
 // account create it first in the shared base and lock this user out.
-func recordSocketToken(dir string) (string, error) {
+func recordSocketToken(dir string) (string, error) { return writeSocketToken(dir, false) }
+
+// safety: an elected daemon replaces an id whose directory another account
+// planted, so a squatted name delays a start instead of blocking it.
+func rotateSocketToken(dir string) error {
+	_, err := writeSocketToken(dir, true)
+	return err
+}
+
+func writeSocketToken(dir string, replace bool) (string, error) {
 	path := filepath.Join(dir, socketTokenFile)
 	if err := fssecure.EnsureDir(dir); err != nil {
 		return "", fmt.Errorf("wingd: prepare %s: %w", dir, err)
@@ -306,7 +317,11 @@ func recordSocketToken(dir string) (string, error) {
 	if err := errors.Join(werr, draft.Close()); err != nil {
 		return "", fmt.Errorf("wingd: record socket id: %w", err)
 	}
-	if err := os.Link(draft.Name(), path); err != nil && !errors.Is(err, fs.ErrExist) {
+	publish := os.Link
+	if replace {
+		publish = os.Rename
+	}
+	if err := publish(draft.Name(), path); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", fmt.Errorf("wingd: record socket id: %w", err)
 	}
 	return readSocketToken(path)
@@ -365,10 +380,10 @@ func checkSocketDir(dir string) error {
 		return fmt.Errorf("wingd: inspect socket directory %s: %w", dir, err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("wingd: socket directory %s is unsafe (not a directory): %w", dir, fs.ErrPermission)
+		return fmt.Errorf("wingd: socket directory %s is unsafe (not a directory): %w", dir, errUnsafeSocketDir)
 	}
 	if fault := socketDirFault(info); fault != "" {
-		return fmt.Errorf("wingd: socket directory %s is unsafe (%s): %w", dir, fault, fs.ErrPermission)
+		return fmt.Errorf("wingd: socket directory %s is unsafe (%s): %w", dir, fault, errUnsafeSocketDir)
 	}
 	return nil
 }
