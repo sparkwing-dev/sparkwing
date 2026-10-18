@@ -41,7 +41,7 @@ source acquisition and directory-based SDK/engine selection path found.
 | `pkg/store/schedule_intake.go` | Builds pinned scheduled requests and replay digests | Pinned identity resolves through the shared pair selector. Replay carries both committed IDs. |
 | `pkg/controller/client/native_services.go` | Fresh-branch child clears parent SHAs and submits unresolved intent | Fresh source flags are cleared here. Controller child intake resolves against the parent's stored location before sealing. |
 | `pkg/controller/child_source.go` | Added authenticated child-ref resolution and server-private credential lookup | Uses shared ref/pair resolution. Credentials never enter a running parent. |
-| `cmd/sparkwing/action_plan.go`, `compile.go`, `run_help.go` | Preview/help materializes pipeline code and chooses its SDK from a directory | W9 owns preview/describe. These files were not edited. |
+| `cmd/sparkwing/action_plan.go`, `compile.go`, `run_help.go` | Preview/help materializes pipeline code and chooses its SDK from a directory | Preview, describe and help use shared acquisition with the prepared environment. SDK selection follows the acquired directory. |
 | `cmd/sparkwing/toolchain_select.go`, `describe_cache.go` | Selects local engine or SDK-dependent description identity | W9's preview/describe selection review remains with W9. |
 | `cmd/sparkwing/cache.go`, `cache_warm.go` | Classifies directories and reads pins for explicit cache management | Retained management surface. |
 | `cmd/sparkwing/upgrade.go`, `info.go` | Classifies directories for explicit upgrade or informational output | Retained management/information surface. |

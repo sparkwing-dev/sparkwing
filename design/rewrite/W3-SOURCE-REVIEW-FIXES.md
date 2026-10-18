@@ -1,8 +1,48 @@
 # W3 source-selection review fixes
 
-All seven findings are implemented. The changed tree still needs the lead's
-native suite and commit. The latest W3-native-latest.md has no FAIL, but its
-session-3 result covers the previous committed state.
+All seven findings are implemented in the committed tree. The latest native
+report covers a854a68b1 and fails only
+FuzzBurstHostSourceEnvironmentExcludesRequesterValues. Its fixture correction
+below needs the lead's commit and native rerun. W3 remains CONTINUE until that
+report contains no FAIL.
+
+## Native failure follow-up
+
+Invariant: source preparation consumes its supplied filtered snapshot. Ambient
+changes after capture cannot restore withheld values or replace tools and caches.
+
+The native fuzzer passed only TOKEN and BURST_USER_VALUE to hostSourceOptions,
+then expected PATH, GOCACHE and GOMODCACHE from the process environment. That
+expectation contradicted mandatory snapshot consumption. The named test reproduced
+the native failure in 0.028s before this correction.
+
+The fixture now captures the host environment before calling the real source
+options and procenv owners. It changes both ambient Go cache paths after capture,
+so the property also catches a return to ambient reads. It still refuses requester
+credentials and arbitrary user values for every tested process kind. Both seeds
+pass in 0.040s. No production behavior changed.
+
+This session changes only cmd/sparkwing/burst_intake_unix_test.go and this report
+plus the source inventory's stale inspection row. Production delta and deleted
+production lines are both zero. The test replaces one line with four. W3 remains
++12,637/-26,135, net -13,498 production lines against main under the existing
+area exclusions. No API caller migration, test port, new mechanism or contract
+change was needed. Lead-owned amendments and handoffs remain untouched. Their
+previously completed assignments remain covered by the earlier implementation
+and continuation reports. The follower-cancellation DESIGN and TypeScript Git
+helper ownership question below remain lead handoffs.
+
+Verification for this continuation uses the same Go environment as below:
+
+- Whole-repository go build ./... and cmd/sparkwing go vet pass.
+- The entry-point SIGNING_MATERIAL, burst preparation, platform-name and
+  withholding properties plus the corrected fuzzer seeds pass together in 12.689s.
+- The corrected fuzzer passes 657 generated cases with two workers in 3.171s.
+- Commentcheck is clean across 2,899 files. Diff whitespace and gofmt checks pass.
+- No acceptance cells changed. The native report passes tests/acceptance and all
+  other packages apart from cmd/sparkwing. The harness must rerun its native suite.
+
+The seven-finding implementation and its original verification follow.
 
 ## Implementation
 
