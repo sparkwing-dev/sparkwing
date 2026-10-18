@@ -710,3 +710,24 @@ Review: /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/review/areas/W
 3. Environment release. Submitted or captured environment values are released through the live execution-unit fence (plan, eval or expansion, and node units) for the unit's own run. This is independent of source-credential (SourceRead) permission and keeps each unit's grants narrow.
 Docs: the migration checker validates every current instruction, excluding only material explicitly marked historical ("Before"). Fix v0.67.0's crons tick claim (decision 94) and the stale environment restrictions, and remove the two stale test comments.
 Assigned to W9 (env 1087) under integration authority. Each mechanism gets a real-path test that runs past admission into hosting.
+
+## 2026-10-18 00:10 lead decision: launcher pod enforcement moves to a namespace-scoped ValidatingAdmissionPolicy
+
+Since the 07:30 decision, four review rounds of the post-create detect-then-kill verifier have each fixed some races and introduced others (activation grace, pass starvation, stale reconcile releasing rejected nodes, admitted labels contaminating expectations). kikd now runs EKS 1.37 and serves admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy and MutatingAdmissionPolicy. Validating admission runs after every mutating webhook, so it judges the final pod, AWS edits included. Korey said "keep going" on the lead's recommendation.
+
+New design:
+- The chart ships a ValidatingAdmissionPolicy and binding whose matchResources namespaceSelector selects only the Sparkwing job namespace, so they cannot affect any other namespace. CEL rules on CREATE and UPDATE of Pods, Jobs and pods/ephemeralcontainers in that namespace:
+  - the only creator is the launcher service account;
+  - the container set, image registry and digests come from the allowed set, and env vars from the allowed name set;
+  - no AWS credential injection (no AWS_ROLE_ARN or AWS_WEB_IDENTITY_TOKEN_FILE, no aws-iam-token volume);
+  - no hostPath, hostNetwork, hostPID, hostIPC or added capabilities beyond the DinD contract;
+  - serviceAccountName is the job SA and automountServiceAccountToken is false;
+  - the protected node-label selector and the toleration are present;
+  - the node label value equals the pod's team label;
+  - no ephemeral containers;
+  - capacity-request pods match their own narrower shape (no volumes, env or SA token).
+- The launcher checks the policy and binding exist and match at startup; if either is missing it refuses to launch.
+- The launcher's post-create verification shrinks to a simple, synchronous backstop. It checks the create response, and the award-specific fields (image digest and resources from demandFor(award)) once at activation and on each sync. A mismatch deletes the Job (UID-fenced) and retires the node. The concurrent background verifier, activation-grace and pass-deadline machinery is deleted.
+- Keep from the recent rounds: award-scoped capacity pods, the runner backoff fix, demand derived from the award, the NodeRestriction label, and nodes never moving between teams.
+- Admission tests run against a real API server via envtest or a kind cluster if available, otherwise as CEL unit tests with the Kubernetes CEL library, covering every allowed and refused shape, including the EKS webhook mutations seen on kikd.
+Assigned to an Opus implementer (env 1086), with Sol review.
