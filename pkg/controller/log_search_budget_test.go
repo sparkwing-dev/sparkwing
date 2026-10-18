@@ -151,3 +151,40 @@ func TestRunSelectionCapsLimitAtRunListMaximum(t *testing.T) {
 		t.Fatalf("limit = %d, %v", q.Limit, err)
 	}
 }
+
+func TestTextLogSearchesTakeTheDownloadSlotFirst(t *testing.T) {
+	logs, st, _, _ := budgetedLogSegments(t)
+	options, _, server := memberObservationOptions(t, st, logs.objs.(blob.ObjectBackend))
+	server.WithEgressMeter(egress.New(egress.Config{MaxDownloadsPerPrincipal: 1}))
+	bearer, err := options.Bearer(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v1/runs/run/logs/search?q=fatal", "/api/v1/runs/grep?q=fatal"} {
+		search := func() int {
+			r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://local"+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set("Authorization", "Bearer "+bearer)
+			response, err := options.HTTP.Do(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = response.Body.Close()
+			return response.StatusCode
+		}
+		if code := search(); code != http.StatusOK {
+			t.Fatalf("%s with a free slot = %d", path, code)
+		}
+		release, err := server.egress.Open(egress.TeamPrincipal("a", "member"), egress.SlotDownload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code := search()
+		release()
+		if code != http.StatusTooManyRequests {
+			t.Fatalf("%s with the slot held = %d", path, code)
+		}
+	}
+}

@@ -30,11 +30,11 @@ func (s *Server) reportingEndpoints() []Endpoint {
 		{Method: "GET", Pattern: "/api/v1/trends", Decode: authorityTarget, Handle: s.handleTrends},
 		{Method: "GET", Pattern: "/api/v1/runners", Decode: authorityTarget, Handle: s.handleAgents},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/logs", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.dashboardRead(web.RunLogsHandler, egress.ClassLog, egress.SlotDownload)},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/logs/search", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.dashboardRead(func(b backend.Backend) http.HandlerFunc { return web.RunLogsSearchHandler(b, controllerSearchBounds) }, "", egress.SlotNone)},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/logs/search", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.logScanSlot(s.dashboardRead(func(b backend.Backend) http.HandlerFunc { return web.RunLogsSearchHandler(b, controllerSearchBounds) }, "", egress.SlotNone))},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/logs", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.dashboardRead(web.NodeLogsHandler, egress.ClassLog, egress.SlotDownload)},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/logs/stream", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.dashboardRead(web.NodeLogStreamHandler, egress.ClassLogStream, egress.SlotLogStream)},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/logs/completeness", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.dashboardRead(web.NodeLogCompletenessHandler, "", egress.SlotNone)},
-		{Method: "GET", Pattern: "/api/v1/runs/grep", Decode: authorityTarget, Handle: s.dashboardRead(func(b backend.Backend) http.HandlerFunc { return web.RunsGrepHandler(b, controllerSearchBounds) }, "", egress.SlotNone)},
+		{Method: "GET", Pattern: "/api/v1/runs/grep", Decode: authorityTarget, Handle: s.logScanSlot(s.dashboardRead(func(b backend.Backend) http.HandlerFunc { return web.RunsGrepHandler(b, controllerSearchBounds) }, "", egress.SlotNone))},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/events/stream", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.dashboardRead(web.EventsStreamHandler, "", egress.SlotNone)},
 	}
 	for i := range endpoints {
@@ -47,6 +47,17 @@ func (s *Server) reportingEndpoints() []Endpoint {
 		}
 	}
 	return endpoints
+}
+
+func (s *Server) logScanSlot(next func(http.ResponseWriter, *http.Request, capability.Authorized) error) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+	return func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+		release, ok := s.holdLogScanSlot(w, r, egress.TeamPrincipal(a.Target.Team, a.Principal.Capability.Subject.ID))
+		if !ok {
+			return nil
+		}
+		defer release()
+		return next(w, r, a)
+	}
 }
 
 func reportingPipelineTarget(r *http.Request) (capability.RequestEvidence, error) {
