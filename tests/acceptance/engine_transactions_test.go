@@ -137,6 +137,10 @@ func (f *engineTransactions) ReadOwnerSnapshot(ctx context.Context, _ capability
 	return f.ReadSnapshot(ctx, run)
 }
 
+func (f *engineTransactions) ReplayRun(context.Context, store.IntakeRequest) (store.AdmissionResult, bool, error) {
+	return store.AdmissionResult{}, false, nil
+}
+
 func (f *engineTransactions) AdmitRun(_ context.Context, request store.IntakeRequest) (store.AdmissionResult, error) {
 	f.intake = request
 	f.writes++

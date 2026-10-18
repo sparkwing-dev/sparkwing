@@ -18,10 +18,13 @@ import (
 // IntakeRequest carries client input and server-derived tagged authority, re-resolved
 // by C2 in the intake transaction. CapabilityPrefix is only a claim fence and
 // cannot replace a session parent. Verified App facts come from the delivery ID.
+// Intent, when set, is Request before server-side source resolution and is the
+// idempotency digest input, so replay never depends on Git state.
 type IntakeRequest struct {
 	SubmittedEnv       map[string][]byte `json:"-"`
 	Authority          capability.AuthorityRef
 	Request            runspec.Request
+	Intent             *runspec.Request
 	IdempotencyKey     string
 	CapabilityPrefix   string
 	LocalSecrets       map[string]string `json:"-"`

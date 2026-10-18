@@ -171,17 +171,30 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err := validateGitSHA(body.Request.Git.SHA); err != nil {
 			return invalidEngineBody(err.Error())
 		}
+		if err := s.dedupeIntake(a, &body); err != nil {
+			return err
+		}
+		intent, err := IntakeForStore(a, body)
+		if err != nil {
+			return err
+		}
+		if replay, found := engine.replayRun(r.Context(), a.Target.Team, intent); found {
+			writeJSON(w, http.StatusOK, replay)
+			return nil
+		}
 		if err := s.resolveIntakeSource(r.Context(), a.Target.Team, &body.Request); err != nil {
 			return err
 		}
 		if err := s.resolveChildRevisions(r.Context(), engine, a, &body.Request); err != nil {
 			return err
 		}
-		if err := s.dedupeIntake(a, &body); err != nil {
+		ctx := context.WithValue(r.Context(), verifiedIntakeSourceKey{}, verifiedIntakeSource{location: body.Request.Source.Location, repository: body.Request.Git.Repository})
+		request, err := IntakeForStore(a, body)
+		if err != nil {
 			return err
 		}
-		ctx := context.WithValue(r.Context(), verifiedIntakeSourceKey{}, verifiedIntakeSource{location: body.Request.Source.Location, repository: body.Request.Git.Repository})
-		response, err := engine.CreateRun(ctx, a, body)
+		request.Intent = &intent.Request
+		response, err := engine.admitRun(ctx, a.Target.Team, request)
 		if err != nil {
 			return err
 		}

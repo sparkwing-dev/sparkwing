@@ -37,6 +37,10 @@ type intakeSourceTransaction struct {
 	calls int
 }
 
+func (f *intakeSourceTransaction) ReplayRun(context.Context, store.IntakeRequest) (store.AdmissionResult, bool, error) {
+	return store.AdmissionResult{}, false, nil
+}
+
 func (f *intakeSourceTransaction) AdmitRun(_ context.Context, input store.IntakeRequest) (store.AdmissionResult, error) {
 	f.seen = input
 	f.calls++
