@@ -8,13 +8,15 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func TestPostgresScheduleConcurrentFiresCommitOneRunWithoutDeadlock(t *testing.T) {
-	f := newStoreRecoveryFixtureAt(t, true, storetest.NewPostgres(t))
+func scheduleLockFixture(t *testing.T, target *storetest.Target) (*storeRecoveryFixture, store.CronSchedule, time.Time) {
+	t.Helper()
+	f := newStoreRecoveryFixtureAt(t, true, target)
 	f.s.DB().SetMaxOpenConns(8)
 	controller.New(f.s, nil)
 	p, err := f.s.ResolveAuthority(t.Context(), f.plan.Seal.Request.AuthorityRef)
@@ -22,7 +24,8 @@ func TestPostgresScheduleConcurrentFiresCommitOneRunWithoutDeadlock(t *testing.T
 		t.Fatal(err)
 	}
 	a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(f.tenant.Team())}}
-	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: "https://gitlab.com/acme/repo.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567", Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
+	remote := "https://93.184.216.34/acme/repo.git"
+	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: remote, Branch: "main", SHA: sourcetest.FixedRemote(t, remote), Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
 	ids, _, err := f.tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +42,23 @@ func TestPostgresScheduleConcurrentFiresCommitOneRunWithoutDeadlock(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	return f, row, due
+}
+
+func TestScheduledRunSealsPinnedRemoteSource(t *testing.T) {
+	f, row, due := scheduleLockFixture(t, storetest.New(t))
+	admitted, err := f.tenant.AdmitScheduledRun(t.Context(), row, due)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := admitted.Request.Request
+	if request.Git.SHA != row.LockedRef || request.Source.Ref != row.LockedRef || request.Source.Location.RemoteURL != row.RepoPath {
+		t.Fatalf("scheduled source changed: %+v", request)
+	}
+}
+
+func TestPostgresScheduleConcurrentFiresCommitOneRunWithoutDeadlock(t *testing.T) {
+	f, row, due := scheduleLockFixture(t, storetest.NewPostgres(t))
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	intake, err := f.s.DB().BeginTx(ctx, nil)
