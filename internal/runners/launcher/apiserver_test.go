@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -27,9 +28,10 @@ func apiServer(t *testing.T) *rest.Config {
 		t.Skip("KUBEBUILDER_ASSETS unset; run setup-envtest use 1.37.0 -p path to exercise admission against a real API server")
 	}
 	dir := t.TempDir()
-	client, peer, secure := freePort(t), freePort(t), freePort(t)
+	ports := freePorts(t, 3)
+	client, peer, secure := ports[0], ports[1], ports[2]
 	etcdURL := "http://127.0.0.1:" + client
-	start(t, filepath.Join(assets, "etcd"), "--data-dir="+filepath.Join(dir, "etcd"), "--listen-client-urls="+etcdURL, "--advertise-client-urls="+etcdURL, "--listen-peer-urls=http://127.0.0.1:"+peer, "--initial-advertise-peer-urls=http://127.0.0.1:"+peer, "--initial-cluster=default=http://127.0.0.1:"+peer, "--unsafe-no-fsync")
+	etcdExit := start(t, filepath.Join(assets, "etcd"), "--data-dir="+filepath.Join(dir, "etcd"), "--listen-client-urls="+etcdURL, "--advertise-client-urls="+etcdURL, "--listen-peer-urls=http://127.0.0.1:"+peer, "--initial-advertise-peer-urls=http://127.0.0.1:"+peer, "--initial-cluster=default=http://127.0.0.1:"+peer, "--unsafe-no-fsync")
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +44,7 @@ func apiServer(t *testing.T) *rest.Config {
 	if err := os.WriteFile(tokens, []byte(token+`,admin,admin,"system:masters"`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	start(t, filepath.Join(assets, "kube-apiserver"), "--etcd-servers="+etcdURL, "--cert-dir="+filepath.Join(dir, "certs"), "--bind-address=127.0.0.1", "--secure-port="+secure,
+	apiExit := start(t, filepath.Join(assets, "kube-apiserver"), "--etcd-servers="+etcdURL, "--cert-dir="+filepath.Join(dir, "certs"), "--bind-address=127.0.0.1", "--secure-port="+secure,
 		"--service-account-issuer=https://kubernetes.default.svc", "--service-account-key-file="+keyFile, "--service-account-signing-key-file="+keyFile,
 		"--token-auth-file="+tokens, "--authorization-mode=AlwaysAllow", "--allow-privileged=true", "--service-cluster-ip-range=10.0.0.0/24")
 	cfg := &rest.Config{Host: "https://127.0.0.1:" + secure, BearerToken: token, TLSClientConfig: rest.TLSClientConfig{Insecure: true}, QPS: -1}
@@ -51,6 +53,13 @@ func apiServer(t *testing.T) *rest.Config {
 		t.Fatal(err)
 	}
 	err = wait.PollUntilContextTimeout(t.Context(), 100*time.Millisecond, time.Minute, true, func(ctx context.Context) (bool, error) {
+		select {
+		case err := <-etcdExit:
+			return false, fmt.Errorf("etcd exited: %w", err)
+		case err := <-apiExit:
+			return false, fmt.Errorf("kube-apiserver exited: %w", err)
+		default:
+		}
 		body, err := kube.Discovery().RESTClient().Get().AbsPath("/readyz").DoRaw(ctx)
 		return err == nil && string(body) == "ok", nil
 	})
@@ -60,7 +69,7 @@ func apiServer(t *testing.T) *rest.Config {
 	return cfg
 }
 
-func start(t *testing.T, binary string, args ...string) {
+func start(t *testing.T, binary string, args ...string) <-chan error {
 	t.Helper()
 	cmd := exec.Command(binary, args...)
 	log, err := os.Create(filepath.Join(t.TempDir(), filepath.Base(binary)+".log"))
@@ -71,17 +80,20 @@ func start(t *testing.T, binary string, args ...string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
 	t.Cleanup(func() {
-		if err := cmd.Process.Kill(); err != nil {
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			t.Error(err)
 		}
-		_ = cmd.Wait()
+		<-exited
 		if t.Failed() {
 			out, _ := os.ReadFile(log.Name())
 			t.Logf("%s output:\n%s", filepath.Base(binary), tail(out))
 		}
 		log.Close()
 	})
+	return exited
 }
 
 func tail(out []byte) []byte {
@@ -91,14 +103,19 @@ func tail(out []byte) []byte {
 	return out
 }
 
-func freePort(t *testing.T) string {
+// safety: every listener stays open until all are chosen, so no two servers get one port.
+func freePorts(t *testing.T, n int) []string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	ports := make([]string, n)
+	for i := range ports {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		ports[i] = strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 	}
-	defer listener.Close()
-	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+	return ports
 }
 
 func impersonate(t *testing.T, cfg *rest.Config, user string) kubernetes.Interface {
