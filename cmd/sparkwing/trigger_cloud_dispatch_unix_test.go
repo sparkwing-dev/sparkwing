@@ -141,7 +141,7 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: doc, Context: settings.Context{ControllerOwned: true}})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: doc, Context: settings.Context{}})
 	if err != nil {
 		t.Fatal(err)
 	}
