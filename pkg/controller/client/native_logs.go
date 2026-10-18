@@ -3,6 +3,8 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,13 +54,15 @@ func (c *LocalHostClient) LogUploader(ctx context.Context, principal capability.
 	return &nativeLogUploader{transport: transport, subject: subject, pattern: pattern, path: path}, nil
 }
 
-func (u *nativeLogUploader) signed(ctx context.Context, index int) (blob.LogUploadBatch, error) {
-	var batch blob.LogUploadBatch
-	err := u.transport.request(ctx, "POST", u.pattern+"/log-segments", u.path+"/log-segments", "", blob.LogSigningRequest{Subject: u.subject, FirstSegment: int64(index), Count: 1}, &batch)
-	if err == nil && (!reflect.DeepEqual(batch.Subject, u.subject) || len(batch.Segments) != 1 || batch.Segments[0].Index != int64(index)) {
+func (u *nativeLogUploader) signed(ctx context.Context, index int64, body []byte) (blob.LogUploadURL, error) {
+	var slot blob.LogUploadURL
+	sum := sha256.Sum256(body)
+	request := blob.LogSigningRequest{Subject: u.subject, Index: index, Size: int64(len(body)), Digest: blob.Digest(hex.EncodeToString(sum[:]))}
+	err := u.transport.request(ctx, "POST", u.pattern+"/log-segments", u.path+"/log-segments", "", request, &slot)
+	if err == nil && (!reflect.DeepEqual(slot.Subject, u.subject) || slot.Index != index) {
 		err = dataProtocolError("log signing response differs from requested subject or segment")
 	}
-	return batch, err
+	return slot, err
 }
 
 func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[string]string, expiry time.Time, body []byte) error {
@@ -85,11 +89,11 @@ func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[
 }
 
 func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segment, body []byte) error {
-	batch, err := u.signed(ctx, segment.N)
+	slot, err := u.signed(ctx, int64(segment.N), body)
 	if err != nil {
 		return err
 	}
-	if err := u.put(ctx, batch.Segments[0].URL, batch.Segments[0].Headers, batch.Segments[0].ExpiresAt, body); err != nil {
+	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
 		return err
 	}
 	var offset int64
@@ -102,7 +106,7 @@ func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 		}
 		offset += previous.Size
 	}
-	key, err := blob.LogObjectKey(u.subject, batch.RetentionClass, int64(segment.N))
+	key, err := blob.LogObjectKey(u.subject, slot.RetentionClass, int64(segment.N))
 	if err != nil {
 		return err
 	}
@@ -122,11 +126,11 @@ func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Man
 	if err != nil {
 		return err
 	}
-	batch, err := u.signed(ctx, max(1, len(u.segments)))
+	slot, err := u.signed(ctx, 0, body)
 	if err != nil {
 		return err
 	}
-	if err := u.put(ctx, batch.ManifestURL, batch.ManifestHeaders, batch.ExpiresAt, body); err != nil {
+	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
 		return err
 	}
 	reason := ""

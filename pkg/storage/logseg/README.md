@@ -22,9 +22,9 @@ that stream's final tail grace. `NodeProgress` and `SealGrace` are removed.
 grace constant remains `limits.LogSealGrace`.
 
 `SubjectUploader` verifies compressed bytes, raw size and line coverage before
-signing. Batches contain up to `limits.LogUploadBatch` segment slots and one
-manifest URL. Every URL carries its required signed headers. A batch must
-preserve the subject, retention class, dense indexes and expiry. Failed transfers
+signing. Each segment and the final manifest is signed separately with its
+exact stored size and SHA-256. Every URL carries its required signed headers.
+A slot must preserve the subject, retention class, index and expiry. Failed transfers
 and commits retain the pending payload. A retry cannot substitute different
 bytes under an uncertain immutable write.
 
@@ -34,12 +34,12 @@ The uploader preserves the first final payload across failures and rejects a
 changed final payload. The sink can mark a lost tail incomplete without changing
 the job's result.
 
-`BatchSigner` assembles up to sixteen segment URLs and one manifest URL, all
-with the same fifteen-minute expiry. The controller supplies the run's persisted
-retention class after authorizing its writer. A required callback checks the
-class lifecycle before any URL is signed. The signer copies the subject and
-derives every key from it. `LogPutSigner` returns URLs and headers for both
-`blob.Filesystem` and `blob.S3`. The filesystem backend permits only an identical
+`Signer` signs one segment or manifest URL with a fifteen-minute expiry. The
+controller supplies the run's persisted retention class after authorizing its
+writer. A required callback checks the class lifecycle before any URL is signed.
+The signer copies the subject and derives the key from it. `LogPutSigner`
+returns URLs and headers for both `blob.Filesystem` and `blob.S3`, bound to
+the requested length and digest. The filesystem backend permits only an identical
 retry at an existing key. S3 signs a create-only condition and rejects every
 overwrite. After a transfer error, `SubjectUploader` calls
 `LogTransport.VerifyUpload` with the exact subject, index, stored size and digest.

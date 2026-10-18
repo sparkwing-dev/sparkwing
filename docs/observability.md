@@ -190,8 +190,10 @@ including descendant runs when a tree read is requested.
 The log contract cuts masked segments at the shared size or interval, flushes
 on completion and records a manifest. Signing uses
 `POST /api/v1/claims/{claim}/log-segments` under the current tagged subject and
-claim fence. The controller selects retention class and storage keys. Segment
-PUT URLs grant no read authority.
+claim fence. Each request names one segment or the final manifest with its
+exact stored size and SHA-256, and the signed PUT accepts only those bytes. The
+controller selects retention class and storage keys. Segment PUT URLs grant no
+read authority.
 
 Reads through `GET /api/v1/runs/{run}/logs` and
 `GET /api/v1/runs/{run}/jobs/{job}/logs` reauthorize each page. Live ring gaps

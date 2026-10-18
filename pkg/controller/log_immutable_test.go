@@ -2,6 +2,8 @@ package controller
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"math/rand"
 	"net/http"
@@ -35,12 +37,13 @@ func TestSignedLogKeyCannotBeReplaced(t *testing.T) {
 			t.Log(err)
 			return false
 		}
-		url, _, err := objects.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
-		if err != nil {
-			t.Log(err)
-			return false
-		}
 		put := func(body []byte) int {
+			sum := sha256.Sum256(body)
+			url, _, err := objects.SignLogPut(t.Context(), key, int64(len(body)), blob.Digest(hex.EncodeToString(sum[:])), time.Now().Add(time.Minute))
+			if err != nil {
+				t.Log(err)
+				return 0
+			}
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, httptest.NewRequest(http.MethodPut, url, bytes.NewReader(body)))
 			return w.Code

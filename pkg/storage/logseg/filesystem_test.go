@@ -21,7 +21,7 @@ import (
 )
 
 type logDataFixture struct {
-	signer    logseg.BatchSigner
+	signer    logseg.Signer
 	reader    logseg.CommittedReader
 	view      store.LogSegments
 	commitErr error
@@ -42,7 +42,7 @@ func (f *logDataFixture) VerifyUpload(ctx context.Context, check blob.LogUploadC
 	return (logseg.UploadVerifier{Objects: f.reader.Objects}).Verify(ctx, check, "r90")
 }
 
-func (f *logDataFixture) SignSegments(ctx context.Context, req blob.LogSigningRequest) (blob.LogUploadBatch, error) {
+func (f *logDataFixture) SignUpload(ctx context.Context, req blob.LogSigningRequest) (blob.LogUploadURL, error) {
 	f.signs++
 	return f.signer.Sign(ctx, req, "r90")
 }
@@ -98,7 +98,7 @@ func bindFilesystemLogs(t *testing.T, subject blob.LogSubject) (*logDataFixture,
 	}
 	t.Cleanup(func() { _ = backend.Close() })
 	f := &logDataFixture{view: store.LogSegments{Subject: subject}, actor: store.Actor{Holder: "writer", Generation: 7}}
-	f.signer = logseg.BatchSigner{Objects: backend, ClassReady: func(_ context.Context, class string) error {
+	f.signer = logseg.Signer{Objects: backend, ClassReady: func(_ context.Context, class string) error {
 		if class != "r90" {
 			return errors.New("missing lifecycle rule")
 		}

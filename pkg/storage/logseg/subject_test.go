@@ -29,17 +29,17 @@ type subjectFixture struct {
 	signs                            []blob.LogSigningRequest
 	commits                          []store.SegmentCommit
 	bodies                           map[string][]byte
-	changeBatch                      func(*blob.LogUploadBatch)
+	changeSlot                       func(*blob.LogUploadURL)
 	commitErr, transferErr, closeErr error
 	read                             blob.LogReadRequest
 }
 
 func TestSubjectUploaderSendsSignedHeaders(t *testing.T) {
 	f, data := newSubjectFixture(jobSubject())
-	f.changeBatch = func(batch *blob.LogUploadBatch) {
-		batch.ManifestHeaders = map[string]string{"If-None-Match": "*", "X-Object": "manifest"}
-		for i := range batch.Segments {
-			batch.Segments[i].Headers = map[string]string{"If-None-Match": "*", "X-Object": fmt.Sprint(batch.Segments[i].Index)}
+	f.changeSlot = func(slot *blob.LogUploadURL) {
+		slot.Headers = map[string]string{"If-None-Match": "*", "X-Object": fmt.Sprint(slot.Index)}
+		if slot.Index == 0 {
+			slot.Headers["X-Object"] = "manifest"
 		}
 	}
 	var paths []string
@@ -95,17 +95,16 @@ func newSubjectFixture(subject blob.LogSubject) (*subjectFixture, logseg.Data) {
 	return f, logseg.Data{Subject: subject, Transport: f, HTTPClient: f, Records: f, Actor: store.Actor{Holder: "runner", Generation: 7}}
 }
 
-func (f *subjectFixture) SignSegments(_ context.Context, req blob.LogSigningRequest) (blob.LogUploadBatch, error) {
+func (f *subjectFixture) SignUpload(_ context.Context, req blob.LogSigningRequest) (blob.LogUploadURL, error) {
 	f.signs = append(f.signs, req)
-	b := blob.LogUploadBatch{Subject: req.Subject, ManifestURL: "https://objects.test/manifest", RetentionClass: "r90", ExpiresAt: time.Now().Add(limits.LogUploadURLTTL)}
-	for i := 0; i < req.Count; i++ {
-		index := req.FirstSegment + int64(i)
-		b.Segments = append(b.Segments, blob.LogUploadURL{Index: index, URL: fmt.Sprintf("https://objects.test/segment-%d", index), ExpiresAt: b.ExpiresAt})
+	slot := blob.LogUploadURL{Subject: req.Subject, RetentionClass: "r90", Index: req.Index, URL: fmt.Sprintf("https://objects.test/segment-%d", req.Index), ExpiresAt: time.Now().Add(limits.LogUploadURLTTL)}
+	if req.Index == 0 {
+		slot.URL = "https://objects.test/manifest"
 	}
-	if f.changeBatch != nil {
-		f.changeBatch(&b)
+	if f.changeSlot != nil {
+		f.changeSlot(&slot)
 	}
-	return b, nil
+	return slot, nil
 }
 
 func (f *subjectFixture) RecordSegments(_ context.Context, c store.SegmentCommit) error {
@@ -168,7 +167,7 @@ func TestSubjectUploaderCommitsTaggedSegments(t *testing.T) {
 			}
 			var segments []logseg.Segment
 			var offset int64
-			for i := 1; i <= limits.LogUploadBatch+1; i++ {
+			for i := 1; i <= 17; i++ {
 				seg, body := subjectSegment(t, i, "line\n")
 				if err := u.PutSegment(t.Context(), seg, body); err != nil {
 					t.Fatal(err)
@@ -184,8 +183,18 @@ func TestSubjectUploaderCommitsTaggedSegments(t *testing.T) {
 			if err := u.PutManifest(t.Context(), m); err != nil {
 				t.Fatal(err)
 			}
-			if len(f.signs) != 2 || f.signs[0].FirstSegment != 1 || f.signs[1].FirstSegment != 17 || f.signs[0].Count != 16 {
+			if len(f.signs) != 18 {
 				t.Fatalf("signing = %+v", f.signs)
+			}
+			for i, sign := range f.signs {
+				body := f.bodies[fmt.Sprintf("https://objects.test/segment-%d", i+1)]
+				if i == 17 {
+					body = f.bodies["https://objects.test/manifest"]
+				}
+				sum := sha256.Sum256(body)
+				if sign.Index != int64((i+1)%18) || sign.Size != int64(len(body)) || string(sign.Digest) != hex.EncodeToString(sum[:]) {
+					t.Fatalf("signing %d = %+v; stored %d bytes", i, sign, len(body))
+				}
 			}
 			last := f.commits[len(f.commits)-1]
 			if !last.Final || last.IncompleteReason != "" || len(last.Segments) != 17 || last.RetentionClass != "r90" {
@@ -201,19 +210,16 @@ func TestSubjectUploaderCommitsTaggedSegments(t *testing.T) {
 	}
 }
 
-func TestSubjectUploaderRejectsSubstitutedBatch(t *testing.T) {
-	for name, change := range map[string]func(*blob.LogUploadBatch){
-		"subject":       func(b *blob.LogUploadBatch) { b.Subject = ownerSubject(blob.LogPlan) },
-		"count":         func(b *blob.LogUploadBatch) { b.Segments = b.Segments[:1] },
-		"index":         func(b *blob.LogUploadBatch) { b.Segments[1].Index++ },
-		"manifest":      func(b *blob.LogUploadBatch) { b.ManifestURL = "" },
-		"expired":       func(b *blob.LogUploadBatch) { b.ExpiresAt = time.Time{} },
-		"expired_slot":  func(b *blob.LogUploadBatch) { b.Segments[0].ExpiresAt = time.Time{} },
-		"duplicate_url": func(b *blob.LogUploadBatch) { b.Segments[1].URL = b.Segments[0].URL },
+func TestSubjectUploaderRejectsSubstitutedSlot(t *testing.T) {
+	for name, change := range map[string]func(*blob.LogUploadURL){
+		"subject":   func(b *blob.LogUploadURL) { b.Subject = ownerSubject(blob.LogPlan) },
+		"index":     func(b *blob.LogUploadURL) { b.Index++ },
+		"url":       func(b *blob.LogUploadURL) { b.URL = "" },
+		"expired":   func(b *blob.LogUploadURL) { b.ExpiresAt = time.Time{} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, data := newSubjectFixture(jobSubject())
-			f.changeBatch = change
+			f.changeSlot = change
 			u, err := logseg.NewSubjectUploader(data)
 			if err != nil {
 				t.Fatal(err)
@@ -375,7 +381,7 @@ func TestSubjectUploaderPinsIdentityAndRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	data.Subject.Attempt.Generation++
-	for i := 1; i <= limits.LogUploadBatch; i++ {
+	for i := 1; i <= 16; i++ {
 		seg, body := subjectSegment(t, i, "line\n")
 		if err := u.PutSegment(t.Context(), seg, body); err != nil {
 			t.Fatal(err)
@@ -384,9 +390,9 @@ func TestSubjectUploaderPinsIdentityAndRetention(t *testing.T) {
 	if !reflect.DeepEqual(f.signs[0].Subject, jobSubject()) {
 		t.Fatal("caller changed the upload identity")
 	}
-	f.changeBatch = func(b *blob.LogUploadBatch) { b.RetentionClass = "r30" }
-	seg, body := subjectSegment(t, limits.LogUploadBatch+1, "line\n")
-	if err := u.PutSegment(t.Context(), seg, body); !errors.Is(err, blob.ErrIntegrity) || len(f.commits) != limits.LogUploadBatch {
+	f.changeSlot = func(b *blob.LogUploadURL) { b.RetentionClass = "r30" }
+	seg, body := subjectSegment(t, 17, "line\n")
+	if err := u.PutSegment(t.Context(), seg, body); !errors.Is(err, blob.ErrIntegrity) || len(f.commits) != 16 {
 		t.Fatalf("retention change = %v", err)
 	}
 }
@@ -583,12 +589,7 @@ func TestSubjectUploaderSerializesExactReplays(t *testing.T) {
 
 func TestSubjectUploaderAcceptsControllerClockAhead(t *testing.T) {
 	f, data := newSubjectFixture(jobSubject())
-	f.changeBatch = func(b *blob.LogUploadBatch) {
-		b.ExpiresAt = b.ExpiresAt.Add(time.Second)
-		for i := range b.Segments {
-			b.Segments[i].ExpiresAt = b.ExpiresAt
-		}
-	}
+	f.changeSlot = func(b *blob.LogUploadURL) { b.ExpiresAt = b.ExpiresAt.Add(time.Second) }
 	u, err := logseg.NewSubjectUploader(data)
 	if err != nil {
 		t.Fatal(err)

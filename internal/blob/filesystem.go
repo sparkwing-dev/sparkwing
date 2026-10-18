@@ -142,11 +142,7 @@ func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if object.Method == http.MethodPut {
-		put := f.put
-		if strings.HasPrefix(object.Key, "logs/") {
-			put = f.putLog
-		}
-		if err := put(r, object); err != nil {
+		if err := f.put(r, object); err != nil {
 			apierr.NoteResponseError(w, err)
 			code := apierr.Internal
 			if errors.Is(err, ErrIntegrity) {

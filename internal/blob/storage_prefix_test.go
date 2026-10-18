@@ -44,7 +44,7 @@ func FuzzS3StoragePrefix(f *testing.F) {
 				check(signed.URL)
 			}
 		}
-		if raw, _, err := backend.SignLogPut(t.Context(), key, time.Now().Add(time.Minute)); err == nil {
+		if raw, _, err := backend.SignLogPut(t.Context(), key, 7, digest("payload"), time.Now().Add(time.Minute)); err == nil {
 			check(raw)
 		}
 	})

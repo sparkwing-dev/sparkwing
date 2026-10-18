@@ -57,6 +57,4 @@ const (
 	LogSearchBytes int64 = 256 << 20
 	// ProtocolEnvelopeBytes bounds envelope allowance beyond a typed output payload.
 	ProtocolEnvelopeBytes int64 = 1 << 20
-	// LogUploadBatch bounds segment URLs per signing batch, plus manifest URL.
-	LogUploadBatch int = 16
 )

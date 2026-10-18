@@ -44,7 +44,7 @@ type storageLogTransport struct {
 	checks  int
 }
 
-func (s *storageLogTransport) SignSegments(ctx context.Context, q blob.LogSigningRequest) (blob.LogUploadBatch, error) {
+func (s *storageLogTransport) SignUpload(ctx context.Context, q blob.LogSigningRequest) (blob.LogUploadURL, error) {
 	s.signs++
 	ready := func(context.Context, string) error { return nil }
 	if objects, ok := s.objects.(interface {
@@ -52,7 +52,7 @@ func (s *storageLogTransport) SignSegments(ctx context.Context, q blob.LogSignin
 	}); ok {
 		ready = objects.LogClassReady
 	}
-	return (logseg.BatchSigner{Objects: s.objects, ClassReady: ready}).Sign(ctx, q, s.class)
+	return (logseg.Signer{Objects: s.objects, ClassReady: ready}).Sign(ctx, q, s.class)
 }
 
 func (s *storageLogTransport) VerifyUpload(ctx context.Context, q blob.LogUploadCheck) error {
@@ -131,7 +131,7 @@ func checkStorageLogRoundTrip(t *testing.T, objects storageLogObjects, transport
 	if err := uploader.PutManifest(t.Context(), manifest); err != nil {
 		t.Fatal(err)
 	}
-	if signing.signs != 1 || (lost && signing.checks != 3) || (!lost && signing.checks != 0) {
+	if signing.signs != 3 || (lost && signing.checks != 3) || (!lost && signing.checks != 0) {
 		return false
 	}
 	persisted, records := reopen()

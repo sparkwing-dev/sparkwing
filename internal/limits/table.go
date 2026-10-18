@@ -91,7 +91,6 @@ func Table() []Limit {
 		{Name: "LogSegmentBytes", Value: LogSegmentBytes, Class: Internal, Doc: "Log segment cut size.", Refusal: "Flush at size or interval."},
 		{Name: "LogSearchBytes", Value: LogSearchBytes, Class: Internal, Doc: "Run-scoped log search bytes.", Refusal: "Stop at bound."},
 		{Name: "ProtocolEnvelopeBytes", Value: ProtocolEnvelopeBytes, Class: Internal, Doc: "Envelope allowance beyond a typed output payload.", Refusal: "Refuse oversized protocol frame."},
-		{Name: "LogUploadBatch", Value: LogUploadBatch, Class: Internal, Doc: "Segment URLs per signing batch, plus manifest URL.", Refusal: "Request another batch."},
 		{Name: "DefaultLease", Value: DefaultLease, Class: Operator, Doc: "Default work lease.", Refusal: "Validate renewal configuration; never silently default invalid values."},
 		{Name: "MaxLease", Value: MaxLease, Class: Operator, Doc: "Maximum lease, bounded by claim expiry.", Refusal: "Validate renewal configuration; never silently default invalid values."},
 		{Name: "ClaimPoll", Value: ClaimPoll, Class: Operator, Doc: "Idle claim-loop poll.", Refusal: "Validate renewal configuration; never silently default invalid values."},

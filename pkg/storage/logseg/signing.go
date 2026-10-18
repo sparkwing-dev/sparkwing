@@ -9,61 +9,54 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// LogPutSigner issues PUT-only URLs and their required headers to server-derived
-// log keys. Existing bytes must be preserved. A precondition failure grants no
+// LogPutSigner issues PUT-only URLs bound to exact bytes and their required
+// headers. Existing bytes must be preserved. A precondition failure grants no
 // proof that the object matches the retried payload.
 type LogPutSigner interface {
-	SignLogPut(context.Context, string, time.Time) (string, map[string]string, error)
+	SignLogPut(ctx context.Context, key string, size int64, digest blob.Digest, expiry time.Time) (string, map[string]string, error)
 }
 
-// BatchSigner assembles storage URLs after controller authorization. ClassReady
+// Signer assembles one storage URL after controller authorization. ClassReady
 // checks the backend lifecycle rule; the caller supplies the run's persisted
 // retention class. Now defaults to time.Now.
-type BatchSigner struct {
+type Signer struct {
 	Objects    LogPutSigner
 	ClassReady func(context.Context, string) error
 	Now        func() time.Time
 }
 
-// Sign returns dense immutable segment slots and one final-manifest slot. It
-// neither authenticates a writer nor selects retention from current standing.
-func (s BatchSigner) Sign(ctx context.Context, request blob.LogSigningRequest, class string) (blob.LogUploadBatch, error) {
+// Sign returns one immutable segment or final-manifest slot for the requested
+// bytes. It neither authenticates a writer nor selects retention from current standing.
+func (s Signer) Sign(ctx context.Context, request blob.LogSigningRequest, class string) (blob.LogUploadURL, error) {
 	if err := ctx.Err(); err != nil {
-		return blob.LogUploadBatch{}, err
+		return blob.LogUploadURL{}, err
 	}
 	if s.Objects == nil || s.ClassReady == nil {
-		return blob.LogUploadBatch{}, fmt.Errorf("logseg: batch signing requires objects and lifecycle validation")
+		return blob.LogUploadURL{}, fmt.Errorf("logseg: signing requires objects and lifecycle validation")
 	}
-	if request.FirstSegment < 1 || request.FirstSegment > int64(limits.MaxLogSegmentNumber) || request.Count < 1 || request.Count > limits.LogUploadBatch || int64(request.Count)-1 > int64(limits.MaxLogSegmentNumber)-request.FirstSegment {
-		return blob.LogUploadBatch{}, fmt.Errorf("logseg: invalid segment signing range")
+	if request.Index < 0 || request.Index > int64(limits.MaxLogSegmentNumber) {
+		return blob.LogUploadURL{}, fmt.Errorf("logseg: invalid segment index")
 	}
 	subject := cloneSubject(request.Subject)
 	prefix, err := blob.LogSubjectPrefix(class, subject)
 	if err != nil {
-		return blob.LogUploadBatch{}, err
+		return blob.LogUploadURL{}, err
 	}
 	if err := s.ClassReady(ctx, class); err != nil {
-		return blob.LogUploadBatch{}, err
+		return blob.LogUploadURL{}, err
 	}
 	now := time.Now
 	if s.Now != nil {
 		now = s.Now
 	}
-	batch := blob.LogUploadBatch{Subject: subject, RetentionClass: class, ExpiresAt: now().Add(limits.LogUploadURLTTL)}
-	for i := range request.Count {
-		if err := ctx.Err(); err != nil {
-			return blob.LogUploadBatch{}, err
-		}
-		index := request.FirstSegment + int64(i)
-		u, headers, err := s.Objects.SignLogPut(ctx, blob.LogSegmentKey(prefix, int(index)), batch.ExpiresAt)
-		if err != nil {
-			return blob.LogUploadBatch{}, err
-		}
-		batch.Segments = append(batch.Segments, blob.LogUploadURL{Index: index, URL: u, Headers: headers, ExpiresAt: batch.ExpiresAt})
+	key := blob.LogManifestKey(prefix)
+	if request.Index > 0 {
+		key = blob.LogSegmentKey(prefix, int(request.Index))
 	}
-	batch.ManifestURL, batch.ManifestHeaders, err = s.Objects.SignLogPut(ctx, blob.LogManifestKey(prefix), batch.ExpiresAt)
+	slot := blob.LogUploadURL{Subject: subject, RetentionClass: class, Index: request.Index, ExpiresAt: now().Add(limits.LogUploadURLTTL)}
+	slot.URL, slot.Headers, err = s.Objects.SignLogPut(ctx, key, request.Size, request.Digest, slot.ExpiresAt)
 	if err != nil {
-		return blob.LogUploadBatch{}, err
+		return blob.LogUploadURL{}, err
 	}
-	return batch, nil
+	return slot, nil
 }

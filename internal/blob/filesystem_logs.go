@@ -1,10 +1,7 @@
 package blob
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,18 +16,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// SignLogPut signs a bounded PUT to one server-derived log key. Writer authority
-// and the run's retention lifecycle must be checked before calling it. Unlike
-// data uploads, future batch slots have no known digest or length at signing.
-func (f *Filesystem) SignLogPut(ctx context.Context, key string, expiry time.Time) (string, map[string]string, error) {
+// SignLogPut signs a PUT of exact bytes to one server-derived log key. Writer
+// authority and the run's retention lifecycle must be checked before calling it.
+func (f *Filesystem) SignLogPut(ctx context.Context, key string, size int64, digest Digest, expiry time.Time) (string, map[string]string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}
-	limit, err := logObjectLimit(key)
-	if err != nil {
-		return "", nil, err
-	}
-	object := capability.ObjectToSign{Method: http.MethodPut, Key: key, Size: limit, ExpiresAt: expiry}
+	object := capability.ObjectToSign{Method: http.MethodPut, Key: key, Size: size, SHA256: string(digest), ExpiresAt: expiry}
 	if err := validateFilesystemLog(object, f.now()); err != nil {
 		return "", nil, err
 	}
@@ -61,35 +53,25 @@ func logObjectLimit(key string) (int64, error) {
 	return limits.LogSegmentUploadBytes, nil
 }
 
-func validateFilesystemLog(object capability.ObjectToSign, now time.Time) error {
-	limit, err := logObjectLimit(object.Key)
+func validLogPayload(key string, size int64, digest Digest) error {
+	limit, err := logObjectLimit(key)
 	if err != nil {
 		return err
 	}
-	if object.Method != http.MethodPut || object.SHA256 != "" || object.Size != limit || !object.ExpiresAt.After(now) || object.ExpiresAt.Sub(now) > limits.LogUploadURLTTL {
-		return fmt.Errorf("invalid signed log PUT")
+	if size < 1 || size > limit || !validDigest(digest) {
+		return fmt.Errorf("invalid log upload size or digest")
 	}
 	return nil
 }
 
-func (f *Filesystem) putLog(r *http.Request, object capability.ObjectToSign) error {
-	if r.ContentLength > object.Size {
-		return ErrIntegrity
-	}
-	raw, err := io.ReadAll(io.LimitReader(&contextReader{ctx: r.Context(), reader: r.Body}, object.Size+1))
-	if err != nil {
+func validateFilesystemLog(object capability.ObjectToSign, now time.Time) error {
+	if err := validLogPayload(object.Key, object.Size, Digest(object.SHA256)); err != nil {
 		return err
 	}
-	if int64(len(raw)) > object.Size || (r.ContentLength >= 0 && r.ContentLength != int64(len(raw))) {
-		return ErrIntegrity
+	if object.Method != http.MethodPut || !object.ExpiresAt.After(now) || object.ExpiresAt.Sub(now) > limits.LogUploadURLTTL {
+		return fmt.Errorf("invalid signed log PUT")
 	}
-	sum := sha256.Sum256(raw)
-	object.Size, object.SHA256 = int64(len(raw)), hex.EncodeToString(sum[:])
-	upload := r.Clone(r.Context())
-	upload.Body, upload.ContentLength = io.NopCloser(bytes.NewReader(raw)), object.Size
-	// safety: the CAS writer links once and verifies an existing object, so a
-	// retried signed slot cannot replace a committed segment or final manifest.
-	return f.put(upload, object)
+	return nil
 }
 
 // Get opens a log object for an authorized controller read. It grants no signed
