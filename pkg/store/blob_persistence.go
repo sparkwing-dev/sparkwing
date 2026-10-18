@@ -17,11 +17,11 @@ import (
 )
 
 func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blobActor, intent blob.UploadIntent, accounting blobAccounting) (blob.Receipt, error) {
-	quotas, err := lockBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting)
-	if err != nil {
+	if err := advisoryLockTx(ctx, tx, "blob:"+string(team)+":"+string(intent.Digest)); err != nil {
 		return blob.Receipt{}, err
 	}
-	if err := advisoryLockTx(ctx, tx, "blob:"+string(team)+":"+string(intent.Digest)); err != nil {
+	quotas, err := lockBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting)
+	if err != nil {
 		return blob.Receipt{}, err
 	}
 	if quotas[0].state == "committed" {
@@ -49,7 +49,7 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 	if err != nil {
 		return blob.Receipt{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", team, intent.Digest); err != nil {
+	if err := clearBlobTombstoneTx(ctx, tx, team, intent.Digest); err != nil {
 		return blob.Receipt{}, err
 	}
 	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quotas, intent.Size*objects, objects); err != nil {
@@ -315,7 +315,7 @@ func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.
 	if size != object.Size {
 		return 0, blob.ErrIntegrity
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", team, object.Digest); err != nil {
+	if err := clearBlobTombstoneTx(ctx, tx, team, object.Digest); err != nil {
 		return 0, err
 	}
 	return objects, nil

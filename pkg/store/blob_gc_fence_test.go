@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -12,6 +13,43 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
+
+func TestBlobGCRechecksLeaseImmediatelyBeforeDeletion(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	s.db.SetMaxOpenConns(2)
+	now := time.Unix(1_800_000_000, 0).UTC()
+	s.clock = func() time.Time { return now }
+	op := s.AsOperator()
+	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "collector", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('gc',1,1)")
+	rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('gc',?,3,1)", digest)
+	rewriteSchemaExec(t, s.db, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES ('gc',?,?)", digest, now.Add(-limits.BlobGCGrace).UnixNano())
+	s.clock = func() time.Time {
+		var collecting int
+		if err := s.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM blob_tombstones WHERE collecting_at IS NOT NULL").Scan(&collecting); err != nil {
+			t.Fatal(err)
+		}
+		if collecting > 0 {
+			return lease.ExpiresAt
+		}
+		return now
+	}
+	calls := 0
+	deleter := blobDeleteFunc(func(context.Context, blob.Blob) error { calls++; return nil })
+	removed, err := op.CollectBlobTombstones(t.Context(), lease, 10, deleter)
+	if removed != 0 || !errors.Is(err, ErrLockHeld) || calls != 0 {
+		t.Fatalf("expired collector: removed=%d deletes=%d error=%v", removed, calls, err)
+	}
+	rewriteSchemaCount(t, s.db, "blobs", 1)
+}
 
 func TestBlobGCCollectionRequiresCurrentFenceProperty(t *testing.T) {
 	for _, inventory := range []string{"empty", "grace", "ready"} {

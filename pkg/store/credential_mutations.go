@@ -12,10 +12,10 @@ import (
 
 func (t *Tenant) mutateCredentials(ctx context.Context, a capability.Authorized, write func(*storeTx, string) error) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
+		if err := t.lockTeamTx(ctx, tx); err != nil {
 			return err
 		}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
+		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 			return err
 		}
 		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)

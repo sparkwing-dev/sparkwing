@@ -22,7 +22,7 @@ func (t *Tenant) credentialAdminTx(ctx context.Context, tx *storeTx, a capabilit
 	return nil
 }
 
-// RotateCredentials commits one tenant's secret and source-credential value changes together.
+// RotateCredentials commits one tenant's secret and source-credential value changes together; a retried transaction reruns the transforms.
 func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (string, error), git func(GitCredential) (string, error)) (int, int, error) {
 	if secret == nil || git == nil {
 		return 0, 0, authorityError(apierr.BadRequest, "credential transforms are required")
@@ -30,10 +30,10 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 	var secrets []Secret
 	var credentials []GitCredential
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
+		if err := t.lockTeamTx(ctx, tx); err != nil {
 			return err
 		}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
+		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 			return err
 		}
 		var err error

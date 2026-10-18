@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"slices"
 	"time"
 
@@ -139,6 +140,9 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 	if err != nil {
 		return awardRow{}, err
 	}
+	if err := lockUnitsTx(ctx, tx, []UnitRef{unit}); err != nil {
+		return awardRow{}, err
+	}
 	row := awardRow{run: unit.RunID, node: unit.NodeID}
 	switch spec.Unit {
 	case capability.UnitTrigger, capability.UnitPlan:
@@ -155,7 +159,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 	}
 	var status string
 	var runCancel sql.NullInt64
-	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,repo_display,git_branch,git_sha,request_json FROM runs WHERE team = ? AND id = ?"+tx.forShare(), row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.display, &row.ref, &row.sha, &row.request)
+	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,repo_display,git_branch,git_sha,request_json FROM runs WHERE team = ? AND id = ?", row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.display, &row.ref, &row.sha, &row.request)
 	if err != nil {
 		return row, err
 	}
@@ -169,6 +173,59 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 		}
 	}
 	return row, nil
+}
+
+// safety: owners (triggers, then evaluations), then all runs, then all jobs, each in key order;
+// see STORE-DATA.md lock order.
+func lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRef) error {
+	type lock struct {
+		tier       storeLockTier
+		team, run  string
+		node       string
+		generation int64
+	}
+	var locks []lock
+	for _, unit := range units {
+		var team string
+		err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		locks = append(locks, lock{tier: lockRun, team: team, run: unit.RunID})
+		switch unit.Kind {
+		case capability.UnitTrigger, capability.UnitPlan:
+			locks = append(locks, lock{tier: lockTrigger, team: team, run: unit.RunID})
+		case capability.UnitEval:
+			locks = append(locks, lock{lockEval, team, unit.RunID, unit.NodeID, unit.SourceGeneration})
+		case capability.UnitNode:
+			locks = append(locks, lock{tier: lockNode, team: team, run: unit.RunID, node: unit.NodeID})
+		}
+	}
+	compare := func(a, b lock) int {
+		return compareStoreLocks(storeLockKey{tier: a.tier, keys: [3]string{a.team, a.run, a.node}, generation: a.generation}, storeLockKey{tier: b.tier, keys: [3]string{b.team, b.run, b.node}, generation: b.generation})
+	}
+	slices.SortFunc(locks, compare)
+	var held string
+	for _, l := range slices.Compact(locks) {
+		var err error
+		switch l.tier {
+		case lockTrigger:
+			err = tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), l.team, l.run).Scan(&held)
+		case lockEval:
+			err = tx.QueryRowContext(ctx, `SELECT run_id FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), l.team, l.run, l.node, l.generation).Scan(&held)
+		case lockRun:
+			err = tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND id=?`+tx.forNoKeyUpdate(), l.team, l.run).Scan(&held)
+		default:
+			err = tx.QueryRowContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? AND node_id=?`+tx.forUpdate(), l.team, l.run, l.node).Scan(&held)
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
 }
 
 func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec, prospective *awardRow) (capability.Capability, error) {
@@ -349,6 +406,9 @@ func awardDataScope(row awardRow, c capability.Capability) *capability.DataScope
 
 func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ExchangeSpec) (capability.Capability, error) {
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: spec.BootstrapPrefix}
+	if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
+		return capability.Capability{}, err
+	}
 	p, err := tx.ResolveAuthority(ctx, ref)
 	if err != nil {
 		return capability.Capability{}, err

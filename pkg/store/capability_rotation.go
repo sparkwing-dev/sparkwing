@@ -27,6 +27,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 	}
 	var out capability.Rotation
 	err := s.inTx(ctx, func(tx *storeTx) error {
+		expires := expires
 		var prefix string
 		if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=? AND COALESCE(team,'')=?`+tx.forUpdate(), a.Target.TokenPrefix, team).Scan(&prefix); err != nil {
 			return err

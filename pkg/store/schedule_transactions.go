@@ -184,6 +184,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 	}
 	var ids, withdrawn []string
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		ids, withdrawn = ids[:0], withdrawn[:0]
 		p, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
 		if err != nil {
 			return err
@@ -415,6 +416,7 @@ func deleteScheduleTx(ctx context.Context, tx *storeTx, team Team, id string) er
 func (t *Tenant) DeleteAuthorizedSchedules(ctx context.Context, a capability.Authorized, repo string) (int, error) {
 	count := 0
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		count = 0
 		if a.Target.Team != string(t.team) {
 			return bindingRefusal()
 		}

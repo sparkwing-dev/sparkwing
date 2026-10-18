@@ -13,6 +13,9 @@ import (
 func (t *Tenant) RenewNodeClaim(ctx context.Context, ref NodeRef, actor Actor) (LeaseBeat, error) {
 	var beat LeaseBeat
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockActorTx(ctx, tx, actor); err != nil {
+			return err
+		}
 		return t.renewNodeClaimTx(ctx, tx, ref, actor, &beat)
 	})
 	return beat, err
@@ -71,6 +74,9 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref NodeRef,
 func (t *Tenant) RenewOwner(ctx context.Context, actor Actor) (LeaseBeat, error) {
 	var beat LeaseBeat
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockActorTx(ctx, tx, actor); err != nil {
+			return err
+		}
 		return t.renewOwnerTx(ctx, tx, actor, &beat)
 	})
 	return beat, err
@@ -152,6 +158,13 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 		return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 	}
 	return nil
+}
+
+func lockActorTx(ctx context.Context, tx *storeTx, actor Actor) error {
+	if actor.CapabilityPrefix == "" {
+		return nil
+	}
+	return lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority}, actor.CapabilityPrefix)
 }
 
 func boundedClaimExpiryTx(ctx context.Context, tx *storeTx, actor Actor, now time.Time) (time.Time, error) {

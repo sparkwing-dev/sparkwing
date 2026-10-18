@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **store:** Read completion batches and runner observations without nested database clock queries on PostgreSQL.
+- **controller (Breaking):** Remove the unused Argon2 verifier and its `--argon2-memory-budget-mb` flag and chart value. Remove the obsolete raw-run secret-input validator and trigger sweep lookup. See [migration](docs/migrations/_unreleased.md#retired-token-verifier).
+
 - **runs (Breaking):** Seal environment provenance independently of invocation origin. Children inherit their parent's captured or submitted environment. Request producers with nonempty environments set `environment_source`. See [migration](docs/migrations/_unreleased.md#environment-and-source-selections).
 - **cli:** Select configured SDK entrypoints in inspection, planning and scaffolds. Resolve `--sw-ref` and `--sw-pipeline-ref` before engine selection and retain the chosen revisions through sealing and retry.
 

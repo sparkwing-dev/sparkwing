@@ -37,11 +37,6 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 		if generation != claim.Award.Generation {
 			return holderRefusal()
 		}
-		if claim.Kind == capability.UnitNode {
-			if err := lockStateRunTx(ctx, tx, claim.Team, claim.RunID); err != nil {
-				return err
-			}
-		}
 		row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
 		if err != nil {
 			return err
@@ -64,9 +59,6 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 			}
 			actor := Actor{Kind: ActorHolder, Authority: ref, CapabilityPrefix: prefix, Holder: claim.Award.Holder, Generation: generation}
 			_, err = transitionNodeTx(ctx, tx, claim.Team, NodeTransition{Ref: node.Ref, To: NodePending, Cause: CauseRelease, Actor: actor, SourceAttempt: &node.Attempt}, now)
-			return err
-		}
-		if err := lockStateRunTx(ctx, tx, claim.Team, claim.RunID); err != nil {
 			return err
 		}
 		return releaseOwnerUnitTx(ctx, tx, claim, unit)

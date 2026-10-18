@@ -90,7 +90,7 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 		}
 	}
 	for _, digest := range digests {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", r.tenant.team, digest); err != nil {
+		if err := clearBlobTombstoneTx(ctx, tx, r.tenant.team, digest); err != nil {
 			return nil, err
 		}
 	}

@@ -16,9 +16,10 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"releaseExpiredBlobUploadQuotasTx": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
-	"revokeSetupAuthorityTx":           "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
-	"launcherReservationAwardTx":       "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
+	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
+	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
+	"revokeSetupAuthorityTx":                "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
+	"launcherAwardPrefixTx":                 "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
 	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
 	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
@@ -34,7 +35,7 @@ var reviewedUnscopedSQL = map[string]string{
 
 	"refundableBillingSecondsTx":        "the deployment credit sampler totals unsettled awards across teams from their immutable billing records",
 	"(*Operator).CollectBlobTombstones": "the elected blob collector visits expired tombstones across teams and deletes each exact tenant digest",
-	"(*Operator).maintainRetention":     "the elected maintenance pass counts retained pins and records across all teams",
+	"maintainRetentionTx":               "the elected maintenance pass counts retained pins and records across all teams",
 	"deleteRetentionRecordsTx":          "the elected maintenance pass selects expired records across teams and deletes exact tenant record keys",
 
 	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
@@ -42,7 +43,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
 	"advanceAuthGenerationsTx":            "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
-	"lockClaimantTx":                      "the claimant's globally unique capability prefix is locked before authority resolution, so its award stamp cannot invert lock order",
+	"lockAuthorityTx":                     "globally unique capability prefixes and session hashes are locked before authority resolution reads their teams",
+	"lockUnitsTx":                         "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"readMatchingInputsTx":                "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
@@ -73,7 +75,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).lookupSession":           "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
 	"(*Store).DeleteSession":           "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Store).mintCSRFKey":             "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
-	"(*Store).resolveSignInOnce":       "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
+	"resolveSignInTx":                  "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"approveOneTx":                     "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
@@ -103,8 +105,6 @@ var reviewedUnscopedSQL = map[string]string{
 
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
-	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +
-		"through that team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",
