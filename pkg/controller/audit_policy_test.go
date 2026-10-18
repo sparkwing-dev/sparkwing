@@ -22,7 +22,6 @@ func TestUnmatchedRouteLogsSanitizedPathProperty(t *testing.T) {
 	handler := s.HTTP().API
 	property := func(input []byte, write bool) bool {
 		secret := "private-" + hex.EncodeToString(input)
-		s.masker.Register(secret)
 		method, message := "GET", "http"
 		if write {
 			method, message = "POST", "audit"
@@ -37,7 +36,9 @@ func TestUnmatchedRouteLogsSanitizedPathProperty(t *testing.T) {
 		} {
 			logs.Reset()
 			w := httptest.NewRecorder()
-			r := httptest.NewRequest(method, tc.path+"?token="+secret, nil)
+			ctx, masker := withRequestMasker(context.Background())
+			masker.Register(secret)
+			r := httptest.NewRequest(method, tc.path+"?token="+secret, nil).WithContext(ctx)
 			r.Header.Set("Authorization", "Bearer "+secret)
 			handler.ServeHTTP(w, r)
 			records := auditLines(t, &logs, message)

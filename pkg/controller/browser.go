@@ -88,7 +88,7 @@ func (s *Server) signInRoutes(mux *registeredMux) {
 // refused sign-in or a logout leaves the trail docs/security.md promises; the API chain logs itself.
 func (s *Server) logged(mux *http.ServeMux) http.Handler {
 	return otelutil.WrapHandler("sparkwing-controller",
-		withRequestLog(mux, s.logger, muxRouteLabeler(mux), ratelimit.ClientIP, s.masker))
+		withRequestLog(mux, s.logger, muxRouteLabeler(mux), ratelimit.ClientIP))
 }
 
 // safety: the API owns every route it registers outside /api/ (webhooks, metrics, OIDC discovery and the internal

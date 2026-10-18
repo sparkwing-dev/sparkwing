@@ -29,9 +29,9 @@ func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
 			for _, path := range []string{"policy", "legacy", "internal", "encoded", "typed", "browser", "status", "panic"} {
 				var logs bytes.Buffer
 				server := New(nil, slog.New(slog.NewJSONHandler(&logs, nil)))
-				server.masker.Register(secret)
 				cause := errors.New("database unavailable: " + form)
 				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requestMasker(r.Context()).Register(secret)
 					switch path {
 					case "policy":
 						writePolicyError(w, cause)
@@ -52,7 +52,7 @@ func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
 						panic(cause)
 					}
 				})
-				observed := withRequestLog(handler, server.logger, func(*http.Request) string { return "/api/v1/runs/{run}/plan" }, func(*http.Request) string { return "" }, server.masker)
+				observed := withRequestLog(handler, server.logger, func(*http.Request) string { return "/api/v1/runs/{run}/plan" }, func(*http.Request) string { return "" })
 				req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/private-path/plan", nil)
 				req.Header.Set(RequestIDHeader, "request-123")
 				out := httptest.NewRecorder()
@@ -111,8 +111,9 @@ func TestSignedUploadFailureLogsMaskedCauseOnceProperty(t *testing.T) {
 		}
 		var logs bytes.Buffer
 		server := New(nil, slog.New(slog.NewJSONHandler(&logs, nil))).WithDataObjects(objects)
-		server.masker.Register(secret)
-		req := httptest.NewRequest("PUT", signed.URL, failingUploadBody{errors.New("upload read: " + secret)})
+		ctx, masker := withRequestMasker(t.Context())
+		masker.Register(secret)
+		req := httptest.NewRequest("PUT", signed.URL, failingUploadBody{errors.New("upload read: " + secret)}).WithContext(ctx)
 		req.Header.Set(RequestIDHeader, "upload-request")
 		out := httptest.NewRecorder()
 		server.Handler().ServeHTTP(out, req)

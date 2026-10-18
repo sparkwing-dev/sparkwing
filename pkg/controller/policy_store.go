@@ -64,7 +64,6 @@ func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation
 	if capability.DeploymentAuthority(authenticated.Principal) && !a.server.deploymentBearerEligible() && slices.ContainsFunc(route.Access, func(rule capability.AccessRule) bool { return rule.Credential == capability.CredentialDeployment }) {
 		return capability.Authenticated{}, sessionUnavailable()
 	}
-	a.server.masker.Register(presentation.Raw)
 	return authenticated, nil
 }
 
