@@ -57,7 +57,8 @@ func NewFileEnvironmentSnapshots(directory string) (*FileEnvironmentSnapshots, e
 
 const snapshotSaltKeyName = "salt.key"
 
-// safety: the salt derives from a host-private key so equal local inputs keep one identity without a reader-testable digest.
+// safety: the salt derives from a host-private key, so equal local inputs keep one identity
+// while readers of the run cannot test guesses against its digest.
 func loadSnapshotSaltKey(directory string) ([]byte, error) {
 	path := filepath.Join(directory, snapshotSaltKeyName)
 	if key, err := readSnapshotSaltKey(path); !errors.Is(err, fs.ErrNotExist) {

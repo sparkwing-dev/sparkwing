@@ -187,7 +187,8 @@ func readKeyFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-// safety: a key others can read opens every sealed value, so only the local file is held to owner-only; mounted service credentials keep fssecure's policy.
+// safety: a readable key opens every sealed value; only this local file is held to owner-only,
+// while mounted service credentials keep fssecure's policy.
 func ownerOnlyKey(f *os.File, path string) error {
 	if runtime.GOOS == "windows" {
 		return nil

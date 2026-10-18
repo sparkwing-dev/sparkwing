@@ -36,7 +36,6 @@ type sealedRotationTx struct {
 	out    SealedRotation
 }
 
-// reseal opens envelope under any configured key and seals it under the current one; ok is false when nothing opens it.
 func (r *sealedRotationTx) reseal(purpose secrets.Purpose, team Team, name, scope string, shared, masked bool, envelope string) (string, bool, error) {
 	plain, err := r.cipher.OpenBound(purpose, string(team), name, scope, shared, masked, envelope)
 	if errors.Is(err, secrets.ErrKeyRefused) {
