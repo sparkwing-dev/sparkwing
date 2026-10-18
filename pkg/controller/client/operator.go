@@ -66,6 +66,15 @@ func (c *engineClient) ResetObjectStoreBreaker(ctx context.Context, key string) 
 	return out, err
 }
 
+func (c *engineClient) RotateSealedValues(ctx context.Context) (controllerwire.SealedRotation, error) {
+	var out controllerwire.SealedRotation
+	err := c.request(ctx, "POST", "/api/v1/operator/secrets/rotate", "/api/v1/operator/secrets/rotate", "", nil, &out)
+	if err == nil && out.Unreadable == nil {
+		err = &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an incomplete key rotation"}
+	}
+	return out, err
+}
+
 func (c *engineClient) ReadOperatorTeam(ctx context.Context, team string) (controllerwire.OperatorTeam, error) {
 	var out controllerwire.OperatorTeam
 	err := c.request(ctx, "GET", "/api/v1/operator/teams/{team}", "/api/v1/operator/teams/"+url.PathEscape(team), "", nil, &out)

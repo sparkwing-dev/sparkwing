@@ -124,7 +124,7 @@ func SweepLocalSessions(ctx context.Context, options EngineOptions, dryRun bool)
 type TeamSettingsClient struct{}
 func (c *TeamSettingsClient) ReadTeamSettings(ctx context.Context) (controllerwire.TeamSettings, error)
 func (c *TeamSettingsClient) SetTeamSettings(ctx context.Context, settings controllerwire.TeamSettings) (controllerwire.TeamSettings, error)
-func UploadSourceSnapshot(ctx context.Context, options EngineOptions, git runspec.Git, source runspec.Source, path string) (string, error)
+func UploadSourceSnapshot(ctx context.Context, options EngineOptions, publication source.Publication) (digestResult string, resultErr error)
 
 # methods on un-declared receiver types (likely a bug)
 func (c *dataClient) Commit(ctx context.Context, input blob.CommitUpload) (blob.Receipt, error)
@@ -187,6 +187,7 @@ func (c *engineClient) ResetSizing(context.Context, controllerwire.SizingReset) 
 func (c *engineClient) ResolveApproval(ctx context.Context, run, job string, input controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
 func (c *engineClient) ResumeDebugPause(ctx context.Context, run, job string) error
 func (c *engineClient) Retry(ctx context.Context, run string, input controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
+func (c *engineClient) RotateSealedValues(ctx context.Context) (controllerwire.SealedRotation, error)
 func (c *engineClient) RotateSecrets(ctx context.Context, input controllerwire.SecretRotationRequest) (controllerwire.SecretRotation, error)
 func (c *engineClient) RunSchedule(ctx context.Context, name, key string) (controllerwire.ScheduleRun, error)
 func (c *engineClient) SearchLogs(ctx context.Context, q controllerwire.LogSearchQuery) (controllerwire.LogSearchPage, error)

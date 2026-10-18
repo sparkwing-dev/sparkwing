@@ -110,6 +110,24 @@ type OperatorManager interface {
 	WriteOperatorLimits(context.Context, OperatorLimitsWrite) (OperatorLimits, error)
 	ReadObjectStoreBreaker(context.Context) (ObjectStoreBreaker, error)
 	ResetObjectStoreBreaker(context.Context, string) (ObjectStoreBreaker, error)
+	RotateSealedValues(context.Context) (SealedRotation, error)
+}
+
+// SealedRotation counts the envelopes a key rotation resealed and names those no configured key opened.
+type SealedRotation struct {
+	Secrets         int             `json:"secrets"`
+	GitCredentials  int             `json:"git_credentials"`
+	RunEnvironments int             `json:"run_environments"`
+	Settings        int             `json:"settings"`
+	Unreadable      []SealedRowName `json:"unreadable"`
+}
+
+// SealedRowName identifies a sealed row a rotation left unchanged.
+type SealedRowName struct {
+	Purpose  string `json:"purpose"`
+	Team     string `json:"team,omitempty"`
+	Name     string `json:"name"`
+	Pipeline string `json:"pipeline,omitempty"`
 }
 
 // OperatorTeamCreate names a new team for operator-managed onboarding.

@@ -191,6 +191,8 @@ var commandSynopses = map[string]string{
 	"sparkwing operator object-store":               "Operate the controller's object-store request budget",
 	"sparkwing operator object-store reset-breaker": "Clear a tripped object-store budget or ceiling freeze",
 	"sparkwing operator object-store status":        "Show the controller's object-store request budget",
+	"sparkwing operator secrets":                    "Maintain the controller's sealed values",
+	"sparkwing operator secrets rotate":             "Reseal every stored secret and key under the current key",
 	"sparkwing operator tokens":                     "Manage deployment service credentials",
 	"sparkwing operator tokens create":              "Issue a deployment service credential",
 	"sparkwing operator tokens list":                "List deployment service credentials",

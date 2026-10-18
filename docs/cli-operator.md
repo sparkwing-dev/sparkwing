@@ -13,6 +13,7 @@ Manage deployment operations
 - `teams` -- Create teams under operator authority
 - `limits` -- Manage deployment operational ceilings
 - `object-store` -- Operate the controller's object-store request budget
+- `secrets` -- Maintain the controller's sealed values
 - `tokens` -- Manage deployment service credentials
 
 ### Flags
@@ -109,6 +110,41 @@ Clear a tripped object-store budget or ceiling freeze
 ## `sparkwing operator object-store status`
 
 Show the controller's object-store request budget
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+
+## `sparkwing operator secrets`
+
+Maintain the controller's sealed values
+
+### Subcommands
+
+- `rotate` -- Reseal every stored secret and key under the current key
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+
+## `sparkwing operator secrets rotate`
+
+Reseal every stored secret and key under the current key
+
+Reseal every team's secrets, git credentials and submitted run environments, and the session signing key, under the controller's current key. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.
+
+Repeats safely. JSON retains the counts and each unreadable row's purpose, team and name; values never appear.
 
 ### Flags
 

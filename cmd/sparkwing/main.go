@@ -244,6 +244,8 @@ func runSparkwing(args []string) (result error) {
 		return runOperatorLimits(inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing operator object-store "):
 		return runOperatorObjectStore(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing operator secrets "):
+		return runOperatorSecretsCommand(context.Background(), inv, os.Stdout, resolveOperatorManager)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing runs approvals "), strings.HasPrefix(inv.Command.Path, "sparkwing runs annotations "):
 		return runReviewCommand(context.Background(), inv, os.Stdout, resolveRunReview)
 	}

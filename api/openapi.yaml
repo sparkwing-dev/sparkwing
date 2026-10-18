@@ -8441,6 +8441,36 @@ paths:
             liveness: credential
         retry: idempotency_key
       x-sparkwing-wire: undocumented
+  /api/v1/operator/secrets/rotate:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/operator/secrets/rotate
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/operator/secrets/rotate
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: deployment_admin
+            grants:
+              - operator.tokens
+            binding: none
+            liveness: credential
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: safe
+      x-sparkwing-wire: undocumented
   /api/v1/operator/signups:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

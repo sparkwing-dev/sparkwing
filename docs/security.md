@@ -166,10 +166,30 @@ credential release is audited. See [Git credentials](git-credentials.md).
 
 ## Secrets at rest
 
-Secrets remain encrypted with authenticated row binding. Their team, name,
-pipeline/shared scope and masking policy participate in the binding. Moving a
-ciphertext to a row with different access cannot make it readable there. A value
-that fails to open is an error, never an empty success value.
+Secrets remain encrypted with authenticated row binding. The kind of row
+(secret, git credential, submitted run environment or controller setting), its
+team, name, pipeline/shared scope and masking policy participate in the binding.
+Moving a ciphertext to a row with different access, or to a row of another kind,
+cannot make it readable there. A value that fails to open is an error, never an
+empty success value.
+
+### Rotating the secrets key
+
+One key seals every team's secrets, git credentials and submitted run
+environments, and the session signing key. To replace it:
+
+1. Generate a new key (`openssl rand -base64 32`).
+2. Put the current key in the `secrets-key.previous` credential and the new key
+   in `secrets-key`, then restart every controller replica. Each replica now
+   seals under the new key and opens values sealed under either.
+3. Run `sparkwing operator secrets rotate` with a deployment credential holding
+   `operator.tokens`, or `POST /api/v1/operator/secrets/rotate` from a console
+   session signed in within the last 10 minutes. It reseals every row under the
+   new key, one team at a time, and reports counts plus any row neither key
+   opens. It is safe to repeat, including after an interruption.
+4. When nothing is reported unreadable, remove `secrets-key.previous` and
+   restart. A row reported unreadable was already unreadable under both keys;
+   rewrite or delete it first. Back up the new key with the database.
 
 Management reads and execution release are separate permissions. Execution
 release checks the accepted plan's declarations and current claim. Pool-restricted
@@ -179,8 +199,8 @@ supplies neither condition. See [secret management](cli-secrets.md).
 
 The final schema is created once before launch. Legacy envelope conversion,
 store backfills and an open-auth bootstrap window are not part of the rewrite's
-startup contract. Provisioning and key rotation require their owning controller
-and store implementation.
+startup contract. Provisioning requires its owning controller and store
+implementation.
 
 ## Release integrity
 

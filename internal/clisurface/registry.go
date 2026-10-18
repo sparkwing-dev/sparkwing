@@ -177,6 +177,10 @@ func Registry() []Command {
 		{Path: "sparkwing operator object-store status", Authority: DeploymentAdmin, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 		}},
+		{Path: "sparkwing operator secrets", Authority: DeploymentAdmin, Flags: []Flag{}},
+		{Path: "sparkwing operator secrets rotate", Authority: DeploymentAdmin, Rules: []string{"Reseal every team's secrets, git credentials and submitted run environments, and the session signing key, under the controller's current key. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.", "Repeats safely. JSON retains the counts and each unreadable row's purpose, team and name; values never appear."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME"},
+		}},
 		{Path: "sparkwing operator tokens", Authority: DeploymentAdmin, Flags: []Flag{}},
 		{Path: "sparkwing operator tokens create", Authority: DeploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path.", "Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"service", "deployment"}},
