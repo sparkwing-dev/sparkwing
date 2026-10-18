@@ -6,9 +6,12 @@ Sparkwing Cloud now dispatches every trigger, App webhook run, schedule and
 child run that names no `--runner`, label, `here` or routed pool to the Cloud
 launcher. Before, CLI triggers and webhook runs waited for a self-hosted
 runner. To keep work on your own machines, pass `--runner NAME` or
-`--runner label=LABEL`, or route the repository to a pool. Unclaimed runs now
-carry an `unclaimed_work` notice, and `sparkwing_claim_empty_total` counts
-claim polls that matched nothing.
+`--runner label=LABEL`, or route the repository to a pool. App automation and
+subscriptions take `runner: cloud | github-actions | pool=<name>`, default
+`cloud`; set `github-actions` on repositories whose App runs a GitHub Actions
+workflow should own. The schema baseline moves to version 10, so recreate the
+database. Unclaimed runs now carry an `unclaimed_work` notice, and
+`sparkwing_claim_empty_total` counts claim polls that matched nothing.
 
 ## Job outputs holding a secret are withheld
 

@@ -140,6 +140,11 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err := validateChildLineageTx(ctx, tx, team, &input); err != nil {
 			return AdmissionResult{}, err
 		}
+		owner, err := trustedAppRunnerTx(ctx, tx, request)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+		owner.apply(&input.Options)
 		pools, err := intakePoolsTx(ctx, tx, team, &input, policy.RepositoryAuthorized)
 		if err != nil {
 			return AdmissionResult{}, err

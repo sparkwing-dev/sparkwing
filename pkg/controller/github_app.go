@@ -574,6 +574,7 @@ type githubAppTriggerReq struct {
 	ReleasePrereleased        bool     `json:"release_prereleased"`
 	BranchCreate              bool     `json:"branch_create"`
 	BranchDelete              bool     `json:"branch_delete"`
+	Runner                    string   `json:"runner"`
 }
 
 type githubAppTriggerJSON struct {
@@ -594,6 +595,7 @@ type githubAppTriggerJSON struct {
 	ReleasePrereleased        bool     `json:"release_prereleased"`
 	BranchCreate              bool     `json:"branch_create"`
 	BranchDelete              bool     `json:"branch_delete"`
+	Runner                    string   `json:"runner"`
 	CreatedBy                 string   `json:"created_by"`
 	CreatedAt                 int64    `json:"created_at"`
 }
@@ -609,7 +611,7 @@ func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 		PullRequestClosed: tr.PullRequestClosed, PullRequestLabeled: tr.PullRequestLabeled,
 		PullRequestLabels: tr.PullRequestLabels, PullRequestReadyForReview: tr.PullRequestReadyForReview,
 		ReleasePublished: tr.ReleasePublished, ReleasePrereleased: tr.ReleasePrereleased,
-		BranchCreate: tr.BranchCreate, BranchDelete: tr.BranchDelete,
+		BranchCreate: tr.BranchCreate, BranchDelete: tr.BranchDelete, Runner: string(tr.Runner),
 		CreatedBy: tr.CreatedBy, CreatedAt: tr.CreatedAt.Unix(),
 	}
 }
@@ -663,6 +665,10 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 	if req.PullRequestLabeled && len(req.PullRequestLabels) == 0 {
 		return githubAppRequestError(http.StatusBadRequest, errors.New("pull_request_labeled needs pull_request_labels"))
 	}
+	runner, err := store.ParseGitHubAppRunner(req.Runner)
+	if err != nil {
+		return githubAppRequestError(http.StatusBadRequest, err)
+	}
 	repo, _ := store.ParseGitHubRepo(slug)
 	inst, found, err := s.teamInstallationFor(r.Context(), t, repo)
 	if err != nil {
@@ -699,7 +705,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		PullRequestClosed: req.PullRequestClosed, PullRequestLabeled: req.PullRequestLabeled,
 		PullRequestLabels: req.PullRequestLabels, PullRequestReadyForReview: req.PullRequestReadyForReview,
 		ReleasePublished: req.ReleasePublished, ReleasePrereleased: req.ReleasePrereleased,
-		BranchCreate: req.BranchCreate, BranchDelete: req.BranchDelete,
+		BranchCreate: req.BranchCreate, BranchDelete: req.BranchDelete, Runner: runner,
 	})
 	if err != nil {
 		return accountMutationError(err)

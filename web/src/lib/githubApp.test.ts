@@ -98,10 +98,12 @@ describe("GitHub App calls", () => {
     respond = () => json({ enabled: true });
     await lib.enableAutomation("acme/widgets");
     assert.equal(calls[0].method, "PUT");
-    assert.deepEqual(JSON.parse(calls[0].body), { repository: "acme/widgets" });
+    assert.deepEqual(JSON.parse(calls[0].body), { repository: "acme/widgets", runner: "cloud" });
+    await lib.enableAutomation("acme/widgets", "github-actions");
+    assert.deepEqual(JSON.parse(calls[1].body), { repository: "acme/widgets", runner: "github-actions" });
     await lib.disableAutomation(9);
-    assert.equal(calls[1].url, "/api/v1/team/github-app/automation?repository_id=9");
-    assert.equal(calls[1].method, "DELETE");
+    assert.equal(calls[2].url, "/api/v1/team/github-app/automation?repository_id=9");
+    assert.equal(calls[2].method, "DELETE");
   });
 
   it("binds Actions by repository name and preserves the server workflow", async () => {
@@ -173,6 +175,7 @@ describe("GitHub App calls", () => {
       pull_request: false,
       branches: ["main", "release/*"],
       base_branches: [],
+      runner: "cloud",
     });
   });
 
@@ -310,8 +313,16 @@ describe("subscription form rules", () => {
     };
     assert.deepEqual(
       Object.keys(lib.subscriptionRequest(lib.draftFromSubscription(stored))),
-      ["repository", "pipeline", "push", "pull_request", "branches", "base_branches"],
+      ["repository", "pipeline", "push", "pull_request", "branches", "base_branches", "runner"],
     );
+  });
+
+  it("keeps the subscription's run owner and refuses unknown owners", () => {
+    const draft = { repository: "octo-org/api", pipeline: "ci", push: true, pull_request: false };
+    assert.equal(lib.subscriptionRequest(draft).runner, "cloud");
+    assert.equal(lib.subscriptionProblem({ ...draft, runner: "github-actions" }), null);
+    assert.equal(lib.subscriptionProblem({ ...draft, runner: "pool=prod" }), null);
+    assert.match(lib.subscriptionProblem({ ...draft, runner: "laptop" as never }) ?? "", /pool=<name>/);
   });
 
   it("offers the repositories of installations that can start runs", () => {

@@ -116,3 +116,11 @@ jobs:
             --idle-exit 2m
 ```
 <!-- design:end -->
+
+## App-triggered runs
+
+On Sparkwing Cloud an App push or pull request run goes to the Cloud launcher
+unless its automation or subscription selects `runner: github-actions`. With that
+selection the run seals host dispatch and its trigger waits for an Actions runner
+whose push binding matches the delivery's repository, ref and commit. See
+[GitHub App run owner](github-app.md#run-owner).
