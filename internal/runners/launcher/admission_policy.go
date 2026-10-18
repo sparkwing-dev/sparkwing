@@ -35,7 +35,8 @@ const (
 	podOwners     = `['system:serviceaccount:kube-system:job-controller', 'system:serviceaccount:kube-system:generic-garbage-collector']`
 )
 
-// safety: the API server's PodTopologyLabels admission copies these from the Node onto any Pod created with spec.nodeName.
+// safety: the API server's PodTopologyLabels admission copies these from the Node
+// onto any Pod created with spec.nodeName.
 var nodeTopologyLabels = []string{corev1.LabelTopologyRegion, corev1.LabelTopologyZone}
 
 func podValidations() []admissionv1.Validation {
