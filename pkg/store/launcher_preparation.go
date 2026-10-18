@@ -17,6 +17,9 @@ func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capabili
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
+		if err := lockLauncherBatchTx(ctx, tx, authority, preparing, true); err != nil {
+			return err
+		}
 		chain, err := authorityChainTx(ctx, tx, authority, true)
 		if err != nil {
 			return err

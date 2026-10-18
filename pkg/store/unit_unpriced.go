@@ -18,7 +18,7 @@ func (s *Store) failUnpricedClaim(ctx context.Context, demand UnitDemand, refusa
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
-		if err := lockClaimantTx(ctx, tx, demand.CapabilityPrefix); err != nil {
+		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}}); err != nil {
 			return err
 		}
 		change := NodeTransition{Ref: NodeRef{refusal.RunID, refusal.NodeID}, To: NodeFailed, Cause: CauseUnpriced, Actor: Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass, MaskedError: refusal.Error()}}}

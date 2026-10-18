@@ -18,7 +18,7 @@ import (
 var reviewedUnscopedSQL = map[string]string{
 	"releaseExpiredBlobUploadQuotasTx": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
 	"revokeSetupAuthorityTx":           "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
-	"launcherReservationAwardTx":       "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
+	"launcherAwardPrefixTx":            "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
 	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
 	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
@@ -42,7 +42,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
 	"advanceAuthGenerationsTx":            "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
-	"lockClaimantTx":                      "the claimant's globally unique capability prefix is locked before authority resolution, so its award stamp cannot invert lock order",
+	"lockAuthorityTx":                     "globally unique capability prefixes and session hashes are locked before authority resolution reads their teams",
+	"lockUnitsTx":                         "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"readMatchingInputsTx":                "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",

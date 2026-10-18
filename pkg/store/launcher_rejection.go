@@ -13,6 +13,9 @@ func (s *Store) RejectLauncherAwards(ctx context.Context, authority capability.A
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
+		if err := lockLauncherBatchTx(ctx, tx, authority, fences, false); err != nil {
+			return err
+		}
 		chain, err := authorityChainTx(ctx, tx, authority, true)
 		if err != nil {
 			return err
