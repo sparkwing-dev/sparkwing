@@ -55,8 +55,8 @@ App-armed schedules take their owner from the repository's App configuration
 (`runner: cloud | github-actions | pool=<name>`). `--runner NAME`
 or `--runner label=LABEL` keeps the run on matching self-hosted runners, as
 does a pool route rule, and `--runner here` hosts it in the submitting CLI.
-Intake seals the choice in the run's request, so retries keep it. A run that
-no eligible runner or launcher has claimed within 30 seconds shows a notice in
+Intake seals the choice in the run's request, so retries keep it. A run whose
+work no runner or launcher has claimed after 30 seconds shows a notice in
 `sparkwing runs status`.
 
 ## Self-hosted runners

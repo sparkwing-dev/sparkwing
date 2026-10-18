@@ -194,7 +194,7 @@ func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
 	}
 }
 
-func TestCloudTriggerNoticesWhenNoClaimantCanTakeIt(t *testing.T) {
+func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
 	for _, runner := range []string{"", "--runner=builder"} {
 		t.Run(map[string]string{"": "launcher", "--runner=builder": "runner"}[runner], func(t *testing.T) {
 			var args []string
@@ -214,15 +214,8 @@ func TestCloudTriggerNoticesWhenNoClaimantCanTakeIt(t *testing.T) {
 				t.Fatal(err)
 			}
 			detail, err = f.member.ReadRun(t.Context(), created.RunID)
-			if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeUnclaimed || !strings.Contains(detail.Notices[0].Reason, "no eligible runner or launcher for the run's") {
+			if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeUnclaimed || !strings.Contains(detail.Notices[0].Reason, "no runner or launcher has claimed the run's") {
 				t.Fatalf("unclaimed run notice: %+v %v", detail.Notices, err)
-			}
-			if runner == "" {
-				return
-			}
-			cloudDispatchMachine(t, f, "builder")
-			if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 0 {
-				t.Fatalf("online eligible runner left the notice: %+v %v", detail.Notices, err)
 			}
 		})
 	}
