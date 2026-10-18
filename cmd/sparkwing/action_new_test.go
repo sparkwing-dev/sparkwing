@@ -448,7 +448,7 @@ func TestScaffoldRollsBackJobWhenConfigCannotBeUpdated(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "jobs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := scaffoldGoFromTemplate(dir, "sample", false, "", minimalTemplate, false, "")
+	err := scaffoldGoFromTemplate(dir, "sample", false, "", minimalTemplate, false, "", "pretty")
 	if err == nil {
 		t.Fatal("missing config returned success")
 	}
@@ -485,7 +485,7 @@ func TestFinishScaffold_FailsWhenGoModTidyFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("not a go.mod\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := finishScaffold(dir, filepath.Join(dir, "jobs", "sample.go"), "sample", false, "")
+	err := finishScaffold(dir, filepath.Join(dir, "jobs", "sample.go"), "sample", false, "", "pretty")
 	if err == nil || !strings.Contains(err.Error(), "go mod tidy") {
 		t.Fatalf("finishScaffold = %v, want the go mod tidy failure", err)
 	}

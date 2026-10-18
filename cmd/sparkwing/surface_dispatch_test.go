@@ -14,6 +14,9 @@ func TestSurfaceDispatchRejectsBeforeState(t *testing.T) {
 	for _, command := range []string{
 		"cluster", "cloud", "configure", "serve", "crons", "runs consumer", "runs bounce", "debug rerun",
 		"runs status r1", "runs list --limit 0", "runs list --node j1", "run check --unknown",
+		"pipeline new --pipeline sample -o yaml", "pipeline new -o json",
+		"pipeline hooks install --fleet", "pipeline hooks status --all",
+		"pipeline hooks uninstall --output=", "cache info --all",
 		"run check --profile prod", "run check --sw-no-cache", "run check --sw-allow destructive",
 	} {
 		err := runSparkwing(strings.Fields(command))

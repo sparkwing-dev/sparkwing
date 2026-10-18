@@ -67,12 +67,13 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 			return selected.InstallSDK(ctx, request)
 		}
 	}
-	relative, err := filepath.Rel(entry.checkoutDirectory, entry.Directory)
+	relative, err := filepath.Rel(entry.pipelineCheckout, entry.Directory)
 	if err != nil {
 		return entry, err
 	}
 	command, err := install(ctx, entry.Engine, engine.SDKInstallRequest{
-		Directory: entry.checkoutDirectory, PipelineDir: relative, SDK: options.SDK, Environment: environment, Masker: options.Base.Masker,
+		Directory: entry.pipelineCheckout, PipelineDir: relative, SDK: options.SDK, Environment: environment, Masker: options.Base.Masker,
+		NoBincache: spec.NoBincache, HashAllFiles: spec.HashAllFiles,
 	})
 	if err != nil {
 		return entry, fmt.Errorf("install source entry: %w", err)

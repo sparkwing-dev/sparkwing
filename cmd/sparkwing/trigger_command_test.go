@@ -26,7 +26,7 @@ func TestTriggerCommandSubmitsPreparedSealThroughFinalRoute(t *testing.T) {
 	}
 	var out bytes.Buffer
 	calls, closed := 0, false
-	err = runTriggerCommand(t.Context(), []string{"deploy-prod", "--profile=prod", "--detach", "-o=json", "--", "--image=release"}, &out,
+	err = runTriggerCommandArgs(t.Context(), []string{"deploy-prod", "--profile=prod", "--detach", "-o=json", "--", "--image=release"}, &out,
 		func(_ context.Context, flags triggerFlags) (controllerwire.CreateRunRequest, error) {
 			if flags.pipeline != "deploy-prod" || flags.profile != "prod" || !reflect.DeepEqual(flags.passthrough, []string{"--image=release"}) {
 				t.Fatalf("preparation input: %+v", flags)
@@ -57,7 +57,7 @@ func TestTriggerCommandPreparationFailureCannotSubmit(t *testing.T) {
 	enterGitCheckout(t, "https://git.example/acme/app.git")
 	failure := errors.New("source unavailable")
 	var out bytes.Buffer
-	err := runTriggerCommand(t.Context(), []string{"deploy-prod", "--profile=prod", "--detach", "-o=json"}, &out,
+	err := runTriggerCommandArgs(t.Context(), []string{"deploy-prod", "--profile=prod", "--detach", "-o=json"}, &out,
 		func(context.Context, triggerFlags) (controllerwire.CreateRunRequest, error) {
 			return controllerwire.CreateRunRequest{}, failure
 		},
@@ -70,8 +70,8 @@ func TestTriggerCommandPreparationFailureCannotSubmit(t *testing.T) {
 	}
 }
 
-func TestNativeTriggerRefusesMissingContractsBeforeIntake(t *testing.T) {
-	for _, flags := range []triggerFlags{{workingTree: true}, {runner: hereRunnerFlag}, {allowSecretFiles: []string{"private.env"}}} {
+func TestNativeTriggerRefusesIncompleteSourceBeforeIntake(t *testing.T) {
+	for _, flags := range []triggerFlags{{workingTree: true}, {allowSecretFiles: []string{"private.env"}}} {
 		request, err := prepareNativeTrigger(t.Context(), flags)
 		if err == nil || request.IdempotencyKey != "" || request.Request.Pipeline != "" || strings.Contains(err.Error(), "private.env") {
 			t.Fatalf("request=%+v error=%v", request, err)

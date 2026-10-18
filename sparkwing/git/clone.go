@@ -2,9 +2,10 @@ package git
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"runtime"
+
+	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 )
 
 // CloneOption configures a clone.
@@ -22,16 +23,7 @@ func Clone(ctx context.Context, url, destDir string, opts ...CloneOption) error 
 			opt(&cfg)
 		}
 	}
-	if cfg.depth < 0 {
-		return fmt.Errorf("clone depth must not be negative")
-	}
-	args := []string{"clone"}
-	if cfg.depth > 0 {
-		args = append(args, "--depth", fmt.Sprint(cfg.depth))
-	}
-	args = append(args, "--", url, destDir)
-	_, err := runGitEnv(ctx, "", promptlessEnv(), args...)
-	return err
+	return gitcmd.CloneRepository(ctx, url, destDir, cfg.depth, promptlessEnv())
 }
 
 // Fetch updates the configured origin directly.

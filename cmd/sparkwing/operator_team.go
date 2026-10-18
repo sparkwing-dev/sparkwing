@@ -14,15 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func runOperatorTeams(args []string) error {
-	return runOperatorTeamsCommand(context.Background(), args, os.Stdout, resolveOperatorManager)
+func runOperatorTeams(inv clisurface.Invocation) error {
+	return runOperatorTeamsCommand(context.Background(), inv, os.Stdout, resolveOperatorManager)
 }
 
-func runOperatorTeamsCommand(ctx context.Context, args []string, out io.Writer, connect operatorConnector) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"operator", "teams"}, args...))
-	if err != nil {
-		return err
-	}
+func runOperatorTeamsCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, connect operatorConnector) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() || inv.Command.Path == "sparkwing operator teams" {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

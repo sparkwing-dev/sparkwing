@@ -72,7 +72,7 @@ func TestProfilesAddUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) 
 	userConfig := scratchUserConfigDir(t)
 	underAScratchHome(t)
 
-	err := runProfiles([]string{"add", "--profile", "drill", "--controller", "http://127.0.0.1:4344", "--no-probe"})
+	err := runProfilesArgs([]string{"add", "--profile", "drill", "--controller", "http://127.0.0.1:4344", "--no-probe"})
 	wantRefusedAndUnwritten(t, "profiles add", err, filepath.Join(userConfig, userconfig.Filename))
 }
 
@@ -82,7 +82,7 @@ func TestProfilesAddWritesInsideTheHomeItIsPointedAt(t *testing.T) {
 	inHome := filepath.Join(home, userconfig.Filename)
 	t.Setenv(userconfig.PathEnv, inHome)
 
-	if err := runProfiles([]string{"add", "--profile", "drill", "--controller", "http://127.0.0.1:4344", "--no-probe"}); err != nil {
+	if err := runProfilesArgs([]string{"add", "--profile", "drill", "--controller", "http://127.0.0.1:4344", "--no-probe"}); err != nil {
 		t.Fatalf("profiles add with %s=%s: %v", userconfig.PathEnv, inHome, err)
 	}
 
@@ -100,10 +100,10 @@ func TestVersionHoldUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) 
 	underAScratchHome(t)
 	holdFile := filepath.Join(userConfig, "version-hold")
 
-	err := runVersionHold([]string{"--set", "v0.15"})
+	err := runVersionHoldArgs([]string{"--set", "v0.15"})
 	wantRefusedAndUnwritten(t, "version hold --set", err, holdFile)
 
-	err = runVersionHold([]string{"--clear"})
+	err = runVersionHoldArgs([]string{"--clear"})
 	wantRefusedAndUnwritten(t, "version hold --clear", err, holdFile)
 }
 
@@ -115,6 +115,6 @@ func TestXrepoAddUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) {
 		t.Fatalf("make a checkout to register: %v", err)
 	}
 
-	err := runXrepoAdd([]string{checkout})
+	err := runXrepoAddArgs([]string{"--checkout", checkout})
 	wantRefusedAndUnwritten(t, "xrepo add", err, filepath.Join(userConfig, userconfig.Filename))
 }

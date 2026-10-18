@@ -34,8 +34,8 @@ func resolveOperatorManager(ctx context.Context, profile string) (controllerwire
 	return manager, closeTransport, nil
 }
 
-func runOperatorLimits(args []string) error {
-	return runOperatorLimitsCommand(context.Background(), args, os.Stdout, resolveOperatorManager)
+func runOperatorLimits(inv clisurface.Invocation) error {
+	return runOperatorLimitsCommand(context.Background(), inv, os.Stdout, resolveOperatorManager)
 }
 
 func budgetRows(view controllerwire.OperatorLimits) [][2]string {
@@ -57,11 +57,7 @@ func budgetRows(view controllerwire.OperatorLimits) [][2]string {
 	}
 }
 
-func runOperatorLimitsCommand(ctx context.Context, args []string, out io.Writer, connect operatorConnector) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"operator", "limits"}, args...))
-	if err != nil {
-		return err
-	}
+func runOperatorLimitsCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, connect operatorConnector) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() || inv.Command.Path == "sparkwing operator limits" {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

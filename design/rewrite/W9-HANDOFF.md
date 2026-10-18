@@ -1,6 +1,19 @@
-# W9 continuation: cached local dependency preparation
+# W9 continuation: preview, child secrets and migration docs
 
-Latest continuation: [W9-CACHED-LOCAL-DEPENDENCIES.md](W9-CACHED-LOCAL-DEPENDENCIES.md).
+Latest continuation: [W9-PREVIEW-CHILD-DOCS.md](W9-PREVIEW-CHILD-DOCS.md).
+Review 3 findings 3, 5 and 6 are implemented. Preview, describe and run help use
+shared source acquisition and the selected engine. Children do not inherit parent
+local-secret names. Migration instructions are checked after expanding abbreviated
+commands, and v0.67.0's pre-rewrite notes are explicitly archived. Build, vet,
+focused regressions, child fuzzing and surface acceptance checks pass.
+The supplied native report is green for the previous committed state. The lead
+must commit and rerun the repository and socket-dependent native suites.
+
+Previous continuation: [W9-REDESIGN-SUITE-CORRECTIONS.md](W9-REDESIGN-SUITE-CORRECTIONS.md).
+
+Previous redesign: [W9-SHARED-SOURCE-CHILD-ENVIRONMENT.md](W9-SHARED-SOURCE-CHILD-ENVIRONMENT.md).
+
+Previous continuation: [W9-CACHED-LOCAL-DEPENDENCIES.md](W9-CACHED-LOCAL-DEPENDENCIES.md).
 Matching local binaries are leased before invoking Go. Cold preparation retains
 checksum and workspace behavior. The toolchain fixture verifies its override
 during preparation and compilation. Build, vet, focused tests and source/doc

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
@@ -204,31 +204,17 @@ const infoBat = `      /\                        /\
      '-._  __  __'---'__  __  _.-'
          \/  \/         \/  \/`
 
-func runInfo(args []string) error {
-	fs := flag.NewFlagSet(cmdInfo.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
-	forAgent := fs.Bool("for-agent", false, "emit current discovery context for one agent wake (no ANSI, no extras)")
-	firstTime := fs.Bool("first-time", false, "print the post-install onboarding card (used by install.sh; re-runnable any time)")
-	if err := parseAndCheck(cmdInfo, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		PrintHelp(cmdInfo, os.Stderr)
-		return fmt.Errorf("info: unexpected positional %q (info takes no positional args)", fs.Arg(0))
+func runInfo(inv clisurface.Invocation) error {
+	output := inv.Output(color.IsInteractiveStdout())
+	if inv.Bool("for-agent") {
+		return writeRenderedText(os.Stdout, "document", output, printAgentBlock)
 	}
 
-	if *forAgent {
-		return writeRenderedText(os.Stdout, "document", *output, printAgentBlock)
+	if inv.Bool("first-time") {
+		return writeRenderedText(os.Stdout, "document", output, printFirstTimeCard)
 	}
 
-	if *firstTime {
-		return writeRenderedText(os.Stdout, "document", *output, printFirstTimeCard)
-	}
-
-	format, err := resolveOutputFormat(*output, cmdInfo.Path)
+	format, err := resolveOutputFormat(output, cmdInfo.Path)
 	if err != nil {
 		return err
 	}

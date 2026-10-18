@@ -365,7 +365,7 @@ func TestEscapeProbe_PlansOpenNoConnection(t *testing.T) {
 
 	for _, runID := range []string{"", "run-probe"} {
 		host := newTestHost(t, sparkwingtest.Options{Run: sparkwing.RunContext{RunID: runID}})
-		if _, err := host.Plan(t.Context(), "escape-probe", map[string]string{"rds": "db:5432", "api-hosts": "10.0.36.1"}); err != nil {
+		if _, err := host.Plan(t.Context(), "EscapeProbe", map[string]string{"rds": "db:5432", "api-hosts": "10.0.36.1"}); err != nil {
 			t.Fatal(err)
 		}
 	}

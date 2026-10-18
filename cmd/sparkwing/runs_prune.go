@@ -33,11 +33,7 @@ func parseRunPrune(inv clisurface.Invocation) (time.Duration, error) {
 	return d, nil
 }
 
-func runRunsPrune(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "prune"}, args...))
-	if err != nil {
-		return err
-	}
+func runRunsPrune(ctx context.Context, inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}

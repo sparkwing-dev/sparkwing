@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
@@ -61,6 +62,22 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	sparkwingHome := t.TempDir()
 	t.Setenv("SPARKWING_HOME", sparkwingHome)
 	offlineStopDaemon(t, sparkwingHome)
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		path, err := wingd.LogPath(sparkwingHome)
+		if err != nil {
+			t.Logf("resolve local controller log: %v", err)
+			return
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Logf("read local controller log: %v", err)
+			return
+		}
+		t.Logf("local controller log (%s):\n%s", path, body)
+	})
 
 	// safety: a sparkwing on the developer's PATH would host the admission
 	// daemon for this home, and the operator's binary is not this test's to
@@ -406,6 +423,12 @@ func offlineWriteFixture(t *testing.T, gitBin, toolPath, fixtureHome string) (re
 	cmd.Env = []string{"HOME=" + fixtureHome, "PATH=" + toolPath, "GIT_CONFIG_NOSYSTEM=1"}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v\n%s", repoDir, err, out)
+	}
+	cmd = exec.Command(gitBin, "-c", "user.name=Offline Test", "-c", "user.email=offline@example.test", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial")
+	cmd.Dir = repoDir
+	cmd.Env = []string{"HOME=" + fixtureHome, "PATH=" + toolPath, "GIT_CONFIG_NOSYSTEM=1"}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit %s: %v\n%s", repoDir, err, out)
 	}
 	return repoDir, sparkwingDir
 }

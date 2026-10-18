@@ -9,6 +9,9 @@ import (
 var (
 	EngineClaimHTTPFixture = engineClaimHTTPFixture
 	EngineClaimHTTP        = engineClaimHTTP
+	ChildIntakeFixture     = childIntakeFixture
+	EngineSQL              = engineSQL
+	EngineHTTPRoot         = engineHTTPRoot
 )
 
 // CardBillingPass runs one pass of the payment worker, so a test drives its

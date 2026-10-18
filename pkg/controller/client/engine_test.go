@@ -281,3 +281,16 @@ func TestEngineClientLauncherSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineServerFailureNamesTheControllerRequest(t *testing.T) {
+	c := testEngine(t, func(*http.Request) (*http.Response, error) {
+		response := engineResponse(503, `{"error":{"code":"unavailable","message":"request failed"}}`)
+		response.Header.Set("X-Request-Id", "request-42")
+		return response, nil
+	})
+	_, err := c.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}})
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || failure.Details["request_id"] != "request-42" {
+		t.Fatalf("server failure lost its request id: %#v", err)
+	}
+}

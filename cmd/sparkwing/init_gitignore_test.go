@@ -48,7 +48,7 @@ func TestPipelineNewIgnoresBinaryWithoutChangingRootGitignore(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(repo, ".gitignore")); err != nil {
 		t.Fatal(err)
 	}
-	if err := runPipelineNew([]string{"--pipeline", "sample", "--template", "minimal"}); err != nil {
+	if err := parsePipelineNew([]string{"--pipeline", "sample", "--template", "minimal"}); err != nil {
 		t.Fatal(err)
 	}
 	checkPipelineBinaryIgnored(t, repo)
@@ -59,14 +59,14 @@ func TestPipelineNewIgnoresBinaryWithoutChangingRootGitignore(t *testing.T) {
 
 func TestExistingScaffoldUpdatesLocalIgnoreAndWarnsAboutExternalSymlink(t *testing.T) {
 	repo := enterScaffoldTestRepo(t)
-	if err := runPipelineNew([]string{"--pipeline", "first", "--template", "minimal"}); err != nil {
+	if err := parsePipelineNew([]string{"--pipeline", "first", "--template", "minimal"}); err != nil {
 		t.Fatal(err)
 	}
 	ignore := filepath.Join(repo, ".sparkwing", ".gitignore")
 	if err := os.WriteFile(ignore, []byte("go.sum\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runPipelineNew([]string{"--pipeline", "middle", "--template", "minimal"}); err != nil {
+	if err := parsePipelineNew([]string{"--pipeline", "middle", "--template", "minimal"}); err != nil {
 		t.Fatal(err)
 	}
 	checkPipelineBinaryIgnored(t, repo)
@@ -85,7 +85,7 @@ func TestExistingScaffoldUpdatesLocalIgnoreAndWarnsAboutExternalSymlink(t *testi
 		t.Fatal(err)
 	}
 	warning := captureStderr(t, func() {
-		if err := runPipelineNew([]string{"--pipeline", "second", "--template", "minimal"}); err != nil {
+		if err := parsePipelineNew([]string{"--pipeline", "second", "--template", "minimal"}); err != nil {
 			t.Fatal(err)
 		}
 	})

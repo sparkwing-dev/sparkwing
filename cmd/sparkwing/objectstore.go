@@ -16,15 +16,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-func runOperatorObjectStore(args []string) error {
-	return runOperatorObjectStoreCommand(context.Background(), args, os.Stdout, resolveOperatorManager)
+func runOperatorObjectStore(inv clisurface.Invocation) error {
+	return runOperatorObjectStoreCommand(context.Background(), inv, os.Stdout, resolveOperatorManager)
 }
 
-func runOperatorObjectStoreCommand(ctx context.Context, args []string, out io.Writer, connect operatorConnector) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"operator", "object-store"}, args...))
-	if err != nil {
-		return err
-	}
+func runOperatorObjectStoreCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, connect operatorConnector) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() || inv.Command.Path == "sparkwing operator object-store" {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

@@ -15,13 +15,14 @@ func TestProfilesEditPreservesOtherMachineSettings(t *testing.T) {
 	if err := writePrivateConfigFixture(path, []byte("run: {cache_from: '', submit_env_allow: []}\ncache: {max_entries: 0}\nrunner: {repos: [], local_admission: false}\n")); err != nil {
 		t.Fatal(err)
 	}
+	withStdin(t, "new-credential\n")
 	for _, args := range [][]string{
 		{"add", "--profile", "prod", "--controller", "https://api.example", "--no-probe"},
-		{"set", "--profile", "prod", "--token=new-credential"},
+		{"set", "--profile", "prod", "--token-stdin"},
 		{"remove", "--profile", "prod", "--keep-token"},
 	} {
 		captureStdout(t, func() {
-			if err := runProfiles(args); err != nil {
+			if err := runProfilesArgs(args); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -49,7 +50,7 @@ func TestProfilesAddRetainsConnectionAddedDuringProbe(t *testing.T) {
 		return 200, `{"principal":"person","kind":"account"}`
 	})
 	captureStdout(t, func() {
-		if err := runProfiles([]string{"add", "--profile", "prod", "--controller", "https://api.example", "--token-stdin"}); err != nil {
+		if err := runProfilesArgs([]string{"add", "--profile", "prod", "--controller", "https://api.example", "--token-stdin"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -72,7 +73,7 @@ func TestProfilesAddRechecksReplacementAfterProbe(t *testing.T) {
 		}
 		return 200, `{"principal":"person","kind":"account"}`
 	})
-	err := runProfiles([]string{"add", "--profile", "prod", "--controller", "https://api.example", "--token-stdin"})
+	err := runProfilesArgs([]string{"add", "--profile", "prod", "--controller", "https://api.example", "--token-stdin"})
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("concurrent replacement accepted: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestProfilesRemoveRetainsConnectionChangedDuringRevocation(t *testing.T) {
 		}
 		return http.StatusNoContent, ""
 	})
-	err := runProfiles([]string{"remove", "--profile", "prod"})
+	err := runProfilesArgs([]string{"remove", "--profile", "prod"})
 	if err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("removed a changed connection: %v", err)
 	}
@@ -121,8 +122,8 @@ func TestProfileCommandsRejectTheWholeInvalidMachineFile(t *testing.T) {
 		if err := writePrivateConfigFixture(path, []byte(body)); err != nil {
 			t.Fatal(err)
 		}
-		for _, args := range [][]string{{"show", "--profile", "prod"}, {"set", "--profile", "prod", "--token=new-credential"}, {"remove", "--profile", "prod", "--keep-token"}} {
-			err := runProfiles(args)
+		for _, args := range [][]string{{"show", "--profile", "prod"}, {"set", "--profile", "prod", "--token-stdin"}, {"remove", "--profile", "prod", "--keep-token"}} {
+			err := runProfilesArgs(args)
 			if err == nil {
 				t.Fatalf("accepted invalid config through %s", args[0])
 			}

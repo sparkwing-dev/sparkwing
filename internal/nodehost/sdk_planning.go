@@ -157,7 +157,7 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: true}
 		var raw json.RawMessage
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
-			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Run.Pipeline, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
+			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
 			return nil, p.planningError(ctx, err, true)

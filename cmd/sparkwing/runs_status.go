@@ -56,11 +56,7 @@ func parseRunStatus(inv clisurface.Invocation) (runStatusOptions, error) {
 	return opts, nil
 }
 
-func runRunsStatus(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "status"}, args...))
-	if err != nil {
-		return err
-	}
+func runRunsStatus(ctx context.Context, inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}

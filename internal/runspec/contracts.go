@@ -159,10 +159,15 @@ type EnvSnapshot struct {
 
 // safety: Source records acquisition intent without embedding source credentials.
 type Source struct {
-	Ref          string           `json:"ref"`
-	Entrypoint   string           `json:"entrypoint"`
-	BundleDigest Optional[string] `json:"bundle_digest"`
-	Location     SourceLocation   `json:"location"`
+	RequestedRef      string           `json:"requested_ref,omitempty"`
+	Ref               string           `json:"ref"`
+	Entrypoint        string           `json:"entrypoint"`
+	BundleDigest      Optional[string] `json:"bundle_digest"`
+	Location          SourceLocation   `json:"location"`
+	WorkingTree       bool             `json:"working_tree,omitempty"`
+	CommittedCheckout bool             `json:"committed_checkout,omitempty"`
+	NoBincache        bool             `json:"no_bincache,omitempty"`
+	HashAllFiles      bool             `json:"hash_all_files,omitempty"`
 }
 
 // SourceLocation preserves acquisition input separately from repository identity and checkout policy.
@@ -372,6 +377,8 @@ type Request struct {
 	Mode              IntakeMode            `json:"mode"`
 	Origin            Origin                `json:"origin"`
 	Dispatch          Dispatch              `json:"dispatch"`
+	Reason            string                `json:"reason,omitempty"`
+	RequestID         string                `json:"request_id,omitempty"`
 	LocalSecretNames  []string              `json:"local_secret_names,omitempty"`
 	SecretArgs        Optional[[]string]    `json:"secret_args"`
 	RequestedArgs     map[string]string     `json:"requested_args"`
@@ -380,6 +387,7 @@ type Request struct {
 	PullRequest       Optional[PullRequest] `json:"pull_request"`
 	Source            Source                `json:"source"`
 	Lineage           Lineage               `json:"lineage"`
+	EnvironmentSource EnvironmentSource     `json:"environment_source,omitempty"`
 	Env               EnvSnapshot           `json:"env"`
 	Options           Options               `json:"options"`
 	ExecutionLocation string                `json:"execution_location"`

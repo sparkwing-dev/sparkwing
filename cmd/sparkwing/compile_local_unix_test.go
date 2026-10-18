@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 )
 
@@ -49,14 +50,14 @@ exit 1
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	ctx := gotoolchain.WithSession(t.Context(), os.Environ(), nil)
 	for _, wantSource := range []string{"compiled", "cached"} {
-		lease, source, err := pipelineBinary(ctx, dir, os.Environ(), os.Stderr)
+		lease, published, err := bincache.MaterializePipeline(ctx, dir, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 		if err != nil {
 			t.Fatal(err)
 		}
 		data, readErr := os.ReadFile(lease.Path())
 		releaseErr := lease.Release()
-		if readErr != nil || releaseErr != nil || source != wantSource || string(data) != "#!/bin/sh\nexit 0\n" {
-			t.Fatalf("local materialization: source=%s data=%q errors=%v,%v", source, data, readErr, releaseErr)
+		if readErr != nil || releaseErr != nil || published != (wantSource == "compiled") || string(data) != "#!/bin/sh\nexit 0\n" {
+			t.Fatalf("local materialization: published=%t data=%q errors=%v,%v", published, data, readErr, releaseErr)
 		}
 		if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 			t.Fatal(err)

@@ -178,7 +178,9 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		byJob[observation.JobName], byAward[observed.Award] = i, i
 		jobs[i] = observed.Job
 		request.Observed = append(request.Observed, observed)
-		request.Preparing = append(request.Preparing, observed.Award)
+		if !observation.Unheld {
+			request.Preparing = append(request.Preparing, observed.Award)
+		}
 	}
 	if len(observations) == 0 {
 		return nil, nil

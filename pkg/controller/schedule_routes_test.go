@@ -157,7 +157,7 @@ func (f *scheduleWriterFake) admit(ctx context.Context, sched store.CronSchedule
 		Version: 1, Team: string(f.Team()), Pipeline: sched.Pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Origin: runspec.OriginSchedule, RequestedArgs: sched.Effective().Args,
 		Git:    runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey("gh:" + strconv.FormatInt(sched.GitHubRepositoryID, 10))}, Ref: sched.GitBranch, SHA: sched.LockedRef},
-		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: sched.RepoPath}},
+		Source: runspec.Source{Ref: sched.LockedRef, Location: runspec.SourceLocation{RemoteURL: sched.RepoPath}},
 	}})
 	if err == nil {
 		if f.runs == nil {

@@ -14,17 +14,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
-func runTriggerHost(args []string) error {
+func runTriggerHost(inv clisurface.Invocation) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runLocalHostCommand(ctx, args, os.Stdout, localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
+	return runLocalHostCommand(ctx, inv, os.Stdout, localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
 }
 
-func runLocalHostCommand(ctx context.Context, args []string, out io.Writer, deps localRunDependencies) (resultErr error) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"__host-trigger"}, args...))
-	if err != nil {
-		return err
-	}
+func runLocalHostCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, deps localRunDependencies) (resultErr error) {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, inv.Output(false))
 	}

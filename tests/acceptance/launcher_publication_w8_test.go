@@ -93,7 +93,7 @@ func TestLauncherRetriesRenamedBootstrapCleanupW8Components(t *testing.T) {
 				}
 			}
 			control.remove = true
-			restarted := *l
+			restarted := &launcher.Launcher{Kube: l.Kube, Control: l.Control, Config: l.Config, Boundary: l.Boundary, Poll: l.Poll, Logger: l.Logger}
 			err = restarted.Sync(t.Context())
 			if replace && !apierrors.IsConflict(err) {
 				t.Fatalf("replacement was not fenced: %v", err)

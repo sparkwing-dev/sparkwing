@@ -20,6 +20,46 @@ unlock.
 
 ## [Unreleased]
 
+- **runs (Breaking):** Seal environment provenance independently of invocation origin. Children inherit their parent's captured or submitted environment. Request producers with nonempty environments set `environment_source`. See [migration](docs/migrations/_unreleased.md#environment-and-source-selections).
+- **cli:** Select configured SDK entrypoints in inspection, planning and scaffolds. Resolve `--sw-ref` and `--sw-pipeline-ref` before engine selection and retain the chosen revisions through sealing and retry.
+
+- **cli:** Submit present, allow-listed environment values with triggers and Cloud overflow. Encrypt private values at the controller, retain them through retry, and mask them on hosts.
+- **cli:** `run --sw-allow-unadmitted` uses an exclusive in-process local controller for standalone CI, with joined shutdown and its own admission queue.
+
+- **cli:** Cloud overflow retains uncached builds, full source hashing and relative priority. Inspection uses the installed SDK entry through the shared planner.
+- **cli:** Local `run --sw-index` retains a private, self-contained Git index for detached hosting and retries. Startup rejects changed snapshot bytes.
+
+- **cli (Breaking):** Remove the restored `run --target` flag. The pipeline name selects the deployment shape, as in v0.6.0.
+
+- **run:** Local runs honor `--sw-no-bincache` and `--sw-hash-all-files` during
+  inspection, detached hosting and retries. Uncached Go builds keep debug
+  information. Resolve relative priority against the local controller queue.
+
+- **CLI:** Use one command parser for execution and help. Honor `--checkout`
+  for repository registration and removal. Utility mutations emit JSON when
+  piped, including version holds, state recovery and sparks checks and updates.
+
+- **docs:** Present Local and Cloud as the launch modes, with self-hosted runners
+  registering to Cloud. Document operator team creation and remove cache-service
+  and self-hosted-controller onboarding promises.
+
+- **pipeline trigger:** Submit `--runner here` through native preparation and
+  retain its reason in the sealed request, including replay and retry.
+
+- **repos update:** Use `pipeline plan --pipeline` for comparisons. A failed
+  baseline stops the update before the SDK bump or commit.
+
+- **pipeline discovery:** Join descriptions by the configured entrypoint while
+  displaying the invoked pipeline name in listings and completion.
+
+- **profiles (Breaking):** Remove `profiles set --token` and the unsupported
+  `profiles add --scope`. Pipe credentials to `--token-stdin`. Create member
+  credentials with `tokens create` and teams with `operator teams create`.
+
+- **hooks:** Use the run parser's plain output format for installation proofs
+  and generated hooks.
+
+- **source:** Accept authenticated proxy settings when inspecting Git checkouts.
 - **Personal machines:** Members can enroll their own machines by default.
   Administrators control `members_can_add_machines` in team settings or with
   `sparkwing team settings set`. Changes are audited and preserve registered
@@ -291,6 +331,12 @@ unlock.
 - **controller (Breaking):** Dashboard token sign-in uses account capabilities and parented sessions
   Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 ### Fixed
+
+- **CLI:** Hook install, uninstall and pipeline scaffolding accept `-o pretty|json|plain`
+  and emit JSON when piped. Hook `--all-repos` selects registered repositories.
+- **run:** Detached runs retain `--sw-request-id` through intake and retry and include it
+  in the JSON submission receipt without deduplicating submissions.
+
 
 - **controller:** Preserve manual ref namespaces in data record queries and responses. A record written under `manual:<ref>` can be selected with the same ref, and lookups keep verified and manual read grants separate.
 

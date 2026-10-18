@@ -23,8 +23,8 @@ type daemonEventQuery struct {
 	Since       time.Duration
 }
 
-func runDaemonEvents(args []string) error {
-	return runDaemonEventsCommand(args, os.Stdout, os.Stderr, time.Now(), func() (string, []journal.Record, int, error) {
+func runDaemonEvents(inv clisurface.Invocation) error {
+	return runDaemonEventsCommand(inv, os.Stdout, os.Stderr, time.Now(), func() (string, []journal.Record, int, error) {
 		dir, err := wingd.StateDir("")
 		if err != nil {
 			return "", nil, 0, err
@@ -34,11 +34,7 @@ func runDaemonEvents(args []string) error {
 	})
 }
 
-func runDaemonEventsCommand(args []string, out, diagnostics io.Writer, now time.Time, read func() (string, []journal.Record, int, error)) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"daemon", "events"}, args...))
-	if err != nil {
-		return err
-	}
+func runDaemonEventsCommand(inv clisurface.Invocation, out, diagnostics io.Writer, now time.Time, read func() (string, []journal.Record, int, error)) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

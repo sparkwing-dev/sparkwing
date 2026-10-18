@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -22,9 +23,9 @@ type GitHubSourceProvider interface {
 }
 
 // ReleaseGitHubSourceCredential rechecks live consent and commits an audit after minting outside database transactions.
-func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized capability.Authorized, provider GitHubSourceProvider) (githubapp.Token, error) {
+func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized capability.Authorized, provider GitHubSourceProvider) (source.Credential, error) {
 	if provider == nil {
-		return githubapp.Token{}, ErrNotFound
+		return source.Credential{}, ErrNotFound
 	}
 	var before githubSourceRelease
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
@@ -33,21 +34,22 @@ func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized c
 		return err
 	})
 	if err != nil {
-		return githubapp.Token{}, err
+		return source.Credential{}, err
 	}
 	token, err := provider.InstallationTokenByIDs(ctx, before.installation, before.ids, map[string]string{"contents": "read"})
 	if errors.Is(err, githubapp.ErrNotInstalled) {
-		return githubapp.Token{}, authorityError(apierr.Conflict, "install the team's GitHub App on the approved repositories or update the owner's extras: "+strings.Join(before.names, ", "))
+		return source.Credential{}, authorityError(apierr.Conflict, "install the team's GitHub App on the approved repositories or update the owner's extras: "+strings.Join(before.names, ", "))
 	}
 	if err != nil {
-		return githubapp.Token{}, errors.Join(authorityError(apierr.Unavailable, "GitHub source token mint failed"), err)
+		return source.Credential{}, errors.Join(authorityError(apierr.Unavailable, "GitHub source token mint failed"), err)
 	}
+	var credential source.Credential
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		current, err := t.githubSourceReleaseTx(ctx, tx, authorized)
 		if err != nil {
 			return err
 		}
-		if current.installation != before.installation || !slices.Equal(current.ids, before.ids) {
+		if current.installation != before.installation || !slices.Equal(current.ids, before.ids) || !slices.Equal(current.names, before.names) {
 			return bindingRefusal()
 		}
 		if token.Token == "" || !token.ExpiresAt.After(tx.now()) {
@@ -57,12 +59,16 @@ func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized c
 		if err != nil {
 			return err
 		}
-		return insertSourceReleaseAuditTx(ctx, tx, audit)
+		if err := insertSourceReleaseAuditTx(ctx, tx, audit); err != nil {
+			return err
+		}
+		credential = source.Credential{Kind: "github_app", Host: "github.com", Secret: token.Token, ExtraRepositories: slices.Clone(current.names[1:])}
+		return nil
 	})
 	if err != nil {
-		return githubapp.Token{}, err
+		return source.Credential{}, err
 	}
-	return token, nil
+	return credential, nil
 }
 
 type githubSourceRelease struct {

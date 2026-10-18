@@ -25,11 +25,7 @@ import (
 
 const secretConnectTimeout = 10 * time.Second
 
-func runSecret(args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"secrets"}, args...))
-	if err != nil {
-		return err
-	}
+func runSecret(inv clisurface.Invocation) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() || inv.Command.Path == "sparkwing secrets" {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, format)

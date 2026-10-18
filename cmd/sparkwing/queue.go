@@ -27,8 +27,8 @@ type queueDependencies struct {
 	resolveRun func(context.Context, string) (string, error)
 }
 
-func runQueue(args []string) error {
-	return runQueueCommand(context.Background(), args, os.Stdout, queueDependencies{
+func runQueue(inv clisurface.Invocation) error {
+	return runQueueCommand(context.Background(), inv, os.Stdout, queueDependencies{
 		connect:    resolveQueueManager,
 		resolveRun: resolveQueueRun,
 		priority: func(ctx context.Context, run string, priority int, mode string) (queuePriorityResult, error) {
@@ -50,11 +50,7 @@ func resolveQueueManager(ctx context.Context, profile string) (controllerwire.Qu
 	return manager, closeTransport, nil
 }
 
-func runQueueCommand(ctx context.Context, args []string, out io.Writer, deps queueDependencies) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"queue"}, args...))
-	if err != nil {
-		return err
-	}
+func runQueueCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, deps queueDependencies) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() || inv.Command.Path == "sparkwing queue" {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

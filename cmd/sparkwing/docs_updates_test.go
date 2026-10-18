@@ -27,3 +27,20 @@ func TestUpdateGuideExamplesUseFinalGrammar(t *testing.T) {
 		t.Fatal("update guide contains no CLI examples")
 	}
 }
+
+func TestLaunchGuidesUseAvailableOnboardingAndModes(t *testing.T) {
+	for _, topic := range []string{"deployment-modes", "getting-started", "auth", "self-hosting"} {
+		body, err := docs.ReadRaw(topic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stale := range []string{"pending Korey", "controller, dashboard, cache, and Kubernetes runner", "| Self-hosted controller |"} {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s advertises stale launch behavior: %s", topic, stale)
+			}
+		}
+		if !strings.Contains(body, "sparkwing operator teams create") {
+			t.Errorf("%s omits available team onboarding", topic)
+		}
+	}
+}

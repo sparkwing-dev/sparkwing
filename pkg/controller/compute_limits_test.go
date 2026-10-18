@@ -26,7 +26,7 @@ func setComputeLimit(t *testing.T, f creditsFixture, name string, value int64) {
 }
 
 func computeIntake(pipeline string) controllerwire.CreateRunRequest {
-	return controllerwire.CreateRunRequest{Request: runspec.Request{Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}
+	return controllerwire.CreateRunRequest{Request: runspec.Request{Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: fortyHex(1)}, Source: runspec.Source{Ref: fortyHex(1)}}}
 }
 
 func TestComputeLimits_ShowAndSet(t *testing.T) {

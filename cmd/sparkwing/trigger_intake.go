@@ -34,6 +34,9 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 	for _, value := range input.LocalSecrets {
 		masker.Register(value)
 	}
+	for _, value := range input.SubmittedEnv {
+		masker.Register(string(value))
+	}
 	for _, value := range input.Request.RequestedArgs {
 		masker.Register(value)
 	}

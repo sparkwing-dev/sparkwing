@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -19,10 +18,6 @@ type annotationEntry struct {
 	JobID  string `json:"job_id"`
 	StepID string `json:"step_id,omitempty"`
 	controllerwire.Annotation
-}
-
-func runRunsAnnotations(ctx context.Context, args []string) error {
-	return runReviewCommand(ctx, append([]string{"runs", "annotations"}, args...), os.Stdout, resolveRunReview)
 }
 
 func listAnnotations(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation) ([]annotationEntry, error) {

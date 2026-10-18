@@ -18,40 +18,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
-
-func runRepos(args []string) error {
-	if handleParentHelp(cmdRepos, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdRepos, os.Stderr)
-		return errors.New("repos: subcommand required (list|info|update|add|remove|prune)")
-	}
-	switch args[0] {
-	case "update":
-		return runReposUpdate(args[1:])
-	case "list":
-		return runReposList(args[1:])
-	case "info":
-		return runReposInfo(args[1:])
-	case "add":
-		return runXrepoAdd(args[1:])
-	case "remove":
-		return runXrepoRemove(args[1:])
-	case "prune":
-		return runXrepoPrune(args[1:])
-	default:
-		PrintHelp(cmdRepos, os.Stderr)
-		return fmt.Errorf("repos: unknown subcommand %q", args[0])
-	}
-}
 
 func fleetGit(dir string, args ...string) (string, error) {
 	return runGit(dir, args...)
@@ -123,25 +94,17 @@ func repoRunObservations(ctx context.Context, reader controllerwire.RunReader) (
 	return out, nil
 }
 
-func runReposList(args []string) error {
-	fs := flag.NewFlagSet(cmdReposList.Path, flag.ContinueOnError)
-	var output string
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	checkouts := fs.Bool("checkouts", false, "list registered checkouts, their status and pipelines instead of SDK pins")
-	pipelines := fs.Bool("pipelines", true, "with --checkouts, include pipeline names (--pipelines=false skips the per-repo describe call)")
-	if err := parseAndCheck(cmdReposList, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runReposList(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("repos list: unexpected positional %q", fs.Arg(0))
+	output := inv.Output(color.IsInteractiveStdout())
+	checkouts := inv.Bool("checkouts")
+	pipelines := !inv.Has("pipelines") || inv.Bool("pipelines")
+	if checkouts {
+		return listCheckouts(output, pipelines)
 	}
-	if *checkouts {
-		return listCheckouts(output, *pipelines)
-	}
-	if fs.Changed("pipelines") {
+	if inv.Has("pipelines") {
 		return errors.New("repos list: --pipelines applies to --checkouts")
 	}
 
@@ -245,17 +208,13 @@ func printFleet(fleet []repos.Repo, latest string) {
 	}
 }
 
-func runReposUpdate(args []string) error {
-	return runReposUpdateWith(args, buildFleet, func(fleet []repos.Repo, config repos.UpdateConfig) []repos.Verdict {
+func runReposUpdate(inv clisurface.Invocation) error {
+	return runReposUpdateWith(inv, buildFleet, func(fleet []repos.Repo, config repos.UpdateConfig) []repos.Verdict {
 		return repos.UpdateFleet(&execOps{ctx: config.Context}, fleet, config)
 	})
 }
 
-func runReposUpdateWith(args []string, readFleet func(string) ([]repos.Repo, error), update func([]repos.Repo, repos.UpdateConfig) []repos.Verdict) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"repos", "update"}, args...))
-	if err != nil {
-		return err
-	}
+func runReposUpdateWith(inv clisurface.Invocation, readFleet func(string) ([]repos.Repo, error), update func([]repos.Repo, repos.UpdateConfig) []repos.Verdict) error {
 	output := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)
@@ -413,9 +372,7 @@ func printOneVerdict(v repos.Verdict) {
 			fmt.Printf("    %s\n", line)
 		}
 	}
-	for _, u := range v.Uncompared {
-		fmt.Printf("      %s\n", color.Dim("not compared: "+u.Pipeline+" -- "+compactReason(u.Reason)))
-	}
+
 	if len(v.Guides) > 0 {
 		fmt.Printf("      %s\n", color.Dim("migration guides in range:"))
 		for _, g := range v.Guides {
@@ -491,7 +448,7 @@ func (o execOps) Plan(sparkwingDir, pipeline string) (repos.Plan, error) {
 	if err != nil {
 		self = "sparkwing"
 	}
-	cmd := exec.CommandContext(o.context(), self, "pipeline", "plan", "--name", pipeline, "-o", "json")
+	cmd := exec.CommandContext(o.context(), self, "pipeline", "plan", "--pipeline", pipeline, "-o", "json")
 	cmd.Dir = filepath.Dir(sparkwingDir)
 	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer

@@ -27,17 +27,13 @@ type daemonLifecycleResult struct {
 	PreviousVersion string `json:"previous_version,omitempty"`
 }
 
-func runDaemonLifecycle(args []string) error {
+func runDaemonLifecycle(inv clisurface.Invocation) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runDaemonLifecycleCommand(ctx, args, os.Stdout, resolveLocalServices)
+	return runDaemonLifecycleCommand(ctx, inv, os.Stdout, resolveLocalServices)
 }
 
-func runDaemonLifecycleCommand(ctx context.Context, args []string, out io.Writer, resolve func(context.Context) (dashboardServices, error)) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"daemon"}, args...))
-	if err != nil {
-		return err
-	}
+func runDaemonLifecycleCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, resolve func(context.Context) (dashboardServices, error)) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

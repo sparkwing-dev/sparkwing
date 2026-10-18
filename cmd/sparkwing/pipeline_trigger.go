@@ -26,11 +26,7 @@ type triggerFlags struct {
 	resume, ref, pipelineRef, output string
 }
 
-func parseTriggerFlags(args []string) (triggerFlags, error) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "trigger"}, args...))
-	if err != nil {
-		return triggerFlags{}, err
-	}
+func triggerFlagsFromInvocation(inv clisurface.Invocation) (triggerFlags, error) {
 	flags := triggerFlags{
 		pipeline: inv.Pipeline, profile: inv.Value("profile"), detach: inv.Bool("detach"),
 		workingTree: inv.Bool("working-tree"), wantHelp: inv.Help(),
@@ -46,14 +42,14 @@ func parseTriggerFlags(args []string) (triggerFlags, error) {
 	return flags, nil
 }
 
-func runPipelineTrigger(args []string) error {
+func runPipelineTrigger(inv clisurface.Invocation) error {
 	ctx, stop, _ := interruptContext()
 	defer stop()
-	return runTriggerCommand(ctx, args, os.Stdout, prepareNativeTrigger, controllerOptions)
+	return runTriggerCommand(ctx, inv, os.Stdout, prepareNativeTrigger, controllerOptions)
 }
 
-func runTriggerCommand(ctx context.Context, args []string, out io.Writer, prepare func(context.Context, triggerFlags) (controllerwire.CreateRunRequest, error), connect func(context.Context, string) (client.EngineOptions, func(), error)) error {
-	flags, err := parseTriggerFlags(args)
+func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, prepare func(context.Context, triggerFlags) (controllerwire.CreateRunRequest, error), connect func(context.Context, string) (client.EngineOptions, func(), error)) error {
+	flags, err := triggerFlagsFromInvocation(inv)
 	if err != nil {
 		return err
 	}

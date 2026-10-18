@@ -134,6 +134,7 @@ func (s *Server) provisionRoot(w http.ResponseWriter, r *http.Request, spec capa
 	writeJSON(w, http.StatusCreated, credentialResponse{
 		Capability: issued.Raw, Prefix: issued.Capability.Prefix,
 		Team: issued.Capability.Team, Grants: append([]capability.Grant{}, issued.Capability.Grants...), ExpiresAt: issued.Capability.ExpiresAt,
+		Principal: issued.Capability.Subject.ID,
 	})
 	return nil
 }

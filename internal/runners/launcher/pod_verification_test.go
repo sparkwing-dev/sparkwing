@@ -16,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func requestedPod(t *testing.T) (*Launcher, *corev1.Pod) {
@@ -544,4 +546,35 @@ func apiDefaultedPod(p *corev1.Pod) {
 			}
 		}
 	}
+}
+
+func TestThrottledControllerDoesNotPauseLocalPodVerification(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, p := requestedPod(t)
+		control := l.Control.(*controlFake)
+		if _, err := l.LaunchOne(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		control.award = nil
+		control.fail = &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(60000)}}
+		l.Poll = 5 * time.Second
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- l.Run(ctx) }()
+		synctest.Wait()
+		p.Spec.Containers[0].Image = "other"
+		if _, err := l.Kube.CoreV1().Pods("cloud").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(6 * time.Second)
+		synctest.Wait()
+		retired := l.Boundary.(*boundaryFake).retirements
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if retired != 1 {
+			t.Fatalf("a mutated Pod went unverified for a poll while the controller asked for 60s: retirements=%d", retired)
+		}
+	})
 }

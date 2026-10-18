@@ -41,7 +41,7 @@ func TestAdmissionClassInferenceAtPlanSeal(t *testing.T) {
 			if tc.request != nil {
 				opts.AdmissionClass = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: *tc.request}, Origin: runspec.SettingOrigin{Layer: runspec.LayerSealed, Key: "admission_class"}}
 			}
-			request, err := runspec.SealRequest(runspec.Request{Version: 1, Team: "team", Pipeline: "build", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: tc.origin, Options: opts, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42"}}}, runspec.IntakeFacts{RunID: "run", Ceilings: runspec.Ceilings{AllowedAdmissionClasses: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{tc.want}}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "operator.allowed_admission_classes"}}}})
+			request, err := runspec.SealRequest(runspec.Request{Version: 1, Team: "team", Pipeline: "build", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: tc.origin, Options: opts, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}}, runspec.IntakeFacts{RunID: "run", Ceilings: runspec.Ceilings{AllowedAdmissionClasses: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{tc.want}}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "operator.allowed_admission_classes"}}}})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -5,6 +5,11 @@ kind: NodePool
 metadata:
   name: sparkwing-jobs-small
 spec:
+  # consolidateAfter must exceed the 3-minute award lease, or a node emptied by
+  # a launcher restart can be removed before its job is re-awarded.
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 10m
   template:
     metadata:
       labels:

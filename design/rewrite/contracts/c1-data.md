@@ -1,5 +1,24 @@
 # C1 data contract
 
+## Submitted environment retention
+
+Integration amendment: IntakeRequest.SubmittedEnv carries private values outside
+the request seal. AdmitRun validates the sealed environment names/digest and
+allow-list and encrypts values atomically into runs.submitted_env. The existing
+row-bound cipher binds ciphertext to team, execution ID and run-environment
+purpose. Values never enter RunRow, receipts, events or public snapshots. Missing
+or corrupt values fail before release; no ambient fallback occurs.
+
+Retries and child intake retain the source values and seal identity, encrypting
+them under the new execution ID. Replay cannot replace values. Retention follows
+the run row, including deletion. SetRunEnvironmentCipher is configured with the
+controller's existing credential cipher. ReadSubmittedEnvironment releases only
+to the run's live direct trigger, plan, eval or node execution award. The persisted
+unit prefix, holder, generation and lease fence the release. Eval also retains
+its source and controller expansion leases. SourceRead is independent of
+environment release, so eval retains its fixed narrow grants.
+Plan acceptance includes these registered masks in identifier refusal.
+
 ## Verified-default record observations
 
 `RecordLookupResult.VerifiedDefault` records a successful verified-default
@@ -44,6 +63,13 @@ Exact-body transition proofs use the decoded `source_attempt`, revalidated
 against the persisted source ordinal in the committing transaction. An identical
 actor and digest may replay before comparison with the advanced ordinal, after
 authority is rechecked. A changed source ordinal cannot reuse that proof.
+
+## Here intake reasons
+
+`runspec.Request.Reason` retains the explicit here-trigger reason in the existing
+request JSON and canonical seal. Intake, replay and retry preserve it. Changing
+that reason under the original idempotency key conflicts. It adds no authority
+and does not alter one-time here bearer issuance.
 
 ## Committed retry selection
 
@@ -3751,12 +3777,14 @@ Controller schedules reach the same sealed intake through the adapter below.
 ## Integration amendment: audited GitHub source release
 
 `Tenant.ReleaseGitHubSourceCredential(ctx, Authorized, GitHubSourceProvider)`
-returns a `githubapp.Token` only after the existing source-release audit commits.
+returns a `source.Credential` only after the existing source-release audit commits.
+Its `ExtraRepositories` contains the approved extra repository names read in that
+transaction. The primary repository is excluded.
 The provider interface contains only `InstallationTokenByIDs`, matching the
 existing GitHub client and store test fake. A short transaction resolves and
 validates source authority and consent. Minting runs with no transaction open.
 A second short transaction repeats authority, enrollment, consent and fence
-checks, requires the same installation and approved ID set, and writes the audit.
+checks, requires the same installation, approved IDs and names, and writes the audit.
 GitHub verifies coverage while minting that ID set. Source release never lists
 installation repositories, so the listing's 1,000-repository bound cannot turn
 an authorized source into not_found. Refused coverage returns conflict; other
@@ -3832,6 +3860,12 @@ repository automation consent. It locks the installation before locking and
 rechecking that relation. Contents-only minting, exact repository and extra IDs,
 claim fencing and committing audit remain the existing source-release path.
 
+## Detached request trace
+
+`runspec.Request.RequestID` carries optional detached submission trace metadata.
+The ordinary request seal, intake persistence and retry clone retain it. It
+carries no authority and does not replace the intake idempotency key. No schema
+column is added because it lives in the existing request JSON.
 
 ## Launcher Pod rejection amendment (2026-10-17, W8 integration)
 
@@ -4029,3 +4063,14 @@ committed collection correlation. TestRecordedRefundCannotBindAnotherAssociation
 generates foreign tenant, mode, payment and refund associations.
 TestRecordedRefundBindingRollsBackWithItsOutcome proves atomicity when applying
 the stored outcome fails. The native harness retains PostgreSQL execution.
+
+## Environment provenance integration
+
+`runspec.Request.EnvironmentSource` seals `captured` or `submitted` independently
+of invocation origin. Captured snapshots stay in private local host storage.
+Submitted values use `runs.submitted_env` and its existing bound cipher. Intake
+rejects submitted values attached to captured provenance and refuses nonempty
+environments without known provenance. Child intake copies its parent's
+environment and provenance in the ancestry transaction. A supplied snapshot or
+provenance that differs from the parent fails with `spec_drift`. Retry retains
+the original seal. Invocation origin never selects environment storage.

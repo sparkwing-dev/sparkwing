@@ -125,9 +125,6 @@ type capabilitiesClaims struct {
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if versions, present := r.URL.Query()["engine_version"]; present {
 		engine := s.engineController
-		if engine == nil {
-			engine = &EngineController{}
-		}
 		result, err := engine.Compatibility(r.Context(), versions[0])
 		if err != nil {
 			writePolicyError(w, err)

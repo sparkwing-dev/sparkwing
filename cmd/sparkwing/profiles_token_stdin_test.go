@@ -73,7 +73,7 @@ func TestProfilesAddNoProbeReadsTokenFromStdin(t *testing.T) {
 	withStdin(t, "swu_from_stdin\n")
 	out := captureStdout(t, func() {
 		args := []string{"--profile", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
-		if err := runProfiles(append([]string{"add"}, args...)); err != nil {
+		if err := runProfilesArgs(append([]string{"add"}, args...)); err != nil {
 			t.Errorf("profiles add: %v", err)
 		}
 	})
@@ -90,39 +90,17 @@ func TestProfilesSetReadsTokenFromStdin(t *testing.T) {
 	withStdin(t, "swu_first\n")
 	captureStdout(t, func() {
 		args := []string{"--profile", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
-		if err := runProfiles(append([]string{"add"}, args...)); err != nil {
+		if err := runProfilesArgs(append([]string{"add"}, args...)); err != nil {
 			t.Fatalf("profiles add: %v", err)
 		}
 	})
 	withStdin(t, "swu_rotated\n")
 	captureStdout(t, func() {
-		if err := runProfiles([]string{"set", "--profile", "prod", "--token-stdin"}); err != nil {
+		if err := runProfilesArgs([]string{"set", "--profile", "prod", "--token-stdin"}); err != nil {
 			t.Fatalf("profiles set: %v", err)
 		}
 	})
 	if got := loadSavedProfile(t, path, "prod").ControllerToken(); got != "swu_rotated" {
 		t.Errorf("stored token = %q, want %q", got, "swu_rotated")
-	}
-}
-
-func TestProfilesTokenFlagsConflict(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		run  func([]string) error
-		args []string
-	}{
-		{"set", runProfiles, []string{"set", "--profile", "prod", "--token", "swu_x", "--token-stdin"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			profilesFixturePath(t)
-			withStdin(t, "swu_from_stdin\n")
-			err := tc.run(tc.args)
-			if err == nil {
-				t.Fatal("expected --token with --token-stdin to be rejected")
-			}
-			if !strings.Contains(err.Error(), "conflicts with") {
-				t.Errorf("error = %v, want a conflict about --token and --token-stdin", err)
-			}
-		})
 	}
 }

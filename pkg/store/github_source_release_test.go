@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"testing/quick"
@@ -74,7 +75,9 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 		extra := int64(value) + 10
 		tenant, auth, provider := githubSourceFixture(t, extra)
 		s := tenant.s
-		mode %= 14
+		approved := fmt.Sprintf("acme/approved-%d", value)
+		rewriteSchemaExec(t, s.db, `UPDATE github_app_extra_repos SET extra_repo=?`, approved)
+		mode %= 15
 		switch mode {
 		case 1:
 			auth.Target.Team = "b"
@@ -106,6 +109,10 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE capabilities SET grants=? WHERE prefix=?`, []byte(`[]`), auth.Principal.Capability.Prefix)
 		case 13:
 			rewriteSchemaExec(t, s.db, `UPDATE capabilities SET expires_at=1 WHERE prefix='runner'`)
+		case 14:
+			provider.before = func() {
+				rewriteSchemaExec(t, s.db, `UPDATE github_app_extra_repos SET extra_repo=?`, approved+"-changed")
+			}
 		}
 		token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
 		var count int
@@ -113,9 +120,9 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		if mode != 0 {
-			return err != nil && token.Token == "" && count == 0
+			return err != nil && token.Secret == "" && len(token.ExtraRepositories) == 0 && count == 0
 		}
-		return err == nil && token.Token == provider.token.Token && count == 1 && provider.calls == 1 && reflect.DeepEqual(provider.ids, []int64{1, extra}) && reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"})
+		return err == nil && token.Kind == "github_app" && token.Host == "github.com" && reflect.DeepEqual(token.ExtraRepositories, []string{approved}) && token.Secret == provider.token.Token && count == 1 && provider.calls == 1 && reflect.DeepEqual(provider.ids, []int64{1, extra}) && reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"})
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 96}); err != nil {
 		t.Fatal(err)
@@ -125,7 +132,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 func TestGitHubSourceReleaseAuditPrecedesReturn(t *testing.T) {
 	tenant, auth, provider := githubSourceFixture(t, 2)
 	token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
-	if err != nil || token.Token == "" {
+	if err != nil || token.Secret == "" || !reflect.DeepEqual(token.ExtraRepositories, []string{"acme/approved"}) {
 		t.Fatalf("release: %v", err)
 	}
 	var team, repo, run, node, prefix, credential string
@@ -184,11 +191,11 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == 0 {
-				if err != nil || token.Token == "" || audits != 1 || !reflect.DeepEqual(provider.ids, []int64{1, extra}) || !reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"}) {
+				if err != nil || token.Secret == "" || audits != 1 || !reflect.DeepEqual(provider.ids, []int64{1, extra}) || !reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"}) {
 					t.Logf("scheduled release=%+v ids=%v err=%v", token, provider.ids, err)
 					return false
 				}
-			} else if err == nil || token.Token != "" || provider.calls != 0 || audits != 0 {
+			} else if err == nil || token.Secret != "" || provider.calls != 0 || audits != 0 {
 				t.Logf("mode=%d refused release=%+v err=%v calls=%d", mode, token, err, provider.calls)
 				return false
 			}
@@ -213,7 +220,7 @@ func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET team='b' WHERE prefix='runner'`)
 			}
 			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
-			if err == nil || token.Token != "" || provider.calls != 0 {
+			if err == nil || token.Secret != "" || provider.calls != 0 {
 				t.Logf("mode=%d token=%+v calls=%d err=%v", mode, token, provider.calls, err)
 				return false
 			}
@@ -277,13 +284,13 @@ func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testi
 				return false
 			}
 			if mode == 0 {
-				if err != nil || token.Token == "" {
+				if err != nil || token.Secret == "" {
 					t.Logf("scoped mint beyond listing: %v", err)
 					return false
 				}
 				rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 1)
 			} else {
-				if err == nil || token.Token != "" {
+				if err == nil || token.Secret != "" {
 					t.Logf("mode=%d token=%+v err=%v", mode, token, err)
 					return false
 				}

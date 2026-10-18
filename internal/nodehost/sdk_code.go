@@ -121,8 +121,15 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 	if args == nil {
 		args = map[string]string{}
 	}
+	entrypoint := spec.Resolved.Entrypoint
+	if entrypoint == "" {
+		entrypoint = spec.Request.Request.Source.Entrypoint
+	}
+	if entrypoint == "" {
+		entrypoint = spec.Request.Request.Pipeline
+	}
 	var raw json.RawMessage
-	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: spec.Request.Request.Pipeline, Args: args, Run: &run}, &raw, "")
+	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: entrypoint, Args: args, Run: &run}, &raw, "")
 	if err != nil {
 		return err
 	}

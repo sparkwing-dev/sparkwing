@@ -24,7 +24,7 @@ func TestDoctorCommandRetainsToolchainFinding(t *testing.T) {
 			deps := doctorTestDependencies(&doctorLifecycleFake{})
 			deps.machine = func(context.Context) doctorReport { return doctorReport{GoToolchain: finding} }
 			var out bytes.Buffer
-			if err := runDoctorCommand(t.Context(), []string{"-o", format}, &out, deps); err != nil {
+			if err := runDoctorCommandArgs(t.Context(), []string{"-o", format}, &out, deps); err != nil {
 				t.Fatal(err)
 			}
 			if format == "json" {
@@ -49,7 +49,7 @@ func TestDoctorCommandRetainsToolchainFinding(t *testing.T) {
 func TestDoctorCommandNoProjectHasNoToolchainFinding(t *testing.T) {
 	for _, format := range []string{"pretty", "plain", "json"} {
 		var out bytes.Buffer
-		if err := runDoctorCommand(t.Context(), []string{"-o", format}, &out, doctorTestDependencies(&doctorLifecycleFake{})); err != nil {
+		if err := runDoctorCommandArgs(t.Context(), []string{"-o", format}, &out, doctorTestDependencies(&doctorLifecycleFake{})); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(out.String(), "go_toolchain") {
@@ -70,7 +70,7 @@ func TestDoctorCommandRetainsInstallConflict(t *testing.T) {
 			deps := doctorTestDependencies(&doctorLifecycleFake{})
 			deps.machine = func(context.Context) doctorReport { return doctorReport{InstallConflict: conflict} }
 			var out bytes.Buffer
-			if err := runDoctorCommand(t.Context(), []string{"-o", format}, &out, deps); err != nil {
+			if err := runDoctorCommandArgs(t.Context(), []string{"-o", format}, &out, deps); err != nil {
 				t.Fatal(err)
 			}
 			if format == "json" {
@@ -112,7 +112,7 @@ func TestDoctorCommandDistinguishesSurveyFailureFromGatedFleet(t *testing.T) {
 				return doctorReport{GatesSurveyed: 3, UngatedRepos: []githooks.RepoGates{{Repo: "/projects/repo", Missing: []string{"pre-push"}}}}
 			}
 			var out bytes.Buffer
-			if err := runDoctorCommand(t.Context(), []string{"-o", format}, &out, deps); err != nil {
+			if err := runDoctorCommandArgs(t.Context(), []string{"-o", format}, &out, deps); err != nil {
 				t.Fatal(err)
 			}
 			if failed {

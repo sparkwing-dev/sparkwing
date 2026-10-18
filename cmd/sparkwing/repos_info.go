@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -55,19 +54,14 @@ type repoPipeline struct {
 	lastNumber int64
 }
 
-func runReposInfo(args []string) error {
-	fs := flag.NewFlagSet(cmdReposInfo.Path, flag.ContinueOnError)
-	var repoSel, output string
-	fs.StringVar(&repoSel, "repo", "", "repo name or checkout path; default: the repo containing the current directory")
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
-	if err := parseAndCheck(cmdReposInfo, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runReposInfo(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("repos info: unexpected positional %q", fs.Arg(0))
+	output := inv.Output(color.IsInteractiveStdout())
+	repoSel, err := invocationCheckout(inv)
+	if err != nil {
+		return err
 	}
 
 	latest, _ := fetchLatestRelease()
@@ -93,6 +87,10 @@ func runReposInfo(args []string) error {
 	if strings.ToLower(output) == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		return enc.Encode(info)
+	}
+	if output == "plain" {
+		_, err := fmt.Fprintln(os.Stdout, repo.Primary)
+		return err
 	}
 	printRepoInfo(info)
 	return nil

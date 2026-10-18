@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -59,6 +60,13 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			return AdmissionResult{}, err
 		}
 		input.Source.Location = runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}
+		if schedule.LockedRef != "" {
+			git, code, err := source.ResolveRevisions(ctx, input.Git, input.Source, "", nil)
+			if err != nil {
+				return AdmissionResult{}, err
+			}
+			input.Git, input.Source = git, code
+		}
 	}
 	input.Team, input.Pipeline, input.Origin = string(t.team), schedule.Pipeline, runspec.OriginSchedule
 	input.RequestedArgs = schedule.Effective().Args
@@ -92,6 +100,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			if schedule.LockedRef == "" {
 				input.Git.SHA = stored.Request.Request.Git.SHA
 			}
+			input.Source.Ref = stored.Request.Request.Source.Ref
 			digest, err := tx.store.planServices().CanonicalHash(struct {
 				Request  runspec.Request
 				Delivery string

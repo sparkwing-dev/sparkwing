@@ -2,85 +2,48 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
-
-	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-func runDocs(args []string) error {
-	if len(args) == 0 {
-		PrintHelp(cmdDocs, os.Stderr)
-		return errors.New("docs: missing subcommand")
+func runDocsList(inv clisurface.Invocation) error {
+	output := inv.Output(color.IsInteractiveStdout())
+	wf := docsWebFlags{web: inv.Bool("web"), version: inv.Value("version"), noCache: inv.Bool("no-cache")}
+	query := inv.Value("search")
+	paging := discoveryPaging{limit: 40, cursor: inv.Value("cursor")}
+	if inv.Has("limit") {
+		paging.limit, _ = strconv.Atoi(inv.Value("limit"))
 	}
-	switch args[0] {
-	case "list":
-		return runDocsList(args[1:])
-	case "read":
-		return runDocsRead(args[1:])
-	case "search":
-		return runDocsSearch(args[1:])
-	case "migrations":
-		return runDocsMigrations(args[1:])
-	case "help", "-h", "--help":
-		PrintHelp(cmdDocs, os.Stdout)
-		return nil
-	default:
-		PrintHelp(cmdDocs, os.Stderr)
-		return fmt.Errorf("docs: unknown verb %q (valid: list, read, search, migrations)", args[0])
+	guides, versions := inv.Bool("guides"), inv.Bool("versions")
+	if guides && versions {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--guides and --versions select separate listings"}
 	}
-}
-
-func runDocsList(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsList.Path, flag.ContinueOnError)
-	var output string
-	var wf docsWebFlags
-	query := fs.String("search", "", "match words against topic slug, title and summary")
-	var paging discoveryPaging
-	fs.IntVar(&paging.limit, "limit", 40, "maximum records; must be at least 1")
-	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	guides := fs.Bool("guides", false, "list the task-sized topic sets instead of topics")
-	versions := fs.Bool("versions", false, "list the doc versions this CLI knows instead of topics")
-	registerWebFlags(fs, &wf, true)
-	if err := parseAndCheck(cmdDocsList, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("docs list: unexpected positional %q", fs.Arg(0))
-	}
-	if *guides && *versions {
-		return errors.New("docs list: --guides and --versions each pick a different listing; name one")
-	}
-	if *guides || *versions {
+	if guides || versions {
 		mode := "--guides"
 		allowed := map[string]bool{"output": true, "guides": true}
-		if *versions {
+		if versions {
 			mode = "--versions"
 			allowed = map[string]bool{"output": true, "versions": true, "web": true, "no-cache": true}
 		}
 		var stray []string
-		fs.Visit(func(f *flag.Flag) {
-			if !allowed[f.Name] {
+		for _, f := range inv.Command.Flags {
+			if inv.Has(f.Name) && !allowed[f.Name] {
 				stray = append(stray, "--"+f.Name)
 			}
-		})
-		if len(stray) > 0 {
-			return fmt.Errorf("docs list %s: %s does not apply to this listing", mode, strings.Join(stray, ", "))
 		}
-		if *guides {
+		if len(stray) > 0 {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: fmt.Sprintf("%s: %s does not apply to this listing", mode, strings.Join(stray, ", "))}
+		}
+		if guides {
 			return renderDocsGuides(output)
 		}
 		return renderDocsVersions(wf, output)
@@ -96,13 +59,13 @@ func runDocsList(args []string) error {
 	}
 	printDiscoveryWarning(resolution)
 	if !resolution.useWeb {
-		return renderDocsPage(docs.List(), *query, paging, output)
+		return renderDocsPage(docs.List(), query, paging, output)
 	}
 	entries, err := resolution.client.DocIndex(ctx, resolution.version)
 	if err != nil {
 		return fmt.Errorf("docs list --web %s: %w", resolution.version, err)
 	}
-	return renderDocsPage(entries, *query, paging, output)
+	return renderDocsPage(entries, query, paging, output)
 }
 
 func renderDocsGuides(output string) error {
@@ -129,58 +92,41 @@ func renderDocsGuides(output string) error {
 	}
 }
 
-func runDocsRead(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsRead.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "pretty | json | plain")
-	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, auth)")
-	guide := fs.String("guide", "", "read a named set of topics instead of one (see `sparkwing docs list --guides`)")
-	section := fs.Int("section", 0, "read the embedded section whose start_line was returned by docs search")
-	all := fs.Bool("full", false, "read every embedded document")
-	var wf docsWebFlags
-	registerWebFlags(fs, &wf, true)
-	if err := parseAndCheck(cmdDocsRead, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *all {
+func runDocsRead(inv clisurface.Invocation) error {
+	output := inv.Output(color.IsInteractiveStdout())
+	topic, guide := inv.Value("topic"), inv.Value("guide")
+	section, _ := strconv.Atoi(inv.Value("section"))
+	wf := docsWebFlags{web: inv.Bool("web"), version: inv.Value("version"), noCache: inv.Bool("no-cache")}
+	if inv.Bool("full") {
 		var stray []string
-		fs.Visit(func(f *flag.Flag) {
-			if f.Name != "full" && f.Name != "output" {
+		for _, f := range inv.Command.Flags {
+			if inv.Has(f.Name) && f.Name != "full" && f.Name != "output" {
 				stray = append(stray, "--"+f.Name)
 			}
-		})
+		}
 		if len(stray) > 0 {
-			return fmt.Errorf("docs read --full: reads the whole embedded corpus, so %s does not apply", strings.Join(stray, ", "))
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: fmt.Sprintf("--full: %s does not apply to the whole embedded corpus", strings.Join(stray, ", "))}
 		}
-		if fs.NArg() > 0 {
-			return fmt.Errorf("docs read --full: unexpected positional %q", fs.Arg(0))
-		}
-		return readAllDocs(*output)
+		return readAllDocs(output)
 	}
-	if fs.Changed("section") && (*section < 1 || *guide != "" || wf.web) {
-		return fmt.Errorf("docs read: --section requires a positive start_line, an embedded --topic, and no --guide or --web")
+	if inv.Has("section") && (section < 1 || guide != "" || wf.web) {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--section requires a positive start_line, an embedded --topic, and no --guide or --web"}
 	}
-	if fs.NArg() > 0 {
-		return &clisurface.UsageError{Path: cmdDocsRead.Path, Message: "use --topic or --guide"}
-	}
-	if *guide != "" {
+	if guide != "" {
 		if wf.web || wf.version != "" || wf.noCache {
-			return errors.New("docs read: --guide reads embedded docs; use --topic with --web, --version, or --no-cache")
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--guide reads embedded docs; use --topic with --web, --version, or --no-cache"}
 		}
-		if *topic != "" {
-			return errors.New("docs read: --topic and --guide are mutually exclusive")
+		if topic != "" {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--topic and --guide are mutually exclusive"}
 		}
-		body, err := docs.ReadGuide(*guide)
+		body, err := docs.ReadGuide(guide)
 		if err != nil {
 			return err
 		}
-		return writeDocument(os.Stdout, *topic, body, *output)
+		return writeDocument(os.Stdout, topic, body, output)
 	}
-	if *topic == "" {
-		PrintHelp(cmdDocsRead, os.Stderr)
-		return errors.New("docs read: --topic is required (e.g. --topic getting-started), or --guide for a task-sized set")
+	if topic == "" {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--topic or --guide is required"}
 	}
 	ctx, cancel := newWebContext()
 	defer cancel()
@@ -190,39 +136,39 @@ func runDocsRead(args []string) error {
 	}
 	printDiscoveryWarning(resolution)
 	if !resolution.useWeb {
-		body, err := docs.Read(*topic)
+		body, err := docs.Read(topic)
 		if err != nil {
 			return fmt.Errorf("%w; use sparkwing docs list --search <topic>", err)
 		}
-		if *section > 0 {
-			sections, err := docs.Sections(*topic)
+		if section > 0 {
+			sections, err := docs.Sections(topic)
 			if err != nil {
 				return err
 			}
 			found := false
 			for _, selected := range sections {
-				if selected.StartLine == *section {
+				if selected.StartLine == section {
 					body, found = selected.Body, true
 					break
 				}
 			}
 			if !found {
-				return fmt.Errorf("docs read: no section starts at line %d in %s; repeat docs search for this build", *section, *topic)
+				return fmt.Errorf("docs read: no section starts at line %d in %s; repeat docs search for this build", section, topic)
 			}
 		}
 		if !strings.HasSuffix(body, "\n") {
 			body += "\n"
 		}
-		return writeDocument(os.Stdout, *topic, body, *output)
+		return writeDocument(os.Stdout, topic, body, output)
 	}
-	body, err := fetchDocWeb(ctx, resolution, *topic)
+	body, err := fetchDocWeb(ctx, resolution, topic)
 	if err != nil {
 		return err
 	}
 	if !strings.HasSuffix(body, "\n") {
 		body += "\n"
 	}
-	return writeDocument(os.Stdout, *topic, body, *output)
+	return writeDocument(os.Stdout, topic, body, output)
 }
 
 func readAllDocs(output string) error {
@@ -241,33 +187,19 @@ func readAllDocs(output string) error {
 	return writeText(os.Stdout, "document", docs.All(), output)
 }
 
-func runDocsSearch(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsSearch.Path, flag.ContinueOnError)
-	var query string
-	var output string
-	var topicsOnly, withBody bool
-	var paging discoveryPaging
-	fs.IntVar(&paging.limit, "limit", 20, "maximum records; must be at least 1")
-	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
-	fs.StringVar(&query, "search", "", "search terms (every token must match somewhere)")
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	fs.BoolVar(&withBody, "body", false, "print each matching section in full instead of a snippet")
-	fs.BoolVar(&topicsOnly, "topics", false, "list matching topics instead of sections")
-	if err := parseAndCheck(cmdDocsSearch, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runDocsSearch(inv clisurface.Invocation) error {
+	query := inv.Value("search")
+	output := inv.Output(color.IsInteractiveStdout())
+	topicsOnly, withBody := inv.Bool("topics"), inv.Bool("body")
+	paging := discoveryPaging{limit: 20, cursor: inv.Value("cursor")}
+	if inv.Has("limit") {
+		paging.limit, _ = strconv.Atoi(inv.Value("limit"))
 	}
 	if paging.limit < 1 {
 		return fmt.Errorf("--limit must be at least 1")
 	}
-	if fs.NArg() > 0 {
-		return &clisurface.UsageError{Path: cmdDocsSearch.Path, Message: "use --search"}
-	}
 	if query == "" {
-		PrintHelp(cmdDocsSearch, os.Stderr)
-		return errors.New("docs search: --search is required (e.g. --search \"pull_request\")")
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--search is required"}
 	}
 	if topicsOnly {
 		return renderDocsPage(docs.Search(query), "", paging, output)

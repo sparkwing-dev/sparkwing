@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,6 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
@@ -93,26 +93,9 @@ func exitCodeFor(err error) int {
 	return 1
 }
 
-func dispatchRun(args []string) error {
-	return dispatchRunWithEngine(args, switchToolchain)
-}
-
-func dispatchRunWithEngine(args []string, selectEngine func(string, func()) error) error {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		if len(args) == 0 {
-			PrintHelp(cmdRun, os.Stderr)
-			return errors.New("run: pipeline name required; use `sparkwing run <pipeline>`")
-		}
-		PrintHelp(cmdRun, os.Stdout)
-		return nil
-	}
-
-	pipelineName := args[0]
-	if strings.HasPrefix(pipelineName, "-") {
-		PrintHelp(cmdRun, os.Stderr)
-		return fmt.Errorf("run: pipeline name must come first; got flag %q", pipelineName)
-	}
-	flags, passthrough := parseRunFlags(args[1:])
+func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, func()) error) (resultErr error) {
+	pipelineName := inv.Pipeline
+	flags, passthrough := runFlagsFromInvocation(inv)
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
@@ -127,13 +110,31 @@ func dispatchRunWithEngine(args []string, selectEngine func(string, func()) erro
 		return err
 	}
 	if helpRequested {
-		return runSelectedHelp(dir, pipelineName, flags, selectEngine)
+		return runSelectedHelp(dir, pipelineName, flags)
 	}
-	entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
+	home, err := wingd.HomeDir("")
+	if err != nil {
+		return err
+	}
+	captured := os.Environ()
+	selection, err := selectLocalRunSource(context.Background(), home, dir, pipelineName, flags, captured, secrets.NewMasker())
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, selection.execution.Close()) }()
+	code, err := selection.checkout(context.Background(), home, captured)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, code.Close()) }()
+	flags.sourceSelection = &selection
+	entry, err := pinnedPipeline(selection.execution.Directory, pipelineName)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
-	route, err := loadRunRouting(dir, pipelineName)
+	var closeErr error
+	beforeExec := func() { closeErr = errors.Join(closeErr, code.Close(), selection.execution.Close()) }
+	route, err := loadRunRouting(selection.execution.Directory, pipelineName)
 	if err != nil {
 		return err
 	}
@@ -143,9 +144,11 @@ func dispatchRunWithEngine(args []string, selectEngine func(string, func()) erro
 		}
 	}
 
-	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
-	if err := selectEngine(dir, nil); err != nil {
-		return err
+	if err := selectEngine(code.Directory, beforeExec); err != nil {
+		return errors.Join(err, closeErr)
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 
 	return runConfiguredInvocation(pipelineName, flags, passthrough)
@@ -155,38 +158,6 @@ func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, err
 	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
 	if err != nil || cfg == nil {
 		return nil, err
-	}
-	return cfg.Registry().Find(pipelineName), nil
-}
-
-// safety: --sw-ref executes another revision, so its sparkwing.yaml, not the
-// checkout's, says whether the pipeline is pinned.
-func pinnedPipelineAt(sparkwingDir, ref, pipelineName string) (*pipelines.Pipeline, error) {
-	if ref == "" {
-		return pinnedPipeline(sparkwingDir, pipelineName)
-	}
-	repoRoot := filepath.Dir(sparkwingDir)
-	commit, err := orchestrator.ResolveRefCommit(context.Background(), repoRoot, ref, slog.Default())
-	if err != nil {
-		return nil, fmt.Errorf("--sw-ref %s: %w", ref, err)
-	}
-	path := ".sparkwing/" + projectconfig.Filename
-	// #nosec G204 -- the commit is a resolved object ID and the path a constant.
-	listed, err := exec.Command("git", "-C", repoRoot, "ls-tree", "--name-only", string(commit), "--", path).Output()
-	if err != nil {
-		return nil, fmt.Errorf("--sw-ref %s: list %s: %w", ref, path, err)
-	}
-	if strings.TrimSpace(string(listed)) == "" {
-		return nil, nil
-	}
-	// #nosec G204 -- the commit is a resolved object ID and the path a constant.
-	raw, err := exec.Command("git", "-C", repoRoot, "show", string(commit)+":./"+path).Output()
-	if err != nil {
-		return nil, fmt.Errorf("--sw-ref %s: read %s: %w", ref, path, err)
-	}
-	cfg, err := projectconfig.Parse(raw)
-	if err != nil {
-		return nil, fmt.Errorf("--sw-ref %s: %s: %w", ref, path, err)
 	}
 	return cfg.Registry().Find(pipelineName), nil
 }
@@ -225,6 +196,7 @@ func runSparkwing(args []string) (result error) {
 	if inv.Help() && !pipelineHelp || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
+	replayDirectory := ""
 	if checkout := inv.Value("checkout"); checkout != "" {
 		previous, err := os.Getwd()
 		if err != nil {
@@ -233,160 +205,171 @@ func runSparkwing(args []string) (result error) {
 		if err := os.Chdir(checkout); err != nil {
 			return err
 		}
+		replayDirectory = previous
 		defer func() { result = errors.Join(result, os.Chdir(previous)) }()
 	}
 	if inv.Command.Path == "sparkwing __sdk-install" {
-		return runSDKInstall(invocationArgs(inv)[1:])
+		return runSDKInstall(inv)
 	}
 	cleanupStaleUpdate()
-	args = invocationArgs(inv)
-	toolchainReplayArgs = args
-	noteVersionTransition(os.Stderr, args[0])
-	return dispatchCommand(args)
-}
-
-func invocationArgs(inv clisurface.Invocation) []string {
-	args := strings.Fields(strings.TrimPrefix(inv.Command.Path, "sparkwing "))
-	if inv.Pipeline != "" {
-		args = append(args, inv.Pipeline)
+	previousArgs, previousDirectory := toolchainReplayArgs, toolchainReplayDirectory
+	toolchainReplayArgs = append([]string(nil), args...)
+	toolchainReplayDirectory = replayDirectory
+	defer func() { toolchainReplayArgs, toolchainReplayDirectory = previousArgs, previousDirectory }()
+	noteVersionTransition(os.Stderr, strings.Fields(inv.Command.Path)[1])
+	switch {
+	case strings.HasPrefix(inv.Command.Path, "sparkwing tokens "), strings.HasPrefix(inv.Command.Path, "sparkwing operator tokens "):
+		return runTokenCommand(context.Background(), inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing queue "):
+		return runQueue(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing dashboard "):
+		return runDashboard(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing profiles "):
+		return runProfiles(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing secrets "):
+		return runSecret(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing schedules "):
+		return runSchedules(context.Background(), inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing pools "):
+		return runPools(context.Background(), inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing overflow "):
+		return runOverflow(context.Background(), inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing operator teams "):
+		return runOperatorTeams(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing operator limits "):
+		return runOperatorLimits(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing operator object-store "):
+		return runOperatorObjectStore(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing runs approvals "), strings.HasPrefix(inv.Command.Path, "sparkwing runs annotations "):
+		return runReviewCommand(context.Background(), inv, os.Stdout, resolveRunReview)
 	}
-	for _, f := range append(clisurface.GlobalFlags(), inv.Command.Flags...) {
-		if f.Name == "checkout" {
-			continue
-		}
-		for _, value := range inv.Flags[f.Name] {
-			args = append(args, "--"+f.Name+"="+value)
-		}
+	switch inv.Command.Path {
+	case "sparkwing team settings show", "sparkwing team settings set":
+		return runTeamSettings(context.Background(), inv)
+	case "sparkwing run":
+		return dispatchRunWithEngine(inv, switchToolchain)
+	case "sparkwing pipeline list":
+		return runPipelineList(inv)
+	case "sparkwing pipeline describe":
+		return runPipelineDescribe(inv)
+	case "sparkwing pipeline plan":
+		return runPipelinePlan(inv)
+	case "sparkwing pipeline lint":
+		return runPipelineLint(inv)
+	case "sparkwing pipeline trigger":
+		return runPipelineTrigger(inv)
+	case "sparkwing pipeline sparks list":
+		return runSparksList(inv)
+	case "sparkwing pipeline sparks add":
+		return runSparksAdd(inv)
+	case "sparkwing pipeline sparks remove":
+		return runSparksRemove(inv)
+	case "sparkwing pipeline sparks catalog":
+		return runSparksCatalog(inv)
+	case "sparkwing pipeline sparks lint":
+		return runSparksLint(inv)
+	case "sparkwing pipeline sparks update":
+		return runSparksUpdate(inv)
+	case "sparkwing pipeline sparks inflate":
+		return runSparksInflate(inv)
+	case "sparkwing cache info":
+		return runCacheInfo(inv)
+	case "sparkwing cache explain":
+		return runCacheExplain(inv)
+	case "sparkwing cache prune":
+		return runCachePrune(inv)
+	case "sparkwing daemon recover-state":
+		return runDaemonRecoverState(inv)
+	case "sparkwing repos list":
+		return runReposList(inv)
+	case "sparkwing repos add":
+		return runXrepoAdd(inv)
+	case "sparkwing repos remove":
+		return runXrepoRemove(inv)
+	case "sparkwing repos prune":
+		return runXrepoPrune(inv)
+	case "sparkwing repos info":
+		return runReposInfo(inv)
+	case "sparkwing repos update":
+		return runReposUpdate(inv)
+	case "sparkwing runners add":
+		return runRunnersAdd(inv)
+	case "sparkwing runners remove":
+		return runRunnersRemove(inv)
+	case "sparkwing completion":
+		return runCompletion(inv)
+	case "sparkwing runs logs", "sparkwing runs grep":
+		return runRunsLogs(context.Background(), inv)
+	case "sparkwing debug attach", "sparkwing debug env":
+		return runDebug(inv)
+	case "sparkwing __complete":
+		return runInternalComplete(inv)
+	case "sparkwing update":
+		return runUpdate(inv)
+	case "sparkwing upgrade":
+		return runUpgrade(inv)
+	case "sparkwing examples":
+		return runExamples(inv)
+	case "sparkwing doctor":
+		return runDoctor(inv)
+	case "sparkwing cache warm":
+		return runCacheWarm(inv)
+	case "sparkwing runs list":
+		return runRunsList(context.Background(), inv)
+	case "sparkwing runs status":
+		return runRunsStatus(context.Background(), inv)
+	case "sparkwing runs stats":
+		return runJobsStats(context.Background(), inv)
+	case "sparkwing runs cancel":
+		return runRunsCancel(context.Background(), inv)
+	case "sparkwing runs prune":
+		return runRunsPrune(context.Background(), inv)
+	case "sparkwing runs retry":
+		return runRunsRetry(context.Background(), inv)
+	case "sparkwing runners list":
+		return runRunnersList(context.Background(), inv)
+	case "sparkwing __tick":
+		return runScheduleTick(inv)
+	case "sparkwing __host-trigger":
+		return runTriggerHost(inv)
+	case "sparkwing wingd run":
+		return runWingdRun(inv)
+	case "sparkwing daemon status":
+		return runDaemonLifecycle(inv)
+	case "sparkwing daemon restart":
+		return runDaemonLifecycle(inv)
+	case "sparkwing daemon stop":
+		return runDaemonLifecycle(inv)
+	case "sparkwing daemon events":
+		return runDaemonEvents(inv)
+	case "sparkwing debug resume":
+		return runDebug(inv)
+	case "sparkwing docs list":
+		return runDocsList(inv)
+	case "sparkwing docs read":
+		return runDocsRead(inv)
+	case "sparkwing docs search":
+		return runDocsSearch(inv)
+	case "sparkwing docs migrations":
+		return runDocsMigrations(inv)
+	case "sparkwing commands":
+		return runCommands(inv)
+	case "sparkwing info":
+		return runInfo(inv)
+	case "sparkwing version":
+		return runVersion(inv)
+	case "sparkwing version hold":
+		return runVersionHold(inv)
+	case "sparkwing pipeline new":
+		return runPipelineNew(inv)
+	case "sparkwing pipeline hooks install":
+		return runHooksInstall(inv)
+	case "sparkwing pipeline hooks uninstall":
+		return runHooksUninstall(inv)
+	case "sparkwing pipeline hooks status":
+		return runHooksStatus(inv)
 	}
-	if inv.Args != nil {
-		args = append(args, "--")
-		args = append(args, inv.Args...)
-	}
-	return args
-}
-
-func dispatchCommand(args []string) error {
-	switch args[0] {
-	case "info":
-		return runInfo(args[1:])
-	case "pipeline":
-		return runPipeline(args[1:])
-	case "run":
-		return dispatchRun(args[1:])
-	case "runs":
-		return runJobs(args[1:])
-	case "queue":
-		return runQueue(args[1:])
-	case "cache":
-		return runCache(args[1:])
-	case "daemon":
-		return runDaemon(args[1:])
-	case "dashboard":
-		return runDashboard(args[1:])
-	case "repos":
-		return runRepos(args[1:])
-	case "schedules":
-		return runSchedules(context.Background(), args[1:])
-	case "runners":
-		if len(args) > 1 && args[1] == "list" {
-			return runRunnersList(context.Background(), args[2:])
-		}
-		return runRunners(args[1:])
-	case "tokens":
-		return runTokens(args[1:])
-	case "pools":
-		return runPools(context.Background(), args[1:])
-	case "overflow":
-		return runOverflow(context.Background(), args[1:])
-	case "team":
-		return runTeamSettings(context.Background(), args[1:])
-	case "profiles":
-		return runProfiles(args[1:])
-	case "operator":
-		switch args[1] {
-		case "limits":
-			return runOperatorLimits(args[2:])
-		case "object-store":
-			return runOperatorObjectStore(args[2:])
-		case "tokens":
-			return runTokenCommand(context.Background(), args[2:], true)
-		case "teams":
-			return runOperatorTeams(args[2:])
-		}
-	case "doctor":
-		return runDoctor(args[1:])
-	case "secrets":
-		return runSecret(args[1:])
-	case "completion":
-		return runCompletion(args[1:])
-	case "examples":
-		return runExamples(args[1:])
-	case "docs":
-		return runDocs(args[1:])
-	case "commands":
-		return runCommands(args[1:])
-	case "upgrade":
-		return runUpgrade(args[1:])
-	case "update":
-		return runUpdate(args[1:])
-	case "version":
-		return runVersion(args[1:])
-	case "debug":
-		return runDebug(args[1:])
-	case "wingd":
-		return runWingd(args[1:])
-	case "__tick":
-		return runScheduleTick(args[1:])
-	case "__sdk-install":
-		return runSDKInstall(args[1:])
-	case "__host-trigger":
-		return runTriggerHost(args[1:])
-	case "__complete":
-		return runInternalComplete(args[1:])
-	}
-	return fmt.Errorf("%s: execution is not implemented", args[0])
-}
-
-func runRunsApprovals(ctx context.Context, args []string) error {
-	return runReviewCommand(ctx, append([]string{"runs", "approvals"}, args...), os.Stdout, resolveRunReview)
-}
-
-func runJobs(args []string) error {
-	if handleParentHelp(cmdJobs, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdJobs, os.Stderr)
-		return errors.New("jobs: subcommand required")
-	}
-	contextValue := context.Background()
-
-	switch args[0] {
-	case "approvals":
-		return runRunsApprovals(contextValue, args[1:])
-	case "annotations":
-		return runRunsAnnotations(contextValue, args[1:])
-	case "list":
-		return runRunsList(contextValue, args[1:])
-
-	case "status":
-		return runRunsStatus(contextValue, args[1:])
-
-	case "logs", "grep":
-		return runRunsLogs(contextValue, args[0], args[1:])
-
-	case "cancel":
-		return runRunsCancel(contextValue, args[1:])
-	case "retry":
-		return runRunsRetry(contextValue, args[1:])
-	case "prune":
-		return runRunsPrune(contextValue, args[1:])
-
-	case "stats":
-		return runJobsStats(contextValue, args[1:])
-	default:
-		return fmt.Errorf("runs: unknown command %q", args[0])
-	}
+	return &clisurface.UsageError{Path: inv.Command.Path, Message: "command execution is unavailable"}
 }
 
 func resolveOutputFormat(outputFormat, cmdPath string) (string, error) {

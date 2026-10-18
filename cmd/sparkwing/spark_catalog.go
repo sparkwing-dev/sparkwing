@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
+
 	"golang.org/x/mod/modfile"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
@@ -38,24 +40,16 @@ type sparkCatalogBlock struct {
 	Stability   string `json:"stability,omitempty"`
 }
 
-func runSparksCatalog(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksCatalog.Path, flag.ContinueOnError)
-	library := fs.String("library", "", "spark library module path (default: "+sparksCoreModule+")")
-	pathFlag := fs.String("path", "", "read a library checkout on disk instead of downloading it")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
-	if err := parseAndCheck(cmdSparksCatalog, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runSparksCatalog(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("spark catalog: unexpected positional %q (use --library or --path)", rest[0])
-	}
-	if *pathFlag != "" && *library != "" {
+	library, pathFlag := inv.Value("library"), inv.Value("path")
+	outFmt := inv.Output(color.IsInteractiveStdout())
+	if pathFlag != "" && library != "" {
 		return errors.New("spark catalog: --path and --library both given (pass one)")
 	}
-	format, err := resolveOutputFormat(*outFmt, "spark catalog")
+	format, err := resolveOutputFormat(outFmt, "spark catalog")
 	if err != nil {
 		return err
 	}
@@ -67,9 +61,9 @@ func runSparksCatalog(args []string) error {
 	}
 
 	source := ""
-	target := *pathFlag
+	target := pathFlag
 	if target == "" {
-		source = *library
+		source = library
 		if source == "" {
 			source = sparksCoreModule
 		}

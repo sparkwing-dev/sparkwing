@@ -979,7 +979,10 @@ generation and capability prefix with the authorized projection before opening.
 `POST /api/v1/runs/{run}/source-credential` uses PolicyRouter and the existing
 SourceRead/BindSource/LiveSensitive rule. It takes no body. Its local C2
 `SourceCredentialResponse` carries kind, host, secret, optional username and
-optional known_hosts. Checkout identity and policy remain in the sealed request.
+optional known_hosts and extra_repositories. The App release takes its extra
+repository names from C1's audited credential, and the host client preserves
+them for submodule authorization. Stored SSH/HTTPS credentials supply no App
+extras. Checkout identity and policy remain in the sealed request.
 This cuts the legacy claim-token handler, its separate eligibility checks and
 its per-process limiter. Source release has RetryNever.
 

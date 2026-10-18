@@ -21,7 +21,7 @@ func TestSparksCatalogListsModulesFromALocalLibrary(t *testing.T) {
 	dir := writeSparkFixture(t, map[string]string{"spark.json": catalogFixtureManifest})
 
 	var err error
-	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "pretty"}) })
+	out := captureStdout(t, func() { err = runSparksCatalogArgs([]string{"--path", dir, "-o", "pretty"}) })
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestSparksCatalogDoesNotOfferPackagesToInflate(t *testing.T) {
 }`})
 
 	var err error
-	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "pretty"}) })
+	out := captureStdout(t, func() { err = runSparksCatalogArgs([]string{"--path", dir, "-o", "pretty"}) })
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestSparksCatalogDoesNotOfferPackagesToInflate(t *testing.T) {
 func TestSparksCatalogErrorsCarryTheCatalogVerb(t *testing.T) {
 	dir := t.TempDir()
 
-	err := runSparksCatalog([]string{"--path", dir})
+	err := runSparksCatalogArgs([]string{"--path", dir})
 	if err == nil {
 		t.Fatal("expected a directory with no spark.json to fail")
 	}
@@ -76,7 +76,7 @@ func TestSparksCatalogPlainFeedsInflate(t *testing.T) {
 	dir := writeSparkFixture(t, map[string]string{"spark.json": catalogFixtureManifest})
 
 	var err error
-	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "plain"}) })
+	out := captureStdout(t, func() { err = runSparksCatalogArgs([]string{"--path", dir, "-o", "plain"}) })
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestSparksCatalogNamesAPackagesLibraryByItsGoModule(t *testing.T) {
 	})
 
 	var err error
-	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "pretty"}) })
+	out := captureStdout(t, func() { err = runSparksCatalogArgs([]string{"--path", dir, "-o", "pretty"}) })
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestSparksCatalogJSONIsNDJSON(t *testing.T) {
 	dir := writeSparkFixture(t, map[string]string{"spark.json": catalogFixtureManifest})
 
 	var err error
-	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "json"}) })
+	out := captureStdout(t, func() { err = runSparksCatalogArgs([]string{"--path", dir, "-o", "json"}) })
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestSparksCatalogJSONIsNDJSON(t *testing.T) {
 }
 
 func TestSparksInflateWithoutLibraryPointsAtTheCatalog(t *testing.T) {
-	err := runSparksInflate(nil)
+	err := runSparksInflateArgs(nil)
 	if err == nil {
 		t.Fatal("expected --library to be required")
 	}
@@ -168,7 +168,7 @@ func TestSparksCatalogPlainNamesEachPackageOnce(t *testing.T) {
 	})
 
 	var err error
-	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "plain"}) })
+	out := captureStdout(t, func() { err = runSparksCatalogArgs([]string{"--path", dir, "-o", "plain"}) })
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}

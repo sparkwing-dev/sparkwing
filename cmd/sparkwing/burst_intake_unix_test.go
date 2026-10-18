@@ -20,6 +20,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
@@ -28,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -87,7 +89,7 @@ func burstLocalFallbackSecrets(t *testing.T, value string) {
 			return client.EngineOptions{}, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("unreachable")}
 		},
 		local: func(ctx context.Context, pipeline string, flags runFlags, args []string) error {
-			prepared, err := prepareNativeLocalRun(ctx, home, filepath.Join(repo, ".sparkwing"), pipeline, captured, snapshots, compileOptions{})
+			prepared, err := prepareNativeLocalRun(ctx, home, filepath.Join(repo, ".sparkwing"), pipeline, captured, snapshots, flags)
 			if err == nil {
 				request, err = prepareLocalRunRequest(ctx, prepared, flags, args)
 			}
@@ -416,5 +418,68 @@ func TestBurstFixtureSupportsPublicSessionEnrollment(t *testing.T) {
 	}
 	if _, err := manager.EnrollRunner(t.Context(), client.EnrollRunnerRequest{Name: "desktop", Repos: []string{"example.test/acme/*"}, Personal: true}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBurstNativePreparationRetainsAdvertisedRunOptions(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("TOKEN", burstIntakeSecret)
+	t.Chdir(burstIntakeRepository(t))
+	_, server, bearer := burstIntakeController(t, "http://controller.test")
+	handler := server.Handler()
+	connection := client.EngineOptions{URL: "http://controller.test", Bearer: func(context.Context) (string, error) { return bearer, nil }, HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w.Result(), nil
+	})}}
+	route := userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"TOKEN"}, SourceFiles: []string{"declared.txt"}}
+	for _, tc := range []struct {
+		mode string
+		want int
+	}{{"front", 1}, {"back", -1}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			inv, err := clisurface.Parse("sparkwing", []string{"run", "burst", "--sw-no-bincache", "--sw-hash-all-files", "--sw-priority", tc.mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			flags, args := runFlagsFromInvocation(inv)
+			request, err := prepareNativeBurst(t.Context(), "burst", flags, args, route, connection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !request.Request.Source.NoBincache || !request.Request.Source.HashAllFiles || request.Request.Options.Priority.Value != tc.want || request.Request.Options.Priority.Origin.Layer != runspec.LayerFlag {
+				t.Fatalf("run options lost before intake: source=%+v priority=%+v", request.Request.Source, request.Request.Options.Priority)
+			}
+		})
+	}
+}
+
+func TestBurstNativePreparationSelectsConfiguredSDKEntrypoint(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("TOKEN", burstIntakeSecret)
+	repo := burstIntakeRepository(t)
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n    source_files: [declared.txt]\n", 0o600)
+	fixture := strings.Replace(burstIntakePipeline, `sw.Register("burst",`, `sw.Register("Deploy",`, 1)
+	fixture = strings.Replace(fixture, "sw.Main()", `sw.Register("deploy-prod",func() sw.Pipeline[sw.NoInputs]{return unrelated{}});sw.Main()`, 1)
+	fixture += `type unrelated struct{sw.Base}
+func(unrelated) Plan(context.Context,*sw.Plan,sw.NoInputs,sw.RunContext)error{return nil}
+`
+	writeSnapshotFile(t, repo, ".sparkwing/main.go", fixture, 0o600)
+	t.Chdir(repo)
+	_, server, bearer := burstIntakeController(t, "http://controller.test")
+	connection := client.EngineOptions{URL: "http://controller.test", Bearer: func(context.Context) (string, error) { return bearer, nil }, HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		server.Handler().ServeHTTP(w, r)
+		return w.Result(), nil
+	})}}
+	request, err := prepareNativeBurst(t.Context(), "deploy-prod", runFlags{}, []string{"--block"}, userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"TOKEN"}, SourceFiles: []string{"declared.txt"}}, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Request.Pipeline != "deploy-prod" || request.Request.Source.Entrypoint != "Deploy" || request.Request.RequestedArgs["block"] != "true" || len(request.LocalSecrets) != 1 {
+		t.Fatal("native overflow selected alias metadata")
 	}
 }

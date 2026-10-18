@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -43,6 +44,10 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 	request := run.Request.Request
 	if run.Request.Hash == "" || request.Origin != runspec.OriginSchedule || request.Dispatch != runspec.DispatchController || request.Actor.ID != "alice" || request.RequestedArgs["channel"] != "nightly" || request.Git.SHA != "0123456789abcdef0123456789abcdef01234567" || request.Source.Location.RemoteURL != "https://gitlab.com/acme/ci.git" || len(run.Request.AllowedPools) != 0 || request.Git.App.Set {
 		t.Fatalf("scheduled Cloud intake lost source or consent: %+v", run.Request)
+	}
+	acquired, err := source.ForRequest(run.Request)
+	if err != nil || acquired.PipelineSHA != request.Git.SHA {
+		t.Fatalf("scheduled source is not pinned for acquisition: pipeline=%s checkout=%s err=%v", acquired.PipelineSHA, acquired.SHA, err)
 	}
 	response = f.serve(f.cookieRequest("PUT", "/api/v1/schedules/"+row.ID+"/override", `{"args":{"channel":"changed"}}`))
 	if response.Code != 200 {

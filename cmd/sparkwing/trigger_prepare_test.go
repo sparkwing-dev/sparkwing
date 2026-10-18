@@ -256,8 +256,8 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 		source: selection, settings: inputs,
 		args: []string{"-r", "us-east", "--image", "release", "--password", password},
 		described: []nodeproto.PipelineDescription{
-			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
-			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{
+			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
+			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{
 				{Name: "region", Short: "r", Type: "string", Required: true},
 				{Name: "image", Type: "string", JobID: "rollout", Required: true},
 				{Name: "password", Type: "string", Secret: true},
@@ -295,7 +295,7 @@ func TestPrepareTriggerRequestSubmitsThroughTheFinalController(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := prepareTriggerRequest(triggerRequestInput{source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "deploy-prod"}}, idempotencyKey: "stable-key"})
+	request, err := prepareTriggerRequest(triggerRequestInput{source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "Deploy"}}, idempotencyKey: "stable-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,9 +333,9 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 	request, err := prepareTriggerRequest(triggerRequestInput{
 		idempotencyKey: "retained",
 		source:         preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-		described:      []nodeproto.PipelineDescription{{Name: "deploy-prod"}},
+		described:      []nodeproto.PipelineDescription{{Name: "Deploy"}},
 		settings:       settings.Inputs{Flags: settings.Values{Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: priority}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: output}}, Runner: runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runner}}}}, Context: settings.Context{NumCPU: 4}},
-		env:            map[string]string{"DEPLOY_REGION": "private-region"},
+		submittedEnv:   map[string][]byte{"DEPLOY_REGION": []byte("private-region")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 	if !reflect.DeepEqual(request.Request.Env.Names, []string{"DEPLOY_REGION"}) || request.Request.Env.Digest == "" {
 		t.Fatalf("environment identity lost: %+v", request.Request.Env)
 	}
-	raw, err := json.Marshal(request)
+	raw, err := json.Marshal(request.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,8 +380,8 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 		value = "private-" + value
 		request, err := prepareTriggerRequest(triggerRequestInput{
 			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-			described: []nodeproto.PipelineDescription{{Name: "deploy-prod"}},
-			settings:  settings.Inputs{Context: settings.Context{NumCPU: 4}}, env: map[string]string{"DEPLOY_REGION": value},
+			described: []nodeproto.PipelineDescription{{Name: "Deploy"}},
+			settings:  settings.Inputs{Context: settings.Context{NumCPU: 4}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte(value)},
 		})
 		if strings.ContainsRune(value, 0) {
 			if err == nil || strings.Contains(err.Error(), value) {
@@ -392,7 +392,7 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, err := json.Marshal(request)
+		raw, err := json.Marshal(request.Request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -422,7 +422,7 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 		}
 		_, err := prepareTriggerRequest(triggerRequestInput{
 			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-			described: []nodeproto.PipelineDescription{{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
+			described: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
 			args:      args,
 		})
 		var canonical *apierr.Error
@@ -443,7 +443,7 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 func TestPrepareTriggerRequestMasksQuotedEnumValues(t *testing.T) {
 	_, err := prepareTriggerRequest(triggerRequestInput{
 		source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-		described: []nodeproto.PipelineDescription{{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"us-east"}}}}},
+		described: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"us-east"}}}}},
 		args:      []string{"--region=private-\x00value"},
 	})
 	if err == nil || strings.Contains(err.Error(), `private-\x00value`) || !strings.Contains(err.Error(), "--region") {
@@ -481,4 +481,63 @@ func FuzzTriggerRepositoryCredentialsNeverReachIntake(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestTriggerCheckoutsAcceptAuthenticatedProxy(t *testing.T) {
+	repo, sha := triggerPreparationRepo(t)
+	runSnapshotGit(t, repo, "remote", "set-url", "origin", "https://git.example/acme/app.git")
+	t.Setenv("HTTPS_PROXY", "https://user:pass@proxy")
+	selected, err := prepareTriggerSource(t.Context(), triggerSourceInput{checkout: repo, pipeline: "deploy-prod", environment: os.Environ()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.source.Ref != sha {
+		t.Fatal("proxy changed source revision")
+	}
+	checkout, err := triggerInspectionCheckout(t.Context(), repo, sha, "", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(runSnapshotGit(t, checkout, "rev-parse", "HEAD")); got != sha {
+		t.Fatalf("inspection revision = %s", got)
+	}
+}
+
+func FuzzTriggerGitProxyCredentialsStayPrivate(f *testing.F) {
+	f.Add("private-password")
+	f.Add("引数\"'/@:&=\n")
+	f.Fuzz(func(t *testing.T, value string) {
+		value = "private-" + strings.ReplaceAll(strings.ToValidUTF8(value, "?"), "\x00", "?") + "-credential"
+		repo, _ := triggerPreparationRepo(t)
+		runSnapshotGit(t, repo, "remote", "set-url", "origin", "https://git.example/acme/app.git")
+		proxy := "https://" + url.UserPassword("private-user", value).String() + "@proxy"
+		input := triggerSourceInput{checkout: repo, pipeline: "deploy-prod", environment: append(os.Environ(), "HTTPS_PROXY="+proxy)}
+		selected, err := prepareTriggerSource(t.Context(), input)
+		if err != nil {
+			t.Fatalf("proxy prevented local Git inspection: %v", err)
+		}
+		_, err = selected.checkout.read(t.Context(), "rev-parse", "--verify", "missing^{commit}")
+		if err == nil || strings.Contains(err.Error(), value) || strings.Contains(err.Error(), proxy) {
+			t.Fatalf("Git error disclosed proxy: %v", err)
+		}
+	})
+}
+
+func TestPrepareTriggerSourceSurfacesGitDiagnostics(t *testing.T) {
+	repo, _ := triggerPreparationRepo(t)
+	runSnapshotGit(t, repo, "remote", "remove", "origin")
+	_, err := prepareTriggerSource(t.Context(), triggerPreparationInput(repo))
+	if err == nil || !strings.Contains(err.Error(), "No such remote 'origin'") {
+		t.Fatalf("git cause lost: %v", err)
+	}
+}
+
+func TestTriggerGitDiagnosticsRedactCredentials(t *testing.T) {
+	detail := gitDiagnostic([]byte("fatal: unable to access 'https://deploy:pw-secret@github.com/acme/app.git/': denied\n"))
+	if strings.Contains(detail, "pw-secret") || !strings.Contains(detail, "github.com/acme/app.git") {
+		t.Fatalf("diagnostic = %q", detail)
+	}
+	if long := gitDiagnostic([]byte(strings.Repeat("x", 4096))); len(long) > maxGitDiagnostic+len("...") {
+		t.Fatalf("diagnostic is unbounded: %d bytes", len(long))
+	}
 }

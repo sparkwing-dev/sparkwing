@@ -25,11 +25,7 @@ type templateDetailJSON struct {
 	RenderedBody string             `json:"rendered_body,omitempty"`
 }
 
-func runExamples(args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"examples"}, args...))
-	if err != nil {
-		return err
-	}
+func runExamples(inv clisurface.Invocation) error {
 	output := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)

@@ -61,7 +61,7 @@ func runUpdateArtifactFixture(t *testing.T, args []string) error {
 		},
 		units: func(context.Context) (wingd.ManagedUnitManager, error) { return updateUnitsFixture{calls: &calls}, nil },
 	}
-	return command.run(t.Context(), args)
+	return command.runArgs(t.Context(), args)
 }
 
 func updateMetadataFixture(t *testing.T) (*atomic.Int32, string) {
@@ -181,7 +181,7 @@ func TestUnifiedUpdateCheckPreservesHoldAndOutputModes(t *testing.T) {
 	}
 	for _, mode := range []string{"plain", "pretty"} {
 		var err error
-		out := captureStdout(t, func() { err = runUpdate([]string{"--dry-run", "-o", mode}) })
+		out := captureStdout(t, func() { err = runUpdateArgs([]string{"--dry-run", "-o", mode}) })
 		if exitCodeFor(err) != 1 {
 			t.Fatalf("mode %s exit: %v", mode, err)
 		}
@@ -336,7 +336,7 @@ func TestVersionUpdateIsAbsentFromDispatchAndRegistry(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"update"}, {"update", "--help"}, {"-o", "json", "update", "--help"}, {"--help", "update"}} {
-		if err := runVersion(args); err == nil {
+		if err := runVersionArgs(args); err == nil {
 			t.Fatalf("retired version update was accepted: %v", args)
 		}
 	}
@@ -634,7 +634,7 @@ func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	t.Setenv("GOTOOLCHAIN", "go1.26.6+auto")
 	writeVersionHold(t, "v0.10")
 	var commandError error
-	out := captureStdout(t, func() { commandError = runReposUpdate([]string{"--in-place"}) })
+	out := captureStdout(t, func() { commandError = runReposUpdateArgs([]string{"--in-place"}) })
 	if commandError != nil {
 		t.Fatal(commandError)
 	}
@@ -660,7 +660,7 @@ func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.sum"), []byte("previous sum\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out = captureStdout(t, func() { commandError = runReposUpdate([]string{"--in-place"}) })
+	out = captureStdout(t, func() { commandError = runReposUpdateArgs([]string{"--in-place"}) })
 	if commandError != nil {
 		t.Fatal(commandError)
 	}
@@ -685,7 +685,7 @@ func TestUnifiedSDKPartialFailureHasNoSuccessReceipt(t *testing.T) {
 	testshell.Install(t, filepath.Join(bin, "go"), script)
 	t.Setenv("PATH", bin)
 	var commandError error
-	out := captureStdout(t, func() { commandError = runReposUpdate([]string{"--in-place"}) })
+	out := captureStdout(t, func() { commandError = runReposUpdateArgs([]string{"--in-place"}) })
 	if commandError == nil || out != "" || !strings.Contains(commandError.Error(), "SDK files may have changed") {
 		t.Fatalf("partial SDK failure misreported: %v %q", commandError, out)
 	}

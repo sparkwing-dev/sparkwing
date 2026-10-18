@@ -135,7 +135,7 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
 		Grants: []capability.Grant{capability.OperatorLimits}, Binding: capability.Binding{Kind: capability.BindingNone},
 	}}
-	srv := controller.New(st, nil).WithMetricsListener(metricsLn).WithAuthorization(controller.RouteAuthorization{
+	srv := controller.New(st, nil).WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{}}).WithMetricsListener(metricsLn).WithAuthorization(controller.RouteAuthorization{
 		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 	})
 
@@ -198,9 +198,22 @@ func TestMetricsAddr_FailsStartupWhenTheMetricsPortIsTaken(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	srv := controller.New(st, nil).WithMetricsAddr(held.Addr().String())
-	if err := controller.ServeWith(ctx, srv, "127.0.0.1:0"); err == nil {
-		t.Fatal("ServeWith error = nil, want the bind failure")
+	srv := controller.New(st, nil).WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{}}).WithMetricsAddr(held.Addr().String())
+	if err := controller.ServeWith(ctx, srv, "127.0.0.1:0"); err == nil || !strings.Contains(err.Error(), held.Addr().String()) {
+		t.Fatalf("ServeWith error = %v, want the bind failure", err)
+	}
+}
+
+func TestServeWithRefusesAServerWithoutRunnerPolicy(t *testing.T) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := controller.ServeWith(ctx, controller.New(st, nil), "127.0.0.1:0"); err == nil || !strings.Contains(err.Error(), "runner admission policy") {
+		t.Fatalf("ServeWith error = %v, want a startup refusal", err)
 	}
 }
 

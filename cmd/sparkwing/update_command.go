@@ -21,7 +21,7 @@ type updateCommand struct {
 	units    func(context.Context) (wingd.ManagedUnitManager, error)
 }
 
-func runUpdate(args []string) error {
+func runUpdate(inv clisurface.Invocation) error {
 	command := updateCommand{
 		out: os.Stdout, terminal: color.IsInteractiveStdout(), install: updateBinary,
 		check: func(version string, force, override bool) updateCheckReport {
@@ -29,7 +29,7 @@ func runUpdate(args []string) error {
 		},
 		units: resolveUpdateUnits,
 	}
-	return command.run(context.Background(), args)
+	return command.run(context.Background(), inv)
 }
 
 func resolveUpdateUnits(ctx context.Context) (wingd.ManagedUnitManager, error) {
@@ -37,11 +37,7 @@ func resolveUpdateUnits(ctx context.Context) (wingd.ManagedUnitManager, error) {
 	return services.units, err
 }
 
-func (c updateCommand) run(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"update"}, args...))
-	if err != nil {
-		return err
-	}
+func (c updateCommand) run(ctx context.Context, inv clisurface.Invocation) error {
 	mode := inv.Output(c.terminal)
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), c.out, mode)

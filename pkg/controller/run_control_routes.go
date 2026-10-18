@@ -54,9 +54,6 @@ func (s *Server) runControlWriter(r *http.Request, a capability.Authorized) (Run
 
 func (s *Server) runControlEndpoints() []Endpoint {
 	engine := s.engineController
-	if engine == nil {
-		engine = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/resume", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleResumeDebugPause},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/debug-pauses", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleCreateDebugPause},

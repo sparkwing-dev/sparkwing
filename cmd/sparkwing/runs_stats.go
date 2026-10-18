@@ -61,11 +61,7 @@ func parseRunStatistics(inv clisurface.Invocation, now time.Time) (runStatistics
 	return o, nil
 }
 
-func runJobsStats(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "stats"}, args...))
-	if err != nil {
-		return err
-	}
+func runJobsStats(ctx context.Context, inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}

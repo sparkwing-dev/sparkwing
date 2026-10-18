@@ -133,11 +133,10 @@ var flagDescriptions = map[string]string{
 	"sw-no-update":        "Skip automatic updates for this invocation.",
 	"sw-no-bincache":      "Build without reusing the local pipeline binary cache.",
 	"sw-hash-all-files":   "Include all files when computing the local binary cache key.",
-	"sw-allow-unadmitted": "Permit execution without local resource admission.",
+	"sw-allow-unadmitted": "Use an exclusive in-process local controller for CI admission.",
 	"sw-dry-run":          "Preview the run without executing its jobs.",
-	"sw-index":            "Pipeline discovery index path.",
+	"sw-index":            "Capture a Git index for local staged-content checks.",
 	"sw-run-handle-file":  "Write the submitted run handle to this file.",
-	"target":              "Select a declared pipeline target.",
 	"controller":          "Controller URL for this connection profile.",
 	"token-stdin":         "Read the controller credential from standard input.",
 	"scope":               "Credential scope.",
@@ -363,7 +362,6 @@ var (
 	cmdSparks             = surfaceCommand("sparkwing pipeline sparks")
 	cmdSparksList         = surfaceCommand("sparkwing pipeline sparks list")
 	cmdSparksLint         = surfaceCommand("sparkwing pipeline sparks lint")
-	cmdSparksResolve      = Command{Path: "sparkwing pipeline sparks resolve", Hidden: true}
 	cmdSparksUpdate       = surfaceCommand("sparkwing pipeline sparks update")
 	cmdSparksAdd          = surfaceCommand("sparkwing pipeline sparks add")
 	cmdSparksRemove       = surfaceCommand("sparkwing pipeline sparks remove")

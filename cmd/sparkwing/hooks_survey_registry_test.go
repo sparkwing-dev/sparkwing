@@ -18,7 +18,7 @@ func armedFleet(t *testing.T) {
 	f.asProcessEnv(t)
 	f.registerRepos(t, f.repo)
 	captureStdout(t, func() {
-		if err := runIn(t, f.repo, runHooksInstall, "--no-prove"); err != nil {
+		if err := runIn(t, f.repo, parseHooksInstall, "--no-prove"); err != nil {
 			t.Fatalf("hooks install: %v", err)
 		}
 	})
@@ -27,7 +27,7 @@ func armedFleet(t *testing.T) {
 func TestHooksSurvey_UnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T) {
 	armedFleet(t)
 	gatedOut := captureStdout(t, func() {
-		if err := runHooksStatus([]string{"--all", "-o", "pretty"}); err != nil {
+		if err := parseHooksStatus([]string{"--all-repos", "-o", "pretty"}); err != nil {
 			t.Fatalf("survey of a gated fleet: %v", err)
 		}
 	})
@@ -40,7 +40,7 @@ func TestHooksSurvey_UnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T)
 	blind.corruptRegistry(t)
 	var blindErr error
 	blindOut := captureStdout(t, func() {
-		blindErr = runHooksStatus([]string{"--all", "-o", "pretty"})
+		blindErr = parseHooksStatus([]string{"--all-repos", "-o", "pretty"})
 	})
 
 	if blindErr == nil {
@@ -67,7 +67,7 @@ func TestHooksSurvey_UnreadableRegistryEmitsNoJSONRecords(t *testing.T) {
 
 	var err error
 	out := captureStdout(t, func() {
-		err = runHooksStatus([]string{"--all", "-o", "json", "--ungated"})
+		err = parseHooksStatus([]string{"--all-repos", "-o", "json", "--ungated"})
 	})
 	if err == nil {
 		t.Fatal("survey --ungated -o json exited zero on an unreadable registry")
@@ -80,7 +80,7 @@ func TestHooksSurvey_UnreadableRegistryEmitsNoJSONRecords(t *testing.T) {
 func TestFleetSweeps_RefuseAnUnreadableRegistry(t *testing.T) {
 	for name, run := range map[string]func() error{
 		"install": func() error { return installFleet(installOptions{}) },
-		"fire":    func() error { return runHooksStatus([]string{"--prove", "--fleet", "-o", "plain"}) },
+		"fire":    func() error { return parseHooksStatus([]string{"--prove", "--all-repos", "-o", "plain"}) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newChainFixture(t)
@@ -90,10 +90,10 @@ func TestFleetSweeps_RefuseAnUnreadableRegistry(t *testing.T) {
 			var err error
 			out := captureStdout(t, func() { err = run() })
 			if err == nil {
-				t.Fatalf("%s --fleet swept a registry it could not read and reported success:\n%s", name, out)
+				t.Fatalf("%s --all-repos swept a registry it could not read and reported success:\n%s", name, out)
 			}
 			if strings.Contains(out, "no repos registered") {
-				t.Errorf("%s --fleet reported an empty registry when it could not read one:\n%s", name, out)
+				t.Errorf("%s --all-repos reported an empty registry when it could not read one:\n%s", name, out)
 			}
 		})
 	}

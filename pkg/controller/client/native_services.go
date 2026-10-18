@@ -106,16 +106,29 @@ func (c *NativeProcessClient) Latest(ctx context.Context, pipeline, job string, 
 
 // StartChild submits sealed parent lineage through the shared intake endpoint.
 func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, args map[string]string, repo, branch string) (string, error) {
-	request := c.request
-	request.Pipeline, request.RequestedArgs, request.Origin = pipeline, args, runspec.OriginChild
-	request.Lineage = runspec.Lineage{ParentRunID: c.run, ParentJobID: c.job, RepoInherited: repo == ""}
+	parent := c.request
+	request := runspec.Request{
+		Version: parent.Version, Pipeline: pipeline, RequestedArgs: args, Origin: runspec.OriginChild,
+		Mode: runspec.IntakeExecute, Dispatch: parent.Dispatch, Git: parent.Git,
+		Source: runspec.Source{
+			Location: parent.Source.Location, Ref: parent.Source.Ref, RequestedRef: parent.Source.RequestedRef,
+			BundleDigest: parent.Source.BundleDigest, WorkingTree: parent.Source.WorkingTree, CommittedCheckout: parent.Source.CommittedCheckout,
+			NoBincache: parent.Source.NoBincache, HashAllFiles: parent.Source.HashAllFiles,
+		},
+		EnvironmentSource: parent.EnvironmentSource, Env: parent.Env, Options: parent.Options, PullRequest: parent.PullRequest,
+		ExecutionLocation: parent.ExecutionLocation,
+		Lineage:           runspec.Lineage{ParentRunID: c.run, ParentJobID: c.job, RepoInherited: repo == ""},
+	}
 	if repo != "" && repo != string(request.Git.Repository.Key) {
 		return "", localHostClientRefusal()
 	}
 	if branch != "" {
 		request.Git.Ref = branch
 		request.Git.SHA = ""
+		request.Source.Ref, request.Source.RequestedRef = "", ""
 		request.Git.App = runspec.Optional[runspec.AppFacts]{}
+		request.Source.WorkingTree, request.Source.CommittedCheckout = false, true
+		request.Source.BundleDigest = runspec.Optional[string]{}
 	}
 	key := rand.Text()
 	var result controllerwire.CreateRunResponse

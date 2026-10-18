@@ -29,14 +29,17 @@ func TestPipelineAliasResolvesBeforeArgumentParsing(t *testing.T) {
 	if out, err := exec.CommandContext(ctx, "go", "-C", repo, "build", "-o", bin, "./internal/nodehost/testdata/pipelinealias").CombinedOutput(); err != nil {
 		t.Fatalf("compile alias fixture: %v\n%s", err, out)
 	}
-	run := pipelineRun{ctx: ctx, sparkwingDir: dir, entry: pipelineentry.Binary(bin)}
-	schema, err := run.describedPipeline("deploy-prod")
+	inspection, err := inspectionCommand(pipelineentry.Binary(bin), filepath.Dir(dir), "deploy-prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := inspection.describe(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	args, err := parsePipelineArgs(schema, []string{"--target", "production", "--image", "release"})
-	if err != nil || args["target"] != "production" || args["image"] != "release" || run.pipeline.Invoked != "deploy-prod" || run.pipeline.Entrypoint != "Deploy" {
-		t.Fatalf("selection=%+v args=%v error=%v", run.pipeline, args, err)
+	if err != nil || args["target"] != "production" || args["image"] != "release" || inspection.input.Run.Pipeline != "deploy-prod" || inspection.input.Entrypoint != "Deploy" {
+		t.Fatalf("selection=%+v args=%v error=%v", inspection.input, args, err)
 	}
 	var help bytes.Buffer
 	printPipelineHelp(&help, schema)

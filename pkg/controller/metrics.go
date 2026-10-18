@@ -15,9 +15,6 @@ import (
 
 func (s *Server) metricEndpoints() []Endpoint {
 	engine := s.engineController
-	if engine == nil {
-		engine = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/metrics", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleAddJobMetric},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/usage", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleAddJobUsage},

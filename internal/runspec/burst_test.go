@@ -2,6 +2,7 @@ package runspec
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,7 +27,7 @@ func TestBurstPlacementValidation(t *testing.T) {
 
 func TestBurstPlacementIsImmutableInRequestSeal(t *testing.T) {
 	limit := int64(30)
-	request := Request{Version: 1, Team: "a", Pipeline: "ci", Mode: IntakeExecute, Dispatch: DispatchHost, Git: Git{Repository: Repository{Key: "gh:1"}}, Burst: &BurstPlacement{Preferences: []PlacementStep{{Target: "here", Hold: time.Second}, {Target: "cloud"}}, OverflowMinutes: &limit}}
+	request := Request{Version: 1, Team: "a", Pipeline: "ci", Mode: IntakeExecute, Dispatch: DispatchHost, Git: Git{Repository: Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40)}, Source: Source{Ref: strings.Repeat("a", 40)}, Burst: &BurstPlacement{Preferences: []PlacementStep{{Target: "here", Hold: time.Second}, {Target: "cloud"}}, OverflowMinutes: &limit}}
 	seal, err := SealRequest(request, IntakeFacts{RunID: "run"})
 	if err != nil {
 		t.Fatal(err)

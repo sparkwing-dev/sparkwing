@@ -150,7 +150,8 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
 
 - Each team's nodes have `node-restriction.kubernetes.io/sparkwing-team-node` equal to the `node_label_value` from
   `sparkwing operator teams show --team <team> -o json`:
-  `sha256-` plus the first 40 lowercase hex characters of SHA-256 of the team ID.
+  `sha256-` plus the first 40 lowercase hex characters of SHA-256 of the team slug
+  (the `--team` value, for example `qa-team`).
   A presence-only label or a shared `small` value cannot establish team ownership.
 - Set that exact value in the team's NodePool template metadata labels and in a
   `node-restriction.kubernetes.io/sparkwing-team-node=<hash>:NoSchedule` taint. Retain the existing
@@ -160,9 +161,15 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   Reservation checks the node's owning NodeClaim, its node name/provider identity,
   and its NodePool UID and template label. A protected first-use label permanently
   binds the node to one team. Clearing a reservation retains that label.
-  A rejected Pod cordons the node and deletes its exact NodeClaim. The launcher reserves existing Ready nodes
-  and does not create NodePools or request nodes from Karpenter. An empty pool
-  that scales only in response to pending Pods must be provisioned externally.
+  A rejected Pod cordons the node and deletes its exact NodeClaim. With no vacant
+  Ready team node, the launcher holds the award and creates an unbound
+  `sw-capacity-*` Pod sized to the award, with the team node selector and the job
+  tolerations and no credentials, so Karpenter adds a node from the team's pool.
+  The request stays on the node until the award reserves it, and is deleted when
+  the award ends. Set the team NodePool's `disruption` to
+  `consolidationPolicy: WhenEmpty` with `consolidateAfter: 10m`; it must exceed
+  the 3-minute award lease, the longest a node can sit empty after a launcher
+  restart before its unit is re-awarded. Cap cost with the NodePool `limits`.
 - Nodes need the awarded CPU/memory plus system overhead and at least 20 GiB of
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars and `PodLevelResources`.

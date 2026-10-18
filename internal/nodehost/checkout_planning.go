@@ -36,7 +36,7 @@ func (h *OwnerHost) prepare(ctx context.Context, input RunInput, request runspec
 	if h.Planner == nil {
 		return OwnerPlanning{}, errors.New("new run requires checkout resolution and planning")
 	}
-	project, file, err := readCheckoutProject(ctx, entry.CheckoutDirectory(), entry.Directory)
+	project, file, err := readCheckoutProject(ctx, entry.CheckoutDirectory(), filepath.Join(entry.CheckoutDirectory(), request.Request.Source.Location.PipelineDir))
 	if err != nil {
 		return OwnerPlanning{}, err
 	}

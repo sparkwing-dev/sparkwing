@@ -12,9 +12,6 @@ import (
 
 func (s *Server) reportingEndpoints() []Endpoint {
 	engine := s.engineController
-	if engine == nil {
-		engine = &EngineController{Store: s.store}
-	}
 	endpoints := []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/metrics", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleGetJobMetrics},
 		{Method: "GET", Pattern: "/api/v1/runs", Decode: authorityTarget, Handle: s.handleListRuns},

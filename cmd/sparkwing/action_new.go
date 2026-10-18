@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,8 +13,9 @@ import (
 	"strings"
 	"unicode"
 
-	flag "github.com/spf13/pflag"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -21,28 +23,13 @@ import (
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
-func runPipelineNew(args []string) error {
-	fs := flag.NewFlagSet(cmdPipelineNew.Path, flag.ContinueOnError)
-	pipelineName := fs.String("pipeline", "", "new pipeline name (kebab-case, e.g. deploy-staging)")
-	template := fs.String("template", "minimal", "shape to scaffold: minimal | build-test-deploy | ci-pr-check | release | scheduled-report")
-	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
-	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
-	on := fs.StringArray("on", nil, "trigger to declare: "+strings.Join(triggerEventNames, " | ")+" (repeatable or comma-separated; default: the shape's own)")
-	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runPipelineNew(inv clisurface.Invocation) error {
+	name := inv.Value("pipeline")
+	template := inv.Value("template")
+	if !inv.Has("template") {
+		template = "minimal"
 	}
-	if fs.NArg() > 0 {
-		PrintHelp(cmdPipelineNew, os.Stderr)
-		return fmt.Errorf("new: unexpected positional %q (use --pipeline)", fs.Arg(0))
-	}
-	if *pipelineName == "" {
-		PrintHelp(cmdPipelineNew, os.Stderr)
-		return errors.New("new: --pipeline is required (e.g. --pipeline deploy-staging)")
-	}
-	name := *pipelineName
+	mode := inv.Output(color.IsInteractiveStdout())
 	if err := validatePipelineName(name); err != nil {
 		return err
 	}
@@ -74,20 +61,20 @@ func runPipelineNew(args []string) error {
 		fmt.Fprintln(os.Stderr)
 	}
 
-	shape, ok := builtinShapeByName(*template)
+	shape, ok := builtinShapeByName(template)
 	if !ok {
 		return fmt.Errorf("new: unknown shape %q -- pipeline new takes a shape, one of: %s\n"+
 			"  a worked pipeline to read instead: sparkwing examples --example %s --body",
-			*template, strings.Join(builtinShapeNames(), ", "), *template)
+			template, strings.Join(builtinShapeNames(), ", "), template)
 	}
-	trigger, err := resolveTrigger(shape, parseOnFlag(*on), fs.Changed("on"))
+	trigger, err := resolveTrigger(shape, parseOnFlag(inv.Flags["on"]), inv.Has("on"))
 	if err != nil {
 		return err
 	}
-	if err := scaffoldGoFromTemplate(sparkwingDir, name, *hidden, *short, shape.src, bootstrapped, trigger); err != nil {
+	if err := scaffoldGoFromTemplate(sparkwingDir, name, inv.Bool("hidden"), inv.Value("short"), shape.src, bootstrapped, trigger, mode); err != nil {
 		return err
 	}
-	if !fs.Changed("template") {
+	if mode == "pretty" && !inv.Has("template") {
 		printExamplesHint()
 	}
 	return nil
@@ -338,7 +325,7 @@ func renderBuiltinTemplate(name, short, tmpl string) string {
 	).Replace(tmpl)
 }
 
-func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl string, bootstrapped bool, trigger string) error {
+func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl string, bootstrapped bool, trigger, mode string) error {
 	struct_ := kebabToPascal(name)
 	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
 	if _, err := os.Stat(file); err == nil {
@@ -351,12 +338,26 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden, trigger); err != nil {
 		return errors.Join(err, os.Remove(file))
 	}
-	return finishScaffold(sparkwingDir, file, name, bootstrapped, trigger)
+	return finishScaffold(sparkwingDir, file, name, bootstrapped, trigger, mode)
 }
 
-func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger string) error {
+func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger, mode string) error {
 	if err := ensureGitignoreEntry(sparkwingDir, "sparkwing-pipeline"); err != nil {
 		fmt.Fprintf(os.Stderr, "init: note: could not update .sparkwing/.gitignore; add sparkwing-pipeline to an ignore file: %v\n", err)
+	}
+	tidied, err := tidySkeleton(context.Background(), sparkwingDir)
+	if err != nil {
+		return err
+	}
+	if mode == "json" {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Pipeline string `json:"pipeline"`
+			Path     string `json:"path"`
+		}{name, file})
+	}
+	if mode == "plain" {
+		_, err := fmt.Fprintln(os.Stdout, name)
+		return err
 	}
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
 	if err != nil {
@@ -382,10 +383,6 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 		if hint, ok := gateArmingHint(events); ok {
 			fmt.Printf("    %s\n", color.Dim(hint))
 		}
-	}
-	tidied, err := tidySkeleton(context.Background(), sparkwingDir)
-	if err != nil {
-		return err
 	}
 	if tidied {
 		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim("resolved dependencies (go mod tidy)"))
@@ -489,7 +486,7 @@ func ({{STRUCT}}Job) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.RegisterEntrypoint[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 
@@ -569,7 +566,7 @@ func ({{STRUCT}}Deploy) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.RegisterEntrypoint[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 
@@ -653,7 +650,7 @@ func ({{STRUCT}}Gate) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.RegisterEntrypoint[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 
@@ -735,7 +732,7 @@ func ({{STRUCT}}Publish) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.RegisterEntrypoint[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 
@@ -844,7 +841,7 @@ func ({{STRUCT}}PublishReport) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.RegisterEntrypoint[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 

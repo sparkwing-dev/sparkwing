@@ -55,21 +55,18 @@ type doctorDependencies struct {
 	sweep   func(context.Context, dashboardServices, bool) ([]wingd.LocalDoctorFinding, error)
 }
 
-func runDoctor(args []string) error {
-	return runDoctorCommand(context.Background(), args, os.Stdout, doctorDependencies{
+func runDoctor(inv clisurface.Invocation) error {
+	return runDoctorCommand(context.Background(), inv, os.Stdout, doctorDependencies{
 		version: installedVersion(), local: resolveLocalServices, machine: inspectDoctorMachine, sweep: sweepDoctorSessions,
 	})
 }
 
-func runDoctorCommand(ctx context.Context, args []string, out io.Writer, deps doctorDependencies) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"doctor"}, args...))
-	if err != nil {
-		return err
-	}
+func runDoctorCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, deps doctorDependencies) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
 	}
+	var err error
 	timeout := doctorDefaultTimeout
 	if inv.Has("timeout") {
 		timeout, err = time.ParseDuration(inv.Value("timeout"))

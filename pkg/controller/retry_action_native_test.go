@@ -33,7 +33,7 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*Server, cli
 		Actor:         runspec.Actor{Kind: "account", ID: "original-author"},
 		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main"},
 		RequestedArgs: map[string]string{"public": "visible", "secret": value}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"secret"}},
-		Source: runspec.Source{Location: runspec.SourceLocation{LocalCheckout: "/private/original-checkout", PipelineDir: ".sparkwing"}},
+		Source: runspec.Source{Ref: strings.Repeat("a", 40), Location: runspec.SourceLocation{LocalCheckout: "/private/original-checkout", PipelineDir: ".sparkwing"}},
 	}, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Unix(1, 0).UTC()})
 	if err != nil {
 		t.Fatal(err)

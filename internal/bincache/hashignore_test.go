@@ -61,14 +61,15 @@ func TestPipelineCacheKey_InvalidatesOnGitignoreEdit(t *testing.T) {
 func TestPipelineCacheKey_HashAllFilesRestoresFullHashing(t *testing.T) {
 	dir := newGitPipelineDir(t)
 	writeFile(t, filepath.Join(dir, ".gitignore"), "dist/\n")
-	SetHashAllFiles(true)
-	t.Cleanup(func() { SetHashAllFiles(false) })
-	before := mustKey(t, dir)
+	before, _, err := explainCacheKey(dir, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	writeFile(t, filepath.Join(dir, "dist/binary"), "pretend output")
 
-	if after := mustKey(t, dir); after == before {
-		t.Fatalf("SetHashAllFiles must restore hashing of ignored files, got %s twice", before)
+	if after, _, err := explainCacheKey(dir, nil, true); err != nil || after == before {
+		t.Fatalf("hash-all-files did not include ignored files: %s: %v", after, err)
 	}
 }
 

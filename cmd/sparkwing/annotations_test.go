@@ -62,7 +62,7 @@ func reviewFixture() *fakeRunReview {
 func runReviewFake(t *testing.T, f *fakeRunReview, args []string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runReviewCommand(t.Context(), args, &out, func(context.Context, string) (controllerwire.RunReview, func(), error) { return f, func() {}, nil })
+	err := runReviewCommandArgs(t.Context(), args, &out, func(context.Context, string) (controllerwire.RunReview, func(), error) { return f, func() {}, nil })
 	return out.String(), err
 }
 
@@ -140,7 +140,7 @@ func TestReviewAnnotationWriteAndPolicyGap(t *testing.T) {
 func runReviewCommandWithoutTransport(t *testing.T, args []string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runReviewCommand(t.Context(), args, &out, func(context.Context, string) (controllerwire.RunReview, func(), error) {
+	err := runReviewCommandArgs(t.Context(), args, &out, func(context.Context, string) (controllerwire.RunReview, func(), error) {
 		t.Fatal("unexpected controller resolution")
 		return nil, nil, nil
 	})
@@ -186,7 +186,7 @@ func TestReviewProfileSelectionAndTransportCleanup(t *testing.T) {
 		}
 		closed := false
 		var out bytes.Buffer
-		err := runReviewCommand(t.Context(), args, &out, func(_ context.Context, selected string) (controllerwire.RunReview, func(), error) {
+		err := runReviewCommandArgs(t.Context(), args, &out, func(_ context.Context, selected string) (controllerwire.RunReview, func(), error) {
 			if selected != profile {
 				t.Fatalf("selected profile %q, want %q", selected, profile)
 			}

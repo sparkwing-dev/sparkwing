@@ -55,5 +55,5 @@ func (p *StaticAnalysis) tidyDrift(ctx context.Context) error {
 }
 
 func init() {
-	sparkwing.Register("static-analysis", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &StaticAnalysis{} })
+	sparkwing.Register("StaticAnalysis", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &StaticAnalysis{} })
 }

@@ -339,7 +339,15 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("TOKEN", burstIntakeSecret)
+	const submittedValue = "requester-submitted-environment-value"
+	t.Setenv("W9_APP_NOTE", submittedValue)
 	repo := burstIntakeRepository(t)
+	pipeline := strings.Replace(burstIntakePipeline,
+		`sw.Info(ctx, "burst-edited-ok secret=%s encoded=%s", value, base64.StdEncoding.EncodeToString([]byte(value)))`,
+		`if note, ok := os.LookupEnv("W9_APP_NOTE"); !ok || note != "requester-submitted-environment-value" { return errors.New("submitted environment missing or changed") }
+        sw.Info(ctx, "submitted-note=%s", os.Getenv("W9_APP_NOTE"))
+        sw.Info(ctx, "burst-edited-ok secret=%s encoded=%s", value, base64.StdEncoding.EncodeToString([]byte(value)))`, 1)
+	writeSnapshotFile(t, repo, ".sparkwing/main.go", pipeline, 0o600)
 	endpoint := "http://" + listener.Addr().String()
 	state, controller, bearer := burstIntakeController(t, endpoint)
 	var personalAwarded atomic.Bool
@@ -373,7 +381,7 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	server.Start()
 	t.Cleanup(server.Close)
 	config := filepath.Join(os.Getenv("SPARKWING_HOME"), "config.yaml")
-	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint, bearer)
+	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  submit_env_allow: [W9_APP_*]\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint, bearer)
 	if contended {
 		contents += "    prefer: [{target: here}, {target: machines}]\n"
 	} else if personal {
@@ -459,6 +467,9 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	}
 	if !strings.Contains(string(output), "burst-edited-ok secret=*** encoded=***") || strings.Contains(string(output), burstIntakeSecret) || strings.Contains(string(output), base64.StdEncoding.EncodeToString([]byte(burstIntakeSecret))) {
 		t.Fatalf("native burst lost masked terminal output: %s", output)
+	}
+	if !strings.Contains(string(output), "submitted-note=***") || bytes.Contains(output, []byte(submittedValue)) || bytes.Contains(output, []byte(base64.StdEncoding.EncodeToString([]byte(submittedValue)))) {
+		t.Fatal("submitted environment was lost or disclosed by the real host")
 	}
 	var handle orchestrator.RunHandle
 	body, err := os.ReadFile(handleFile)

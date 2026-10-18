@@ -19,16 +19,12 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 	}
 	complete := true
 	seen := map[string]bool{}
-	var selected *nodeproto.PipelineDescription
 	for i := range doc.Pipelines {
 		pipeline := &doc.Pipelines[i]
 		if pipeline.Name == "" || seen[pipeline.Name] {
 			return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
 		}
 		seen[pipeline.Name] = true
-		if pipeline.Name == input.Run.Pipeline {
-			selected = pipeline
-		}
 		if pipeline.Error != nil {
 			complete = false
 			continue
@@ -52,13 +48,14 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 			return PreparedPlanning{}, false, err
 		}
 	}
-	if selected == nil {
+	selected, found := (nodeproto.DescribeDoc{Pipelines: doc.Pipelines}).Pipeline(input.Entrypoint)
+	if !found {
 		return PreparedPlanning{}, false, executorError(apierr.UnknownPipeline, "SDK describe does not declare the requested pipeline")
 	}
 	if selected.Error != nil {
 		return PreparedPlanning{Description: nodeproto.PipelineDescription{Name: selected.Name, Error: selected.Error}}, false, nil
 	}
-	prepared := PreparedPlanning{Description: *selected, Args: maps.Clone(input.Args), SecretArgs: append([]string{}, input.SecretArgs...)}
+	prepared := PreparedPlanning{Description: selected, Args: maps.Clone(input.Args), SecretArgs: append([]string{}, input.SecretArgs...)}
 	if prepared.Args == nil {
 		prepared.Args = map[string]string{}
 	}

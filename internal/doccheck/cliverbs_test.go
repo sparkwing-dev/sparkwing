@@ -260,3 +260,88 @@ func TestCheckCLIVerbsReportsReadFailures(t *testing.T) {
 		t.Fatal("missing documentation reported as a passing check")
 	}
 }
+
+func TestMigrationDestinationsUseCurrentGrammar(t *testing.T) {
+	for _, example := range []string{"sparkwing run ci --target prod", "sparkwing pipeline hooks status --fleet", "sparkwing pipeline hooks status --all", "sparkwing cluster triggers list"} {
+		t.Run(example, func(t *testing.T) {
+			content := t.TempDir()
+			if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeDoc(t, filepath.Join(content, "migrations"), "v1.md", "| Before | After |\n|---|---|\n| `sparkwing old-command --gone` | `"+example+"` |\n")
+			if checkCLIVerbs(content) {
+				t.Fatalf("invalid migration destination accepted: %s", example)
+			}
+		})
+	}
+	content := t.TempDir()
+	if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", "| Before | After |\n|---|---|\n| `sparkwing old-command --gone` | `sparkwing run ci` |\n\nBefore:\n```bash\nsparkwing old-command --gone\n```\nAfter:\n```bash\nsparkwing pipeline hooks status --all-repos\n```\n")
+	if !checkCLIVerbs(content) {
+		t.Fatal("historical Before examples were checked")
+	}
+}
+
+func TestMigrationAfterSectionChecksEveryExample(t *testing.T) {
+	content := t.TempDir()
+	if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", "### Before\n```bash\nsparkwing old-command\n```\n### After\n```bash\nsparkwing run ci\n```\n```bash\nsparkwing pipeline hooks status --fleet\n```\n")
+	if checkCLIVerbs(content) {
+		t.Fatal("second After example was ignored")
+	}
+}
+
+func TestMigrationCurrentInstructionsAreAllChecked(t *testing.T) {
+	for _, doc := range []string{
+		"Run `sparkwing crons tick` now.",
+		"Before: `sparkwing retired`.\n\nRun `sparkwing crons tick` now.",
+		"- **Before:** `sparkwing retired`.\n\nRun `sparkwing crons tick` now.",
+		"Before:\n```bash\nsparkwing retired\n```\n\nOperator steps:\nRun `sparkwing crons tick` now.",
+		"### Before\n```bash\nsparkwing retired\n```\n### Operator steps\nRun `sparkwing crons tick` now.",
+		"| Before | After | Notes |\n|---|---|---|\n| `sparkwing retired` | `sparkwing run ci` | Run `sparkwing crons tick` |\n",
+	} {
+		content := t.TempDir()
+		if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeDoc(t, filepath.Join(content, "migrations"), "v1.md", doc)
+		if checkCLIVerbs(content) {
+			t.Fatalf("unchecked current instruction: %s", doc)
+		}
+	}
+}
+
+func TestMigrationUnprefixedInstructionsUseFullGrammar(t *testing.T) {
+	for _, command := range []string{"cloud status", "cloud status --cluster", "configure profiles show --name prod --show-token", "update --cli", "pipeline hooks status --fleet", "crons tick"} {
+		for _, example := range []string{"Run `" + command + "` now.", "Run `" + strings.Replace(command, " ", "\n", 1) + "` now.", "```bash\n" + command + "\n```", "```console\n$\t" + command + "\n```", "| Before | After |\n|---|---|\n| `retired --gone` | `" + command + "` |"} {
+			content := t.TempDir()
+			if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeDoc(t, filepath.Join(content, "migrations"), "v1.md", example)
+			if checkCLIVerbs(content) {
+				t.Fatalf("unchecked instruction: %s", example)
+			}
+		}
+	}
+}
+
+func TestArchivedMigrationNotesDoNotExemptCurrentInstructions(t *testing.T) {
+	content := t.TempDir()
+	if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	archive := "# Migration\n## Before: archived notes\n### Connections\nRun `cloud status --cluster`.\n## Current instructions\n"
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", archive+"Run `profiles show --profile prod`.\n")
+	if !checkCLIVerbs(content) {
+		t.Fatal("historical notes invalidated current instructions")
+	}
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", archive+"Run `update --cli`.\n")
+	if checkCLIVerbs(content) {
+		t.Fatal("archive exempted a current instruction")
+	}
+}

@@ -14,7 +14,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if _, err := ConfiguredLimits(); err != nil {
 		return nil, false, fmt.Errorf("pipeline cache ceilings: %w", err)
 	}
-	key, parts, err := ExplainCacheKey(dir, options.Environment)
+	key, parts, err := explainCacheKey(dir, options.Environment, options.HashAllFiles)
 	if err != nil {
 		return nil, false, err
 	}
@@ -31,7 +31,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if err := preparePipelineDependencies(ctx, dir, options); err != nil {
 		return nil, false, fmt.Errorf("prepare pipeline dependencies: %w", err)
 	}
-	key, parts, err = ExplainCacheKey(dir, options.Environment)
+	key, parts, err = explainCacheKey(dir, options.Environment, options.HashAllFiles)
 	if err != nil {
 		return nil, false, err
 	}

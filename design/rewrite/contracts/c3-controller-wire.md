@@ -1,5 +1,22 @@
 # Controller API contract
 
+## Submitted environment transport
+
+CreateRunRequest.SubmittedEnv carries only filtered, present variables privately
+as map[string][]byte, preserving empty and non-UTF-8 values through JSON. The
+immutable request retains only EnvSnapshot names/digest and SubmitEnvAllow's
+setting and provenance. Intake validates both before admitting.
+
+ClaimedUnit.SubmittedEnv is populated only on live direct execution awards,
+including successful bootstrap exchange and fresh node reconciliation. Source
+bootstrap awards, launcher sync and reconciled awards without a fresh bearer
+carry no values. The controller rechecks the live execution unit and its own run,
+tenant, prefix, holder, generation, cancellation and lease before release. Eval
+also checks its source generation and controller expansion lease. SourceRead
+is independent of environment release. NativeServices verifies the values against
+the sealed identity before merging them with the remote base or starting code.
+No new route or grant is introduced.
+
 <!-- design:begin -->
 
 Team machine enrollment settings share controllerwire.TeamSettings with the
@@ -172,10 +189,13 @@ wired. Private environment retention remains a binding. Working-tree upload
 is integrated below. Native selected-engine process-tree cancellation remains unverified.
 The public command now uses this prepared request and sealed intake path.
 GitHub numeric-ID lookup and working-tree source binding use the integrated paths below.
-Captured environment delivery still needs a native binding. Initial here intake requires a contract for persisting
-the required reason and refuses before submission until that contract exists. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
-that reason. It must survive intake and replay before the CLI can replace the old
-path without dropping it. No foreign contract is changed by this component.
+Captured environment delivery still needs a native binding.
+`runspec.Request.Reason` carries the explicit `--runner here --reason` text in
+both request and spec seals. Intake, replay and retry preserve it with the
+selected `RunnerHere`. Changing the reason under an existing intake key is a
+conflict. Initial here intake uses the same native committed-source preparation,
+selected-engine inspection and authenticated controller client as other triggers.
+The reason adds no authority and does not change the one-time bearer rules.
 
 Sealed here resume and retry follow public logs with the caller's display
 credential. The retained bearer selects the named owner claim, and the fresh
@@ -1217,6 +1237,12 @@ executor renewal continues to cancel its execution context on a cancellation bea
 An owner waits for a holder with persisted cancellation intent instead of
 submitting the same cancellation again on each scheduling pass.
 
+## Detached request trace
+
+`runspec.Request.RequestID` carries optional detached submission trace metadata.
+The ordinary request seal, intake persistence and retry clone retain it. It
+carries no authority and does not replace the intake idempotency key. No schema
+column is added because it lives in the existing request JSON.
 
 ## Launcher Pod rejection amendment (2026-10-17, W8 integration)
 
@@ -1238,6 +1264,18 @@ Changed omission intent under one idempotency key conflicts. Cross-repository
 resolution in the native client remains a refusal until its source resolver is
 provided.
 
+## Environment and source selection integration
+
+The sealed request carries `environment_source`, `source.working_tree` and
+`source.committed_checkout`. These are execution inputs and grant no authority.
+The native child client retains environment provenance when setting child origin.
+Private values keep the existing captured-snapshot or encrypted award transport.
+
+Source access admits only the captured execution projection or its exact
+`Spec.PipelineSource()` projection. That projection changes the commit to the
+sealed pipeline SHA without changing repository, remote or checkout policy.
+Both request the same live, run-bound source credential route. A changed
+repository, URL, commit or policy is refused before transport.
 
 ## W8 operator placement read (2026-10-17, integration)
 

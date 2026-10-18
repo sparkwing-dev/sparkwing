@@ -27,11 +27,12 @@ type SourceController struct {
 
 // SourceCredentialResponse carries ephemeral source access for an already sealed checkout.
 type SourceCredentialResponse struct {
-	Kind       string `json:"kind"`
-	Host       string `json:"host"`
-	Username   string `json:"username,omitempty"`
-	Secret     string `json:"secret"`
-	KnownHosts string `json:"known_hosts,omitempty"`
+	Kind              string   `json:"kind"`
+	Host              string   `json:"host"`
+	Username          string   `json:"username,omitempty"`
+	Secret            string   `json:"secret"`
+	KnownHosts        string   `json:"known_hosts,omitempty"`
+	ExtraRepositories []string `json:"extra_repositories,omitempty"`
 }
 
 func (s *SourceController) transactions(ctx context.Context, team string) (SourceTransactions, error) {
@@ -65,7 +66,7 @@ func (s *SourceController) Release(ctx context.Context, a capability.Authorized)
 		}
 		token, err := appTenant.ReleaseGitHubSourceCredential(ctx, a, s.GitHub)
 		if err == nil {
-			return SourceCredentialResponse{Kind: "github_app", Host: "github.com", Secret: token.Token}, nil
+			return SourceCredentialResponse{Kind: token.Kind, Host: token.Host, Secret: token.Secret, ExtraRepositories: token.ExtraRepositories}, nil
 		}
 		if !errors.Is(err, store.ErrNotFound) {
 			return SourceCredentialResponse{}, err
@@ -136,9 +137,6 @@ func (s *Server) sourceAdapter() *SourceController {
 
 func (s *Server) sourceEndpoints() []Endpoint {
 	e := s.engineController
-	if e == nil {
-		e = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleSourceRelease},
 		{Method: "PUT", Pattern: "/api/v1/tokens/{token}/git-credentials", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSourceConsent},

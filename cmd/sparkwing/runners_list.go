@@ -16,11 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-func runRunnersList(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "list"}, args...))
-	if err != nil {
-		return err
-	}
+func runRunnersList(ctx context.Context, inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}

@@ -19,6 +19,7 @@ import (
 // by C2 in the intake transaction. CapabilityPrefix is only a claim fence and
 // cannot replace a session parent. Verified App facts come from the delivery ID.
 type IntakeRequest struct {
+	SubmittedEnv       map[string][]byte `json:"-"`
 	Authority          capability.AuthorityRef
 	Request            runspec.Request
 	IdempotencyKey     string
@@ -106,6 +107,9 @@ func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (Admission
 		if err == nil {
 			key = localSecretKey{t.team, result.RunID}
 			installed, err = t.s.installLocalSecrets(t.team, result, request.LocalSecrets)
+		}
+		if err == nil {
+			err = t.installSubmittedEnvironmentTx(ctx, tx, result, request)
 		}
 		return err
 	})

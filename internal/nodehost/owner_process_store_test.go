@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
@@ -77,7 +78,12 @@ func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 		t.Fatalf("evaluation created work: %+v %v", row, err)
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "host-fixture-root"}
-	if err := f.Tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref, CapabilityPrefix: ref.ID}, ref); err != nil {
+	_, admin, err := teststore.ProvisionCredential(t.Context(), f.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "admin"}, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: admin.Prefix}, CapabilityPrefix: admin.Prefix}
+	if err := f.Tenant.RevokeAuthority(t.Context(), actor, ref); err != nil {
 		t.Fatal(err)
 	}
 	if status := call("after-revoke"); status != http.StatusUnauthorized || masker.Mask("after-revoke") != "after-revoke" {

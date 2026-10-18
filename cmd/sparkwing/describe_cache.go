@@ -102,11 +102,7 @@ func refreshDescribe(ctx context.Context, sparkwingDir string, entry pipelineent
 	return doc.Pipelines, nil
 }
 
-func writeDescribeCache(ctx context.Context, sparkwingDir string, entry pipelineentry.Command) error {
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
-	if err != nil {
-		return fmt.Errorf("cache key: %w", err)
-	}
+func writeDescribeCache(ctx context.Context, sparkwingDir, key string, entry pipelineentry.Command) error {
 	doc, err := describeEntry(ctx, sparkwingDir, entry)
 	if err != nil {
 		return err

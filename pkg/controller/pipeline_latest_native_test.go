@@ -19,7 +19,7 @@ func TestPipelineLatestHTTPUsesNativeDeclaredJobReference(t *testing.T) {
 	now := time.Now().UTC()
 	request, err := runspec.SealRequest(runspec.Request{
 		Version: 1, Team: "a", Pipeline: "producer", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
-		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:1"}},
+		Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40)}, Source: runspec.Source{Ref: strings.Repeat("a", 40)},
 		RequestedArgs: map[string]string{"secret": "never-expose-secret", "public": "visible"},
 		SecretArgs:    runspec.Optional[[]string]{Set: true, Value: []string{"secret"}},
 	}, runspec.IntakeFacts{RunID: "producer-run", AdmittedAt: now.Add(-time.Hour)})

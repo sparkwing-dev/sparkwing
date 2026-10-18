@@ -13,9 +13,6 @@ import (
 
 func (s *Server) claimEndpoints() []Endpoint {
 	e := s.engineController
-	if e == nil {
-		e = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runners/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
 		{Method: "POST", Pattern: "/api/v1/launcher/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},

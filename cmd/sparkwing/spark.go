@@ -11,7 +11,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/modfile"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -39,37 +38,6 @@ func defaultSparkwingDir() (string, error) {
 	return "", fmt.Errorf("no .sparkwing/ project (sparkwing.yaml or go.mod) in %s or above it; run from a checkout or pass -C DIR", cwd)
 }
 
-func runSparks(args []string) error {
-	if handleParentHelp(cmdSparks, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdSparks, os.Stderr)
-		return errors.New("spark: subcommand required (catalog|list|lint|resolve|update|add|remove|inflate)")
-	}
-	switch args[0] {
-	case "catalog":
-		return runSparksCatalog(args[1:])
-	case "list":
-		return runSparksList(args[1:])
-	case "lint":
-		return runSparksLint(args[1:])
-	case "resolve":
-		return runSparksResolve(args[1:])
-	case "update":
-		return runSparksUpdate(args[1:])
-	case "add":
-		return runSparksAdd(args[1:])
-	case "remove":
-		return runSparksRemove(args[1:])
-	case "inflate":
-		return runSparksInflate(args[1:])
-	default:
-		PrintHelp(cmdSparks, os.Stderr)
-		return fmt.Errorf("spark: unknown subcommand %q", args[0])
-	}
-}
-
 type sparkListEntry struct {
 	Name     string `json:"name"`
 	Source   string `json:"source"`
@@ -83,17 +51,13 @@ type sparkListLine struct {
 	sparkListEntry
 }
 
-func runSparksList(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksList.Path, flag.ContinueOnError)
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
-	noResolve := fs.Bool("no-resolve", false, "skip module-proxy lookups; only print declared versions")
-	if err := parseAndCheck(cmdSparksList, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runSparksList(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	format, err := resolveOutputFormat(*outFmt, "spark list")
+	outFmt := inv.Output(color.IsInteractiveStdout())
+	noResolve := inv.Bool("no-resolve")
+	format, err := resolveOutputFormat(outFmt, "spark list")
 	if err != nil {
 		return err
 	}
@@ -109,13 +73,13 @@ func runSparksList(args []string) error {
 	if m != nil {
 		ctx := gotoolchain.WithSession(context.Background(), nil, nil)
 		var resolver *sparks.Resolver
-		if !*noResolve {
+		if !noResolve {
 			resolver = sparks.NewResolverFromEnv()
 			resolver.Dir = sparkwingDir
 		}
 		for _, lib := range m.Libraries {
 			e := sparkListEntry{Name: lib.Name, Source: lib.Source, Declared: lib.Version}
-			if !*noResolve {
+			if !noResolve {
 				resolved, rerr := resolver.Resolve(ctx, &sparks.Manifest{Libraries: []sparks.Library{lib}})
 				if rerr != nil {
 					e.Error = rerr.Error()
@@ -216,25 +180,15 @@ type sparkManifestDepRaw struct {
 	Version string `json:"version"`
 }
 
-func runSparksLint(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksLint.Path, flag.ContinueOnError)
-	pathFlag := fs.String("path", ".", "path to a sparks library or its parent dir")
-	if err := parseAndCheck(cmdSparksLint, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runSparksLint(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	target := *pathFlag
-	if rest := fs.Args(); len(rest) > 0 {
-		if len(rest) > 1 {
-			return fmt.Errorf("spark lint: unexpected positional %q (lint takes one path)", rest[1])
-		}
-		if fs.Changed("path") {
-			return fmt.Errorf("spark lint: --path %s and positional %q both given (pass one)", *pathFlag, rest[0])
-		}
-		target = rest[0]
+	pathFlag := inv.Value("path")
+	if pathFlag == "" {
+		pathFlag = "."
 	}
+	target := pathFlag
 	libDir, manifestPath, err := resolveSparkJSONPath("spark lint", target)
 	if err != nil {
 		return err
@@ -294,9 +248,19 @@ func runSparksLint(args []string) error {
 		}
 		return fmt.Errorf("spark lint: %d problem(s) in %s", len(problems), manifestPath)
 	}
-	fmt.Fprintf(os.Stdout, "ok: %s (%d %s%s)\n",
-		manifestPath, len(entries), strings.TrimSuffix(field, "s"), pluralS(len(entries)))
-	return nil
+	switch inv.Output(color.IsInteractiveStdout()) {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Path    string `json:"path"`
+			Entries int    `json:"entries"`
+			Kind    string `json:"kind"`
+		}{manifestPath, len(entries), field})
+	case "plain":
+		_, err := fmt.Fprintln(os.Stdout, manifestPath)
+		return err
+	}
+	_, err = fmt.Fprintf(os.Stdout, "ok: %s (%d %s%s)\n", manifestPath, len(entries), strings.TrimSuffix(field, "s"), pluralS(len(entries)))
+	return err
 }
 
 func sparkManifestShape(m sparkManifest) (field string, entries []sparkManifestEntry, problem string) {
@@ -418,46 +382,11 @@ func resolveSparkJSONPath(verb, target string) (libDir, manifestPath string, err
 	return filepath.Dir(target), target, nil
 }
 
-func runSparksResolve(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksResolve.Path, flag.ContinueOnError)
-	quiet := fs.BoolP("quiet", "q", false, "suppress progress output; print only changes")
-	if err := parseAndCheck(cmdSparksResolve, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runSparksUpdate(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	sparkwingDir, err := defaultSparkwingDir()
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
-	if err != nil {
-		return err
-	}
-	if changed {
-		fmt.Fprintf(os.Stdout, "overlay written: %s\n",
-			filepath.Join(sparkwingDir, sparks.OverlayModfileName))
-		return nil
-	}
-	if !*quiet {
-		fmt.Fprintln(os.Stdout, "up-to-date (no overlay changes)")
-	}
-	return nil
-}
 
-func runSparksUpdate(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksUpdate.Path, flag.ContinueOnError)
-	if err := parseAndCheck(cmdSparksUpdate, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("spark update: unexpected positional %q", rest[0])
-	}
 	sparkwingDir, err := defaultSparkwingDir()
 	if err != nil {
 		return err
@@ -474,20 +403,26 @@ func runSparksUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	if changed {
-		fmt.Fprintf(os.Stdout, "overlay updated: %s\n",
-			filepath.Join(sparkwingDir, sparks.OverlayModfileName))
-	} else {
-		fmt.Fprintln(os.Stdout, "up-to-date (no overlay changes)")
-	}
-	return nil
-}
-
-func runSparksAdd(args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "sparks", "add"}, args...))
-	if err != nil {
+	path = filepath.Join(sparkwingDir, sparks.OverlayModfileName)
+	switch inv.Output(color.IsInteractiveStdout()) {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Path    string `json:"path"`
+			Changed bool   `json:"changed"`
+		}{path, changed})
+	case "plain":
+		_, err := fmt.Fprintln(os.Stdout, path)
 		return err
 	}
+	if changed {
+		_, err = fmt.Fprintln(os.Stdout, "overlay updated:", path)
+	} else {
+		_, err = fmt.Fprintln(os.Stdout, "up-to-date (no overlay changes)")
+	}
+	return err
+}
+
+func runSparksAdd(inv clisurface.Invocation) error {
 	output := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)
@@ -528,11 +463,7 @@ func runSparksAdd(args []string) error {
 	return writeSparkMutation("added", m.Libraries[len(m.Libraries)-1], path, output)
 }
 
-func runSparksRemove(args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "sparks", "remove"}, args...))
-	if err != nil {
-		return err
-	}
+func runSparksRemove(inv clisurface.Invocation) error {
 	output := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)
@@ -597,21 +528,13 @@ func resolveVendorModulePath(module string) string {
 	return sparksCoreModulePrefix + module
 }
 
-func runSparksInflate(args []string) error {
-	return runSparksInflateCommand(context.Background(), args, os.Stdout, defaultSparkwingDir, sparks.Vendor)
+func runSparksInflate(inv clisurface.Invocation) error {
+	return runSparksInflateCommand(context.Background(), inv, os.Stdout, defaultSparkwingDir, sparks.Vendor)
 }
 
-func runSparksInflateCommand(ctx context.Context, args []string, out io.Writer,
+func runSparksInflateCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer,
 	locate func() (string, error), vendor func(context.Context, string, string) (*sparks.VendorResult, error),
 ) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "sparks", "inflate"}, args...))
-	if err != nil {
-		var usage *clisurface.UsageError
-		if errors.As(err, &usage) && usage.Message == "--library is required" {
-			return fmt.Errorf("%w; list choices with sparkwing pipeline sparks catalog", err)
-		}
-		return err
-	}
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

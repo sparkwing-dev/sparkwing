@@ -28,7 +28,7 @@ type upgradeCommand struct {
 	terminal    bool
 }
 
-func runUpgrade(args []string) error {
+func runUpgrade(inv clisurface.Invocation) error {
 	command := upgradeCommand{
 		newResolver: func() (upgradeResolver, error) {
 			mode, err := toolchain.ParseMode(os.Getenv("SPARKWING_TOOLCHAIN"))
@@ -40,23 +40,16 @@ func runUpgrade(args []string) error {
 		verifier: &upgradeVerifier{environment: os.Environ(), buildEnv: procenv.Build, exec: executeUpgradeCheck},
 		out:      os.Stdout, terminal: color.IsInteractiveStdout(),
 	}
-	return command.run(context.Background(), args)
+	return command.run(context.Background(), inv)
 }
 
-func (c upgradeCommand) run(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"upgrade"}, args...))
-	if err != nil {
-		return err
-	}
+func (c upgradeCommand) run(ctx context.Context, inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), c.out, inv.Output(c.terminal))
 	}
-	start := inv.Value("checkout")
-	if start == "" {
-		start, err = os.Getwd()
-		if err != nil {
-			return err
-		}
+	start, err := os.Getwd()
+	if err != nil {
+		return err
 	}
 	dir, err := findSparkwingDirFrom(start)
 	if err != nil {

@@ -41,7 +41,7 @@ func TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty(t *testing.T) {
 		location := runspec.SourceLocation{RemoteURL: "https://github.com/acme/repo", PipelineDir: ".sparkwing"}
 		s.SetIntakePolicy(retrySourcePolicy{location: location})
 		request := plan.Seal.Request.Request
-		request.Source = runspec.Source{Ref: fmt.Sprintf("pipeline-%x", random.Uint64()), Entrypoint: "Fixture", Location: location}
+		request.Source = runspec.Source{Ref: fmt.Sprintf("%040x", random.Uint64()), RequestedRef: fmt.Sprintf("pipeline-%x", random.Uint64()), Entrypoint: "Fixture", Location: location}
 		request.Git.SHA = fmt.Sprintf("%040x", random.Uint64())
 		request.RequestedArgs = map[string]string{"message": fmt.Sprintf("secret-%x", random.Uint64())}
 		request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"message"}}
@@ -104,7 +104,7 @@ func TestManualRetryRetainsVerifiedRepositoryFacts(t *testing.T) {
 	}
 	request := plan.Seal.Request.Request
 	git := request.Git
-	git.Ref, git.SHA = "refs/heads/main", "original-sha"
+	git.Ref, git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
 	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: plan.Seal.Request.AdmittedAt}}
 	s.SetIntakePolicy(retrySourcePolicy{delivery: &store.VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "app-actor"}}})
 	source, err := own.AdmitRun(t.Context(), store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request, VerifiedDeliveryID: "verified-delivery"})

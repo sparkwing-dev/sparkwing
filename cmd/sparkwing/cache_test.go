@@ -27,7 +27,7 @@ func TestCacheExplainJSONEmitsReport(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCacheExplain([]string{"-o", "json"})
+		runErr = runCacheExplainArgs([]string{"-o", "json"})
 	})
 	if runErr != nil {
 		t.Fatalf("cache explain: %v", runErr)
@@ -51,7 +51,7 @@ func TestCacheExplainSaysATypeScriptPipelineIsNotCached(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCacheExplain([]string{"-o", "json"})
+		runErr = runCacheExplainArgs([]string{"-o", "json"})
 	})
 	if runErr != nil {
 		t.Fatalf("cache explain: %v", runErr)
@@ -65,7 +65,7 @@ func TestCacheExplainSaysATypeScriptPipelineIsNotCached(t *testing.T) {
 func TestCacheExplainJSONReportsParseFailureBeforeOutputFlag(t *testing.T) {
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCacheExplain([]string{"--unknown", "-ojson"})
+		runErr = runCacheExplainArgs([]string{"--unknown", "-ojson"})
 	})
 	if runErr == nil {
 		t.Fatal("cache explain hid parse failure")
@@ -107,7 +107,7 @@ func TestCacheInfoJSONReportsManagedBytes(t *testing.T) {
 	lease := seedCommandCacheEntry(t, "active")
 	defer func() { _ = lease.Release() }()
 	var runErr error
-	out := captureStdout(t, func() { runErr = runCacheInfo([]string{"-o", "json"}) })
+	out := captureStdout(t, func() { runErr = runCacheInfoArgs([]string{"-o", "json"}) })
 	if runErr != nil {
 		t.Fatalf("cache info: %v", runErr)
 	}
@@ -125,7 +125,7 @@ func TestCachePruneJSONReportsBoundedOutcome(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"--all", "-o", "json"})
+		runErr = runCachePruneArgs([]string{"--all-entries", "-o", "json"})
 	})
 	if runErr != nil {
 		t.Fatalf("cache prune: %v", runErr)
@@ -140,7 +140,7 @@ func TestCachePruneRejectsInvalidLimit(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"--max-bytes", "invalid", "-o", "json"})
+		runErr = runCachePruneArgs([]string{"--max-bytes", "invalid", "-o", "json"})
 	})
 	if runErr == nil {
 		t.Fatal("cache prune accepted an invalid byte ceiling")
@@ -158,7 +158,7 @@ func TestCachePruneJSONReportsAPIFailure(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"--all", "-o", "json"})
+		runErr = runCachePruneArgs([]string{"--all-entries", "-o", "json"})
 	})
 	if runErr == nil {
 		t.Fatal("cache prune hid API failure")
@@ -171,7 +171,7 @@ func TestCachePruneJSONReportsAPIFailure(t *testing.T) {
 func TestCachePruneJSONReportsParseFailure(t *testing.T) {
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"-o", "json", "--unknown"})
+		runErr = runCachePruneArgs([]string{"-o", "json", "--unknown"})
 	})
 	if runErr == nil {
 		t.Fatal("cache prune hid parse failure")
@@ -191,7 +191,7 @@ func TestCachePruneJSONReportsParseFailureBeforeOutputFlag(t *testing.T) {
 	} {
 		var runErr error
 		out := captureStdout(t, func() {
-			runErr = runCachePrune(args)
+			runErr = runCachePruneArgs(args)
 		})
 		if runErr == nil {
 			t.Fatalf("cache prune hid parse failure for %q", args)
@@ -210,7 +210,7 @@ func TestCachePruneRejectsOutputBeforeMutation(t *testing.T) {
 		calls++
 		return bincache.PruneResult{}, nil
 	}
-	if err := runCachePrune([]string{"--all", "-o", "bogus"}); err == nil {
+	if err := runCachePruneArgs([]string{"--all-entries", "-o", "bogus"}); err == nil {
 		t.Fatal("cache prune accepted an invalid output format")
 	}
 	if calls != 0 {
@@ -237,7 +237,7 @@ func TestCacheExplainFindsTheModuleFromASubdirectory(t *testing.T) {
 	t.Chdir(sub)
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCacheExplain([]string{"-o", "json"})
+		runErr = runCacheExplainArgs([]string{"-o", "json"})
 	})
 	if runErr != nil {
 		t.Fatalf("cache explain from a subdirectory: %v", runErr)

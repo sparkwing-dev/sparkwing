@@ -181,7 +181,7 @@ func runNativeFakeGo() bool {
 func TestResolveSparks_NoManifest_FastPath(t *testing.T) {
 	t.Setenv("GOPROXY", "http://proxy.invalid.example")
 	dir := newSparksFixture(t, "")
-	if err := resolveSparks(context.Background(), dir, compileOptions{}); err != nil {
+	if err := resolveSparks(context.Background(), dir, false); err != nil {
 		t.Fatalf("fast path should be a no-op, got: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".resolved.mod")); !errors.Is(err, os.ErrNotExist) {
@@ -196,7 +196,7 @@ func TestResolveSparks_WithManifest_WritesOverlay(t *testing.T) {
 	manifest := "libraries:\n  - name: sparks-core\n    source: example.com/sparks-core\n    version: latest\n"
 	dir := newSparksFixture(t, manifest)
 
-	if err := resolveSparks(context.Background(), dir, compileOptions{}); err != nil {
+	if err := resolveSparks(context.Background(), dir, false); err != nil {
 		t.Fatalf("resolveSparks: %v", err)
 	}
 	overlayBytes, err := os.ReadFile(filepath.Join(dir, ".resolved.mod"))
@@ -213,7 +213,7 @@ func TestResolveSparks_NoUpdate_SkipsResolve(t *testing.T) {
 	manifest := "libraries:\n  - name: sparks-core\n    source: example.com/sparks-core\n    version: latest\n"
 	dir := newSparksFixture(t, manifest)
 
-	if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: true}); err != nil {
+	if err := resolveSparks(context.Background(), dir, true); err != nil {
 		t.Fatalf("--no-update should bypass resolve, got: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".resolved.mod")); !errors.Is(err, os.ErrNotExist) {
@@ -230,7 +230,7 @@ func TestResolveSparks_ProxyDown_FailsLoudly(t *testing.T) {
 	manifest := "libraries:\n  - name: sparks-core\n    source: example.com/sparks-core\n    version: latest\n"
 	dir := newSparksFixture(t, manifest)
 
-	err := resolveSparks(context.Background(), dir, compileOptions{})
+	err := resolveSparks(context.Background(), dir, false)
 	if err == nil {
 		t.Fatal("expected resolve failure when proxy is down")
 	}
@@ -249,10 +249,4 @@ func TestPipelineCacheKey_PipelineDirTreatsAllFilesAsInputs(t *testing.T) {
 	if k1 == k2 {
 		t.Fatal("pipelines.yaml change should bust cache")
 	}
-}
-
-func materializeOnly(sparkwingDir string, env []string, opts compileOptions) error {
-	run := newPipelineRun(sparkwingDir, opts)
-	defer run.stop()
-	return run.finish(run.materialize(env))
 }

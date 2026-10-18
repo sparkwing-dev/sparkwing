@@ -12,7 +12,7 @@ import (
 )
 
 func TestScaffoldAliasThroughCLI(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), ".sparkwing")
+	dir := filepath.Join(initSnapshotRepo(t), ".sparkwing")
 	if err := os.MkdirAll(filepath.Join(dir, "jobs"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestScaffoldAliasThroughCLI(t *testing.T) {
 }
 
 func TestRegisteredNameThroughCLI(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), ".sparkwing")
+	dir := filepath.Join(initSnapshotRepo(t), ".sparkwing")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func (*Example) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, rc sw.RunCont
  return nil
 }
 func main() {
- sw.Register("example", func() sw.Pipeline[sw.NoInputs] { return &Example{} })
+ sw.Register("Example", func() sw.Pipeline[sw.NoInputs] { return &Example{} })
  sw.Main()
 }
 `)

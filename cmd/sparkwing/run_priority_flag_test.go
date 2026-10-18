@@ -20,7 +20,7 @@ func TestParseRunFlags_Priority(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			wf, pass := parseRunFlags(tc.args)
+			wf, pass := parseRunFlagsArgs(tc.args)
 			if !wf.prioritySet {
 				t.Fatalf("prioritySet = false for %v", tc.args)
 			}
@@ -42,7 +42,7 @@ func TestParseRunFlags_PriorityIsNeverForwarded(t *testing.T) {
 		{"--sw-priority=sideways"},
 		{"--sw-priority"},
 	} {
-		wf, pass := parseRunFlags(args)
+		wf, pass := parseRunFlagsArgs(args)
 		if !wf.prioritySet && wf.parseErr == nil {
 			t.Errorf("%v: prioritySet = false", args)
 		}

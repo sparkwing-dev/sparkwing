@@ -8,7 +8,7 @@ import (
 
 func TestRunDocsMigrations_ListTableMentionsKnownVersion(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"--output", "pretty"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"--output", "pretty"}); err != nil {
 			t.Fatalf("list: %v", err)
 		}
 	})
@@ -22,7 +22,7 @@ func TestRunDocsMigrations_ListTableMentionsKnownVersion(t *testing.T) {
 
 func TestRunDocsMigrations_ListJSONIsParseable(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"-o", "json"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"-o", "json"}); err != nil {
 			t.Fatalf("list -o json: %v", err)
 		}
 	})
@@ -46,7 +46,7 @@ func TestRunDocsMigrations_ListJSONIsParseable(t *testing.T) {
 
 func TestRunDocsMigrations_ListJSONSchemaMatchesWeb(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"-o", "json"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"-o", "json"}); err != nil {
 			t.Fatalf("list -o json: %v", err)
 		}
 	})
@@ -78,7 +78,7 @@ func TestRunDocsMigrations_ListJSONSchemaMatchesWeb(t *testing.T) {
 
 func TestRunDocsList_JSONSchemaMatchesWeb(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsList([]string{"-o", "json"}); err != nil {
+		if err := runDocsListArgs([]string{"-o", "json"}); err != nil {
 			t.Fatalf("list -o json: %v", err)
 		}
 	})
@@ -132,7 +132,7 @@ func keysInOrder(ndjson string) []string {
 
 func TestRunDocsMigrations_ListPlainOnePerLine(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"-o", "plain"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"-o", "plain"}); err != nil {
 			t.Fatalf("list -o plain: %v", err)
 		}
 	})
@@ -146,7 +146,7 @@ func TestRunDocsMigrations_ListPlainOnePerLine(t *testing.T) {
 
 func TestRunDocsMigrations_VersionPrintsBody(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"--version", "v0.4.0"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"--version", "v0.4.0"}); err != nil {
 			t.Fatalf("read: %v", err)
 		}
 	})
@@ -158,19 +158,14 @@ func TestRunDocsMigrations_VersionPrintsBody(t *testing.T) {
 	}
 }
 
-func TestRunDocsMigrations_VersionAcceptsPositionalFallback(t *testing.T) {
-	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"v0.4.0"}); err != nil {
-			t.Fatalf("read v0.4.0 (positional): %v", err)
-		}
-	})
-	if !strings.Contains(out, "Migrating to v0.4.0") {
-		t.Errorf("positional fallback didn't read v0.4.0")
+func TestRunDocsMigrations_RejectsPositionalVersion(t *testing.T) {
+	if err := runDocsMigrationsArgs([]string{"v0.4.0"}); exitCodeFor(err) != 2 {
+		t.Fatalf("positional version: %v", err)
 	}
 }
 
 func TestRunDocsMigrations_VersionUnknownVersionSuggestsList(t *testing.T) {
-	err := runDocsMigrations([]string{"--version", "v9.9.9"})
+	err := runDocsMigrationsArgs([]string{"--version", "v9.9.9"})
 	if err == nil {
 		t.Fatal("expected error for unknown version")
 	}
@@ -180,7 +175,7 @@ func TestRunDocsMigrations_VersionUnknownVersionSuggestsList(t *testing.T) {
 }
 
 func TestRunDocsMigrations_VersionRejectsBadSemver(t *testing.T) {
-	err := runDocsMigrations([]string{"--version", "garbage"})
+	err := runDocsMigrationsArgs([]string{"--version", "garbage"})
 	if err == nil {
 		t.Fatal("expected error for invalid semver")
 	}
@@ -191,7 +186,7 @@ func TestRunDocsMigrations_VersionAndRangeAreExclusive(t *testing.T) {
 		{"--version", "v0.4.0", "--from", "v0.3.0"},
 		{"v0.4.0", "--to", "v0.4.0"},
 	} {
-		if err := runDocsMigrations(args); err == nil {
+		if err := runDocsMigrationsArgs(args); err == nil {
 			t.Errorf("docs migrations %v was accepted", args)
 		}
 	}
@@ -199,7 +194,7 @@ func TestRunDocsMigrations_VersionAndRangeAreExclusive(t *testing.T) {
 
 func TestRunDocsMigrations_RangeRangeHeaderAndBody(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"--from", "v0.3.0", "--to", "v0.4.0", "--output", "plain"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"--from", "v0.3.0", "--to", "v0.4.0", "--output", "plain"}); err != nil {
 			t.Fatalf("between: %v", err)
 		}
 	})
@@ -216,7 +211,7 @@ func TestRunDocsMigrations_RangeRangeHeaderAndBody(t *testing.T) {
 
 func TestRunDocsMigrations_RangeDefaultsWork(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"--from", "v0.0.0", "--output", "plain"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"--from", "v0.0.0", "--output", "plain"}); err != nil {
 			t.Fatalf("between (no args): %v", err)
 		}
 	})
@@ -229,21 +224,21 @@ func TestRunDocsMigrations_RangeDefaultsWork(t *testing.T) {
 }
 
 func TestRunDocsMigrations_RangeRejectsBadSemver(t *testing.T) {
-	if err := runDocsMigrations([]string{"--from", "garbage"}); err == nil {
+	if err := runDocsMigrationsArgs([]string{"--from", "garbage"}); err == nil {
 		t.Error("expected error for invalid --from")
 	}
 }
 
 func TestRunDocsMigrations_RemovedVerbsFailLoudly(t *testing.T) {
-	err := runDocsMigrations([]string{"between"})
-	if err == nil || !strings.Contains(err.Error(), "not a valid semver") {
-		t.Fatalf("expected an invalid-version error; got %v", err)
+	err := runDocsMigrationsArgs([]string{"between"})
+	if exitCodeFor(err) != 2 {
+		t.Fatalf("expected a usage error; got %v", err)
 	}
 	for _, args := range [][]string{
 		{"read", "--version", "v0.4.0"},
 		{"between", "--from", "v0.3.0", "--to", "v0.4.0"},
 	} {
-		if err := runDocsMigrations(args); err == nil || !strings.Contains(err.Error(), "unexpected positional") {
+		if err := runDocsMigrationsArgs(args); err == nil || !strings.Contains(err.Error(), "unexpected positional") {
 			t.Errorf("docs migrations %v: err = %v", args, err)
 		}
 	}
@@ -251,7 +246,7 @@ func TestRunDocsMigrations_RemovedVerbsFailLoudly(t *testing.T) {
 
 func TestRunDocsMigrations_NoFlagsLists(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrations([]string{"-o", "plain"}); err != nil {
+		if err := runDocsMigrationsArgs([]string{"-o", "plain"}); err != nil {
 			t.Fatalf("docs migrations: %v", err)
 		}
 	})
@@ -262,7 +257,7 @@ func TestRunDocsMigrations_NoFlagsLists(t *testing.T) {
 
 func TestRunDocs_DispatchesMigrationsVerb(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocs([]string{"migrations", "-o", "plain"}); err != nil {
+		if err := runDocsArgs([]string{"migrations", "-o", "plain"}); err != nil {
 			t.Fatalf("runDocs migrations: %v", err)
 		}
 	})

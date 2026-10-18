@@ -199,7 +199,7 @@ func TestScheduleAdmissionCountsAllSchedulesAgainstArmedBy(t *testing.T) {
 	if _, err := tenant.AdmitScheduledRun(t.Context(), first, now); err != nil {
 		t.Fatal(err)
 	}
-	second, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "second", RepoPath: first.RepoPath, Pipeline: first.Pipeline, Name: "second", Cron: first.Cron, TZ: first.TZ, Where: first.Where, ArmedBy: first.ArmedBy, GitHubInstallationID: first.GitHubInstallationID, GitHubRepositoryID: first.GitHubRepositoryID}, now)
+	second, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "second", RepoPath: first.RepoPath, Pipeline: first.Pipeline, Name: "second", GitBranch: first.GitBranch, LockedRef: first.LockedRef, Cron: first.Cron, TZ: first.TZ, Where: first.Where, ArmedBy: first.ArmedBy, GitHubInstallationID: first.GitHubInstallationID, GitHubRepositoryID: first.GitHubRepositoryID}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -201,7 +201,7 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 	// including sidecar logs and writable layers.
 	main.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}, Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}}
 	return corev1.PodSpec{
-		Tolerations: []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: TeamNodeLabel, Value: labelHash(a.Binding.Team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}},
+		Tolerations: teamTolerations(a.Binding.Team),
 		NodeName:    r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 		SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr(int64(0)), RunAsGroup: ptr(int64(0)), RunAsNonRoot: ptr(false)},
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.

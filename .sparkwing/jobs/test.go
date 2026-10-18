@@ -67,5 +67,5 @@ func testGoCommand(h hostShape) string {
 }
 
 func init() {
-	sparkwing.Register("test", func() sparkwing.Pipeline[TestArgs] { return &Test{} })
+	sparkwing.Register("Test", func() sparkwing.Pipeline[TestArgs] { return &Test{} })
 }
