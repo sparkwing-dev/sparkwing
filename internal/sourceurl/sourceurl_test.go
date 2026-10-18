@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"testing"
 )
 
@@ -345,7 +346,7 @@ func fakeLookup(addrs map[string][]string, fail error) Lookup {
 	}
 }
 
-func TestCheckResolvedHostRefusesANameThatResolvesInward(t *testing.T) {
+func TestPinCloneHostRefusesANameThatResolvesInward(t *testing.T) {
 	lookup := fakeLookup(map[string][]string{
 		"git.example.com":     {"140.82.112.3"},
 		"inward.example.com":  {"10.0.0.5"},
@@ -371,20 +372,44 @@ func TestCheckResolvedHostRefusesANameThatResolvesInward(t *testing.T) {
 		"https://siit.example.com/o/r.git":       true,
 		"https://6to4.example.com/o/r.git":       true,
 		"https://6to4pub.example.com/o/r.git":    false,
-		"https://unknown.example.com/o/r.git":    false,
+		"https://unknown.example.com/o/r.git":    true,
 		"https://127.0.0.1/o/r.git":              true,
 		"https://[::ffff:10.0.0.1]:8443/o/r.git": true,
 	} {
-		err := CheckResolvedHost(context.Background(), remote, lookup)
+		_, err := PinCloneHost(context.Background(), remote, lookup)
 		if (err != nil) != wantErr {
-			t.Errorf("CheckResolvedHost(%q) = %v, want error %v", remote, err, wantErr)
+			t.Errorf("PinCloneHost(%q) = %v, want error %v", remote, err, wantErr)
 		}
 	}
 }
 
-func TestCheckResolvedHostFailsClosedWhenTheResolverFails(t *testing.T) {
+func TestPinCloneHostFailsClosedWhenTheResolverFails(t *testing.T) {
 	lookup := fakeLookup(nil, errors.New("resolver unreachable"))
-	if err := CheckResolvedHost(context.Background(), "https://git.example.com/o/r.git", lookup); err == nil {
+	if _, err := PinCloneHost(context.Background(), "https://git.example.com/o/r.git", lookup); err == nil {
 		t.Fatal("a failed lookup let the fetch go ahead")
+	}
+}
+
+func TestPinCloneHostKeepsEveryValidatedAddress(t *testing.T) {
+	lookup := fakeLookup(map[string][]string{
+		"git.example.com":   {"140.82.112.3", "2606:50c0:8000::153"},
+		"inward.example.com": {"10.0.0.5"},
+	}, nil)
+	for remote, want := range map[string]Pin{
+		"https://git.example.com/o/r.git":         {Host: "git.example.com", Port: "443", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}},
+		"https://Git.Example.com.:8443/o/r.git":   {Host: "git.example.com", Port: "8443", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}},
+		"git@git.example.com:o/r.git":             {Host: "git.example.com", Port: "22", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}, SSH: true},
+		"ssh://git@git.example.com:2222/o/r.git":  {Host: "git.example.com", Port: "2222", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}, SSH: true},
+		"https://140.82.112.3/o/r.git":            {Host: "140.82.112.3", Port: "443", Addrs: []string{"140.82.112.3"}},
+	} {
+		got, err := PinCloneHost(context.Background(), remote, lookup)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("PinCloneHost(%q) = %+v, %v; want %+v", remote, got, err, want)
+		}
+	}
+	for _, remote := range []string{"https://inward.example.com/o/r.git", "https://unknown.example.com/o/r.git"} {
+		if _, err := PinCloneHost(context.Background(), remote, lookup); err == nil {
+			t.Errorf("PinCloneHost(%q) gave a pin", remote)
+		}
 	}
 }

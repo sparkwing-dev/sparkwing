@@ -2,7 +2,6 @@ package sourceurl
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -133,12 +132,9 @@ type HostPolicy func(host string) error
 var hostPolicy atomic.Pointer[HostPolicy]
 
 // SetHostPolicy installs pol for every clone URL this process validates from
-// here on, and a nil pol leaves only the built-in checks. It exists because a
-// name is never resolved during validation: git resolves it again when it
-// connects, so an address checked here says nothing about the address reached
-// then, and a deployment that must bound where clones go states that boundary
-// by name -- an allowlist of forges it clones from, or a denylist of names it
-// knows point inward -- rather than by an address that will not hold still.
+// here on, and a nil pol leaves only the built-in checks. A deployment that
+// bounds where clones go states that boundary by name, such as an allowlist
+// of forges.
 func SetHostPolicy(pol HostPolicy) {
 	if pol == nil {
 		hostPolicy.Store(nil)
@@ -300,49 +296,60 @@ func parseNumericLabel(label string) (uint64, bool) {
 // is the production one.
 type Lookup func(ctx context.Context, host string) ([]net.IPAddr, error)
 
-// CheckResolvedHost resolves the host of remote, a URL ValidateCloneURL
-// accepted, and refuses it when any address it resolves to is one
-// ValidateCloneURL would refuse as a literal. A name the resolver does not know
-// passes, since only a client-side alias such as an ssh config Host can reach
-// it; any other lookup failure refuses. git resolves the name again when it
-// connects, so a name that changes its answer in between still gets through:
-// this narrows DNS rebinding rather than closing it.
-func CheckResolvedHost(ctx context.Context, remote string, lookup Lookup) error {
-	host := cloneHost(remote)
+// Pin is a clone host and every address it resolved to. Git must connect to
+// one of Addrs, never to a fresh resolution of Host.
+type Pin struct {
+	Host  string
+	Port  string
+	Addrs []string
+	SSH   bool
+}
+
+// PinCloneHost resolves the host of remote, a URL ValidateCloneURL accepted,
+// once. It refuses the host when it does not resolve or when any address is
+// one ValidateCloneURL would refuse as a literal.
+func PinCloneHost(ctx context.Context, remote string, lookup Lookup) (Pin, error) {
+	host, port, ssh := cloneHostPort(remote)
 	if host == "" {
-		return fmt.Errorf("repo URL has no host")
+		return Pin{}, fmt.Errorf("repo URL has no host")
 	}
 	if err := validateHost(host); err != nil {
-		return err
+		return Pin{}, err
 	}
-	host = strings.TrimRight(strings.ToLower(strings.Trim(host, "[]")), ".")
-	if parseHostIP(host) != nil {
-		return nil
+	pin := Pin{Host: strings.TrimRight(strings.ToLower(strings.Trim(host, "[]")), "."), Port: port, SSH: ssh}
+	if ip := parseHostIP(pin.Host); ip != nil {
+		pin.Addrs = []string{ip.String()}
+		return pin, nil
 	}
-	addrs, err := lookup(ctx, host)
+	addrs, err := lookup(ctx, pin.Host)
 	if err != nil {
-		var dnsErr *net.DNSError
-		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
-			return nil
-		}
-		return fmt.Errorf("resolve repo URL host %q: %w", host, err)
+		return Pin{}, fmt.Errorf("resolve repo URL host %q: %w", pin.Host, err)
+	}
+	if len(addrs) == 0 {
+		return Pin{}, fmt.Errorf("repo URL host %q has no address", pin.Host)
 	}
 	for _, addr := range addrs {
 		if !routableIP(addr.IP) {
-			return fmt.Errorf("repo URL host %q resolves to %s, which is not allowed", host, addr.IP)
+			return Pin{}, fmt.Errorf("repo URL host %q resolves to %s, which is not allowed", pin.Host, addr.IP)
 		}
+		pin.Addrs = append(pin.Addrs, addr.IP.String())
 	}
-	return nil
+	return pin, nil
 }
 
-func cloneHost(raw string) string {
+func cloneHostPort(raw string) (host, port string, ssh bool) {
 	raw = strings.TrimSpace(raw)
 	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
-		return match[1]
+		return match[1], "22", true
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return ""
+		return "", "", false
 	}
-	return u.Hostname()
+	port, ssh = u.Port(), u.Scheme == "ssh"
+	if port == "" {
+		port = map[bool]string{true: "22", false: "443"}[ssh]
+	}
+	return u.Hostname(), port, ssh
 }
+
