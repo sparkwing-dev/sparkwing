@@ -183,14 +183,14 @@ func TestCredentialRotationHTTPPreservesTenantAndRowBindings(t *testing.T) {
 		plain := "private-" + hex.EncodeToString(digest[:])
 		row := store.Secret{Name: "TOKEN", Pipeline: pipeline, Masked: masked, Shared: shared, Principal: "creator", CreatedAt: time.Unix(10, 0), UpdatedAt: time.Unix(20, 0)}
 		var err error
-		row.Value, err = old.SealBound("team", row.Name, pipeline, shared, masked, plain)
+		row.Value, err = old.SealBound(secrets.PurposeSecret, "team", row.Name, pipeline, shared, masked, plain)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := current.OpenBound("team", row.Name, pipeline, shared, masked, row.Value); err == nil {
+		if _, err := current.OpenBound(secrets.PurposeSecret, "team", row.Name, pipeline, shared, masked, row.Value); err == nil {
 			return false
 		}
-		sealed, err := old.SealBound("team", "git-credential:git.invalid", "git-credential", false, true, plain)
+		sealed, err := old.SealBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, plain)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -207,13 +207,13 @@ func TestCredentialRotationHTTPPreservesTenantAndRowBindings(t *testing.T) {
 		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Rotated != 1 || result.GitCredentials != 1 || result.Skipped == nil || len(result.Skipped) != 0 || strings.Contains(w.Body.String(), plain) || w.Header().Get("Cache-Control") != "no-store" || f.calls != 1 || f.actor.Principal.Authority != b.snapshot.Authorities[0].Principal.Authority || f.actor.Target.Team != "team" {
 			return false
 		}
-		if opened, err := current.OpenBound("team", row.Name, pipeline, shared, masked, f.secrets[0].Value); err != nil || opened != plain {
+		if opened, err := current.OpenBound(secrets.PurposeSecret, "team", row.Name, pipeline, shared, masked, f.secrets[0].Value); err != nil || opened != plain {
 			return false
 		}
-		if _, err := current.OpenBound("foreign", row.Name, pipeline, shared, masked, f.secrets[0].Value); err == nil {
+		if _, err := current.OpenBound(secrets.PurposeSecret, "foreign", row.Name, pipeline, shared, masked, f.secrets[0].Value); err == nil {
 			return false
 		}
-		if opened, err := current.OpenBound("team", "git-credential:git.invalid", "git-credential", false, true, f.git[0].Secret); err != nil || opened != plain {
+		if opened, err := current.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, f.git[0].Secret); err != nil || opened != plain {
 			return false
 		}
 		f.secrets[0].Value, f.git[0].Secret = row.Value, git.Secret
@@ -230,15 +230,15 @@ func TestCredentialRotationHTTPSkipsUnreadableSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	good, err := old.SealBound("team", "GOOD", "", false, true, "readable")
+	good, err := old.SealBound(secrets.PurposeSecret, "team", "GOOD", "", false, true, "readable")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lost, err := stray.SealBound("team", "LOST", "build", false, true, "private-lost")
+	lost, err := stray.SealBound(secrets.PurposeSecret, "team", "LOST", "build", false, true, "private-lost")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrongBinding, err := old.SealBound("foreign", "FOREIGN", "build", false, true, "foreign-private")
+	wrongBinding, err := old.SealBound(secrets.PurposeSecret, "foreign", "FOREIGN", "build", false, true, "foreign-private")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestCredentialRotationHTTPSkipsUnreadableSecrets(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Rotated != 1 || len(body.Skipped) != 4 || body.Skipped[0].Name != "LOST" || body.Skipped[0].Pipeline != "build" || body.Skipped[1].Name != "FOREIGN" || body.Skipped[2].Name != "IMPOSTOR" || body.Skipped[3].Name != "PLAIN" || strings.Contains(w.Body.String(), "private") {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
-	if value, err := current.OpenBound("team", "GOOD", "", false, true, f.secrets[0].Value); err != nil || value != "readable" || f.secrets[1].Value != lost || f.secrets[2].Value != wrongBinding || f.secrets[3].Value != "enc:v1:not-really-an-envelope" || f.secrets[4].Value != "private-plaintext" {
+	if value, err := current.OpenBound(secrets.PurposeSecret, "team", "GOOD", "", false, true, f.secrets[0].Value); err != nil || value != "readable" || f.secrets[1].Value != lost || f.secrets[2].Value != wrongBinding || f.secrets[3].Value != "enc:v1:not-really-an-envelope" || f.secrets[4].Value != "private-plaintext" {
 		t.Fatalf("rotation changed unreadable rows or lost readable value: %v", err)
 	}
 }
@@ -274,7 +274,7 @@ func TestCredentialRotationHTTPReportsOnlyCommittedAttemptProperty(t *testing.T)
 				f.rolledBack = append(f.rolledBack, row)
 				if i < repaired {
 					var err error
-					row.Value, err = old.SealBound("team", row.Name, "ci", false, true, "private")
+					row.Value, err = old.SealBound(secrets.PurposeSecret, "team", row.Name, "ci", false, true, "private")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -297,14 +297,14 @@ func TestCredentialRotationHTTPReportsOnlyCommittedAttemptProperty(t *testing.T)
 func TestCredentialRotationHTTPGitFailureCommitsNothing(t *testing.T) {
 	old, _, rotating := maintenanceCiphers(t)
 	for _, failure := range []string{"envelope", "team"} {
-		sealed, err := old.SealBound("team", "GOOD", "", false, true, "readable")
+		sealed, err := old.SealBound(secrets.PurposeSecret, "team", "GOOD", "", false, true, "readable")
 		if err != nil {
 			t.Fatal(err)
 		}
 		row := store.GitCredential{Team: "team", Host: "git.invalid", Secret: "private-broken-envelope"}
 		if failure == "team" {
 			row.Team = "foreign"
-			row.Secret, err = old.SealBound("foreign", "git-credential:git.invalid", "git-credential", false, true, "foreign-private")
+			row.Secret, err = old.SealBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential", false, true, "foreign-private")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -469,18 +469,18 @@ type rotationCipherFailure struct {
 	openErr error
 }
 
-func (c rotationCipherFailure) SealBound(team, name, scope string, shared, masked bool, plain string) (string, error) {
+func (c rotationCipherFailure) SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error) {
 	if c.sealErr != nil {
 		return "", c.sealErr
 	}
-	return c.Cipher.SealBound(team, name, scope, shared, masked, plain)
+	return c.Cipher.SealBound(purpose, team, name, scope, shared, masked, plain)
 }
 
-func (c rotationCipherFailure) OpenBound(team, name, scope string, shared, masked bool, value string) (string, error) {
+func (c rotationCipherFailure) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, value string) (string, error) {
 	if c.openErr != nil {
 		return "", c.openErr
 	}
-	return c.Cipher.OpenBound(team, name, scope, shared, masked, value)
+	return c.Cipher.OpenBound(purpose, team, name, scope, shared, masked, value)
 }
 
 func TestCredentialRotationHTTPCipherFailuresCommitNothing(t *testing.T) {
@@ -490,13 +490,13 @@ func TestCredentialRotationHTTPCipherFailuresCommitNothing(t *testing.T) {
 			b := authorityMember()
 			f := &credentialMaintenance{team: "team"}
 			if resource == "secret" {
-				value, err := old.SealBound("team", "TOKEN", "", false, true, "private-value")
+				value, err := old.SealBound(secrets.PurposeSecret, "team", "TOKEN", "", false, true, "private-value")
 				if err != nil {
 					t.Fatal(err)
 				}
 				f.secrets = []store.Secret{{Name: "TOKEN", Masked: true, Value: value}}
 			} else {
-				value, err := old.SealBound("team", "git-credential:git.invalid", "git-credential", false, true, "private-value")
+				value, err := old.SealBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, "private-value")
 				if err != nil {
 					t.Fatal(err)
 				}

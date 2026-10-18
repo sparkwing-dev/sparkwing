@@ -26,7 +26,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, secret := range []store.Secret{{Name: "TEAM_ONLY", Value: "private-team", Masked: true}, {Name: "ELSEWHERE", Value: "private-elsewhere", Pipeline: "release", Masked: true}} {
-		sealed, err := cipher.SealBound(string(tenant.Team()), secret.Name, secret.Pipeline, secret.Shared, secret.Masked, secret.Value)
+		sealed, err := cipher.SealBound(secrets.PurposeSecret, string(tenant.Team()), secret.Name, secret.Pipeline, secret.Shared, secret.Masked, secret.Value)
 		if err != nil {
 			t.Fatal(err)
 		}

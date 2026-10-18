@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
@@ -149,11 +151,11 @@ func TestBoundCipher(t *testing.T, factory func() controller.BoundCipher) {
 
 	t.Run("SealBoundOpenBoundRoundTrip", func(t *testing.T) {
 		c := factory()
-		envelope, err := c.SealBound(sealed.team, sealed.name, sealed.repo, sealed.shared, sealed.masked, plain)
+		envelope, err := c.SealBound(secrets.PurposeSecret, sealed.team, sealed.name, sealed.repo, sealed.shared, sealed.masked, plain)
 		if err != nil {
 			t.Fatalf("SealBound: %v", err)
 		}
-		got, err := c.OpenBound(sealed.team, sealed.name, sealed.repo, sealed.shared, sealed.masked, envelope)
+		got, err := c.OpenBound(secrets.PurposeSecret, sealed.team, sealed.name, sealed.repo, sealed.shared, sealed.masked, envelope)
 		if err != nil {
 			t.Fatalf("OpenBound(SealBound(%q)): %v", plain, err)
 		}
@@ -164,7 +166,7 @@ func TestBoundCipher(t *testing.T, factory func() controller.BoundCipher) {
 
 	t.Run("OpenBoundRejectsAnotherBinding", func(t *testing.T) {
 		c := factory()
-		envelope, err := c.SealBound(sealed.team, sealed.name, sealed.repo, sealed.shared, sealed.masked, plain)
+		envelope, err := c.SealBound(secrets.PurposeSecret, sealed.team, sealed.name, sealed.repo, sealed.shared, sealed.masked, plain)
 		if err != nil {
 			t.Fatalf("SealBound: %v", err)
 		}
@@ -177,7 +179,7 @@ func TestBoundCipher(t *testing.T, factory func() controller.BoundCipher) {
 			{"a flipped shared flag", sealed.team, sealed.name, sealed.repo, !sealed.shared, sealed.masked},
 			{"a flipped masked flag", sealed.team, sealed.name, sealed.repo, sealed.shared, !sealed.masked},
 		} {
-			got, err := c.OpenBound(other.team, other.name, other.repo, other.shared, other.masked, envelope)
+			got, err := c.OpenBound(secrets.PurposeSecret, other.team, other.name, other.repo, other.shared, other.masked, envelope)
 			if err == nil {
 				t.Errorf("OpenBound under %s returned %q with nil error; a bound envelope must not open under another binding",
 					other.label, truncate(got))

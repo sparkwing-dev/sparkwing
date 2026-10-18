@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -387,6 +388,19 @@ func TestTeamBoundary_EveryRunRouteHidesOtherTeamsResources(t *testing.T) {
 		}
 		if checked < len(mustCover) {
 			t.Errorf("checked %d run routes, want at least %d", checked, len(mustCover))
+		}
+		for _, named := range []map[string]any{
+			{"runner_version": "test", "kinds": []string{"node"}, "labels": []string{}, "job_id": "n1"},
+			{"runner_version": "test", "kinds": []string{"trigger"}, "labels": []string{}},
+			{"runner_version": "test", "kinds": []string{"node", "trigger"}, "labels": []string{}},
+		} {
+			foreign, missing := maps.Clone(named), maps.Clone(named)
+			foreign["run_id"], missing["run_id"] = f.runA, "missing-run"
+			code, body := f.do("POST", "/api/v1/runners/claim", f.runnerB, foreign)
+			missingCode, missingBody := f.do("POST", "/api/v1/runners/claim", f.runnerB, missing)
+			if code != missingCode || body != missingBody || code == http.StatusOK {
+				t.Errorf("runner claim naming %v reveals run existence: foreign=%d %s missing=%d %s", named["kinds"], code, body, missingCode, missingBody)
+			}
 		}
 
 		ctx := context.Background()

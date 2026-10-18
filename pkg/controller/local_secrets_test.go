@@ -48,7 +48,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 	input.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "machines"}, {Target: "cloud"}}}
 	submittedValue := "submitted-environment-" + value
-	environment, err := runspec.EnvironmentDigest(map[string]string{"BUILD_REGION": submittedValue, "BUILD_EMPTY": ""})
+	environment, err := runspec.EnvironmentDigest(map[string]string{"BUILD_REGION": submittedValue, "BUILD_EMPTY": ""}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 	input.EnvironmentSource = runspec.EnvironmentSubmitted
 	input.Options.SubmitEnvAllow = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"BUILD_REGION"}}}
 	var err error
-	input.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_REGION": "original"})
+	input.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_REGION": "original"}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}

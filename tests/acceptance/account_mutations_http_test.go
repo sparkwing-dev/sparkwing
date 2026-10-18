@@ -68,7 +68,7 @@ func TestAccountMutationsHTTPUseCommittedStoreAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.LinkIdentity(t.Context(), member.Account.ID, store.SignInProfile{Provider: store.ProviderGitHub, Subject: "linked"}, now); err != nil {
+	if _, err := f.store.DB().ExecContext(t.Context(), `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at,linked) VALUES ('github','linked',?,'',0,?,1)`, member.Account.ID, now.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	owner, err := f.store.ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-owner", Email: "real-owner@example.test", EmailVerified: true}, store.SignUpConditions{}, now)

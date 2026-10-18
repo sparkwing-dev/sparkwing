@@ -167,7 +167,7 @@ controller:
   # The key stored secret values were sealed under before secretsKey.
   # Read-only: a value that does not open under secretsKey is tried
   # against this one, which is what keeps every value readable across a
-  # key change. Run `sparkwing secrets rotate --profile <name>` to
+  # key change. Run `sparkwing operator secrets rotate --profile <name>` to
   # re-encrypt everything under secretsKey, then clear this.
   secretsPreviousKey:
     # Empty name disables; the controller holds one key.

@@ -41,12 +41,12 @@ type secretReadCipher struct {
 	err   error
 }
 
-func (c *secretReadCipher) OpenBound(team, name, scope string, shared, masked bool, value string) (string, error) {
+func (c *secretReadCipher) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, value string) (string, error) {
 	c.opens++
 	if c.err != nil {
 		return "", c.err
 	}
-	return c.BoundCipher.OpenBound(team, name, scope, shared, masked, value)
+	return c.BoundCipher.OpenBound(purpose, team, name, scope, shared, masked, value)
 }
 
 func secretReadFixture(t testing.TB, b *credentialBoundary, value string) (*secretReads, *secretReadCipher, *controller.Server) {
@@ -56,7 +56,7 @@ func secretReadFixture(t testing.TB, b *credentialBoundary, value string) (*secr
 		t.Fatal(err)
 	}
 	masked := b.snapshot.Authorities[0].Principal.Capability.Binding.Kind != capability.BindingNone
-	envelope, err := cipher.SealBound("team", "TOKEN", "build", false, masked, value)
+	envelope, err := cipher.SealBound(secrets.PurposeSecret, "team", "TOKEN", "build", false, masked, value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestSecretReadHTTPUsesPolicyAndCommittedRow(t *testing.T) {
 			if kind == "shared" {
 				f.row.Pipeline, f.row.Shared = "", true
 				var err error
-				f.row.Value, err = c.SealBound("team", "TOKEN", "", true, true, "private-value")
+				f.row.Value, err = c.SealBound(secrets.PurposeSecret, "team", "TOKEN", "", true, true, "private-value")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -292,7 +292,7 @@ func TestSecretReadHTTPBindingProperty(t *testing.T) {
 			f.row.Value = "unbound:" + value
 		case 8:
 			var err error
-			f.row.Value, err = c.SealBound("foreign", "TOKEN", "build", false, true, value)
+			f.row.Value, err = c.SealBound(secrets.PurposeSecret, "foreign", "TOKEN", "build", false, true, value)
 			if err != nil {
 				t.Fatal(err)
 			}

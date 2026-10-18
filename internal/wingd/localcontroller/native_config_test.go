@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -117,7 +118,7 @@ func TestNativeServicesBindsSubmittedValuesBeforeProcessStartup(t *testing.T) {
 			cfg.Source.Base = procenv.Base{Ambient: []string{"BUILD_NOTE=ambient-value", "UNLISTED=ambient-private"}}
 			cfg.SubmittedEnv = map[string][]byte{"BUILD_NOTE": []byte(value), "BUILD_EMPTY": {}}
 			var err error
-			state.snapshot.Run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": value, "BUILD_EMPTY": ""})
+			state.snapshot.Run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": value, "BUILD_EMPTY": ""}, strings.Repeat("5", 64))
 			if err != nil {
 				t.Fatal(err)
 			}

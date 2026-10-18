@@ -172,7 +172,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 		t.Fatal(err)
 	}
 	values := map[string][]byte{"BUILD_NOTE": []byte("private-cloud-environment")}
-	env, err := runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": string(values["BUILD_NOTE"])})
+	env, err := runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": string(values["BUILD_NOTE"])}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope, err := cipher.SealBound("a", "run", "run-environment", false, true, string(private))
+	envelope, err := cipher.SealBound(secrets.PurposeRunEnvironment, "a", "run", "run-environment", false, true, string(private))
 	if err != nil {
 		t.Fatal(err)
 	}

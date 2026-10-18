@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestCredentialWritersRejectUnsealedValuesProperty(t *testing.T) {
@@ -48,7 +50,7 @@ func TestCredentialWritersRejectUnsealedValuesProperty(t *testing.T) {
 		if err != nil || storedGit.Secret == plain {
 			t.Fatalf("sealed source credential: %v", err)
 		}
-		opened, err := cipher.OpenBound(string(tenant.team), "git-credential:"+storedGit.Host, "git-credential", false, true, storedGit.Secret)
+		opened, err := cipher.OpenBound(secrets.PurposeGitCredential, string(tenant.team), "git-credential:"+storedGit.Host, "git-credential", false, true, storedGit.Secret)
 		if err != nil || opened != plain {
 			t.Fatalf("source round trip: %v", err)
 		}

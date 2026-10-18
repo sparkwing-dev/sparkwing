@@ -29,7 +29,7 @@ func TestSDKEnvironmentProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec.Resolved.Settings.Options.DryRun.Value = true
-			spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "sealed"})
+			spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "sealed"}, strings.Repeat("5", 64))
 			if operation != name {
 				// safety: retry intake preserves the source envelope while rows and SDK execution name the destination.
 				spec.Request.RunID = "source-run"

@@ -345,7 +345,7 @@ var errSignInIdentityChanged = errors.New("store: sign-in identity changed durin
 //  2. Otherwise, when an existing account holds the address verified, holds
 //     no identity from this provider and did not unlink this one, the
 //     sign-in is refused with [ErrAccountExists]. The provider account
-//     joins that account only through [Store.LinkIdentity], which a signed-in
+//     joins that account only through [Store.LinkAccountIdentity], which a signed-in
 //     session drives.
 //  3. Otherwise it becomes a new account.
 //

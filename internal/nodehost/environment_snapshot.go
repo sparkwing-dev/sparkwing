@@ -2,11 +2,16 @@ package nodehost
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,7 +32,10 @@ type CapturedEnvironmentLoader interface {
 // FileEnvironmentSnapshots retains local inputs across owner loss, retries and
 // children. The directory belongs to an authorized local host; a digest grants
 // no access. Values never enter the run spec or a shared planning-cache entry.
-type FileEnvironmentSnapshots struct{ directory string }
+type FileEnvironmentSnapshots struct {
+	directory string
+	saltKey   []byte
+}
 
 // NewFileEnvironmentSnapshots secures the host-owned directory before storing values.
 func NewFileEnvironmentSnapshots(directory string) (*FileEnvironmentSnapshots, error) {
@@ -40,7 +48,68 @@ func NewFileEnvironmentSnapshots(directory string) (*FileEnvironmentSnapshots, e
 	if err := fssecure.SecurePrivateDir(directory); err != nil {
 		return nil, snapshotStorageError("protect", err)
 	}
-	return &FileEnvironmentSnapshots{directory: directory}, nil
+	key, err := loadSnapshotSaltKey(directory)
+	if err != nil {
+		return nil, err
+	}
+	return &FileEnvironmentSnapshots{directory: directory, saltKey: key}, nil
+}
+
+const snapshotSaltKeyName = "salt.key"
+
+// safety: the salt derives from a host-private key, so equal local inputs keep one identity
+// while readers of the run cannot test guesses against its digest.
+func loadSnapshotSaltKey(directory string) (_ []byte, err error) {
+	path := filepath.Join(directory, snapshotSaltKeyName)
+	if key, err := readSnapshotSaltKey(path); !errors.Is(err, fs.ErrNotExist) {
+		return key, err
+	}
+	key := make([]byte, sha256.Size)
+	if _, err := rand.Read(key); err != nil {
+		return nil, errors.New("cannot create captured environment salt key")
+	}
+	temporary, err := fssecure.MkdirPrivateTemp(directory, ".salt-")
+	if err != nil {
+		return nil, snapshotStorageError("create salt key", err)
+	}
+	defer func() {
+		err = errors.Join(err, snapshotStorageError("remove incomplete salt key", os.RemoveAll(temporary)))
+	}()
+	file := filepath.Join(temporary, "key")
+	if err := fssecure.WriteFile(file, key); err != nil {
+		return nil, snapshotStorageError("write salt key", err)
+	}
+	if err := os.Link(file, path); err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, snapshotStorageError("publish salt key", err)
+	}
+	return readSnapshotSaltKey(path)
+}
+
+func readSnapshotSaltKey(path string) ([]byte, error) {
+	file, err := fssecure.OpenPrivateConfig(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		return nil, snapshotStorageError("open salt key", err)
+	}
+	key, readErr := io.ReadAll(io.LimitReader(file, sha256.Size+1))
+	if err := errors.Join(readErr, file.Close()); err != nil {
+		return nil, snapshotStorageError("read salt key", err)
+	}
+	if len(key) != sha256.Size {
+		return nil, errors.New("captured environment salt key is malformed")
+	}
+	return key, nil
+}
+
+func (s *FileEnvironmentSnapshots) salt(values map[string]string) string {
+	names := slices.Sorted(maps.Keys(values))
+	mac := hmac.New(sha256.New, s.saltKey)
+	for _, name := range names {
+		mac.Write([]byte(name + "=" + values[name] + "\x00"))
+	}
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // Capture saves host-selected inputs before intake seals their identity.
@@ -50,7 +119,11 @@ func (s *FileEnvironmentSnapshots) Capture(ctx context.Context, environment []st
 	if err := context.Cause(ctx); err != nil {
 		return seal, err
 	}
-	seal, environment, err = capturedEnvironment(environment)
+	values, err := capturedValues(environment)
+	if err != nil {
+		return runspec.EnvSnapshot{}, err
+	}
+	seal, environment, err = capturedEnvironment(environment, s.salt(values))
 	if err != nil {
 		return runspec.EnvSnapshot{}, err
 	}
@@ -86,6 +159,16 @@ func (s *FileEnvironmentSnapshots) Capture(ctx context.Context, environment []st
 		return runspec.EnvSnapshot{}, snapshotStorageError("publish", err)
 	}
 	return seal, nil
+}
+
+// Identify names environment as Capture would without storing its values.
+func (s *FileEnvironmentSnapshots) Identify(environment []string) (runspec.EnvSnapshot, error) {
+	values, err := capturedValues(environment)
+	if err != nil {
+		return runspec.EnvSnapshot{}, err
+	}
+	seal, _, err := capturedEnvironment(environment, s.salt(values))
+	return seal, err
 }
 
 // Load never consumes the snapshot: replacement hosts and child runs need the
@@ -133,7 +216,7 @@ func verifyCapturedEnvironment(ctx context.Context, expected runspec.EnvSnapshot
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	actual, normalized, err := capturedEnvironment(environment)
+	actual, normalized, err := capturedEnvironment(environment, expected.Salt)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +255,7 @@ func capturedBase(ctx context.Context, base procenv.Base, snapshots CapturedEnvi
 	return base, nil
 }
 
-func capturedEnvironment(environment []string) (runspec.EnvSnapshot, []string, error) {
+func capturedValues(environment []string) (map[string]string, error) {
 	values := make(map[string]string, len(environment))
 	seen := make(map[string]bool, len(environment))
 	for _, entry := range environment {
@@ -182,11 +265,19 @@ func capturedEnvironment(environment []string) (runspec.EnvSnapshot, []string, e
 			key = strings.ToUpper(key)
 		}
 		if !ok || name == "" || strings.ContainsRune(name, 0) || strings.ContainsRune(value, 0) || seen[key] {
-			return runspec.EnvSnapshot{}, nil, errors.New("captured environment contains an invalid or duplicate assignment")
+			return nil, errors.New("captured environment contains an invalid or duplicate assignment")
 		}
 		seen[key], values[name] = true, value
 	}
-	seal, err := runspec.EnvironmentDigest(values)
+	return values, nil
+}
+
+func capturedEnvironment(environment []string, salt string) (runspec.EnvSnapshot, []string, error) {
+	values, err := capturedValues(environment)
+	if err != nil {
+		return runspec.EnvSnapshot{}, nil, err
+	}
+	seal, err := runspec.EnvironmentDigest(values, salt)
 	if err != nil {
 		return runspec.EnvSnapshot{}, nil, errors.New("cannot identify captured environment")
 	}

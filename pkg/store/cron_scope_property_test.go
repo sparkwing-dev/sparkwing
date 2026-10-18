@@ -41,12 +41,6 @@ func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
 		for j, tenant := range []*Tenant{a, b} {
 			foreign := expected[1-j]
 			mutations := []func() error{
-				func() error {
-					forged := foreign
-					forged.RepoPath += "/forged"
-					_, _, err := tenant.ArmCronSchedule(t.Context(), forged, now)
-					return err
-				},
 				func() error { return tenant.SetCronSchedulePaused(t.Context(), foreign.ID, true, now) },
 				func() error { return tenant.SetCronScheduleDeclared(t.Context(), foreign.ID, false, now) },
 				func() error { return tenant.SetCronScheduleNextDue(t.Context(), foreign.ID, &now, now) },
@@ -70,6 +64,14 @@ func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
 			fires, err := tenant.ListCronFires(t.Context(), foreign.ID, 10)
 			if err != nil || len(fires) != 0 {
 				t.Fatalf("foreign history: %+v, %v", fires, err)
+			}
+			forged := foreign
+			forged.RepoPath += "/forged"
+			if own, created, err := tenant.ArmCronSchedule(t.Context(), forged, now); err != nil || !created || own.Team != tenant.team {
+				t.Fatalf("arming a foreign id in this team: %+v, %v, %v", own, created, err)
+			}
+			if err := tenant.DeleteCronSchedule(t.Context(), foreign.ID); err != nil {
+				t.Fatal(err)
 			}
 		}
 		for j, tenant := range []*Tenant{a, b} {

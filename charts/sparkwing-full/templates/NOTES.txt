@@ -53,7 +53,7 @@ NOTE: controller.credentialsSecret is set and the chart cannot see its keys.
 If it carries secrets-key, that is the live key every stored secret is sealed
 under: keep an owner-only backup of it, and never replace it except by moving
 it to controller.secretsPreviousKey, setting the new key, and running
-`sparkwing secrets rotate`.
+`sparkwing operator secrets rotate`.
 {{- if not .Values.controller.databaseSecret.name }}
 If it carries no secrets-key, what happens depends on whether it carries
 pg-url. With pg-url, the controller runs on PostgreSQL and refuses to store
@@ -103,7 +103,7 @@ new key:
     --reuse-values --set controller.secretsKey.name=sparkwing-secrets-key
 
 To change keys later, set the old key as controller.secretsPreviousKey and the
-new one as controller.secretsKey, then run `sparkwing secrets rotate`.
+new one as controller.secretsKey, then run `sparkwing operator secrets rotate`.
 {{- end }}
 {{- end }}
 

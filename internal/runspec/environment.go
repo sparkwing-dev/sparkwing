@@ -19,7 +19,7 @@ func VerifyEnvironment(expected EnvSnapshot, values map[string][]byte) error {
 	for name, value := range values {
 		strings[name] = string(value)
 	}
-	actual, err := EnvironmentDigest(strings)
+	actual, err := EnvironmentDigest(strings, expected.Salt)
 	if err != nil || actual.Digest != expected.Digest || !slices.Equal(actual.Names, expected.Names) {
 		return errors.New("submitted environment differs from its sealed identity")
 	}

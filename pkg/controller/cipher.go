@@ -3,6 +3,8 @@ package controller
 import (
 	"errors"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -18,21 +20,22 @@ type Cipher interface {
 type BoundCipher interface {
 	Cipher
 	// SealBound encrypts plaintext with a fresh nonce and the complete row binding.
-	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
+	SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error)
 	// OpenBound decrypts only an envelope sealed for the complete row binding.
-	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
+	OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
 
 type secretBinding struct {
-	Team   store.Team
-	Name   string
-	Scope  string
-	Shared bool
-	Masked bool
+	Purpose secrets.Purpose
+	Team    store.Team
+	Name    string
+	Scope   string
+	Shared  bool
+	Masked  bool
 }
 
 func bindingForRow(team store.Team, sec *store.Secret) secretBinding {
-	return secretBinding{Team: team, Name: sec.Name, Scope: sec.Pipeline, Shared: sec.Shared, Masked: sec.Masked}
+	return secretBinding{Purpose: secrets.PurposeSecret, Team: team, Name: sec.Name, Scope: sec.Pipeline, Shared: sec.Shared, Masked: sec.Masked}
 }
 
 // SealSecretValue encrypts a secret using its complete tenant and row binding.
@@ -52,7 +55,7 @@ func sealSecret(c Cipher, b secretBinding, plain string) (string, error) {
 	if !ok {
 		return "", errBoundCipherRequired
 	}
-	return bc.SealBound(string(b.Team), b.Name, b.Scope, b.Shared, b.Masked, plain)
+	return bc.SealBound(b.Purpose, string(b.Team), b.Name, b.Scope, b.Shared, b.Masked, plain)
 }
 
 func openSecret(c Cipher, b secretBinding, envelope string) (string, error) {
@@ -60,5 +63,5 @@ func openSecret(c Cipher, b secretBinding, envelope string) (string, error) {
 	if !ok {
 		return "", errBoundCipherRequired
 	}
-	return bc.OpenBound(string(b.Team), b.Name, b.Scope, b.Shared, b.Masked, envelope)
+	return bc.OpenBound(b.Purpose, string(b.Team), b.Name, b.Scope, b.Shared, b.Masked, envelope)
 }

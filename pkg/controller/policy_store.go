@@ -40,7 +40,7 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 			return capability.AuthenticationSnapshot{}, apierr.Authorization(apierr.ReasonMissingGrant, "operator console requires the operator's own signed-in account")
 		}
 		p := &snapshot.Authorities[0].Principal
-		p.Class, p.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
+		p.Class, p.Capability.Subject.Kind, p.Capability.Team = capability.CredentialConsole, capability.SubjectOperator, ""
 		p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 	}
 	return snapshot, nil
@@ -61,11 +61,18 @@ func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation
 	if err != nil {
 		return capability.Authenticated{}, err
 	}
+	if p := authenticated.Principal; p.Class == capability.CredentialConsole && unsafeMethod(route.Method) && !recentSignIn(p.Capability.IssuedAt, time.Now()) {
+		return capability.Authenticated{}, apierr.Authorization(apierr.ReasonReauthRequired, "operator console changes need a sign-in from the last 10 minutes; sign out, sign in again and retry")
+	}
 	if capability.DeploymentAuthority(authenticated.Principal) && !a.server.deploymentBearerEligible() && slices.ContainsFunc(route.Access, func(rule capability.AccessRule) bool { return rule.Credential == capability.CredentialDeployment }) {
 		return capability.Authenticated{}, sessionUnavailable()
 	}
 	a.server.masker.Register(presentation.Raw)
 	return authenticated, nil
+}
+
+func recentSignIn(at, now time.Time) bool {
+	return !at.After(now) && now.Sub(at) <= store.IdentityChangeSignInWindow
 }
 
 func (s *Server) consoleAccount(p capability.Principal) bool {
@@ -116,7 +123,7 @@ func (s *Server) checkSessionCSRF(r *http.Request, p capability.Principal) error
 	if errors.Is(err, store.ErrSessionBackend) {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
-	if err != nil || session.Team != store.Team(p.Capability.Team) || session.AccountID != p.Capability.Subject.ID {
+	if err != nil || p.Class != capability.CredentialConsole && session.Team != store.Team(p.Capability.Team) || session.AccountID != p.Capability.Subject.ID {
 		return &apierr.Error{Code: apierr.Unauthenticated, Message: "session is unavailable"}
 	}
 	if err := s.validateSessionFlow(session); err != nil {

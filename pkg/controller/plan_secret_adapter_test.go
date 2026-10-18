@@ -26,7 +26,7 @@ type planSecretProbe struct {
 	t     *testing.T
 }
 
-func (p *planSecretProbe) OpenBound(team, name, scope string, shared, masked bool, value string) (string, error) {
+func (p *planSecretProbe) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, value string) (string, error) {
 	p.opens++
 	if team != "a" || name != "TOKEN" || scope != "ci" || shared || !masked || value != "sealed-value" {
 		p.t.Fatal("plan secret lost its stored binding")
@@ -192,8 +192,10 @@ func TestPlanSecretOpenerAllowsValidatedPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := e.AcceptPlan(t.Context(), owner, controllerwire.PlanSubmission{Declarations: declarations, Plan: body,
-		Resolved: runspec.Resolved{SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
+	accepted, err := e.AcceptPlan(t.Context(), owner, controllerwire.PlanSubmission{
+		Declarations: declarations, Plan: body,
+		Resolved: runspec.Resolved{SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}},
+	})
 	if err != nil || accepted.Spec.Hash == "" || accepted.PlanHash == "" || strings.Contains(string(accepted.Plan), "private-value") {
 		t.Fatalf("accepted=%+v err=%v", accepted, err)
 	}

@@ -47,7 +47,7 @@ func localCapture(_ context.Context, environment []string) (runspec.EnvSnapshot,
 		}
 		values[name] = value
 	}
-	return runspec.EnvironmentDigest(values)
+	return runspec.EnvironmentDigest(values, strings.Repeat("5", 64))
 }
 
 func TestLocalRegistrationPersistsSelectedInputsAndPins(t *testing.T) {

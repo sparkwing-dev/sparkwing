@@ -46,12 +46,7 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 	if err := errors.Join(err, ctx.Err()); err != nil {
 		return nil, err
 	}
-	values := make(map[string]string, len(captured))
-	for _, item := range captured {
-		name, value, _ := strings.Cut(item, "=")
-		values[name] = value
-	}
-	environment, err := runspec.EnvironmentDigest(values)
+	environment, err := identifyCapturedEnvironment("", captured)
 	if err != nil {
 		return nil, err
 	}

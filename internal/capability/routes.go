@@ -213,6 +213,7 @@ var Routes = []RoutePolicy{
 	route("GET", "/api/v1/operator/tokens/{token}", OwnerDeployment, RetrySafe, deployment(OperatorTokens), console()),
 	route("DELETE", "/api/v1/operator/tokens/{token}", OwnerDeployment, RetrySafe, deployment(OperatorTokens), console()),
 	route("POST", "/api/v1/operator/tokens/{token}/rotate", OwnerDeployment, RetryNever, deployment(OperatorTokens), console()),
+	route("POST", "/api/v1/operator/secrets/rotate", OwnerDeployment, RetrySafe, deployment(OperatorTokens), console()),
 	route("GET", "/api/v1/operator/teams", OwnerDeployment, RetrySafe, console()),
 	route("POST", "/api/v1/operator/teams", OwnerDeployment, RetryNever, deployment(OperatorTokens), console()),
 	route("GET", "/api/v1/operator/teams/{team}", OwnerDeployment, RetrySafe, AccessRule{CredentialDeployment, []Grant{OperatorTokens}, BindOperatorSettings, LiveCredential}, console()),

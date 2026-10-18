@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"net/netip"
 	"strconv"
 	"time"
 
@@ -12,36 +13,31 @@ import (
 const (
 	loginClientBurst  = 30
 	loginClientWindow = time.Minute
-	loginGlobalWindow = time.Minute
-	loginGlobalKey    = "all-clients"
-	loginGlobalBurst  = 2400
 )
 
-type loginLimiter struct {
-	clients *ratelimit.Limiter
-	global  *ratelimit.Limiter
-}
+type loginLimiter struct{ clients *ratelimit.Limiter }
 
 func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{
-		clients: ratelimit.New(loginClientBurst, loginClientWindow),
-		global:  ratelimit.New(loginGlobalBurst, loginGlobalWindow),
-	}
+	return &loginLimiter{clients: ratelimit.New(loginClientBurst, loginClientWindow)}
 }
 
 func (l *loginLimiter) admit(r *http.Request) error {
-	now := time.Now()
-	if !l.clients.Allow(l.client(r), now) {
+	if !l.clients.Allow(loginClientKey(ratelimit.ClientIP(r)), time.Now()) {
 		return &apierr.Error{Code: apierr.RateLimited, Message: "too many login attempts from this client", Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
-	}
-	if !l.global.Allow(loginGlobalKey, now) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: "too many login attempts", Details: map[string]any{"retry_after_ms": loginGlobalWindow.Milliseconds()}}
 	}
 	return nil
 }
 
-func (l *loginLimiter) client(r *http.Request) string {
-	return ratelimit.ClientIP(r)
+// safety: one IPv6 subscriber holds at least a /64, so a narrower key hands each client unbounded budgets.
+func loginClientKey(client string) string {
+	address, err := netip.ParseAddr(client)
+	if err != nil {
+		return client
+	}
+	if address = address.Unmap(); address.Is4() {
+		return address.String()
+	}
+	return netip.PrefixFrom(address.WithZone(""), 64).Masked().String()
 }
 
 func writeRetryAfter(w http.ResponseWriter, after time.Duration, message string) {

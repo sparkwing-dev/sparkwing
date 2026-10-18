@@ -100,8 +100,10 @@ Use each fixed file name once. Leave bundled database/bootstrap/encryption keys
 out when separate references supply them. A PostgreSQL Cloud controller needs the
 current encryption key at startup. Back it up with the database. For key rotation,
 mount the old key through `controller.secretsPreviousKey`, set the new
-`controller.secretsKey`, re-encrypt with `sparkwing secrets rotate`, then remove
-the previous key. Do not replace an existing key without retaining it for reads.
+`controller.secretsKey`, re-encrypt every team's values with
+`sparkwing operator secrets rotate` after every replica restarted, then remove the
+previous key once `sparkwing operator secrets rotate --verify` reports
+`previous_key_only: 0` and nothing unreadable. See [rotating the secrets key](../../docs/security.md#rotating-the-secrets-key). Do not replace an existing key without retaining it for reads.
 Helm cannot inspect a Secret's keys. The controller validates their contents.
 
 ## S3, CloudFront and sign-in

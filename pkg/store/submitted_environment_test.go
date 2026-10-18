@@ -31,7 +31,7 @@ func FuzzSubmittedEnvironmentStaysPrivateAndClaimBound(f *testing.F) {
 		}
 		request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
 		request.SubmittedEnv = map[string][]byte{"APP_NOTE": []byte(value), "APP_EMPTY": {}}
-		request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"APP_NOTE": value, "APP_EMPTY": ""})
+		request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"APP_NOTE": value, "APP_EMPTY": ""}, strings.Repeat("5", 64))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func TestSubmittedEnvironmentRetryCopiesEncryptedValues(t *testing.T) {
 	tenant.s.SetRunEnvironmentCipher(cipher)
 	request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
 	request.SubmittedEnv = map[string][]byte{"BUILD_NOTE": []byte("retained-private-value")}
-	request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": "retained-private-value"})
+	request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": "retained-private-value"}, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestSubmittedEnvironmentRefusesInvalidIntakeAtomically(t *testing.T) {
 			}
 			request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
 			request.SubmittedEnv = map[string][]byte{name: []byte(value)}
-			request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{name: value})
+			request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{name: value}, strings.Repeat("5", 64))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -202,7 +202,7 @@ func FuzzExecutionEnvironmentUsesOnlyLiveUnitFence(f *testing.F) {
 			t.Fatal(err)
 		}
 		run.Request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
-		run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_VALUE": value})
+		run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_VALUE": value}, strings.Repeat("5", 64))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,7 +214,7 @@ func FuzzExecutionEnvironmentUsesOnlyLiveUnitFence(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		envelope, err := cipher.SealBound(string(claim.Team), claim.RunID, "run-environment", false, true, string(values))
+		envelope, err := cipher.SealBound(secrets.PurposeRunEnvironment, string(claim.Team), claim.RunID, "run-environment", false, true, string(values))
 		if err != nil {
 			t.Fatal(err)
 		}

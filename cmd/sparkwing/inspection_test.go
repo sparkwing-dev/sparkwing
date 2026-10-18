@@ -31,7 +31,7 @@ func inspectionCommand(command pipelineentry.Command, directory, pipeline string
 		name, value, _ := strings.Cut(item, "=")
 		values[name] = value
 	}
-	snapshot, err := runspec.EnvironmentDigest(values)
+	snapshot, err := runspec.EnvironmentDigest(values, strings.Repeat("5", 64))
 	if err != nil {
 		return pipelineInspection{}, err
 	}

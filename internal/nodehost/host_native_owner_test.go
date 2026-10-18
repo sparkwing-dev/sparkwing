@@ -48,7 +48,7 @@ func TestNativeOwnerFailures(t *testing.T) {
 			}
 			selected := engine.Resolved{Identity: engine.Identity{Version: "fixture", ManifestDigest: "fixture", Pin: engine.Pin{SDK: engine.GoSDK, Version: hello.SDK.Version}}}
 			spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "eval"}}, Resolved: runspec.Resolved{Engine: selected.Identity, Entrypoint: "eval"}}
-			spec.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")})
+			spec.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")}, strings.Repeat("5", 64))
 			if err != nil {
 				t.Fatal(err)
 			}

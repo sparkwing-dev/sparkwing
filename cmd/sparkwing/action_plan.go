@@ -131,6 +131,20 @@ func withPipelineEntryAt(directory, pipeline string, flags runFlags, fn func(con
 	return withLocalPipelineEntry(ctx, home, directory, pipeline, flags, prepared.captured, options, fn)
 }
 
+func identifyCapturedEnvironment(home string, captured []string) (runspec.EnvSnapshot, error) {
+	if home == "" {
+		var err error
+		if home, err = wingd.HomeDir(""); err != nil {
+			return runspec.EnvSnapshot{}, err
+		}
+	}
+	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
+	if err != nil {
+		return runspec.EnvSnapshot{}, err
+	}
+	return snapshots.Identify(captured)
+}
+
 func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline string, flags runFlags, captured []string, options source.Options, fn func(context.Context, pipelineInspection, string) error) (resultErr error) {
 	prepared, err := prepareRunEnvironment(directory, pipeline, captured, flags)
 	if err != nil {
@@ -174,12 +188,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 	if err := errors.Join(writeEngineNotices(masked, entry.Engine.Notices), masked.close()); err != nil {
 		return err
 	}
-	values := make(map[string]string, len(captured))
-	for _, item := range captured {
-		name, value, _ := strings.Cut(item, "=")
-		values[name] = value
-	}
-	environment, err := runspec.EnvironmentDigest(values)
+	environment, err := identifyCapturedEnvironment(home, captured)
 	if err != nil {
 		return err
 	}

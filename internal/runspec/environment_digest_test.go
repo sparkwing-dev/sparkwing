@@ -13,7 +13,7 @@ func FuzzEnvironmentDigestBindsNativeBytes(f *testing.F) {
 		if name == "" || value == "" || strings.ContainsAny(name, "=\x00") || strings.ContainsRune(value, 0) || replacement == 0 || (changeName && replacement == '=') {
 			t.Skip()
 		}
-		before, err := EnvironmentDigest(map[string]string{name: value})
+		before, err := EnvironmentDigest(map[string]string{name: value}, strings.Repeat("5", 64))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -28,7 +28,7 @@ func FuzzEnvironmentDigestBindsNativeBytes(f *testing.F) {
 			}
 			value = value[:len(value)-1] + string([]byte{replacement})
 		}
-		after, err := EnvironmentDigest(map[string]string{name: value})
+		after, err := EnvironmentDigest(map[string]string{name: value}, strings.Repeat("5", 64))
 		if err != nil || before.Digest == after.Digest {
 			t.Fatal("changing native bytes must change snapshot identity", err)
 		}

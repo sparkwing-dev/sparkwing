@@ -132,7 +132,7 @@ func TestSDKPlanningCacheKeepsCapturedAndHostEnvironmentIdentity(t *testing.T) {
 	for _, captured := range []string{"original", "changed"} {
 		for _, host := range []string{strings.Repeat("a", 64), strings.Repeat("b", 64), ""} {
 			planner, input, fixture, _ := sdkPlanningFixture(t)
-			seal, err := runspec.EnvironmentDigest(map[string]string{"CAPTURED": captured})
+			seal, err := runspec.EnvironmentDigest(map[string]string{"CAPTURED": captured}, strings.Repeat("5", 64))
 			if err != nil {
 				t.Fatal(err)
 			}

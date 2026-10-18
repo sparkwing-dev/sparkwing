@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -240,6 +241,25 @@ func TestKeyring_RefusesAKeyFileOthersCanWrite(t *testing.T) {
 	}
 	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "writable") {
 		t.Fatalf("load with a group-writable key file = %v, want a writable-target refusal", err)
+	}
+}
+
+func TestKeyring_RefusesAKeyFileOthersCanRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits")
+	}
+	for _, mode := range []os.FileMode{0o640, 0o604, 0o644} {
+		path := keyFileIn(t, t.TempDir())
+		if err := os.WriteFile(path, bytes.Repeat([]byte{5}, secrets.KeySize), mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		_, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+		if err == nil || !strings.Contains(err.Error(), "chmod 600 "+path) {
+			t.Fatalf("load with a %o key file = %v, want a refusal naming chmod 600", mode, err)
+		}
 	}
 }
 

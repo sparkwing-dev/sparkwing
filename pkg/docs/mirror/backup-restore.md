@@ -43,7 +43,8 @@ controller serves run and node records without them.
 The commands below write `$CREDS` for the controller's `--credentials-dir`.
 A single-team SQLite controller that was never given a `secrets-key` keeps
 the key it created at `$SPARKWING_HOME/secrets.key`; the copy falls back to
-that file.
+that file. A restored `secrets.key` must be owner-only: sparkwing refuses one
+that group or others can read and names the `chmod 600` that fixes it.
 
 ### SQLite
 

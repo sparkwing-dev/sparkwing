@@ -813,7 +813,7 @@ var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live"
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
-var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
+var ErrCronScheduleTaken = errors.New("store: another schedule holds this identity")
 var ErrDeletionLeaseLost = errors.New("store: this purger no longer holds the team deletion's lease")
 var ErrDisputeConflict = errors.New("credits: the dispute is already held for another payment")
 var ErrDownloadCap = errors.New("daily download cap reached")
@@ -1090,6 +1090,7 @@ type Identity struct {
 	Linked    bool
 	CreatedAt time.Time
 }
+const IdentityChangeSignInWindow = 10 * time.Minute
 type IllegalTransitionReason string
 type InsufficientCreditsError struct {
 	BalanceMicro  int64
@@ -1491,6 +1492,7 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
 func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (o *Operator) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
+func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SealedRotationCipher, verify bool) (SealedRotation, error)
 func (o *Operator) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (bool, error)
 func (o *Operator) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error)
@@ -2105,6 +2107,24 @@ func SealSecret(cipher SecretSealer, team Team, row Secret) (SealedSecret, error
 type SealedGitCredential struct {
 }
 func (s SealedGitCredential) Row() GitCredential
+type SealedRotation struct {
+	Secrets         int
+	GitCredentials  int
+	RunEnvironments int
+	Settings        int
+	PreviousKeyOnly int
+	Unreadable      []SealedRowName
+}
+type SealedRotationCipher interface {
+	SessionKeyCipher
+	OpenBoundCurrent(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error)
+}
+type SealedRowName struct {
+	Purpose  secrets.Purpose
+	Team     Team
+	Name     string
+	Pipeline string
+}
 type SealedSecret struct {
 }
 func (s SealedSecret) Row() Secret
@@ -2131,7 +2151,7 @@ type SecretRotationSkip struct {
 	Pipeline string
 }
 type SecretSealer interface {
-	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
+	SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error)
 }
 type Segment struct {
 	Index       int64
@@ -2163,8 +2183,8 @@ type Session struct {
 }
 const SessionIDLen = 32
 type SessionKeyCipher interface {
-	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
-	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
+	SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error)
+	OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
 func SetTestBusyTimeout(t interface{ Cleanup(func()) }, ms int)
 type SignInProfile struct {
@@ -2409,7 +2429,7 @@ func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, n
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error)
 func (s *Store) Close() error
 func (s *Store) CloudAwardResources(ctx context.Context, ref capability.AuthorityRef) (*match.Resources, error)
-func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
+func (s *Store) ConsumeIdentityLink(ctx context.Context, claim capability.IdentityLink) error
 func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateAccountTeam(ctx context.Context, a capability.Authorized, input TeamInfo) (TeamInfo, error)
 func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
@@ -2431,7 +2451,7 @@ func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (er
 func (s *Store) HasDeploymentAdministrator(ctx context.Context) (bool, error)
 func (s *Store) IdentityLinkStateKey(ctx context.Context) ([]byte, error)
 func (s *Store) Issue(ctx context.Context, tx *storeTx, request capability.IssueRequest) (capability.Issued, error)
-func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
+func (s *Store) LinkAccountIdentity(ctx context.Context, claim capability.IdentityLink, p SignInProfile) (Identity, error)
 func (s *Store) LookupCapability(ctx context.Context, digest [32]byte) (capability.Principal, error)
 func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session, error)
 func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error)

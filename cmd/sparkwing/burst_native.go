@@ -173,7 +173,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	inputs := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: values}
 	inputs.Machine.SubmitEnvAllow.Set, inputs.Machine.SubmitEnvAllow.Value = allow != nil, allow
 	inputs.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: configPath, Key: "run.submit_env_allow"}
-	request, err := prepareTriggerRequest(triggerRequestInput{source: selected, settings: inputs, described: described, args: args, submittedEnv: submitted, idempotencyKey: flags.idempotencyKey})
+	request, err := prepareTriggerRequest(triggerRequestInput{home: home, source: selected, settings: inputs, described: described, args: args, submittedEnv: submitted, idempotencyKey: flags.idempotencyKey})
 	if err != nil {
 		return request, err
 	}

@@ -272,7 +272,7 @@ func run(args []string) error {
 			"writes. Unneeded when a proxy reaching --trusted-proxy-addr forwards X-Forwarded-Proto")
 	insecureCookies := fs.Bool("insecure-cookies", false,
 		"drop Secure and the __Host- prefix from the dashboard's session cookies so a browser "+
-			"keeps a session over plain HTTP. Only for a dashboard published without TLS: the "+
+			"keeps a session over plain HTTP. Only for a single-team, self-hosted dashboard published without TLS: the "+
 			"cookies then travel readable to every hop on the path")
 	requireAuth := fs.Bool("require-auth", false,
 		"refuse to start until a live deployment administrator capability exists; private routes always require credentials")
@@ -509,6 +509,9 @@ func run(args []string) error {
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
 		return err
 	}
+	if err := checkInsecureCookies(srv, *limitsProfile == controller.LimitsProfileCloud || *limitsProfile == controller.LimitsProfileCloudFree, *insecureCookies); err != nil {
+		return err
+	}
 	if *teamDownloadFree < 0 || *teamDownloadFunded < 0 {
 		return fmt.Errorf("a team daily download cap must not be negative; pass 0 to turn it off")
 	}
@@ -726,6 +729,14 @@ func checkMultiTeamObjectStore(srv *controller.Server, bucketStoreURL string) er
 	}
 	return errors.New("the license allows more than one team, so an object store is required: set --bucket-store " +
 		"to the s3:// store the cache (--blob-store) keeps its objects in, because free-tier allowances are enforced only there")
+}
+
+func checkInsecureCookies(srv *controller.Server, hosted, insecure bool) error {
+	if !insecure || !hosted && !srv.MultiTeam() {
+		return nil
+	}
+	return errors.New("--insecure-cookies is refused on a multi-team or hosted controller, whose sessions belong to other people; " +
+		"publish the dashboard over TLS and drop the flag")
 }
 
 // safety: no secret is stored as plaintext; a multi-team controller holds other

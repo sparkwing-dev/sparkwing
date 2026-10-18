@@ -71,7 +71,7 @@ func (s *Server) identityLinkSession(r *http.Request) (*store.Session, signInPro
 		return nil, nil, invalidEngineBody("redirect_uri is not on this controller's allowlist")
 	}
 	now := time.Now().UTC()
-	if session.CreatedAt.After(now) || now.Sub(session.CreatedAt) > identityChangeSignInWindow {
+	if !recentSignIn(session.CreatedAt, now) {
 		return nil, nil, identityLinkRefusal(apierr.Forbidden, "reauth_required", "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
 	}
 	notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{

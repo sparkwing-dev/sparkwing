@@ -5,9 +5,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
-	"fmt"
+	"strconv"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Identity is one sign-in method attached to an account: an identity
@@ -57,40 +61,116 @@ func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Id
 	return out, rows.Err()
 }
 
-// LinkIdentity attaches the provider account p describes to accountID as a
-// further sign-in method. The provider's address plays no part: the caller
-// has proven that this account's holder controls the provider account.
-//
-// It refuses, changing nothing, a provider account already attached to any
-// account ([ErrIdentityLinkedElsewhere], or [ErrIdentityAlreadyLinked] when
-// that account is accountID) and a second provider account from a provider
-// accountID already signs in with ([ErrProviderAlreadyLinked]). The
-// account's email stays what it was.
-func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error) {
-	if p.Provider == "" || p.Subject == "" {
-		return Identity{}, fmt.Errorf("%w: a link names no provider or subject", ErrInvalidInput)
-	}
-	p.Email = NormalizeEmail(p.Email)
-	id, err := s.linkIdentityOnce(ctx, accountID, p, now)
-	// safety: two links of one provider account race on the identities key;
-	// the loser reads the winner's row and answers as if it had come second.
-	if isUniqueViolation(err) {
-		id, err = s.linkIdentityOnce(ctx, accountID, p, now)
-	}
-	return id, err
+// IdentityChangeSignInWindow bounds how old a sign-in may be when it adds or removes a sign-in method.
+const IdentityChangeSignInWindow = 10 * time.Minute
+
+// ConsumeIdentityLink records the link nonce once, bound to its direct session, account, provider and expiry.
+func (s *Store) ConsumeIdentityLink(ctx context.Context, claim capability.IdentityLink) error {
+	return s.inTx(ctx, func(tx *storeTx) error {
+		if err := identityLinkAuthorityTx(ctx, tx, claim); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at,binding) VALUES ('identity_link',?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, claim.Nonce, claim.ExpiresAt.UnixNano(), identityLinkBinding(claim))
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n != 1 {
+			return errors.Join(identityLinkInvalid(), err)
+		}
+		return nil
+	})
 }
 
-func (s *Store) linkIdentityOnce(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error) {
-	tx, err := s.beginTx(ctx)
+// LinkAccountIdentity attaches the verified provider profile to the claim's account and completes its nonce.
+// The account's email is unchanged; identity uniqueness refusals are the Err* sentinels.
+func (s *Store) LinkAccountIdentity(ctx context.Context, claim capability.IdentityLink, p SignInProfile) (Identity, error) {
+	var out Identity
+	attempt := func() error {
+		return s.inTx(ctx, func(tx *storeTx) error {
+			var err error
+			out, err = linkAccountIdentityTx(ctx, tx, claim, p)
+			return err
+		})
+	}
+	err := attempt()
+	// safety: two accounts racing to link one provider account meet on the identities key; the loser rereads and refuses.
+	if isUniqueViolation(err) {
+		err = attempt()
+	}
 	if err != nil {
 		return Identity{}, err
 	}
-	defer rollbackOrLog(tx)
+	return out, nil
+}
+
+func linkAccountIdentityTx(ctx context.Context, tx *storeTx, claim capability.IdentityLink, p SignInProfile) (Identity, error) {
+	if p.Provider != claim.Provider || p.Subject == "" || !p.EmailVerified {
+		return Identity{}, identityLinkInvalid()
+	}
+	if err := identityLinkAuthorityTx(ctx, tx, claim); err != nil {
+		return Identity{}, err
+	}
+	var binding string
+	var completed sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT binding,completed_at FROM flow_nonces WHERE kind='identity_link' AND nonce=?`+tx.forUpdate(), claim.Nonce).Scan(&binding, &completed)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (completed.Valid || binding != identityLinkBinding(claim)) {
+		return Identity{}, identityLinkInvalid()
+	}
+	if err != nil {
+		return Identity{}, err
+	}
+	id, err := linkIdentityTx(ctx, tx, claim.AccountID, p, tx.now())
+	if err != nil {
+		return Identity{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, tx.now().UnixNano(), claim.Nonce); err != nil {
+		return Identity{}, err
+	}
+	return id, nil
+}
+
+func identityLinkAuthorityTx(ctx context.Context, tx *storeTx, claim capability.IdentityLink) error {
+	now := tx.now()
+	if claim.Authority.Kind != capability.AuthoritySession || claim.Authority.ID == "" || claim.AccountID == "" || claim.Nonce == "" ||
+		claim.Provider != ProviderGoogle && claim.Provider != ProviderGitHub || !claim.ExpiresAt.After(now) {
+		return identityLinkInvalid()
+	}
+	if err := lockAccountTx(ctx, tx, claim.AccountID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return identityLinkInvalid()
+		}
+		return err
+	}
+	principal, err := tx.ResolveAuthority(ctx, claim.Authority)
+	if err != nil {
+		return err
+	}
+	c := principal.Capability
+	if !principal.DirectAccountSession() || c.Subject.ID != claim.AccountID {
+		return identityLinkInvalid()
+	}
+	if now.Before(c.IssuedAt) || now.Sub(c.IssuedAt) > IdentityChangeSignInWindow {
+		return apierr.Authorization(apierr.ReasonReauthRequired, "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
+	}
+	return nil
+}
+
+func identityLinkBinding(claim capability.IdentityLink) string {
+	encoded, _ := json.Marshal([]string{claim.Authority.ID, claim.AccountID, claim.Provider, strconv.FormatInt(claim.ExpiresAt.UnixNano(), 10)})
+	return string(encoded)
+}
+
+func identityLinkInvalid() error {
+	return &apierr.Error{Code: apierr.Forbidden, Message: "this link could not be verified; start linking again", Details: map[string]any{"reason": "link_state_invalid"}}
+}
+
+func linkIdentityTx(ctx context.Context, tx *storeTx, accountID string, p SignInProfile, now time.Time) (Identity, error) {
+	p.Email = NormalizeEmail(p.Email)
 	if _, err := accountTx(ctx, tx, accountID); err != nil {
 		return Identity{}, err
 	}
 	var holder string
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT account_id FROM identities WHERE provider = ? AND subject = ?`, p.Provider, p.Subject).Scan(&holder)
 	switch {
 	case err == nil && holder == accountID:
@@ -118,9 +198,6 @@ func (s *Store) linkIdentityOnce(ctx context.Context, accountID string, p SignIn
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM identity_unlinks WHERE provider = ? AND subject = ? AND account_id = ?`,
 		p.Provider, p.Subject, accountID); err != nil {
-		return Identity{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return Identity{}, err
 	}
 	return Identity{
@@ -200,14 +277,6 @@ func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
 		return ErrNotFound
 	}
 	return err
-}
-
-// ConsumeIdentityLinkState records that the link flow named by nonce
-// finished, and reports false when one already did. The record lives until
-// the state expires, so every replica and a restarted controller refuse a
-// state that was used once.
-func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
-	return s.consumeFlowNonce(ctx, "identity_link", nonce, expires)
 }
 
 func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expires time.Time) (bool, error) {

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
@@ -80,7 +82,7 @@ func gitCredentialJSON(c store.GitCredential, publicKey string) GitCredentialJSO
 // safety: the envelope is bound to its team and host, so a row copied to
 // another team or host, or into the secrets table, does not open.
 func gitCredentialBinding(team store.Team, host string) secretBinding {
-	return secretBinding{Team: team, Name: gitCredentialScope + ":" + host, Scope: gitCredentialScope, Masked: true}
+	return secretBinding{Purpose: secrets.PurposeGitCredential, Team: team, Name: gitCredentialScope + ":" + host, Scope: gitCredentialScope, Masked: true}
 }
 
 func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

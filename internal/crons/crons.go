@@ -51,8 +51,7 @@ func ScheduleID(repoPath, pipeline, name string) string {
 
 // TeamScheduleID is [ScheduleID] for a schedule armed in team. The operator's
 // team keeps the ids [ScheduleID] names; any other team's seed also carries the
-// team, because an id is unique across the store and two teams may arm the
-// same repository, pipeline and name.
+// team. The store keys schedules by team and id, so no team's id can block another's.
 func TeamScheduleID(team store.Team, repoPath, pipeline, name string) string {
 	seed := repoPath + "\x00" + pipeline
 	if name != "" && name != store.CronScheduleDefaultName {

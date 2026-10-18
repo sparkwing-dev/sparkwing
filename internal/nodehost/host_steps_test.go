@@ -85,7 +85,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec.PlanHash, spec.Resolved.Engine = hash, input.Engine.Identity
-			spec.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")})
+			spec.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")}, strings.Repeat("5", 64))
 			if err != nil {
 				t.Fatal(err)
 			}

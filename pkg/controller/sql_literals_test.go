@@ -119,7 +119,7 @@ func TestSecretMutationsTreatSQLMetacharactersAsLiteral(t *testing.T) {
 				for _, row := range rows {
 					value := row.Value
 					if secrets.IsEncrypted(value) {
-						opened, err := testCipher(t).OpenBound(string(tn.Team()), row.Name, row.Pipeline, row.Shared, row.Masked, value)
+						opened, err := testCipher(t).OpenBound(secrets.PurposeSecret, string(tn.Team()), row.Name, row.Pipeline, row.Shared, row.Masked, value)
 						if err != nil {
 							t.Fatal(err)
 						}

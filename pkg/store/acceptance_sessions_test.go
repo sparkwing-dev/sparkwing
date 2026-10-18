@@ -189,12 +189,13 @@ func checkRolelessStoreSession(ctx context.Context, s *store.Store, team store.T
 	if err := s.SelectAccountTeam(ctx, capability.Authorized{Principal: principal, Access: route.Access[0]}, team); !errors.Is(err, store.ErrNotMember) {
 		return fmt.Errorf("roleless switch bypassed membership: %v", err)
 	}
-	expires := time.Now().Add(time.Minute)
-	if ok, err := s.ConsumeIdentityLinkState(ctx, "roleless-link", expires, time.Time{}); err != nil || !ok {
-		return fmt.Errorf("link nonce did not commit: %v", err)
+	digest := sha256.Sum256([]byte(raw))
+	claim := capability.IdentityLink{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, AccountID: member.Account.ID, Provider: store.ProviderGoogle, Nonce: "roleless-link", ExpiresAt: time.Now().Add(time.Minute)}
+	if err := s.ConsumeIdentityLink(ctx, claim); err != nil {
+		return fmt.Errorf("link nonce did not commit: %w", err)
 	}
-	if ok, err := s.ConsumeIdentityLinkState(ctx, "roleless-link", expires, time.Time{}); err != nil || ok {
-		return fmt.Errorf("link nonce replay: %v", err)
+	if err := s.ConsumeIdentityLink(ctx, claim); err == nil {
+		return errors.New("link nonce replayed")
 	}
 	return nil
 }

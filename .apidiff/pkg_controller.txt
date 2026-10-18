@@ -30,9 +30,9 @@ const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
 	Cipher
 
-	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
+	SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error)
 
-	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
+	OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
 type CapabilityManager interface {
 	Team() store.Team

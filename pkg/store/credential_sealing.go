@@ -4,7 +4,7 @@ import "github.com/sparkwing-dev/sparkwing/internal/secrets"
 
 // SecretSealer seals values against their complete stored row identity.
 type SecretSealer interface {
-	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
+	SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error)
 }
 
 // SealedSecret is an immutable tenant-bound secret write.
@@ -30,7 +30,7 @@ func SealSecret(cipher SecretSealer, team Team, row Secret) (SealedSecret, error
 	if cipher == nil {
 		return SealedSecret{}, ErrInvalidInput
 	}
-	value, err := cipher.SealBound(string(team), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+	value, err := cipher.SealBound(secrets.PurposeSecret, string(team), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
 	if err != nil {
 		return SealedSecret{}, err
 	}
@@ -46,7 +46,7 @@ func SealGitCredential(cipher SecretSealer, team Team, row GitCredential) (Seale
 	if cipher == nil {
 		return SealedGitCredential{}, ErrInvalidInput
 	}
-	value, err := cipher.SealBound(string(team), "git-credential:"+row.Host, "git-credential", false, true, row.Secret)
+	value, err := cipher.SealBound(secrets.PurposeGitCredential, string(team), "git-credential:"+row.Host, "git-credential", false, true, row.Secret)
 	if err != nil {
 		return SealedGitCredential{}, err
 	}

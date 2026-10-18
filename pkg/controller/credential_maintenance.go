@@ -140,6 +140,33 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a c
 	return nil
 }
 
+func (s *Server) handleRotateSealedValues(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1))
+	if err != nil {
+		return err
+	}
+	if len(body) != 0 {
+		return invalidEngineBody("key rotation takes no body")
+	}
+	query := r.URL.Query()
+	verify := query.Has("verify")
+	if len(query) > 1 || verify && (len(query["verify"]) != 1 || query.Get("verify") != "1") || len(query) == 1 && !verify {
+		return invalidEngineBody("key rotation accepts only verify=1")
+	}
+	cipher, ok := s.secretsCipher.(store.SealedRotationCipher)
+	if !ok || s.store == nil {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": apierr.ReasonSecretsKeyRequired}}
+	}
+	result, err := s.store.AsOperator().RotateSealedValues(r.Context(), a, cipher, verify)
+	if err != nil {
+		return credentialWriteError(err)
+	}
+	s.logger.Info("sealed values rotated", "verify", verify, "previous_key_only", result.PreviousKeyOnly, "secrets", result.Secrets, "git_credentials", result.GitCredentials,
+		"run_environments", result.RunEnvironments, "settings", result.Settings, "unreadable", len(result.Unreadable))
+	writeJSON(w, http.StatusOK, result)
+	return nil
+}
+
 func (s *Server) handleListGitCredentialReleases(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	reader, err := s.sourceAuditReader(r.Context(), a.Target.Team)
 	if err != nil {

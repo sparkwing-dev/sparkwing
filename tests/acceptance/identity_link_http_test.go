@@ -1,8 +1,8 @@
 package acceptance_test
 
 import (
-	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -18,60 +18,46 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type identityLinkWriter struct {
-	claim               capability.IdentityLink
-	consumed, committed int
-	failure             error
-	profile             store.SignInProfile
-	onConsume           func()
-}
-
-func (w *identityLinkWriter) ConsumeIdentityLink(_ context.Context, claim capability.IdentityLink) error {
-	if w.failure != nil {
-		return w.failure
-	}
-	if w.consumed != 0 {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "link already used"}
-	}
-	w.claim, w.consumed = claim, 1
-	if w.onConsume != nil {
-		w.onConsume()
-	}
-	return nil
-}
-
-func (w *identityLinkWriter) LinkAccountIdentity(_ context.Context, claim capability.IdentityLink, profile store.SignInProfile) (store.Identity, error) {
-	if w.failure != nil {
-		return store.Identity{}, w.failure
-	}
-	if w.consumed != 1 || w.claim != claim || w.committed != 0 || profile.Provider != claim.Provider || !profile.EmailVerified {
-		return store.Identity{}, &apierr.Error{Code: apierr.Forbidden, Message: "invalid link"}
-	}
-	w.committed, w.profile = 1, profile
-	return store.Identity{Provider: profile.Provider, Subject: profile.Subject}, nil
-}
-
-type identityLinkHTTP struct {
-	oauthHTTP
-	writer *identityLinkWriter
-}
+type identityLinkHTTP struct{ oauthHTTP }
 
 func newIdentityLinkHTTP(t *testing.T) identityLinkHTTP {
 	t.Helper()
-	f := newOAuthHTTP(t)
-	if _, err := f.store.DB().ExecContext(t.Context(), `DELETE FROM identities WHERE provider='github'`); err != nil {
+	f := identityLinkHTTP{oauthHTTP: newOAuthHTTP(t)}
+	f.exec(t, `DELETE FROM identities WHERE provider='github'`)
+	return f
+}
+
+func (f *identityLinkHTTP) exec(t *testing.T, statement string, args ...any) {
+	t.Helper()
+	if _, err := f.store.DB().ExecContext(t.Context(), statement, args...); err != nil {
 		t.Fatal(err)
 	}
-	writer := &identityLinkWriter{}
-	f.server.WithIdentityLinkWriter(writer)
-	f.handler = f.server.Handler()
-	return identityLinkHTTP{oauthHTTP: f, writer: writer}
+}
+
+func (f *identityLinkHTTP) links(t *testing.T) (consumed, committed int) {
+	t.Helper()
+	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*),COUNT(completed_at) FROM flow_nonces WHERE kind='identity_link'`).Scan(&consumed, &committed); err != nil {
+		t.Fatal(err)
+	}
+	return consumed, committed
+}
+
+func (f *identityLinkHTTP) linkedSubject(t *testing.T) string {
+	t.Helper()
+	var subject string
+	err := f.store.DB().QueryRowContext(t.Context(), `SELECT subject FROM identities WHERE provider='github' AND account_id='member' AND linked=1`).Scan(&subject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return subject
 }
 
 func (f *identityLinkHTTP) startRequest() *http.Request {
@@ -140,9 +126,18 @@ func TestIdentityLinkHTTPCommitsVerifiedIdentityOnce(t *testing.T) {
 	cookie := f.ready(t)
 	w := f.complete(cookie)
 	digest := sha256.Sum256([]byte(f.raw))
-	claim := f.writer.claim
-	if w.Code != 303 || w.Header().Get("Location") != "/account/sign-ins?linked=github" || f.writer.committed != 1 || f.writer.profile.Subject != "123" || claim.Authority != (capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}) || claim.AccountID != "member" || claim.Provider != "github" || claim.Nonce == "" || !claim.ExpiresAt.After(time.Now()) {
-		t.Fatalf("HTTP %d %s claim=%+v", w.Code, w.Body.String(), claim)
+	var binding string
+	var expiry int64
+	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT binding,expires_at FROM flow_nonces WHERE kind='identity_link' AND completed_at IS NOT NULL`).Scan(&binding, &expiry); err != nil {
+		t.Fatalf("HTTP %d %s: %v", w.Code, w.Body.String(), err)
+	}
+	var email string
+	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT email FROM accounts WHERE id='member'`).Scan(&email); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 303 || w.Header().Get("Location") != "/account/sign-ins?linked=github" || f.linkedSubject(t) != "123" || email != "member@example.test" ||
+		binding != fmt.Sprintf(`[%q,"member","github","%d"]`, hex.EncodeToString(digest[:]), expiry) || !time.Unix(0, expiry).After(time.Now()) {
+		t.Fatalf("HTTP %d %s binding=%q", w.Code, w.Body.String(), binding)
 	}
 	after, renewed := f.state(t)
 	if before != after || expires != renewed || oauthCookie(w, "__Host-sw_oauth").MaxAge != -1 {
@@ -151,7 +146,7 @@ func TestIdentityLinkHTTPCommitsVerifiedIdentityOnce(t *testing.T) {
 	calls := f.provider.calls
 	w = f.complete(cookie)
 	assertEngineError(t, w, 403, apierr.Forbidden)
-	if f.provider.calls != calls || f.writer.committed != 1 {
+	if consumed, committed := f.links(t); f.provider.calls != calls || consumed != 1 || committed != 1 {
 		t.Fatal("replay reached provider or committed again")
 	}
 	for _, secret := range []string{f.raw, f.csrf, f.provider.code, cookie.Value, "private-provider-access-token"} {
@@ -220,7 +215,8 @@ func TestIdentityLinkHTTPProofProperty(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		f.handler.ServeHTTP(w, r)
-		return w.Code >= 400 && w.Code < 500 && f.writer.consumed == 0 && f.writer.committed == 0 && f.provider.calls == 0 && oauthCookie(w, "__Host-sw_oauth") == nil
+		consumed, _ := f.links(t)
+		return w.Code >= 400 && w.Code < 500 && consumed == 0 && f.linkedSubject(t) == "" && f.provider.calls == 0 && oauthCookie(w, "__Host-sw_oauth") == nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 130}); err != nil {
 		t.Fatal(err)
@@ -300,45 +296,40 @@ func TestIdentityLinkHTTPStartLimitsAndExistingProvider(t *testing.T) {
 	w = httptest.NewRecorder()
 	g.handler.ServeHTTP(w, g.startRequest())
 	assertEngineError(t, w, 409, apierr.Conflict)
-	if oauthCookie(w, "__Host-sw_oauth") != nil || g.writer.consumed != 0 {
+	if consumed, _ := g.links(t); oauthCookie(w, "__Host-sw_oauth") != nil || consumed != 0 {
 		t.Fatal("already-linked provider started a flow")
 	}
 }
 
 func TestIdentityLinkHTTPRefusals(t *testing.T) {
-	for _, failure := range []string{"missing", "backend", "revoked", "old", "parent", "consumed-race", "commit-race", "provider-rejected", "provider-unverified", "provider-unavailable"} {
+	for _, failure := range []string{"backend", "revoked", "old", "parent", "revoked-during-exchange", "stale-during-exchange", "completed-during-exchange", "rebound-during-exchange", "provider-rejected", "provider-unverified", "provider-unavailable"} {
 		t.Run(failure, func(t *testing.T) {
 			f := newIdentityLinkHTTP(t)
 			cookie := f.ready(t)
 			code, status := apierr.Forbidden, 403
 			switch failure {
-			case "missing":
-				f.server.WithIdentityLinkWriter(nil)
-				code, status = apierr.PolicyMissing, 500
 			case "backend":
-				f.writer.failure = errors.New("private-writer-diagnostic")
+				f.exec(t, `DROP TABLE flow_nonces`)
 				code, status = apierr.Unavailable, 503
 			case "revoked":
-				if _, err := f.store.DB().ExecContext(t.Context(), `DELETE FROM sessions`); err != nil {
-					t.Fatal(err)
-				}
+				f.exec(t, `DELETE FROM sessions`)
 				code, status = apierr.Unauthenticated, 401
 			case "old":
-				if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE sessions SET created_at=?`, time.Now().Add(-time.Hour).UnixNano()); err != nil {
-					t.Fatal(err)
-				}
+				f.exec(t, `UPDATE sessions SET created_at=?`, time.Now().Add(-time.Hour).UnixNano())
 			case "parent":
-				if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE sessions SET capability_prefix='missing'`); err != nil {
-					t.Fatal(err)
-				}
+				f.exec(t, `UPDATE sessions SET capability_prefix='missing'`)
 				code, status = apierr.Unauthenticated, 401
-			case "consumed-race":
-				f.writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "link authority ended"}
-			case "commit-race":
-				f.writer.onConsume = func() {
-					f.writer.failure = &apierr.Error{Code: apierr.Unauthenticated, Message: "session ended during provider exchange"}
-				}
+			case "revoked-during-exchange":
+				f.provider.onToken = func() { f.exec(t, `DELETE FROM sessions`) }
 				code, status = apierr.Unauthenticated, 401
+			case "stale-during-exchange":
+				f.provider.onToken = func() {
+					f.exec(t, `UPDATE sessions SET created_at=?`, time.Now().Add(-time.Hour).UnixNano())
+				}
+			case "completed-during-exchange":
+				f.provider.onToken = func() { f.exec(t, `UPDATE flow_nonces SET completed_at=1`) }
+			case "rebound-during-exchange":
+				f.provider.onToken = func() { f.exec(t, `UPDATE flow_nonces SET binding='other'`) }
 			case "provider-rejected":
 				f.provider.failure = "rejected"
 				code, status = apierr.Unauthenticated, 401
@@ -351,7 +342,7 @@ func TestIdentityLinkHTTPRefusals(t *testing.T) {
 			f.handler = f.server.Handler()
 			w := f.complete(cookie)
 			assertEngineError(t, w, status, code)
-			if f.writer.committed != 0 || strings.Contains(w.Body.String(), "private-") || strings.Contains(f.logs.String(), "private-provider-diagnostic") {
+			if f.linkedSubject(t) != "" || strings.Contains(w.Body.String(), "private-") || strings.Contains(w.Body.String(), "flow_nonces") || strings.Contains(f.logs.String(), "private-provider-diagnostic") {
 				t.Fatal("refused link committed or leaked diagnostics")
 			}
 		})
@@ -375,11 +366,11 @@ func TestIdentityLinkHTTPProviderDiagnosticProperty(t *testing.T) {
 		w := f.complete(cookie)
 		var envelope apierr.Envelope
 		return w.Code == 503 && json.Unmarshal(w.Body.Bytes(), &envelope) == nil && envelope.Error != nil && envelope.Error.Code == apierr.Unavailable &&
-			!strings.Contains(w.Body.String(), secret) && !strings.Contains(f.logs.String(), secret) && f.writer.committed == 0
+			!strings.Contains(w.Body.String(), secret) && !strings.Contains(f.logs.String(), secret) && f.linkedSubject(t) == ""
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-var _ controller.IdentityLinkWriter = (*identityLinkWriter)(nil)
+var _ controller.IdentityLinkWriter = (*store.Store)(nil)

@@ -98,7 +98,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 	for _, name := range shellNames {
 		values[name] = "private shell value"
 	}
-	localEnv, err := runspec.EnvironmentDigest(values)
+	localEnv, err := runspec.EnvironmentDigest(values, strings.Repeat("5", 64))
 	if err != nil {
 		t.Fatal(err)
 	}

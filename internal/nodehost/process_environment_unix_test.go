@@ -256,7 +256,7 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 				t.Fatal(err)
 			}
-			spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"GORACE": "atexit_sleep_ms=0", "DOCKER_HOST": "tcp://captured:2375", "API_TOKEN": "private-value"})
+			spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"GORACE": "atexit_sleep_ms=0", "DOCKER_HOST": "tcp://captured:2375", "API_TOKEN": "private-value"}, strings.Repeat("5", 64))
 			input.Accepted.Spec, _ = json.Marshal(spec)
 			exe, err := os.Executable()
 			if err != nil {

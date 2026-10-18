@@ -218,6 +218,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"GET", "/api/v1/operator/tokens/{token}", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"DELETE", "/api/v1/operator/tokens/{token}", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"POST", "/api/v1/operator/tokens/{token}/rotate", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|none|credential", "operator_console_session|operator.console|none|credential"}},
+		{"POST", "/api/v1/operator/secrets/rotate", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/operator/teams", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"POST", "/api/v1/operator/teams", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/operator/teams/{team}", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|operator_settings|credential", "operator_console_session|operator.console|none|credential"}},

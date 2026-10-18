@@ -20,9 +20,11 @@ func TestIdentityLinkHTTPAddressDoesNotSelectAccountProperty(t *testing.T) {
 		}
 		f.provider.emailsBody = string(body)
 		w := f.complete(f.ready(t))
-		return w.Code == 303 && f.writer.committed == 1 && f.writer.claim.AccountID == "member" &&
-			f.writer.profile.Subject == "123" && f.writer.profile.Email != "member@example.test" &&
-			oauthCookie(w, "__Host-sw_session") == nil
+		var linked, account string
+		if err := f.store.DB().QueryRowContext(t.Context(), `SELECT i.email,a.email FROM identities i JOIN accounts a ON a.id=i.account_id WHERE i.provider='github' AND i.subject='123' AND i.account_id='member'`).Scan(&linked, &account); err != nil {
+			t.Fatal(err)
+		}
+		return w.Code == 303 && linked != "member@example.test" && account == "member@example.test" && oauthCookie(w, "__Host-sw_session") == nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
 		t.Fatal(err)
@@ -31,18 +33,19 @@ func TestIdentityLinkHTTPAddressDoesNotSelectAccountProperty(t *testing.T) {
 
 func TestIdentityLinkHTTPCommittedIdentityConflicts(t *testing.T) {
 	for _, tc := range []struct {
-		err    error
-		reason string
+		conflict string
+		reason   string
 	}{
-		{store.ErrIdentityLinkedElsewhere, "identity_linked_elsewhere"},
-		{store.ErrIdentityAlreadyLinked, "identity_already_linked"},
-		{store.ErrProviderAlreadyLinked, "provider_already_linked"},
+		{`INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','123','stranger','stranger@example.test',1,1)`, "identity_linked_elsewhere"},
+		{`INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','123','member','member@example.test',1,1)`, "identity_already_linked"},
+		{`INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','999','member','member@example.test',1,1)`, "provider_already_linked"},
 	} {
 		t.Run(tc.reason, func(t *testing.T) {
 			f := newIdentityLinkHTTP(t)
+			f.exec(t, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('stranger','stranger@example.test',1,1)`)
 			cookie := f.ready(t)
 			before, expiry := f.state(t)
-			f.writer.onConsume = func() { f.writer.failure = tc.err }
+			f.provider.onToken = func() { f.exec(t, tc.conflict) }
 			w := f.complete(cookie)
 			assertEngineError(t, w, 409, apierr.Conflict)
 			var result apierr.Envelope
@@ -50,9 +53,10 @@ func TestIdentityLinkHTTPCommittedIdentityConflicts(t *testing.T) {
 				t.Fatal(err)
 			}
 			after, expires := f.state(t)
-			if result.Error.Details["reason"] != tc.reason || f.writer.consumed != 1 || f.writer.committed != 0 ||
+			consumed, committed := f.links(t)
+			if result.Error.Details["reason"] != tc.reason || consumed != 1 || committed != 0 ||
 				f.provider.calls != 3 || before != after || expiry != expires || oauthCookie(w, "__Host-sw_session") != nil {
-				t.Fatalf("HTTP %d %s writer=%+v calls=%d", w.Code, w.Body, f.writer, f.provider.calls)
+				t.Fatalf("HTTP %d %s links=%d/%d calls=%d", w.Code, w.Body, consumed, committed, f.provider.calls)
 			}
 		})
 	}

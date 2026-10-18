@@ -166,21 +166,36 @@ credential release is audited. See [Git credentials](git-credentials.md).
 
 ## Secrets at rest
 
-Secrets remain encrypted with authenticated row binding. Their team, name,
-pipeline/shared scope and masking policy participate in the binding. Moving a
-ciphertext to a row with different access cannot make it readable there. A value
-that fails to open is an error, never an empty success value.
+Secrets remain encrypted with authenticated row binding. The kind of row
+(secret, git credential, submitted run environment or controller setting), its
+team, name, pipeline/shared scope and masking policy participate in the binding.
+Moving a ciphertext to a row with different access, or to a row of another kind,
+cannot make it readable there. A value that fails to open is an error, never an
+empty success value.
 
-Management reads and execution release are separate permissions. Execution
-release checks the accepted plan's declarations and current claim. Pool-restricted
-secrets require a granted reservation and intake-authorized pool access. Here
-execution cannot release pool-restricted secrets. A label spelling the pool name
-supplies neither condition. See [secret management](cli-secrets.md).
+### Rotating the secrets key
 
-The final schema is created once before launch. Legacy envelope conversion,
-store backfills and an open-auth bootstrap window are not part of the rewrite's
-startup contract. Provisioning and key rotation require their owning controller
-and store implementation.
+One key seals every team's secrets, git credentials and submitted run
+environments, and the session signing key. To replace it:
+
+1. Generate a new key (`openssl rand -base64 32`).
+2. Put the current key in the `secrets-key.previous` credential and the new key
+   in `secrets-key`, then restart every controller replica. Wait until no
+   replica still runs with the old key alone: one that does keeps sealing new
+   values under it.
+3. Run `sparkwing operator secrets rotate` with a deployment credential holding
+   `operator.tokens`, or `POST /api/v1/operator/secrets/rotate` from a console
+   session signed in within the last 10 minutes. It reseals every row under the
+   new key, one team at a time, and reports counts, `previous_key_only` (rows
+   that needed the previous key) and any row neither key opens. It is safe to
+   repeat, including after an interruption.
+4. Run `sparkwing operator secrets rotate --verify` (`?verify=1`). It writes
+   nothing and reports how many rows still open only under the previous key.
+   Run the rotation again until it reports `previous_key_only: 0`.
+5. When verification reports zero and nothing unreadable, remove
+   `secrets-key.previous` and restart every replica. A row reported unreadable
+   was already unreadable under both keys; rewrite or delete it first. Back up
+   the new key with the database.
 
 ## Release integrity
 
