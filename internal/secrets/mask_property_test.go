@@ -84,8 +84,7 @@ func assertNoSecretVisible(t *testing.T, iter int, secrets []string, in, got str
 	}
 }
 
-// jsonDecodedView decodes each escape sequence in s with encoding/json and
-// keeps every other byte, so the oracle shares no decoding with the masker.
+// safety: the oracle decodes escapes with encoding/json, never the masker's own decoder.
 func jsonDecodedView(s string) string {
 	escape := regexp.MustCompile(`\\(?:u[dD][89abAB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|["\\/bfnrt])`)
 	return escape.ReplaceAllStringFunc(s, func(sequence string) string {
