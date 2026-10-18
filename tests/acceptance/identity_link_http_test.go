@@ -136,7 +136,7 @@ func TestIdentityLinkHTTPCommitsVerifiedIdentityOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	if w.Code != 303 || w.Header().Get("Location") != "/account/sign-ins?linked=github" || f.linkedSubject(t) != "123" || email != "member@example.test" ||
-		binding != strings.Join([]string{hex.EncodeToString(digest[:]), "member", "github", fmt.Sprint(expiry)}, "\x00") || !time.Unix(0, expiry).After(time.Now()) {
+		binding != fmt.Sprintf(`[%q,"member","github","%d"]`, hex.EncodeToString(digest[:]), expiry) || !time.Unix(0, expiry).After(time.Now()) {
 		t.Fatalf("HTTP %d %s binding=%q", w.Code, w.Body.String(), binding)
 	}
 	after, renewed := f.state(t)

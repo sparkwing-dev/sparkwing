@@ -5,9 +5,9 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -156,7 +156,8 @@ func identityLinkAuthorityTx(ctx context.Context, tx *storeTx, claim capability.
 }
 
 func identityLinkBinding(claim capability.IdentityLink) string {
-	return strings.Join([]string{claim.Authority.ID, claim.AccountID, claim.Provider, strconv.FormatInt(claim.ExpiresAt.UnixNano(), 10)}, "\x00")
+	encoded, _ := json.Marshal([]string{claim.Authority.ID, claim.AccountID, claim.Provider, strconv.FormatInt(claim.ExpiresAt.UnixNano(), 10)})
+	return string(encoded)
 }
 
 func identityLinkInvalid() error {
