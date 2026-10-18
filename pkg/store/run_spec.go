@@ -98,18 +98,19 @@ func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (Admission
 	}
 	var result AdmissionResult
 	var installed *localRunSecrets
+	var key localSecretKey
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		t.s.uninstallLocalSecrets(key, &installed)
 		var err error
 		result, err = admitRun(ctx, tx, t.team, request, tx.now())
 		if err == nil {
+			key = localSecretKey{t.team, result.RunID}
 			installed, err = t.s.installLocalSecrets(t.team, result, request.LocalSecrets)
 		}
 		return err
 	})
 	if err != nil {
-		if installed != nil {
-			t.s.localSecrets.CompareAndDelete(localSecretKey{t.team, result.RunID}, installed)
-		}
+		t.s.uninstallLocalSecrets(key, &installed)
 		return AdmissionResult{}, err
 	}
 	return result, nil
