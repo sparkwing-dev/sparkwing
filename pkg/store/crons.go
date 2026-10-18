@@ -237,12 +237,8 @@ var cronScheduleInsertPlaceholders = placeholders(strings.Count(cronScheduleInse
 
 const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, detail, args`
 
-// ErrCronScheduleTaken reports an arm whose schedule id another team already
-// holds. Ids are unique across the store and derive from the team as well as
-// the repository, pipeline and name, so this is a collision rather than a
-// key two teams share, and the second team is refused rather than handed the
-// first team's row.
-var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
+// ErrCronScheduleTaken reports an arm or rename whose identity another of the team's schedules already holds.
+var ErrCronScheduleTaken = errors.New("store: another schedule holds this identity")
 
 // ScheduleRepositoryResolver resolves manual schedule identity without granting App authority.
 type ScheduleRepositoryResolver interface {
@@ -260,8 +256,8 @@ type ScheduleRepositoryResolver interface {
 // [CronScheduleDefaultName], an empty Overlap means CronOverlapSkip, and
 // an empty Where means CronWhereLocal. A row that recorded no ArmedBy takes
 // the one this arming carries, so a schedule armed before the host recorded
-// an owner gains one on its next push. An id another team holds is
-// [ErrCronScheduleTaken].
+// an owner gains one on its next push. Ids are unique within a team; a
+// collision with another of the team's schedules is [ErrCronScheduleTaken].
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error) {
 	if sched.ID == "" || sched.RepoPath == "" || sched.Pipeline == "" {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: id, repo_path and pipeline required")
@@ -336,8 +332,6 @@ func (t *Tenant) armCronScheduleTx(ctx context.Context, tx *storeTx, sched CronS
 		if armedAt.IsZero() {
 			armedAt = now
 		}
-		// safety: the id spans every team, so an id another team holds fails
-		// this insert rather than reaching an update that would rewrite their row.
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO cron_schedules (team, `+cronScheduleInsertColumns+`)
 VALUES (?, `+cronScheduleInsertPlaceholders+`)`,

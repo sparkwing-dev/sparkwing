@@ -912,7 +912,7 @@ func TestResolveCronDueSkipsASecondFiredRowForTheSameInstantAndRun(t *testing.T)
 }
 
 // Two teams arm one repository, pipeline and name under their own ids, and
-// each keeps its own row. An id another team holds is still refused.
+// each keeps its own row. An id another team holds neither blocks nor touches it.
 func TestArmCronScheduleKeysTheRepositoryPipelineAndNamePerTeam(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
@@ -935,7 +935,19 @@ func TestArmCronScheduleKeysTheRepositoryPipelineAndNamePerTeam(t *testing.T) {
 		t.Fatalf("the default team's schedule after team B's arm: %+v, %v", own, err)
 	}
 	sched.ID, sched.Pipeline = "crn_default", "weekly"
-	if _, _, err := tenantB.ArmCronSchedule(ctx, sched, cronBase); !errors.Is(err, store.ErrCronScheduleTaken) {
-		t.Fatalf("team B arming the default team's id = %v, want ErrCronScheduleTaken", err)
+	if _, created, err := tenantB.ArmCronSchedule(ctx, sched, cronBase); err != nil || !created {
+		t.Fatalf("team B arming an id the default team holds = created %v, %v", created, err)
+	}
+	if own, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, "crn_default"); err != nil || own.Pipeline != "nightly" {
+		t.Fatalf("team B's arm changed the default team's schedule: %+v, %v", own, err)
+	}
+	if theirs, err := tenantB.GetCronSchedule(ctx, "crn_default"); err != nil || theirs.Pipeline != "weekly" || theirs.Team != "team-b" {
+		t.Fatalf("team B's schedule under the shared id: %+v, %v", theirs, err)
+	}
+	if err := tenantB.DeleteCronSchedule(ctx, "crn_default"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, "crn_default"); err != nil {
+		t.Fatalf("team B's delete removed the default team's schedule: %v", err)
 	}
 }

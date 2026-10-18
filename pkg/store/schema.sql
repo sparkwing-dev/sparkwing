@@ -321,7 +321,7 @@ CREATE TABLE approvals (
 );
 
 CREATE TABLE cron_schedules (
-    id TEXT NOT NULL PRIMARY KEY,
+    id TEXT NOT NULL,
     repo_path TEXT NOT NULL,
     github_installation_id BIGINT NOT NULL DEFAULT 0,
     github_repository_id BIGINT NOT NULL DEFAULT 0,
@@ -356,7 +356,8 @@ CREATE TABLE cron_schedules (
     override_set_at BIGINT,
     git_branch TEXT NOT NULL DEFAULT '',
     team TEXT NOT NULL REFERENCES teams(name),
-    repo_key TEXT NOT NULL
+    repo_key TEXT NOT NULL,
+    PRIMARY KEY(team,id)
 );
 
 CREATE TABLE cron_fires (
