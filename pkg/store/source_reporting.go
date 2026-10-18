@@ -16,6 +16,9 @@ func bindingSourceReportTx(ctx context.Context, tx *storeTx, c capability.Capabi
 	if err := expansionAuthorityTx(ctx, tx, Team(c.Team), request, tx.now()); err != nil {
 		return err
 	}
+	if err := lockStateRunTx(ctx, tx, Team(c.Team), b.RunID); err != nil {
+		return err
+	}
 	run, err := readRunTx(ctx, tx, Team(c.Team), b.RunID)
 	if err != nil {
 		return err
@@ -34,9 +37,6 @@ func checkMetadataWriterTx(ctx context.Context, tx *storeTx, team Team, ref Node
 	if step != "" {
 		return checkResultWriterTx(ctx, tx, team, ref, actor)
 	}
-	if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil {
-		return NodeRow{}, err
-	}
 	p, err := resolveActorTx(ctx, tx, actor)
 	if err != nil {
 		return NodeRow{}, err
@@ -52,6 +52,9 @@ func checkMetadataWriterTx(ctx context.Context, tx *storeTx, team Team, ref Node
 			return NodeRow{}, holderRefusal()
 		}
 		err = checkOwnerLeaseTx(ctx, tx, team, actor, ref.RunID, tx.now())
+		if err == nil {
+			err = lockStateRunTx(ctx, tx, team, ref.RunID)
+		}
 		if err == nil {
 			run, readErr := readRunTx(ctx, tx, team, ref.RunID)
 			if readErr != nil {

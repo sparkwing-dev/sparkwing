@@ -35,18 +35,32 @@ func newRecordingStore(t *testing.T) (*Store, *sqlStatementRecorder) {
 type sqlStatementRecorder struct {
 	mu         sync.Mutex
 	statements []string
+	calls      []recordedSQLCall
 }
 
-func (r *sqlStatementRecorder) record(statement string) {
+type recordedSQLCall struct {
+	statement string
+	args      []driver.NamedValue
+}
+
+func (r *sqlStatementRecorder) record(statement string, args []driver.NamedValue) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.statements = append(r.statements, statement)
+	r.calls = append(r.calls, recordedSQLCall{statement, append([]driver.NamedValue(nil), args...)})
 }
 
 func (r *sqlStatementRecorder) reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.statements = nil
+	r.calls = nil
+}
+
+func (r *sqlStatementRecorder) snapshotCalls() []recordedSQLCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]recordedSQLCall(nil), r.calls...)
 }
 
 func (r *sqlStatementRecorder) snapshot() []string {
@@ -71,12 +85,12 @@ type recordingSQLiteConn struct {
 }
 
 func (c *recordingSQLiteConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	c.recorder.record(query)
+	c.recorder.record(query, args)
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 }
 
 func (c *recordingSQLiteConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	c.recorder.record(query)
+	c.recorder.record(query, args)
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
 }
 

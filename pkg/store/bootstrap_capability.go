@@ -50,6 +50,7 @@ func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.P
 	}
 	created := false
 	err := s.inTx(ctx, func(tx *storeTx) error {
+		created = false
 		prefix, err := lockBootstrapGateTx(ctx, tx)
 		if err != nil {
 			return err

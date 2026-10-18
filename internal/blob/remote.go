@@ -94,7 +94,10 @@ func (c *remoteCache) Memo(ctx context.Context, key MemoKey, budget Budget) (Mem
 		return MemoHit{}, err
 	}
 	result, err := c.lookup(ctx, RecordKey{Kind: KindMemo, Name: MemoRecordName, Scope: Scope{Repo: key.Repo, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}}, budget)
-	if err != nil || !result.Found {
+	if err != nil {
+		return MemoHit{}, err
+	}
+	if !result.Found {
 		return MemoHit{}, ctx.Err()
 	}
 	return MemoHit{Found: true, Output: runspec.Optional[Digest]{Set: true, Value: result.Record.Digest}, Manifest: result.Record.ManifestDigest, Members: result.Members, ReadSet: result.ReadSet}, nil
@@ -108,7 +111,10 @@ func (c *remoteCache) Depcache(ctx context.Context, key DepcacheKey, budget Budg
 		return Record{}, err
 	}
 	result, err := c.lookup(ctx, RecordKey{Kind: KindDepcache, Scope: Scope{Repo: key.Repo, Key: key.Key}, Name: key.Name}, budget)
-	if err != nil || !result.Found {
+	if err != nil {
+		return Record{}, err
+	}
+	if !result.Found {
 		if err := ctx.Err(); err != nil {
 			return Record{}, err
 		}

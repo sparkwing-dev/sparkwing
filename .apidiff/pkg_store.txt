@@ -147,10 +147,6 @@ type ApprovalResolution struct {
 const ApprovalResolutionApproved = "approved"
 const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
-func Argon2Concurrency(budget int64) int
-const Argon2HashBytes = int64(argonMemory) << 10
-func Argon2Shed() int64
-func Argon2Slots() int
 type BillingStanding struct {
 	Tier           string
 	CloudVCPU      int64
@@ -717,8 +713,6 @@ const DecisionExpand DecisionKind = "expand"
 type DecisionKind string
 const DecisionReady DecisionKind = "ready"
 const DecisionTerminal DecisionKind = "terminal"
-const DefaultArgon2AcquireTimeout = 250 * time.Millisecond
-const DefaultArgon2MemoryBudget = int64(256) << 20
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
@@ -824,7 +818,6 @@ var ErrFreeStoragePaused = errors.New("free storage is paused; buy credits or jo
 var ErrGitCredentialLimit = fmt.Errorf("store: a team stores at most %d git credentials", MaxGitCredentialsPerTeam)
 var ErrGitHubAppAutomationRevoked = errors.New("store: repository automation consent is no longer current")
 var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
-var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
 var ErrIdentityAlreadyLinked = errors.New("store: that sign-in is already linked to this account")
 var ErrIdentityLinkedElsewhere = errors.New("store: that sign-in belongs to another account")
@@ -861,7 +854,6 @@ var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warn
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tokens as a team may")
-var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
 var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
@@ -1121,6 +1113,7 @@ type IntakePolicyFacts struct {
 }
 func IntakeQueueDepth(ctx context.Context, resolver capability.AuthorityResolver, team Team) (int, error)
 type IntakeRequest struct {
+	SubmittedEnv       map[string][]byte
 	Authority          capability.AuthorityRef
 	Request            runspec.Request
 	IdempotencyKey     string
@@ -1507,7 +1500,6 @@ func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now tim
 func (o *Operator) StorageSettings(ctx context.Context) (StorageSettings, error)
 func (o *Operator) Team() Team
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
-func (o *Operator) TriggerTeam(ctx context.Context, triggerID string) (Team, error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
 func (o *Operator) WarmCPUClassCores(ctx context.Context) (int64, error)
 func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error)
@@ -2163,7 +2155,6 @@ type SessionKeyCipher interface {
 	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
 	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
-func SetArgon2MemoryBudget(budget int64) int
 func SetTestBusyTimeout(t interface{ Cleanup(func()) }, ms int)
 type SignInProfile struct {
 	Provider      string
@@ -2458,6 +2449,7 @@ func (s *Store) SetIntakePolicy(policy IntakePolicy)
 func (s *Store) SetPlanSecretOpener(opener PlanSecretOpener)
 func (s *Store) SetProvisionPolicy(policy ProvisionPolicy)
 func (s *Store) SetResultBlobRecords(manifests BlobManifestReader)
+func (s *Store) SetRunEnvironmentCipher(cipher SessionKeyCipher)
 func (s *Store) SetSessionKeyCipher(cipher SessionKeyCipher)
 func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignUpGate, error)
 func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setBy string, now time.Time) (SignUpGate, error)
@@ -2649,7 +2641,7 @@ func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Author
 func (t *Tenant) ReadDataBlob(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error)
 func (t *Tenant) ReadFailure(ctx context.Context, source NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error)
 func (t *Tenant) ReadJobOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error)
-func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (LocalPublication, error)
+func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (publication LocalPublication, err error)
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error)
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
 func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authorized) (capability.OIDCFacts, error)
@@ -2663,6 +2655,7 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (RunSnapshot, error)
 func (t *Tenant) ReadSourceUpload(ctx context.Context, authority capability.AuthorityRef, id string) (SourceUpload, error)
 func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64, limit int) ([]StateEvent, error)
+func (t *Tenant) ReadSubmittedEnvironment(ctx context.Context, authority capability.AuthorityRef) (values map[string][]byte, err error)
 func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error)
 func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error)
 func (t *Tenant) RecordAuthorizedBillingPageFailure(ctx context.Context, a capability.Authorized, page capability.BillingPage) error
@@ -2679,7 +2672,7 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 func (t *Tenant) RejectRunEffect(ctx context.Context, delivery EffectDelivery) error
 func (t *Tenant) ReleaseAuthorizedSlot(ctx context.Context, a capability.Authorized, key, id, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (t *Tenant) ReleaseCreditFreezes(ctx context.Context, disputeID, actor, reason string, now time.Time) (int64, error)
-func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized capability.Authorized, provider GitHubSourceProvider) (githubapp.Token, error)
+func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized capability.Authorized, provider GitHubSourceProvider) (source.Credential, error)
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error)
 func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capability.Authorized) (GitCredential, capability.SourceReleaseAudit, error)
 func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host string) error
@@ -2871,7 +2864,6 @@ func ValidComputeLimit(name string) bool
 func ValidRunnerName(name string) bool
 func ValidateEventKind(kind string) error
 func ValidateGitHubTagPatterns(patterns []string) error
-func ValidateRunInvocation(r Run) error
 func ValidateSlug(slug string) error
 func VerifiedAppIntake(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (VerifiedRunDelivery, error)
 type VerifiedRunDelivery struct {
@@ -2948,12 +2940,12 @@ func WithoutCreditMetering(ctx context.Context) context.Context
 
 # methods on un-declared receiver types (likely a bug)
 func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, result NodeResult) error
-func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
+func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (record blob.Record, err error)
 func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, ref NodeRef, source MaterializeSource) (materializedRecords, error)
-func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
-func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error)
-func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)
-func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error)
+func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (hit blob.MemoHit, err error)
+func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (hit blob.DepcacheHit, err error)
+func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (hit blob.MemoHit, err error)
+func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLookup) (hit blob.RecordLookupResult, err error)
 func (nativeProvisionPolicy) AuthorizeProvision(ctx context.Context, resolver capability.AuthorityResolver, spec capability.ProvisionSpec) error
 func (values planSecretValues) ContainsSecret(identifier string) bool
 func (sharedIntakeContracts) CarryRetry(input runspec.RetryInput) (runspec.RetrySnapshot, error)

@@ -90,6 +90,7 @@ func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.Au
 	var installed *localRunSecrets
 	var key localSecretKey
 	err := s.inTx(ctx, func(tx *storeTx) error {
+		s.uninstallLocalSecrets(key, &installed)
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
@@ -135,8 +136,15 @@ func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.Au
 		installed, err = s.installLocalSecrets(tenant.team, AdmissionResult{RunID: run.ID, Request: run.Request}, values)
 		return err
 	})
-	if err != nil && installed != nil {
-		s.localSecrets.CompareAndDelete(key, installed)
+	if err != nil {
+		s.uninstallLocalSecrets(key, &installed)
 	}
 	return err
+}
+
+func (s *Store) uninstallLocalSecrets(key localSecretKey, installed **localRunSecrets) {
+	if *installed != nil {
+		s.localSecrets.CompareAndDelete(key, *installed)
+		*installed = nil
+	}
 }

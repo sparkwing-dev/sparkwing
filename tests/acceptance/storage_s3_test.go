@@ -35,7 +35,7 @@ func (s collectionS3) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	out := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody, Request: r}
 	switch r.Method {
-	case http.MethodGet:
+	case http.MethodGet, http.MethodHead:
 		if r.URL.Query().Has("lifecycle") {
 			out.Body = io.NopCloser(strings.NewReader(`<LifecycleConfiguration><Rule><ID>free</ID><Filter><Prefix>deployment/nested-root/logs/r30/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule><Rule><ID>standard</ID><Filter><Prefix>deployment/nested-root/logs/r90/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`))
 			break
@@ -85,6 +85,12 @@ func (s collectionS3) RoundTrip(r *http.Request) (*http.Response, error) {
 			s.objects[key] = bytes.Clone(body)
 		}
 	case http.MethodDelete:
+		if match := r.Header.Get("If-Match"); match != "" {
+			if body, exists := s.objects[key]; exists && match != fmt.Sprintf(`"%x"`, sha256.Sum256(body)) {
+				out.StatusCode = http.StatusPreconditionFailed
+				break
+			}
+		}
 		delete(s.objects, key)
 	default:
 		return nil, fmt.Errorf("unexpected S3 request: %s %s", r.Method, r.URL)

@@ -134,8 +134,8 @@ func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.
 	return current, until, nil
 }
 
-// safety: slot mutations lock admission, controller lease, authority, owner unit, sorted runs/nodes, then group.
-// Claims take authority before work too, so neither path can wait for authority while holding the other's work.
+// safety: slot mutations lock admission, controller lease, authority, owner unit, sorted runs/nodes, then group,
+// following STORE-DATA.md lock order.
 func authorizedConcurrency[T any](ctx context.Context, t *Tenant, a capability.Authorized, key, operation string, work func(*storeTx, capability.Authorized, time.Time) (T, error)) (T, error) {
 	var zero T
 	if key != a.Target.SlotKey {

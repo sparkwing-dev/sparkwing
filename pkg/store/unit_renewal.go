@@ -13,7 +13,11 @@ func (s *Store) renewUnit(ctx context.Context, prefix string, executing bool) (L
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
-		principal, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, prefix); err != nil {
+			return err
+		}
+		principal, err := tx.ResolveAuthority(ctx, ref)
 		if err != nil {
 			return err
 		}

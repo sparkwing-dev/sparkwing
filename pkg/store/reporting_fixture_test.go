@@ -131,3 +131,10 @@ func creatingPrincipal(ctx context.Context) string {
 	principal, _ := ctx.Value(creatingPrincipalKey{}).(string)
 	return principal
 }
+
+func nullableTimeNS(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UnixNano()
+}

@@ -2,6 +2,7 @@ package blob_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -52,7 +53,7 @@ func FuzzRemoteCacheSelectsServerDefaultRef(f *testing.F) {
 		localRef := blob.RefScope{Ref: ref, Verified: verified}
 		hit, err := cache.Memo(t.Context(), blob.MemoKey{Repo: "gh:123", Ref: localRef, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, budget)
 		if !attested {
-			if err != nil || hit.Found {
+			if !errors.Is(err, blob.ErrDigestNotReadable) || hit.Found {
 				t.Fatalf("unverified memo selection: %+v %v", hit, err)
 			}
 			return

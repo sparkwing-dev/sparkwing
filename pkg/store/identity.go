@@ -384,17 +384,25 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpCond
 }
 
 func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
-	tx, err := s.beginTx(ctx)
+	var result SignInResult
+	err := s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		result, err = resolveSignInTx(ctx, tx, p, c, now)
+		return err
+	})
 	if err != nil {
 		return SignInResult{}, err
 	}
-	defer rollbackOrLog(tx)
+	return result, nil
+}
+
+func resolveSignInTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
 	at := now.UTC().UnixNano()
 
 	var res SignInResult
 	var accountID string
 	var linked int
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT account_id, linked FROM identities WHERE provider = ? AND subject = ?`,
 		p.Provider, p.Subject).Scan(&accountID, &linked)
 	switch {
@@ -509,9 +517,6 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 		return SignInResult{}, err
 	}
 	if res.Account, err = accountTx(ctx, tx, accountID); err != nil {
-		return SignInResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return SignInResult{}, err
 	}
 	return res, nil
@@ -864,10 +869,8 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 		return "", "", nil, err
 	}
 	defer rollbackOrLog(tx)
-	// safety: the session insert takes the team row's key-share lock through its
-	// foreign key, after this transaction holds the account lock, while unlink and
-	// team mutations lock the team and then the account. Taking the same share
-	// lock first keeps one order: team, then account.
+	// safety: the session insert's foreign key takes a team key-share after the
+	// account lock; taking it first keeps team before account (STORE-DATA.md lock order).
 	if team != "" {
 		var name string
 		err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=?`+tx.forKeyShare(), string(team)).Scan(&name)

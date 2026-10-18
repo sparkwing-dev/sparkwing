@@ -9,14 +9,22 @@ import (
 )
 
 func (o *Operator) maintainRetention(ctx context.Context, request RetentionRequest) (RetentionResult, error) {
-	if request.Limit <= 0 {
-		return RetentionResult{}, fmt.Errorf("retention limit must be positive")
-	}
-	tx, err := o.s.beginTx(ctx)
+	var result RetentionResult
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		result, err = maintainRetentionTx(ctx, tx, request)
+		return err
+	})
 	if err != nil {
 		return RetentionResult{}, err
 	}
-	defer rollbackOrLog(tx)
+	return result, nil
+}
+
+func maintainRetentionTx(ctx context.Context, tx *storeTx, request RetentionRequest) (RetentionResult, error) {
+	if request.Limit <= 0 {
+		return RetentionResult{}, fmt.Errorf("retention limit must be positive")
+	}
 	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance", tx.now()); err != nil {
 		return RetentionResult{}, err
 	}
@@ -72,9 +80,6 @@ func (o *Operator) maintainRetention(ctx context.Context, request RetentionReque
 		return RetentionResult{}, err
 	}
 	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance", tx.now()); err != nil {
-		return RetentionResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return RetentionResult{}, err
 	}
 	return result, nil

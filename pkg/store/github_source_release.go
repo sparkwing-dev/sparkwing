@@ -125,10 +125,8 @@ func githubSourceMissing(remedy string) error {
 func (t *Tenant) githubSourceInstallationTx(ctx context.Context, tx *storeTx, sealed runspec.SealedRequest, id int64) (int64, string, error) {
 	request := sealed.Request
 	var installation int64
-	var slug string
-	scheduled := false
-	scheduleQuery := `SELECT a.installation_id,a.repository FROM cron_schedules c JOIN github_app_automation a ON a.team=c.team AND a.installation_id=c.github_installation_id AND a.repository_id=c.github_repository_id WHERE c.team=? AND c.id=? AND c.repo_key=? AND c.github_repository_id=? AND c.pipeline=?`
-	scheduleArgs := []any{t.team, sealed.AuthorityRef.ID, request.Git.Repository.Key, id, request.Pipeline}
+	var slug, query, remedy string
+	var args []any
 	app := request.Git.App
 	if app.Set {
 		if app.Value.RepositoryID != id || app.Value.VerifiedAt.IsZero() || app.Value.SHA != request.Git.SHA || app.Value.Ref != request.Git.Ref {
@@ -145,10 +143,12 @@ func (t *Tenant) githubSourceInstallationTx(ctx context.Context, tx *storeTx, se
 		}
 		slug = repo.Slug()
 	} else {
-		err := tx.QueryRowContext(ctx, `SELECT installation_id,repository FROM github_app_triggers WHERE team=? AND repository_id=? ORDER BY created_at LIMIT 1`+tx.forShare(), t.team, id).Scan(&installation, &slug)
+		query, args, remedy = `SELECT installation_id,repository FROM github_app_triggers WHERE team=? AND repository_id=? ORDER BY created_at LIMIT 1`, []any{t.team, id}, "a team owner subscribes it before the App can read a typed repository"
+		err := tx.QueryRowContext(ctx, query, args...).Scan(&installation, &slug)
 		if errors.Is(err, sql.ErrNoRows) && sealed.AuthorityRef.Kind == "schedule" && request.Origin == runspec.OriginSchedule {
-			err = tx.QueryRowContext(ctx, scheduleQuery, scheduleArgs...).Scan(&installation, &slug)
-			scheduled = err == nil
+			query = `SELECT a.installation_id,a.repository FROM cron_schedules c JOIN github_app_automation a ON a.team=c.team AND a.installation_id=c.github_installation_id AND a.repository_id=c.github_repository_id WHERE c.team=? AND c.id=? AND c.repo_key=? AND c.github_repository_id=? AND c.pipeline=?`
+			args, remedy = []any{t.team, sealed.AuthorityRef.ID, request.Git.Repository.Key, id, request.Pipeline}, "restore the schedule's repository automation consent"
+			err = tx.QueryRowContext(ctx, query, args...).Scan(&installation, &slug)
 		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, "", githubSourceMissing("a team owner subscribes it before the App can read a typed repository")
@@ -157,15 +157,16 @@ func (t *Tenant) githubSourceInstallationTx(ctx context.Context, tx *storeTx, se
 			return 0, "", err
 		}
 	}
+	// safety: the installation locks before its subscription; see STORE-DATA.md lock order.
 	var current int64
 	err := tx.QueryRowContext(ctx, `SELECT installation_id FROM github_app_installations WHERE team=? AND installation_id=? AND suspended=0`+tx.forUpdate(), t.team, installation).Scan(&current)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", githubSourceMissing("install the team's GitHub App on " + slug)
 	}
-	if err == nil && scheduled {
-		err = tx.QueryRowContext(ctx, scheduleQuery+tx.forShare(), scheduleArgs...).Scan(&installation, &slug)
+	if err == nil && query != "" {
+		err = tx.QueryRowContext(ctx, query+tx.forShare(), args...).Scan(&installation, &slug)
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, "", githubSourceMissing("restore the schedule's repository automation consent")
+			return 0, "", githubSourceMissing(remedy)
 		}
 		if err == nil && installation != current {
 			return 0, "", bindingRefusal()

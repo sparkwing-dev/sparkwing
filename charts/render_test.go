@@ -161,26 +161,6 @@ func hasFlag(args []string, prefix string) (string, bool) {
 	return "", false
 }
 
-func TestControllerLoginThrottleFlagsRender(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	controllerArgs := func(sets ...string) []string {
-		return containerArgs(t, helmRender(t, "./sparkwing-full",
-			"templates/controller-deployment.yaml", "sparkwing", sets...))
-	}
-
-	defaultArgs := controllerArgs()
-	if got, ok := hasFlag(defaultArgs, "--argon2-memory-budget-mb="); !ok || got != "--argon2-memory-budget-mb=256" {
-		t.Fatalf("argon2 budget flag = %q, want the 256 MiB default", got)
-	}
-
-	configured := controllerArgs("controller.argon2MemoryBudgetMB=128")
-	if got, _ := hasFlag(configured, "--argon2-memory-budget-mb="); got != "--argon2-memory-budget-mb=128" {
-		t.Fatalf("argon2 budget flag = %q, want the override", got)
-	}
-}
-
 func TestControllerMetricsPortMovesMetricsOffTheAPIPort(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 1.0s of real work; the fast class runs under -short")

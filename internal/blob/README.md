@@ -61,7 +61,8 @@ record transaction also checks the pipeline and job against the sealed plan.
 store and a record store. Its lookups set `VerifiedDefaultOnly`, which requires
 the record owner to resolve the verified default branch from sealed evidence.
 The client also checks returned evidence and verifies the bytes. A memo lookup
-failure becomes a miss. A depcache failure returns `ErrNotFound` for a cold start.
+without a matching record becomes a miss. Memo and depcache failures while
+reading a referenced digest remain errors. Missing objects return `ErrNotFound`.
 The local key's ref is not a remote selector. Remote lookups validate their
 logical key fields and leave the verified default ref to the server, including
 when the local reader has no ref.
@@ -237,8 +238,13 @@ be uploaded by principals with different trust.
 
 Both backends implement `store.BlobDeleter` through `DeleteBlob`. The collector
 passes a tenant and digest after rechecking reachability under its maintenance
-lease. The backend derives that tenant's CAS key, and an absent object succeeds
-on replay. The old controller output pruner and bucket-measurement expiry
+lease. Before each physical delete it rechecks the live lease and the same
+collecting tombstone. S3 observes the object's ETag and deletes with `If-Match`.
+A changed ETag or failed conditional delete preserves the tombstone for retry.
+The backend derives that tenant's CAS key, and an absent object succeeds
+on replay. A process paused after the last check can still race publication,
+including identical S3 bytes with the same ETag. Required reads refuse missing
+objects, and verified readers refuse incomplete bytes. The old controller output pruner and bucket-measurement expiry
 callback are removed. The controller supplies its configured backend to the
 shared leased maintenance pass. Standalone S3 construction installs this backend.
 Standalone controllers install either backend through `Server.WithDataObjects`.

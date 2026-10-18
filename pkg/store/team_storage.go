@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"math/rand/v2"
+	"time"
 )
 
 // StorageKind names the storage inventory class.
@@ -39,7 +41,38 @@ func execStatements(ctx context.Context, tx *storeTx, script string) error {
 	return nil
 }
 
-func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {
+// safety: a PostgreSQL deadlock or serialization failure aborts only the victim, so inTx
+// reruns fn in a fresh transaction; fn resets any state it shares with its caller.
+func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) error {
+	return retryConflict(ctx, func() error { return s.inTxOnce(ctx, fn) }, sleepCtx)
+}
+
+func retryConflict(ctx context.Context, attempt func() error, sleep func(context.Context, time.Duration) error) error {
+	const attempts, base, ceiling = 5, 10 * time.Millisecond, 250 * time.Millisecond
+	var err error
+	for i := range attempts {
+		if err = attempt(); err == nil || !isPGConflict(err) || i == attempts-1 {
+			return err
+		}
+		if sleep(ctx, rand.N(min(base<<i, ceiling))) != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (s *Store) inTxOnce(ctx context.Context, fn func(*storeTx) error) (err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err

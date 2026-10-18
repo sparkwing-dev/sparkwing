@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -111,7 +112,10 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a c
 			return "", err
 		}
 		if err != nil {
-			skipped = append(skipped, secretsRotateSkip{Name: row.Name, Pipeline: row.Pipeline})
+			// safety: a retried store transaction calls this again for the same row.
+			if skip := (secretsRotateSkip{Name: row.Name, Pipeline: row.Pipeline}); !slices.Contains(skipped, skip) {
+				skipped = append(skipped, skip)
+			}
 			return row.Value, nil
 		}
 		return seal(binding, plain)
