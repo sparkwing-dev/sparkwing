@@ -96,10 +96,14 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 	if _, err := client.run(ctx, "", "", "init", "--bare", "--quiet", "--object-format="+format, repository); err != nil {
 		return nil, false, err
 	}
-	if _, err := client.run(ctx, repository, remote, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--filter=blob:none", "--", remote, sha); err != nil {
+	if _, err := client.run(ctx, repository, remote, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--filter=blob:limit="+strconv.FormatInt(limits.ProjectConfigBytes+1, 10), "--", remote, sha); err != nil {
 		return nil, false, err
 	}
-	return readCommittedBlob(ctx, client, repository, remote, sha+":"+name)
+	// safety: a filtered blob is absent rather than fetched on demand, so an
+	// oversized configuration never reaches the controller's disk.
+	local := *client
+	local.env = append(append([]string{}, client.env...), "GIT_NO_LAZY_FETCH=1")
+	return readCommittedBlob(ctx, &local, repository, sha+":"+name)
 }
 
 func readLocalCommitFile(ctx context.Context, spec Spec, sha, name string, options Options) (_ []byte, _ bool, err error) {
@@ -134,10 +138,14 @@ func readLocalCommitFile(ctx context.Context, spec Spec, sha, name string, optio
 	return content, true, nil
 }
 
-func readCommittedBlob(ctx context.Context, client *gitClient, repository, remote, object string) ([]byte, bool, error) {
-	out, err := client.output(ctx, repository, remote, object+"\n", "cat-file", "--batch-check", "--follow-symlinks")
+func readCommittedBlob(ctx context.Context, client *gitClient, repository, object string) ([]byte, bool, error) {
+	tooLarge := &apierr.Error{Code: apierr.InvalidArgs, Message: "execution commit configuration is invalid: " + projectconfig.ErrTooLarge.Error()}
+	out, err := client.output(ctx, repository, "", object+"\n", "cat-file", "--batch-check", "--follow-symlinks")
 	if err != nil {
-		return nil, false, err
+		if ctx.Err() != nil {
+			return nil, false, err
+		}
+		return nil, false, errors.Join(tooLarge, err)
 	}
 	header, _, _ := strings.Cut(string(out), "\n")
 	fields := strings.Fields(header)
@@ -148,9 +156,9 @@ func readCommittedBlob(ctx context.Context, client *gitClient, repository, remot
 			return nil, false, fmt.Errorf("source git reported an invalid object size")
 		}
 		if size > limits.ProjectConfigBytes {
-			return nil, false, &apierr.Error{Code: apierr.InvalidArgs, Message: "execution commit configuration is invalid: " + projectconfig.ErrTooLarge.Error()}
+			return nil, false, tooLarge
 		}
-		content, err := client.output(ctx, repository, remote, "", "cat-file", "blob", fields[0])
+		content, err := client.output(ctx, repository, "", "", "cat-file", "blob", fields[0])
 		if err == nil && int64(len(content)) != size {
 			err = fmt.Errorf("source git returned a configuration of the wrong size")
 		}

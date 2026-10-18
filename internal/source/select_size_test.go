@@ -2,7 +2,10 @@ package source_test
 
 import (
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -52,3 +55,48 @@ func TestParseRefusesConfigurationAboveTheSizeLimit(t *testing.T) {
 		t.Fatalf("oversized parse = %v", err)
 	}
 }
+
+func TestTenantSelectionNeverDownloadsAnOversizedConfiguration(t *testing.T) {
+	repo, _ := sourcetest.Repository(t)
+	sourcetest.Git(t, repo, "config", "uploadpack.allowFilter", "true")
+	big := make([]byte, 20<<20)
+	for i := range big {
+		big[i] = byte('a' + i*7919%26)
+	}
+	copy(big, "pipelines: []\n#")
+	sourcetest.Write(t, filepath.Join(repo, ".sparkwing", projectconfig.Filename), string(big)+"\n")
+	sourcetest.Git(t, repo, "add", ".")
+	sourcetest.Git(t, repo, "commit", "-qm", "oversized configuration")
+	execution := sourcetest.Git(t, repo, "rev-parse", "HEAD")
+	remote := "https://8.8.8.8/team/oversized"
+	sourcetest.Remote(t, map[string]string{remote: "file://" + repo})
+	shim, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin, sizes := t.TempDir(), filepath.Join(t.TempDir(), "sizes")
+	wrapper := "#!/bin/sh\n" + shellWord(shim) + " \"$@\"\nrc=$?\nfor a in \"$@\"; do case \"$a\" in */objects.git) du -sk \"$a\" >> " + shellWord(sizes) + ";; esac; done\nexit $rc\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	spec := source.Spec{RepoKey: "git:8.8.8.8/team/oversized", RemoteURL: remote}
+	options := source.Options{Workspace: t.TempDir(), Access: &access{}, Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
+	_, _, cfg, err := source.Select(t.Context(), spec, "build", runspec.Git{SHA: execution}, runspec.Source{}, "", options)
+	var refused *apierr.Error
+	if !errors.As(err, &refused) || refused.Code != apierr.InvalidArgs || !strings.Contains(err.Error(), "1 MiB") || cfg != nil {
+		t.Fatalf("oversized tenant configuration = %v, %v", cfg, err)
+	}
+	raw, err := os.ReadFile(sizes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		kb, err := strconv.Atoi(strings.Fields(line)[0])
+		if err != nil || int64(kb)<<10 > limits.ProjectConfigBytes {
+			t.Fatalf("selection object store grew to %s", line)
+		}
+	}
+}
+
+func shellWord(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
