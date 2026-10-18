@@ -769,3 +769,11 @@ Assigned to an Opus implementer (env 1087).
 8. Landing order: Cloud QA on the QA pre-release, then fixes, then merge to main, then v0.68.0 (Korey approves the release), then Ryan's migration guide and the kikd-infra release pipeline.
 9. Store and launcher code-volume trims run alongside QA, with no behaviour change and the full suite green.
 10. Stripe test mode on kikd during Cloud QA (Add funds, card setup, collection ladder, webhook at /webhooks/stripe); live keys at launch.
+
+## 2026-10-18 Korey decision 11: prepaid standing and fraud
+
+- 3-D Secure is required on every Add-funds top-up (Stripe Checkout).
+- Prepaid balance can raise a team's standing by at most ONE tier above its history-earned tier. New can reach Trusted through prepay; High needs history (30 clean days and $500 paid), or an operator grant of standing.
+- The billing page (console) and the CLI offer a "contact us to unlock higher tiers" request. It creates an operator task in the operator console queue, which the operator approves with the existing grant of standing.
+- docs/billing.md documents the cap, 3DS and the request.
+- A chargeback still puts the team on Held (no new admissions).
