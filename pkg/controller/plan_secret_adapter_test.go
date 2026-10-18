@@ -26,7 +26,7 @@ type planSecretProbe struct {
 	t     *testing.T
 }
 
-func (p *planSecretProbe) OpenBound(team, name, scope string, shared, masked bool, value string) (string, error) {
+func (p *planSecretProbe) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, value string) (string, error) {
 	p.opens++
 	if team != "a" || name != "TOKEN" || scope != "ci" || shared || !masked || value != "sealed-value" {
 		p.t.Fatal("plan secret lost its stored binding")

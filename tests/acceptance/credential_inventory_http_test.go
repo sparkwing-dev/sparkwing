@@ -52,7 +52,7 @@ func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
 			if masked {
 				name = "SECRET"
 			}
-			value, err := cipher.SealBound(string(team), name, "build", false, masked, string(team)+"-"+name)
+			value, err := cipher.SealBound(secrets.PurposeSecret, string(team), name, "build", false, masked, string(team)+"-"+name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -314,7 +314,7 @@ func TestCredentialInventoryHTTPConfigFailureReturnsNoPartialList(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		value, err := cipher.SealBound("team", "CONFIG", "build", false, false, "partial-config")
+		value, err := cipher.SealBound(secrets.PurposeSecret, "team", "CONFIG", "build", false, false, "partial-config")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -354,7 +354,7 @@ func TestCredentialInventoryHTTPRejectsChangedSecretBinding(t *testing.T) {
 			masked = true
 		}
 		var err error
-		row.Value, err = cipher.SealBound(team, name, pipeline, shared, masked, value)
+		row.Value, err = cipher.SealBound(secrets.PurposeSecret, team, name, pipeline, shared, masked, value)
 		if err != nil {
 			t.Fatal(err)
 		}

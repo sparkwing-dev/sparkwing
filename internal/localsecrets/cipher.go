@@ -35,20 +35,20 @@ func (c *Cipher) Open(envelope string) (string, error) {
 	return inner.Open(envelope)
 }
 
-func (c *Cipher) SealBound(team, name, scope string, shared, masked bool, plain string) (string, error) {
+func (c *Cipher) SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error) {
 	inner, err := c.ring.ensure(context.Background(), c.st)
 	if err != nil {
 		return "", err
 	}
-	return inner.SealBound(team, name, scope, shared, masked, plain)
+	return inner.SealBound(purpose, team, name, scope, shared, masked, plain)
 }
 
-func (c *Cipher) OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error) {
+func (c *Cipher) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
 	inner, err := c.opener()
 	if err != nil {
 		return "", err
 	}
-	return inner.OpenBound(team, name, scope, shared, masked, envelope)
+	return inner.OpenBound(purpose, team, name, scope, shared, masked, envelope)
 }
 
 func (c *Cipher) OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error) {

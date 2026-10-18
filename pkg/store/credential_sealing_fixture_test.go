@@ -38,7 +38,7 @@ func openSecretFixture(t *testing.T, tenant *Tenant, row *Secret) string {
 	if row == nil {
 		t.Fatal("missing secret")
 	}
-	plain, err := fixtureSecretCipher(t).OpenBound(string(tenant.team), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+	plain, err := fixtureSecretCipher(t).OpenBound(secrets.PurposeSecret, string(tenant.team), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
 	if err != nil {
 		t.Fatal(err)
 	}

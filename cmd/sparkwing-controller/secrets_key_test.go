@@ -133,8 +133,12 @@ func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *test
 func TestKeylessCipherRefusesCredentialAccess(t *testing.T) {
 	cipher := keylessCipher{}
 	for _, access := range []func() (string, error){
-		func() (string, error) { return cipher.SealBound("team", "TOKEN", "build", false, true, "private") },
-		func() (string, error) { return cipher.OpenBound("team", "TOKEN", "build", false, true, "sealed") },
+		func() (string, error) {
+			return cipher.SealBound(secrets.PurposeSecret, "team", "TOKEN", "build", false, true, "private")
+		},
+		func() (string, error) {
+			return cipher.OpenBound(secrets.PurposeSecret, "team", "TOKEN", "build", false, true, "sealed")
+		},
 	} {
 		value, err := access()
 		if value != "" || !errors.Is(err, secrets.ErrKeyRefused) || !strings.Contains(err.Error(), credSecretsKey) {

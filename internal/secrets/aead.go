@@ -37,6 +37,25 @@ var ErrKeyRefused = errors.New("secrets key refused")
 
 const KeySize = chacha20poly1305.KeySize
 
+// Purpose names the kind of row a bound envelope belongs to and is authenticated with it.
+type Purpose string
+
+// Bound envelope purposes.
+const (
+	PurposeSecret         Purpose = "secret"
+	PurposeGitCredential  Purpose = "git-credential"
+	PurposeRunEnvironment Purpose = "run-environment"
+	PurposeSetting        Purpose = "setting"
+)
+
+func (p Purpose) valid() bool {
+	switch p {
+	case PurposeSecret, PurposeGitCredential, PurposeRunEnvironment, PurposeSetting:
+		return true
+	}
+	return false
+}
+
 type Cipher struct {
 	aead cipher.AEAD
 	// safety: read-only keys an envelope may still carry; sealing always uses aead.
@@ -84,14 +103,17 @@ func (c *Cipher) Seal(plain string) (string, error) {
 }
 
 // SealBound seals plain with the row fields that decide access to the
-// secret as additional authenticated data: the team that owns the row, its
-// name, its owning scope (the owning pipeline, empty for an unscoped
-// secret), whether an unscoped row answers every run, and whether the value
-// is redacted in run output. The envelope opens only under that same
-// combination, so one team's envelope copied into another team's row does
-// not open.
-func (c *Cipher) SealBound(team, name, scope string, shared, masked bool, plain string) (string, error) {
-	return c.seal(plain, BoundPrefix, boundAAD(team, name, scope, shared, masked))
+// secret as additional authenticated data: the kind of row, the team that
+// owns it, its name, its owning scope (the owning pipeline, empty for an
+// unscoped secret), whether an unscoped row answers every run, and whether
+// the value is redacted in run output. The envelope opens only under that
+// same combination, so an envelope copied onto another team's row or onto a
+// row of another kind does not open.
+func (c *Cipher) SealBound(purpose Purpose, team, name, scope string, shared, masked bool, plain string) (string, error) {
+	if !purpose.valid() {
+		return "", fmt.Errorf("secrets cipher: unknown envelope purpose %q", purpose)
+	}
+	return c.seal(plain, BoundPrefix, boundAAD(purpose, team, name, scope, shared, masked))
 }
 
 func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
@@ -115,11 +137,14 @@ func (c *Cipher) Open(envelope string) (string, error) {
 }
 
 // OpenBound decrypts an envelope sealed by [Cipher.SealBound] for this
-// combination of team, name, scope, shared and masked. It refuses an
+// combination of purpose, team, name, scope, shared and masked. It refuses an
 // envelope sealed before team binding with [ErrLegacyEnvelope].
-func (c *Cipher) OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error) {
+func (c *Cipher) OpenBound(purpose Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
+	if !purpose.valid() {
+		return "", fmt.Errorf("secrets cipher: unknown envelope purpose %q", purpose)
+	}
 	if strings.HasPrefix(envelope, BoundPrefix) {
-		return c.open(envelope, BoundPrefix, boundAAD(team, name, scope, shared, masked))
+		return c.open(envelope, BoundPrefix, boundAAD(purpose, team, name, scope, shared, masked))
 	}
 	if IsEncrypted(envelope) {
 		return "", ErrLegacyEnvelope
@@ -139,9 +164,10 @@ func (c *Cipher) OpenLegacy(name, scope string, shared, masked bool, envelope st
 }
 
 // safety: length prefixes keep one field from spelling another, so the binding needs no name rule to hold.
-func boundAAD(team, name, scope string, shared, masked bool) []byte {
-	aad := make([]byte, 0, len(boundAADLabel)+26+len(team)+len(name)+len(scope))
+func boundAAD(purpose Purpose, team, name, scope string, shared, masked bool) []byte {
+	aad := make([]byte, 0, len(boundAADLabel)+34+len(purpose)+len(team)+len(name)+len(scope))
 	aad = append(aad, boundAADLabel...)
+	aad = appendBoundField(aad, string(purpose))
 	aad = appendBoundField(aad, team)
 	aad = appendBoundField(aad, name)
 	aad = appendBoundField(aad, scope)

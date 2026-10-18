@@ -7,12 +7,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // SessionKeyCipher binds the deployment session key to its settings row.
 type SessionKeyCipher interface {
-	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
-	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
+	SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error)
+	OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
 
 // SetSessionKeyCipher configures key protection before the store serves sessions.
@@ -44,7 +46,7 @@ func (s *Store) csrfSigningKey(ctx context.Context) ([]byte, error) {
 	if sealed != 1 {
 		return nil, errors.New("sessions: signing key is not sealed")
 	}
-	plain, err := s.csrfCipher.OpenBound("", metaKeySessionCSRFKey, "settings", false, true, envelope)
+	plain, err := s.csrfCipher.OpenBound(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, envelope)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +63,7 @@ func (s *Store) mintCSRFKey(ctx context.Context) (string, error) {
 	if _, err := rand.Read(minted); err != nil {
 		return "", err
 	}
-	envelope, err := s.csrfCipher.SealBound("", metaKeySessionCSRFKey, "settings", false, true, hex.EncodeToString(minted))
+	envelope, err := s.csrfCipher.SealBound(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, hex.EncodeToString(minted))
 	if err != nil {
 		return "", err
 	}

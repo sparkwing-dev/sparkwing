@@ -66,7 +66,7 @@ func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx,
 	if err != nil {
 		return authorityError(apierr.BadRequest, "invalid submitted environment")
 	}
-	envelope, err := cipher.SealBound(string(t.team), result.RunID, "run-environment", false, true, string(encoded))
+	envelope, err := cipher.SealBound(secrets.PurposeRunEnvironment, string(t.team), result.RunID, "run-environment", false, true, string(encoded))
 	if err != nil || !secrets.IsBound(envelope) {
 		return authorityError(apierr.Unavailable, "submitted environment encryption failed")
 	}
@@ -96,7 +96,7 @@ func (t *Tenant) readSubmittedEnvironmentTx(ctx context.Context, tx *storeTx, ru
 	if cipher == nil {
 		return nil, authorityError(apierr.Unavailable, "submitted environment encryption is unavailable")
 	}
-	plain, err := cipher.OpenBound(string(t.team), runID, "run-environment", false, true, envelope)
+	plain, err := cipher.OpenBound(secrets.PurposeRunEnvironment, string(t.team), runID, "run-environment", false, true, envelope)
 	var values map[string][]byte
 	if err != nil || json.Unmarshal([]byte(plain), &values) != nil || runspec.VerifyEnvironment(run.Request.Request.Env, values) != nil {
 		return nil, authorityError(apierr.Unavailable, "submitted environment is unavailable or corrupt")

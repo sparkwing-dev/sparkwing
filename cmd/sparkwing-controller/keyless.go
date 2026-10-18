@@ -17,10 +17,10 @@ type keylessCipher struct{}
 
 func (keylessCipher) Seal(string) (string, error) { return "", errKeyless }
 func (keylessCipher) Open(string) (string, error) { return "", errKeyless }
-func (keylessCipher) SealBound(string, string, string, bool, bool, string) (string, error) {
+func (keylessCipher) SealBound(secrets.Purpose, string, string, string, bool, bool, string) (string, error) {
 	return "", errKeyless
 }
 
-func (keylessCipher) OpenBound(string, string, string, bool, bool, string) (string, error) {
+func (keylessCipher) OpenBound(secrets.Purpose, string, string, string, bool, bool, string) (string, error) {
 	return "", errKeyless
 }

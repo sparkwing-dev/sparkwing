@@ -214,7 +214,7 @@ func FuzzExecutionEnvironmentUsesOnlyLiveUnitFence(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		envelope, err := cipher.SealBound(string(claim.Team), claim.RunID, "run-environment", false, true, string(values))
+		envelope, err := cipher.SealBound(secrets.PurposeRunEnvironment, string(claim.Team), claim.RunID, "run-environment", false, true, string(values))
 		if err != nil {
 			t.Fatal(err)
 		}

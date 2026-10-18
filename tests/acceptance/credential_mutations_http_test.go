@@ -150,11 +150,11 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		if w.Code != 204 || w.Body.Len() != 0 || w.Header().Get("Cache-Control") != "no-store" || err != nil || row.Principal != "account" || row.Masked != masked || row.Shared != shared {
 			return false
 		}
-		plain, err := cipher.OpenBound("team", "KEY", pipeline, shared, masked, row.Value)
+		plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", "KEY", pipeline, shared, masked, row.Value)
 		if err != nil || plain != value || row.Value == value {
 			return false
 		}
-		if _, err := cipher.OpenBound("foreign", "KEY", pipeline, shared, masked, row.Value); err == nil {
+		if _, err := cipher.OpenBound(secrets.PurposeSecret, "foreign", "KEY", pipeline, shared, masked, row.Value); err == nil {
 			return false
 		}
 		w = authorityHTTP(h, b, "DELETE", "/api/v1/secrets/KEY?"+query.Encode(), "")
@@ -202,11 +202,11 @@ func TestCredentialMutationsHTTPGitValuesStayPrivateAndTenantBound(t *testing.T)
 		if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || json.Unmarshal(w.Body.Bytes(), &public) != nil || !public.Confirmed || public.Host != "git.invalid" || public.CreatedBy != "account" || err != nil || strings.Contains(w.Body.String(), token) || strings.Contains(w.Body.String(), row.Secret) {
 			return false
 		}
-		plain, err := cipher.OpenBound("team", "git-credential:git.invalid", "git-credential", false, true, row.Secret)
+		plain, err := cipher.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, row.Secret)
 		if err != nil || plain != token || row.Username != "x-access-token" {
 			return false
 		}
-		if _, err := cipher.OpenBound("foreign", "git-credential:git.invalid", "git-credential", false, true, row.Secret); err == nil {
+		if _, err := cipher.OpenBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential", false, true, row.Secret); err == nil {
 			return false
 		}
 		w = authorityHTTP(h, b, "DELETE", "/api/v1/team/git-credentials/git.invalid?"+query.Encode(), "")
@@ -460,11 +460,11 @@ type mutationSealFailure struct{ err error }
 
 func (c mutationSealFailure) Seal(string) (string, error) { return "", c.err }
 func (c mutationSealFailure) Open(string) (string, error) { return "", c.err }
-func (c mutationSealFailure) SealBound(string, string, string, bool, bool, string) (string, error) {
+func (c mutationSealFailure) SealBound(secrets.Purpose, string, string, string, bool, bool, string) (string, error) {
 	return "", c.err
 }
 
-func (c mutationSealFailure) OpenBound(string, string, string, bool, bool, string) (string, error) {
+func (c mutationSealFailure) OpenBound(secrets.Purpose, string, string, string, bool, bool, string) (string, error) {
 	return "", c.err
 }
 

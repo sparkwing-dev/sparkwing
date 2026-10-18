@@ -204,7 +204,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope, err := cipher.SealBound("a", "run", "run-environment", false, true, string(encoded))
+	envelope, err := cipher.SealBound(secrets.PurposeRunEnvironment, "a", "run", "run-environment", false, true, string(encoded))
 	if err != nil {
 		t.Fatal(err)
 	}

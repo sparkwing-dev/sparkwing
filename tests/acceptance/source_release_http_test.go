@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -45,10 +47,10 @@ type sourceCipher struct {
 
 func (c *sourceCipher) Seal(string) (string, error) { return "", errors.New("unused") }
 func (c *sourceCipher) Open(string) (string, error) { return "", errors.New("unbound open") }
-func (c *sourceCipher) SealBound(string, string, string, bool, bool, string) (string, error) {
+func (c *sourceCipher) SealBound(secrets.Purpose, string, string, string, bool, bool, string) (string, error) {
 	return "", errors.New("unused")
 }
-func (c *sourceCipher) OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error) {
+func (c *sourceCipher) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
 	c.opens++
 	if team != "team" || name != "git-credential:git.example" || scope != "git-credential" || shared || !masked || envelope != "private-envelope" {
 		return "", errors.New("private-cipher-binding")
