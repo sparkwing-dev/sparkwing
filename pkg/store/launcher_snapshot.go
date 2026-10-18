@@ -139,12 +139,45 @@ func launcherEvalLiveTx(ctx context.Context, tx *storeTx, award LauncherAward) (
 	return live == 1, err
 }
 
-func launcherReservationAwardTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject capability.Subject, lease capability.LeaseRef) error {
+// safety: a caller-ordered batch locks every authority and unit up front, or two batches lock jobs in opposite orders.
+func lockLauncherBatchTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, fences []capability.LeaseRef, observed bool) error {
+	refs := []capability.AuthorityRef{authority}
+	var writes []string
+	var units []UnitRef
+	for _, fence := range fences {
+		if unit, err := decodeAwardUnit(fence.Kind, fence.ID); err == nil {
+			units = append(units, unit)
+		}
+		prefix, err := launcherAwardPrefixTx(ctx, tx, fence)
+		var refused *apierr.Error
+		if errors.As(err, &refused) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		refs = append(refs, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+		if observed {
+			writes = append(writes, prefix)
+		}
+	}
+	if err := lockAuthorityTx(ctx, tx, refs, writes...); err != nil {
+		return err
+	}
+	return lockUnitsTx(ctx, tx, units)
+}
+
+func launcherAwardPrefixTx(ctx context.Context, tx *storeTx, lease capability.LeaseRef) (string, error) {
 	var prefix string
 	err := tx.QueryRowContext(ctx, "SELECT prefix FROM capabilities WHERE unit_kind=? AND unit_id=? AND bind_holder=? AND COALESCE(eval_unit_generation,bind_generation)=? AND issuance='award' AND delivery_purpose='bootstrap'", string(lease.Kind), lease.ID, lease.Holder, lease.Generation).Scan(&prefix)
 	if errors.Is(err, sql.ErrNoRows) {
-		return bindingRefusal()
+		return "", bindingRefusal()
 	}
+	return prefix, err
+}
+
+func launcherReservationAwardTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject capability.Subject, lease capability.LeaseRef) error {
+	prefix, err := launcherAwardPrefixTx(ctx, tx, lease)
 	if err != nil {
 		return err
 	}

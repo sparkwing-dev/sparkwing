@@ -37,7 +37,11 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 		return err
 	}
 	return s.inTx(ctx, func(tx *storeTx) error {
-		principal, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix})
+		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}
+		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
+			return err
+		}
+		principal, err := tx.ResolveAuthority(ctx, ref)
 		if err != nil {
 			return err
 		}

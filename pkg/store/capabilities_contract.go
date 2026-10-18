@@ -418,6 +418,57 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	return chain, nil
 }
 
+// safety: observation stamps registered claimants, so they and writes lock for update before any work row.
+// Resolution shares leaf to root, so the whole ancestry locks deepest first; see STORE-DATA.md lock order.
+func lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.AuthorityRef, writes ...string) error {
+	type held struct {
+		ref   capability.AuthorityRef
+		depth int
+		write bool
+	}
+	var set []held
+	for _, leaf := range leaves {
+		chain, err := authorityChainTx(ctx, tx, leaf, false)
+		var refused *apierr.Error
+		if errors.As(err, &refused) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for i, node := range chain {
+			ref := node.principal.Authority
+			write := ref.Kind == capability.AuthorityCapability && (registeredClaimant(node.principal.Capability) || slices.Contains(writes, ref.ID))
+			if at := slices.IndexFunc(set, func(h held) bool { return h.ref == ref }); at >= 0 {
+				set[at].write = set[at].write || write
+				continue
+			}
+			set = append(set, held{ref, len(chain) - 1 - i, write})
+		}
+	}
+	slices.SortFunc(set, func(a, b held) int {
+		if a.depth != b.depth {
+			return b.depth - a.depth
+		}
+		return strings.Compare(string(a.ref.Kind)+a.ref.ID, string(b.ref.Kind)+b.ref.ID)
+	})
+	for _, h := range set {
+		query := "SELECT prefix FROM capabilities WHERE prefix=?"
+		if h.ref.Kind == capability.AuthoritySession {
+			query = "SELECT hash FROM sessions WHERE hash=?"
+		}
+		mode := tx.forShare()
+		if h.write {
+			mode = tx.forNoKeyUpdate()
+		}
+		var key string
+		if err := tx.QueryRowContext(ctx, query+mode, h.ref.ID).Scan(&key); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
+}
+
 // ResolveAuthority reads live ancestry and locks it in write transactions.
 func (tx *storeTx) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error) {
 	if tx.scheduleAdmission != nil && ref == tx.scheduleAdmission.authority() {

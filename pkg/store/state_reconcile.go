@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error) {
@@ -15,6 +16,9 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		result = ReconciledNode{}
 		if _, err := controllerOwnerTx(ctx, tx, t.team, request.Ref.RunID, tx.now()); err != nil {
+			return err
+		}
+		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{request.Actor.Authority}); err != nil {
 			return err
 		}
 		if err := prepareStateActorTx(ctx, tx, t.team, request.Ref.RunID, request.Actor, tx.now()); err != nil {
