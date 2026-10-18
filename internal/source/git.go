@@ -16,6 +16,7 @@ import (
 
 type gitClient struct {
 	owner           bool
+	combined        bool
 	env             []string
 	credential      Credential
 	workspace       string
@@ -72,13 +73,17 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
-	out, err := gitcmd.Output(ctx, cmd, false)
+	out, err := gitcmd.Output(ctx, cmd, g.combined)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// safety: remote failures can echo credentials, signed URLs and helper output.
-		return nil, fmt.Errorf("source git %s failed: %w", args[0], err)
+		// safety: remote failures can echo credentials, signed URLs and helper
+		// output, so only a combined local read returns its output on failure.
+		if !g.combined {
+			out = nil
+		}
+		return out, fmt.Errorf("source git %s failed: %w", args[0], err)
 	}
 	return out, nil
 }

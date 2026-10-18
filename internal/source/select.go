@@ -145,7 +145,15 @@ func readCommittedBlob(ctx context.Context, client *gitClient, repository, objec
 		if ctx.Err() != nil {
 			return nil, false, err
 		}
-		return nil, false, errors.Join(tooLarge, err)
+		diagnose := *client
+		diagnose.combined = true
+		detail, _ := diagnose.output(ctx, repository, "", object+"\n", "cat-file", "--batch-check", "--follow-symlinks")
+		// safety: the size filter leaves an oversized blob absent, which git
+		// reports only as an object it may not fetch.
+		if strings.Contains(string(detail), "from promisor remote") {
+			return nil, false, errors.Join(tooLarge, err)
+		}
+		return nil, false, fmt.Errorf("read the execution commit configuration: %w", err)
 	}
 	header, _, _ := strings.Cut(string(out), "\n")
 	fields := strings.Fields(header)

@@ -100,3 +100,29 @@ func TestTenantSelectionNeverDownloadsAnOversizedConfiguration(t *testing.T) {
 }
 
 func shellWord(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+func TestTenantSelectionReportsAGitFailureAsItself(t *testing.T) {
+	repo, _ := sourcetest.Repository(t)
+	sourcetest.Git(t, repo, "config", "uploadpack.allowFilter", "true")
+	sourcetest.Write(t, filepath.Join(repo, ".sparkwing", projectconfig.Filename), "pipelines: []\n")
+	sourcetest.Git(t, repo, "add", ".")
+	sourcetest.Git(t, repo, "commit", "-qm", "configuration")
+	execution := sourcetest.Git(t, repo, "rev-parse", "HEAD")
+	remote := "https://8.8.8.8/team/broken"
+	sourcetest.Remote(t, map[string]string{remote: "file://" + repo})
+	shim, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	wrapper := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = cat-file ] && { echo 'fatal: bad object store' >&2; exit 128; }; done\nexec " + shellWord(shim) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	options := source.Options{Workspace: t.TempDir(), Access: &access{}, Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
+	_, _, _, err = source.Select(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/broken", RemoteURL: remote}, "build", runspec.Git{SHA: execution}, runspec.Source{}, "", options)
+	if err == nil || strings.Contains(err.Error(), "1 MiB") {
+		t.Fatalf("git failure reported as = %v", err)
+	}
+}
