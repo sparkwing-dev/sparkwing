@@ -744,3 +744,28 @@ Ruling:
 - A run whose units no eligible claimant can take within the claim window gets a visible run notice ("no eligible runner or launcher for …") instead of staying silently pending.
 - Empty launcher claim polls are counted in metrics, so a launcher that matches nothing is visible.
 Assigned to an Opus implementer (env 1087).
+
+## 2026-10-18 Korey decisions (grilling session); these supersede earlier lead rulings where they differ
+
+1. QA trust root. A QA-only signed pre-release, signed with a QA ed25519 key stored in SSM `/kikd-prod/sparkwing/qa-release-signing-key` (private) plus its public half. Images built with the `qatrust` Go build tag add the QA public key to releaseauth trust and point the version index and the download allow-list at `https://qa-releases.sparkwing.dev` (a private S3 bucket behind CloudFront, created in kikd-infra Terraform). Production builds never carry the tag.
+
+2. Run anywhere (supersedes "Cloud triggers use controller dispatch" for unselected runs). A run or unit with no placement selection can be claimed by any eligible claimant.
+   - Default ranking: (1) the machine that started the run (here); (2) the requester's other personal machines; (3) GitHub Actions runners; (4) self-hosted team runners; (5) the Cloud launcher. The launcher is eligible only when the team has billing enabled (prepaid funds, a saved card, or operator-granted credits).
+   - Each unit (plan step and every job) has its own 5-second window from readiness. If a claimant from the highest-ranked tier present in the ranking asks, it is awarded immediately. Otherwise, at the end of the window, the highest-ranked claimant that asked during the window wins. After the window, first eligible asker wins. A team with no ranking set uses first-come.
+   - Automatically started runs (push, PR, schedule) skip tiers 1-2 by default. A personal machine's owner may opt that machine in to the owner's automated runs (a per-machine setting, off by default).
+   - The ranking is a per-team setting a team admin can change: reorder tiers or drop tiers. An explicit placement (`--runner`, pool requirement, App `runner:`) still pins the run and takes it out of run-anywhere.
+   - Self-hosted runners, personal machines and Actions runners must be able to claim the plan unit too, not only jobs.
+3. Go toolchain variables (GOPROXY, GOFLAGS, GOPATH, GOPRIVATE, GONOPROXY, GONOSUMDB, GOSUMDB, GOTOOLCHAIN, GOINSECURE) pass through, masked, for runs on the requester's own machine. Cloud and shared runners keep dropping them.
+4. Local dashboard over TCP requires a one-time login link printed by `sparkwing dashboard open`, which sets a session cookie. The local socket stays the trusted path.
+5. All 14 customer-visible changes in the security batches are approved.
+6. Security by-design items:
+   - (a) invitations: keep;
+   - (b) admins may revoke but NOT rotate another member's token;
+   - (c) team git credentials go only to shared runners and Cloud, never personal machines;
+   - (d) a team's schedules are withdrawn only by that team's own installation;
+   - (e) local runs pulling masked secrets: keep;
+   - (f) no branch scoping, forks refused: keep.
+7. Operations approved: ArgoCD project kikd VAP permission; delete the 3 inert sparkwing-runner-* policies; extend the budget breaker to sparkwing-team-* NodePools; stop Korey's old local sparkwing-runner agent; keep Traefik readTimeout 0; move the NLB TLS policy to ELBSecurityPolicy-TLS13-1-2-2021-06; break-glass in-pod credit grant approved.
+8. Landing order: Cloud QA on the QA pre-release, then fixes, then merge to main, then v0.68.0 (Korey approves the release), then Ryan's migration guide and the kikd-infra release pipeline.
+9. Store and launcher code-volume trims run alongside QA, with no behaviour change and the full suite green.
+10. Stripe test mode on kikd during Cloud QA (Add funds, card setup, collection ladder, webhook at /webhooks/stripe); live keys at launch.
