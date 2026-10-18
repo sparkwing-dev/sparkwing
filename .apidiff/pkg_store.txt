@@ -1491,7 +1491,7 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
 func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (o *Operator) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
-func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SessionKeyCipher) (SealedRotation, error)
+func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SealedRotationCipher, verify bool) (SealedRotation, error)
 func (o *Operator) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (bool, error)
 func (o *Operator) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error)
@@ -2111,7 +2111,12 @@ type SealedRotation struct {
 	GitCredentials  int
 	RunEnvironments int
 	Settings        int
+	PreviousKeyOnly int
 	Unreadable      []SealedRowName
+}
+type SealedRotationCipher interface {
+	SessionKeyCipher
+	OpenBoundCurrent(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
 type SealedRowName struct {
 	Purpose  secrets.Purpose

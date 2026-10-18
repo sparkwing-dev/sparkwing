@@ -152,6 +152,15 @@ func (c *Cipher) OpenBound(purpose Purpose, team, name, scope string, shared, ma
 	return "", errors.New("secrets cipher: value is not sealed")
 }
 
+// OpenBoundCurrent is [Cipher.OpenBound] under the current key alone.
+func (c *Cipher) OpenBoundCurrent(purpose Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
+	if c == nil {
+		return "", errors.New("secrets cipher: no key configured")
+	}
+	current := &Cipher{aead: c.aead}
+	return current.OpenBound(purpose, team, name, scope, shared, masked, envelope)
+}
+
 // OpenLegacy decrypts an envelope sealed before the team joined the binding:
 // one bound to name, scope, shared and masked alone, or one bound to nothing.
 // Such an envelope can be moved between teams undetected, so its only caller

@@ -144,7 +144,9 @@ Reseal every stored secret and key under the current key
 
 Reseal every team's secrets, git credentials and submitted run environments, and the session signing key, under the controller's current key. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.
 
-Repeats safely. JSON retains the counts and each unreadable row's purpose, team and name; values never appear.
+Repeats safely. JSON retains the counts, previous_key_only and each unreadable row's purpose, team and name; values never appear.
+
+--verify writes nothing and counts the rows that still open only under the previous key; retire the previous key when it reports zero and nothing unreadable.
 
 ### Flags
 
@@ -154,6 +156,7 @@ Repeats safely. JSON retains the counts and each unreadable row's purpose, team 
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+| `--verify` | verify |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 
 ## `sparkwing operator teams`

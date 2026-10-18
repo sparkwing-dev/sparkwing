@@ -93,9 +93,13 @@ func (f *keyRotationFixture) server(t *testing.T, c *secrets.Cipher) http.Handle
 	return controller.New(f.st, nil).WithSecretsCipher(c).WithLicense(license.Resolve(raw, pub, time.Now(), nil)).WithCloudDeployment(true).Handler()
 }
 
-func (f *keyRotationFixture) rotate(t *testing.T, h http.Handler, auth string) (int, map[string]any) {
+func (f *keyRotationFixture) rotate(t *testing.T, h http.Handler, auth string, query ...string) (int, map[string]any) {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/operator/secrets/rotate", nil)
+	target := "https://controller.test/api/v1/operator/secrets/rotate"
+	if len(query) > 0 {
+		target += "?" + query[0]
+	}
+	r := httptest.NewRequest(http.MethodPost, target, nil)
 	r.Header.Set("Authorization", auth)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -150,8 +154,18 @@ func TestOperatorKeyRotationResealsEveryTenantUnderTheCurrentKey(t *testing.T) {
 			if s, g, e, c := f.opensUnder(t, f.next); s+g+e != 0 || c {
 				t.Fatal("refused rotation resealed rows")
 			}
-			code, body := f.rotate(t, h, f.operator)
-			if code != http.StatusOK || body["secrets"] != float64(2) || body["git_credentials"] != float64(2) || body["run_environments"] != float64(2) || body["settings"] != float64(1) {
+			code, body := f.rotate(t, h, f.operator, "verify=1")
+			if code != http.StatusOK || body["previous_key_only"] != float64(7) || body["secrets"] != float64(2) {
+				t.Fatalf("verification: %d %v", code, body)
+			}
+			if s, g, e, c := f.opensUnder(t, f.next); s+g+e != 0 || c {
+				t.Fatal("verification resealed rows")
+			}
+			if code, _ := f.rotate(t, h, f.operator, "verify=yes"); code != http.StatusBadRequest {
+				t.Fatalf("malformed verify query: %d", code)
+			}
+			code, body = f.rotate(t, h, f.operator)
+			if code != http.StatusOK || body["previous_key_only"] != float64(7) || body["secrets"] != float64(2) || body["git_credentials"] != float64(2) || body["run_environments"] != float64(2) || body["settings"] != float64(1) {
 				t.Fatalf("rotation: %d %v", code, body)
 			}
 			unreadable, _ := body["unreadable"].([]any)
@@ -168,7 +182,10 @@ func TestOperatorKeyRotationResealsEveryTenantUnderTheCurrentKey(t *testing.T) {
 			if _, err := f.stray.OpenBound(secrets.PurposeSecret, string(f.teams[1]), "LOST", "", false, true, lost); err != nil {
 				t.Fatalf("unreadable row changed: %v", err)
 			}
-			if code, body := f.rotate(t, f.server(t, f.next), f.operator); code != http.StatusOK || body["secrets"] != float64(2) {
+			if code, body := f.rotate(t, h, f.operator, "verify=1"); code != http.StatusOK || body["previous_key_only"] != float64(0) {
+				t.Fatalf("verification after rotation: %d %v", code, body)
+			}
+			if code, body := f.rotate(t, f.server(t, f.next), f.operator); code != http.StatusOK || body["secrets"] != float64(2) || body["previous_key_only"] != float64(0) {
 				t.Fatalf("repeat rotation under the new key alone: %d %v", code, body)
 			}
 		})

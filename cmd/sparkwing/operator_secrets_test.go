@@ -50,6 +50,18 @@ func TestOperatorSecretsRotateResealsThroughTheController(t *testing.T) {
 		m, err := client.NewOperatorManager(client.EngineOptions{URL: srv.URL, HTTP: srv.Client(), Bearer: func(context.Context) (string, error) { return raw, nil }})
 		return m, func() {}, err
 	}
+	verify, err := clisurface.Parse("sparkwing", []string{"operator", "secrets", "rotate", "--verify", "-o", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checked bytes.Buffer
+	if err := runOperatorSecretsCommand(ctx, verify, &checked, connect); err != nil {
+		t.Fatal(err)
+	}
+	var pending controllerwire.SealedRotation
+	if err := json.Unmarshal(checked.Bytes(), &pending); err != nil || pending.PreviousKeyOnly != 1 {
+		t.Fatalf("verification output %s: %v", &checked, err)
+	}
 	inv, err := clisurface.Parse("sparkwing", []string{"operator", "secrets", "rotate", "-o", "json"})
 	if err != nil {
 		t.Fatal(err)

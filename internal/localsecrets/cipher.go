@@ -51,6 +51,14 @@ func (c *Cipher) OpenBound(purpose secrets.Purpose, team, name, scope string, sh
 	return inner.OpenBound(purpose, team, name, scope, shared, masked, envelope)
 }
 
+func (c *Cipher) OpenBoundCurrent(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
+	inner, err := c.opener()
+	if err != nil {
+		return "", err
+	}
+	return inner.OpenBoundCurrent(purpose, team, name, scope, shared, masked, envelope)
+}
+
 func (c *Cipher) OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error) {
 	inner, err := c.opener()
 	if err != nil {

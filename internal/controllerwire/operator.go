@@ -110,7 +110,7 @@ type OperatorManager interface {
 	WriteOperatorLimits(context.Context, OperatorLimitsWrite) (OperatorLimits, error)
 	ReadObjectStoreBreaker(context.Context) (ObjectStoreBreaker, error)
 	ResetObjectStoreBreaker(context.Context, string) (ObjectStoreBreaker, error)
-	RotateSealedValues(context.Context) (SealedRotation, error)
+	RotateSealedValues(ctx context.Context, verify bool) (SealedRotation, error)
 }
 
 // SealedRotation counts the envelopes a key rotation resealed and names those no configured key opened.
@@ -119,6 +119,7 @@ type SealedRotation struct {
 	GitCredentials  int             `json:"git_credentials"`
 	RunEnvironments int             `json:"run_environments"`
 	Settings        int             `json:"settings"`
+	PreviousKeyOnly int             `json:"previous_key_only"`
 	Unreadable      []SealedRowName `json:"unreadable"`
 }
 

@@ -180,27 +180,22 @@ environments, and the session signing key. To replace it:
 
 1. Generate a new key (`openssl rand -base64 32`).
 2. Put the current key in the `secrets-key.previous` credential and the new key
-   in `secrets-key`, then restart every controller replica. Each replica now
-   seals under the new key and opens values sealed under either.
+   in `secrets-key`, then restart every controller replica. Wait until no
+   replica still runs with the old key alone: one that does keeps sealing new
+   values under it.
 3. Run `sparkwing operator secrets rotate` with a deployment credential holding
    `operator.tokens`, or `POST /api/v1/operator/secrets/rotate` from a console
    session signed in within the last 10 minutes. It reseals every row under the
-   new key, one team at a time, and reports counts plus any row neither key
-   opens. It is safe to repeat, including after an interruption.
-4. When nothing is reported unreadable, remove `secrets-key.previous` and
-   restart. A row reported unreadable was already unreadable under both keys;
-   rewrite or delete it first. Back up the new key with the database.
-
-Management reads and execution release are separate permissions. Execution
-release checks the accepted plan's declarations and current claim. Pool-restricted
-secrets require a granted reservation and intake-authorized pool access. Here
-execution cannot release pool-restricted secrets. A label spelling the pool name
-supplies neither condition. See [secret management](cli-secrets.md).
-
-The final schema is created once before launch. Legacy envelope conversion,
-store backfills and an open-auth bootstrap window are not part of the rewrite's
-startup contract. Provisioning requires its owning controller and store
-implementation.
+   new key, one team at a time, and reports counts, `previous_key_only` (rows
+   that needed the previous key) and any row neither key opens. It is safe to
+   repeat, including after an interruption.
+4. Run `sparkwing operator secrets rotate --verify` (`?verify=1`). It writes
+   nothing and reports how many rows still open only under the previous key.
+   Run the rotation again until it reports `previous_key_only: 0`.
+5. When verification reports zero and nothing unreadable, remove
+   `secrets-key.previous` and restart every replica. A row reported unreadable
+   was already unreadable under both keys; rewrite or delete it first. Back up
+   the new key with the database.
 
 ## Release integrity
 
