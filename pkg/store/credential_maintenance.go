@@ -30,10 +30,10 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 	var secrets []Secret
 	var credentials []GitCredential
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
+		if err := t.lockTeamTx(ctx, tx); err != nil {
 			return err
 		}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
+		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 			return err
 		}
 		var err error
