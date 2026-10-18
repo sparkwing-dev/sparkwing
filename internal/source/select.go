@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -57,40 +58,77 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 	if (spec.LocalCheckout == "") == (spec.RemoteURL == "") {
 		return nil, false, errors.New("source selection requires exactly one acquisition location")
 	}
+	if spec.LocalCheckout != "" {
+		return readLocalCommitFile(ctx, spec, sha, name, options)
+	}
+	if options.Access == nil {
+		return nil, false, errors.New("remote source selection requires live source access")
+	}
 	environment, err := sourceEnvironment(options, procenv.Git)
 	if err != nil {
 		return nil, false, err
 	}
-	client := &gitClient{env: gitEnvironment(environment), workspace: options.Workspace}
-	repository, remote := spec.LocalCheckout, ""
-	if repository == "" {
-		if options.Access == nil || !filepath.IsAbs(options.Workspace) {
-			return nil, false, errors.New("remote source selection requires live source access and an absolute workspace")
-		}
-		if err := fssecure.EnsureDir(options.Workspace); err != nil {
-			return nil, false, err
-		}
-		workspace, err := fssecure.MkdirPrivateTemp(options.Workspace, "selection-")
-		if err != nil {
-			return nil, false, err
-		}
-		defer func() { err = errors.Join(err, os.RemoveAll(workspace)) }()
-		client.workspace, repository = workspace, filepath.Join(workspace, "objects.git")
-		if remote, err = client.authorizeRemote(ctx, spec, spec.RemoteURL, options.Access); err != nil {
-			return nil, false, err
-		}
-		format := "sha1"
-		if len(sha) == 64 {
-			format = "sha256"
-		}
-		if _, err := client.run(ctx, "", "", "init", "--bare", "--quiet", "--object-format="+format, repository); err != nil {
-			return nil, false, err
-		}
-		if _, err := client.run(ctx, repository, remote, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--filter=blob:none", "--", remote, sha); err != nil {
-			return nil, false, err
-		}
+	parent := options.Workspace
+	if parent == "" {
+		parent = os.TempDir()
+	}
+	if err := fssecure.EnsureDir(parent); err != nil {
+		return nil, false, err
+	}
+	workspace, err := fssecure.MkdirPrivateTemp(parent, "selection-")
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(workspace)) }()
+	client := &gitClient{env: gitEnvironment(environment), workspace: workspace}
+	repository := filepath.Join(workspace, "objects.git")
+	remote, err := client.authorizeRemote(ctx, spec, spec.RemoteURL, options.Access)
+	if err != nil {
+		return nil, false, err
+	}
+	format := "sha1"
+	if len(sha) == 64 {
+		format = "sha256"
+	}
+	if _, err := client.run(ctx, "", "", "init", "--bare", "--quiet", "--object-format="+format, repository); err != nil {
+		return nil, false, err
+	}
+	if _, err := client.run(ctx, repository, remote, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--filter=blob:none", "--", remote, sha); err != nil {
+		return nil, false, err
 	}
 	return readCommittedBlob(ctx, client, repository, remote, sha+":"+name)
+}
+
+func readLocalCommitFile(ctx context.Context, spec Spec, sha, name string, options Options) (_ []byte, _ bool, err error) {
+	workspace, err := os.MkdirTemp(options.Workspace, "selection-")
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(workspace)) }()
+	spec.SHA, spec.PipelineSHA, spec.PipelineDir, spec.CommittedCheckout = sha, "", ".", true
+	options.Workspace, options.PreparedCheckout = workspace, ""
+	entry, err := PrepareCheckout(ctx, spec, options)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { err = errors.Join(err, entry.Close()) }()
+	root, err := os.OpenRoot(entry.CheckoutDirectory())
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	file, err := root.Open(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	content, err := io.ReadAll(io.LimitReader(file, limits.ProjectConfigBytes+1))
+	if err = errors.Join(err, file.Close()); err != nil {
+		return nil, false, err
+	}
+	return content, true, nil
 }
 
 func readCommittedBlob(ctx context.Context, client *gitClient, repository, remote, object string) ([]byte, bool, error) {
