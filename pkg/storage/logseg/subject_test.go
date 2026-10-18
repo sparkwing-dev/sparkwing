@@ -212,10 +212,10 @@ func TestSubjectUploaderCommitsTaggedSegments(t *testing.T) {
 
 func TestSubjectUploaderRejectsSubstitutedSlot(t *testing.T) {
 	for name, change := range map[string]func(*blob.LogUploadURL){
-		"subject":   func(b *blob.LogUploadURL) { b.Subject = ownerSubject(blob.LogPlan) },
-		"index":     func(b *blob.LogUploadURL) { b.Index++ },
-		"url":       func(b *blob.LogUploadURL) { b.URL = "" },
-		"expired":   func(b *blob.LogUploadURL) { b.ExpiresAt = time.Time{} },
+		"subject": func(b *blob.LogUploadURL) { b.Subject = ownerSubject(blob.LogPlan) },
+		"index":   func(b *blob.LogUploadURL) { b.Index++ },
+		"url":     func(b *blob.LogUploadURL) { b.URL = "" },
+		"expired": func(b *blob.LogUploadURL) { b.ExpiresAt = time.Time{} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, data := newSubjectFixture(jobSubject())

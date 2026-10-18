@@ -352,4 +352,3 @@ func cloneHostPort(raw string) (host, port string, ssh bool) {
 	}
 	return u.Hostname(), port, ssh
 }
-

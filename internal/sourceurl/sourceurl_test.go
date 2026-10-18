@@ -392,15 +392,15 @@ func TestPinCloneHostFailsClosedWhenTheResolverFails(t *testing.T) {
 
 func TestPinCloneHostKeepsEveryValidatedAddress(t *testing.T) {
 	lookup := fakeLookup(map[string][]string{
-		"git.example.com":   {"140.82.112.3", "2606:50c0:8000::153"},
+		"git.example.com":    {"140.82.112.3", "2606:50c0:8000::153"},
 		"inward.example.com": {"10.0.0.5"},
 	}, nil)
 	for remote, want := range map[string]Pin{
-		"https://git.example.com/o/r.git":         {Host: "git.example.com", Port: "443", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}},
-		"https://Git.Example.com.:8443/o/r.git":   {Host: "git.example.com", Port: "8443", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}},
-		"git@git.example.com:o/r.git":             {Host: "git.example.com", Port: "22", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}, SSH: true},
-		"ssh://git@git.example.com:2222/o/r.git":  {Host: "git.example.com", Port: "2222", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}, SSH: true},
-		"https://140.82.112.3/o/r.git":            {Host: "140.82.112.3", Port: "443", Addrs: []string{"140.82.112.3"}},
+		"https://git.example.com/o/r.git":        {Host: "git.example.com", Port: "443", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}},
+		"https://Git.Example.com.:8443/o/r.git":  {Host: "git.example.com", Port: "8443", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}},
+		"git@git.example.com:o/r.git":            {Host: "git.example.com", Port: "22", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}, SSH: true},
+		"ssh://git@git.example.com:2222/o/r.git": {Host: "git.example.com", Port: "2222", Addrs: []string{"140.82.112.3", "2606:50c0:8000::153"}, SSH: true},
+		"https://140.82.112.3/o/r.git":           {Host: "140.82.112.3", Port: "443", Addrs: []string{"140.82.112.3"}},
 	} {
 		got, err := PinCloneHost(context.Background(), remote, lookup)
 		if err != nil || !reflect.DeepEqual(got, want) {
