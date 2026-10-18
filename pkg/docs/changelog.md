@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **controller:** Remove the unused in-process `EngineController.CreateRun` intake, which admitted a run without verifying its repository display; the HTTP intake is the only run intake.
 - **controller (Breaking):** A verified GitHub push withdraws only the pushing installation's team's schedules on that repository, never another team's. A former team's App schedules stop when its own installation reports the removal, transfer or deletion. See [GitHub App](docs/github-app.md).
 - **docs:** List `SPARKWING_ADMIN_GRANT_ALLOW_LARGE` in the environment variable reference.
 - **controller (Breaking):** Rotation through a bearer token never moves a credential's expiry later and caps it at the caller's own expiry; only an account or console session can extend it. Console writes need a sign-in from the last 10 minutes. `--insecure-cookies` is refused on multi-team and hosted controllers. Login throttling is per client only, keyed by IPv4 address or IPv6 /64; the listener-wide budget is removed

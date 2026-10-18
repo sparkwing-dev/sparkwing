@@ -1655,8 +1655,10 @@ The deployment cut's extra shared test edits are
 `docs/migrations/_unreleased.md`, `CHANGELOG.md` and `api/openapi.yaml`, with
 the matching `pkg/docs` copies. No persistent store contract was changed.
 
-`EngineController.CreateRun`, `AcceptPlan`, `AcceptExpansion`, `IntakeForStore`
-and `ExpansionForStore` have implementations. Intake preserves the tagged
+`AcceptPlan`, `AcceptExpansion`, `IntakeForStore` and `ExpansionForStore`
+have implementations. Run intake has one entry, the HTTP intake route, which
+verifies the repository display through `resolveIntakeSource` before
+`AdmitRun`; there is no in-process `CreateRun` adapter. Intake preserves the tagged
 authority and idempotency key, derives actor and team, and removes caller App
 proof. Sessions supply no capability-prefix fence. Plan acceptance reads the
 persisted first seal and passes both author declaration layers unchanged.
