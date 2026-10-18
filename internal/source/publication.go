@@ -44,8 +44,11 @@ func OpenPublication(ctx context.Context, publication Publication) (_ *os.File, 
 	var stream *os.File
 	cleanup := func() error {
 		var closeErr error
+		// safety: an HTTP transfer closes the stream it sends as a request body.
 		if stream != nil {
-			closeErr = stream.Close()
+			if closeErr = stream.Close(); errors.Is(closeErr, os.ErrClosed) {
+				closeErr = nil
+			}
 		}
 		return errors.Join(closeErr, os.RemoveAll(root))
 	}
