@@ -1453,6 +1453,7 @@ func (o *Operator) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, 
 func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (o *Operator) CreditSettings(ctx context.Context) (_ CreditSettings, err error)
 func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error)
+func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease SingletonLease, limit int, objects StagingDeleter) error
 func (o *Operator) DueCardCharges(ctx context.Context, now time.Time) (_ []CardChargeWork, _ []BudgetAlert, err error)
 func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error)
 func (o *Operator) DueGitHubChecks(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
@@ -2279,6 +2280,9 @@ func (s SpendStanding) CardBilled() bool
 func (s SpendStanding) ChargeFailed() bool
 func (s SpendStanding) Headroom() (int64, string)
 const SpendWindowDays = 30
+type StagingDeleter interface {
+	DeleteObject(context.Context, string) error
+}
 type StateEvent struct {
 	Seq      int64
 	StateSeq int64

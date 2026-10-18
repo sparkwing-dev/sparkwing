@@ -854,6 +854,7 @@ CREATE TABLE uploads (
     expires_at BIGINT NOT NULL,
     committed_at BIGINT NOT NULL DEFAULT 0,
     abandoned_at BIGINT,
+    staging_deleted_at BIGINT,
     uploader_kind TEXT NOT NULL CHECK(uploader_kind IN ('job','owner_unit','publication')),
     unit_kind TEXT CHECK(unit_kind IN ('trigger','plan','eval')),
     unit_id TEXT,
@@ -1453,6 +1454,7 @@ CREATE INDEX idx_git_credential_releases_team ON git_credential_releases(team, r
 CREATE INDEX idx_identity_unlinks_account ON identity_unlinks(account_id);
 
 CREATE INDEX idx_uploads_expiry ON uploads(team,expires_at);
+CREATE INDEX idx_uploads_staging ON uploads(expires_at) WHERE staging_deleted_at IS NULL;
 
 CREATE INDEX idx_cron_schedules_github_identity ON cron_schedules(team, github_installation_id, github_repository_id);
 

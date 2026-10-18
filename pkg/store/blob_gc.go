@@ -93,6 +93,49 @@ func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, lease Singleto
 	return err
 }
 
+// StagingDeleter removes a staging object; absence is an idempotent success.
+type StagingDeleter interface {
+	DeleteObject(context.Context, string) error
+}
+
+// DeleteExpiredBlobStaging removes staging bytes of settled blob tickets once
+// their upload URLs are past the collection grace. A failed delete stays pending
+// for the next leased pass.
+func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease SingletonLease, limit int, objects StagingDeleter) error {
+	if limit <= 0 || objects == nil {
+		return ErrInvalidInput
+	}
+	var settled []teamKey
+	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+			return err
+		}
+		settled, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND staging_deleted_at IS NULL AND (committed_at<>0 OR abandoned_at IS NOT NULL) AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now().Add(-limits.BlobGCGrace).UnixNano(), limit)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	var failed error
+	for _, u := range settled {
+		if err := objects.DeleteObject(ctx, "teams/"+u.team+"/pending/"+u.key); err != nil {
+			failed = errors.Join(failed, err)
+			continue
+		}
+		err := o.s.inTx(ctx, func(tx *storeTx) error {
+			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, "UPDATE uploads SET staging_deleted_at=? WHERE team=? AND id=? AND staging_deleted_at IS NULL", tx.now().UnixNano(), u.team, u.key)
+			return err
+		})
+		if err != nil {
+			return errors.Join(failed, err)
+		}
+	}
+	return failed
+}
+
 type teamKey struct{ team, key string }
 
 func teamKeysTx(ctx context.Context, tx *storeTx, query string, args ...any) ([]teamKey, error) {
