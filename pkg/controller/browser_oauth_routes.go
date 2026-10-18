@@ -28,7 +28,7 @@ func (s *Server) oauthEndpoints() []Endpoint {
 }
 
 func (s *Server) verifyOAuthStart(r *http.Request) error {
-	if err := s.loginLimit.admit(r); err != nil {
+	if err := s.loginLimit.admitClient(r); err != nil {
 		return err
 	}
 	name := r.PathValue("provider")
@@ -45,7 +45,7 @@ func (s *Server) verifyOAuthStart(r *http.Request) error {
 }
 
 func (s *Server) verifyOAuthCallback(r *http.Request) error {
-	if err := s.loginLimit.admit(r); err != nil {
+	if err := s.loginLimit.admitClient(r); err != nil {
 		return err
 	}
 	name := r.PathValue("provider")

@@ -61,10 +61,12 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 	route, _ := capability.LookupRoute("GET", "/api/v1/auth/whoami")
 	auth, err := s.authorization.Authenticator.Authenticate(r.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: strings.TrimSpace(r.PostForm.Get("token"))}, route)
 	if err != nil {
+		s.loginLimit.failed()
 		return err
 	}
 	p, c := auth.Principal, auth.Principal.Capability
 	if p.Class != capability.CredentialBearer || c.Subject.Kind != capability.SubjectAccount || c.Audience != capability.Controller || c.Team == "" || c.Unit != "" || c.Purpose != "" || c.Binding.Kind != capability.BindingNone || c.Data != nil {
+		s.loginLimit.failed()
 		return apierr.Authorization(apierr.ReasonBinding, "sign-in requires an unbound account access token without data scope")
 	}
 	raw, session, err := s.store.CreateCapabilitySession(r.Context(), c.Prefix, s.sessionInitialTTL())
