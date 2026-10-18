@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
@@ -22,6 +24,7 @@ var ErrNoDedicatedNode = errors.New("no unoccupied team-dedicated Cloud node")
 const (
 	reservationNamespaceAnnotation = "sparkwing.dev/reservation-namespace"
 	reservationTaint               = "sparkwing.dev/cloud-reserved"
+	capacityRemoval                = 30 * time.Second
 )
 
 // KubernetesBoundary persists exclusivity on the node under Kubernetes resource-version fencing.
@@ -63,7 +66,11 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 		if err != nil {
 			return CloudNodeReservation{}, CloudNetworkEvidence{}, err
 		}
-		evidence, err := b.Probe(ctx, reservation)
+		err = b.consumeCapacity(ctx, node.Name, binding.Team)
+		var evidence CloudNetworkEvidence
+		if err == nil {
+			evidence, err = b.Probe(ctx, reservation)
+		}
 		if err == nil {
 			err = validateBoundary(b.Namespace, binding, job, reservation, evidence)
 		}
@@ -90,7 +97,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 		}
 		return CloudNodeReservation{}, ErrNoDedicatedNode
 	}
-	if err := b.vacant(ctx, node.Name); err != nil {
+	if _, err := b.occupants(ctx, node.Name, team); err != nil {
 		return CloudNodeReservation{}, err
 	}
 	r := CloudNodeReservation{NodeName: node.Name, NodeUID: string(node.UID), Team: team, JobName: job, ReservationID: rand.Text(), Award: binding.LeaseRef()}
@@ -169,10 +176,18 @@ func (b *KubernetesBoundary) Release(ctx context.Context, reservation CloudNodeR
 }
 
 func (b *KubernetesBoundary) vacant(ctx context.Context, node string) error {
+	_, err := b.occupants(ctx, node, "")
+	return err
+}
+
+// safety: only the team's own unowned requests in the launcher namespace are
+// consumable; any other non-DaemonSet Pod keeps the node occupied.
+func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) ([]corev1.Pod, error) {
 	pods, err := b.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var requests []corev1.Pod
 	for _, pod := range pods.Items {
 		if pod.Spec.NodeName != node {
 			continue
@@ -183,8 +198,41 @@ func (b *KubernetesBoundary) vacant(ctx context.Context, node string) error {
 				daemon = true
 			}
 		}
-		if !daemon {
-			return ErrNoDedicatedNode
+		if daemon {
+			continue
+		}
+		if team != "" && pod.Namespace == b.Namespace && strings.HasPrefix(pod.Name, capacityPrefix) && len(pod.OwnerReferences) == 0 && pod.Labels[capacityLabel] == "true" && pod.Labels[TeamLabel] == labelHash(team) {
+			requests = append(requests, pod)
+			continue
+		}
+		return nil, ErrNoDedicatedNode
+	}
+	return requests, nil
+}
+
+// safety: requests leave only after the reservation is persisted, so the node
+// is never empty between provisioning and its first job, and the wait for
+// their removal lets kubelet release their resources before the job is placed.
+func (b *KubernetesBoundary) consumeCapacity(ctx context.Context, node, team string) error {
+	requests, err := b.occupants(ctx, node, team)
+	if err != nil {
+		return err
+	}
+	pods := b.Kube.CoreV1().Pods(b.Namespace)
+	for _, pod := range requests {
+		err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID}})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		err = wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, capacityRemoval, true, func(ctx context.Context) (bool, error) {
+			current, err := pods.Get(ctx, pod.Name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return true, nil
+			}
+			return err == nil && current.UID != pod.UID, err
+		})
+		if err != nil {
+			return fmt.Errorf("capacity request %s did not leave node %s: %w", pod.Name, node, err)
 		}
 	}
 	return nil

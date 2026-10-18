@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 )
@@ -26,10 +28,14 @@ type boundaryFake struct {
 	releases     int
 	retirements  int
 	err          error
+	reserveErr   error
 }
 
 func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string) (CloudNodeReservation, CloudNetworkEvidence, error) {
 	b.reservations++
+	if b.reserveErr != nil {
+		return CloudNodeReservation{}, CloudNetworkEvidence{}, b.reserveErr
+	}
 	return CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation", Award: a.LeaseRef()}, CloudNetworkEvidence{Namespace: "cloud", NodeUID: "uid", PolicyRevision: "revision", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
 }
 
@@ -162,7 +168,13 @@ func TestSyncRetainsReservationWhileDockerLives(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := jobName(control.award.Binding)
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "cloud", Labels: map[string]string{JobLabel: name}}, Status: corev1.PodStatus{Phase: corev1.PodRunning, InitContainerStatuses: []corev1.ContainerStatus{{Name: "docker", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}, ContainerStatuses: []corev1.ContainerStatus{{Name: "run-node", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}}}}}
+	job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy(), Status: corev1.PodStatus{Phase: corev1.PodRunning, InitContainerStatuses: []corev1.ContainerStatus{{Name: "docker", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}, ContainerStatuses: []corev1.ContainerStatus{{Name: "run-node", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}}}}}
+	pod.Name, pod.Namespace = "pod", "cloud"
+	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: name, UID: job.UID, Controller: ptr(true)}}
 	if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -386,4 +398,35 @@ func TestBuildJobRoundsFractionalCPUUpToKubernetesPrecision(t *testing.T) {
 
 func (c *controlFake) Prepare(ctx context.Context, _ []capability.LeaseRef) error {
 	return context.Cause(ctx)
+}
+
+type retryAfterControl struct {
+	*controlFake
+	claimed []time.Time
+	stop    context.CancelFunc
+}
+
+func (c *retryAfterControl) Claim(ctx context.Context) (*CloudJobAward, error) {
+	c.claimed = append(c.claimed, time.Now())
+	if len(c.claimed) > 1 {
+		c.stop()
+		return nil, nil
+	}
+	return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(7000)}}
+}
+
+func TestLauncherWaitsOutAControllerRetryAfter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, _, _, control := fixture()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		retrying := &retryAfterControl{controlFake: control, stop: cancel}
+		l.Control, l.Poll = retrying, time.Second
+		if err := l.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if len(retrying.claimed) != 2 || retrying.claimed[1].Sub(retrying.claimed[0]) != 7*time.Second {
+			t.Fatalf("claims at %v, want the second after the controller's 7s", retrying.claimed)
+		}
+	})
 }

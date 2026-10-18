@@ -56,9 +56,28 @@ func (c triggerCheckout) read(ctx context.Context, args ...string) (string, erro
 	cmd.Stderr = c.diagnostics
 	out, err := cmd.Output()
 	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			err = fmt.Errorf("%w: %s", err, gitDiagnostic(exit.Stderr))
+		}
 		return "", fmt.Errorf("inspect trigger checkout: %w", errors.Join(ctx.Err(), err))
 	}
 	return strings.TrimSuffix(string(out), "\n"), nil
+}
+
+const maxGitDiagnostic = 512
+
+func gitDiagnostic(stderr []byte) string {
+	fields := strings.Fields(string(stderr))
+	for i, field := range fields {
+		value := strings.Trim(field, "'\"")
+		fields[i] = strings.Replace(field, value, envredact.RedactValue(value), 1)
+	}
+	detail := strings.Join(fields, " ")
+	if len(detail) > maxGitDiagnostic {
+		detail = detail[:maxGitDiagnostic] + "..."
+	}
+	return detail
 }
 
 func (s preparedTriggerSource) checkReachable(ctx context.Context) error {

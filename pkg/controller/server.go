@@ -169,6 +169,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	}
 	srv := &Server{
 		store:              st,
+		engineController:   &EngineController{Store: st},
 		operatorSettings:   storeOperatorSettings{Store: st, Operator: st.AsOperator()},
 		logger:             logger,
 		masker:             secrets.NewMasker(),
@@ -495,10 +496,12 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 // time the listener's own shutdown already spent.
 const controllerShutdownBudget = 5 * time.Second
 
-// ServeWith runs a pre-built Server (configured with its With options)
-// at addr. Split from Serve so the controller pod
-// main can configure the server without passing options through Serve.
+// ServeWith runs a Server configured through its With options at addr,
+// refusing one whose engine has no runner admission policy.
 func ServeWith(ctx context.Context, s *Server, addr string) error {
+	if s.engineController.RunnerPolicy == nil {
+		return errors.New("controller has no runner admission policy; compose its engine with WithEngineController before serving")
+	}
 	listener := func(addr string, h http.Handler) *http.Server {
 		return &http.Server{
 			Addr:              addr,

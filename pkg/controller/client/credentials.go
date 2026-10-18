@@ -165,7 +165,7 @@ func (c *tokenManager) CreateToken(ctx context.Context, input controllerwire.Tok
 		return result, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned incomplete credential issuance"}
 	}
 	result.Token = response.Capability
-	result.Metadata = controllerwire.TokenMetadata{Prefix: response.Prefix, Kind: kind, Team: response.Team, Scopes: []capability.Grant{}, ExpiresAt: tokenTime(response.ExpiresAt)}
+	result.Metadata = controllerwire.TokenMetadata{Prefix: response.Prefix, Kind: kind, Principal: response.Principal, Team: response.Team, Scopes: []capability.Grant{}, ExpiresAt: tokenTime(response.ExpiresAt)}
 	for _, grant := range response.Grants {
 		result.Metadata.Scopes = append(result.Metadata.Scopes, capability.Grant(grant))
 	}

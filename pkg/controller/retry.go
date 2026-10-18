@@ -19,9 +19,6 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request, auth
 	}
 
 	engine := s.engineController
-	if engine == nil {
-		engine = &EngineController{Store: s.store}
-	}
 	page := controllerwire.RunPage{Runs: []controllerwire.RunDetail{}}
 	for _, run := range runs {
 		a := authorized

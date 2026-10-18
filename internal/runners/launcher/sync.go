@@ -29,11 +29,11 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	if err := l.validate(); err != nil {
 		return err
 	}
+	errs := []error{l.verifyLocal(ctx)}
 	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
-		return fmt.Errorf("list Cloud Jobs: %w", err)
+		return errors.Join(append(errs, fmt.Errorf("list Cloud Jobs: %w", err))...)
 	}
-	var errs []error
 	var observations []CloudJobObservation
 	live := make(map[string]int)
 	for i, job := range jobs.Items {
@@ -83,12 +83,6 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			job := &jobs.Items[live[observation.JobName]]
 			_, reservation, err := jobOwnership(*job)
 			if err == nil && !retirements[observation.JobName] {
-				if job.Spec.Suspend != nil && *job.Spec.Suspend {
-					continue
-				}
-				if verifyErr := l.verifyJobPods(ctx, job); verifyErr != nil {
-					errs = append(errs, l.verificationFailure(ctx, job, observation.Binding, reservation, verifyErr))
-				}
 				continue
 			}
 			if err == nil {
@@ -99,7 +93,31 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			}
 		}
 	}
-	return errors.Join(append(errs, l.syncReservations(ctx))...)
+	return errors.Join(append(errs, l.syncReservations(ctx), l.syncCapacity(ctx))...)
+}
+
+// safety: Kubernetes-only checks run on every pass, so neither a controller
+// cooldown nor a failed controller reconciliation leaves an active Pod unverified.
+func (l *Launcher) verifyLocal(ctx context.Context) error {
+	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
+	if err != nil {
+		return fmt.Errorf("list Cloud Jobs: %w", err)
+	}
+	var errs []error
+	for i := range jobs.Items {
+		job := &jobs.Items[i]
+		if job.DeletionTimestamp != nil || job.Annotations[rejectedAnnotation] != "" || jobFinished(*job) || job.Spec.Suspend != nil && *job.Spec.Suspend {
+			continue
+		}
+		binding, reservation, err := jobOwnership(*job)
+		if err != nil {
+			continue
+		}
+		if verifyErr := l.verifyJobPods(ctx, job); verifyErr != nil {
+			errs = append(errs, l.verificationFailure(ctx, job, binding, reservation, verifyErr))
+		}
+	}
+	return errors.Join(append(errs, l.verifyCapacity(ctx))...)
 }
 
 func (l *Launcher) syncReservations(ctx context.Context) error {

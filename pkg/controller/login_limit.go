@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -46,21 +45,27 @@ func (l *loginLimiter) client(r *http.Request) string {
 }
 
 func writeRetryAfter(w http.ResponseWriter, after time.Duration, message string) {
-	setRetryAfter(w, after)
-	writeError(w, http.StatusTooManyRequests, errors.New(message))
+	writeRetryAfterStatus(w, http.StatusTooManyRequests, after, message)
 }
 
 // safety: the header is whole seconds, so a sub-second delay truncates to a
 // zero that invites the caller straight back; every delay rounds up instead.
 func setRetryAfter(w http.ResponseWriter, after time.Duration) {
+	w.Header().Set("Retry-After", strconv.FormatInt(retryAfterWholeSeconds(after), 10))
+}
+
+func retryAfterWholeSeconds(after time.Duration) int64 {
 	seconds := int64(after / time.Second)
 	if after%time.Second > 0 || seconds < 1 {
 		seconds++
 	}
-	w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
+	return seconds
 }
 
 func writeRetryAfterStatus(w http.ResponseWriter, status int, after time.Duration, message string) {
-	setRetryAfter(w, after)
-	writeError(w, status, errors.New(message))
+	code := apierr.RateLimited
+	if status == http.StatusServiceUnavailable {
+		code = apierr.Unavailable
+	}
+	writePolicyError(w, &apierr.Error{Code: code, Message: message, Details: map[string]any{"retry_after_ms": retryAfterWholeSeconds(after) * 1000}})
 }

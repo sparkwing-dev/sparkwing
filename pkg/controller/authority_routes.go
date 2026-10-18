@@ -22,9 +22,6 @@ type membershipRequest struct {
 
 func (s *Server) authorityEndpoints() []Endpoint {
 	e := s.engineController
-	if e == nil {
-		e = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{
 			Method: "PATCH", Pattern: "/api/v1/team/members/{account}", Authentication: capability.AuthCapability,

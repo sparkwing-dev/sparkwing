@@ -137,9 +137,6 @@ func (s *Server) sourceAdapter() *SourceController {
 
 func (s *Server) sourceEndpoints() []Endpoint {
 	e := s.engineController
-	if e == nil {
-		e = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleSourceRelease},
 		{Method: "PUT", Pattern: "/api/v1/tokens/{token}/git-credentials", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSourceConsent},
