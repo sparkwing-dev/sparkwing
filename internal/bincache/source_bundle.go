@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// SeedRef names the one ref a working-tree snapshot bundle carries.
+// SeedRef names the bundle ref that carries commit sha, either the snapshot or a selected code revision.
 func SeedRef(sha string) string { return "refs/sparkwing-seed/" + sha }
 
 // SourceData binds a source bundle to the host's live data authority. Reads use
