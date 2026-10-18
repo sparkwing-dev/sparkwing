@@ -42,6 +42,9 @@ controller:
 launcher:
   enabled: false
   serviceAccountName: ""
+  # Cloud Jobs run in this dedicated namespace, <release namespace>-jobs when
+  # empty. Its admission policies admit only launcher-created Pods and Jobs.
+  jobNamespace: ""
   image:
     pullPolicy: IfNotPresent
   tokenSecret:

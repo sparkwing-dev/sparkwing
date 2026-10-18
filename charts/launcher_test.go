@@ -14,7 +14,7 @@ import (
 )
 
 func TestCloudLauncherSecretPermissions(t *testing.T) {
-	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", "launcher.serviceAccountName=cloud-launcher"))
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher")...))
 	secretRule, customer := false, false
 	for _, r := range resources {
 		if r.Kind == "ServiceAccount" && r.Metadata.Name == "sparkwing-customer-job" {
@@ -43,13 +43,13 @@ func TestCloudLauncherSecretPermissions(t *testing.T) {
 }
 
 func TestCloudLauncherProvisioningPermissions(t *testing.T) {
-	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", "launcher.serviceAccountName=cloud-launcher"))
-	wants := map[string][]string{"nodeclaims": {"get", "delete"}, "nodepools": {"get"}, "priorityclasses": {"list"}}
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher")...))
+	wants := map[string][]string{"nodeclaims": {"get", "delete"}, "nodepools": {"get"}}
 	for _, r := range resources {
 		for _, rule := range r.Rules {
 			for _, resource := range rule.Resources {
-				if resource == "limitranges" {
-					t.Fatal("unused LimitRange access remains")
+				if resource == "limitranges" || resource == "priorityclasses" || resource == "namespaces" {
+					t.Fatalf("unused %s access remains", resource)
 				}
 				if verbs, ok := wants[resource]; ok {
 					if r.Kind != "ClusterRole" || !slices.Equal(verbs, rule.Verbs) {

@@ -1,0 +1,283 @@
+{{- /* Generated from launcher.AdmissionPolicies: GOWORK=off go test ./charts -run TestLauncherAdmissionTemplateIsGenerated -update */}}
+{{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
+{{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
+{{- $launcher := printf "system:serviceaccount:%s:%s" .Release.Namespace (include "sparkwing-runner-bundle.launcher.serviceAccountName" .) }}
+{{- $runner := include "sparkwing-runner-bundle.digestImage" .Values.launcher.jobImage }}
+{{- $docker := include "sparkwing-runner-bundle.digestImage" .Values.launcher.dockerImage }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sparkwing-cloud-pods-{{ $jobs }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: '{{ $jobs }}'
+    objectSelector: {}
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+      - pods/resize
+      scope: Namespaced
+  validations:
+  - expression: '!variables.create || (variables.shape == ''job'' ? request.userInfo.username
+      in [''system:serviceaccount:kube-system:job-controller'', ''system:kube-controller-manager'']
+      : request.userInfo.username == variables.launcher)'
+    message: only the launcher and the Job controller create Pods here
+  - expression: size(variables.spec.?ephemeralContainers.orValue([])) == 0
+    message: ephemeral containers are not allowed
+  - expression: request.operation != 'UPDATE' || object.spec == oldObject.spec &&
+      variables.labels == oldObject.metadata.?labels.orValue({})
+    message: Pod specs and labels are immutable here
+  - expression: '!variables.create || variables.shape != ''other'''
+    message: only Cloud Job, capacity and boundary probe Pods run in the Sparkwing
+      job namespace
+  - expression: '!variables.create || variables.spec.?serviceAccountName.orValue('''')
+      == ''sparkwing-customer-job'' && !variables.spec.?automountServiceAccountToken.orValue(true)'
+    message: Pods use the customer job service account without an API token
+  - expression: '!variables.create || !variables.spec.?hostNetwork.orValue(false)
+      && !variables.spec.?hostIPC.orValue(false) && (!variables.spec.?hostPID.orValue(false)
+      || variables.shape == ''probe'') && variables.containers.all(c, c.?ports.orValue([]).all(p,
+      p.?hostPort.orValue(0) == 0))'
+    message: Pods cannot share host namespaces or ports
+  - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
+      == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
+      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')))'
+    message: Pods mount only their scratch emptyDir and own bootstrap Secret
+  - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
+      == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
+      == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
+      == ''docker'' && variables.inits[0].image == variables.dockerImage && variables.inits[1].name
+      == ''fetch-source'' && variables.inits[1].image == variables.runnerImage : size(variables.spec.containers)
+      == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
+      == 0)'
+    message: Pods run only the launcher's container set and pinned images
+  - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false)
+      || variables.shape == ''job'' && c.name == ''docker'' || variables.shape ==
+      ''probe'' && c.name == ''measure'')'
+    message: only the DinD sidecar and the boundary measurement run privileged
+  - expression: '!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([]))
+      == 0)'
+    message: containers cannot add capabilities
+  - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
+      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && e.name in [''HOME'',
+      ''DOCKER_HOST'', ''AWS_REGION'', ''AWS_DEFAULT_REGION'', ''AWS_STS_REGIONAL_ENDPOINTS'']
+      && !has(e.valueFrom)))'
+    message: containers carry only the launcher's environment and EKS region values,
+      never AWS credentials
+  - expression: '!variables.create || variables.team != '''' && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
+      == variables.team && variables.spec.?tolerations.orValue([]).exists(t, t.?key.orValue('''')
+      == ''node-restriction.kubernetes.io/sparkwing-team-node'' && t.?operator.orValue(''Equal'')
+      == ''Equal'' && t.?value.orValue('''') == variables.team && t.?effect.orValue('''')
+      == ''NoSchedule'')'
+    message: Pods select and tolerate only their own team's nodes
+  - expression: '!variables.create || (variables.shape == ''capacity'' ? variables.spec.?nodeName.orValue('''')
+      == '''' : variables.spec.?nodeName.orValue('''') != '''')'
+    message: Job and probe Pods are bound to their reserved node; capacity requests
+      are not
+  - expression: '!variables.create || (variables.shape == ''job'' ? variables.labels.all(k,
+      k in [''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'',
+      ''batch.kubernetes.io/controller-uid'', ''batch.kubernetes.io/job-name'', ''controller-uid'',
+      ''job-name'']) && variables.labels[?''app''].orValue('''') == ''sparkwing-job''
+      && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''') == ''sparkwing-launcher''
+      && variables.labels[?''sparkwing.dev/job''].orValue('''') != '''' : variables.shape
+      == ''capacity'' ? variables.labels.all(k, k in [''app'', ''app.kubernetes.io/managed-by'',
+      ''sparkwing.dev/capacity-request'', ''sparkwing.dev/team'']) && variables.labels[?''app''].orValue('''')
+      == ''sparkwing-job'' && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''')
+      == ''sparkwing-launcher'' && variables.labels[?''sparkwing.dev/capacity-request''].orValue('''')
+      == ''true'' : variables.labels.all(k, k in [''sparkwing.dev/boundary-control'',
+      ''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'']))'
+    message: Pods carry exactly the launcher's labels
+  - expression: '!variables.create || variables.spec.?readinessGates.orValue([]).all(g,
+      g.conditionType.startsWith(''target-health.elbv2.k8s.aws/''))'
+    message: only AWS load balancer readiness gates are allowed
+  variables:
+  - expression: request.operation == 'CREATE'
+    name: create
+  - expression: '''{{ $launcher }}'''
+    name: launcher
+  - expression: '''{{ $runner }}'''
+    name: runnerImage
+  - expression: '''{{ $docker }}'''
+    name: dockerImage
+  - expression: object.metadata.?labels.orValue({})
+    name: labels
+  - expression: variables.labels[?'sparkwing.dev/team'].orValue('')
+    name: team
+  - expression: object.spec
+    name: spec
+  - expression: variables.spec.?initContainers.orValue([])
+    name: inits
+  - expression: variables.spec.containers + variables.inits
+    name: containers
+  - expression: object.metadata.?ownerReferences.orValue([])
+    name: owners
+  - expression: 'size(variables.owners) == 1 && variables.owners[0].apiVersion ==
+      ''batch/v1'' && variables.owners[0].kind == ''Job'' && variables.owners[0].?controller.orValue(false)
+      && variables.owners[0].name == variables.labels[?''sparkwing.dev/job''].orValue('''')
+      ? ''job'' : size(variables.owners) == 0 && object.metadata.name.startsWith(''sw-capacity-'')
+      ? ''capacity'' : size(variables.owners) == 0 && object.metadata.name.startsWith(''sw-boundary-'')
+      ? ''probe'' : ''other'''
+    name: shape
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sparkwing-cloud-pods-{{ $jobs }}
+spec:
+  matchResources:
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: '{{ $jobs }}'
+    objectSelector: {}
+  policyName: sparkwing-cloud-pods-{{ $jobs }}
+  validationActions:
+  - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sparkwing-cloud-jobs-{{ $jobs }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: '{{ $jobs }}'
+    objectSelector: {}
+    resourceRules:
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      scope: Namespaced
+  validations:
+  - expression: '!variables.create || request.userInfo.username == variables.launcher'
+    message: only the launcher creates Jobs here
+  - expression: '!variables.create || object.metadata.name == variables.labels[?''sparkwing.dev/job''].orValue('''')'
+    message: the Job template names its own Job
+  - expression: object.spec.?parallelism.orValue(1) == 1 && object.spec.?completions.orValue(1)
+      == 1 && object.spec.?backoffLimit.orValue(6) == 0 && !has(object.spec.podFailurePolicy)
+      && !has(object.spec.successPolicy) && object.spec.?completionMode.orValue('NonIndexed')
+      == 'NonIndexed'
+    message: Jobs run exactly one Pod without retries
+  - expression: request.operation != 'UPDATE' || object.spec.template == oldObject.spec.template
+      && (request.userInfo.username == variables.launcher || object.spec == oldObject.spec)
+    message: only the launcher changes a Job, and never its template
+  - expression: '!variables.create || variables.shape != ''other'''
+    message: only Cloud Job, capacity and boundary probe Pods run in the Sparkwing
+      job namespace
+  - expression: '!variables.create || variables.spec.?serviceAccountName.orValue('''')
+      == ''sparkwing-customer-job'' && !variables.spec.?automountServiceAccountToken.orValue(true)'
+    message: Pods use the customer job service account without an API token
+  - expression: '!variables.create || !variables.spec.?hostNetwork.orValue(false)
+      && !variables.spec.?hostIPC.orValue(false) && (!variables.spec.?hostPID.orValue(false)
+      || variables.shape == ''probe'') && variables.containers.all(c, c.?ports.orValue([]).all(p,
+      p.?hostPort.orValue(0) == 0))'
+    message: Pods cannot share host namespaces or ports
+  - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
+      == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
+      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')))'
+    message: Pods mount only their scratch emptyDir and own bootstrap Secret
+  - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
+      == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
+      == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
+      == ''docker'' && variables.inits[0].image == variables.dockerImage && variables.inits[1].name
+      == ''fetch-source'' && variables.inits[1].image == variables.runnerImage : size(variables.spec.containers)
+      == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
+      == 0)'
+    message: Pods run only the launcher's container set and pinned images
+  - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false)
+      || variables.shape == ''job'' && c.name == ''docker'' || variables.shape ==
+      ''probe'' && c.name == ''measure'')'
+    message: only the DinD sidecar and the boundary measurement run privileged
+  - expression: '!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([]))
+      == 0)'
+    message: containers cannot add capabilities
+  - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
+      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && e.name in [''HOME'',
+      ''DOCKER_HOST'', ''AWS_REGION'', ''AWS_DEFAULT_REGION'', ''AWS_STS_REGIONAL_ENDPOINTS'']
+      && !has(e.valueFrom)))'
+    message: containers carry only the launcher's environment and EKS region values,
+      never AWS credentials
+  - expression: '!variables.create || variables.team != '''' && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
+      == variables.team && variables.spec.?tolerations.orValue([]).exists(t, t.?key.orValue('''')
+      == ''node-restriction.kubernetes.io/sparkwing-team-node'' && t.?operator.orValue(''Equal'')
+      == ''Equal'' && t.?value.orValue('''') == variables.team && t.?effect.orValue('''')
+      == ''NoSchedule'')'
+    message: Pods select and tolerate only their own team's nodes
+  - expression: '!variables.create || (variables.shape == ''capacity'' ? variables.spec.?nodeName.orValue('''')
+      == '''' : variables.spec.?nodeName.orValue('''') != '''')'
+    message: Job and probe Pods are bound to their reserved node; capacity requests
+      are not
+  - expression: '!variables.create || (variables.shape == ''job'' ? variables.labels.all(k,
+      k in [''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'',
+      ''batch.kubernetes.io/controller-uid'', ''batch.kubernetes.io/job-name'', ''controller-uid'',
+      ''job-name'']) && variables.labels[?''app''].orValue('''') == ''sparkwing-job''
+      && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''') == ''sparkwing-launcher''
+      && variables.labels[?''sparkwing.dev/job''].orValue('''') != '''' : variables.shape
+      == ''capacity'' ? variables.labels.all(k, k in [''app'', ''app.kubernetes.io/managed-by'',
+      ''sparkwing.dev/capacity-request'', ''sparkwing.dev/team'']) && variables.labels[?''app''].orValue('''')
+      == ''sparkwing-job'' && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''')
+      == ''sparkwing-launcher'' && variables.labels[?''sparkwing.dev/capacity-request''].orValue('''')
+      == ''true'' : variables.labels.all(k, k in [''sparkwing.dev/boundary-control'',
+      ''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'']))'
+    message: Pods carry exactly the launcher's labels
+  - expression: '!variables.create || variables.spec.?readinessGates.orValue([]).all(g,
+      g.conditionType.startsWith(''target-health.elbv2.k8s.aws/''))'
+    message: only AWS load balancer readiness gates are allowed
+  variables:
+  - expression: request.operation == 'CREATE'
+    name: create
+  - expression: '''{{ $launcher }}'''
+    name: launcher
+  - expression: '''{{ $runner }}'''
+    name: runnerImage
+  - expression: '''{{ $docker }}'''
+    name: dockerImage
+  - expression: object.spec.template.metadata.?labels.orValue({})
+    name: labels
+  - expression: variables.labels[?'sparkwing.dev/team'].orValue('')
+    name: team
+  - expression: object.spec.template.spec
+    name: spec
+  - expression: variables.spec.?initContainers.orValue([])
+    name: inits
+  - expression: variables.spec.containers + variables.inits
+    name: containers
+  - expression: '''job'''
+    name: shape
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sparkwing-cloud-jobs-{{ $jobs }}
+spec:
+  matchResources:
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: '{{ $jobs }}'
+    objectSelector: {}
+  policyName: sparkwing-cloud-jobs-{{ $jobs }}
+  validationActions:
+  - Deny
+{{- end }}

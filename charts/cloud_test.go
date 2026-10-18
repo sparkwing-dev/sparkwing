@@ -48,7 +48,7 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 			t.Errorf("launcher lacks pinned %s: %v", prefix, c.Args)
 		}
 	}
-	for _, want := range []string{"--namespace=sparkwing", "--controller=https://api.sparkwing.dev", "--credentials-dir=/etc/sparkwing/credentials", "--cpu-ceiling=2", "--memory-ceiling=8Gi"} {
+	for _, want := range []string{"--namespace=sparkwing-jobs", "--controller=https://api.sparkwing.dev", "--credentials-dir=/etc/sparkwing/credentials", "--cpu-ceiling=2", "--memory-ceiling=8Gi"} {
 		if !containsArg(c.Args, want) {
 			t.Errorf("launcher lacks %q", want)
 		}
@@ -65,7 +65,7 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 			}
 		}
 	}
-	for _, kind := range []string{"Service", "Ingress", "ServiceAccount", "Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding", "NetworkPolicy"} {
+	for _, kind := range []string{"Service", "Ingress", "Namespace", "ServiceAccount", "Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding", "NetworkPolicy", "ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"} {
 		if !kinds[kind] {
 			t.Errorf("missing %s", kind)
 		}

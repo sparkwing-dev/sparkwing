@@ -50,7 +50,7 @@ spec:
           args:
             - launch
             - {{ printf "--controller=%s" (required "launcher requires controller.url" (include "sparkwing-runner-bundle.controllerURL" .)) | quote }}
-            - {{ printf "--namespace=%s" .Release.Namespace | quote }}
+            - {{ printf "--namespace=%s" (include "sparkwing-runner-bundle.jobNamespace" .) | quote }}
             - {{ printf "--image=%s" (include "sparkwing-runner-bundle.digestImage" $launcher.jobImage) | quote }}
             - {{ printf "--docker-image=%s" (include "sparkwing-runner-bundle.digestImage" $launcher.dockerImage) | quote }}
             - {{ printf "--cpu-ceiling=%s" (required "launcher.cpuCeiling is required" $launcher.cpuCeiling | toString) | quote }}
