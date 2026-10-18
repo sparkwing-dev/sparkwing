@@ -70,7 +70,7 @@ func renderHooksFire(w io.Writer, results []githooks.FireResult, format string) 
 		return nil
 	}
 	if len(results) == 0 {
-		fmt.Fprintln(w, "no repos registered; run `sparkwing pipeline add <dir>` first")
+		fmt.Fprintln(w, "no repos registered; run `sparkwing repos add --checkout <dir>` first")
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)

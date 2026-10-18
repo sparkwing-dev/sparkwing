@@ -345,3 +345,18 @@ func TestArchivedMigrationNotesDoNotExemptCurrentInstructions(t *testing.T) {
 		t.Fatal("archive exempted a current instruction")
 	}
 }
+
+func TestGuideUnprefixedInstructionsAreChecked(t *testing.T) {
+	for _, doc := range []string{"Run `update --cli` now.", "```bash\nsecrets set --name KEY\n```\n", "Run `cloud status`."} {
+		content := t.TempDir()
+		writeDoc(t, content, "guide.md", doc)
+		if checkCLIVerbs(content) {
+			t.Fatalf("unchecked instruction: %s", doc)
+		}
+	}
+	content := t.TempDir()
+	writeDoc(t, content, "guide.md", "Run `update` or `go run ./cmd/x`.\n")
+	if !checkCLIVerbs(content) {
+		t.Fatal("current unprefixed instruction rejected")
+	}
+}
