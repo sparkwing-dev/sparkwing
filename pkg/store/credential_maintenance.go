@@ -22,7 +22,7 @@ func (t *Tenant) credentialAdminTx(ctx context.Context, tx *storeTx, a capabilit
 	return nil
 }
 
-// RotateCredentials commits one tenant's secret and source-credential value changes together.
+// RotateCredentials commits one tenant's secret and source-credential value changes together; a retried transaction reruns the transforms.
 func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (string, error), git func(GitCredential) (string, error)) (int, int, error) {
 	if secret == nil || git == nil {
 		return 0, 0, authorityError(apierr.BadRequest, "credential transforms are required")

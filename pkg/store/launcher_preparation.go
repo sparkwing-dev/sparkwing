@@ -14,6 +14,7 @@ import (
 func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error) {
 	prepared := []capability.LeaseRef{}
 	err := s.inTx(ctx, func(tx *storeTx) error {
+		prepared = prepared[:0]
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}

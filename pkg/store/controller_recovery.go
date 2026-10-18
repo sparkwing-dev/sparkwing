@@ -24,6 +24,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 	}
 	var targets []ControllerRun
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		targets = targets[:0]
 		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner", tx.now()); err != nil {
 			return err
 		}
