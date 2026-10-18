@@ -98,7 +98,8 @@ func localControllerOptions(ctx context.Context, home string, query func(context
 	if !status.Running || status.PID <= 0 || status.Version == "" {
 		return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller has not established API readiness"}
 	}
-	socket, err := wingd.APISocketPath(home)
+	admission, err := wingd.EnsureSocketPath(home)
+	socket := wingd.APISocketBeside(admission)
 	if err != nil {
 		return client.EngineOptions{}, nil, err
 	}

@@ -16,7 +16,7 @@ import (
 
 func blockSocket(t *testing.T, home string) {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestProbe_TellsAnUnreachableSocketFromAnAbsentOne(t *testing.T) {
 	defer cancel()
 
 	absent := shortHome(t)
-	absentSock, err := wingd.SocketPath(absent)
+	absentSock, err := wingd.EnsureSocketPath(absent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestProbe_TellsAnUnreachableSocketFromAnAbsentOne(t *testing.T) {
 
 	blocked := shortHome(t)
 	blockSocket(t, blocked)
-	blockedSock, err := wingd.SocketPath(blocked)
+	blockedSock, err := wingd.EnsureSocketPath(blocked)
 	if err != nil {
 		t.Fatal(err)
 	}

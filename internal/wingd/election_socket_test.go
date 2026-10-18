@@ -22,7 +22,7 @@ func TestPrepareDaemonSocketTreatsAFreshHomeAsReady(t *testing.T) {
 
 func TestPrepareDaemonSocketDistinguishesCleanupFailure(t *testing.T) {
 	home := t.TempDir()
-	sock, err := SocketPath(home)
+	sock, err := EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

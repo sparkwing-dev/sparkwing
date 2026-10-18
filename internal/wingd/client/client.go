@@ -328,7 +328,7 @@ func describeHome(home string) string {
 }
 
 func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
-	sock, err := wingd.SocketPath(opts.Home)
+	sock, err := wingd.EnsureSocketPath(opts.Home)
 	if err != nil {
 		return nil, err
 	}

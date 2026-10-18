@@ -88,7 +88,7 @@ const (
 // ClaimDaemonStart serializes startup until the socket answers. The daemon
 // acquires its own election lock after spawning, leaving a gap for duplicate starters.
 func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
-	l, err := resolveLayout(home)
+	l, err := daemonLayout(home)
 	if err != nil {
 		return nil, false, err
 	}
@@ -110,7 +110,7 @@ func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
 }
 
 func PrepareDaemonSocket(home string) (SocketPreparation, error) {
-	l, err := resolveLayout(home)
+	l, err := daemonLayout(home)
 	if err != nil {
 		return SocketPreparationUnknown, err
 	}

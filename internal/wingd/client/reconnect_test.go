@@ -21,7 +21,7 @@ func TestReconnectClassifiesHostErrorsFromSpawn(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := shortHome(t)
-			sock, err := wingd.SocketPath(home)
+			sock, err := wingd.EnsureSocketPath(home)
 			if err != nil {
 				t.Fatal(err)
 			}

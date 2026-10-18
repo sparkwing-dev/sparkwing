@@ -12,7 +12,7 @@ import (
 
 func dialAtMajor(t *testing.T, home string, major int) (net.Conn, wingwire.HelloAck) {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

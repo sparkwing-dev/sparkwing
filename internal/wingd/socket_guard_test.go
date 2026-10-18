@@ -156,7 +156,7 @@ func TestSocketBaseDir_IgnoresTheEnvironment(t *testing.T) {
 		t.Fatalf("socketBaseDir() = %q with TMPDIR set, want the fixed base %q", got, base)
 	}
 	home := t.TempDir()
-	sock, err := SocketPath(home)
+	sock, err := EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestSocketBaseDir_IgnoresTheEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := socketPathIn(base, identity); sock != want {
+	if want := socketPathIn(base, identity, recordedSocketToken(t, home)); sock != want {
 		t.Fatalf("SocketPath = %q, want the derived path %q", sock, want)
 	}
 }
@@ -203,7 +203,7 @@ func TestCheckSocketBase_RefusesAWritableBaseWithoutTheStickyBit(t *testing.T) {
 
 func TestDaemon_RefusesAForeignDirectoryAtTheDerivedPath(t *testing.T) {
 	home := t.TempDir()
-	sock, err := SocketPath(home)
+	sock, err := EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestDaemon_RefusesAForeignDirectoryAtTheDerivedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	again, err := SocketPath(home)
+	again, err := EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestDaemon_RefusesAForeignDirectoryAtTheDerivedPath(t *testing.T) {
 
 func TestPrepareDaemonSocket_ClearsAStaleSocket(t *testing.T) {
 	home := t.TempDir()
-	sock, err := SocketPath(home)
+	sock, err := EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

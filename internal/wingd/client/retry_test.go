@@ -66,7 +66,7 @@ func TestRetryReturnsOnceTheCallerGivesUp(t *testing.T) {
 
 func failingDaemon(t *testing.T, home string) *atomic.Int64 {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

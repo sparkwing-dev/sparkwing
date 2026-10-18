@@ -16,7 +16,7 @@ import (
 
 func TestDial_RefusesAForeignSocketDirectory(t *testing.T) {
 	home := shortHome(t)
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

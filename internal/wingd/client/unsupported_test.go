@@ -18,7 +18,7 @@ const fakeDaemonVersion = "v1.0.0"
 
 func serveFakeDaemon(t *testing.T, home string, afterHandshake func(nc net.Conn, r *frameReader)) {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

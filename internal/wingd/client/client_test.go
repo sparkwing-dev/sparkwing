@@ -186,7 +186,7 @@ func TestEnsureDaemon_SpawnsWhenAbsent(t *testing.T) {
 func TestEnsureDaemon_BoundsAnUnreachablePredecessorElection(t *testing.T) {
 	home := shortHome(t)
 	_ = runDaemon(t, home, "v1.0.0")
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

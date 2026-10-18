@@ -200,7 +200,7 @@ func TestHealthProbeProducesNoConnectionJournalRecords(t *testing.T) {
 	if err := probeHome(context.Background(), home); err != nil {
 		t.Fatal(err)
 	}
-	socket, err := wingd.SocketPath(home)
+	socket, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -232,7 +232,7 @@ func TestWingdRunOpensControllerUnderElection(t *testing.T) {
 	if err != nil || held {
 		t.Fatalf("election after failure = %v, %v", held, err)
 	}
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

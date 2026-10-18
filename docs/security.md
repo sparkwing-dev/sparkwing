@@ -245,6 +245,8 @@ as an error or cache miss. See [data uploads](data-uploads.md).
 
 The local controller owns its home's store, queue, admission and dashboard.
 Unix transports require an owner-only socket directory and kernel peer identity.
+The socket directory and Windows pipe names carry a random id kept in the home,
+so another account cannot claim them first.
 Windows uses the authenticated account SID. An unauthenticated or foreign peer
 is refused. A filesystem path alone is not peer authentication.
 

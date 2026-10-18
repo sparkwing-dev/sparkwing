@@ -24,7 +24,7 @@ func TestProbeCompletesAfterHandshake(t *testing.T) {
 func startHealthProbeServer(t *testing.T, protocolMajor int) (string, string) {
 	t.Helper()
 	home := shortHome(t)
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatal(err)
 	}

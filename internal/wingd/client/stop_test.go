@@ -152,7 +152,7 @@ func TestStop_KeepsANewerBuildFromTakingOverInstead(t *testing.T) {
 func TestProbe_ReportsTheDaemonsOwnVersion(t *testing.T) {
 	home := shortHome(t)
 	runDaemon(t, home, "v0.0.0")
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestProbe_ReportsTheDaemonsOwnVersion(t *testing.T) {
 
 func TestProbe_ReportsNoDaemonForAnUnservedSocket(t *testing.T) {
 	home := shortHome(t)
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

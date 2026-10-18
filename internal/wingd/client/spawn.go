@@ -33,6 +33,9 @@ var ErrNoDaemonHost = errors.New("wingd/client: no admission daemon is running a
 var ErrDaemonHostFailed = errors.New("wingd/client: the daemon host binary exited without serving")
 
 func spawnDetached(bin, home, version string) error {
+	if _, err := wingd.EnsureSocketPath(home); err != nil {
+		return err
+	}
 	args := []string{"wingd", DaemonSpawnVerb}
 	if home != "" {
 		args = append(args, "--home", home)

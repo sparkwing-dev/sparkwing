@@ -15,7 +15,7 @@ import (
 
 func silentAfterReconnect(t *testing.T, home string) (queuedAgain <-chan struct{}) {
 	t.Helper()
-	sock, err := wingd.SocketPath(home)
+	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}

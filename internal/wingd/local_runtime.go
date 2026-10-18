@@ -56,7 +56,7 @@ func NewLocalRuntime(cfg LocalRuntimeConfig) (LocalRuntime, error) {
 	if cfg.Open == nil || cfg.Admission.Runs != nil || cfg.Admission.ServeAPI != nil {
 		return nil, errors.New("wingd: local runtime requires one elected controller factory")
 	}
-	lay, err := resolveLayout(cfg.Admission.Home)
+	lay, err := daemonLayout(cfg.Admission.Home)
 	if err != nil {
 		return nil, err
 	}
