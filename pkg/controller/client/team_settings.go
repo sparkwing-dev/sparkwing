@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"net/url"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -30,19 +29,5 @@ func (c *TeamSettingsClient) ReadTeamSettings(ctx context.Context) (controllerwi
 func (c *TeamSettingsClient) SetTeamSettings(ctx context.Context, settings controllerwire.TeamSettingsUpdate) (controllerwire.TeamSettings, error) {
 	var result controllerwire.TeamSettings
 	err := c.client.request(ctx, "PUT", "/api/v1/team/settings", "/api/v1/team/settings", "", settings, &result)
-	return result, err
-}
-
-// RequestMachineAutomation requests or withdraws automated runs for the caller's personal machine.
-func (c *TeamSettingsClient) RequestMachineAutomation(ctx context.Context, runner string, requested bool) (controllerwire.MachineAutomation, error) {
-	var result controllerwire.MachineAutomation
-	err := c.client.request(ctx, "PUT", "/api/v1/runners/{runner}/automation", "/api/v1/runners/"+url.PathEscape(runner)+"/automation", "", controllerwire.MachineAutomationRequest{Requested: &requested}, &result)
-	return result, err
-}
-
-// ApproveMachineAutomation approves or revokes a personal machine's automated runs as a team administrator.
-func (c *TeamSettingsClient) ApproveMachineAutomation(ctx context.Context, runner string, approved bool) (controllerwire.MachineAutomation, error) {
-	var result controllerwire.MachineAutomation
-	err := c.client.request(ctx, "PUT", "/api/v1/runners/{runner}/automation/approval", "/api/v1/runners/"+url.PathEscape(runner)+"/automation/approval", "", controllerwire.MachineAutomationApproval{Approved: &approved}, &result)
 	return result, err
 }

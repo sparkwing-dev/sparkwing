@@ -211,108 +211,29 @@ func TestGitHubAppRunsAnywhereUnlessTheRepositoryPinsCloud(t *testing.T) {
 	for _, id := range ids {
 		sealed := f.sealedRequest(id)
 		pinned := strings.Contains(strings.Join(sealed.Options.Requires.Value, ","), "class=cloud")
-		if sealed.Dispatch != runspec.DispatchController || pinned != (sealed.Pipeline == "cloud-build") || sealed.Git.App.Value.AuthorID != 0 {
-			t.Fatalf("%s sealed dispatch=%s requires=%v sender=%d", sealed.Pipeline, sealed.Dispatch, sealed.Options.Requires.Value, sealed.Git.App.Value.AuthorID)
+		if sealed.Dispatch != runspec.DispatchController || pinned != (sealed.Pipeline == "cloud-build") {
+			t.Fatalf("%s sealed dispatch=%s requires=%v", sealed.Pipeline, sealed.Dispatch, sealed.Options.Requires.Value)
 		}
 		if !pinned {
 			anywhere = id
 		}
 	}
-	machine, _ := f.teamRunner(olga, "team-box")
+	var laptop struct {
+		Capability string `json:"capability"`
+	}
+	if code := f.call("POST", "/api/v1/runners", olga.auth, map[string]any{"name": "olga-laptop", "repos": []string{"github.com/*/*"}, "personal": true}, &laptop); code != http.StatusCreated {
+		t.Fatalf("enroll personal machine: %d", code)
+	}
 	var claimed controllerwire.ClaimResponse
+	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+laptop.Capability, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || claimed.Claim != nil {
+		t.Fatalf("the sender's personal machine took an App run: %d %+v", code, claimed.Claim)
+	}
+	machine, _ := f.teamRunner(olga, "team-box")
 	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != anywhere || claimed.Claim.Unit != capability.UnitPlan {
 		t.Fatalf("team runner plan claim = %d %+v, want %s", code, claimed.Claim, anywhere)
 	}
 	claimed = controllerwire.ClaimResponse{}
 	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || claimed.Claim != nil {
 		t.Fatalf("team runner took the Cloud-pinned plan: %d %+v", code, claimed.Claim)
-	}
-}
-
-func TestGitHubAppRunsReachAnApprovedPersonalMachineOnlyForItsAuthorWithAccess(t *testing.T) {
-	for _, permission := range []string{"write", "none"} {
-		t.Run(permission, func(t *testing.T) {
-			f := newAppFixture(t, func(s *controller.Server) *controller.Server { return s.WithCloudDeployment(true) })
-			olga := f.ghUser(501, "olga")
-			f.connect(olga, 501, 7, acmeAdmin)
-			if code := f.subscribe(olga, "acme/widgets", "any-build", map[string]any{"pull_request": true}); code != http.StatusOK {
-				t.Fatalf("subscribe: %d", code)
-			}
-			var minted struct {
-				Capability string `json:"capability"`
-			}
-			if code := f.call("POST", "/api/v1/runners", olga.auth, map[string]any{"name": "olga-laptop", "repos": []string{"github.com/*/*"}, "personal": true}, &minted); code != http.StatusCreated {
-				t.Fatalf("enroll personal machine: %d", code)
-			}
-			laptop := "Bearer " + minted.Capability
-			var state controllerwire.MachineAutomation
-			if code := f.call("PUT", "/api/v1/runners/olga-laptop/automation/approval", olga.auth, map[string]any{"approved": true}, nil); code != http.StatusBadRequest {
-				t.Fatalf("approval before a request = %d, want 400", code)
-			}
-			if code := f.call("PUT", "/api/v1/runners/olga-laptop/automation", olga.auth, map[string]any{}, nil); code != http.StatusBadRequest {
-				t.Fatalf("request without a value = %d, want 400", code)
-			}
-			if code := f.call("PUT", "/api/v1/runners/olga-laptop/automation", olga.auth, map[string]any{"requested": true}, &state); code != http.StatusOK || state.State != "requested" {
-				t.Fatalf("request = %d %+v", code, state)
-			}
-			if code := f.call("PUT", "/api/v1/runners/olga-laptop/automation/approval", olga.auth, map[string]any{"approved": true}, &state); code != http.StatusOK || state.State != "approved" {
-				t.Fatalf("approve = %d %+v", code, state)
-			}
-			f.app.SetCollaborator("acme/widgets", 501, "olga", permission)
-			laptopTakes := func(payload map[string]any, event string, want bool) []string {
-				t.Helper()
-				code, out := f.deliver(event, payload, "")
-				ids := startedRunIDs(t, out)
-				if code != http.StatusAccepted || len(ids) != 1 {
-					t.Fatalf("%s = %d %v", event, code, out)
-				}
-				var claimed controllerwire.ClaimResponse
-				if code := f.call("POST", "/api/v1/runners/claim", laptop, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || (claimed.Claim != nil) != want {
-					t.Fatalf("%s: laptop claim = %d %+v, want claimed=%t", event, code, claimed.Claim, want)
-				}
-				return ids
-			}
-			pr := prPayload(7, 701, "acme/widgets", 701)
-			pr["pull_request"].(map[string]any)["user"] = map[string]any{"id": 601, "login": "contributor"}
-			pr["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]any{"id": 701, "full_name": "acme/widgets"}
-			pr["sender"] = map[string]any{"id": 501, "login": "olga"}
-			if ids := laptopTakes(pr, "pull_request", false); f.sealedRequest(ids[0]).Automation.Value.AuthorID != 601 {
-				t.Fatal("the pull request's author was not sealed")
-			}
-			own := prPayload(7, 701, "acme/widgets", 701)
-			own["pull_request"].(map[string]any)["user"] = map[string]any{"id": 501, "login": "olga"}
-			own["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]any{"id": 701, "full_name": "acme/widgets"}
-			own["pull_request"].(map[string]any)["head"].(map[string]any)["sha"] = strings.Repeat("b", 40)
-			own["sender"] = map[string]any{"id": 601, "login": "contributor"}
-			laptopTakes(own, "pull_request", false)
-			reopened := prPayload(7, 701, "acme/widgets", 701)
-			reopened["action"] = "reopened"
-			reopened["pull_request"].(map[string]any)["user"] = map[string]any{"id": 501, "login": "olga"}
-			reopened["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]any{"id": 701, "full_name": "acme/widgets"}
-			reopened["pull_request"].(map[string]any)["head"].(map[string]any)["sha"] = strings.Repeat("d", 40)
-			reopened["sender"] = map[string]any{"id": 501, "login": "olga"}
-			laptopTakes(reopened, "pull_request", false)
-			f.app.SetCommitAuthor("acme/widgets", headSHA, 501)
-			spoofed := pushPayload(7, 701, "acme/widgets", headSHA)
-			spoofed["sender"] = map[string]any{"id": 601, "login": "contributor"}
-			laptopTakes(spoofed, "push", false)
-			pushed := pushPayload(7, 701, "acme/widgets", headSHA)
-			pushed["after"], pushed["sender"] = headSHA, map[string]any{"id": 501, "login": "olga"}
-			pushed["head_commit"] = map[string]any{"id": headSHA, "timestamp": "2026-01-02T00:00:00Z"}
-			ids := laptopTakes(pushed, "push", permission != "none")
-			if sealed := f.sealedRequest(ids[0]).Automation.Value; sealed.SenderID != 501 || sealed.AuthorID != 501 || len(sealed.Repos) != 1 || sealed.Repos[0] != "gh:701" {
-				t.Fatalf("push automation identity: %+v", sealed)
-			}
-			if permission == "none" {
-				return
-			}
-			f.app.SetCollaborator("acme/widgets", 501, "olga", "none")
-			next := strings.Repeat("c", 40)
-			f.app.SetCommitAuthor("acme/widgets", next, 501)
-			again := pushPayload(7, 701, "acme/widgets", next)
-			again["after"], again["sender"] = next, map[string]any{"id": 501, "login": "olga"}
-			again["head_commit"] = map[string]any{"id": next, "timestamp": "2026-01-02T00:01:00Z"}
-			laptopTakes(again, "push", false)
-		})
 	}
 }

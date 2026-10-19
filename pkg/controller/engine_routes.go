@@ -19,15 +19,9 @@ import (
 // WithEngineController supplies the engine and authority transaction adapter before
 // Handler is constructed. ServeWith refuses an engine without a runner policy.
 func (s *Server) WithEngineController(engine *EngineController) *Server {
-	if engine != nil && engine.ConfirmAward == nil {
-		engine.ConfirmAward = s.confirmPersonalAward
-	}
 	s.engineController = engine
 	return s
 }
-
-// EngineController returns the engine WithEngineController composed.
-func (s *Server) EngineController() *EngineController { return s.engineController }
 
 func (s *Server) engineEndpoints() []Endpoint {
 	engine := s.engineController

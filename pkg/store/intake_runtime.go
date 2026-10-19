@@ -146,9 +146,6 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if input.Origin == runspec.OriginSchedule && tx.scheduleAdmission == nil {
 			return AdmissionResult{}, authorityError(apierr.Forbidden, "only a schedule firing starts a schedule run")
 		}
-		if input.Automation, err = automationTx(ctx, tx, team, input); err != nil {
-			return AdmissionResult{}, err
-		}
 		if err := checkActionsOwnerTx(ctx, tx, team, input); err != nil {
 			return AdmissionResult{}, err
 		}
@@ -358,7 +355,7 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	if input.Pipeline == "" || input.Mode != runspec.IntakeExecute && input.Mode != runspec.IntakePublish || input.Dispatch != "" && input.Dispatch != runspec.DispatchHost && input.Dispatch != runspec.DispatchController {
 		return input, authorityError(apierr.BadRequest, "invalid intake mode, dispatch or pipeline")
 	}
-	input.Team, input.OriginMachine, input.Automation = string(team), "", runspec.Optional[runspec.Automation]{}
+	input.Team, input.OriginMachine = string(team), ""
 	if policy.Options == nil {
 		return input, authorityError(apierr.Unavailable, "intake settings resolution is unavailable")
 	}

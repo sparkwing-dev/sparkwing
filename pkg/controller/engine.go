@@ -22,8 +22,6 @@ type EngineController struct {
 	ResolveOperator   func(context.Context) (AuthorityRevoker, error)
 	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
 	ReadRunStatus     func(context.Context, store.Team, string) (RunStatusFacts, error)
-	// ConfirmAward rechecks a fresh award before it is returned; false releases the unit unstarted.
-	ConfirmAward func(context.Context, store.UnitClaim, string) (bool, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.

@@ -441,8 +441,6 @@ components:
       properties:
         audience:
           type: string
-        automation:
-          type: string
         created_by:
           type: string
         expires_at:
@@ -2031,40 +2029,6 @@ components:
         - truncated
       type: object
       x-sparkwing-go-type: controllerwire.LogSearchPage
-    internal.controllerwire.MachineAutomation:
-      additionalProperties: true
-      properties:
-        runner:
-          type: string
-        state:
-          type: string
-      required:
-        - runner
-        - state
-      type: object
-      x-sparkwing-go-type: controllerwire.MachineAutomation
-    internal.controllerwire.MachineAutomationApproval:
-      additionalProperties: true
-      properties:
-        approved:
-          anyOf:
-            - type: boolean
-            - type: "null"
-      required:
-        - approved
-      type: object
-      x-sparkwing-go-type: controllerwire.MachineAutomationApproval
-    internal.controllerwire.MachineAutomationRequest:
-      additionalProperties: true
-      properties:
-        requested:
-          anyOf:
-            - type: boolean
-            - type: "null"
-      required:
-        - requested
-      type: object
-      x-sparkwing-go-type: controllerwire.MachineAutomationRequest
     internal.controllerwire.MaterializedResultSource:
       additionalProperties: true
       properties:
@@ -4690,8 +4654,6 @@ components:
       properties:
         action:
           type: string
-        author_id:
-          type: integer
         default_branch:
           type: string
         default_branch_push:
@@ -4705,8 +4667,6 @@ components:
         ref:
           type: string
         repository_id:
-          type: integer
-        sender_id:
           type: integer
         sha:
           type: string
@@ -4745,27 +4705,6 @@ components:
         - generation
       type: object
       x-sparkwing-go-type: runspec.AttemptIdentity
-    internal.runspec.Automation:
-      additionalProperties: true
-      properties:
-        armed_by:
-          type: string
-        author_id:
-          type: integer
-        pushed:
-          type: boolean
-        repos:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        sender_id:
-          type: integer
-      required:
-        - repos
-      type: object
-      x-sparkwing-go-type: runspec.Automation
     internal.runspec.BurstPlacement:
       additionalProperties: true
       properties:
@@ -5209,18 +5148,6 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/runspec.AttemptIdentity]
-    internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Automation.:
-      additionalProperties: true
-      properties:
-        set:
-          type: boolean
-        value:
-          $ref: '#/components/schemas/internal.runspec.Automation'
-      required:
-        - set
-        - value
-      type: object
-      x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/runspec.Automation]
     internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.:
       additionalProperties: true
       properties:
@@ -5450,8 +5377,6 @@ components:
       properties:
         actor:
           $ref: '#/components/schemas/internal.runspec.Actor'
-        automation:
-          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Automation.'
         burst:
           anyOf:
             - $ref: '#/components/schemas/internal.runspec.BurstPlacement'
@@ -5521,7 +5446,6 @@ components:
         - env
         - options
         - execution_location
-        - automation
       type: object
       x-sparkwing-go-type: runspec.Request
     internal.runspec.Resolved:
@@ -10285,88 +10209,6 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
-  /api/v1/runners/{runner}/automation:
-    put:
-      parameters:
-        - in: path
-          name: runner
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/internal.controllerwire.MachineAutomationRequest'
-        required: true
-      responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.MachineAutomation'
-          description: Successful response.
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: Request or withdraw automated runs for the caller's personal machine
-      x-sparkwing-policy:
-        method: PUT
-        path: /api/v1/runners/{runner}/automation
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: unbound_member_or_local
-            grants:
-              - runs.write
-            binding: none
-            liveness: credential
-        retry: safe
-  /api/v1/runners/{runner}/automation/approval:
-    put:
-      parameters:
-        - in: path
-          name: runner
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/internal.controllerwire.MachineAutomationApproval'
-        required: true
-      responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.MachineAutomation'
-          description: Successful response.
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: Approve or revoke a personal machine's automated runs
-      x-sparkwing-policy:
-        method: PUT
-        path: /api/v1/runners/{runner}/automation/approval
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: unbound_member_or_local
-            grants:
-              - team.admin
-            binding: none
-            liveness: credential
-        retry: safe
   /api/v1/runners/claim:
     post:
       requestBody:

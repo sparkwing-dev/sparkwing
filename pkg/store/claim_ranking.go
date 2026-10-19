@@ -91,9 +91,6 @@ func claimTierTx(ctx context.Context, tx *storeTx, chain []authorityNode, reques
 	if launcherClaimant(chain[0].principal.Capability) {
 		return TierCloud, nil
 	}
-	if hostClaimant(chain[len(chain)-1].principal.Capability) {
-		return TierSelfHosted, nil
-	}
 	for _, ancestor := range chain {
 		if ancestor.principal.Capability.Binding.Kind == capability.BindingPush {
 			return TierActions, nil
@@ -110,8 +107,6 @@ func claimTierTx(ctx context.Context, tx *storeTx, chain []authorityNode, reques
 	switch {
 	case err != nil || !personal:
 		return TierSelfHosted, err
-	case automatedRun(request):
-		return TierSelfHosted, nil
 	case request.OriginMachine != "" && request.OriginMachine == root.Subject.ID:
 		return TierHere, nil
 	}

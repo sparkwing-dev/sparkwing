@@ -512,62 +512,6 @@ func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, r
 	return commit.SHA, nil
 }
 
-// CommitAuthor returns the GitHub user ID linked to sha's author, or zero when GitHub links none.
-func (c *Client) CommitAuthor(ctx context.Context, installation int64, owner, repo, sha string) (int64, error) {
-	tok, err := c.InstallationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
-	if err != nil {
-		return 0, err
-	}
-	var commit struct {
-		SHA    string `json:"sha"`
-		Author *struct {
-			ID int64 `json:"id"`
-		} `json:"author"`
-	}
-	if err := c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/commits/"+url.PathEscape(sha), "Bearer "+tok.Token, &commit); err != nil {
-		return 0, err
-	}
-	if commit.SHA != sha || commit.Author == nil {
-		return 0, nil
-	}
-	return commit.Author.ID, nil
-}
-
-// CanRead reports whether the GitHub user id can read each repository, named by its GitHub ID. The installation
-// token is restricted to those IDs, and each current name is resolved from its ID only for the collaborator call.
-func (c *Client) CanRead(ctx context.Context, installation, user int64, ids []int64) (map[int64]bool, error) {
-	tok, err := c.InstallationTokenByIDs(ctx, installation, ids, map[string]string{"metadata": "read"})
-	if err != nil {
-		return nil, err
-	}
-	var who struct {
-		Login string `json:"login"`
-	}
-	if err := c.getJSON(ctx, "/user/"+strconv.FormatInt(user, 10), "Bearer "+tok.Token, &who); err != nil {
-		return nil, err
-	}
-	out := map[int64]bool{}
-	for _, id := range ids {
-		repo, err := c.RepositoryByID(ctx, tok.Token, id)
-		if err != nil {
-			return nil, err
-		}
-		owner, name, ok := strings.Cut(repo.FullName, "/")
-		if repo.ID != id || !ok {
-			out[id] = false
-			continue
-		}
-		var permission struct {
-			Permission string `json:"permission"`
-		}
-		if err := c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name)+"/collaborators/"+url.PathEscape(who.Login)+"/permission", "Bearer "+tok.Token, &permission); err != nil {
-			return nil, err
-		}
-		out[id] = who.Login != "" && permission.Permission != "" && permission.Permission != "none"
-	}
-	return out, nil
-}
-
 // RepositoryFileSnapshot reads one file at the current default-branch head
 // with a token restricted to this repository and contents:read. Found is false
 // only when GitHub confirms the file is absent at that commit.

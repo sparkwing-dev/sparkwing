@@ -78,7 +78,7 @@ func loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, l
 	var repo, display string
 	var requestBody, specBody []byte
 	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json,allowed_pools FROM runs WHERE id=?`, runID).Scan(&run.team, &repo, &display, &requestBody, &specBody, &run.pools)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !launcherClaimant(p.Capability) && !hostClaimant(p.Capability) && p.Capability.Team != run.team {
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !launcherClaimant(p.Capability) && p.Capability.Team != run.team {
 		run.err = bindingRefusal()
 		return run
 	}
@@ -100,7 +100,7 @@ func loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, l
 	if run.err = checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); run.err != nil {
 		return run
 	}
-	if run.err = checkPersonalMachineTx(ctx, tx, chain, runID, run.request.Request); run.err != nil {
+	if run.err = checkPersonalMachineTx(ctx, tx, chain, runID); run.err != nil {
 		return run
 	}
 	if len(specBody) > 0 {

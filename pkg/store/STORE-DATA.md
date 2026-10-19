@@ -527,14 +527,9 @@ when the scan awards another unit or nothing. For `limits.RankingAward` after
 the window, a claim waits only for a better-ranked ask recorded inside the
 window. An award deletes the unit's asks.
 
-`runs.request_json` seals `Automation` on automated runs and their children:
-the App delivery's sender and author IDs or the schedule's arming account, and
-the `gh:<id>` keys of every repository the run reads. A personal machine takes
-an automated run only when that identity's owner is the machine's owner, a
-`machine_automation` row for the credential is approved, and every sealed
-repository has a `machine_repo_access` row keyed by `gh:<id>` with `allowed=1`
-checked within `limits.PersonalRepoAccess`. Both tables cascade from the
-machine's capability row.
+A personal machine takes only its owner's manual runs. `automatedLineageTx`
+follows a retry or child run back to its original request and refuses any whose
+origin is an App delivery or a schedule.
 
 ## Database observations
 

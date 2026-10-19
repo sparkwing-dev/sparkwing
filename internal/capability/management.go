@@ -15,8 +15,6 @@ type Metadata struct {
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	Metered    bool       `json:"metered"`
-	// Automation is a personal machine's standing for its owner's automated runs: none, requested or approved.
-	Automation string `json:"automation,omitempty"`
 }
 
 // InventoryFilter selects metadata without changing its authenticated scope.

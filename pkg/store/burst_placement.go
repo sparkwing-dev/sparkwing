@@ -77,7 +77,7 @@ func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run st
 	return names, nil
 }
 
-func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityNode, run string, request runspec.Request) error {
+func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityNode, run string) error {
 	root := chain[len(chain)-1].principal.Capability
 	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
 		return nil
@@ -93,8 +93,8 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&owner); err != nil {
 		return err
 	}
-	if automatedRun(request) {
-		return personalAutomatedRunTx(ctx, tx, Team(root.Team), root.Prefix, owner, request.Automation.Value)
+	if automated, err := automatedLineageTx(ctx, tx, Team(root.Team), run); err != nil || automated {
+		return errors.Join(err, authorityError(apierr.Forbidden, "personal machines take only their owner's manual runs"))
 	}
 	requester, err := runRequesterAccountTx(ctx, tx, Team(root.Team), run)
 	if err != nil {
@@ -104,6 +104,18 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 		return authorityError(apierr.Forbidden, "personal machine is reserved for its owner's runs")
 	}
 	return nil
+}
+
+// safety: an App or schedule run, or a retry or child of one, never reaches a personal machine.
+func automatedLineageTx(ctx context.Context, tx *storeTx, team Team, run string) (bool, error) {
+	seal, err := sealedRequestTx(ctx, tx, team, run)
+	if err != nil {
+		return false, err
+	}
+	seal.RunID = run
+	original, err := originalRequestTx(ctx, tx, team, seal)
+	origin := original.Request.Origin
+	return origin == runspec.OriginApp || origin == runspec.OriginSchedule, err
 }
 
 func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, unit UnitRef) error {
@@ -127,7 +139,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 		}
 		eligible = record.Origin != nil && record.Origin.Personal
 		if eligible {
-			if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID, seal.Request); err != nil {
+			if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
 				return err
 			}
 		}

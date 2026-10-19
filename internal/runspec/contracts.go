@@ -139,21 +139,7 @@ type AppFacts struct {
 	SHA               string    `json:"sha"`
 	DefaultBranch     string    `json:"default_branch"`
 	DefaultBranchPush bool      `json:"default_branch_push"`
-	AuthorID          int64     `json:"author_id,omitempty"`
-	SenderID          int64     `json:"sender_id,omitempty"`
 	VerifiedAt        time.Time `json:"verified_at"`
-}
-
-// Automation is an automated run's owner identity: intake derives it, and children and retries keep it unchanged.
-// SenderID and AuthorID are linked GitHub user IDs for App runs, and Pushed says the sender pushed the code the run
-// executes (a push, or a pull request opened or synchronized). ArmedBy is a schedule's arming account.
-// Repos are the immutable gh:<id> keys of the primary and every extra repository the run reads.
-type Automation struct {
-	SenderID int64     `json:"sender_id,omitempty"`
-	AuthorID int64     `json:"author_id,omitempty"`
-	Pushed   bool      `json:"pushed,omitempty"`
-	ArmedBy  string    `json:"armed_by,omitempty"`
-	Repos    []RepoKey `json:"repos"`
 }
 
 // safety: Git pins checkout to the sealed SHA, never the later head of Ref.
@@ -410,8 +396,6 @@ type Request struct {
 	ExecutionLocation string                `json:"execution_location"`
 	// OriginMachine names the personal machine whose credential intake verified for the submitter; requests cannot set it.
 	OriginMachine string `json:"origin_machine,omitempty"`
-	// Automation is set on automated runs and their descendants; requests cannot set it.
-	Automation Optional[Automation] `json:"automation"`
 }
 
 // safety: IntakeFacts are server-derived, with opaque authority IDs resolved only by C2.

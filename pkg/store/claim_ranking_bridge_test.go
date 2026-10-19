@@ -3,7 +3,6 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"strconv"
 	"testing"
 	"time"
 
@@ -140,35 +139,6 @@ func (f *RankingFixture) AddJob(t *testing.T, id string, readyAt time.Time) {
 	f.Store.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,status,?,spec_json,execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`, id, readyAt.UnixNano())
 }
 
-// Approve has the owner request automated runs for the machine and the admin approve them.
-func (f *RankingFixture) Approve(t *testing.T, machine string) {
-	t.Helper()
-	tenant := &Tenant{s: f.Store, team: "a"}
-	if _, err := tenant.RequestMachineAutomation(t.Context(), f.Owner.Authority, machine, true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.ApproveMachineAutomation(t.Context(), teamAuthorization(t, f.Store, f.Admin, "a", "PUT", "/api/v1/runners/{runner}/automation/approval"), machine, true); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// AdminAuthorization authorizes the approval route as the given member.
-func (f *RankingFixture) AdminAuthorization(t *testing.T, actor Actor) (capability.Authorized, error) {
-	t.Helper()
-	p, err := f.Store.ResolveAuthority(t.Context(), actor.Authority)
-	if err != nil {
-		return capability.Authorized{}, err
-	}
-	route, _ := capability.LookupRoute("PUT", "/api/v1/runners/{runner}/automation/approval")
-	return capability.Authorize(t.Context(), f.Store, route, capability.Authenticated{Principal: p, Method: "PUT", Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: "a"})
-}
-
-// LinkGitHub links the account to a GitHub user ID.
-func (f *RankingFixture) LinkGitHub(t *testing.T, account string, id int64) {
-	t.Helper()
-	f.Store.testOnlyExec(t, `INSERT INTO identities(provider,subject,account_id,created_at) VALUES (?,?,?,1)`, ProviderGitHub, strconv.FormatInt(id, 10), account)
-}
-
 // RequireOnJobs sets every node's resolved requirements to terms.
 func (f *RankingFixture) RequireOnJobs(t *testing.T, terms ...string) {
 	t.Helper()
@@ -194,25 +164,6 @@ func (f *RankingFixture) LocalQueue(t *testing.T) string {
 	root.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
 	authorityPersist(t, f.Store, root)
 	return root.Prefix
-}
-
-// Rotate replaces the owner's personal machine credential and keeps the predecessor live through a day of grace.
-func (f *RankingFixture) Rotate(t *testing.T, prefix string) string {
-	t.Helper()
-	p, err := f.Store.ResolveAuthority(t.Context(), f.Owner.Authority)
-	if err != nil {
-		t.Fatal(err)
-	}
-	route, _ := capability.LookupRoute("POST", "/api/v1/tokens/{token}/rotate")
-	a, err := capability.Authorize(t.Context(), f.Store, route, capability.Authenticated{Principal: p, Method: "POST", Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: "a", TokenPrefix: prefix})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rotation, err := (&Tenant{s: f.Store, team: "a"}).RotateCapability(t.Context(), a, 24*time.Hour, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return rotation.Issued.Capability.Prefix
 }
 
 // OpenAsk holds the job's ranking lock in an open transaction, as a scan does, and records the claimant's ask at

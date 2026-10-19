@@ -12,19 +12,17 @@ import (
 )
 
 // StoreRunnerConfig binds an embedded claimant and native hosts to the controller's store.
-// Host, when set, hosts awards in place of the store-bound native services Bind supplies.
 type StoreRunnerConfig struct {
 	Bearer          func(context.Context) (string, error)
 	Loop            LoopConfig
 	Bind            func(context.Context, StoreBinding) (NativeServices, error)
-	Host            UnitHost
 	RequestCapacity func(context.Context) (capacity, available match.Resources, err error)
 	OnError         func(error)
 }
 
 // NewStoreRunner constructs the shared queue without a transport or another store opener.
 func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) (*Loop, error) {
-	if engine == nil || engine.Store == nil || engine.RunnerPolicy == nil || cfg.Bearer == nil || cfg.Bind == nil && cfg.Host == nil {
+	if engine == nil || engine.Store == nil || engine.RunnerPolicy == nil || cfg.Bearer == nil || cfg.Bind == nil {
 		return nil, errors.New("embedded runner requires the owned controller, claimant, signed policy and native services")
 	}
 	if cfg.Loop.Version == "" || cfg.Loop.MaxConcurrent < 1 {
@@ -33,13 +31,9 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 	cfg.Loop.Labels = slices.Clone(cfg.Loop.Labels)
 	cfg.Loop.Kinds = slices.Clone(cfg.Loop.Kinds)
 	client := StoreController{Engine: engine, Bearer: cfg.Bearer}
-	host := cfg.Host
-	if host == nil {
-		host = StoreHosting{Store: engine.Store, Bind: cfg.Bind}
-	}
 	return &Loop{
 		Config: cfg.Loop, Controller: client,
-		Host: host, CheckVersion: client.checkVersion,
+		Host: StoreHosting{Store: engine.Store, Bind: cfg.Bind}, CheckVersion: client.checkVersion,
 		RequestCapacity: cfg.RequestCapacity, OnError: cfg.OnError,
 	}, nil
 }

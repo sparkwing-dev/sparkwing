@@ -100,7 +100,6 @@ func Table() []Limit {
 		{Name: "RankingWindow", Value: RankingWindow, Class: Internal, Doc: "Run-anywhere unit ask window.", Refusal: "Award the best claimant that asked."},
 		{Name: "RankingObservations", Value: RankingObservations, Class: Internal, Doc: "Most recent live claimant observations one ranking check or notice evaluates.", Refusal: "Older observations do not hold the unit."},
 		{Name: "RankingAward", Value: RankingAward, Class: Internal, Doc: "Window winner's award deadline.", Refusal: "Then first eligible asker wins."},
-		{Name: "PersonalRepoAccess", Value: PersonalRepoAccess, Class: Internal, Doc: "Cached personal-machine repository access check.", Refusal: "Skip the machine until access is checked again."},
 		{Name: "ClaimWindow", Value: ClaimWindow, Class: Internal, Doc: "Here credential must first claim within this window.", Refusal: "Bound by parent where applicable."},
 		{Name: "HeartbeatTimeout", Value: HeartbeatTimeout, Class: Internal, Doc: "Shared heartbeat RPC timeout.", Refusal: "Bound by parent where applicable."},
 		{Name: "HeartbeatMaxSilence", Value: HeartbeatMaxSilence, Class: Internal, Doc: "Shared heartbeat outage budget.", Refusal: "Bound by parent where applicable."},

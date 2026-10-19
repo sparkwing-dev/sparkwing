@@ -67,8 +67,6 @@ func (s *Server) capabilityEndpoints() []Endpoint {
 	return []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/overflow", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleReadOverflow},
 		{Method: "PUT", Pattern: "/api/v1/overflow", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSetOverflow},
-		{Method: "PUT", Pattern: "/api/v1/runners/{runner}/automation", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRequestMachineAutomation},
-		{Method: "PUT", Pattern: "/api/v1/runners/{runner}/automation/approval", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleApproveMachineAutomation},
 		{Method: "POST", Pattern: "/api/v1/runners", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleEnrollRunner},
 		{Method: "GET", Pattern: "/api/v1/tokens", Authentication: capability.AuthCapability, Decode: capabilityListTarget, Handle: s.handleListCapabilities},
 		{Method: "POST", Pattern: "/api/v1/tokens", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIssueCredential},

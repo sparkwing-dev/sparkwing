@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// OwnerMachineClaimant reports whether an award's root credential is the run requester itself, a personal machine the
-// requester enrolled, or a personal machine approved for the automated run its owner owns.
+// OwnerMachineClaimant reports whether an award's root credential is the run requester itself or a personal machine the requester enrolled.
 func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Principal, run string) (bool, error) {
 	var owner bool
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
@@ -32,29 +30,16 @@ func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Prin
 		case capability.SubjectAccount, capability.SubjectLocal:
 			owner = kind == string(root.Subject.Kind) && root.Subject.ID == requester
 		case capability.SubjectMachine:
+			account, err := runRequesterAccountTx(ctx, tx, t.team, run)
+			if err != nil || account == "" {
+				return err
+			}
 			record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
 			if err != nil || record.Origin == nil || !record.Origin.Personal {
 				return err
 			}
 			var enrolledBy string
 			if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, t.team, root.Prefix).Scan(&enrolledBy); err != nil {
-				return err
-			}
-			seal, err := sealedRequestTx(ctx, tx, t.team, run)
-			if err != nil {
-				return err
-			}
-			if automatedRun(seal.Request) {
-				err := personalAutomatedRunTx(ctx, tx, t.team, root.Prefix, enrolledBy, seal.Request.Automation.Value)
-				owner = err == nil
-				var refusal *apierr.Error
-				if errors.As(err, &refusal) && refusal.Code == apierr.Forbidden {
-					return nil
-				}
-				return err
-			}
-			account, err := runRequesterAccountTx(ctx, tx, t.team, run)
-			if err != nil || account == "" {
 				return err
 			}
 			owner = enrolledBy != "" && enrolledBy == account

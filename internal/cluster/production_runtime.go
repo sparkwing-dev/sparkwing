@@ -2,13 +2,17 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
@@ -18,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // ProductionRuntime composes installed commands with authenticated controller and native host services.
@@ -37,7 +42,7 @@ func ProductionRuntime(version string) Runtime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			hosting := &productionHost{UnitHost: localcontroller.RunnerHosting(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission)}
+			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission)}
 			installation, err := productionInstallation(options.ConfigPath, hosting)
 			if err != nil {
 				return runners.RuntimeConfig{}, err
@@ -59,7 +64,7 @@ func ProductionRuntime(version string) Runtime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: localcontroller.RunnerHosting(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, false)}, nil, nil
+				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, false)}, nil, nil
 			},
 		},
 	}
@@ -67,6 +72,114 @@ func ProductionRuntime(version string) Runtime {
 
 func fixedBearer(raw string) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) { return raw, context.Cause(ctx) }
+}
+
+func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool) runners.Hosting {
+	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services runners.NativeServices, principal capability.Principal, err error) {
+		options := connection
+		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
+		var private *client.LocalHostClient
+		if unit.Unit == capability.UnitNode {
+			private, err = client.NewNodeHostClient(options, unit.RunID, unit.JobID)
+		} else {
+			private, err = client.NewLocalHostClient(options, unit.RunID)
+		}
+		if err != nil {
+			return services, principal, err
+		}
+		closeResources := private.Close
+		defer func() {
+			if err != nil {
+				err = errors.Join(err, closeResources())
+			}
+		}()
+		refresh := func(ctx context.Context) (capability.Principal, error) {
+			p, e := private.Principal(ctx)
+			if e == nil {
+				e = runners.ValidateAwardPrincipal(unit, p)
+			}
+			return p, e
+		}
+		principal, err = refresh(ctx)
+		if err != nil {
+			return services, principal, err
+		}
+		var processes *nodehost.NativeProcesses
+		state, err := nodehost.NewRemoteHostStore(controller, private, unit.UnitID, func() bool { return processes != nil && processes.Computing(unit.RunID) })
+		if err != nil {
+			return services, principal, err
+		}
+		state.Finish = private.FinishRunAndUnit
+		engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines")})
+		if err != nil {
+			return services, principal, err
+		}
+		input, err := nodehost.NewRunInput(unit)
+		if err != nil {
+			return services, principal, err
+		}
+		spec, err := source.ForRequest(unit.Request)
+		if input.Accepted != nil {
+			spec, err = source.ForExecution(unit.Accepted.Spec)
+		}
+		if err != nil {
+			return services, principal, err
+		}
+		access, err := client.NewSourceAccess(options, unit.RunID, spec)
+		if err != nil {
+			return services, principal, err
+		}
+		services, err = localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
+			SubmittedEnv: unit.SubmittedEnv,
+			Home:         home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
+			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
+			Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
+				return state.RenewOwner(ctx, store.Actor{}, computing)
+			},
+		}, private))
+		if err != nil {
+			return services, principal, err
+		}
+		if admission {
+			services.Config.Admission.Controller = connection.URL
+			services.Config.ClaimAdmission = services.Config.Admission
+		}
+		processes = services.Config.Processes
+		closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
+		originalClose := services.Close
+		services.Close = func() error { return errors.Join(originalClose(), private.Close()) }
+		if unit.Unit == capability.UnitTrigger {
+			adopt := services.Config.Owner.AdoptClaim
+			services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
+				if err := private.AdoptClaim(ctx, claim); err != nil {
+					return err
+				}
+				return adopt(ctx, claim)
+			}
+		}
+		return services, principal, nil
+	}}
+}
+
+func ownerGitAccess(owner bool) source.GitAccess {
+	if owner {
+		return source.GitAccessOwner
+	}
+	return source.GitAccessTeam
+}
+
+func runnerToolEnvironment(modules string) []string {
+	environment := os.Environ()
+	if modules == "" {
+		return environment
+	}
+	for i := 0; i < len(environment); i++ {
+		if strings.HasPrefix(environment[i], "GOMODCACHE=") {
+			environment = append(environment[:i], environment[i+1:]...)
+			i--
+		}
+	}
+	return append(environment, "GOMODCACHE="+modules)
 }
 
 type productionHost struct {

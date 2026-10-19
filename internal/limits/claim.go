@@ -19,8 +19,6 @@ const (
 	RankingAward time.Duration = 2 * time.Second
 	// RankingObservations caps the most recent live claimant observations one ranking check or notice evaluates.
 	RankingObservations int = 64
-	// PersonalRepoAccess bounds how long a personal machine owner's checked repository access stays valid.
-	PersonalRepoAccess time.Duration = time.Minute
 	// ClaimWindow bounds here credential must first claim within this window.
 	ClaimWindow time.Duration = 10 * time.Minute
 	// HeartbeatTimeout bounds shared heartbeat RPC timeout.

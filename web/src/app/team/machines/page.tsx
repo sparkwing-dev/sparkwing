@@ -31,10 +31,6 @@ import {
   revokeTeamToken,
   runnerConnectCommand,
 } from "@/lib/teams";
-import {
-  approveMachineAutomation,
-  requestMachineAutomation,
-} from "@/lib/gitCredentials";
 import { fmtDateTime } from "@/lib/timeFormat";
 
 export default function MachinesPage() {
@@ -91,23 +87,6 @@ function Machines({ me }: { me: Me }) {
     }
   }
 
-  async function setAutomation(t: TeamToken, change: "request" | "withdraw" | "approve" | "revoke") {
-    const label = t.subject.id || t.prefix;
-    setBusy(t.prefix);
-    try {
-      const state =
-        change === "request" || change === "withdraw"
-          ? await requestMachineAutomation(t.subject.id, change === "request")
-          : await approveMachineAutomation(t.subject.id, change === "approve");
-      toast(`${label} automated runs: ${state}`, "success");
-      await load();
-    } catch (err) {
-      toast(errorText(err), "error");
-    } finally {
-      setBusy(null);
-    }
-  }
-
   const owner = canManageTeam(role);
   const machines = tokens?.filter((t) => t.subject.kind === "machine") ?? null;
   const cliTokens = tokens?.filter((t) => t.subject.kind === "account") ?? null;
@@ -125,7 +104,7 @@ function Machines({ me }: { me: Me }) {
       )}
       <Panel
         title="Machine tokens"
-        hint="Personal machines accept only their owner's work, and take the owner's automated runs only after the owner requests it and an administrator approves. Shared runners accept team work and require an administrator to revoke. Team git credentials reach shared runners and Cloud work, never personal machines."
+        hint="Personal machines accept only their owner's work. Shared runners accept team work and require an administrator to revoke. Team git credentials reach shared runners and Cloud work, never personal machines."
       >
         {loadError ? (
           <div className="p-4 text-sm text-red-300">{loadError}</div>
@@ -159,15 +138,6 @@ function Machines({ me }: { me: Me }) {
                   <span className="text-xs text-[var(--muted)]">
                     last seen {fmtDateTime(t.last_used_at)}
                   </span>
-                ) : null}
-                {t.automation ? (
-                  <AutomationControl
-                    token={t}
-                    mine={t.created_by === me.user.id}
-                    admin={owner}
-                    busy={busy !== null}
-                    change={(c) => setAutomation(t, c)}
-                  />
                 ) : null}
                 {mayRevoke ? (
                   <button
@@ -462,47 +432,5 @@ function ConnectForm({
         </div>
       ) : null}
     </Panel>
-  );
-}
-
-// AutomationControl lets the owner request automated runs and an administrator approve or revoke them.
-function AutomationControl({
-  token,
-  mine,
-  admin,
-  busy,
-  change,
-}: {
-  token: TeamToken;
-  mine: boolean;
-  admin: boolean;
-  busy: boolean;
-  change: (c: "request" | "withdraw" | "approve" | "revoke") => void;
-}) {
-  const state = token.automation ?? "none";
-  return (
-    <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
-      automated runs: {state}
-      {mine && state === "none" ? (
-        <button type="button" className={buttonClass} disabled={busy} onClick={() => change("request")}>
-          Request
-        </button>
-      ) : null}
-      {mine && state === "requested" ? (
-        <button type="button" className={buttonClass} disabled={busy} onClick={() => change("withdraw")}>
-          Withdraw
-        </button>
-      ) : null}
-      {admin && state === "requested" ? (
-        <button type="button" className={buttonClass} disabled={busy} onClick={() => change("approve")}>
-          Approve
-        </button>
-      ) : null}
-      {admin && state === "approved" ? (
-        <button type="button" className={dangerButtonClass} disabled={busy} onClick={() => change("revoke")}>
-          Revoke approval
-        </button>
-      ) : null}
-    </span>
   );
 }

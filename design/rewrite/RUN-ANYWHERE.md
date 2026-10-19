@@ -4,48 +4,35 @@ Source: Korey's decisions 2 and 13-16 of 2026-10-18 (`contracts/handoffs.md`). I
 the launcher-only rule for unselected runs from the earlier lead ruling "Cloud
 triggers use controller dispatch". Frozen §2.3, §3.2 and §3.5 still hold.
 
-## Restructure plan (2026-10-19, Sol re-review and Opus re-review 2)
+## Shared boundaries (2026-10-19)
 
-Three shared boundaries replace the per-path patches.
-
-**A. Automation identity, sealed at intake.** `runspec.Request.Automation` is
-server-derived and client-cleared. It holds the delivery's `SenderID` and the
-code's `AuthorID` (linked GitHub IDs, App runs), or `ArmedBy` (the schedule
-armer account), plus the immutable `Repos` (`gh:<id>` for the primary and each
-extra repository). Its presence is the automated flag. Children copy the
-parent's, and retries keep it because they keep the sealed request. Release
-events take the commit author, never the publisher; branch create/delete stay
-unowned. Personal eligibility, the tier, repository access and the access
-cache all read it: an App run belongs to a member only when the sender equals
-the author on that member's linked account. Access rows are keyed by `gh:<id>`,
-names are resolved from the ID only for the collaborator call, entries live
-60 s, and the controller re-checks access live when it awards a unit to a
-personal machine, releasing the unit on a denial. Needs come from the units the
-machine could claim, not a scan of recent runs. Intake refuses a client
-`schedule` origin. Approval revocation deletes every live generation of the
-machine. `here` uses a short-lived proof the runner derives from its
-credential, never the credential.
+**A. Personal machines take only their owner's manual runs** (decision 20).
+`automatedLineageTx` follows a retry or child back to its original request
+and refuses any App or schedule origin. Intake refuses a client `schedule`
+origin. `here` uses a short-lived proof the runner derives from its
+credential, never the credential. Admin-approved automated runs on personal
+machines (decisions 15 and 16) and the in-process controller host (decision
+13's host claimant) were built, reviewed and deleted; they return as their
+own reviewed work.
 
 **B. One eligibility result per (unit, claimant).** `unitEligibilityTx`
 returns the claimant's matching inputs, tier rank, kind, liveness, capacity
 fit and billing (for every metered claimant) in one value. Queue scans, named
-claims, ranking holds and notices all derive from it. The notice survey is
-deleted: notices evaluate the same live observations the ranking scans
-(capped per claim), including the local queue and the controller host, and
-report the first failing step (tier dropped, pin, nobody online, capacity,
-credits).
+claims, ranking holds and notices all derive from it. A claimant-specific
+refusal, an unpriced Cloud class included, is an ineligible result, never an
+error that aborts another claimant's check. Notices evaluate the live
+observations the ranking scans (capped per claim), including the local
+queue, and report the first failing step.
 
-**C. Asks inside the ranking transaction.** A held claimant's ask is written,
-under the unit's claim lock, in the same transaction that scans the queue,
-whether that scan awards another unit or nothing. Awards read asks under the
-same lock. `RankingAward` (2 s after the window, worst case 7 s) is the lead
-amendment to decision 2.
+**C. Asks and awards serialize under one ranking lock per unit.** A held
+claimant's ask is written in its claim transaction, whether that scan awards
+another unit or nothing. Every ask and award takes the unit's ranking lock
+before reading readiness; scans take these locks in one global unit order.
+`RankingAward` (2 s after the window, worst case 7 s) is the lead amendment to
+decision 2.
 
-The non-Cloud `sparkwing-controller` can compose an in-process host claimant
-(`internal/controllerhost`), but it stays off on every deployment: it would
-run every team's code as the controller's OS user beside its credentials and
-database (Opus review 3, C1). Korey decides its isolation; until then a
-self-hosted controller without runners shows `no_eligible_runner`.
+A self-hosted `sparkwing-controller` runs no pipelines itself: without a
+registered runner, unselected work shows `no_eligible_runner`.
 
 ## Which runs
 
@@ -80,9 +67,9 @@ award reads its run's sealed source bundle and its source job's output. A
 generated job's snapshot carries its generator sources, so a remote node host
 can replay the generator ancestry.
 
-The controller host is a self-hosted claimant (decision 13). wingd's embedded
-queue holds `controller.owner`, renews plan and eval units it owns, and claims
-plan, eval and job units like any runner.
+wingd's embedded queue holds `controller.owner`, renews plan and eval units it
+owns, and claims plan, eval and job units like any runner, at the self-hosted
+tier.
 
 ## Tiers and the ranking
 
@@ -93,7 +80,7 @@ The claimant's tier comes from its authenticated chain, never from labels:
 | `here` | the personal machine the submitting CLI ran on |
 | `personal` | a personal machine root of the run's owner |
 | `github-actions` | an Actions push-bound machine root |
-| `self-hosted` | any other registered machine root, the local queue, and a personal machine approved for automated runs when it takes one |
+| `self-hosted` | any other registered machine root and the local queue |
 | `cloud` | the launcher service |
 
 `here` is sealed at intake. When the local runner is enrolled with the same
@@ -138,8 +125,8 @@ kinds and advertised kinds, authority and placement (repository, push and
 personal-machine scope, tier inside the ranking), matching, advertised
 capacity, and billing for every metered claimant. Queue scans, named claims,
 ranking holds and notices all call it. Named claims leave billing to award
-issuance, which reports the exact credit standing. The wingd queue and the
-controller host are observed claimants like any runner.
+issuance, which reports the exact credit standing. The wingd queue is an
+observed claimant like any runner.
 
 ## Notices
 
@@ -152,34 +139,13 @@ this team's runner ranking"), the pin ("this job targets pool=gpu only"), or
 "no runner of the allowed tiers (...) is online". A live claimant that is only
 short of capacity keeps the generic notice.
 
-## Automated runs on personal machines
+## Personal machines
 
-Intake seals `Automation` on runs from a verified App delivery, from a
-schedule firing, and on their children; retries keep it. Clients cannot set
-it, and intake refuses a client `schedule` origin. A personal machine takes
-an automated run only when all of these hold (decisions 15 and 16):
-
-- its owner requested automated runs for it on a direct sign-in, and a team
-  admin approved (`PUT /api/v1/runners/{runner}/automation` and
-  `.../automation/approval`). Both are audited and cover every live credential
-  generation of the machine, so revocation also ends a rotation predecessor's
-  approval. Machine revocation ends it too.
-- the sealed owner is the machine's owner: the arming member of a schedule, or
-  for an App run the member linked to the author when the author is also the
-  event's sender and the event is the sender's push (a push, or a pull request
-  opened or synchronized). Labeled, reopened, release and branch events are
-  unowned. A child's repositories are its parent's plus its own, checked in
-  full.
-- the owner's linked GitHub login can read every sealed repository, by
-  immutable ID. The controller resolves each name from its ID under a token
-  restricted to those IDs, checks the collaborator permission, caches the
-  answer for `limits.PersonalRepoAccess` (60 s) for the units the machine
-  could claim, and rechecks live when it awards a unit, releasing it on a
-  denial. The claimant never supplies it.
-
-An approved machine ranks as `self-hosted` for automated runs. Its OIDC
-tokens carry `runner_kind=personal`. It never receives team git credentials
-or App installation tokens, and fetches with its owner's own git access.
+A personal machine takes only its owner's manual runs, ranked `here` when its
+CLI started the run and `personal` otherwise. App and schedule runs, and their
+retries and children, never reach it. Its OIDC tokens carry
+`runner_kind=personal`. It never receives team git credentials or App
+installation tokens, and fetches with its owner's own git access.
 
 ## Explicit placements
 

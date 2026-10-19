@@ -185,9 +185,5 @@ func capabilityMetadataTx(ctx context.Context, tx *storeTx, prefix string) (capa
 		return capability.Capability{}, capability.Metadata{}, err
 	}
 	row.LastUsedAt = stateTime(last)
-	if personal, err := personalRootTx(ctx, tx, []authorityNode{{principal: capability.Principal{Capability: c}}}); err != nil || !personal {
-		return c, row, err
-	}
-	row.Automation, err = machineAutomationTx(ctx, tx, Team(c.Team), c.Prefix)
-	return c, row, err
+	return c, row, nil
 }

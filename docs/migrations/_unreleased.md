@@ -30,19 +30,11 @@ evaluation units as well as triggers and jobs. Change the order with
 `sparkwing team settings set --profile work --claim-ranking cloud,self-hosted`;
 `none` means first come.
 
-Personal machines take automated runs (App and schedule) only after their owner
-requests it with `sparkwing runners automation --profile work --runner laptop
---request true --session-stdin` and a team administrator approves it with
-`--approve true`. The approved machine then takes only its owner's automated
-runs, in repositories the owner's linked GitHub account can read, and ranks as
-`self-hosted` for them. An App run belongs to the owner only when the owner both
-wrote and pushed it (a push, or opening or synchronizing a pull request); other
-pull request actions, release and branch events belong to nobody. Child runs and
-retries keep their run's owner. Clients can no longer submit a run with the
-`schedule` origin. The trigger CLI proves its machine's runner credential with
-a short-lived signature instead of sending it. The former owner toggle (`--automated-runs`,
-`{"automated_runs": ...}`) is removed with no alias. OIDC tokens minted on a
-personal machine carry `runner_kind=personal`.
+Personal machines take only their owner's manual runs: App and schedule runs,
+and their retries and children, never reach them. Clients can no longer submit
+a run with the `schedule` origin. The trigger CLI proves its machine's runner
+credential with a short-lived signature instead of sending it. OIDC tokens
+minted on a personal machine carry `runner_kind=personal`.
 
 App automation and subscriptions take `runner: anywhere | cloud | github-actions
 | pool=<name>`, default `anywhere`. `cloud` now pins runs to the launcher. Set

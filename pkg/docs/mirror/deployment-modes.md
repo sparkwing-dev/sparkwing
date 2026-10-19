@@ -68,30 +68,9 @@ back. After that, the first eligible asker wins. The launcher takes part only
 while the team has credits or a saved card. A job that requires a `pool=`,
 `name=` or `class=` term skips the ranking and goes to the runners it names.
 
-Runs started by a push, pull request, release or schedule skip `here` and
-`personal`. A personal machine takes them only after its owner requests it and
-a team administrator approves. The owner requests with their own account
-session, not a stored token:
-
-```bash
-sparkwing runners automation --profile work --runner laptop --request true --session-stdin
-sparkwing runners automation --profile work --runner laptop --approve true
-```
-
-An approved machine ranks as `self-hosted` for automated runs and takes only
-its owner's: schedules the owner armed, and App runs of code the owner both
-wrote and pushed, by the owner's linked GitHub account: a push, or opening or
-synchronizing a pull request. A commit that merely carries the owner's email,
-a push by someone else to the owner's pull request, labeling or reopening a
-pull request, and release or branch events never reach the machine. Child
-runs and retries keep their run's owner; a child also needs access to its own
-repository. The owner's GitHub login must also be able to read the
-run's repository and every extra repository, checked by repository ID through
-the GitHub App, cached for 60 seconds, and checked again live when the machine
-is awarded a unit. Revoking the machine or running `--approve false` ends the
-approval for every live credential of the machine, including one still in its
-rotation grace. The console's
-Machines page shows the same request and approval controls.
+Runs started by a push, pull request, release or schedule, and their retries
+and child runs, skip `here` and `personal`: a personal machine takes only its
+owner's manual runs.
 
 A team administrator reorders or drops tiers. A dropped tier takes no
 unselected work, and `none` means first come:

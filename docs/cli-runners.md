@@ -11,7 +11,6 @@ Manage runners
 ### Subcommands
 
 - `add` -- Register a runner
-- `automation` -- Request or approve a personal machine's automated runs
 - `list` -- List runners and their capacity
 - `remove` -- Remove a runner
 
@@ -50,26 +49,6 @@ Shared runner registration requires team administration. --personal registers ca
 | `--no-service` | no service |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 | `--reserved-for POOL` | reserved for Repeatable; comma-separated values are accepted. |
-
-## `sparkwing runners automation`
-
-Request or approve a personal machine's automated runs
-
-A personal machine takes its owner's automated runs (push, pull request, release, schedule) only after the owner requests it and a team administrator approves it. The owner passes --request with --session-stdin and an existing independent account session; an administrator passes --approve with a team-admin profile. --approve false or --request false revokes it, and revoking the machine ends it. An approved machine ranks as self-hosted for those runs. JSON and plain report none, requested or approved.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
-| `--runner RUNNER` | Runner name or selection. (required) |
-| `--request BOOL` | As the machine's owner, request (true) or withdraw (false) automated runs. Values: true, false. |
-| `--approve BOOL` | As a team administrator, approve (true) or revoke (false) the owner's request. Values: true, false. |
-| `--session-stdin` | Read an existing independent account session from stdin without saving it; required with --request. |
 
 ## `sparkwing runners list`
 

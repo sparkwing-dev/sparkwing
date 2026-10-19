@@ -1134,25 +1134,6 @@ CREATE TABLE capabilities (
     FOREIGN KEY(team,bind_run) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
-CREATE TABLE machine_automation (
-    team TEXT NOT NULL REFERENCES teams(name),
-    prefix TEXT NOT NULL REFERENCES capabilities(prefix) ON DELETE CASCADE,
-    owner TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    requested_at BIGINT NOT NULL,
-    approved_by TEXT NOT NULL DEFAULT '',
-    approved_at BIGINT NOT NULL DEFAULT 0,
-    PRIMARY KEY (team,prefix)
-);
-
-CREATE TABLE machine_repo_access (
-    team TEXT NOT NULL REFERENCES teams(name),
-    prefix TEXT NOT NULL REFERENCES capabilities(prefix) ON DELETE CASCADE,
-    repo TEXT NOT NULL,
-    allowed BIGINT NOT NULL CHECK(allowed IN (0,1)),
-    checked_at BIGINT NOT NULL,
-    PRIMARY KEY (team,prefix,repo)
-);
-
 CREATE TABLE unit_asks (
     team TEXT NOT NULL REFERENCES teams(name),
     run_id TEXT NOT NULL,

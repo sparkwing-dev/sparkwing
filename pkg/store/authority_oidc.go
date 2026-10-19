@@ -66,7 +66,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if !facts.NotAfter.After(facts.Now) {
 		return capability.OIDCFacts{}, authorityError(apierr.Unauthenticated, "claim issuance window has ended")
 	}
-	identity, err := oidcOriginalIdentityTx(ctx, tx, t.team, run.Request)
+	identity, err := originalRequestTx(ctx, tx, t.team, run.Request)
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
@@ -98,7 +98,7 @@ func oidcRunnerKind(chain []authorityNode, personal bool) string {
 	}
 }
 
-func oidcOriginalIdentityTx(ctx context.Context, tx *storeTx, team Team, request runspec.SealedRequest) (runspec.SealedRequest, error) {
+func originalRequestTx(ctx context.Context, tx *storeTx, team Team, request runspec.SealedRequest) (runspec.SealedRequest, error) {
 	seen := map[string]bool{request.RunID: true}
 	for {
 		origin, lineage := request.Request.Origin, request.Request.Lineage

@@ -112,9 +112,6 @@ type GitHub struct {
 	users            map[string]*userCode
 	tokens           map[string]*issuedToken
 	commits          map[string]string
-	authors          map[string]int64
-	logins           map[int64]string
-	permissions      map[string]string
 	files            map[string][]byte
 	aliases          map[string]string
 	failContents     int
@@ -138,17 +135,14 @@ func New(t testing.TB) *GitHub {
 	}
 	g := &GitHub{
 		Key: key, t: t,
-		insts:       map[int64]*Installation{},
-		codes:       map[string]*userCode{},
-		users:       map[string]*userCode{},
-		tokens:      map[string]*issuedToken{},
-		commits:     map[string]string{},
-		authors:     map[string]int64{},
-		logins:      map[int64]string{},
-		permissions: map[string]string{},
-		files:       map[string][]byte{},
-		aliases:     map[string]string{},
-		checkRuns:   map[int64]CheckRunCall{},
+		insts:     map[int64]*Installation{},
+		codes:     map[string]*userCode{},
+		users:     map[string]*userCode{},
+		tokens:    map[string]*issuedToken{},
+		commits:   map[string]string{},
+		files:     map[string][]byte{},
+		aliases:   map[string]string{},
+		checkRuns: map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/oauth/access_token", g.handleAccessToken)
@@ -163,8 +157,6 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", g.handleContents)
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
-	mux.HandleFunc("GET /user/{id}", g.handleUserByID)
-	mux.HandleFunc("GET /repos/{owner}/{repo}/collaborators/{login}/permission", g.handlePermission)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{sha}/check-runs", g.handleListCheckRuns)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
@@ -203,50 +195,6 @@ func (g *GitHub) SetCommit(repo, ref, sha string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.commits[strings.ToLower(repo)+"/"+ref] = sha
-}
-
-// SetCommitAuthor names the GitHub user ID that authored sha.
-func (g *GitHub) SetCommitAuthor(repo, sha string, id int64) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.commits[strings.ToLower(repo)+"/"+sha] = sha
-	g.authors[strings.ToLower(repo)+"/"+sha] = id
-}
-
-// SetCollaborator records login as GitHub user id with permission on repo.
-func (g *GitHub) SetCollaborator(repo string, id int64, login, permission string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.logins[id] = login
-	g.permissions[strings.ToLower(repo)+"/"+login] = permission
-}
-
-func (g *GitHub) handleUserByID(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	g.mu.Lock()
-	login := g.logins[id]
-	g.mu.Unlock()
-	if err != nil || login == "" || g.installationToken(r) == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "login": login})
-}
-
-func (g *GitHub) handlePermission(w http.ResponseWriter, r *http.Request) {
-	repo := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
-	tok := g.installationToken(r)
-	if tok == nil || !tok.repos[repo] {
-		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
-		return
-	}
-	g.mu.Lock()
-	permission := g.permissions[repo+"/"+r.PathValue("login")]
-	g.mu.Unlock()
-	if permission == "" {
-		permission = "none"
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"permission": permission})
 }
 
 // SetFile makes path available at sha, or removes it when content is nil.
@@ -369,17 +317,12 @@ func (g *GitHub) handleCommit(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Lock()
 	sha := g.commits[repo+"/"+r.PathValue("ref")]
-	author := g.authors[repo+"/"+sha]
 	g.mu.Unlock()
 	if sha == "" {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 		return
 	}
-	body := map[string]any{"sha": sha}
-	if author > 0 {
-		body["author"] = map[string]int64{"id": author}
-	}
-	writeJSON(w, http.StatusOK, body)
+	writeJSON(w, http.StatusOK, map[string]string{"sha": sha})
 }
 
 // SetChecksGranted records whether installation id's owner accepted the

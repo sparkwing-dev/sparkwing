@@ -129,7 +129,7 @@ func enrolledClaimProfileTx(ctx context.Context, tx *storeTx, chain []authorityN
 	case capability.ProvisionMachine:
 		profile.Accept, err = match.ParseAccept(root.Capability.Repositories)
 	case capability.ProvisionService:
-		if !launcherClaimant(chain[0].principal.Capability) && !hostClaimant(root.Capability) {
+		if !launcherClaimant(chain[0].principal.Capability) {
 			return profile, bindingRefusal()
 		}
 	case capability.ProvisionActions:
