@@ -813,3 +813,8 @@ Assigned to an Opus implementer (env 1087).
 ## 2026-10-18 Korey decision 17: `sparkwing update` refreshes runner services
 
 - `sparkwing update` calls `service.Refresh` after installing a new binary, restarting installed runner services (launchd, systemd, Windows service) onto it and saying which it restarted. No installed service means no change.
+
+## 2026-10-18 Korey decision 18: operator holds and clean days
+
+- Any hold placed or released still restarts the clean-day count for history standing.
+- When an operator releases a hold they placed, they may mark it "no fault found"; that hold then does not restart the count (the count continues as if the hold never happened). Audited. Payment-dispute and automatic holds always restart it.
