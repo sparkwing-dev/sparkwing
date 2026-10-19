@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -41,9 +40,11 @@ func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices
 	return resolveLocalServicesWith(ctx, home, openLocalController)
 }
 
-func resolveStandaloneServicesAt(ctx context.Context, home string) (dashboardServices, error) {
+func resolveStandaloneServicesAt(ctx context.Context, home string, claimed <-chan struct{}) (dashboardServices, error) {
 	return resolveLocalServicesWith(ctx, home, func(ctx context.Context, home string) (wingd.LocalController, error) {
-		return (localcontroller.Config{Bind: bindStandaloneController}).Open(ctx, home)
+		return (localcontroller.Config{Bind: func(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
+			return bindStandaloneController(ctx, b, claimed)
+		}}).Open(ctx, home)
 	})
 }
 
@@ -110,12 +111,24 @@ func openLocalController(ctx context.Context, home string) (wingd.LocalControlle
 	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
 }
 
-// bindStandaloneController keeps the in-process queue off triggers: a
-// standalone run cannot detach, so its trigger belongs to the foreground CLI,
-// and an immediate queue claim would refuse the CLI's own here handoff.
-func bindStandaloneController(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
+// bindStandaloneController holds the in-process queue until the foreground
+// CLI has claimed its own trigger. A standalone run cannot detach, so that
+// trigger belongs to the CLI, and the queue's first poll would otherwise take
+// it and refuse the CLI's here handoff. Child runs still need the queue's
+// trigger claims afterwards.
+func bindStandaloneController(ctx context.Context, b localcontroller.Binding, claimed <-chan struct{}) (localcontroller.Services, error) {
 	services, err := bindLocalController(ctx, b)
-	services.Runner.Loop.Kinds = []capability.UnitKind{capability.UnitNode}
+	bearer := services.Runner.Bearer
+	if bearer != nil {
+		services.Runner.Bearer = func(ctx context.Context) (string, error) {
+			select {
+			case <-claimed:
+			case <-ctx.Done():
+				return "", context.Cause(ctx)
+			}
+			return bearer(ctx)
+		}
+	}
 	return services, err
 }
 

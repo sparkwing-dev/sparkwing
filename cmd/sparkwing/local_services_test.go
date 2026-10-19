@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -324,12 +325,13 @@ func FuzzLocalServicesKeepOneCapturedHome(f *testing.F) {
 	})
 }
 
-func TestStandaloneLocalQueueLeavesTheForegroundTriggerToItsCLI(t *testing.T) {
+func TestStandaloneLocalQueueWaitsForTheForegroundClaim(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
+	claimed := make(chan struct{})
 	var runner runners.StoreRunnerConfig
 	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
-		services, err := bindStandaloneController(ctx, binding)
+		services, err := bindStandaloneController(ctx, binding, claimed)
 		runner = services.Runner
 		return services, err
 	}}).Open(t.Context(), t.TempDir())
@@ -341,7 +343,16 @@ func TestStandaloneLocalQueueLeavesTheForegroundTriggerToItsCLI(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if len(runner.Loop.Kinds) != 1 || runner.Loop.Kinds[0] != capability.UnitNode {
-		t.Fatalf("standalone queue claims %v; the foreground CLI must claim its own trigger", runner.Loop.Kinds)
+	if runner.Loop.Kinds != nil {
+		t.Fatalf("standalone queue narrowed its kinds to %v; child runs need its trigger claims", runner.Loop.Kinds)
+	}
+	held, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := runner.Bearer(held); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("standalone queue claimed before the foreground CLI: %v", err)
+	}
+	close(claimed)
+	if raw, err := runner.Bearer(t.Context()); err != nil || raw == "" {
+		t.Fatalf("standalone queue stayed held after the foreground claim: %v", err)
 	}
 }
