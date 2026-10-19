@@ -969,8 +969,9 @@ mutation signatures to repeat the operator recheck under the write lock.
 
 ### Stored source release and plan-secret integration
 
-`SourceController` is the local C2 adapter for C1's existing
-`Tenant.ReleaseSourceCredential` and `Tenant.SetSourceMachineConsent` signatures.
+`SourceController` is the local C2 adapter for C1's
+`Tenant.ReleaseSourceCredential` signature. **Superseded by decision 6c (2026-10-18):** `Tenant.SetSourceMachineConsent`
+is removed; no machine-owner consent exists.
 Its `SourceTransactions` interface preserves those signatures. `Store.ForTeam`
 is the default resolver. Embedded controllers and tests may supply
 `ResolveTenant` through `WithSourceController`. The configured BoundCipher opens
@@ -988,11 +989,14 @@ extras. Checkout identity and policy remain in the sealed request.
 This cuts the legacy claim-token handler, its separate eligibility checks and
 its per-process limiter. Source release has RetryNever.
 
-`PUT /api/v1/tokens/{token}/git-credentials` takes an explicit enabled boolean.
-The policy requires an account session and BindMachineOwner. It passes the
-authenticated AuthorityRef and token selector unchanged to C1's consent
-transaction. Team administration does not supply owner consent. The former
-team-token consent route and handler are removed.
+**Superseded by decision 6c (2026-10-18):** `PUT /api/v1/tokens/{token}/git-credentials`, its
+BindMachineOwner policy and the consent transaction are removed. Team git
+credentials and App installation tokens are released only to Cloud work and the
+team's shared runners, never to a personal machine, which is refused with
+`personal_machine`. A personal machine fetches with its owner's own Git access:
+the claim response's `owner_machine` mark, computed from the claimant's
+enrollment, selects `source.GitAccessOwner` on the host, which never requests a
+team credential.
 
 `WithSecretsCipher` installs a PlanSecretOpener on its store. The adapter uses
 the stored tenant, name, pipeline, shared and masked fields through the same
@@ -1150,10 +1154,10 @@ All capability names below are in `internal/capability`.
 | `ObjectToSign` | Supply an authorized object key, method, size, digest and expiry to storage. |
 | `SignedObject` | Return one external signed URL and its required headers. |
 | `DataSigner.Sign` | Give S3/CloudFront and the filesystem signer the same boundary. |
-| `SourceExecutor` | Supply verified runner ownership and machine-owner consent. |
+| `SourceExecutor` | Supply verified executor identity: Cloud or a shared (non-personal) enrolled machine. Machine-owner consent is superseded by decision 6c. |
 | `SourceReleaseRequest` | Combine sensitive authorization with sealed repo and executor facts. |
 | `SourceReleaseAudit` | Record a credential release without its secret material. |
-| `AuthorizeSourceRelease` | Refuse team credential release without repo authority and cloud/owner consent. |
+| `AuthorizeSourceRelease` | Refuse team credential release without repo authority, and to any executor that is not Cloud or a shared runner (decision 6c). |
 
 | Other package API | Purpose |
 | --- | --- |
@@ -1296,7 +1300,7 @@ and deadline arithmetic remain C4's responsibility.
 | `expansion` | This owner/eval authority targets the terminal source job and generation. |
 | `claimSelection` | Match the selected row against repo/push/pool authority. Here can select only its reserved run; a trigger's node selection stays inside its run. |
 | `ownToken` | The account owns the token or has team-admin authority; new roots cannot exceed the minting authority. |
-| `machineOwner` | The authenticated machine owner is the account consenting to credential release. |
+| `machineOwner` | **Superseded by decision 6c (2026-10-18):** removed with the consent route. |
 | `selfOrTeamAdmin` | A member removes only itself unless it has team-admin authority. |
 | `ownCleanup` | The cleanup belongs to this node-host process and attempt. |
 | `planOwner` | A plan claim or live trigger owner submits its run's plan. A work claim cannot. |
@@ -1427,9 +1431,10 @@ reauthorize every read, meter exact egress and remain exempt from the download
 cap. There is no `kind=log` data download. C4 supplies these limits.
 
 Team git release consumes an `Authorized` sensitive decision, then requires
-the same team's cloud runner or explicit consent from the machine's owner.
+the same team's Cloud work or shared runner. **Superseded by decision 6c (2026-10-18):** owner consent no
+longer releases to a personal machine.
 The sealed repo must be authorized; SSH host confirmation is mandatory for
-SSH credentials. C1 rechecks the live claim and consent and commits
+SSH credentials. C1 rechecks the live claim and executor and commits
 `SourceReleaseAudit` before releasing bytes. A failed audit write releases
 nothing. App-token issuance still requires a live authorized claim.
 
@@ -1575,7 +1580,7 @@ T1 should implement these behavioral scenarios against the running contracts:
 | Expansion | Owner/eval reads its terminal source and submits once; stale source generation, cancel and owner lapse refuse. |
 | Blob authority | Foreign-team, foreign-run and unrelated same-run digests fail downloads, HasMany and manifest attachment. |
 | Cache and publish | Manual refs cannot poison verified refs; default-only local reads remain read-only; publication remains local provenance and does not fail the local run. |
-| Source release | Same-team cloud or machine-owner opt-in only; repo allow-list and SSH confirmation apply; audit failure releases no secret. |
+| Source release | Same-team Cloud or shared runner only, never a personal machine (decision 6c); repo allow-list and SSH confirmation apply; audit failure releases no secret. |
 | Operator split | Deployment tokens cannot trust, grant, freeze, refund or delete accounts, including by delegating or using a local peer. |
 | Billing | Immutable operational-to-billing mapping through here/bootstrap, unstarted refund, plan/eval per-second compute, free plan-cache hits, customer wait exclusion and no double charge. |
 | Payment callback | Signed test/live events use one verifier, bind to the committed checkout, derive team and grant once across retries and distinct duplicate events. Invalid proof, wrong mode/amount/currency, unknown checkout and human console powers remain refused. |
@@ -1655,8 +1660,10 @@ The deployment cut's extra shared test edits are
 `docs/migrations/_unreleased.md`, `CHANGELOG.md` and `api/openapi.yaml`, with
 the matching `pkg/docs` copies. No persistent store contract was changed.
 
-`EngineController.CreateRun`, `AcceptPlan`, `AcceptExpansion`, `IntakeForStore`
-and `ExpansionForStore` have implementations. Intake preserves the tagged
+`AcceptPlan`, `AcceptExpansion`, `IntakeForStore` and `ExpansionForStore`
+have implementations. Run intake has one entry, the HTTP intake route, which
+verifies the repository display through `resolveIntakeSource` before
+`AdmitRun`; there is no in-process `CreateRun` adapter. Intake preserves the tagged
 authority and idempotency key, derives actor and team, and removes caller App
 proof. Sessions supply no capability-prefix fence. Plan acceptance reads the
 persisted first seal and passes both author declaration layers unchanged.
@@ -3059,7 +3066,7 @@ grace deadline or binding deadline in the complete live ancestry as the leaf's
 effective expiry. Omitted delegation expiry inherits that ceiling.
 
 The store uses the same origin predicate in `checkMemberProvision`, machine
-provisioning and `SetSourceMachineConsent` after resolving authority inside each
+provisioning (and formerly `SetSourceMachineConsent`, removed by decision 6c) after resolving authority inside each
 committing transaction. Machine provisioning also accepts deployment authority
 and restricts grants to `nodes.claim` and `triggers.claim`. The native
 committing-origin property covers detached member and machine roots and both

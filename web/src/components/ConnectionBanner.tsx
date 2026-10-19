@@ -6,6 +6,8 @@ import {
   onConnectionStatusChange,
   type ConnectionStatus,
 } from "@/lib/api";
+import { connectionMessage } from "@/lib/connectionMessage";
+import { localDashboard } from "@/lib/localSession";
 
 export default function ConnectionBanner() {
   const [status, setStatus] = useState<ConnectionStatus>(getConnectionStatus);
@@ -14,26 +16,7 @@ export default function ConnectionBanner() {
 
   if (status === "ok") return null;
 
-  const messages: Record<
-    Exclude<ConnectionStatus, "ok">,
-    { text: string; hint: string; signIn?: boolean }
-  > = {
-    unreachable: {
-      text: "Cannot reach the sparkwing controller",
-      hint: "The API may be down or your network connection was interrupted. Data shown may be stale.",
-    },
-    unauthorized: {
-      text: "Authentication failed",
-      hint: "The API token is missing or invalid. Check that SPARKWING_API_TOKEN is set in the web deployment.",
-    },
-    "session-expired": {
-      text: "Your session ended",
-      hint: "Sessions expire after a fixed lifetime.",
-      signIn: true,
-    },
-  };
-
-  const { text, hint, signIn } = messages[status];
+  const { text, hint, signIn } = connectionMessage(status, localDashboard());
 
   return (
     <div className="bg-red-900/80 border-b border-red-700 px-4 py-2 text-sm text-red-100 flex items-center gap-2">

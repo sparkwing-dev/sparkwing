@@ -46,8 +46,10 @@ func checkoutSubmodules(ctx context.Context, client *gitClient, checkout, remote
 		if err != nil {
 			return err
 		}
-		if err := authorizedSubmodule(remote, submoduleURL, client.credential); err != nil {
-			return err
+		if !client.owner {
+			if err := authorizedSubmodule(remote, submoduleURL, client.credential); err != nil {
+				return err
+			}
 		}
 		submoduleURL, err = credentialRemote(submoduleURL, client.credential)
 		if err != nil {

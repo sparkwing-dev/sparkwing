@@ -290,6 +290,25 @@ describe("session expiry", () => {
     }
   });
 
+  it("reports a permission refusal apart from missing authentication", async () => {
+    const runtime = globalThis as unknown as { window?: RuntimeWindow; fetch: typeof fetch };
+    const hadWindow = Object.prototype.hasOwnProperty.call(runtime, "window");
+    const previousWindow = runtime.window;
+    const previousFetch = runtime.fetch;
+    for (const mode of ["true", "false"]) {
+      runtime.window = { __SPARKWING_REQUIRE_LOGIN__: mode };
+      runtime.fetch = async () => new Response(null, { status: 403 });
+      try {
+        await assert.rejects(cancelRun("run-one"));
+        assert.equal(getConnectionStatus(), "forbidden");
+      } finally {
+        runtime.fetch = previousFetch;
+        if (hadWindow) runtime.window = previousWindow;
+        else delete runtime.window;
+      }
+    }
+  });
+
   it("sends a capped out session mode tab to the sign-in page and stops polling", async () => {
     const runtime = globalThis as unknown as {
       window?: RuntimeWindow;

@@ -44,8 +44,8 @@ func TestLocalDashboardRefusesForeignHostsAndOrigins(t *testing.T) {
 		host, origin string
 		want         int
 	}{
-		{addr, "", http.StatusOK},
-		{"localhost", "http://" + addr, http.StatusOK},
+		{addr, "", http.StatusUnauthorized},
+		{"localhost", "http://" + addr, http.StatusUnauthorized},
 		{"rebound.example", "", http.StatusForbidden},
 		{addr, "http://evil.example", http.StatusForbidden},
 		{addr, "http://127.0.0.1:1", http.StatusForbidden},

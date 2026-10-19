@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -71,18 +70,27 @@ func (f *gitReleaseFixture) put(token string) {
 	}
 }
 
-func (f *gitReleaseFixture) consent(enabled bool) {
+func (f *gitReleaseFixture) registerRunner(personal bool) {
 	f.t.Helper()
-	body := `{"enabled":false}`
-	if enabled {
-		body = `{"enabled":true}`
+	registerFixtureRunner(f.t, f.s.store, personal)
+}
+
+func registerFixtureRunner(t *testing.T, s *store.Store, personal bool) {
+	t.Helper()
+	var body []byte
+	if err := s.DB().QueryRow(`SELECT authority_json FROM capabilities WHERE prefix='runner'`).Scan(&body); err != nil {
+		t.Fatal(err)
 	}
-	f.request("PUT", "/api/v1/tokens/runner/git-credentials", body, 200)
-	w := f.request("GET", "/api/v1/tokens/runner", "", 200)
-	var metadata capability.Metadata
-	if err := json.Unmarshal(w.Body.Bytes(), &metadata); err != nil || metadata.Prefix != "runner" || metadata.GitCredentials != enabled {
-		f.t.Fatalf("machine consent metadata=%s: %v", w.Body, err)
+	var record store.CapabilityRecord
+	if err := json.Unmarshal(body, &record); err != nil {
+		t.Fatal(err)
 	}
+	record.Origin = &store.CapabilityOrigin{Personal: personal, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, s, `UPDATE capabilities SET authority_json=? WHERE prefix='runner'`, body)
 }
 
 func (f *gitReleaseFixture) release(status int) SourceCredentialResponse {
@@ -122,7 +130,7 @@ func (f *gitReleaseFixture) audits(want int) {
 
 func TestTeamGitCredentialSSHIsUnusableUntilConfirmed(t *testing.T) {
 	f := newGitReleaseFixture(t)
-	f.consent(true)
+	f.registerRunner(false)
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -170,14 +178,19 @@ func TestTeamGitCredentialSSHIsUnusableUntilConfirmed(t *testing.T) {
 	f.audits(1)
 }
 
-func TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn(t *testing.T) {
+func TestTeamGitCredentialGoesToSharedRunnersNeverPersonalMachines(t *testing.T) {
 	f := newGitReleaseFixture(t)
 	f.put("private-git-token")
 	f.release(403)
+	f.registerRunner(true)
+	refused := engineClaimHTTP(t, f.s.Handler(), f.claim, "POST", "/api/v1/runs/run/source-credential", "", 403)
+	if !strings.Contains(refused.Body.String(), `"reason":"personal_machine"`) || strings.Contains(refused.Body.String(), "private-git-token") {
+		t.Fatalf("personal machine refusal: %s", refused.Body)
+	}
 	f.audits(0)
-	f.consent(true)
+	f.registerRunner(false)
 	if got := f.release(200); got.Secret != "private-git-token" || got.Kind != "https" || got.Username != "x-access-token" || got.Host != "gitlab.example.com" {
-		t.Fatal("opted-in source did not receive credential")
+		t.Fatal("shared runner did not receive credential")
 	}
 	w := f.request("POST", "/api/v1/runners", `{"name":"idle","repos":["gitlab.example.com/acme/*"]}`, 201)
 	var idle credentialResponse
@@ -188,12 +201,10 @@ func TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn(t *testing.T) {
 	if strings.Contains(w.Body.String(), "private-git-token") {
 		t.Fatal("an idle runner received a source credential")
 	}
-	f.consent(false)
-	f.release(403)
 	f.audits(1)
 }
 
-func TestTeamGitCredentialCloudNeedsNoMachineConsent(t *testing.T) {
+func TestTeamGitCredentialReachesCloudWork(t *testing.T) {
 	s, session, csrf := reviewAccount(t, "owner")
 	tenant, err := s.store.ForTeam(t.Context(), "a")
 	if err != nil {
@@ -220,15 +231,11 @@ func TestTeamGitCredentialCloudNeedsNoMachineConsent(t *testing.T) {
 	if got := f.release(200); got.Secret != "private-cloud-git" || got.Host != "gitlab.example.com" {
 		t.Fatal("Cloud claim did not receive its team's credential")
 	}
-	var consents int
-	if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM git_credential_machines`).Scan(&consents); err != nil || consents != 0 {
-		t.Fatalf("Cloud release required machine consent: %d: %v", consents, err)
-	}
 }
 
 func TestTeamGitCredentialRotationAndRevocation(t *testing.T) {
 	f := newGitReleaseFixture(t)
-	f.consent(true)
+	f.registerRunner(false)
 	for _, token := range []string{"private-git-one", "private-git-two"} {
 		f.put(token)
 		if got := f.release(200); got.Secret != token {
@@ -238,36 +245,6 @@ func TestTeamGitCredentialRotationAndRevocation(t *testing.T) {
 	f.request("DELETE", "/api/v1/team/git-credentials/gitlab.example.com", "", 204)
 	f.release(404)
 	f.audits(2)
-}
-
-func TestTeamGitCredentialConsentRequiresTheMachineOwnerProperty(t *testing.T) {
-	property := func(role uint8, enabled bool) bool {
-		f := newGitReleaseFixture(t)
-		f.put("private-git-consent")
-		f.consent(true)
-		engineSQL(t, f.s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('other','other@example.test',1,1)`)
-		engineSQL(t, f.s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','other',?,1)`, []string{"owner", "editor", "reader"}[role%3])
-		raw, csrf, _, err := f.s.store.CreateAccountSession(t.Context(), store.Account{ID: "other"}, "a", time.Hour)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := `{"enabled":false}`
-		if enabled {
-			body = `{"enabled":true}`
-		}
-		reviewSessionRequest(t, f.s, raw, csrf, "PUT", "/api/v1/tokens/runner/git-credentials", body, 403)
-		var owner string
-		if err := f.s.store.DB().QueryRow(`SELECT enabled_by FROM git_credential_machines WHERE team='a' AND capability_prefix='runner'`).Scan(&owner); err != nil || owner != "member" {
-			t.Fatalf("another account changed machine consent: %q: %v", owner, err)
-		}
-		if f.release(200).Secret != "private-git-consent" {
-			t.Fatal("refused consent update changed source release")
-		}
-		return true
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 18}); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestTeamGitCredentialIsOwnerManagedAndWriteOnly(t *testing.T) {
@@ -288,7 +265,7 @@ func TestTeamGitCredentialIsOwnerManagedAndWriteOnly(t *testing.T) {
 	engineSQL(t, f.s.store, `UPDATE memberships SET role='owner' WHERE team='a' AND account_id='member'`)
 	f.request("POST", "/api/v1/team/git-credentials", `{"host":"gitlab.example.com","kind":"ssh","private_key":"not a key"}`, 400)
 	f.request("POST", "/api/v1/team/git-credentials", `{"host":"https://gitlab.example.com","kind":"https","token":"x"}`, 400)
-	f.consent(true)
+	f.registerRunner(false)
 	if got := f.release(200); got.Secret != "private-git-secret" {
 		t.Fatal("refused mutation changed credential")
 	}
@@ -317,7 +294,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 	property := func(noise uint32, mode uint8) bool {
 		f := newGitReleaseFixture(t)
 		f.put("private-git-token")
-		f.consent(true)
+		f.registerRunner(false)
 		if f.release(200).Secret != "private-git-token" {
 			t.Fatal("control did not release credential")
 		}

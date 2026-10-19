@@ -81,14 +81,15 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if record.Origin == nil || !record.Origin.Personal {
 		return nil
 	}
-	var owner, requester, kind string
+	var owner string
 	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&owner); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, root.Team, run).Scan(&requester, &kind); err != nil {
+	requester, err := runRequesterAccountTx(ctx, tx, Team(root.Team), run)
+	if err != nil {
 		return err
 	}
-	if owner == "" || owner != requester || kind != string(capability.SubjectAccount) {
+	if owner == "" || owner != requester {
 		return authorityError(apierr.Forbidden, "personal machine is reserved for its owner's runs")
 	}
 	return nil

@@ -19,7 +19,12 @@ func proxyCredentials(name, value string) ([]string, error) {
 		}
 	case "PIP_EXTRA_INDEX_URL":
 		endpoints = strings.Fields(value)
+	case "GOSUMDB":
+		if fields := strings.Fields(value); len(fields) > 1 {
+			endpoints = fields[1:]
+		}
 	}
+	goEndpoint := strings.EqualFold(name, "GOPROXY") || strings.EqualFold(name, "GOSUMDB")
 	var credentials []string
 	for _, endpoint := range endpoints {
 		parts, err := endpointCredentials(endpoint)
@@ -27,8 +32,21 @@ func proxyCredentials(name, value string) ([]string, error) {
 			return nil, fmt.Errorf("invalid proxy URL in %q", name)
 		}
 		credentials = append(credentials, parts...)
+		if goEndpoint && pathOrQueryEndpoint(endpoint) {
+			credentials = append(credentials, endpoint)
+		}
 	}
 	return credentials, nil
+}
+
+// safety: Go module proxies may carry an access token in the path or query, which no userinfo parse finds.
+func pathOrQueryEndpoint(endpoint string) bool {
+	rest := strings.TrimPrefix(endpoint, "//")
+	if _, after, ok := strings.Cut(endpoint, "://"); ok {
+		rest = after
+	}
+	end := strings.IndexAny(rest, "/?#")
+	return end >= 0 && strings.Trim(rest[end:], "/") != ""
 }
 
 func endpointCredentials(endpoint string) ([]string, error) {

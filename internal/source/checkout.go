@@ -45,7 +45,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		}
 	}()
 	checkout := spec.LocalCheckout
-	client := gitClient{owner: options.Base.Local, env: gitEnvironment(environment), bundleTransport: options.BundleTransport}
+	client := gitClient{owner: options.ownerGit(), env: gitEnvironment(environment), bundleTransport: options.BundleTransport}
 	if options.PreparedCheckout != "" {
 		if spec.LocalCheckout != "" || !filepath.IsAbs(options.PreparedCheckout) || spec.SHA == "" {
 			return entry, errors.New("prepared source requires an absolute checkout and sealed remote commit")
@@ -275,6 +275,9 @@ func validateSpec(spec Spec) error {
 }
 
 func (g *gitClient) authorizeRemote(ctx context.Context, spec Spec, remote string, access Access) (string, error) {
+	if g.owner {
+		return remote, nil
+	}
 	credential, err := access.GitCredential(ctx, spec)
 	if err != nil {
 		return "", fmt.Errorf("authorize source: %w", err)

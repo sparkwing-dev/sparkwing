@@ -20,7 +20,7 @@ func scheduleIntakeFixture(t *testing.T, suffix uint32) (*Tenant, CronSchedule, 
 	s.clock = func() time.Time { return now }
 	tenant := &Tenant{s: s, team: "a"}
 	sched, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
-		ID: fmt.Sprintf("schedule-%x", suffix), RepoPath: fmt.Sprintf("https://git.example.com/acme/repo-%x.git", suffix),
+		ID: fmt.Sprintf("schedule-%x", suffix), RepoPath: fmt.Sprintf("https://github.com/acme/repo-%x.git", suffix), GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: CronWhereController,
 		GitBranch: "main", LockedRef: "0123456789abcdef0123456789abcdef01234567", ArmedBy: "owner@example.com",
 		Args: map[string]string{"message": fmt.Sprintf("hello-%x", suffix)},
@@ -49,7 +49,7 @@ func TestScheduleAdmissionSealsReplaysAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := first.Request.Request
-	if first.Number != 1 || first.OwnerUnit == nil || first.Request.Hash == "" || in.Team != "a" || in.Origin != runspec.OriginSchedule || in.Git.App.Set || in.Git.DefaultBranch.Set || in.Source.Location.RemoteURL != sched.RepoPath || in.Git.Repository.Key != sched.RepositoryKey || in.Git.SHA != sched.LockedRef || in.Git.Ref != sched.GitBranch || !reflect.DeepEqual(in.RequestedArgs, sched.Args) {
+	if first.Number != 1 || first.OwnerUnit == nil || first.Request.Hash == "" || in.Team != "a" || in.Origin != runspec.OriginSchedule || in.Git.App.Set || in.Git.DefaultBranch.Set || in.Source.Location.RemoteURL != sched.RepoPath || in.Git.Repository.Key != sched.RepositoryKey || in.Git.Repository.Display != "acme/repo-1" || in.Git.SHA != sched.LockedRef || in.Git.Ref != sched.GitBranch || !reflect.DeepEqual(in.RequestedArgs, sched.Args) {
 		t.Fatalf("sealed schedule = %+v", first)
 	}
 	if replay, err := tenant.AdmitScheduledRun(t.Context(), sched, now); err != nil || !replay.Replayed || replay.RunID != first.RunID {

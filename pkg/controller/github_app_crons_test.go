@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -187,5 +188,32 @@ func TestGitHubAppStaleCronPushStillStartsSubscribedPipeline(t *testing.T) {
 	rows := appCronRows(t, f, olga.team)
 	if len(rows) != 1 || rows[0].LockedRef != headSHA {
 		t.Fatalf("stale push changed schedule: %+v", rows)
+	}
+}
+
+func TestGitHubAppLockedScheduleSealsTheAppPushDisplay(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusAccepted {
+		t.Fatalf("default push = %d", code)
+	}
+	enableAutomation(t, f, olga)
+	rows := appCronRows(t, f, olga.team)
+	if len(rows) != 1 || rows[0].LockedRef != headSHA {
+		t.Fatalf("armed schedules = %+v", rows)
+	}
+	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := tn.AdmitScheduledRun(t.Context(), rows[0], time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository := admitted.Request.Request.Git.Repository; repository.Key != "gh:701" || repository.Display != "acme/widgets" {
+		t.Fatalf("scheduled run repository = %+v, want gh:701 displayed as acme/widgets", repository)
 	}
 }

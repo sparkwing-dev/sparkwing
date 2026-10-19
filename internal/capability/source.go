@@ -15,7 +15,7 @@ type SourceExecutor struct {
 	MachineID              string
 	Cloud                  bool
 	OwnerAccountID         string
-	OwnerOptedIn           bool
+	Shared                 bool
 	AuthorizedRepositories []string
 }
 
@@ -49,8 +49,7 @@ type SourceReleaseAudit struct {
 }
 
 // AuthorizeSourceRelease requires source.read, live sensitive authority, repo permission and
-// either a same-team cloud executor or its owner's explicit machine opt-in.
-// Team-admin token management alone cannot consent on the machine owner's behalf.
+// a same-team Cloud executor or shared runner; a personal machine never qualifies.
 func AuthorizeSourceRelease(request SourceReleaseRequest, now time.Time) (SourceReleaseAudit, error) {
 	a := request.Authorization
 	c := a.Principal.Capability
@@ -73,8 +72,8 @@ func AuthorizeSourceRelease(request SourceReleaseRequest, now time.Time) (Source
 		!slices.Contains(executor.AuthorizedRepositories, request.RepositoryKey) {
 		return SourceReleaseAudit{}, forbidden(apierr.ReasonRepositoryUnauthorized)
 	}
-	if executor.MachineID == "" || !request.GitHubApp && !executor.Cloud && (!executor.OwnerOptedIn || executor.OwnerAccountID == "") {
-		return SourceReleaseAudit{}, forbidden(apierr.ReasonOwnerOptInRequired)
+	if executor.MachineID == "" || !executor.Cloud && !executor.Shared {
+		return SourceReleaseAudit{}, forbidden(apierr.ReasonPersonalMachine)
 	}
 	if request.SSH && !request.SSHHostConfirmed {
 		return SourceReleaseAudit{}, forbidden(apierr.ReasonCredentialUnconfirmed)

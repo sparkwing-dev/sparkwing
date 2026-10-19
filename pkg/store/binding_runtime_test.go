@@ -253,10 +253,10 @@ func TestBindingUnknownRuleAndNodehostCleanupRefuse(t *testing.T) {
 	}
 }
 
-func TestBindingTokenAndConsentRequireTheAccountOwner(t *testing.T) {
+func TestBindingTokenRequiresTheAccountOwner(t *testing.T) {
 	s := authorityStore(t)
 	owner := authorityMember(t, s, "owner", RoleEditor)
-	other := authorityMember(t, s, "other", RoleEditor)
+	authorityMember(t, s, "other", RoleEditor)
 	for _, prefix := range []string{"mine", "theirs"} {
 		authorityPersist(t, s, authorityRoot(prefix, "a"))
 	}
@@ -266,20 +266,10 @@ func TestBindingTokenAndConsentRequireTheAccountOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rule := range []capability.BindingRule{capability.BindOwnToken, capability.BindMachineOwner} {
-		for _, prefix := range []string{"mine", "theirs", "missing"} {
-			err := s.CheckBinding(t.Context(), p, rule, capability.Target{Team: "a", TokenPrefix: prefix})
-			if (err == nil) != (prefix == "mine") {
-				t.Fatalf("%s %s: %v", rule, prefix, err)
-			}
+	for _, prefix := range []string{"mine", "theirs", "missing"} {
+		err := s.CheckBinding(t.Context(), p, capability.BindOwnToken, capability.Target{Team: "a", TokenPrefix: prefix})
+		if (err == nil) != (prefix == "mine") {
+			t.Fatalf("%s: %v", prefix, err)
 		}
-	}
-	otherPrincipal, err := s.ResolveAuthority(t.Context(), other.Authority)
-	if err != nil {
-		t.Fatal(err)
-	}
-	otherPrincipal.Capability.Grants = []capability.Grant{capability.TeamAdmin}
-	if err := s.CheckBinding(t.Context(), otherPrincipal, capability.BindMachineOwner, capability.Target{Team: "a", TokenPrefix: "mine"}); err == nil {
-		t.Fatal("team administration replaced machine-owner consent")
 	}
 }

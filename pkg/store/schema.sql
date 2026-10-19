@@ -819,14 +819,6 @@ CREATE TABLE git_credential_releases (
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
-CREATE TABLE git_credential_machines (
-    team TEXT NOT NULL REFERENCES teams(name),
-    capability_prefix TEXT NOT NULL,
-    enabled_by TEXT NOT NULL DEFAULT '',
-    enabled_at BIGINT NOT NULL,
-    PRIMARY KEY (team, capability_prefix)
-);
-
 CREATE TABLE github_app_extra_repos (
     team TEXT NOT NULL REFERENCES teams(name),
     repository_id BIGINT NOT NULL CHECK(repository_id > 0),

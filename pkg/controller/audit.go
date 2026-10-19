@@ -48,15 +48,14 @@ var (
 // is the caller's text, which can be a whole bearer pasted in place of a prefix, so each value passes its shape check
 // first: a token keeps only the prefix the store keys on, and an id must look like one the store mints.
 var auditTargetIDs = map[string]map[string]auditTarget{
-	"/api/v1/team/members/{account}":               {"account": memberTarget},
-	"/api/v1/team/invitations/{id}":                {"id": invitationTarget},
-	"/api/v1/invitations/{id}/accept":              {"id": invitationTarget},
-	"/api/v1/tokens/{token}":                       {"token": tokenTarget},
-	"/api/v1/operator/tokens/{token}":              {"token": tokenTarget},
-	"/api/v1/tokens/{token}/rotate":                {"token": tokenTarget},
-	"/api/v1/operator/tokens/{token}/rotate":       {"token": tokenTarget},
-	"/api/v1/operator/runners/{runner}/metered":    {"runner": tokenTarget},
-	"/api/v1/team/tokens/{prefix}/git-credentials": {"prefix": tokenTarget},
+	"/api/v1/team/members/{account}":            {"account": memberTarget},
+	"/api/v1/team/invitations/{id}":             {"id": invitationTarget},
+	"/api/v1/invitations/{id}/accept":           {"id": invitationTarget},
+	"/api/v1/tokens/{token}":                    {"token": tokenTarget},
+	"/api/v1/operator/tokens/{token}":           {"token": tokenTarget},
+	"/api/v1/tokens/{token}/rotate":             {"token": tokenTarget},
+	"/api/v1/operator/tokens/{token}/rotate":    {"token": tokenTarget},
+	"/api/v1/operator/runners/{runner}/metered": {"runner": tokenTarget},
 }
 
 func opaqueID(v string) string {

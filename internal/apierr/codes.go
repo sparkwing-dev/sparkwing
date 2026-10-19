@@ -130,7 +130,7 @@ const (
 	ReasonDigestNotReadable      Reason = "digest_not_readable"
 	ReasonRepositoryUnauthorized Reason = "repository_unauthorized"
 	ReasonReadOnly               Reason = "read_only"
-	ReasonOwnerOptInRequired     Reason = "owner_opt_in_required"
+	ReasonPersonalMachine        Reason = "personal_machine"
 	ReasonCredentialUnconfirmed  Reason = "credential_unconfirmed"
 	ReasonConsoleRequired        Reason = "console_required"
 	ReasonReauthRequired         Reason = "reauth_required"

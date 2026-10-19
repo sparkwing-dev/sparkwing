@@ -45,7 +45,7 @@ func TestSourceControllerUsesStoreAuditAndBoundCipher(t *testing.T) {
 			a := engineRuntimeClaim(t, e, capability.UnitNode)
 			e.Store.SetClaimProfileResolver(engineProfileFake{})
 			engineSQL(t, e.Store, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
-			engineSQL(t, e.Store, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) VALUES ('a','runner','owner',1)`)
+			registerFixtureRunner(t, e.Store, false)
 			cipher, err := secrets.NewCipher(bytes.Repeat([]byte{21}, secrets.KeySize))
 			if err != nil {
 				t.Fatal(err)

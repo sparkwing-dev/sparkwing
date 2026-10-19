@@ -51,7 +51,7 @@ func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, reques
 	spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL, LocalCheckout: request.Source.Location.LocalCheckout}
 	options := source.Options{Access: &intakeRevisionAccess{server: s, team: team}, Base: procenv.Base{Ambient: os.Environ(), Masker: requestMasker(ctx)}, ReadFile: read}
 	if spec.LocalCheckout != "" || s.dashboard != nil && s.dashboard.Local {
-		options.Base.Local, options.Base.Captured = true, os.Environ()
+		options.Base.Local, options.Base.Captured, options.GitAccess = true, os.Environ(), source.GitAccessOwner
 	}
 	git, code, _, err := source.Select(ctx, spec, request.Pipeline, request.Git, request.Source, "", options)
 	return git, code, err

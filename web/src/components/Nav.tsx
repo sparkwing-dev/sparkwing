@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
 import { readCSRFCookie } from "@/lib/csrfCookie";
+import { localSession, logOutLocal } from "@/lib/localSession";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import { useTeamState } from "@/lib/useTeam";
@@ -111,6 +112,7 @@ export default function Nav() {
         onClose={() => setOpen(false)}
       />
       <LogoutControl />
+      <LocalLogoutControl />
     </div>
   );
 }
@@ -132,6 +134,25 @@ function LogoutControl() {
         Log out
       </button>
     </form>
+  );
+}
+
+function LocalLogoutControl() {
+  const [held, setHeld] = useState(false);
+  useEffect(() => {
+    queueMicrotask(() => setHeld(localSession() !== null));
+  }, []);
+  if (!held) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void logOutLocal().then(() => window.location.reload());
+      }}
+      className="ml-2 px-2 py-1 text-xs rounded-sm border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
+    >
+      Log out
+    </button>
   );
 }
 

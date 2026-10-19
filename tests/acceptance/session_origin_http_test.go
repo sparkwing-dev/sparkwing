@@ -11,7 +11,6 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -40,27 +39,6 @@ func TestDerivedSessionIssuancePreservesAncestryProperty(t *testing.T) {
 		}
 		p, spec := b.snapshot.Authorities[0].Principal, issuer.delegations[0]
 		return spec.Parent == p.Authority && spec.ExpiresAt != nil && spec.ExpiresAt.Equal(*b.snapshot.Authorities[1].Principal.Capability.ExpiresAt)
-	}
-	if err := quick.Check(property, nil); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDerivedSessionCannotConsentProperty(t *testing.T) {
-	property := func(identity []byte, lifetime uint16) bool {
-		b := derivedIssuanceSession(lifetime)
-		ref := &b.snapshot.Authorities[1].Principal.Authority
-		ref.ID = "parent-" + hex.EncodeToString(identity)
-		b.snapshot.Authorities[1].Principal.Capability.Prefix = ref.ID
-		b.snapshot.Authorities[0].Principal.Capability.Parent = ref
-		tx, _, handler := sourceHTTPFixture(t, b)
-		w := authorityHTTP(handler, b, "PUT", "/api/v1/tokens/machine/git-credentials", `{"enabled":true}`)
-		if w.Code != 403 || tx.consentMachine != "" {
-			t.Logf("HTTP %d %s consent=%q", w.Code, w.Body.String(), tx.consentMachine)
-			return false
-		}
-		assertEngineError(t, w, 403, apierr.Forbidden)
-		return true
 	}
 	if err := quick.Check(property, nil); err != nil {
 		t.Fatal(err)

@@ -124,7 +124,7 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if ref == "" {
 		ref = "HEAD"
 	}
-	options := source.Options{Base: procenv.Base{Local: true, Captured: input.environment, Masker: secrets.NewMasker()}, BuildEnvironment: buildEnv}
+	options := source.Options{GitAccess: source.GitAccessOwner, Base: procenv.Base{Local: true, Captured: input.environment, Masker: secrets.NewMasker()}, BuildEnvironment: buildEnv}
 	var sha string
 	if input.snapshot != nil && input.ref == "" {
 		sha = input.snapshot.SHA
