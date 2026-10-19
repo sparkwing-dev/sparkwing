@@ -79,7 +79,8 @@ ports and `docker run --memory` work.
 - `--device` cannot reach node devices, and host paths, node sysctls and
   kernel modules are out of reach.
 
-The Job's own CPU and memory budget bounds everything its containers use.
+The Job's own CPU and memory budget bounds everything its containers use, and
+all its processes and threads together are limited to 32768 per Job.
 
 GitHub Actions and CircleCI give root only inside a per-job VM. Run work that
 needs those features on a self-hosted runner.

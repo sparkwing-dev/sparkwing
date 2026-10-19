@@ -192,7 +192,7 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   `CAP_SYS_PTRACE` syscalls and `pivot_root` allowed, and io_uring, keyrings and
   `clone3` (ENOSYS) and bpf, perf, userfaultfd, kexec, modules,
   `open_by_handle_at` and `fanotify_init` refused.
-- Set kubelet `podPidsLimit`, so a fork bomb in one Job cannot exhaust the
+- Set kubelet `podPidsLimit` (Sparkwing Cloud uses 32768), so a fork bomb in one Job cannot exhaust the
   node's PIDs, and reserve node disk with `kubeReserved`/`systemReserved`
   ephemeral storage and `evictionHard` on `nodefs`. Each Job's scratch,
   including Docker's data root, is a 20 GiB emptyDir enforced by eviction, so
