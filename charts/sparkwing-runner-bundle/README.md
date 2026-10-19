@@ -54,7 +54,8 @@ only launcher identity the policies admit.
 Set `runner.enabled=false` when all work goes through Cloud Jobs.
 
 `launcher.networkPolicy.egress` supplies allowed Job destinations alongside the
-selecting default-deny policy. The [Cloud example](../sparkwing-full/examples/cloud.yaml)
+selecting policy that denies all Job ingress and egress. Nothing needs to reach
+a Job Pod. The [Cloud example](../sparkwing-full/examples/cloud.yaml)
 and [Cloud prerequisites](../sparkwing-full/README.md#cloud-node-and-network-prerequisites)
 describe team-node labels, CPU-band taints, disruption protection, native
 sidecars, PodLevelResources and node-level network enforcement.
@@ -62,7 +63,7 @@ Cloud Jobs run in `launcher.jobNamespace`, `<release namespace>-cloud-jobs` when
 empty, which must differ from the release namespace. The chart owns that
 namespace and creates it with privileged Pod Security unless
 `launcher.createNamespace=false`. Keep every other NetworkPolicy and Pod
-Security label out of it: an additive egress policy there widens Job egress.
+Security label out of it: an additive policy there widens Job egress or ingress.
 The chart adds the customer ServiceAccount, launcher Role and egress policies, plus two
 ValidatingAdmissionPolicies with Deny bindings selecting only that namespace.
 They admit launcher-created Jobs, capacity requests and boundary probes and
@@ -90,6 +91,14 @@ and remove the `sparkwing.dev/node-reservation`, `sparkwing.dev/reservation-name
 and `sparkwing.dev/award-binding` annotations and the `sparkwing.dev/cloud-reserved`
 taint from their nodes. The launcher logs every node still reserved under
 another namespace and never reuses it.
+
+A node whose reservation annotations are malformed, mismatched or refused by
+the controller is quarantined: cordoned and annotated
+`sparkwing.dev/quarantined` with the cause. The launcher logs it and keeps
+claiming for other nodes. Inspect the node, then delete it or remove the
+annotation. The launcher can update every Node; RBAC cannot narrow that,
+because Karpenter names nodes at launch and RBAC has no label or field
+restrictions.
 
 Grant Pod and Job creation in the job namespace only to the launcher
 ServiceAccount. Kubernetes administrators and the Job controller remain trusted.

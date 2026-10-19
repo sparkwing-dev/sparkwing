@@ -70,7 +70,7 @@ func (f *admissionFixture) capacity(t *testing.T) *corev1.Pod {
 }
 
 func (f *admissionFixture) measure() *corev1.Pod {
-	return f.probes.measure(f.probeCtx, f.resources.Reservation, []string{"10.0.0.1:443"}, "10.0.0.9:18888")
+	return f.probes.measure(f.probeCtx, f.resources.Reservation, []probeTarget{{"node", "10.0.0.1:443"}, {"peer", "10.0.0.2:18888"}}, "10.0.0.9:18888")
 }
 
 func jobPod(job *batchv1.Job) *corev1.Pod {

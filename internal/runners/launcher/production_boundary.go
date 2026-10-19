@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	mrand "math/rand/v2"
 	"net"
 	"net/url"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,23 +30,35 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-const boundaryControlLabel = "sparkwing.dev/boundary-control"
+const (
+	boundaryControlLabel = "sparkwing.dev/boundary-control"
+	peerSample           = 3
+)
 
 // safety: admission pins these commands, so an admission mutation cannot change what a probe runs.
+// Measurement targets come in scopes. A pod target must be refused from the
+// Pod. A node target must also be refused from the node network namespace. A
+// peer, another team's Job Pod, must also be dropped there by its own ingress
+// policy: a refused connection means the packet arrived. The kubelet reaches
+// the Kubernetes API from the node, so API targets are pod scoped.
 var (
 	listenerCommand = []string{"/bin/bash", "-ceu", "exec nc -lk 18888"}
 	witnessCommand  = []string{"/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"}
 	measureCommand  = []string{"/bin/bash", "-ceu", `command -v nc >/dev/null
 command -v nsenter >/dev/null
+command -v timeout >/dev/null
 control_host="$1"; control_port="$2"; shift 2
 required_host="$1"; required_port="$2"; shift 2
 nc -z -w 3 "$required_host" "$required_port"
 nsenter -t 1 -n -- nc -z -w 3 "$required_host" "$required_port"
 if nc -z -w 3 "$control_host" "$control_port"; then echo "Cloud default-deny egress is not enforced" >&2; exit 1; fi
 while (( $# )); do
- host="$1"; port="$2"; shift 2
+ scope="$1"; host="$2"; port="$3"; shift 3
  if nc -z -w 3 "$host" "$port"; then echo "Cloud pod egress escaped to $host:$port" >&2; exit 1; fi
- if nsenter -t 1 -n -- nc -z -w 3 "$host" "$port"; then echo "Cloud node egress escaped to $host:$port" >&2; exit 1; fi
+ case "$scope" in
+ node) if nsenter -t 1 -n -- nc -z -w 3 "$host" "$port"; then echo "Cloud node egress escaped to $host:$port" >&2; exit 1; fi ;;
+ peer) if nsenter -t 1 -n -- timeout 3 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$host" "$port" 2>/dev/null || [ $? -ne 124 ]; then echo "Cloud node reached another team's Pod $host:$port" >&2; exit 1; fi ;;
+ esac
 done`, "boundary-probe"}
 )
 
@@ -89,7 +103,9 @@ func boundaryEndpoint(raw string) (string, error) {
 	return net.JoinHostPort(u.Hostname(), port), nil
 }
 
-func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservation) (string, []string, error) {
+type probeTarget struct{ Scope, Endpoint string }
+
+func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservation) (string, []probeTarget, error) {
 	node, err := p.kube.CoreV1().Nodes().Get(ctx, r.NodeName, metav1.GetOptions{})
 	if err != nil {
 		return "", nil, err
@@ -106,24 +122,42 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 		return "", nil, err
 	}
 	workloadLabels := labels.Set(map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)})
-	deny := false
+	denyEgress, denyIngress := false, false
 	for _, policy := range policies.Items {
 		selector, err := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
 		if err != nil {
 			return "", nil, err
 		}
-		if selector.Matches(workloadLabels) && slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress) && len(policy.Spec.Egress) == 0 {
-			deny = true
+		if selector.Matches(workloadLabels) {
+			denyEgress = denyEgress || slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress) && len(policy.Spec.Egress) == 0
+			denyIngress = denyIngress || slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeIngress) && len(policy.Spec.Ingress) == 0
 		}
 	}
-	if !deny {
-		return "", nil, errors.New("Cloud namespace requires a selecting default-deny egress policy")
+	if !denyEgress || !denyIngress {
+		return "", nil, errors.New("Cloud namespace requires selecting default-deny egress and ingress policies")
 	}
 	pods, err := p.kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return "", nil, err
 	}
-	targets := []string{p.api}
+	targets := []probeTarget{{"pod", p.api}}
+	// safety: the in-cluster API address is a Service; the kubelet dials the
+	// addresses behind it, which pod egress must refuse as well.
+	api, err := p.kube.DiscoveryV1().EndpointSlices(metav1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: discoveryv1.LabelServiceName + "=kubernetes"})
+	if err != nil {
+		return "", nil, err
+	}
+	for _, slice := range api.Items {
+		for _, port := range slice.Ports {
+			for _, endpoint := range slice.Endpoints {
+				for _, address := range endpoint.Addresses {
+					if port.Port != nil {
+						targets = append(targets, probeTarget{"pod", net.JoinHostPort(address, strconv.Itoa(int(*port.Port)))})
+					}
+				}
+			}
+		}
+	}
 	var inventory []string
 	for _, pod := range pods.Items {
 		daemon := slices.ContainsFunc(pod.OwnerReferences, func(o metav1.OwnerReference) bool {
@@ -143,10 +177,10 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 					continue
 				}
 				if pod.Status.PodIP != "" {
-					targets = append(targets, net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port.ContainerPort))))
+					targets = append(targets, probeTarget{"node", net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port.ContainerPort)))})
 				}
 				if port.HostPort > 0 && pod.Status.HostIP != "" {
-					targets = append(targets, net.JoinHostPort(pod.Status.HostIP, strconv.Itoa(int(port.HostPort))))
+					targets = append(targets, probeTarget{"node", net.JoinHostPort(pod.Status.HostIP, strconv.Itoa(int(port.HostPort)))})
 				}
 			}
 		}
@@ -158,20 +192,21 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 	for _, node := range nodes.Items {
 		for _, address := range node.Status.Addresses {
 			if address.Type == corev1.NodeInternalIP && node.Status.DaemonEndpoints.KubeletEndpoint.Port > 0 {
-				targets = append(targets, net.JoinHostPort(address.Address, strconv.Itoa(int(node.Status.DaemonEndpoints.KubeletEndpoint.Port))))
+				targets = append(targets, probeTarget{"node", net.JoinHostPort(address.Address, strconv.Itoa(int(node.Status.DaemonEndpoints.KubeletEndpoint.Port)))})
 			}
 		}
 	}
-	slices.Sort(targets)
+	slices.SortFunc(targets, func(a, b probeTarget) int { return strings.Compare(a.Endpoint+" "+a.Scope, b.Endpoint+" "+b.Scope) })
 	targets = slices.Compact(targets)
-	if slices.Contains(targets, p.required) {
+	if slices.ContainsFunc(targets, func(t probeTarget) bool { return t.Endpoint == p.required }) {
 		return "", nil, fmt.Errorf("conflicting required and forbidden Cloud destination: %s", p.required)
 	}
 	slices.Sort(inventory)
 	slices.SortFunc(policies.Items, func(a, b networkingv1.NetworkPolicy) int { return strings.Compare(a.Name, b.Name) })
 	raw, err := json.Marshal(struct {
-		Policies           []networkingv1.NetworkPolicy
-		Inventory, Targets []string
+		Policies  []networkingv1.NetworkPolicy
+		Inventory []string
+		Targets   []probeTarget
 	}{policies.Items, inventory, targets})
 	if err != nil {
 		return "", nil, err
@@ -196,6 +231,10 @@ func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) 
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	revision, denied, err := p.snapshot(ctx, r)
+	if err != nil {
+		return evidence, err
+	}
+	peers, err := p.peers(ctx, r)
 	if err != nil {
 		return evidence, err
 	}
@@ -258,7 +297,7 @@ func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) 
 	if _, err = p.waitPod(ctx, admitted, false); err != nil {
 		return evidence, err
 	}
-	measure := p.measure(ctx, r, denied, net.JoinHostPort(ready.Status.PodIP, "18888"))
+	measure := p.measure(ctx, r, append(denied, peers...), net.JoinHostPort(ready.Status.PodIP, "18888"))
 	admitted, err = p.kube.CoreV1().Pods(p.cfg.Namespace).Create(ctx, measure, metav1.CreateOptions{})
 	if err != nil {
 		return evidence, err
@@ -298,7 +337,23 @@ func (p *productionBoundary) witness(ctx context.Context, r CloudNodeReservation
 	return pod
 }
 
-func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation, denied []string, control string) *corev1.Pod {
+// safety: other teams' Pods come and go, so a sample is measured but kept out of the snapshot.
+func (p *productionBoundary) peers(ctx context.Context, r CloudNodeReservation) ([]probeTarget, error) {
+	pods, err := p.kube.CoreV1().Pods(p.cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=sparkwing-job," + JobLabel})
+	if err != nil {
+		return nil, err
+	}
+	var peers []probeTarget
+	for _, i := range mrand.Perm(len(pods.Items)) {
+		pod := pods.Items[i]
+		if len(peers) < peerSample && pod.Labels[TeamLabel] != labelHash(r.Team) && pod.Status.Phase == corev1.PodRunning && net.ParseIP(pod.Status.PodIP) != nil {
+			peers = append(peers, probeTarget{"peer", net.JoinHostPort(pod.Status.PodIP, "18888")})
+		}
+	}
+	return peers, nil
+}
+
+func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation, denied []probeTarget, control string) *corev1.Pod {
 	pod := p.canary(ctx, r, "")
 	pod.Labels = map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)}
 	pod.Spec.HostPID = true
@@ -308,9 +363,13 @@ func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation
 	container.SecurityContext = &corev1.SecurityContext{RunAsUser: ptr(int64(0)), Privileged: ptr(true)}
 
 	container.Command = measureCommand
-	for _, endpoint := range append([]string{control, p.required}, denied...) {
+	for _, endpoint := range []string{control, p.required} {
 		host, port, _ := net.SplitHostPort(endpoint)
 		container.Args = append(container.Args, host, port)
+	}
+	for _, target := range denied {
+		host, port, _ := net.SplitHostPort(target.Endpoint)
+		container.Args = append(container.Args, target.Scope, host, port)
 	}
 	return pod
 }

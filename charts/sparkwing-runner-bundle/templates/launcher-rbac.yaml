@@ -56,6 +56,30 @@ roleRef:
   name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-%s-api-endpoints" .Release.Namespace .Release.Name | trunc 63 | trimSuffix "-" }}
+  namespace: default
+rules:
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-%s-api-endpoints" .Release.Namespace .Release.Name | trunc 63 | trimSuffix "-" }}
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . | quote }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-%s-api-endpoints" .Release.Namespace .Release.Name | trunc 63 | trimSuffix "-" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ .Release.Namespace }}-{{ include "sparkwing-runner-bundle.runner.fullname" . }}-boundary

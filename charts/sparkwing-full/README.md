@@ -190,9 +190,18 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   [runner-bundle](../sparkwing-runner-bundle/README.md).
 - Enforce default-deny egress from both Pod and escaped node contexts. Allow DNS,
   the API origin, S3/CloudFront, GitHub source/releases and required dependency
-  registries. Block metadata, Kubernetes API, internal networks and DaemonSet
-  ports. The example allows public HTTPS and cluster DNS at the Pod layer.
-  Supply node/firewall enforcement and adapt destinations for your network.
+  registries. Block metadata, internal networks and DaemonSet ports, and the
+  Kubernetes API from Pods. The kubelet needs the API from the node, so node
+  credentials and authorization guard it there. The example allows public HTTPS
+  and cluster DNS at the Pod layer. Supply node/firewall enforcement and adapt
+  destinations for your network.
+- The CNI must enforce NetworkPolicy ingress as well as egress. On EKS, enable
+  VPC CNI network policy (`enableNetworkPolicy: "true"` in the `vpc-cni` add-on
+  configuration). It enforces each Pod's ingress at that Pod, so it drops
+  connections from other nodes, including escaped node network namespaces, to
+  Job Pods. A Pod's egress policy does not bind code that escaped to its node.
+  The boundary probe requires a sampled connection from the node to another
+  team's Job Pod to be dropped, not refused.
 
 The Cloud example enables `volumePermissions` so the controller owns `/data`
 and can set its private mode to `0700`. `fsGroup: 65534` grants group access but

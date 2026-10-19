@@ -64,17 +64,21 @@ spec:
       == ''control'' && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash",
       "-ceu", "exec nc -lk 18888"] || variables.spec.containers[0].name == ''measure''
       && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash", "-ceu",
-      "command -v nc >/dev/null\ncommand -v nsenter >/dev/null\ncontrol_host=\"$1\";
-      control_port=\"$2\"; shift 2\nrequired_host=\"$1\"; required_port=\"$2\"; shift
-      2\nnc -z -w 3 \"$required_host\" \"$required_port\"\nnsenter -t 1 -n -- nc -z
-      -w 3 \"$required_host\" \"$required_port\"\nif nc -z -w 3 \"$control_host\"
+      "command -v nc >/dev/null\ncommand -v nsenter >/dev/null\ncommand -v timeout
+      >/dev/null\ncontrol_host=\"$1\"; control_port=\"$2\"; shift 2\nrequired_host=\"$1\";
+      required_port=\"$2\"; shift 2\nnc -z -w 3 \"$required_host\" \"$required_port\"\nnsenter
+      -t 1 -n -- nc -z -w 3 \"$required_host\" \"$required_port\"\nif nc -z -w 3 \"$control_host\"
       \"$control_port\"; then echo \"Cloud default-deny egress is not enforced\" >&2;
-      exit 1; fi\nwhile (( $# )); do\n host=\"$1\"; port=\"$2\"; shift 2\n if nc -z
-      -w 3 \"$host\" \"$port\"; then echo \"Cloud pod egress escaped to $host:$port\"
-      >&2; exit 1; fi\n if nsenter -t 1 -n -- nc -z -w 3 \"$host\" \"$port\"; then
-      echo \"Cloud node egress escaped to $host:$port\" >&2; exit 1; fi\ndone", "boundary-probe"]
-      || variables.spec.containers[0].name == ''witness'' && variables.spec.containers[0].?command.orValue([])
-      == ["/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"])'
+      exit 1; fi\nwhile (( $# )); do\n scope=\"$1\"; host=\"$2\"; port=\"$3\"; shift
+      3\n if nc -z -w 3 \"$host\" \"$port\"; then echo \"Cloud pod egress escaped
+      to $host:$port\" >&2; exit 1; fi\n case \"$scope\" in\n node) if nsenter -t
+      1 -n -- nc -z -w 3 \"$host\" \"$port\"; then echo \"Cloud node egress escaped
+      to $host:$port\" >&2; exit 1; fi ;;\n peer) if nsenter -t 1 -n -- timeout 3
+      bash -c ''exec 3<>\"/dev/tcp/$0/$1\"'' \"$host\" \"$port\" 2>/dev/null || [
+      $? -ne 124 ]; then echo \"Cloud node reached another team''s Pod $host:$port\"
+      >&2; exit 1; fi ;;\n esac\ndone", "boundary-probe"] || variables.spec.containers[0].name
+      == ''witness'' && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash",
+      "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"])'
     message: boundary probes run only the launcher's measurement commands
   - expression: '!variables.create || variables.shape != ''other'''
     message: only Cloud Job, capacity and boundary probe Pods run in the Sparkwing
