@@ -61,3 +61,8 @@ func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w PaymentWa
 	}
 	return team, nil
 }
+
+func settleCard(o *Operator, ctx context.Context, p CardPayment, now time.Time) (bool, *WarnedCardPayment, error) {
+	settled, err := o.SettleCardPayment(ctx, p, now)
+	return settled.Granted, settled.Warned, err
+}

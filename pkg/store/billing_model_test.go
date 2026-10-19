@@ -349,7 +349,7 @@ func TestBillingModelLadderReplaysAndDeclinesMoveOneRung(t *testing.T) {
 		}
 		payment := CardPayment{Team: tenant.team, ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: fmt.Sprint("ladder-payment-", i), AmountCents: rung}
 		for replay := range 2 {
-			first, _, err := s.AsOperator().SettleCardPayment(t.Context(), payment, now)
+			first, _, err := settleCard(s.AsOperator(), t.Context(), payment, now)
 			if err != nil || first != (replay == 0) {
 				t.Fatalf("settlement replay=%d first=%t: %v", replay, first, err)
 			}

@@ -45,7 +45,6 @@ type paymentObject struct {
 	Charge         paymentReference `json:"charge"`
 	LatestCharge   paymentReference `json:"latest_charge"`
 	Actionable     *bool            `json:"actionable"`
-	Refunded       bool             `json:"refunded"`
 	Reason         string           `json:"reason"`
 	Type           string           `json:"type"`
 	Metadata       paymentMetadata  `json:"metadata"`
@@ -178,7 +177,6 @@ func (a *paymentAuthenticator) chargeFingerprint(ctx context.Context, event *Pay
 		return invalidPaymentEvent()
 	}
 	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint
-	event.Refunded = event.Kind == PaymentWarningEvent && charge.Refunded
 	return nil
 }
 

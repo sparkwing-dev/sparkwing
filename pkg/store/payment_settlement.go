@@ -37,6 +37,14 @@ type PaymentSettlement struct {
 	GrantID     string
 	AmountMicro int64
 	Replayed    bool
+	// Payment is the provider payment the settlement concerns.
+	Payment string
+	// Granted reports that the payment funded a grant.
+	Granted bool
+	// Warned reports a payment by a card under an actionable early fraud warning, which the operator is alerted to.
+	Warned *WarnedCardPayment
+	// Refused names why the payment was queued for a full refund, or is empty.
+	Refused string
 }
 
 // SettlePayment settles verified provider events against committed billing facts.
@@ -106,17 +114,15 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 			return PaymentSettlement{}, errors.Join(ErrCreditGrantConflict, authorityError(apierr.Conflict, "payment identity already funded another grant"))
 		}
 	}
-	body, err := json.Marshal(event)
+	digest, err := paymentEventDigest(event)
 	if err != nil {
 		return PaymentSettlement{}, err
 	}
-	sum := sha256.Sum256(body)
-	digest := hex.EncodeToString(sum[:])
 	replayed, err := paymentEventReplayTx(ctx, tx, event, digest)
 	if err != nil {
 		return PaymentSettlement{}, err
 	}
-	checkout.result.GrantID = checkout.grant.String
+	checkout.result.GrantID, checkout.result.Payment = checkout.grant.String, event.PaymentID
 	checkout.result.Replayed = replayed || checkout.paid.Valid
 	if replayed {
 		return checkout.result, tx.Commit()
@@ -132,6 +138,17 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 		return PaymentSettlement{}, err
 	}
 	return checkout.result, nil
+}
+
+// safety: replay identity covers only what Stripe signed, so a retry whose provider reads changed since the first
+// delivery is still the same event.
+func paymentEventDigest(event capability.PaymentEvent) (string, error) {
+	body, err := json.Marshal(event.Identity())
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func configuredPaymentModeTx(ctx context.Context, tx *storeTx, eventMode capability.PaymentMode) error {
@@ -216,7 +233,11 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return err
 	}
 	checkout.result.GrantID = grant
+	checkout.result.Granted = true
 	if err := pinCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint, tx.now()); err != nil {
+		return err
+	}
+	if err := applyPaymentRefundsTx(ctx, tx, event.PaymentID); err != nil {
 		return err
 	}
 	if err := recordGrantEventTx(tx, CreditGrant{ID: grant, Team: checkout.result.Team, Kind: CreditGrantPaid, AmountMicro: checkout.result.AmountMicro, Reference: "payment:" + string(event.Mode) + ":" + checkout.result.CheckoutID, CreatedBy: "payment_provider", CreatedAt: tx.now()}, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS}); err != nil {
@@ -236,6 +257,7 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 // settlement finds the team through the checkout's payment; a warned card also holds the team.
 func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
 	team, now := checkout.result.Team, tx.now()
+	checkout.result.Refused = refusal.reason
 	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?) WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}

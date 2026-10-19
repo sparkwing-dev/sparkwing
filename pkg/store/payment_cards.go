@@ -51,7 +51,8 @@ func pinCardTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, finge
 	return err
 }
 
-// safety: a card is forgotten wherever it is saved, so collection never charges it again for this or any team.
+// safety: a card is forgotten on the team named, or on every team that saved it when none is, so collection
+// there never charges it again.
 func forgetCardTx(ctx context.Context, tx *storeTx, fingerprint string, only Team, reason string, now time.Time) error {
 	if fingerprint == "" {
 		return nil

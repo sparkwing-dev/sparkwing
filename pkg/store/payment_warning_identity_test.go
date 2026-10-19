@@ -200,7 +200,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				payments[w.Team] = CardPayment{ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "payment-" + string(w.Team), AmountCents: w.AmountCents, Fingerprint: "fp_1"}
 			}
 			if order == "payment-first" {
-				if created, _, err := s.AsOperator().SettleCardPayment(t.Context(), payments[first.team], now); err != nil || !created {
+				if created, _, err := settleCard(s.AsOperator(), t.Context(), payments[first.team], now); err != nil || !created {
 					t.Fatalf("first payment: %t, %v", created, err)
 				}
 			}
@@ -212,7 +212,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				if order == "payment-first" && team == first.team {
 					return nil
 				}
-				created, warned, err := s.AsOperator().SettleCardPayment(t.Context(), payments[team], now)
+				created, warned, err := settleCard(s.AsOperator(), t.Context(), payments[team], now)
 				if err != nil {
 					return err
 				}

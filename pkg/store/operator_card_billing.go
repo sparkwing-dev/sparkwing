@@ -116,15 +116,15 @@ WHERE a.id=? AND a.status=?`+tx.forUpdate(), attemptID, CardAttemptLive).Scan(&t
 }
 
 // SettleCardPayment settles a provider payment against its persisted card attempt.
-func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error) {
+func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (out PaymentSettlement, err error) {
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		created, warned, err = settleCardPaymentTx(ctx, tx, p, now)
+		out, err = settleCardPaymentTx(ctx, tx, p, now)
 		return err
 	})
 	if err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
-	return created, warned, err
+	return out, nil
 }
 
 // DueCardRefunds lists due refunds across the deployment.
@@ -161,7 +161,7 @@ func (o *Operator) MarkCardRefundMade(
 		if err := lockCreditLedgerTx(ctx, tx); err != nil {
 			return err
 		}
-		recorded, err := recordedRefundOutcomeTx(ctx, tx, team, paymentIntent, refundID)
+		recorded, err := refundOutcomeTx(ctx, tx, paymentIntent, refundID)
 		if err != nil {
 			return err
 		}

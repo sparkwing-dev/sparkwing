@@ -55,6 +55,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"deleteRetentionMetricsTx":            "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
 	"deleteRetentionIdentityTx":           "the elected deployment maintenance pass expires every team's spent identity rows while preserving session ancestry",
 	"paidGrantForPaymentTx":               "provider payment identity is resolved before the payer is known; the configured mode and persisted checkout select the grant",
+	"closeRefundedQueueTx":                "a provider refund names a payment identity, and a queued refund it covers is settled for whichever team queued it",
 	"paymentWarningTeamTx":                "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
 	"(*Store).settlePaymentFacts":         "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 

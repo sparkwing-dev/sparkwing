@@ -10,7 +10,7 @@ import (
 
 // safety: an actionable warning blocks its card everywhere, and on a payment this deployment settled it holds the
 // team, takes back the credit the payment granted even when that leaves the balance negative, and queues a full
-// refund unless the charge was already refunded, so the payer is repaid before a dispute can open.
+// refund unless recorded refunds already returned it, so the payer is repaid before a dispute can open.
 func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, mode capability.PaymentMode, now time.Time) (Team, error) {
 	if w.WarningID == "" || w.PaymentIntent == "" {
 		return "", fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
@@ -59,11 +59,9 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 			return "", err
 		}
 	}
-	if !w.Refunded {
-		refund := CardPayment{PaymentIntent: payment, AmountCents: grant.AmountMicro / MicroCreditsPerCent}
-		if err := queueCardRefundTx(ctx, tx, team, refund, CardRefusedWarning, now); err != nil {
-			return "", err
-		}
+	refund := CardPayment{PaymentIntent: payment, AmountCents: grant.AmountMicro / MicroCreditsPerCent}
+	if err := queueCardRefundTx(ctx, tx, team, refund, CardRefusedWarning, now); err != nil {
+		return "", err
 	}
 	return team, nil
 }

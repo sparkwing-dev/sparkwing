@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
@@ -22,8 +20,10 @@ func (s *Store) settleProviderPaymentFacts(ctx context.Context, event capability
 	if err != nil {
 		return PaymentSettlement{}, err
 	}
-	sum := sha256.Sum256(body)
-	digest := hex.EncodeToString(sum[:])
+	digest, err := paymentEventDigest(event)
+	if err != nil {
+		return PaymentSettlement{}, err
+	}
 	var result PaymentSettlement
 	err = s.inTx(ctx, func(tx *storeTx) error {
 		if err := lockCreditLedgerTx(ctx, tx); err != nil {
@@ -201,23 +201,17 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 			_, _, err = failCardAttemptTx(ctx, tx, c.attempt, e.PaymentID, e.DeclineCode, tx.now())
 			return result, err
 		}
-		_, _, err = settleCardPaymentTx(ctx, tx, CardPayment{Team: c.team, ChargeID: c.charge, AttemptID: c.attempt, PaymentIntent: e.PaymentID, AmountCents: e.AmountMinor, Fingerprint: e.Fingerprint}, tx.now())
-		if err != nil {
-			return result, err
-		}
-		g, _, err := paidGrantForPaymentTx(ctx, tx, e.PaymentID)
-		result.GrantID, result.AmountMicro = g.ID, g.AmountMicro
-		return result, err
+		return settleCardPaymentTx(ctx, tx, CardPayment{Team: c.team, ChargeID: c.charge, AttemptID: c.attempt, PaymentIntent: e.PaymentID, AmountCents: e.AmountMinor, Fingerprint: e.Fingerprint}, tx.now())
 	case capability.PaymentWarningEvent:
 		owner, err := paymentWarningTeamTx(ctx, tx, e.PaymentID, e.Mode)
 		if err != nil {
 			return result, err
 		}
-		team, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable, Refunded: e.Refunded}, e.Mode, tx.now())
+		team, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}, e.Mode, tx.now())
 		if err == nil && team != "" && team != owner {
 			return result, authorityError(apierr.Conflict, "warning changed its persisted payer")
 		}
-		result.Team = owner
+		result.Team, result.Payment = owner, e.PaymentID
 		return result, err
 	case capability.PaymentRefund:
 		return settleProviderRefundTx(ctx, tx, e)
@@ -257,68 +251,34 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 }
 
 func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
-	var result PaymentSettlement
 	team, err := paymentWarningTeamTx(ctx, tx, e.PaymentID, e.Mode)
 	if err != nil {
+		return PaymentSettlement{}, err
+	}
+	result := PaymentSettlement{Team: team, Payment: e.PaymentID}
+	if err := recordProviderRefundTx(ctx, tx, e); err != nil {
+		return result, err
+	}
+	if err := applyPaymentRefundsTx(ctx, tx, e.PaymentID); err != nil {
+		return result, err
+	}
+	if err := closeRefundedQueueTx(ctx, tx, e.PaymentID); err != nil {
 		return result, err
 	}
 	if team == "" {
-		return result, authorityError(apierr.NotFound, "refunded payment is unavailable")
+		return result, nil
 	}
-	result.Team = team
-	_, funded, err := paidGrantForPaymentTx(ctx, tx, e.PaymentID)
+	reversal, found, err := creditGrantByReferenceTx(ctx, tx, team, CreditGrantReversal, "refund:"+string(e.Mode)+":"+e.ObjectID)
 	if err != nil {
 		return result, err
 	}
-	if e.Status == "succeeded" && funded {
-		amount, err := billingProduct(e.AmountMinor, MicroCreditsPerCent)
-		if err != nil {
-			return result, err
-		}
-		reversal, err := reversePaymentTx(ctx, tx, e.PaymentID, "refund:"+string(e.Mode)+":"+e.ObjectID, "payment_provider", amount)
-		if err != nil {
-			return result, err
-		}
-		if reversal.Grant != nil {
-			result.GrantID, result.AmountMicro = reversal.Grant.ID, reversal.Grant.AmountMicro
-		}
+	if found {
+		result.GrantID, result.AmountMicro = reversal.ID, reversal.AmountMicro
 	}
-	if e.Status == "succeeded" || e.Status == "failed" || e.Status == "canceled" {
+	if e.Status == CardRefundSucceeded || e.Status == "failed" || e.Status == "canceled" {
 		_, err = applyCardRefundTx(ctx, tx, team, e.PaymentID, e.ObjectID, e.Status, `refund_id = ? AND status = 'pending'`, []any{e.ObjectID}, tx.now())
 	}
 	return result, err
-}
-
-func recordedRefundOutcomeTx(ctx context.Context, tx *storeTx, team Team, payment, refund string) (string, error) {
-	mode, err := paymentModeTx(ctx, tx)
-	if err != nil {
-		return "", err
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT event_json FROM payment_events WHERE payment_mode=? AND object_id=? AND team=? AND payment_id=? AND event_kind='refund'`, mode, refund, team, payment)
-	if err != nil {
-		return "", err
-	}
-	var outcome string
-	for rows.Next() {
-		var body []byte
-		if err := rows.Scan(&body); err != nil {
-			return "", errors.Join(err, rows.Close())
-		}
-		var event capability.PaymentEvent
-		if json.Unmarshal(body, &event) != nil || event.Mode != mode || event.Kind != capability.PaymentRefund || event.PaymentID != payment || event.ObjectID != refund || validateProviderPayment(event) != nil {
-			return "", errors.Join(authorityError(apierr.IntegrityFailure, "stored refund receipt is invalid"), rows.Close())
-		}
-		switch event.Status {
-		case CardRefundSucceeded, "failed", "canceled":
-			if outcome != CardRefundSucceeded {
-				outcome = event.Status
-			}
-		}
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return "", err
-	}
-	return outcome, nil
 }
 
 func bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {

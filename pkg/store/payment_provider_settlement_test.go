@@ -250,8 +250,9 @@ func TestProviderWarningBeforeCollectionAndCloseBeforeOpen(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := s.settlePaymentFacts(t.Context(), payment); err != nil {
-			t.Fatal(err)
+		settled, err := s.settlePaymentFacts(t.Context(), payment)
+		if err != nil || settled.Warned == nil || settled.Refused != CardRefusedWarning || settled.Granted {
+			t.Fatalf("webhook settlement = %+v, %v; want the warned payment's consequences returned", settled, err)
 		}
 		freeze, err := tenant.CreditFreeze(t.Context())
 		if err != nil || !freeze.Frozen {

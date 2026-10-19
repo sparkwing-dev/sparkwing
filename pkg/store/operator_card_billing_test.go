@@ -67,10 +67,10 @@ func TestADebtAtTheRungIsChargedOnce(t *testing.T) {
 		Team: "a", ChargeID: work[0].ChargeID, AttemptID: work[0].AttemptID,
 		PaymentIntent: "pi_card_1", AmountCents: 500,
 	}
-	if created, _, err := s.AsOperator().SettleCardPayment(ctx, pay, now); err != nil || !created {
+	if created, _, err := settleCard(s.AsOperator(), ctx, pay, now); err != nil || !created {
 		t.Fatalf("settle = %v, %v", created, err)
 	}
-	if created, _, err := s.AsOperator().SettleCardPayment(ctx, pay, now); err != nil || created {
+	if created, _, err := settleCard(s.AsOperator(), ctx, pay, now); err != nil || created {
 		t.Fatalf("a repeated settle = %v, %v; want nothing written", created, err)
 	}
 	if bal, err := acme.CreditBalanceMicro(ctx); err != nil || bal != 0 {
@@ -82,7 +82,7 @@ func TestADebtAtTheRungIsChargedOnce(t *testing.T) {
 	}
 	other := pay
 	other.Team = "globex"
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, other, now); !errors.Is(err, ErrInvalidInput) {
+	if _, _, err := settleCard(s.AsOperator(), ctx, other, now); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("a payment naming another team = %v, want ErrInvalidInput", err)
 	}
 }
@@ -168,7 +168,7 @@ func TestADeclineHoldsTheTeamUntilPaid(t *testing.T) {
 	if err != nil || rec.ChargeID != work[0].ChargeID || rec.AmountCents != 15_000 {
 		t.Fatalf("recovery = %+v, %v", rec, err)
 	}
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{
+	if _, _, err := settleCard(s.AsOperator(), ctx, CardPayment{
 		ChargeID: rec.ChargeID, AttemptID: rec.AttemptID,
 		PaymentIntent: "pi_paid", AmountCents: 15_000,
 	}, now); err != nil {
@@ -206,7 +206,7 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if err := s.AsOperator().RecordAttemptIntent(ctx, w.AttemptID, "pi_short", w.Customer, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{
+	if _, _, err := settleCard(s.AsOperator(), ctx, CardPayment{
 		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_short", AmountCents: 100,
 	}, now); err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 			if err := s.AsOperator().RecordAttemptIntent(ctx, work.AttemptID, "pi_short", work.Customer, now); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "pi_short", AmountCents: 100}, now); err != nil {
+			if _, _, err := settleCard(s.AsOperator(), ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "pi_short", AmountCents: 100}, now); err != nil {
 				t.Fatal(err)
 			}
 			event := providerPaymentEvent(now, capability.PaymentRefund)
@@ -309,7 +309,7 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		if err := s.AsOperator().RecordAttemptIntent(ctx, work.AttemptID, "payment", work.Customer, now); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 100}, now); err != nil {
+		if _, _, err := settleCard(s.AsOperator(), ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 100}, now); err != nil {
 			t.Fatal(err)
 		}
 		event := providerPaymentEvent(now, capability.PaymentRefund)
@@ -323,13 +323,11 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		}
 		switch seed % 4 {
 		case 1:
-			rewriteSchemaExec(t, s.db, "UPDATE payment_events SET team='b' WHERE event_kind='refund'")
+			rewriteSchemaExec(t, s.db, "UPDATE payment_refunds SET payment_intent=?", foreign)
 		case 2:
 			if err := s.AsOperator().SetPaymentMode(ctx, capability.PaymentLive); err != nil {
 				t.Fatal(err)
 			}
-		case 3:
-			rewriteSchemaExec(t, s.db, "UPDATE payment_events SET payment_id=? WHERE event_kind='refund'", foreign)
 		}
 		if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund", "pending", now); err != nil {
 			t.Fatal(err)
@@ -338,6 +336,12 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		var attempts int
 		if err := s.db.QueryRow("SELECT status,refund_id,attempts FROM card_refunds WHERE team='a' AND payment_intent='payment'").Scan(&status, &id, &attempts); err != nil {
 			t.Fatal(err)
+		}
+		switch {
+		case event.Status == CardRefundSucceeded:
+			return status == CardRefundSucceeded
+		case seed%4 == 3:
+			return status == CardRefundDue && id == "bound-refund" && attempts == 1
 		}
 		return status == CardRefundPending && id == "bound-refund" && attempts == 0
 	}
@@ -354,7 +358,7 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	if err := s.AsOperator().RecordAttemptIntent(ctx, work.AttemptID, "payment", work.Customer, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 1_000}, now); err != nil {
+	if _, _, err := settleCard(s.AsOperator(), ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 1_000}, now); err != nil {
 		t.Fatal(err)
 	}
 	owner := authorityMember(t, s, "operator", RoleReader)
@@ -398,7 +402,7 @@ func TestRecordedRefundBindingRollsBackWithItsOutcome(t *testing.T) {
 	if err := s.AsOperator().RecordAttemptIntent(ctx, work.AttemptID, "payment", work.Customer, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 100}, now); err != nil {
+	if _, _, err := settleCard(s.AsOperator(), ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 100}, now); err != nil {
 		t.Fatal(err)
 	}
 	event := providerPaymentEvent(now, capability.PaymentRefund)
@@ -443,12 +447,12 @@ func TestCardCollectionPaymentKeepsPersistedPayerProperty(t *testing.T) {
 		case 2:
 			invalid.AttemptID += "_foreign_" + forged
 		}
-		if created, _, err := s.AsOperator().SettleCardPayment(t.Context(), invalid, now); err == nil || created {
+		if created, _, err := settleCard(s.AsOperator(), t.Context(), invalid, now); err == nil || created {
 			t.Logf("foreign payment settled: created=%t err=%v", created, err)
 			return false
 		}
 		rewriteSchemaCount(t, s.db, "credit_grants", 0)
-		if created, _, err := s.AsOperator().SettleCardPayment(t.Context(), payment, now); err != nil || !created {
+		if created, _, err := settleCard(s.AsOperator(), t.Context(), payment, now); err != nil || !created {
 			t.Fatalf("persisted payer settlement=%t: %v", created, err)
 		}
 		if selector%2 == 0 {
@@ -458,7 +462,7 @@ func TestCardCollectionPaymentKeepsPersistedPayerProperty(t *testing.T) {
 			}
 			s.db = blobAccountingDB(t, path)
 		}
-		if created, _, err := s.AsOperator().SettleCardPayment(t.Context(), payment, now); err != nil || created {
+		if created, _, err := settleCard(s.AsOperator(), t.Context(), payment, now); err != nil || created {
 			t.Logf("replay settled twice: created=%t err=%v", created, err)
 			return false
 		}

@@ -259,10 +259,17 @@ func TestARecordedObjectStampedElsewhereIsAnIntegrityFault(t *testing.T) {
 	secret := "whsec_fixture_only"
 	v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }, provider: newPaymentProvider("sk_test_fixture")}
 	v.provider.client.Transport = noProvider{t}
-	body := []byte(strings.Replace(string(paymentBody("checkout.session.completed", "paid", false)), `"metadata":{`, `"metadata":{"sparkwing_deployment":"dep-another",`, 1))
-	proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)}, PaymentScope{Deployment: "dep-ours", Records: recordsAll(true)})
-	var conflict *PaymentOwnershipConflict
-	if proof != nil || !errors.As(err, &conflict) || conflict.Stamp != "dep-another" || conflict.EventObject != "cs_fixture" {
-		t.Fatalf("proof=%+v err=%v, want an ownership conflict", proof, err)
+	stamp := `"sparkwing_deployment":"dep-another"`
+	for name, tc := range map[string]struct{ body []byte }{
+		"paid checkout":           {[]byte(strings.Replace(string(paymentBody("checkout.session.completed", "paid", false)), `"metadata":{`, `"metadata":{`+stamp+`,`, 1))},
+		"expired recovery page":   {verifiedProviderBody(PaymentTest, "checkout.session.expired", `{"id":"cs_fixture","object":"checkout.session","mode":"payment","status":"expired","livemode":false,"metadata":{"purpose":"card_charge",`+stamp+`}}`)},
+		"setup without a purpose": {verifiedProviderBody(PaymentTest, "setup_intent.succeeded", `{"id":"cs_fixture","object":"setup_intent","status":"succeeded","livemode":false,"metadata":{`+stamp+`}}`)},
+		"failed charge of a page": {verifiedProviderBody(PaymentTest, "payment_intent.payment_failed", `{"id":"cs_fixture","object":"payment_intent","status":"requires_payment_method","livemode":false,"metadata":{`+stamp+`}}`)},
+	} {
+		proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: tc.body, Signature: paymentSignature(tc.body, secret, now)}, PaymentScope{Deployment: "dep-ours", Records: recordsAll(true)})
+		var conflict *PaymentOwnershipConflict
+		if proof != nil || !errors.As(err, &conflict) || conflict.Stamp != "dep-another" || conflict.EventObject != "cs_fixture" {
+			t.Fatalf("%s: proof=%+v err=%v, want an ownership conflict before purpose filtering", name, proof, err)
+		}
 	}
 }

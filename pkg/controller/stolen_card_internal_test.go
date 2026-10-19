@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +23,8 @@ func stolenCardWarning(id, payment string) string {
 
 // A card's first successful payment pins it to that team, a payment by it for another team is refused and queued
 // for refund, and an early fraud warning on a spent payment takes the credit back into debt, holds the team,
-// queues the refund once, forgets the card and refuses the card's next payment.
+// queues the refund once, forgets the card and refuses the card's next payment. The identical signed warning
+// replays after its refund completed.
 func TestAStolenCardIsPinnedRefusedAndRefundedOnWarning(t *testing.T) {
 	e, a := engineRuntimeStore(t)
 	s := e.Store
@@ -32,10 +36,14 @@ func TestAStolenCardIsPinnedRefusedAndRefundedOnWarning(t *testing.T) {
 	}
 	provider := paymenttest.Provider{}
 	for _, payment := range []string{"pi_a", "pi_b", "pi_again"} {
-		provider.Charge(payment, false, "authenticated", "fp_stolen", false)
+		provider.Charge(payment, false, "authenticated", "fp_stolen")
 	}
-	provider.Charge("pi_returned", false, "authenticated", "fp_returned", true)
-	_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server { return s })
+	provider.Charge("pi_returned", false, "authenticated", "fp_returned")
+	var logs bytes.Buffer
+	_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server {
+		s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		return s
+	})
 	accept := func(id, kind, object string) {
 		t.Helper()
 		if w := deliver(id, kind, object); w.Code != http.StatusNoContent {
@@ -97,6 +105,7 @@ func TestAStolenCardIsPinnedRefusedAndRefundedOnWarning(t *testing.T) {
 	if balance(a) != -paid {
 		t.Fatalf("balance after the refund = %d; want the warning's reversal not repeated", balance(a))
 	}
+	accept("evt_warning", "radar.early_fraud_warning.created", stolenCardWarning("issfr_a", "pi_a"))
 	accept("evt_refused_refund", "refund.updated", `{"id":"re_b","object":"refund","payment_intent":"pi_b","charge":"ch_b","status":"succeeded","amount":2000,"currency":"usd","livemode":false}`)
 	if balance(b) != 0 {
 		t.Fatalf("refused payment's refund moved the balance to %d", balance(b))
@@ -110,11 +119,29 @@ func TestAStolenCardIsPinnedRefusedAndRefundedOnWarning(t *testing.T) {
 	if got := refunds(); got["a/pi_again"] != store.CardRefusedWarning {
 		t.Fatalf("refunds %v; want the blocked card's payment refused and queued", got)
 	}
+	if !strings.Contains(logs.String(), `"alert":"card_payment_refused","reason":"warning"`) {
+		t.Fatalf("the webhook's refusal raised no alert: %s", logs.String())
+	}
 
 	billingModelCheckout(t, s, b, "cs_returned", 2000)
 	accept("evt_returned", "checkout.session.completed", stolenCardSession("cs_returned", "pi_returned"))
+	accept("evt_returned_refund", "refund.updated", `{"id":"re_returned","object":"refund","payment_intent":"pi_returned","charge":"ch_returned","status":"succeeded","amount":2000,"currency":"usd","livemode":false}`)
 	accept("evt_returned_warning", "radar.early_fraud_warning.created", stolenCardWarning("issfr_returned", "pi_returned"))
 	if got := refunds(); got["b/pi_returned"] != "" || balance(b) != 0 {
 		t.Fatalf("refunds %v, balance %d; want a charge already refunded reversed but not refunded again", got, balance(b))
+	}
+}
+
+// The synchronous charge reply and the signed webhook report through one path, so a warned card's debt
+// repayment raises the operator alert with its repaid and unapplied amounts.
+func TestAWarnedRepaymentAlertsWithItsAmounts(t *testing.T) {
+	var logs bytes.Buffer
+	s := New(nil, slog.New(slog.NewJSONHandler(&logs, nil)))
+	s.reportPaymentSettlement(store.PaymentSettlement{Team: "a", Payment: "pi_repay", Granted: true,
+		Warned: &store.WarnedCardPayment{WarningID: "issfr", Repays: true, RepaidMicro: 7, UnappliedMicro: 3}})
+	for _, want := range []string{`"alert":"card_payment_warned"`, `"repaid_micro":7`, `"unapplied_micro":3`, `"payment_intent":"pi_repay"`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("alert %s lacks %s", logs.String(), want)
+		}
 	}
 }

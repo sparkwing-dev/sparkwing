@@ -22,7 +22,7 @@ func TestPaymentCardIdentityCannotFundTwoTeams(t *testing.T) {
 			settle := func(kind string, team Team) (bool, error) {
 				switch kind {
 				case "card":
-					created, _, err := s.AsOperator().SettleCardPayment(t.Context(), CardPayment{Team: team, ChargeID: "charge-" + string(team), AttemptID: "attempt-" + string(team), PaymentIntent: event.PaymentID, AmountCents: 100}, now)
+					created, _, err := settleCard(s.AsOperator(), t.Context(), CardPayment{Team: team, ChargeID: "charge-" + string(team), AttemptID: "attempt-" + string(team), PaymentIntent: event.PaymentID, AmountCents: 100}, now)
 					return created, err
 				default:
 					facts := event

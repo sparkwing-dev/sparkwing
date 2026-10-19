@@ -23,18 +23,17 @@ func (p Provider) RoundTrip(r *http.Request) (*http.Response, error) {
 
 // SettledCheckout adds the payment intent and charge a paid checkout reads, with the charge's 3-D Secure result; an empty result reports none.
 func (p Provider) SettledCheckout(paymentIntent string, live bool, threeDSecure string) Provider {
-	return p.Charge(paymentIntent, live, threeDSecure, "fp_ch_"+strings.TrimPrefix(paymentIntent, "pi_"), false)
+	return p.Charge(paymentIntent, live, threeDSecure, "fp_ch_"+strings.TrimPrefix(paymentIntent, "pi_"))
 }
 
-// Charge adds a payment intent and its charge ch_<intent without pi_>, paid by the card fingerprint, and whether
-// the charge is already refunded in full.
-func (p Provider) Charge(paymentIntent string, live bool, threeDSecure, fingerprint string, refunded bool) Provider {
+// Charge adds a payment intent and its charge ch_<intent without pi_>, paid by the card fingerprint.
+func (p Provider) Charge(paymentIntent string, live bool, threeDSecure, fingerprint string) Provider {
 	charge := "ch_" + strings.TrimPrefix(paymentIntent, "pi_")
 	p["/v1/payment_intents/"+paymentIntent] = fmt.Sprintf(`{"id":%q,"object":"payment_intent","livemode":%t,"latest_charge":%q}`, paymentIntent, live, charge)
 	secure := "null"
 	if threeDSecure != "" {
 		secure = fmt.Sprintf(`{"result":%q}`, threeDSecure)
 	}
-	p["/v1/charges/"+charge] = fmt.Sprintf(`{"id":%q,"object":"charge","livemode":%t,"payment_intent":%q,"refunded":%t,"payment_method_details":{"card":{"fingerprint":%q,"three_d_secure":%s}}}`, charge, live, paymentIntent, refunded, fingerprint, secure)
+	p["/v1/charges/"+charge] = fmt.Sprintf(`{"id":%q,"object":"charge","livemode":%t,"payment_intent":%q,"payment_method_details":{"card":{"fingerprint":%q,"three_d_secure":%s}}}`, charge, live, paymentIntent, fingerprint, secure)
 	return p
 }

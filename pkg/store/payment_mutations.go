@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, createdBy string, amountMicro int64) (CreditReversal, error) {
@@ -234,38 +235,41 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	return nil
 }
 
-func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error) {
+func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now time.Time) (PaymentSettlement, error) {
+	out := PaymentSettlement{Team: p.Team, Payment: p.PaymentIntent}
 	if p.PaymentIntent == "" || p.AmountCents <= 0 || p.ChargeID == "" || p.AttemptID == "" {
-		return false, nil, fmt.Errorf("%w: a card payment names its charge, attempt, payment intent and amount", ErrInvalidInput)
+		return PaymentSettlement{}, fmt.Errorf("%w: a card payment names its charge, attempt, payment intent and amount", ErrInvalidInput)
 	}
 	amount, err := billingProduct(p.AmountCents, MicroCreditsPerCent)
 	if err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	var a cardAttemptRow
 	err = tx.QueryRowContext(ctx, `SELECT team, charge_id, kind, status, payment_intent FROM card_attempts WHERE id = ?`,
 		p.AttemptID).Scan(&a.team, &a.chargeID, &a.kind, &a.status, &a.paymentIntent)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil, fmt.Errorf("%w: card attempt %q", ErrNotFound, p.AttemptID)
+		return PaymentSettlement{}, fmt.Errorf("%w: card attempt %q", ErrNotFound, p.AttemptID)
 	}
 	if err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if a.chargeID != p.ChargeID || (p.Team != "" && Team(a.team) != p.Team) {
-		return false, nil, fmt.Errorf("%w: card attempt %q is not for charge %q of this team", ErrInvalidInput, p.AttemptID, p.ChargeID)
+		return PaymentSettlement{}, fmt.Errorf("%w: card attempt %q is not for charge %q of this team", ErrInvalidInput, p.AttemptID, p.ChargeID)
 	}
 	team := Team(a.team)
+	out.Team = team
 	if done, err := cardPaymentSeenTx(ctx, tx, team, p.PaymentIntent); err != nil || done {
-		return false, nil, err
+		out.Replayed = done
+		return out, err
 	}
 	var state string
 	var frozenAmount int64
 	if err := tx.QueryRowContext(ctx, `SELECT state, amount_micro FROM card_charges WHERE team = ? AND id = ?`+tx.forUpdate(), team, p.ChargeID).
 		Scan(&state, &frozenAmount); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	nowNS := now.UnixNano()
 	// safety: a failure is an observation on its payment intent, so that intent's later success still pays the obligation.
@@ -274,92 +278,102 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 	payable := state == CardChargeOpen && amount == frozenAmount && correlated
 	refusal, err := refuseCardTx(ctx, tx, team, p.PaymentIntent, p.Fingerprint)
 	if err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if refusal.reason == CardRefusedPinned {
-		return false, nil, refusePinnedCardTx(ctx, tx, team, p, a.status, now)
+		out.Refused = CardRefusedPinned
+		return out, refusePinnedCardTx(ctx, tx, team, p, a.status, now)
 	}
 	if refusal.warning != "" {
 		repays, repaid, err := warnedCardRepaidTx(ctx, tx, team, a.kind, p.PaymentIntent, payable, amount)
 		if err != nil {
-			return false, nil, err
+			return PaymentSettlement{}, err
 		}
-		warned = &WarnedCardPayment{WarningID: refusal.warning, Repays: repays, RepaidMicro: repaid, UnappliedMicro: amount - repaid}
+		warned := &WarnedCardPayment{WarningID: refusal.warning, Repays: repays, RepaidMicro: repaid, UnappliedMicro: amount - repaid}
 		if err := settleWarnedTx(ctx, tx, team, p, *warned, now); err != nil {
-			return false, nil, err
+			return PaymentSettlement{}, err
 		}
+		out.Warned = warned
 		if !repays {
-			return false, warned, queueCardRefundTx(ctx, tx, team, p, CardRefusedWarning, now)
+			out.Refused = CardRefusedWarning
+			return out, queueCardRefundTx(ctx, tx, team, p, CardRefusedWarning, now)
 		}
 	}
 	if err := insertCardGrantTx(ctx, tx, team, amount, p.PaymentIntent, nowNS); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if err := pinCardTx(ctx, tx, team, p.PaymentIntent, p.Fingerprint, now); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
-	if warned != nil && warned.UnappliedMicro > 0 {
-		if err := insertUnappliedTx(ctx, tx, team, p.PaymentIntent, warned.UnappliedMicro, nowNS); err != nil {
-			return false, nil, err
+	out.Granted = true
+	grant, _, err := paidGrantForPaymentTx(ctx, tx, p.PaymentIntent)
+	if err != nil {
+		return PaymentSettlement{}, err
+	}
+	out.GrantID, out.AmountMicro = grant.ID, grant.AmountMicro
+	if out.Warned != nil && out.Warned.UnappliedMicro > 0 {
+		if err := insertUnappliedTx(ctx, tx, team, p.PaymentIntent, out.Warned.UnappliedMicro, nowNS); err != nil {
+			return PaymentSettlement{}, err
 		}
+	}
+	if err := applyPaymentRefundsTx(ctx, tx, p.PaymentIntent); err != nil {
+		return PaymentSettlement{}, err
 	}
 	if !payable {
 		reason := "duplicate"
 		if amount != frozenAmount {
 			reason = "amount_mismatch"
 		}
-		if err := queueCardRefundTx(ctx, tx, team, p, reason, now); err != nil {
-			return false, nil, err
-		}
-		return true, nil, nil
+		out.Refused = reason
+		return out, queueCardRefundTx(ctx, tx, team, p, reason, now)
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, updated_at = ?
      WHERE team = ? AND id = ? AND charge_id = ? AND status IN (?,?)`, CardAttemptPaid, p.PaymentIntent, nowNS, team, p.AttemptID, p.ChargeID, CardAttemptLive, CardAttemptFailed)
 	if err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if err := requireOneRow(result, "card attempt settlement"); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, decline_code = 'superseded', updated_at = ?
      WHERE team = ? AND charge_id = ? AND status = ? AND id <> ?`, CardAttemptFailed, nowNS, team, p.ChargeID, CardAttemptLive, p.AttemptID); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_rung_index=CASE WHEN billing_rung_index<? THEN billing_rung_index+1 ELSE billing_rung_index END WHERE name=?`, len(billingPolicy)-1, team); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	result, err = tx.ExecContext(ctx, `UPDATE card_charges SET state = ?, payment_intent = ?, closed_at = ?
      WHERE team = ? AND id = ? AND state = ?`, CardChargePaid, p.PaymentIntent, nowNS, team, p.ChargeID, CardChargeOpen)
 	if err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if err := requireOneRow(result, "card charge settlement"); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE credit_freezes SET released_at = ?, no_fault = 1
 	    WHERE team = ? AND cause = ? AND released_at IS NULL`, nowNS, string(team), FreezeCauseDecline); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardCharged, SubjectID: p.PaymentIntent, Actor: "card", At: now,
 		Attrs: map[string]any{"charge_id": p.ChargeID, "attempt_id": p.AttemptID, "amount_micro": amount},
 	}); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	room, err := headroomTx(ctx, tx, team, tx.now())
 	if err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
 	if room > 0 {
 		if err := clearTeamCreditExhaustedTx(ctx, tx, team, nowNS); err != nil {
-			return false, nil, err
+			return PaymentSettlement{}, err
 		}
 	}
 	// safety: partial settlement must retain an open obligation for the unpaid debt.
 	if err := decideCardChargeTx(ctx, tx, team, now); err != nil {
-		return false, nil, err
+		return PaymentSettlement{}, err
 	}
-	return true, warned, nil
+	return out, nil
 }
 
 func failCardAttemptTx(ctx context.Context, tx *storeTx, attemptID, paymentIntent, declineCode string, now time.Time) (team Team, first bool, err error) {

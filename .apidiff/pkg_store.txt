@@ -196,10 +196,12 @@ const BusinessEventAccountAdmitted = "account.admitted"
 const BusinessEventBillingTrustChanged = "billing.trust_changed"
 const BusinessEventBudgetAlert = "billing.budget_alert"
 const BusinessEventCardAdded = "card.added"
+const BusinessEventCardBlocked = "card.blocked"
 const BusinessEventCardChargeOpen = "card.charge_opened"
 const BusinessEventCardCharged = "card.charge_paid"
 const BusinessEventCardFailed = "card.charge_failed"
 const BusinessEventCardRefundDue = "card.refund_due"
+const BusinessEventCardRefused = "card.refused"
 const BusinessEventCardWarned = "card.payment_warned"
 const BusinessEventCheckoutExpired = "checkout.expired"
 const BusinessEventCheckoutFailed = "checkout.failed"
@@ -313,6 +315,8 @@ type CardRefundWork struct {
 	Reason        string
 	Key           string
 }
+const CardRefusedPinned = "card_pinned"
+const CardRefusedWarning = "warning"
 const CauseApprovalOpen TransitionCause = "approval_open"
 const CauseApprovalResolve TransitionCause = "approval_resolve"
 const CauseApprovalTimeout TransitionCause = "approval_timeout"
@@ -864,7 +868,6 @@ var ErrNotMember = errors.New("store: not a member of this team")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
-var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tokens as a team may")
@@ -1481,6 +1484,7 @@ func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (o *Operator) CreditSettings(ctx context.Context) (_ CreditSettings, err error)
 func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error)
 func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease SingletonLease, limit int, objects StagingDeleter) error
+func (o *Operator) DeploymentID(ctx context.Context) (string, error)
 func (o *Operator) DueCardCharges(ctx context.Context, now time.Time) (_ []CardChargeWork, _ []BudgetAlert, err error)
 func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error)
 func (o *Operator) DueGitHubChecks(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
@@ -1531,7 +1535,7 @@ func (o *Operator) SetNodeAttention(ctx context.Context, updates []NodeAttention
 func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMode) error
 func (o *Operator) SetRunnerMetered(ctx context.Context, a capability.Authorized, prefix string, metered bool) error
 func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) error
-func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error)
+func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (out PaymentSettlement, err error)
 func (o *Operator) StorageSettings(ctx context.Context) (StorageSettings, error)
 func (o *Operator) Team() Team
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
@@ -1608,6 +1612,14 @@ type PaymentSettlement struct {
 	GrantID     string
 	AmountMicro int64
 	Replayed    bool
+
+	Payment string
+
+	Granted bool
+
+	Warned *WarnedCardPayment
+
+	Refused string
 }
 type PaymentWarning struct {
 	WarningID     string
@@ -2088,6 +2100,8 @@ var SchemaTables = []SchemaTable{
 	{Name: "payment_correlations", Owner: SchemaTenant},
 	{Name: "payment_events", Owner: SchemaOperator},
 	{Name: "payment_warnings", Owner: SchemaOperator},
+	{Name: "payment_cards", Owner: SchemaOperator},
+	{Name: "payment_refunds", Owner: SchemaOperator},
 	{Name: "pipeline_profiles", Owner: SchemaTenant},
 	{Name: "pipeline_success_pins", Owner: SchemaTenant},
 	{Name: "pool_access_rules", Owner: SchemaTenant},
@@ -2519,6 +2533,7 @@ func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) 
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordHereAvailability(ctx context.Context, authority capability.AuthorityRef, available match.Resources) error
 func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error
+func (s *Store) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (bool, error)
 func (s *Store) RejectLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef) error
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
 func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error)

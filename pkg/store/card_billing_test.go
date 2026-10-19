@@ -157,7 +157,7 @@ func TestAWarningBeforeItsPaymentStopsTheGrant(t *testing.T) {
 	if err != nil || team != "" {
 		t.Fatalf("warning on an unknown payment = %q, %v; want stored with no team", team, err)
 	}
-	created, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	created, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		Team: "acme", ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_warned", AmountCents: 15_000,
 	}, now)
 	if err != nil || created {
@@ -218,7 +218,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 			Team: "acme", ChargeID: rec.ChargeID, AttemptID: rec.AttemptID,
 			PaymentIntent: "pi_recovery", AmountCents: rec.AmountCents, Fingerprint: "fp_flagged",
 		}
-		created, warned, err := s.AsOperator().SettleCardPayment(ctx, pay, now)
+		created, warned, err := settleCard(s.AsOperator(), ctx, pay, now)
 		if err != nil || !created || warned == nil || warned.WarningID != "issfr_elsewhere" ||
 			warned.RepaidMicro != 15_000*store.MicroCreditsPerCent || warned.UnappliedMicro != 0 {
 			t.Fatalf("settle = %v, %+v, %v; want the debt repaid and the warning named", created, warned, err)
@@ -235,14 +235,14 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 		if freeze, err := acme.CreditFreeze(ctx); err != nil || !freeze.Frozen {
 			t.Fatalf("freeze = %+v, %v; want the team held for review", freeze, err)
 		}
-		if created, warned, err := s.AsOperator().SettleCardPayment(ctx, pay, now); err != nil || created || warned != nil {
+		if created, warned, err := settleCard(s.AsOperator(), ctx, pay, now); err != nil || created || warned != nil {
 			t.Fatalf("redelivery = %v, %+v, %v; want a silent no-op", created, warned, err)
 		}
 	})
 	t.Run("wrong amount", func(t *testing.T) {
 		s, acme, rec := recovery(t, "pi_elsewhere")
 		ctx := context.Background()
-		created, warned, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+		created, warned, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 			Team: "acme", ChargeID: rec.ChargeID,
 			AttemptID: rec.AttemptID, PaymentIntent: "pi_recovery", AmountCents: rec.AmountCents + 1, Fingerprint: "fp_flagged",
 		}, now)
@@ -256,7 +256,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 	t.Run("warned payment", func(t *testing.T) {
 		s, acme, rec := recovery(t, "pi_recovery")
 		ctx := context.Background()
-		created, warned, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+		created, warned, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 			Team: "acme", ChargeID: rec.ChargeID,
 			AttemptID: rec.AttemptID, PaymentIntent: "pi_recovery", AmountCents: rec.AmountCents, Fingerprint: "fp_flagged",
 		}, now)
@@ -285,7 +285,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 				t.Fatalf("seed a reservation refund: %v", err)
 			}
 			ctx := context.Background()
-			created, warned, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+			created, warned, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 				Team: "acme", ChargeID: rec.ChargeID, AttemptID: rec.AttemptID,
 				PaymentIntent: "pi_recovery", AmountCents: rec.AmountCents, Fingerprint: "fp_flagged",
 			}, now)
@@ -337,12 +337,12 @@ func TestSettlementChecksTheAttemptAndTheFrozenAmount(t *testing.T) {
 	trustWithCard(t, acme, now)
 	spend(t, s, "acme", "ch_1", 15_000)
 	w := dueCharge(t, s, now)
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	if _, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		ChargeID: "cardcharge-other", AttemptID: w.AttemptID, PaymentIntent: "pi_x", AmountCents: 15_000,
 	}, now); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("an attempt settling another charge = %v, want ErrInvalidInput", err)
 	}
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	if _, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_short", AmountCents: 100,
 	}, now); err != nil {
 		t.Fatal(err)
@@ -353,12 +353,12 @@ func TestSettlementChecksTheAttemptAndTheFrozenAmount(t *testing.T) {
 	if err := s.AsOperator().RecordAttemptIntent(ctx, w.AttemptID, "pi_full", w.Customer, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	if _, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_full", AmountCents: 15_000,
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	if _, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_second", AmountCents: 15_000,
 	}, now); err != nil {
 		t.Fatal(err)
@@ -413,7 +413,7 @@ func TestBillingWritersShareOneLockOrder(t *testing.T) {
 			work, _, err := s.AsOperator().DueCardCharges(ctx, now.Add(time.Duration(i)*time.Hour))
 			note(err)
 			for _, w := range work {
-				_, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+				_, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 					ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: fmt.Sprintf("pi_race_%d", i),
 					AmountCents: w.AmountCents,
 				}, now)
@@ -463,7 +463,7 @@ func TestANonActionableWarningStopsNoGrant(t *testing.T) {
 	}, now); err != nil || team != "" {
 		t.Fatalf("non-actionable warning = %q, %v; want recorded with no hold", team, err)
 	}
-	if created, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	if created, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_quiet", AmountCents: 15_000, Fingerprint: "fp_1",
 	}, now); err != nil || !created {
 		t.Fatalf("settle = %v, %v; want the payment granted", created, err)
@@ -496,7 +496,7 @@ func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	if created, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		ChargeID: rec.ChargeID, AttemptID: rec.AttemptID, PaymentIntent: "pi_other_card", AmountCents: 15_000,
 		Fingerprint: "fp_other",
 	}, now); err != nil || !created {
@@ -523,7 +523,7 @@ func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 	}
 	spend(t, s, "acme", "ch_2", 15_000)
 	next := dueCharge(t, s, now.Add(time.Hour))
-	if created, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	if created, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		ChargeID: next.ChargeID, AttemptID: next.AttemptID, PaymentIntent: "pi_saved_card", AmountCents: 15_000,
 		Fingerprint: "fp_1",
 	}, now); err != nil || created {
@@ -542,7 +542,7 @@ func TestAPinnedCardIsRefusedForAnotherTeam(t *testing.T) {
 	trustWithCard(t, acme, now)
 	spend(t, s, "acme", "ch_1", 15_000)
 	w := dueCharge(t, s, now)
-	if created, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+	if created, _, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_acme", AmountCents: 15_000, Fingerprint: "fp_1",
 	}, now); err != nil || !created {
 		t.Fatalf("first payment = %v, %v; want granted and pinned", created, err)
@@ -560,7 +560,7 @@ func TestAPinnedCardIsRefusedForAnotherTeam(t *testing.T) {
 	spend(t, s, "beta", "ch_2", 15_000)
 	next := dueCharge(t, s, now)
 	for range 2 {
-		if created, warned, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+		if created, warned, err := settleCard(s.AsOperator(), ctx, store.CardPayment{
 			ChargeID: next.ChargeID, AttemptID: next.AttemptID, PaymentIntent: "pi_beta", AmountCents: 15_000, Fingerprint: "fp_1",
 		}, now); err != nil || created || warned != nil {
 			t.Fatalf("pinned card's payment = %v, %+v, %v; want refused", created, warned, err)
@@ -576,4 +576,9 @@ func TestAPinnedCardIsRefusedForAnotherTeam(t *testing.T) {
 	if st, err := beta.SpendStanding(ctx, now); err != nil || st.Card.Fingerprint != "fp_2" {
 		t.Fatalf("card = %+v, %v; want beta's own card kept", st.Card, err)
 	}
+}
+
+func settleCard(o *store.Operator, ctx context.Context, p store.CardPayment, now time.Time) (bool, *store.WarnedCardPayment, error) {
+	settled, err := o.SettleCardPayment(ctx, p, now)
+	return settled.Granted, settled.Warned, err
 }

@@ -102,8 +102,13 @@ type PaymentEvent struct {
 	IntentID    string
 	Created     int64
 	Actionable  bool
-	// Refunded reports that a warned charge was already refunded in full when the warning was read.
-	Refunded bool
+}
+
+// Identity is the event as Stripe signed it. Fingerprint, Brand, Last4 and ThreeDS come from provider reads made
+// after verification, so a replay identifies the event without them.
+func (e PaymentEvent) Identity() PaymentEvent {
+	e.Fingerprint, e.Brand, e.Last4, e.ThreeDS = "", "", "", ""
+	return e
 }
 
 // VerifiedPaymentEvent can originate only from payment signature verification.

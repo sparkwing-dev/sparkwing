@@ -359,6 +359,7 @@ type OperatorSettingsWriter interface {
 	WriteStorageAllowance(context.Context, capability.Authorized, int64) (store.StorageQuota, error)
 }
 type PaymentSettler interface {
+	capability.PaymentRecords
 	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
 }
 const PaymentWarnedCode = "payment_warned"
@@ -519,6 +520,7 @@ func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithOIDCReader(resolve func(context.Context, store.Team) (OIDCReader, error)) *Server
 func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithOperatorSettingsWriter(writer OperatorSettingsWriter) *Server
+func (s *Server) WithPaymentDeployment(name string) *Server
 func (s *Server) WithPayments(verifier capability.PaymentAuthenticator, ledger PaymentSettler) *Server
 func (s *Server) WithPeerIdentity(fn func(*http.Request) capability.Subject) *Server
 func (s *Server) WithQueuePriorityWriter(resolve func(context.Context, store.Team) (QueuePriorityWriter, error)) *Server

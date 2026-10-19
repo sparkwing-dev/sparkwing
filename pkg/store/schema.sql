@@ -726,7 +726,7 @@ CREATE TABLE payment_events (
     settlement_json TEXT,
     PRIMARY KEY(payment_mode,event_id),
     FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode),
-    CHECK(team IS NOT NULL OR event_kind = 'warning'),
+    CHECK(team IS NOT NULL OR event_kind IN ('warning','refund')),
     CHECK((event_kind IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NOT NULL AND team IS NOT NULL)
        OR (event_kind NOT IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NULL AND object_id <> '' AND event_json IS NOT NULL AND settlement_json IS NOT NULL))
 );
@@ -941,6 +941,7 @@ CREATE TABLE card_refunds (
     team TEXT NOT NULL REFERENCES teams(name),
     payment_intent TEXT NOT NULL,
     reason TEXT NOT NULL,
+    amount_micro BIGINT NOT NULL DEFAULT 0 CHECK(amount_micro >= 0),
     refund_id TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'due' CHECK(status IN ('due','pending','succeeded','failed','canceled')),
     attempts BIGINT NOT NULL DEFAULT 0,
@@ -964,6 +965,16 @@ CREATE TABLE payment_warnings (
     fingerprint TEXT NOT NULL DEFAULT '',
     actionable BIGINT NOT NULL DEFAULT 1,
     created_at BIGINT NOT NULL
+);
+
+CREATE TABLE payment_refunds (
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    refund_id TEXT NOT NULL,
+    payment_intent TEXT NOT NULL,
+    amount_micro BIGINT NOT NULL CHECK(amount_micro > 0),
+    status TEXT NOT NULL CHECK(status IN ('pending','requires_action','succeeded','failed','canceled')),
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY (payment_mode, refund_id)
 );
 
 CREATE TABLE payment_cards (
@@ -1516,6 +1527,7 @@ CREATE INDEX idx_card_attempts_team ON card_attempts(team, status, updated_at);
 CREATE INDEX idx_card_attempts_intent ON card_attempts(team,payment_intent);
 
 CREATE INDEX idx_payment_warnings_intent ON payment_warnings(payment_intent);
+CREATE INDEX idx_payment_refunds_intent ON payment_refunds(payment_intent);
 
 CREATE INDEX idx_payment_warnings_card ON payment_warnings(fingerprint);
 

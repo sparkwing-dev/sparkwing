@@ -56,9 +56,10 @@ func moneyEvent(kind PaymentEventKind) bool {
 	return kind != PaymentCheckoutExpired && kind != PaymentCheckoutFailed && kind != PaymentCardFailed
 }
 
-// safety: ownership is decided once, before any provider read or store write. Another deployment's stamp
-// is foreign unless we recorded the object, which is an integrity fault; our stamp or a committed parent is
-// local, retried while a money event's parent is unrecorded; an unstamped child needs our stamp on its intent.
+// safety: ownership is decided once, before any provider read or store write, and before purpose filtering: another
+// deployment's stamp is foreign unless we recorded the object, which is an integrity fault whatever its outcome; our
+// stamp or a committed parent is local, retried while a money event's parent is unrecorded; an unstamped child needs
+// our stamp on its intent.
 func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEventPolicy, body []byte, scope PaymentScope) (PaymentRoute, bool, error) {
 	var head struct {
 		ID            string           `json:"id"`
@@ -71,24 +72,11 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 		return PaymentRoute{}, false, invalidPaymentEvent()
 	}
 	route := PaymentRoute{Mode: a.mode, Kind: policy.Kind, ObjectID: head.ID, PaymentID: string(head.PaymentIntent)}
-	purpose := head.Metadata.get(paymentPurposeMetadata)
-	switch {
-	case strings.HasPrefix(policy.ProviderType, "checkout.session."):
+	checkout := strings.HasPrefix(policy.ProviderType, "checkout.session.")
+	if checkout {
 		route.CheckoutID = head.ID
-		if purpose != "" || head.Mode != "payment" {
-			if policy.Kind != PaymentCheckoutPaid || purpose != paymentPurposeSetup && purpose != paymentPurposeCharge {
-				return route, false, nil
-			}
-			route.Kind = PaymentPageCompleted
-		}
-	case policy.Kind == PaymentCardSetup:
-		if purpose != paymentPurposeSetup {
-			return route, false, nil
-		}
-	case policy.Kind == PaymentCardPaid || policy.Kind == PaymentCardFailed:
-		if purpose != paymentPurposeCharge {
-			return route, false, nil
-		}
+	}
+	if policy.Kind == PaymentCardPaid || policy.Kind == PaymentCardFailed {
 		route.PaymentID = head.ID
 	}
 	if scope.Records == nil {
@@ -103,6 +91,20 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 		return route, false, &PaymentOwnershipConflict{EventObject: head.ID, Stamp: stamp}
 	case stamp != "" && stamp != scope.Deployment:
 		return route, false, nil
+	}
+	purpose := head.Metadata.get(paymentPurposeMetadata)
+	switch {
+	case checkout && (purpose != "" || head.Mode != "payment"):
+		if policy.Kind != PaymentCheckoutPaid || purpose != paymentPurposeSetup && purpose != paymentPurposeCharge {
+			return route, false, nil
+		}
+		route.Kind = PaymentPageCompleted
+	case policy.Kind == PaymentCardSetup && purpose != paymentPurposeSetup:
+		return route, false, nil
+	case (policy.Kind == PaymentCardPaid || policy.Kind == PaymentCardFailed) && purpose != paymentPurposeCharge:
+		return route, false, nil
+	}
+	switch {
 	case recorded:
 		return route, true, nil
 	case !moneyEvent(route.Kind):

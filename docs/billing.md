@@ -109,11 +109,11 @@ controller classifies each event once:
   `alert=payment_ownership_conflict`, answered with a 500 so Stripe retries, and
   never settled.
 - An object stamped with this deployment, or one that resolves to a checkout,
-  page, intent or attempt this controller recorded, is local and settles. A
-  local event whose parent is not recorded yet fails, so Stripe redelivers it;
-  a refund, dispute or fraud warning that arrives before its paid event waits
-  this way, and an unstamped one is local only when its payment intent carries
-  this deployment's stamp.
+  page, intent or attempt this controller recorded, is local and settles. An
+  unstamped refund, dispute or fraud warning whose payment is not recorded yet
+  is local only when its payment intent carries this deployment's stamp. A
+  refund or warning is then kept against its payment, and a dispute whose payer
+  is not known yet fails so Stripe redelivers it.
 - An unstamped event that resolves to nothing is acknowledged. Card setup and
   pay-now pages and Add funds payment intents settle through another object, so
   their other events are acknowledged too.
@@ -130,8 +130,17 @@ collection, grants nothing and is queued for a full refund; a refused
 collection counts as a declined charge, and the card cannot be saved on another
 team. An actionable early fraud warning on a payment this controller settled
 holds the team, takes back the credit the payment granted even when that leaves
-the balance negative, and queues a full refund unless Stripe has already
-refunded the charge. The warning also blocks the card on every team: it is
-removed wherever it is saved, cannot be saved again, and its later payments are
-refused and refunded. The controller's refund queue makes every such refund, and
-settling a refund never takes the same credit back twice.
+the balance negative, and queues a full refund unless Stripe's refunds already
+returned it. The warning also blocks the card: it is removed wherever it is
+saved and cannot be saved again. A later payment by a blocked card holds its
+team and is refunded, with one exception: a pay-now payment of a team's open
+charge by a card warned only on another payment repays the debt already used,
+even when the card is pinned to another team. That payment
+holds the team and raises the `card_payment_warned` alert with the repaid and
+unapplied amounts, and returning the unapplied rest is the operator's decision.
+
+A refund and a fraud warning are kept against their payment whatever order Stripe
+delivers them in. A refund that arrives before its payment is taken back in the
+transaction that grants the payment, and a refund already made in full is not
+queued again. A replay of a signed event is recognized by what Stripe signed,
+not by the card details read from Stripe afterwards.

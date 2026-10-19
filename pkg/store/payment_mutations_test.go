@@ -38,7 +38,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 			}
 			if kind == "queued_refund" {
 				payment.AmountCents = 1
-				if _, _, err := s.AsOperator().SettleCardPayment(t.Context(), payment, now); err != nil {
+				if _, _, err := settleCard(s.AsOperator(), t.Context(), payment, now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -60,7 +60,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 					_, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, "", now)
 					return err
 				case "collection_paid":
-					_, _, err := settleCardPaymentTx(ctx, tx, payment, now)
+					_, err := settleCardPaymentTx(ctx, tx, payment, now)
 					return err
 				case "collection_failed":
 					_, _, err := failCardAttemptTx(ctx, tx, work.AttemptID, payment.PaymentIntent, "declined", now)
@@ -257,7 +257,7 @@ func TestPaymentMutationCollectionAmountsCannotOverflowProperty(t *testing.T) {
 		minimum := int64(math.MaxInt64/MicroCreditsPerCent + 1)
 		amount := minimum + int64(seed%uint64(math.MaxInt64-minimum))
 		p := CardPayment{ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "overflow", AmountCents: amount}
-		if created, warned, err := s.AsOperator().SettleCardPayment(t.Context(), p, now); err == nil || created || warned != nil {
+		if created, warned, err := settleCard(s.AsOperator(), t.Context(), p, now); err == nil || created || warned != nil {
 			t.Logf("unrepresentable amount settled: %d, %t, %+v, %v", amount, created, warned, err)
 			return false
 		}
@@ -284,7 +284,7 @@ func TestCardSettlementRequiresMatchingTeamAndCommittedRows(t *testing.T) {
 			}
 			before := paymentMutationSnapshot(t, s)
 			p := CardPayment{Team: work.Team, ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "settled", AmountCents: work.AmountCents}
-			if _, _, err := s.AsOperator().SettleCardPayment(t.Context(), p, now); err == nil {
+			if _, _, err := settleCard(s.AsOperator(), t.Context(), p, now); err == nil {
 				t.Fatal("invalid settlement committed")
 			}
 			if after := paymentMutationSnapshot(t, s); !reflect.DeepEqual(before, after) {
@@ -307,7 +307,7 @@ func TestCardSettlementNeverTransfersForeignChargeDebtProperty(t *testing.T) {
 		if explicitTeam {
 			payment.Team = work.Team
 		}
-		_, _, err := s.AsOperator().SettleCardPayment(t.Context(), payment, now)
+		_, _, err := settleCard(s.AsOperator(), t.Context(), payment, now)
 		return errors.Is(err, sql.ErrNoRows) && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(6153))}); err != nil {

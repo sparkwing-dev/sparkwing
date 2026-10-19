@@ -179,11 +179,16 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	}
 	work := workItems[0]
 	payment := CardPayment{Team: "a", ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "recovery", AmountCents: work.AmountCents, Fingerprint: "fp_fixture"}
-	if _, _, err := op.SettleCardPayment(t.Context(), payment, *now); err != nil {
+	if _, _, err := settleCard(op, t.Context(), payment, *now); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		return queueCardRefundTx(t.Context(), tx, tenant.team, payment, "fixture", *now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return recordProviderRefundTx(t.Context(), tx, capability.PaymentEvent{Mode: capability.PaymentTest, ObjectID: "refund-fixture", PaymentID: payment.PaymentIntent, AmountMinor: 1, Status: "pending"})
 	}); err != nil {
 		t.Fatal(err)
 	}

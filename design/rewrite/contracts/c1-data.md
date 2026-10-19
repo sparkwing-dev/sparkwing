@@ -3415,19 +3415,24 @@ Account removal preserves financial replay facts. Tenant purge removes them.
 
 Prepare commits a prepaid checkout or recovery attempt with the page reservation.
 Card setup reserves a new setup identity. Delivery failure retains the reservation
-and provider key. Completion binds the prepaid session, setup intent or recovery
-payment intent and saves the URL in the same transaction. It cannot extend expiry
+and provider key. Completion binds the hosted session and its customer and saves
+the URL in the same transaction. It cannot extend expiry
 or change reserved amount, payer or attempt facts. A completed replay uses its
 saved URL after rechecking authority and payment mode. The existing 35-minute
 checkout/recovery hold bounds page expiry. An expired key conflicts rather than
 creating another payment operation.
 
-`BillingPage.IntentID` carries the provider's setup/payment intent separately
-from its hosted-session `ProviderID`. The checkout service response supplies
-`customer` and `setup_intent` for card setup, and `payment_intent` for recovery.
-These identities bind the signed provider event to the persisted payer without
-trusting webhook metadata. Credit-page responses retain `id`, `url` and optional
-`expires_at`. Completion refuses absent required correlation facts.
+`BillingPage.ProviderID` is the hosted Checkout Session and `BillingPage.Customer`
+its Stripe customer; no intent exists when the page opens. Completion records a
+card setup page as a `setup_session` correlation and a recovery page as a
+`collection_session` correlation, both keyed by the session ID. The signed
+`checkout.session.completed` event of that session then binds the setup or
+payment intent it names to the correlated team, customer and attempt, and that
+intent's own events settle against the binding without trusting webhook
+metadata. The checkout service response supplies `id`, `url`, `customer` and
+optional `expires_at` for card setup and recovery, and `id`, `url` and optional
+`expires_at` for credit pages. Completion refuses absent required correlation
+facts.
 
 Decision 112 replaces the prior purchase-cap/trust gate wording. Adding funds
 and saving a card require current team administration, valid payment amounts

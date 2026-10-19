@@ -82,34 +82,48 @@ type cardPaymentReq struct {
 	Fingerprint   string `json:"fingerprint"`
 }
 
-// safety: operator alerting keys on this value, so renaming it silences the
-// alert for a fraud-warned card's payment.
-const cardPaymentWarnedAlert = "card_payment_warned"
+// safety: operator alerting keys on these values, so renaming one silences the
+// alert for a fraud-warned or refused card payment.
+const (
+	cardPaymentWarnedAlert  = "card_payment_warned"
+	cardPaymentRefusedAlert = "card_payment_refused"
+)
+
+// safety: the synchronous charge reply and the signed webhook both report through here, so a warned repayment
+// or refused payment alerts the operator whichever path settled it.
+func (s *Server) reportPaymentSettlement(settled store.PaymentSettlement) {
+	attrs := []any{"team", string(settled.Team), "payment_intent", settled.Payment}
+	switch {
+	case settled.Replayed:
+	case settled.Warned != nil && settled.Warned.Repays:
+		s.logger.Error("billing alert: a card with a fraud warning repaid a debt; the team is held and any unapplied rest is the operator's to return",
+			append(attrs, "alert", cardPaymentWarnedAlert, "warning_id", settled.Warned.WarningID,
+				"repaid_micro", settled.Warned.RepaidMicro, "unapplied_micro", settled.Warned.UnappliedMicro)...)
+	case settled.Warned != nil:
+		s.logger.Error("billing alert: a payment by a card with a fraud warning granted nothing and is queued for refund",
+			append(attrs, "alert", cardPaymentWarnedAlert, "warning_id", settled.Warned.WarningID,
+				"unapplied_micro", settled.Warned.UnappliedMicro)...)
+	case settled.Refused != "":
+		s.logger.Warn("billing alert: a payment was refused and queued for refund",
+			append(attrs, "alert", cardPaymentRefusedAlert, "reason", settled.Refused, "granted", settled.Granted)...)
+	case settled.Granted:
+		s.logger.Info("payment granted", append(attrs, "grant", settled.GrantID, "amount_micro", settled.AmountMicro)...)
+	}
+}
 
 func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error {
 	now := time.Now()
 	switch req.Status {
 	case cardChargeSucceeded:
-		created, warned, err := s.store.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+		settled, err := s.store.AsOperator().SettleCardPayment(ctx, store.CardPayment{
 			Team: store.Team(req.Team), ChargeID: req.ChargeID, AttemptID: req.AttemptID,
 			PaymentIntent: req.PaymentIntent, AmountCents: req.AmountCents, Fingerprint: req.Fingerprint,
 		}, now)
-		switch {
-		case warned != nil && warned.Repays:
-			s.logger.Error("billing alert: a card with a fraud warning repaid a debt; the team is held and any unapplied rest is the operator's to return",
-				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
-				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,
-				"repaid_micro", warned.RepaidMicro, "unapplied_micro", warned.UnappliedMicro)
-		case warned != nil:
-			s.logger.Error("billing alert: a payment by a card with a fraud warning granted nothing and is queued for refund",
-				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
-				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,
-				"unapplied_micro", warned.UnappliedMicro)
-		case created:
-			s.logger.Info("card charge paid", "team", req.Team, "charge", req.ChargeID,
-				"payment_intent", req.PaymentIntent, "cents", req.AmountCents)
+		if err != nil {
+			return err
 		}
-		return err
+		s.reportPaymentSettlement(settled)
+		return nil
 	case cardChargeFailed:
 		if req.AttemptID == "" {
 			return fmt.Errorf("%w: a failed payment names its attempt", store.ErrInvalidInput)

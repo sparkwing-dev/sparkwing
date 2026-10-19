@@ -512,11 +512,24 @@ func insertCardGrantTx(ctx context.Context, tx *storeTx, team Team, amount int64
 	return nil
 }
 
-// safety: a payment is refunded once in full, so a later reason to refund it changes nothing.
+// safety: a payment is refunded once in full, so a later reason to refund it, or a refund Stripe already
+// completed for its whole amount, queues nothing.
 func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, p CardPayment, reason string, now time.Time) error {
-	res, err := tx.ExecContext(ctx, `INSERT INTO card_refunds (payment_intent, team, reason, created_at)
-	    VALUES (?, ?, ?, ?) ON CONFLICT (team, payment_intent) DO NOTHING`,
-		p.PaymentIntent, string(team), reason, now.UnixNano())
+	amount := max(p.AmountCents, 0) * MicroCreditsPerCent
+	if _, err := tx.ExecContext(ctx, `UPDATE card_refunds SET amount_micro = ?
+	    WHERE team = ? AND payment_intent = ? AND amount_micro = 0`, amount, string(team), p.PaymentIntent); err != nil {
+		return err
+	}
+	refunded, err := refundedMicroTx(ctx, tx, p.PaymentIntent)
+	if err != nil {
+		return err
+	}
+	if amount > 0 && refunded >= amount {
+		return closeRefundedQueueTx(ctx, tx, p.PaymentIntent)
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO card_refunds (payment_intent, team, reason, amount_micro, created_at)
+	    VALUES (?, ?, ?, ?, ?) ON CONFLICT (team, payment_intent) DO NOTHING`,
+		p.PaymentIntent, string(team), reason, amount, now.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -644,8 +657,6 @@ type PaymentWarning struct {
 	Fingerprint   string
 	// Actionable is Stripe's word that the payment can still be refunded to head off a dispute; only such a warning stops a grant or holds a team.
 	Actionable bool
-	// Refunded reports that the provider had already refunded the charge in full, so no refund is queued.
-	Refunded bool
 }
 
 const (
