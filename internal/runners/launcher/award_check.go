@@ -68,7 +68,7 @@ func (l *Launcher) checkJob(ctx context.Context, job *batchv1.Job, binding Cloud
 	cfg := l.Config
 	cfg.RunnerImage, cfg.DockerImage = templateImage(template, "run-node"), templateImage(template, "docker")
 	current := cfg.RunnerImage == l.Config.RunnerImage && cfg.DockerImage == l.Config.DockerImage
-	want := corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{TeamLabel: labelHash(binding.Team), JobLabel: job.Name}}, Spec: cloudPod(cfg, CloudJobAward{Binding: binding}, r, job.Name, template.Spec.Resources.Requests)}
+	want := corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{TeamLabel: TeamNodeValue(cfg.Namespace, binding.Team), JobLabel: job.Name}}, Spec: cloudPod(cfg, CloudJobAward{Binding: binding}, r, job.Name, template.Spec.Resources.Requests)}
 	if err := awardPod(&want, template); err != nil {
 		return &podMismatch{message: fmt.Sprintf("Cloud Job %s: %v", job.Name, err)}
 	}

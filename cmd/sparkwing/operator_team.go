@@ -43,7 +43,7 @@ func runOperatorTeamsCommand(ctx context.Context, inv clisurface.Invocation, out
 			controllerwire.OperatorTeam
 			NodeLabelKey   string `json:"node_label_key"`
 			NodeLabelValue string `json:"node_label_value"`
-		}{team, launcher.TeamNodeLabel, launcher.TeamNodeValue(team.Team)}
+		}{team, launcher.TeamNodeLabel, launcher.TeamNodeValue(inv.Value("job-namespace"), team.Team)}
 		if format == "json" {
 			return json.NewEncoder(out).Encode(result)
 		}

@@ -103,7 +103,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err = validateBoundary(cfg.Namespace, b, name, reservation, network); err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
-	labels := map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: name, TeamLabel: labelHash(b.Team)}
+	labels := map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: name, TeamLabel: TeamNodeValue(cfg.Namespace, b.Team)}
 	reservationJSON, err := json.Marshal(reservation)
 	if err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
@@ -196,8 +196,8 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 	// including sidecar logs and writable layers.
 	main.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}, Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}}
 	return corev1.PodSpec{
-		Tolerations: teamTolerations(a.Binding.Team),
-		NodeName:    r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
+		Tolerations: teamTolerations(cfg.Namespace, a.Binding.Team),
+		NodeName:    r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(cfg.Namespace, a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 		// safety: a user-namespaced Pod's IDs map to unprivileged host IDs, so
 		// nothing in it, including the Docker sidecar's root, holds node root.
 		HostUsers:       ptr(false),

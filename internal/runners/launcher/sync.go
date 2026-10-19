@@ -140,7 +140,7 @@ func nodeReservation(node *corev1.Node) (CloudNodeReservation, CloudJobBinding, 
 		return held, binding, false
 	}
 	lease := binding.LeaseRef()
-	return held, binding, held.NodeName == node.Name && held.NodeUID == string(node.UID) && held.Team != "" && held.Team == binding.Team && node.Labels[TeamNodeLabel] == TeamNodeValue(held.Team) &&
+	return held, binding, held.NodeName == node.Name && held.NodeUID == string(node.UID) && held.Team != "" && held.Team == binding.Team && node.Labels[TeamNodeLabel] == TeamNodeValue(node.Annotations[reservationNamespaceAnnotation], held.Team) &&
 		held.Award == lease && lease.Kind != "" && lease.ID != "" && lease.Holder != "" && lease.Generation > 0 && held.JobName == jobName(binding) && held.ReservationID != ""
 }
 

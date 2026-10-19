@@ -40,7 +40,7 @@ func (b *KubernetesBoundary) nodeClaim(ctx context.Context, node *corev1.Node) (
 }
 
 func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.Node, team string) error {
-	value := TeamNodeValue(team)
+	value := TeamNodeValue(b.Namespace, team)
 	if node.Labels[TeamNodeLabel] != value || (node.Labels[usedTeamLabel] != "" && node.Labels[usedTeamLabel] != value) {
 		return ErrNoDedicatedNode
 	}

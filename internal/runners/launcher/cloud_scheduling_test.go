@@ -32,7 +32,7 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 			t.Fatal(err)
 		}
 		pod := r.Job.Spec.Template
-		if pod.Annotations[doNotDisrupt] != "true" || pod.Spec.NodeName != r.Reservation.NodeName || pod.Spec.NodeSelector[TeamNodeLabel] != TeamNodeValue(team) {
+		if pod.Annotations[doNotDisrupt] != "true" || pod.Spec.NodeName != r.Reservation.NodeName || pod.Spec.NodeSelector[TeamNodeLabel] != TeamNodeValue("cloud", team) {
 			t.Fatalf("placement protection missing: %+v", pod)
 		}
 		if pod.Spec.HostUsers == nil || *pod.Spec.HostUsers || *pod.Spec.SecurityContext.RunAsUser != 0 || pod.Spec.InitContainers[0].SecurityContext.Privileged != nil || len(pod.Spec.InitContainers[0].SecurityContext.Capabilities.Add) != 3 {
@@ -41,7 +41,7 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		teamTaint := false
 		found := false
 		for _, toleration := range pod.Spec.Tolerations {
-			if toleration.Key == TeamNodeLabel && toleration.Value == TeamNodeValue(team) && toleration.Operator == corev1.TolerationOpEqual && toleration.Effect == corev1.TaintEffectNoSchedule {
+			if toleration.Key == TeamNodeLabel && toleration.Value == TeamNodeValue("cloud", team) && toleration.Operator == corev1.TolerationOpEqual && toleration.Effect == corev1.TaintEffectNoSchedule {
 				teamTaint = true
 			}
 			if toleration.Key == "sparkwing.dev/cpu-band" && toleration.Operator == corev1.TolerationOpExists && toleration.Effect == corev1.TaintEffectNoSchedule {
@@ -62,7 +62,7 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		case 1:
 			admitted.Spec.Template.Spec.Tolerations = nil
 		case 2:
-			admitted.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue(team + "foreign")
+			admitted.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("cloud", team + "foreign")
 		}
 		if err := validateAdmittedJob(r.Job, admitted); err == nil {
 			t.Fatal("admission weakened Cloud protection")

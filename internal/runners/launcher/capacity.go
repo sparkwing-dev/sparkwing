@@ -40,8 +40,8 @@ func capacityName(b CloudJobBinding) string {
 	return capacityPrefix + strings.TrimPrefix(jobName(b), "sw-")
 }
 
-func teamTolerations(team string) []corev1.Toleration {
-	return []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: TeamNodeLabel, Value: labelHash(team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}}
+func teamTolerations(namespace, team string) []corev1.Toleration {
+	return []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: TeamNodeLabel, Value: TeamNodeValue(namespace, team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}}
 }
 
 // safety: the pod pends until Karpenter adds a node from the team's own pool,
@@ -65,11 +65,11 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: capacityName(b), Namespace: cfg.Namespace,
-			Labels:      map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, capacityLabel: "true", TeamLabel: labelHash(b.Team)},
+			Labels:      map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, capacityLabel: "true", TeamLabel: TeamNodeValue(cfg.Namespace, b.Team)},
 			Annotations: map[string]string{deadlineAnnotation: deadline.Format(time.RFC3339Nano), demandAnnotation: string(demand)},
 		},
 		Spec: corev1.PodSpec{
-			Tolerations: teamTolerations(b.Team), NodeSelector: map[string]string{TeamNodeLabel: labelHash(b.Team)},
+			Tolerations: teamTolerations(cfg.Namespace, b.Team), NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(cfg.Namespace, b.Team)},
 			ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: ptr(int64(1)),
 			SecurityContext:               probePodSecurity(),

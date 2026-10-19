@@ -203,6 +203,8 @@ Show a team and its protected node label
 
 Show the team's protected node label and value for its NodePool template.
 
+The value is derived from the deployment's Cloud Job namespace and the team, so two deployments on one cluster never share a team's nodes.
+
 ### Flags
 
 | Flag | Description |
@@ -212,6 +214,7 @@ Show the team's protected node label and value for its NodePool template.
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--team SLUG` | team (required) |
+| `--job-namespace NAMESPACE` | job namespace (required) |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 
 ## `sparkwing operator tokens`

@@ -154,9 +154,12 @@ the fixed aggregate 20 GiB scratch budget including DinD.
 The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the following:
 
 - Each team's nodes have `node-restriction.kubernetes.io/sparkwing-team-node` equal to the `node_label_value` from
-  `sparkwing operator teams show --team <team> -o json`:
-  `sha256-` plus the first 40 lowercase hex characters of SHA-256 of the team slug
-  (the `--team` value, for example `qa-team`).
+  `sparkwing operator teams show --team <team> --job-namespace <launcher job namespace> -o json`:
+  `sha256-` plus the first 40 lowercase hex characters of SHA-256 of
+  `<job namespace>/<team slug>` (for example `sparkwing-cloud-jobs/qa-team`).
+  The job namespace is unique to one deployment, so two deployments on one
+  cluster with the same team slug never select or tolerate each other's nodes.
+  Name each pool after the deployment as well as the team.
   A presence-only label or a shared `small` value cannot establish team ownership.
 - Set that exact value in the team's NodePool template metadata labels and in a
   `node-restriction.kubernetes.io/sparkwing-team-node=<hash>:NoSchedule` taint. Retain the existing

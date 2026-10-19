@@ -34,7 +34,7 @@ func reservedNode(t *testing.T, name string, binding CloudJobBinding, reservatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{TeamNodeLabel: TeamNodeValue(binding.Team)}, Annotations: map[string]string{reservationNamespaceAnnotation: "cloud", reservationAnnotation: reservation, bindingAnnotation: string(raw)}}}
+	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{TeamNodeLabel: TeamNodeValue("cloud", binding.Team)}, Annotations: map[string]string{reservationNamespaceAnnotation: "cloud", reservationAnnotation: reservation, bindingAnnotation: string(raw)}}}
 }
 
 // A node can rewrite its own annotations, so its bad reservation must cost only that node.

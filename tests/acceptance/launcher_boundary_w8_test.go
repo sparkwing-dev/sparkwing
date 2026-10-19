@@ -70,7 +70,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			_, cfg, award := cloudFixture(kind)
 			control := &cloudControlW8{award: &award}
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "dedicated", UID: "node-uid", Labels: map[string]string{launcher.TeamNodeLabel: launcher.TeamNodeValue("team")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "dedicated", UID: "node-uid", Labels: map[string]string{launcher.TeamNodeLabel: launcher.TeamNodeValue("cloud", "team")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 			karpenter := cloudProvisionerW8(node, "team")
 			kube := cloudKubeW8(node)
 			// safety: retain deleting Jobs so the fake API exercises reconstruction while DinD drains.

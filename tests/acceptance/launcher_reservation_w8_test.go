@@ -74,7 +74,7 @@ func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *c
 	t.Helper()
 	server, root := storedCloudClaimantExpiryW8(t, nil)
 	_, cfg, _ := cloudFixture(launcher.CloudWork)
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "dedicated", UID: "node-uid", Labels: map[string]string{launcher.TeamNodeLabel: launcher.TeamNodeValue("default")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "dedicated", UID: "node-uid", Labels: map[string]string{launcher.TeamNodeLabel: launcher.TeamNodeValue("cloud", "default")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	karpenter := cloudProvisionerW8(node, "default")
 	kube := cloudKubeW8(node)
 	clears := 0

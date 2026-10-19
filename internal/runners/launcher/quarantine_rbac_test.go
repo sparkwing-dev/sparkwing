@@ -72,7 +72,7 @@ func TestQuarantineUnderChartRBAC(t *testing.T) {
 	if installed != 2 {
 		t.Fatalf("installed %d cluster RBAC objects, want the role and its binding", installed)
 	}
-	node, err := admin.CoreV1().Nodes().Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "tampered", Labels: map[string]string{TeamNodeLabel: TeamNodeValue("team")}}}, metav1.CreateOptions{})
+	node, err := admin.CoreV1().Nodes().Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "tampered", Labels: map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "team")}}}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

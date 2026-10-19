@@ -1,4 +1,5 @@
-# Get the team hash with sparkwing operator teams show --team <team> -o json.
+# Get the team hash with sparkwing operator teams show --team <team> --job-namespace <job namespace> -o json.
+# The hash covers the deployment's job namespace, so name the pool after the deployment and team.
 # This pool requires an existing EC2NodeClass named sparkwing-jobs.
 apiVersion: karpenter.sh/v1
 kind: NodePool

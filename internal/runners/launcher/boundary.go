@@ -52,7 +52,7 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 	if lease.Kind == "" || lease.ID == "" || lease.Holder == "" || lease.Generation <= 0 {
 		return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.New("Cloud reservation requires a complete award fence")
 	}
-	nodes, err := b.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: TeamNodeLabel + "=" + TeamNodeValue(binding.Team)})
+	nodes, err := b.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: TeamNodeLabel + "=" + TeamNodeValue(b.Namespace, binding.Team)})
 	if err != nil {
 		return CloudNodeReservation{}, CloudNetworkEvidence{}, err
 	}
@@ -116,7 +116,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	if node.Annotations == nil {
 		node.Annotations = map[string]string{}
 	}
-	node.Labels[usedTeamLabel] = TeamNodeValue(team)
+	node.Labels[usedTeamLabel] = TeamNodeValue(b.Namespace, team)
 	node.Annotations[reservationAnnotation] = string(raw)
 	node.Annotations[reservationNamespaceAnnotation] = b.Namespace
 	node.Annotations[bindingAnnotation] = string(bindingJSON)
@@ -212,7 +212,7 @@ func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) (
 		if daemon {
 			continue
 		}
-		if team != "" && pod.Namespace == b.Namespace && strings.HasPrefix(pod.Name, capacityPrefix) && len(pod.OwnerReferences) == 0 && pod.Labels[capacityLabel] == "true" && pod.Labels[TeamLabel] == labelHash(team) {
+		if team != "" && pod.Namespace == b.Namespace && strings.HasPrefix(pod.Name, capacityPrefix) && len(pod.OwnerReferences) == 0 && pod.Labels[capacityLabel] == "true" && pod.Labels[TeamLabel] == TeamNodeValue(b.Namespace, team) {
 			requests = append(requests, pod)
 			continue
 		}
@@ -263,4 +263,4 @@ func nodeReady(node corev1.Node) bool {
 }
 
 // TeamNodeValue is the collision-resistant value infrastructure must place on the team's dedicated nodes.
-func TeamNodeValue(team string) string { return labelHash(team) }
+func TeamNodeValue(namespace, team string) string { return labelHash(namespace + "/" + team) }

@@ -153,8 +153,9 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing operator", Flags: []Flag{}},
 		{Path: "sparkwing operator teams", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator teams show", Authority: DeploymentAdmin, Rules: []string{"Show the team's protected node label and value for its NodePool template."}, Flags: []Flag{
+		{Path: "sparkwing operator teams show", Authority: DeploymentAdmin, Rules: []string{"Show the team's protected node label and value for its NodePool template.", "The value is derived from the deployment's Cloud Job namespace and the team, so two deployments on one cluster never share a team's nodes."}, Flags: []Flag{
 			{Name: "team", Argument: "SLUG", Required: true},
+			{Name: "job-namespace", Argument: "NAMESPACE", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing operator teams create", Authority: DeploymentAdmin, Rules: []string{"Create a new team and its first team-admin credential atomically under operator authority. Existing or retired team slugs are refused.", "JSON includes the one-time capability and account metadata. Plain and pretty print the capability once. This operation is never retried automatically."}, Flags: []Flag{

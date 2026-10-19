@@ -103,14 +103,14 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 	if err = json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held); err != nil {
 		return "", nil, err
 	}
-	if string(node.UID) != r.NodeUID || held != r || node.Annotations[reservationNamespaceAnnotation] != p.cfg.Namespace || node.Labels[TeamNodeLabel] != TeamNodeValue(r.Team) {
+	if string(node.UID) != r.NodeUID || held != r || node.Annotations[reservationNamespaceAnnotation] != p.cfg.Namespace || node.Labels[TeamNodeLabel] != TeamNodeValue(p.cfg.Namespace, r.Team) {
 		return "", nil, errors.New("Cloud probe reservation changed")
 	}
 	policies, err := p.kube.NetworkingV1().NetworkPolicies(p.cfg.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return "", nil, err
 	}
-	workloadLabels := labels.Set(map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)})
+	workloadLabels := labels.Set(map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: TeamNodeValue(p.cfg.Namespace, r.Team)})
 	denyEgress, denyIngress := false, false
 	for _, policy := range policies.Items {
 		selector, err := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
@@ -337,7 +337,7 @@ func (p *productionBoundary) canary(ctx context.Context, r CloudNodeReservation,
 	raw, _ := json.Marshal(r)
 	deadline, _ := ctx.Deadline()
 	seconds := max(int64(time.Until(deadline).Seconds()), 1)
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "sw-boundary-" + strings.ToLower(rand.Text()), Namespace: p.cfg.Namespace, Labels: map[string]string{boundaryControlLabel: nonce, TeamLabel: labelHash(r.Team)}, Annotations: map[string]string{reservationAnnotation: string(raw), doNotDisrupt: "true"}}, Spec: corev1.PodSpec{NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(r.Team)}, Tolerations: teamTolerations(r.Team), ActiveDeadlineSeconds: &seconds, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever, SecurityContext: probePodSecurity(), Containers: []corev1.Container{{Name: "control", Image: p.cfg.RunnerImage, Command: listenerCommand, SecurityContext: probeSecurity(), ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(18888)}}, TimeoutSeconds: 1, PeriodSeconds: 10, SuccessThreshold: 1, FailureThreshold: 3}}}}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "sw-boundary-" + strings.ToLower(rand.Text()), Namespace: p.cfg.Namespace, Labels: map[string]string{boundaryControlLabel: nonce, TeamLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}, Annotations: map[string]string{reservationAnnotation: string(raw), doNotDisrupt: "true"}}, Spec: corev1.PodSpec{NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}, Tolerations: teamTolerations(p.cfg.Namespace, r.Team), ActiveDeadlineSeconds: &seconds, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever, SecurityContext: probePodSecurity(), Containers: []corev1.Container{{Name: "control", Image: p.cfg.RunnerImage, Command: listenerCommand, SecurityContext: probeSecurity(), ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(18888)}}, TimeoutSeconds: 1, PeriodSeconds: 10, SuccessThreshold: 1, FailureThreshold: 3}}}}}
 }
 
 func (p *productionBoundary) witness(ctx context.Context, r CloudNodeReservation, nonce, listener, peer string) *corev1.Pod {
@@ -353,7 +353,7 @@ func (p *productionBoundary) witness(ctx context.Context, r CloudNodeReservation
 // it. Its readiness check runs on loopback, which no policy filters.
 func (p *productionBoundary) peer(ctx context.Context, r CloudNodeReservation, nonce string) *corev1.Pod {
 	pod := p.canary(ctx, r, nonce+"-peer")
-	pod.Labels = map[string]string{boundaryControlLabel: nonce + "-peer", "app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName + "-peer", TeamLabel: labelHash(r.Team)}
+	pod.Labels = map[string]string{boundaryControlLabel: nonce + "-peer", "app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName + "-peer", TeamLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}
 	container := &pod.Spec.Containers[0]
 	container.Name = "peer"
 	container.ReadinessProbe.ProbeHandler = corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: slices.Clone(peerReadiness)}}
@@ -362,7 +362,7 @@ func (p *productionBoundary) peer(ctx context.Context, r CloudNodeReservation, n
 
 func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation, denied []string, control string) *corev1.Pod {
 	pod := p.canary(ctx, r, "")
-	pod.Labels = map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)}
+	pod.Labels = map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}
 	container := &pod.Spec.Containers[0]
 	container.Name = "measure"
 	container.ReadinessProbe = nil
