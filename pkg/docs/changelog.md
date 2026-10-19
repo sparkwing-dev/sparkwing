@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **cli (Breaking):** The local dashboard's TCP listener answers 401 to every request without a session cookie. `sparkwing dashboard open` prints a one-time sign-in link minted over the local socket; the link works once within 60 seconds and sets an HttpOnly, SameSite=Strict, host-only `sw_local_session` cookie. The local socket still needs no cookie. See [security](docs/security.md#local-daemon-socket).
+- **controller (Breaking):** Only a token's owner rotates it. A team admin rotating another member's account token or personal machine gets 403 and the token keeps working; the admin can still revoke it, and still rotates shared runners. See [migration](docs/migrations/_unreleased.md#only-a-tokens-owner-rotates-it).
+- **controller (Breaking):** Team git credentials and GitHub App tokens reach only shared runners and Cloud work, never a personal machine (403 `personal_machine`). The per-machine opt-in route, Machines page toggle, `git_credentials` token field and `git_credential_machines` table are removed. See [migration](docs/migrations/_unreleased.md#team-git-credentials-never-reach-personal-machines).
 - **schedules:** A run an App-armed schedule with a locked commit starts seals its repository display as `owner/name`, as App push runs do, instead of the clone URL.
 - **runs:** Go toolchain settings (`GOPROXY`, `GOFLAGS`, `GOPATH`, `GOPRIVATE`, `GONOPROXY`, `GONOSUMDB`, `GOSUMDB`, `GOTOOLCHAIN`, `GOINSECURE`) reach pipeline processes on the requester's own machine, with credentials in a `GOPROXY` entry or the `GOSUMDB` URL masked. Cloud and shared runners keep dropping them unless allow-listed. See [environment variables](docs/environment-variables.md#process-environment-policy).
 - **controller:** Remove the unused in-process `EngineController.CreateRun` intake, which admitted a run without verifying its repository display; the HTTP intake is the only run intake.

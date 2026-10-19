@@ -81,15 +81,25 @@ func (f *appFixture) nodeClaim(owner signedIn, runID, repoURL string, repoID int
 
 func (f *appFixture) claimRunNode(owner signedIn, runID, repoURL string, repoID int64) (bearer, claim, prefix string) {
 	f.t.Helper()
+	return f.claimRunNodeOn(owner, runID, repoURL, repoID, false)
+}
+
+func (f *appFixture) claimRunNodeOn(owner signedIn, runID, repoURL string, repoID int64, personal bool) (bearer, claim, prefix string) {
+	f.t.Helper()
 	ctx := context.Background()
 	f.createRun(owner, runID, repoURL, repoID)
+	if personal {
+		if _, err := f.store.DB().ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='account' WHERE team=? AND id=?`, owner.id, owner.team, runID); err != nil {
+			f.t.Fatal(err)
+		}
+	}
 	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
 	if err := teststore.SeedNodeReady(f.store, ctx, runID, "compile"); err != nil {
 		f.t.Fatal(err)
 	}
-	bearer, prefix = f.teamRunner(owner, "r-"+runID)
+	bearer, prefix = f.enrollRunner(owner, "r-"+runID, personal)
 	var n controllerwire.ClaimResponse
 	if code := f.call("POST", "/api/v1/runners/claim", bearer, githubClaimBody(capability.UnitNode, runID, "compile"), &n); code != http.StatusOK || n.Claim == nil || n.Claim.RunID != runID || n.Claim.Capability == "" {
 		f.t.Fatalf("claim %s = %d %+v", runID, code, n)
@@ -102,12 +112,17 @@ func (f *appFixture) claimRunNode(owner signedIn, runID, repoURL string, repoID 
 
 func (f *appFixture) teamRunner(owner signedIn, name string) (auth, prefix string) {
 	f.t.Helper()
+	return f.enrollRunner(owner, name, false)
+}
+
+func (f *appFixture) enrollRunner(owner signedIn, name string, personal bool) (auth, prefix string) {
+	f.t.Helper()
 	var m struct {
 		Capability string `json:"capability"`
 		Prefix     string `json:"prefix"`
 	}
 	if code := f.call("POST", "/api/v1/runners", owner.auth,
-		map[string]any{"name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}}, &m); code != http.StatusCreated {
+		map[string]any{"name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}, "personal": personal}, &m); code != http.StatusCreated {
 		f.t.Fatalf("mint runner = %d", code)
 	}
 	return "Bearer " + m.Capability, m.Prefix

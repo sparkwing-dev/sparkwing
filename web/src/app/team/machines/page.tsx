@@ -31,7 +31,6 @@ import {
   revokeTeamToken,
   runnerConnectCommand,
 } from "@/lib/teams";
-import { setMachineGitCredentials } from "@/lib/gitCredentials";
 import { fmtDateTime } from "@/lib/timeFormat";
 
 export default function MachinesPage() {
@@ -88,25 +87,6 @@ function Machines({ me }: { me: Me }) {
     }
   }
 
-  async function setGitCredentials(t: TeamToken, enabled: boolean) {
-    const label = t.subject.id || t.prefix;
-    setBusy(t.prefix);
-    try {
-      await setMachineGitCredentials(t.prefix, enabled);
-      toast(
-        enabled
-          ? `${label} now receives git credentials`
-          : `${label} no longer receives git credentials`,
-        "success",
-      );
-      await load();
-    } catch (err) {
-      toast(errorText(err), "error");
-    } finally {
-      setBusy(null);
-    }
-  }
-
   const owner = canManageTeam(role);
   const machines = tokens?.filter((t) => t.subject.kind === "machine") ?? null;
   const cliTokens = tokens?.filter((t) => t.subject.kind === "account") ?? null;
@@ -124,7 +104,7 @@ function Machines({ me }: { me: Me }) {
       )}
       <Panel
         title="Machine tokens"
-        hint="Personal machines accept only their owner's work. Shared runners accept team work and require an administrator to revoke. A machine gets team git credentials only when an owner turns them on for it."
+        hint="Personal machines accept only their owner's work. Shared runners accept team work and require an administrator to revoke. Team git credentials reach shared runners and Cloud work, never personal machines."
       >
         {loadError ? (
           <div className="p-4 text-sm text-red-300">{loadError}</div>
@@ -157,21 +137,6 @@ function Machines({ me }: { me: Me }) {
                 {t.last_used_at ? (
                   <span className="text-xs text-[var(--muted)]">
                     last seen {fmtDateTime(t.last_used_at)}
-                  </span>
-                ) : null}
-                {owner ? (
-                  <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
-                    <input
-                      type="checkbox"
-                      checked={t.git_credentials === true}
-                      disabled={busy !== null}
-                      onChange={(e) => setGitCredentials(t, e.target.checked)}
-                    />
-                    Receives git credentials
-                  </label>
-                ) : t.git_credentials ? (
-                  <span className="text-xs text-[var(--muted)]">
-                    receives git credentials
                   </span>
                 ) : null}
                 {mayRevoke ? (

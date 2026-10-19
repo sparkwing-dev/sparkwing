@@ -448,8 +448,6 @@ components:
             - format: date-time
               type: string
             - type: "null"
-        git_credentials:
-          type: boolean
         grants:
           anyOf:
             - items:
@@ -485,7 +483,6 @@ components:
         - grants
         - created_by
         - issued_at
-        - git_credentials
         - metered
       type: object
       x-sparkwing-go-type: capability.Metadata
@@ -15482,36 +15479,6 @@ paths:
             binding: ownToken
             liveness: credential
         retry: safe
-  /api/v1/tokens/{token}/git-credentials:
-    put:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: token
-          required: true
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: PUT /api/v1/tokens/{token}/git-credentials
-      x-sparkwing-policy:
-        method: PUT
-        path: /api/v1/tokens/{token}/git-credentials
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: account_session
-            grants: []
-            binding: machineOwner
-            liveness: credential
-        retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/tokens/{token}/rotate:
     post:
       parameters:

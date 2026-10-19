@@ -26,11 +26,10 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 	owner := authorityMember(t, s, "owner", RoleOwner)
 	s.SetProvisionPolicy(provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, _ capability.ProvisionSpec) error { return nil }))
 	registration := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:runner", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}}
-	machine, err := s.ProvisionCapability(t.Context(), registration)
+	_, err = s.ProvisionCapability(t.Context(), registration)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tenant := &Tenant{s: s, team: "a"}
 	random := rand.New(rand.NewPCG(902, 73))
 	for i := range 64 {
 		root := authorityRoot(fmt.Sprintf("account-root-%d-%x", i, random.Uint64()), "a")
@@ -54,17 +53,6 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 		issued, err := s.ProvisionCapability(t.Context(), spec)
 		if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || issued.Raw != "" {
 			t.Fatalf("capability-derived session member provisioning: issued=%v err=%v", issued.Raw != "", err)
-		}
-		enabled := random.IntN(2) == 0
-		if err := tenant.SetSourceMachineConsent(t.Context(), owner.Authority, machine.Capability.Prefix, !enabled); err != nil {
-			t.Fatal(err)
-		}
-		if err := tenant.SetSourceMachineConsent(t.Context(), derived, machine.Capability.Prefix, enabled); !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
-			t.Fatalf("capability-derived session owner consent: %v", err)
-		}
-		var count int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_machines WHERE capability_prefix=?`, machine.Capability.Prefix).Scan(&count); err != nil || (count == 1) == enabled {
-			t.Fatalf("refused consent changed persisted state: %d, %v", count, err)
 		}
 		spec.Authority = &owner.Authority
 		if issued, err := s.ProvisionCapability(t.Context(), spec); err != nil || issued.Raw == "" {

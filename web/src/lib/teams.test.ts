@@ -379,7 +379,6 @@ describe("listTeamTokens", () => {
         created_by: "acct-1",
         issued_at: "2026-10-14T12:00:00Z",
         expires_at: "2026-10-15T12:00:00Z",
-        git_credentials: false,
       },
       {
         prefix: "swk_b",
@@ -390,7 +389,6 @@ describe("listTeamTokens", () => {
         created_by: "acct-1",
         issued_at: "2026-10-14T12:00:00Z",
         last_used_at: "2026-10-14T13:00:00Z",
-        git_credentials: true,
       },
     ];
     respond = () => new Response(JSON.stringify({ tokens: rows }), { status: 200 });

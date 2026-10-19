@@ -2,7 +2,9 @@ package capability_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -61,19 +63,19 @@ func TestDataRefScope(t *testing.T) {
 	requireCode(t, capability.AuthorizeData(context.Background(), edges, a, target), apierr.Forbidden)
 }
 
-func TestSourceReleaseOptIn(t *testing.T) {
+func TestSourceReleaseReachesSharedRunnersAndCloudOnly(t *testing.T) {
 	p := workPrincipal()
 	p.Capability.Repositories = []string{"github.com/team/repo"}
 	a := capability.Authorized{Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: "team", RunID: "run"}, Access: capability.AccessRule{Grants: []capability.Grant{capability.SourceRead}, Binding: capability.BindSource, Liveness: capability.LiveSensitive}}
 	request := capability.SourceReleaseRequest{Authorization: a, Executor: capability.SourceExecutor{Team: "team", MachineID: "machine", OwnerAccountID: "owner", AuthorizedRepositories: p.Capability.Repositories}, RepositoryKey: p.Capability.Repositories[0], CredentialID: "git", Host: "github.com"}
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	requireCode(t, sourceError(request, now), apierr.Forbidden)
-	request.Executor.OwnerOptedIn = true
+	request.Executor.Shared = true
 	audit, err := capability.AuthorizeSourceRelease(request, now)
 	if err != nil || audit.Team != "team" || audit.RunID != "run" || audit.CapabilityPrefix != "work" || audit.ReleasedAt != now || audit.ID == "" {
 		t.Fatalf("audit=%+v, err=%v", audit, err)
 	}
-	request.Executor.OwnerOptedIn, request.Executor.Cloud = false, true
+	request.Executor.Shared, request.Executor.Cloud = false, true
 	if err := sourceError(request, now); err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +91,22 @@ func TestSourceReleaseOptIn(t *testing.T) {
 		{"claimless", func(r *capability.SourceReleaseRequest) { r.Authorization.Principal.Capability.UnitID = "" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) { r := request; tc.change(&r); requireCode(t, sourceError(r, now), apierr.Forbidden) })
+	}
+}
+
+func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
+	p := workPrincipal()
+	p.Capability.Repositories = []string{"github.com/team/repo"}
+	a := capability.Authorized{Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: "team", RunID: "run"}, Access: capability.AccessRule{Grants: []capability.Grant{capability.SourceRead}, Binding: capability.BindSource, Liveness: capability.LiveSensitive}}
+	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	property := func(githubApp, ssh, confirmed bool, owner string) bool {
+		request := capability.SourceReleaseRequest{Authorization: a, Executor: capability.SourceExecutor{Team: "team", MachineID: "laptop", OwnerAccountID: owner, AuthorizedRepositories: p.Capability.Repositories}, RepositoryKey: p.Capability.Repositories[0], CredentialID: "git", Host: "github.com", GitHubApp: githubApp, SSH: ssh, SSHHostConfirmed: confirmed}
+		audit, err := capability.AuthorizeSourceRelease(request, now)
+		var failure *apierr.Error
+		return audit.ID == "" && errors.As(err, &failure) && failure.Details["reason"] == apierr.ReasonPersonalMachine
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 256}); err != nil {
+		t.Fatal(err)
 	}
 }
 

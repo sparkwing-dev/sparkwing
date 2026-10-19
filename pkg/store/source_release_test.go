@@ -8,6 +8,7 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -73,12 +74,11 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, raw)
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) VALUES ('a','runner','owner',1)`)
+	setMachineOrigin(t, s, "runner", &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 	rewriteSchemaExec(t, s.db, `INSERT INTO git_credentials(id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES ('credential','a','github.com','https','encrypted-secret',1,1,1)`)
 	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "remote"}})
 	if kind == capability.UnitPlan {
 		s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "cloud"}})
-		rewriteSchemaExec(t, s.db, `DELETE FROM git_credential_machines`)
 	}
 	policy := &sourcePolicyFake{}
 	s.sourcePolicy = policy
@@ -87,6 +87,25 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 		t.Fatal(err)
 	}
 	return tenant, capability.Authorized{Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}, Access: capability.AccessRule{Liveness: capability.LiveSensitive}}, policy
+}
+
+func setMachineOrigin(t *testing.T, s *Store, prefix string, origin *CapabilityOrigin) {
+	t.Helper()
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		record, err := loadCapabilityRecordTx(t.Context(), tx, prefix)
+		if err != nil {
+			return err
+		}
+		record.Origin = origin
+		body, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(t.Context(), `UPDATE capabilities SET authority_json=? WHERE prefix=?`, body, prefix)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSourceReleaseSupportsOwnerUnitsAndGrantedCloudPlacement(t *testing.T) {
@@ -111,7 +130,7 @@ func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 		t.Fatalf("release: credential=%s audit=%+v", credential.ID, audit)
 	}
 	executor := policy.request.Executor
-	if executor.Cloud || !executor.OwnerOptedIn || executor.Team != "a" || !reflect.DeepEqual(executor.AuthorizedRepositories, []string{"gh:1"}) || policy.request.Authorization.Principal.Authority != auth.Principal.Authority {
+	if executor.Cloud || !executor.Shared || executor.Team != "a" || !reflect.DeepEqual(executor.AuthorizedRepositories, []string{"gh:1"}) || policy.request.Authorization.Principal.Authority != auth.Principal.Authority {
 		t.Fatalf("derived request: %+v", policy.request)
 	}
 	var stored capability.SourceReleaseAudit
@@ -124,7 +143,7 @@ func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 }
 
 func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
-	for _, problem := range []string{"team", "revoked", "parent_revoked", "lease", "generation", "holder", "started", "cancelled", "finished", "deadline", "consent", "wrong_owner", "unconfirmed_ssh", "credential_host", "repository", "enrollment", "policy", "audit", "commit"} {
+	for _, problem := range []string{"team", "revoked", "parent_revoked", "lease", "generation", "holder", "started", "cancelled", "finished", "deadline", "personal", "unregistered", "unconfirmed_ssh", "credential_host", "repository", "enrollment", "policy", "audit", "commit"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, auth, policy := sourceReleaseFixture(t)
 			s := tenant.s
@@ -149,10 +168,10 @@ func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET status='success',finished_at=1`)
 			case "deadline":
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=?`, s.now().UnixNano())
-			case "consent":
-				rewriteSchemaExec(t, s.db, `DELETE FROM git_credential_machines`)
-			case "wrong_owner":
-				rewriteSchemaExec(t, s.db, `UPDATE git_credential_machines SET enabled_by='admin'`)
+			case "personal":
+				setMachineOrigin(t, s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
+			case "unregistered":
+				setMachineOrigin(t, s, "runner", nil)
 			case "unconfirmed_ssh":
 				rewriteSchemaExec(t, s.db, `UPDATE git_credentials SET kind='ssh',confirmed_at=NULL`)
 			case "credential_host":
@@ -221,9 +240,9 @@ func TestSourceReleaseRechecksLeaseAfterPolicyWork(t *testing.T) {
 	rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 0)
 }
 
-func TestSourceReleaseCannotSubstituteCloudForMachineConsent(t *testing.T) {
+func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
 	tenant, auth, _ := sourceReleaseFixture(t)
-	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM git_credential_machines`)
+	setMachineOrigin(t, tenant.s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 	auth.Principal.Capability.Billing = &capability.BillingProvenance{ExecutorClass: "cloud"}
 	tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Name: "cloud", Class: match.ClassCloud, Location: "cloud", Labels: []string{"class=cloud", "location=cloud"}}})
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
@@ -233,47 +252,31 @@ func TestSourceReleaseCannotSubstituteCloudForMachineConsent(t *testing.T) {
 	rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 0)
 }
 
-func TestSourceConsentRequiresCurrentMachineOwner(t *testing.T) {
-	tenant, _, _ := sourceReleaseFixture(t)
-	owner := authorityMember(t, tenant.s, "owner", RoleEditor)
-	admin := authorityMember(t, tenant.s, "admin", RoleOwner)
-	for _, enabled := range []bool{false, true} {
-		if err := tenant.SetSourceMachineConsent(t.Context(), admin.Authority, "runner", enabled); err == nil {
-			t.Fatal("team administrator consented for another machine owner")
+func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
+	property := func(personal, registered, ssh bool) bool {
+		tenant, auth, _ := sourceReleaseFixture(t)
+		s := tenant.s
+		s.sourcePolicy = nil
+		var origin *CapabilityOrigin
+		if registered {
+			origin = &CapabilityOrigin{Personal: personal, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"}
 		}
-		if err := tenant.SetSourceMachineConsent(t.Context(), owner.Authority, "runner", enabled); err != nil {
+		setMachineOrigin(t, s, "runner", origin)
+		if ssh {
+			rewriteSchemaExec(t, s.db, `UPDATE git_credentials SET kind='ssh'`)
+		}
+		credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
+		var released int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_releases`).Scan(&released); err != nil {
 			t.Fatal(err)
 		}
-		var n int
-		if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_machines WHERE team='a' AND capability_prefix='runner'`).Scan(&n); err != nil || (n == 1) != enabled {
-			t.Fatalf("consent=%d enabled=%v err=%v", n, enabled, err)
+		if registered && !personal {
+			return err == nil && credential.ID == "credential" && audit.MachineID == "runner" && released == 1
 		}
+		var failure *apierr.Error
+		return errors.As(err, &failure) && failure.Details["reason"] == apierr.ReasonPersonalMachine && credential.Secret == "" && audit.ID == "" && released == 0
 	}
-}
-
-func TestSourceConsentCannotChangeAnotherOwnersMachine(t *testing.T) {
-	tenant, _, _ := sourceReleaseFixture(t)
-	owner := authorityMember(t, tenant.s, "owner", RoleEditor)
-	property := func(value string, mine, enabled bool) bool {
-		account := "foreign-" + value
-		if mine {
-			account = "owner"
-		}
-		rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET created_by=? WHERE prefix='runner'`, account)
-		var before, after int
-		if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_machines`).Scan(&before); err != nil {
-			t.Fatal(err)
-		}
-		err := tenant.SetSourceMachineConsent(t.Context(), owner.Authority, "runner", enabled)
-		if readErr := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_machines`).Scan(&after); readErr != nil {
-			t.Fatal(readErr)
-		}
-		if !mine {
-			return err != nil && after == before
-		}
-		return err == nil && (after == 1) == enabled
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
 	}
 }

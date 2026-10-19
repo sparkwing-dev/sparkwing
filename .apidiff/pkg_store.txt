@@ -2038,7 +2038,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "events", Owner: SchemaTenant},
 	{Name: "flow_nonces", Owner: SchemaOperator},
 	{Name: "free_slots", Owner: SchemaTenant},
-	{Name: "git_credential_machines", Owner: SchemaTenant},
 	{Name: "git_credential_releases", Owner: SchemaTenant},
 	{Name: "git_credentials", Owner: SchemaTenant},
 	{Name: "github_app_automation", Owner: SchemaTenant},
@@ -2751,7 +2750,6 @@ func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *ti
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (t *Tenant) SetOverflowLimit(ctx context.Context, authority capability.AuthorityRef, minutes *int64) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
-func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capability.AuthorityRef, machine string, enabled bool) error
 func (t *Tenant) SetStorageAllowance(ctx context.Context, bytes int64) (StorageQuota, error)
 func (t *Tenant) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error

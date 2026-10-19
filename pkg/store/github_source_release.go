@@ -95,7 +95,7 @@ func (t *Tenant) githubSourceReleaseTx(ctx context.Context, tx *storeTx, authori
 	if err != nil {
 		return out, err
 	}
-	request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run, false)
+	request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run)
 	if err != nil {
 		return out, err
 	}

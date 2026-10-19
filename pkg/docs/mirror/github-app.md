@@ -188,10 +188,9 @@ minting runs outside database transactions. A second short transaction rechecks
 the installation, subscription or schedule consent, approved IDs and claim fence.
 GitHub refusing the approved ID set returns 409 and names that set. Other mint
 failures return 503. No token is returned after failed reauthorization or audit.
-App tokens require the executor's repository match and same-team machine
-identity, or verified Cloud placement, but do not require machine-owner opt-in.
-
-Stored team credentials require executor consent as well as repository permission.
+App tokens and stored team credentials require the executor's repository match
+and either a same-team shared runner or verified Cloud placement. A personal
+machine never receives either.
 The store records each release before exposing a credential. The source owner
 passes credentials through memory or private fetch configuration, applies the
 shared Git environment policy and removes acquisition-owned files after use.

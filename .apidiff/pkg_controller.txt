@@ -592,7 +592,6 @@ type SourceCredentialResponse struct {
 }
 type SourceTransactions interface {
 	ReleaseSourceCredential(context.Context, capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error)
-	SetSourceMachineConsent(context.Context, capability.AuthorityRef, string, bool) error
 }
 const SpendLimitCode = "spend_limit"
 const StorageMaintenanceInterval = time.Hour
