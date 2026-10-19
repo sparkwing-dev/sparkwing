@@ -365,8 +365,11 @@ release resolver and need an explicit development workflow during implementation
 | [`Asset`](../../../internal/engine/release.go) | supplies immutable verified bytes to the native installer without bypassing verification. |
 
 The constants `GoSDK`, `TypeScriptSDK`, `GoModule`, `TypeScriptPackage`,
-`GitHubReleaseBase`, `VersionIndexURL`, `VersionIndexSignatureURL` and
+`ReleaseBase`, `VersionIndexURL`, `VersionIndexSignatureURL` and
 `UpgradeCommand` define the pin vocabulary and fixed publication origins.
+A build with the `qatrust` tag replaces those origins with
+`https://qa-releases.sparkwing.dev` and adds the QA public key to the trust
+set; production builds never carry the tag.
 `VersionIndexFormat` defines the signed schema version.
 `NoticeSupportEnding`, `NoticeSupportEnded`, `NoticeEnforcement` and
 `NoticeIndexFallback`, `NoticePinDisabled` and `NoticePolicyUnavailable` define

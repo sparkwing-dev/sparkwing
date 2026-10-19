@@ -1,3 +1,5 @@
+//go:build !qatrust
+
 package releaseauth
 
 import (

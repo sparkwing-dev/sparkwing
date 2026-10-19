@@ -24,6 +24,7 @@ type BuildImagesArgs struct {
 	Push     bool   `flag:"push" desc:"Build multi-arch (linux/amd64,linux/arm64) and push to the registry. Requires --registry."`
 	Tag      string `flag:"tag" desc:"Override the image tag. Default: commit-<short-sha> resolved from the current HEAD."`
 	SkipWeb  bool   `flag:"skip-web-bundle" desc:"Skip the Next.js SPA build. Use when internal/web/next-out/ is already current (faster iteration)."`
+	QATrust  bool   `flag:"qatrust" desc:"Build with the qatrust tag: trust the QA release key and read policy and engines from https://qa-releases.sparkwing.dev. Pair with --tag set to the QA pre-release version (e.g. v0.68.0-qa.1). Never for production images."`
 }
 
 type buildImageSpec struct {
@@ -50,6 +51,7 @@ func (BuildImages) Examples() []sparkwing.Example {
 		{Comment: "Local single-arch build, tagged commit-<sha>", Command: "sparkwing run build-images"},
 		{Comment: "Push multi-arch to a registry", Command: "sparkwing run build-images --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
 		{Comment: "Reuse a current SPA bundle to skip the slow npm step", Command: "sparkwing run build-images --skip-web-bundle"},
+		{Comment: "QA-flavoured images for a QA pre-release", Command: "sparkwing run build-images --qatrust --tag v0.68.0-qa.1 --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
 	}
 }
 
@@ -152,6 +154,9 @@ func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
 		"--build-arg", "SPARKWING_VERSION=" + p.tag,
 		"--build-arg", "SPARKWING_IMAGE_REFRESH=" + p.tag,
 		"--tag", imageRef,
+	}
+	if p.args.QATrust {
+		args = append(args, "--build-arg", "GO_TAGS=qatrust")
 	}
 	if p.args.Push {
 		args = append(args, "--platform", "linux/amd64,linux/arm64", "--push")

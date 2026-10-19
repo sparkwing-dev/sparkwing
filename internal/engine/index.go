@@ -21,7 +21,7 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	if err := ctx.Err(); err != nil {
 		return IndexResult{}, err
 	}
-	if r.config.BuildVersion != "" && !buildinfo.IsReleaseVersion(r.config.BuildVersion) {
+	if r.config.BuildVersion != "" && !releaseBuild(r.config.BuildVersion) {
 		r.notice.Do(func() { slog.Info("version policy checks are off for a development build") })
 		return IndexResult{Index: VerifiedIndex{development: true}}, nil
 	}
@@ -74,6 +74,11 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	r.checkedAt = now
 	r.indexErr = err
 	return indexResult(r.index, err), nil
+}
+
+// releaseBuild lets a qatrust pre-release enforce the QA policy rather than pass as a development build.
+func releaseBuild(version string) bool {
+	return buildinfo.IsReleaseVersion(version) || QATrust && releaseVersion(version)
 }
 
 func (r *Resolver) localIndex(now time.Time) IndexResult {

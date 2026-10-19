@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -12,10 +13,28 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// matrixSinceV068 is frozen for every release from v0.68.0-0 on, so published
+// manifests keep verifying when publishers change; a new matrix adds a new range.
+const matrixSinceV068Start = "v0.68.0-0"
+
+var matrixSinceV068 = []string{
+	"sparkwing-controller-darwin-amd64", "sparkwing-controller-darwin-arm64",
+	"sparkwing-controller-linux-amd64", "sparkwing-controller-linux-arm64",
+	"sparkwing-darwin-amd64", "sparkwing-darwin-arm64",
+	"sparkwing-linux-amd64", "sparkwing-linux-arm64",
+	"sparkwing-runner-darwin-amd64", "sparkwing-runner-darwin-arm64",
+	"sparkwing-runner-linux-amd64", "sparkwing-runner-linux-arm64",
+	"sparkwing-runner-windows-amd64.exe", "sparkwing-runner-windows-arm64.exe",
+	"sparkwing-windows-amd64.exe", "sparkwing-windows-arm64.exe",
+}
+
 // NamesForVersion preserves the published asset matrix independently of today's publishers.
 func NamesForVersion(version string) ([]string, error) {
 	if !semver.IsValid(version) || semver.Canonical(version) != version || semver.Build(version) != "" || module.IsPseudoVersion(version) {
 		return nil, fmt.Errorf("invalid release version %q", version)
+	}
+	if semver.Compare(version, matrixSinceV068Start) >= 0 {
+		return slices.Clone(matrixSinceV068), nil
 	}
 	var names []string
 	for _, binary := range []Binary{Sparkwing, "sparkwing-cache", SparkwingController, SparkwingRunner} {
