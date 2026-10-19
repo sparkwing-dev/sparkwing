@@ -26,7 +26,8 @@ supplied no longer reach it unchecked.
 - **Submitted environment.** A run's `run.submit_env_allow` values reach a
   shared runner only under names the runner's operator also lists, in the
   runner's own machine file `run.submit_env_allow`, `--submit-env-allow`, or the
-  chart's `runner.submitEnvAllow`. Cloud Jobs and here-hosted runs accept every
+  chart's `runner.submitEnvAllow`. Cloud Jobs, here-hosted runs and the requester's own
+  personal machines accept every
   submittable name. Go toolchain names (`GOFLAGS`, `GOPROXY`, `GOTOOLCHAIN`,
   and similar) and network base names (`PATH`, `HOME`, `HTTP_PROXY`, and
   similar) cannot be submitted at all: intake refuses a run that sends one, and
