@@ -77,7 +77,7 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) { return raw, context.Cause(ctx) }
 }
 
-// safety: a Cloud Job serves one claim and is then discarded, so its hosting accepts every submittable name.
+// safety: a Cloud Job serves one claim and is then discarded, and a requester's own machine is its operator, so both accept every submittable name.
 func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool, accept procenv.SubmitAccept) runners.Hosting {
 	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services runners.NativeServices, principal capability.Principal, err error) {
 		options := connection
@@ -133,8 +133,12 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 		if err != nil {
 			return services, principal, err
 		}
+		submitted := accept
+		if unit.OwnerMachine {
+			submitted = procenv.SubmitAcceptAll()
+		}
 		services, err = localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
-			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: accept,
+			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
 			Home: home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
 			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
 			Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {

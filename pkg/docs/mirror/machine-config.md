@@ -70,7 +70,7 @@ names and an environment digest.
 On a machine that runs other people's work, the same `run.submit_env_allow`
 is the operator's list of submitted names it accepts. A submitted value under
 any other name is dropped before a process starts; an empty list accepts none.
-Cloud Jobs and here-hosted runs accept every submittable name. Go toolchain and
+Cloud Jobs, here-hosted runs and the requester's own personal machines accept every submittable name. Go toolchain and
 network base names cannot be submitted at all.
 
 `runner.trust` selects the runs a shared runner takes work from. Unset, the
