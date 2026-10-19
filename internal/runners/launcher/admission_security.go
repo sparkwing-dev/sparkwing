@@ -2,14 +2,16 @@ package launcher
 
 import (
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 // exactly renders CEL that admits the object at path only when it equals
 // want field for field: every field of its type that want leaves unset,
-// including seLinuxOptions and any later addition the API defines, must be
-// absent. Each shape's security context is therefore pinned in full.
+// including seLinuxOptions, must be absent. The fields are those of the
+// vendored k8s.io/api, so a field a newer API server adds is unpinned until
+// that dependency moves; only the launcher creates these objects.
 func exactly(path string, want any) string {
 	v := reflect.ValueOf(want)
 	if v.IsNil() {
@@ -58,4 +60,25 @@ func securityShapes() string {
 	capacity := exactly("variables.spec.securityContext", probePodSecurity()) + " && variables.containers.all(c, " + exactly("c.securityContext", capacitySecurity()) + ")"
 	probe := exactly("variables.spec.securityContext", probePodSecurity()) + " && variables.containers.all(c, " + exactly("c.securityContext", probeSecurity()) + ")"
 	return "variables.shape == 'job' ? " + job + " : variables.shape == 'capacity' ? " + capacity + " : " + probe
+}
+
+// hostCommand pins a workload container's command and argument grammar. The
+// award's controller, run, generation and job values vary; every flag name and
+// path is fixed.
+func hostCommand(c, verb string) string {
+	award := CloudJobAward{Binding: CloudJobBinding{RunID: "\x00run", NodeID: "\x00job", Generation: 1}}
+	sample := hostContainer(CloudJobConfig{ControllerURL: "\x00controller"}, award, verb)
+	args := sample.Args
+	rules := []string{c + ".?command.orValue([]) == " + celList(sample.Command), "!has(" + c + ".restartPolicy)"}
+	sizes := []string{"size(" + c + ".?args.orValue([])) == " + strconv.Itoa(len(args)-2)}
+	jobIndex := slices.Index(args, "--job")
+	sizes = append(sizes, "size("+c+".?args.orValue([])) == "+strconv.Itoa(len(args))+" && "+c+".args["+strconv.Itoa(jobIndex)+"] == '--job'")
+	rules = append(rules, "("+strings.Join(sizes, " || ")+")")
+	for i, arg := range args[:jobIndex] {
+		if strings.HasPrefix(arg, "\x00") || arg == "1" && args[i-1] == "--generation" {
+			continue
+		}
+		rules = append(rules, c+".args["+strconv.Itoa(i)+"] == "+strconv.Quote(arg))
+	}
+	return strings.Join(rules, " && ")
 }

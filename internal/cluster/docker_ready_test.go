@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"os"
@@ -29,22 +28,18 @@ func TestWaitForDockerNeedsAUsableSocket(t *testing.T) {
 		}
 		_ = server.Serve(listener)
 	}()
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	if err := waitForDocker(ctx, "unix://"+socket); err != nil {
+	if err := waitForDocker(t.Context(), "unix://"+socket, 10*time.Second); err != nil {
 		t.Fatalf("a late but usable daemon was refused: %v", err)
 	}
 	if os.Geteuid() != 0 {
 		if err := os.Chmod(socket, 0); err != nil {
 			t.Fatal(err)
 		}
-		short, stop := context.WithTimeout(t.Context(), 700*time.Millisecond)
-		defer stop()
-		if err := waitForDocker(short, "unix://"+socket); err == nil {
+		if err := waitForDocker(t.Context(), "unix://"+socket, 700*time.Millisecond); err == nil {
 			t.Fatal("a socket this identity cannot open counted as ready")
 		}
 	}
-	if err := waitForDocker(t.Context(), "tcp://0.0.0.0:2375"); err == nil {
+	if err := waitForDocker(t.Context(), "tcp://0.0.0.0:2375", time.Second); err == nil {
 		t.Fatal("a TCP DOCKER_HOST was accepted")
 	}
 }

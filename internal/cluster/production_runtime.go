@@ -60,7 +60,7 @@ func ProductionRuntime(version string) Runtime {
 				}}, nil
 			},
 			Host: func(ctx context.Context, options BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
-				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST")); err != nil {
+				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup); err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
 				home, err := wingd.HomeDir("")

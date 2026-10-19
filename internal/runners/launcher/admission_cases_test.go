@@ -199,6 +199,19 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 			p.Spec.Containers[0].ReadinessProbe.TCPSocket.Host = "10.0.0.1"
 			return p
 		}(), reason: "default runtime class"},
+		{name: "dns_config", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.DNSConfig = &corev1.PodDNSConfig{Options: []corev1.PodDNSConfigOption{{Name: "ndots", Value: ptr("1")}}}
+		}), reason: "cluster DNS"},
+		{name: "host_aliases", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.HostAliases = []corev1.HostAlias{{IP: "10.0.0.1", Hostnames: []string{"api.sparkwing.dev"}}}
+		}), reason: "cluster DNS"},
+		{name: "other_scheduler", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SchedulerName = "custom" }), reason: "cluster DNS"},
+		{name: "service_links", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.EnableServiceLinks = ptr(true) }), reason: "cluster DNS"},
+		{name: "run_node_command", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Containers[0].Command = []string{"/bin/sh"} }), reason: "sparkwing-runner commands"},
+		{name: "run_node_flag", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Containers[0].Args[11] = "--bootstrap-dir" }), reason: "sparkwing-runner commands"},
+		{name: "fetch_source_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.InitContainers[1].RestartPolicy = ptr(corev1.ContainerRestartPolicyAlways)
+		}), reason: "sparkwing-runner commands"},
 		{name: "host_path", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "tun", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun"}}})
 		}), reason: "scratch emptyDir"},

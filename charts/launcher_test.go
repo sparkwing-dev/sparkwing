@@ -69,7 +69,7 @@ func TestCustomerJobServiceAccountInJobNamespace(t *testing.T) {
 
 func TestCloudLauncherProvisioningPermissions(t *testing.T) {
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher")...))
-	wants := map[string][]string{"nodeclaims": {"get", "delete"}, "nodepools": {"get"}}
+	wants := map[string][]string{"nodeclaims": {"get", "delete"}, "nodepools": {"get"}, "nodes": {"get", "list", "update", "patch"}}
 	for _, r := range resources {
 		for _, rule := range r.Rules {
 			for _, resource := range rule.Resources {

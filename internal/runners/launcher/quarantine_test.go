@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -196,5 +197,38 @@ func TestQuarantineWriteFailures(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// A controller fault can refuse every orphaned award at once; past the
+// per-pass budget sync stops claims instead of tainting the whole fleet.
+func TestQuarantineBudgetStopsClaims(t *testing.T) {
+	l, kube, _, _ := fixture()
+	for i := range maxQuarantinesPerSync + 1 {
+		binding := boundaryBinding("team")
+		binding.UnitID = "unit-" + string(rune('a'+i))
+		if _, err := kube.CoreV1().Nodes().Create(t.Context(), reservedNode(t, "node-"+string(rune('a'+i)), binding, "garbage"), metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := l.Sync(t.Context())
+	if blocking(err) == nil || !strings.Contains(err.Error(), "claims stop") {
+		t.Fatalf("a fleet-wide fault did not stop claims: %v", err)
+	}
+	nodes, err := kube.CoreV1().Nodes().List(t.Context(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tainted := 0
+	for _, node := range nodes.Items {
+		if quarantined(node) {
+			tainted++
+		}
+	}
+	if tainted != maxQuarantinesPerSync {
+		t.Fatalf("quarantined %d nodes in one pass, want %d", tainted, maxQuarantinesPerSync)
+	}
+	if err := l.Sync(t.Context()); blocking(err) == nil {
+		t.Fatal("the unquarantined node was released on the next pass")
 	}
 }

@@ -10,10 +10,16 @@ import (
 	"time"
 )
 
+// dockerStartup bounds how long run-node waits for the sidecar, so a
+// crash-looping dockerd fails the Job instead of spending its deadline.
+const dockerStartup = 3 * time.Minute
+
 // waitForDocker is the Docker sidecar's readiness check, run by the workload
 // itself: it returns once DOCKER_HOST answers /_ping for this process's own
 // identity, so a socket the workload cannot open never counts as ready.
-func waitForDocker(ctx context.Context, dockerHost string) error {
+func waitForDocker(ctx context.Context, dockerHost string, within time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, within)
+	defer cancel()
 	socket, ok := strings.CutPrefix(dockerHost, "unix://")
 	if !ok || socket == "" {
 		return fmt.Errorf("Cloud Jobs need a unix DOCKER_HOST, got %q", dockerHost)
@@ -33,7 +39,7 @@ func waitForDocker(ctx context.Context, dockerHost string) error {
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("Docker at %s never became usable: %w", socket, last)
+			return fmt.Errorf("Docker at %s was not usable within %s: %w", socket, within, last)
 		case <-ticker.C:
 		}
 	}

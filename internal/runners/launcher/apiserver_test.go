@@ -23,6 +23,13 @@ import (
 
 func apiServer(t *testing.T) *rest.Config {
 	t.Helper()
+	return apiServerAuthorizing(t, "AlwaysAllow")
+}
+
+// apiServerAuthorizing starts the API server with the given authorization mode,
+// so RBAC-limited clients can be checked against real authorization.
+func apiServerAuthorizing(t *testing.T, authorization string) *rest.Config {
+	t.Helper()
 	assets := os.Getenv("KUBEBUILDER_ASSETS")
 	if assets == "" {
 		t.Skip("KUBEBUILDER_ASSETS unset; run setup-envtest use 1.37.0 -p path to exercise admission against a real API server")
@@ -46,7 +53,7 @@ func apiServer(t *testing.T) *rest.Config {
 	}
 	apiExit := start(t, filepath.Join(assets, "kube-apiserver"), "--etcd-servers="+etcdURL, "--cert-dir="+filepath.Join(dir, "certs"), "--bind-address=127.0.0.1", "--secure-port="+secure,
 		"--service-account-issuer=https://kubernetes.default.svc", "--service-account-key-file="+keyFile, "--service-account-signing-key-file="+keyFile,
-		"--token-auth-file="+tokens, "--authorization-mode=AlwaysAllow", "--allow-privileged=true", "--service-cluster-ip-range=10.0.0.0/24")
+		"--token-auth-file="+tokens, "--authorization-mode="+authorization, "--allow-privileged=true", "--service-cluster-ip-range=10.0.0.0/24")
 	cfg := &rest.Config{Host: "https://127.0.0.1:" + secure, BearerToken: token, TLSClientConfig: rest.TLSClientConfig{Insecure: true}, QPS: -1}
 	kube, err := kubernetes.NewForConfig(cfg)
 	if err != nil {

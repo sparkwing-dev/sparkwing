@@ -77,7 +77,20 @@ and the probe commands are CEL literals.
   `super_t` or any type), `windowsOptions`, sysctls, `fsGroup` or a field a
   later API adds, is refused. Capacity requests and probes run as UID 65534
   with every capability dropped. `runtimeClassName`, `shareProcessNamespace`,
-  resource claims and probe `host` fields must stay unset.
+  resource claims and probe `host` fields must stay unset, as must
+  `dnsConfig` and `hostAliases`; the scheduler is the default one, service
+  links are off and no `system-` priority class may be named. The fields come
+  from the vendored k8s.io/api, so a field a newer API server adds stays
+  unpinned until that dependency moves.
+- `fetch-source` and `run-node` run `sparkwing-runner` with the launcher's
+  flags and fixed paths in fixed positions; only the controller, run,
+  generation and job values vary, and `fetch-source` cannot become a sidecar.
+- The sidecar's profile allows `unshare`, `clone` and `setns` without an
+  argument filter, so a nested container can create its own user namespace,
+  as Docker's default profile allows with `CAP_SYS_ADMIN`. Blocking
+  `CLONE_NEWUSER` would need a real-node check that BuildKit and nested runc
+  work without it; until then it stays allowed, and the nested namespace
+  holds no more than the Job's own.
 - The service account is `sparkwing-customer-job` with
   `automountServiceAccountToken: false`.
 - Every Pod selects `node-restriction.kubernetes.io/sparkwing-team-node` equal
@@ -172,6 +185,11 @@ taint or the annotation, even after it is uncordoned. No NodeClaim is deleted:
 an operator inspects the node, then deletes it or removes the taint and
 annotation.
 
+One pass quarantines or keeps quarantined at most three faulted nodes. A
+fourth means the controller, not a node, is likely at fault, so sync stops
+claims with an error naming the node and asking an operator to check the
+controller and the quarantined nodes.
+
 A quarantine that has not persisted stops claims, so a 503 or any other failed
 write blocks until a later pass writes it. A conflict is retried with backoff;
 repeated conflicts, which a kubelet rewriting its own Node causes, become a
@@ -187,7 +205,7 @@ These node faults are logged at error level on every pass while claiming
 continues. Admission mismatch, Kubernetes and controller API failures and every
 other reconciliation error still stop claims.
 
-The launcher's ClusterRole grants `update` on every Node, and RBAC cannot
+The launcher's ClusterRole grants `update` and `patch` on every Node, and RBAC cannot
 narrow it. `resourceNames` needs names known at install, while Karpenter names
 nodes at launch, and RBAC has no label selectors or field restrictions. A
 ValidatingAdmissionPolicy on Node UPDATE by the launcher identity could confine
@@ -260,7 +278,8 @@ mounts cgroups writable for user-namespaced Pods, the Pod's cgroup, so
 container networks and `docker run --memory` work. `SYS_PTRACE` lets dockerd
 join the network namespace of a container that runs as a non-root user. The
 sidecar has no probe: `run-node`, as the workload's own identity, waits until
-`/_ping` on `DOCKER_HOST` answers before it constructs the host, so a socket
+`/_ping` on `DOCKER_HOST` answers before it constructs the host, for at most
+three minutes, so a socket
 the workload cannot open never counts as ready. The bootstrap Secret is mode
 0400. Node requirements are in the chart README. Its
 bootstrap mount is absent from Docker. Pipeline execution starts after source

@@ -92,7 +92,7 @@ rules:
     verbs: ["get"]
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["get", "list", "update"]
+    verbs: ["get", "list", "update", "patch"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list"]
