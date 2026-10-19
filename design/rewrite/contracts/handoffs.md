@@ -818,3 +818,10 @@ Assigned to an Opus implementer (env 1087).
 
 - Any hold placed or released still restarts the clean-day count for history standing.
 - When an operator releases a hold they placed, they may mark it "no fault found"; that hold then does not restart the count (the count continues as if the hold never happened). Audited. Payment-dispute and automatic holds always restart it.
+
+## 2026-10-18 Korey decision 19: failed card charges hold new Cloud work
+
+- A failed charge on the team's saved card (decline, expired card, failed collection) puts the team on `credit_hold` for new Cloud admissions immediately. Running jobs finish. Runs on the team's own runners continue (unmetered).
+- The billing page and run notices say the card was declined and to update it.
+- A successful charge clears that hold automatically and does not restart the clean-day count (like a no-fault release).
+- Customer-visible and approved; GitHub Actions blocks new paid minutes on payment failure while free usage continues.
