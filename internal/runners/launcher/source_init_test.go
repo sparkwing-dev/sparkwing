@@ -35,7 +35,7 @@ func initSourceFixture(t *testing.T, kind capability.UnitKind) (CloudJobAward, s
 	sourcetest.Remote(t, map[string]string{remote: repository})
 	award, _ := bootstrapAward(t, kind)
 	award.Source = source.Spec{RepoKey: "git:1.1.1.1/team/repo", RemoteURL: remote, SHA: sha, PipelineDir: ".sparkwing", Engine: award.Engine}
-	options := source.Options{Access: initAccess{}, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
+	options := source.Options{Access: initAccess{}, Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
 	return award, options, filepath.Join(t.TempDir(), "source")
 }
 

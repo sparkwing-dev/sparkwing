@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import type { Context, ExecOptions } from "../index.d.ts";
@@ -68,7 +68,7 @@ function node(ctx: Context, script: string, options?: ExecOptions) {
 }
 
 async function project(t: TestContext) {
-  const root = await mkdtemp(join(dirname(fileURLToPath(import.meta.url)), ".command-"));
+  const root = await mkdtemp(join(tmpdir(), "sparkwing-command-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }

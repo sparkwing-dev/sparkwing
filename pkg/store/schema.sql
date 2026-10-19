@@ -703,6 +703,7 @@ CREATE TABLE credit_checkouts (
     paid_at BIGINT,
     closed_at BIGINT,
     grant_id TEXT UNIQUE REFERENCES credit_grants(id),
+    three_d_secure TEXT NOT NULL DEFAULT '',
     UNIQUE(team,id,payment_mode),
     UNIQUE(payment_mode,session_id),
     CHECK((paid_at IS NULL) = (grant_id IS NULL))
@@ -763,7 +764,22 @@ CREATE TABLE credit_freezes (
     reason TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
     released_at BIGINT,
-    cause TEXT NOT NULL DEFAULT ''
+    cause TEXT NOT NULL DEFAULT '',
+    no_fault BIGINT NOT NULL DEFAULT 0 CHECK(no_fault IN (0,1)),
+    placed_by TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE standing_requests (
+    id TEXT NOT NULL PRIMARY KEY,
+    team TEXT NOT NULL REFERENCES teams(name),
+    tier TEXT NOT NULL CHECK(tier IN ('High')),
+    message TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    requested_at BIGINT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('open','approved','declined')),
+    decided_by TEXT NOT NULL DEFAULT '',
+    decided_at BIGINT NOT NULL DEFAULT 0,
+    decision_reason TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE team_storage (
@@ -817,14 +833,6 @@ CREATE TABLE git_credential_releases (
     capability_prefix TEXT NOT NULL,
     released_at BIGINT NOT NULL,
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
-);
-
-CREATE TABLE git_credential_machines (
-    team TEXT NOT NULL REFERENCES teams(name),
-    capability_prefix TEXT NOT NULL,
-    enabled_by TEXT NOT NULL DEFAULT '',
-    enabled_at BIGINT NOT NULL,
-    PRIMARY KEY (team, capability_prefix)
 );
 
 CREATE TABLE github_app_extra_repos (
@@ -1451,6 +1459,10 @@ CREATE INDEX idx_credit_checkouts_team_expires ON credit_checkouts(team, expires
 CREATE INDEX idx_credit_checkouts_session ON credit_checkouts(team,session_id);
 
 CREATE INDEX idx_credit_freezes_team ON credit_freezes(team, released_at);
+
+CREATE UNIQUE INDEX idx_standing_requests_open ON standing_requests(team) WHERE state = 'open';
+
+CREATE INDEX idx_standing_requests_team ON standing_requests(team, requested_at);
 
 CREATE UNIQUE INDEX idx_git_credentials_team_host ON git_credentials(team, host);
 

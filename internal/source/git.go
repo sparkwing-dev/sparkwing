@@ -89,7 +89,7 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 }
 
 func tenantRemote(remote string, options Options) (string, error) {
-	if remote == "" || options.Base.Local {
+	if remote == "" || options.ownerGit() {
 		return remote, nil
 	}
 	return sourceurl.NormalizeCloneHost(remote)

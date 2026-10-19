@@ -13,7 +13,7 @@ func TestCapturedGoBuildSettingsSeparateCacheEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, replacement := range []string{"GOFLAGS=-tags=second", "GOARCH=arm64", "CGO_ENABLED=0", "GOTOOLCHAIN=go1.26.8"} {
+	for _, replacement := range []string{"GOFLAGS=-tags=second", "GOARCH=arm64", "CGO_ENABLED=0", "GOTOOLCHAIN=go1.26.8", "GOSUMDB=off", "GONOSUMDB=example.test", "GOINSECURE=example.test", "GOPRIVATE=example.test", "GONOPROXY=example.test"} {
 		other, _, err := ExplainCacheKey(dir, append(append([]string(nil), base...), replacement))
 		if err != nil || other == first {
 			t.Fatalf("build setting %s: key=%s error=%v", replacement, other, err)

@@ -40,7 +40,7 @@ func selectLocalRunSource(ctx context.Context, home, directory, pipeline string,
 	}
 	execution := &source.Entry{Directory: directory}
 	acquireExecution := func() error {
-		selected, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: string(repository.Key), LocalCheckout: root, PipelineDir: filepath.Base(directory), SHA: sha, CommittedCheckout: flags.ref != ""}, source.Options{Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: true, Captured: captured, Masker: masker}})
+		selected, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: string(repository.Key), LocalCheckout: root, PipelineDir: filepath.Base(directory), SHA: sha, CommittedCheckout: flags.ref != ""}, source.Options{Workspace: filepath.Join(home, "workspaces"), GitAccess: source.GitAccessOwner, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}})
 		if err == nil {
 			execution = selected
 		}
@@ -100,5 +100,5 @@ func (s localSourceSelection) checkout(ctx context.Context, home string, capture
 	if err != nil {
 		return nil, err
 	}
-	return source.PrepareCheckout(ctx, spec, source.Options{Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: true, Captured: captured, Masker: secrets.NewMasker()}})
+	return source.PrepareCheckout(ctx, spec, source.Options{Workspace: filepath.Join(home, "workspaces"), GitAccess: source.GitAccessOwner, Base: procenv.Base{Local: true, Captured: captured, Masker: secrets.NewMasker()}})
 }

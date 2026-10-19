@@ -32,7 +32,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -98,7 +100,8 @@ func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
 					args = []string{"--controller=" + hosting.ControllerURL, "--repos=github.com/acme/*", "--credentials-dir=" + credentials, "--max-concurrent=1", "--max-claims-before-restart=1"}
 				}
 				err := ProductionRuntime("dev").Runner.Run(ctx, command, args, "dev")
-				if claims == 0 || renewals != 1 || private == 0 {
+				// The award must be renewed with its own bearer before source acquisition; how many beats that takes is the keeper's business.
+				if claims == 0 || renewals == 0 || private == 0 {
 					t.Fatalf("command did not claim, renew and bind its award: claims=%d renewals=%d private=%d error=%v", claims, renewals, private, err)
 				}
 				var socket *net.OpError
@@ -251,9 +254,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			_, unit := productionNativeAward(t, capability.UnitNode)
 			unit.Unit = kind
-			unit.Execution.Resources = runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
-				Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: 1}}, MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: 1 << 30}},
-			}}}
+			unit.CloudResources = &match.Resources{Cores: 1, MemoryBytes: 1 << 30}
 			expires := time.Now().Add(time.Hour)
 			unit.ParentCapabilityExpiry = &expires
 			binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation, ParentCapabilityExpiry: expires}
@@ -394,6 +395,55 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 			}
 			if !strings.Contains(string(output), want) {
 				t.Fatalf("installed entrypoint did not reach its production HTTP operation: %s", output)
+			}
+		})
+	}
+}
+
+func TestProductionRunnerFetchesPrivateSourceByPlacement(t *testing.T) {
+	for _, owner := range []bool{true, false} {
+		t.Run(fmt.Sprintf("owner=%t", owner), func(t *testing.T) {
+			hosting, unit := productionNativeAward(t, capability.UnitNode)
+			unit.OwnerMachine = owner
+			repository, sha := sourcetest.Repository(t)
+			remote := "https://8.8.8.8/acme/project"
+			log := sourcetest.Remote(t, map[string]string{remote: repository})
+			helperLog := filepath.Join(t.TempDir(), "helper.log")
+			sourcetest.Write(t, filepath.Join(os.Getenv("HOME"), ".gitconfig"), "[credential]\n\thelper = \"!f() { echo called >> "+helperLog+"; echo username=owner; echo password=owner-secret; }; f\"\n")
+			controller, err := client.NewEngineClient(client.EngineOptions{URL: hosting.ControllerURL, HTTP: hosting.HTTP, Bearer: fixedBearer(unit.Capability)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			services, _, err := hosting.Bind(t.Context(), unit, controller)
+			if services.Close != nil {
+				t.Cleanup(func() { _ = services.Close() })
+			}
+			var socket *net.OpError
+			if err != nil && errors.As(err, &socket) && socket.Op == "listen" && errors.Is(err, syscall.EPERM) {
+				t.Skipf("native host reached the sandbox socket boundary: %v", err)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/acme/project", RemoteURL: remote, SHA: sha}, services.Config.Source)
+			if entry != nil {
+				t.Cleanup(func() { _ = entry.Close() })
+			}
+			_, helperErr := os.Stat(helperLog)
+			if owner {
+				if err != nil || helperErr != nil {
+					t.Fatalf("personal runner checkout = %v, owner helper used = %v", err, helperErr == nil)
+				}
+				if got := sourcetest.Git(t, entry.Directory, "rev-parse", "HEAD"); got != sha {
+					t.Fatalf("checked out %s, want %s", got, sha)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "authorize source") || helperErr == nil {
+				t.Fatalf("shared runner checkout = %v, owner helper used = %v", err, helperErr == nil)
+			}
+			if commands, _ := os.ReadFile(log); strings.Contains(string(commands), `"fetch"`) {
+				t.Fatal("shared runner fetched without a controller-released credential")
 			}
 		})
 	}

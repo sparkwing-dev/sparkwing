@@ -565,6 +565,8 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 		{`UPDATE github_runner_bindings SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE teams SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE team_deletions SET requested_by = '' WHERE requested_by = ?`, []any{accountID}},
+		{`UPDATE standing_requests SET requested_by = '' WHERE requested_by = ?`, []any{accountID}},
+		{`UPDATE standing_requests SET decided_by = '' WHERE decided_by = ?`, []any{accountID}},
 		{`DELETE FROM business_events WHERE team IS NULL AND account = ?`, []any{accountID}},
 		{`UPDATE business_events SET account = '' WHERE account = ?`, []any{accountID}},
 		{`UPDATE business_events SET actor = '' WHERE actor IN (?, ?)`, []any{accountID, acct.Email}},

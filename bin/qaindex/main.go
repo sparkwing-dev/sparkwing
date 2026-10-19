@@ -97,7 +97,6 @@ func readPrevious(dir string, now time.Time) (engine.VersionIndex, error) {
 	return verified.Policy(), nil
 }
 
-// nextIndex appends version and keeps Latest at the highest published version.
 func nextIndex(index engine.VersionIndex, version string, now time.Time) (engine.VersionIndex, error) {
 	for _, record := range index.Versions {
 		if record.Version == version {

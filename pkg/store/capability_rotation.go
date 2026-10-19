@@ -43,6 +43,9 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if !inventoryOwned(p, team, c, previous.CreatedBy) {
 			return bindingRefusal()
 		}
+		if err := rotationOwnerTx(ctx, tx, p, c, previous.CreatedBy); err != nil {
+			return err
+		}
 		if err := machineAdministrationTx(ctx, tx, p, c); err != nil {
 			return err
 		}
@@ -95,9 +98,6 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET created_by=? WHERE prefix=? AND COALESCE(team,'')=?`, previous.CreatedBy, issued.Capability.Prefix, team); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) SELECT team,?,enabled_by,enabled_at FROM git_credential_machines WHERE team=? AND capability_prefix=? AND enabled_by=?`, issued.Capability.Prefix, team, c.Prefix, previous.CreatedBy); err != nil {
-			return err
-		}
 		out = capability.Rotation{Issued: issued, Previous: previous, RevokesAt: deadline}
 		return nil
 	})
@@ -105,6 +105,23 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		return capability.Rotation{}, err
 	}
 	return out, nil
+}
+
+func rotationOwnerTx(ctx context.Context, tx *storeTx, p capability.Principal, c capability.Capability, creator string) error {
+	caller := p.Capability.Subject
+	if c.Team == "" || caller.Kind == capability.SubjectAccount && (c.Subject == caller || c.Subject.Kind == capability.SubjectMachine && creator == caller.ID) {
+		return nil
+	}
+	if c.Subject.Kind == capability.SubjectMachine && slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
+		record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+		if err != nil {
+			return err
+		}
+		if record.Origin != nil && !record.Origin.Personal {
+			return nil
+		}
+	}
+	return authorityError(apierr.Forbidden, "only a token's owner can rotate it; a team admin can revoke it instead")
 }
 
 func rotationExpiryCeilingTx(ctx context.Context, tx *storeTx, caller capability.AuthorityRef, old *time.Time) (*time.Time, error) {

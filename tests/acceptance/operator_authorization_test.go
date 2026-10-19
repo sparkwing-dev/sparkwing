@@ -32,6 +32,8 @@ var consoleRequests = [][2]string{
 	{"DELETE", "/api/v1/operator/accounts/account"},
 	{"GET", "/api/v1/operator/waitlist"},
 	{"POST", "/api/v1/operator/waitlist/approve"},
+	{"GET", "/api/v1/operator/standing-requests"},
+	{"POST", "/api/v1/operator/teams/customer/standing-request/decline"},
 	{"DELETE", "/api/v1/operator/github-app/installations/123"},
 	{"PUT", "/api/v1/operator/credits/settings"},
 	{"POST", "/api/v1/operator/runners/swk_ABCDEFGHIJKL/metered"},

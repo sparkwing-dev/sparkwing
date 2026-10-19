@@ -39,34 +39,50 @@ func burstPreferencesTx(ctx context.Context, tx *storeTx, team Team, run string,
 		}
 		prefers := []string{target}
 		if step.Target == "machines" {
-			rows, err := tx.QueryContext(ctx, `SELECT DISTINCT c.prefix,c.subject_id FROM capabilities c JOIN runs r ON r.team=c.team AND r.created_principal=c.created_by WHERE r.team=? AND r.id=? AND r.created_subject_kind='account' AND c.subject_kind='machine' AND c.bind_kind='none' AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at>?)`, team, run, tx.now().UnixNano())
+			names, err := requesterMachineNamesTx(ctx, tx, team, run)
 			if err != nil {
 				return nil, err
 			}
-			candidates := map[string]string{}
-			for rows.Next() {
-				var prefix, name string
-				if err := rows.Scan(&prefix, &name); err != nil {
-					return nil, errors.Join(err, rows.Close())
-				}
-				candidates[prefix] = name
-			}
-			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-				return nil, err
-			}
-			for prefix, name := range candidates {
-				record, err := loadCapabilityRecordTx(ctx, tx, prefix)
-				if err != nil {
-					return nil, err
-				}
-				if record.Origin != nil && record.Origin.Personal {
-					prefers = append(prefers, "name="+name)
-				}
+			for _, name := range names {
+				prefers = append(prefers, "name="+name)
 			}
 		}
 		out = append(out, PlacementPreference{Prefers: []string{strings.Join(prefers, ",")}, Hold: step.Hold})
 	}
 	return out, nil
+}
+
+func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run string) ([]string, error) {
+	account, err := runRequesterAccountTx(ctx, tx, team, run)
+	if err != nil || account == "" {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)`, team, account, tx.now().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	candidates := map[string]string{}
+	for rows.Next() {
+		var prefix, name string
+		if err := rows.Scan(&prefix, &name); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		candidates[prefix] = name
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	var names []string
+	for prefix, name := range candidates {
+		record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+		if err != nil {
+			return nil, err
+		}
+		if record.Origin != nil && record.Origin.Personal {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
 func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityNode, run string) error {
@@ -81,14 +97,15 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if record.Origin == nil || !record.Origin.Personal {
 		return nil
 	}
-	var owner, requester, kind string
+	var owner string
 	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&owner); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, root.Team, run).Scan(&requester, &kind); err != nil {
+	requester, err := runRequesterAccountTx(ctx, tx, Team(root.Team), run)
+	if err != nil {
 		return err
 	}
-	if owner == "" || owner != requester || kind != string(capability.SubjectAccount) {
+	if owner == "" || owner != requester {
 		return authorityError(apierr.Forbidden, "personal machine is reserved for its owner's runs")
 	}
 	return nil

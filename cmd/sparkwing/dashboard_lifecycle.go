@@ -79,3 +79,32 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 		return err
 	}
 }
+
+type dashboardLoginResult struct {
+	Kind      string    `json:"kind"`
+	Tool      string    `json:"tool"`
+	Service   string    `json:"service"`
+	Action    string    `json:"action"`
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func openDashboard(ctx context.Context, services dashboardServices, out io.Writer, mode string) error {
+	if services.mintLogin == nil {
+		return dashboardUnavailable("local controller sign-in links")
+	}
+	login, err := services.mintLogin(ctx)
+	if err != nil {
+		return err
+	}
+	switch mode {
+	case "json":
+		return json.NewEncoder(out).Encode(dashboardLoginResult{Kind: "service", Tool: "sparkwing", Service: "dashboard", Action: "open", URL: login.URL, ExpiresAt: login.ExpiresAt})
+	case "plain":
+		_, err := fmt.Fprintln(out, login.URL)
+		return err
+	default:
+		_, err := fmt.Fprintf(out, "Open this link to sign in to the local dashboard. It works once and expires at %s.\n%s\n", login.ExpiresAt.Local().Format(time.TimeOnly), login.URL)
+		return err
+	}
+}

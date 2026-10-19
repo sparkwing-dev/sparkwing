@@ -1004,6 +1004,7 @@ type GitHubAppAutomation struct {
 	InstallationID int64
 	Enabled        bool
 	EnabledBy      string
+	Runner         GitHubAppRunner
 	EnabledAt      time.Time
 }
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
@@ -1021,6 +1022,9 @@ type GitHubAppInstallation struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
+type GitHubAppRunner string
+const GitHubAppRunnerActions GitHubAppRunner = "github-actions"
+const GitHubAppRunnerCloud GitHubAppRunner = "cloud"
 type GitHubAppTrigger struct {
 	Team                      Team
 	RepositoryID              int64
@@ -1040,6 +1044,7 @@ type GitHubAppTrigger struct {
 	ReleasePrereleased        bool
 	BranchCreate              bool
 	BranchDelete              bool
+	Runner                    GitHubAppRunner
 	CreatedBy                 string
 	CreatedAt                 time.Time
 }
@@ -1116,6 +1121,8 @@ type IntakePolicyFacts struct {
 	Delivery             *VerifiedRunDelivery
 	LogRetentionClass    string
 	LogRetentionDays     int
+
+	CloudDispatch bool
 }
 func IntakeQueueDepth(ctx context.Context, resolver capability.AuthorityResolver, team Team) (int, error)
 type IntakeRequest struct {
@@ -1249,6 +1256,7 @@ const MinCardChargeCents = 50
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
+const NoCreditsHold = "team has no remaining credits; add credits or a payment method"
 type Node struct {
 	RunID        string
 	NodeID       string
@@ -1511,7 +1519,6 @@ func (o *Operator) Team() Team
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
 func (o *Operator) WarmCPUClassCores(ctx context.Context) (int64, error)
-func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error)
 func (o *Operator) WriteComputeLimits(ctx context.Context, a capability.Authorized, updates map[string]int64) (ComputeLimits, error)
 func (o *Operator) WriteSignUpSettings(ctx context.Context, a capability.Authorized, req SignUpSettingsChange) error
 func (o *Operator) WriteStorageAllowance(ctx context.Context, a capability.Authorized, bytes int64) (StorageQuota, error)
@@ -1565,6 +1572,7 @@ var PaidTierQuota = StorageQuota{
 	MaxBytesPerMonth: 100 << 30,
 	MaxObjectsPerRun: 100_000,
 }
+func ParseGitHubAppRunner(raw string) (GitHubAppRunner, error)
 func ParseGitHubRepo(slug string) (GitHubRepo, bool)
 func ParseRunFilter(q url.Values) RunFilter
 func ParseRunFilterValidated(q url.Values) (RunFilter, error)
@@ -1758,10 +1766,6 @@ type RegisteredAgent struct {
 	Profile  match.Profile
 	LastSeen time.Time
 }
-type RepoDispatch string
-const RepoDispatchController RepoDispatch = "controller"
-const RepoDispatchTrigger RepoDispatch = "trigger"
-func RepoKey(owner, name string) string
 func RequestPlacement(request runspec.Request) nodeproto.Placement
 type RetentionRequest struct {
 	Lease SingletonLease
@@ -1957,6 +1961,7 @@ type RunView struct {
 	Attempts []NodeAttempt
 	Logs     []blob.LogSubject
 	Failures []string
+	Waiting  *UnclaimedUnit
 }
 const RunnerIdentityHeader = "X-Sparkwing-Runner"
 const RunnerTokenLifetime = 90 * 24 * time.Hour
@@ -1965,6 +1970,7 @@ type ScheduleDecision struct {
 	Outcome string
 	Reason  string
 }
+func ScheduleDispatch(where string) runspec.Dispatch
 type ScheduleExpansion struct {
 	GeneratorID  string
 	SourceNodeID string
@@ -2038,7 +2044,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "events", Owner: SchemaTenant},
 	{Name: "flow_nonces", Owner: SchemaOperator},
 	{Name: "free_slots", Owner: SchemaTenant},
-	{Name: "git_credential_machines", Owner: SchemaTenant},
 	{Name: "git_credential_releases", Owner: SchemaTenant},
 	{Name: "git_credentials", Owner: SchemaTenant},
 	{Name: "github_app_automation", Owner: SchemaTenant},
@@ -2169,6 +2174,7 @@ type SegmentCommit struct {
 	IncompleteReason string
 	RetentionClass   string
 }
+func SelectDispatch(cloud bool, request runspec.Request) runspec.Dispatch
 type Session struct {
 	ID               string
 	Principal        string
@@ -2661,6 +2667,7 @@ func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) NodeIsAncestor(ctx context.Context, runID, ancestor, node string) (found bool, err error)
 func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, body *controllerwire.ScheduleOverride) (string, error)
+func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Principal, run string) (bool, error)
 func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, paused bool) (string, error)
 func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.Authorized, kind capability.BillingPageKind, amount int64, key string) (capability.BillingPage, error)
 func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, actor Actor) (string, error)
@@ -2680,6 +2687,8 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
 func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authorized) (capability.OIDCFacts, error)
 func (t *Tenant) ReadOverflowControl(ctx context.Context, authority capability.AuthorityRef) (OverflowControl, error)
+func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref NodeRef) (NodeRow, error)
+func (t *Tenant) ReadOwnerNodes(ctx context.Context, authority capability.AuthorityRef, runID string) ([]NodeRow, error)
 func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string) (RunSnapshot, error)
 func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[string][]string, error)
 func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error)
@@ -2751,7 +2760,6 @@ func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *ti
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (t *Tenant) SetOverflowLimit(ctx context.Context, authority capability.AuthorityRef, minutes *int64) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
-func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capability.AuthorityRef, machine string, enabled bool) error
 func (t *Tenant) SetStorageAllowance(ctx context.Context, bytes int64) (StorageQuota, error)
 func (t *Tenant) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error
@@ -2775,6 +2783,7 @@ func (t *Tenant) UseGitHubCommitStatuses(ctx context.Context, runID string) erro
 func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)
 func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
+func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
 func (t *Tenant) WriteActivity(ctx context.Context, ref NodeRef, actor Actor, detail string) error
 func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error
 func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, sealed SealedGitCredential) (GitCredential, error)
@@ -2836,6 +2845,13 @@ type TriggerFilter struct {
 }
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
+type UnclaimedUnit struct {
+	Kind   capability.UnitKind
+	NodeID string
+	Since  time.Time
+
+	CreditHold string
+}
 type UnitClaim struct {
 	Team             Team
 	Kind             capability.UnitKind

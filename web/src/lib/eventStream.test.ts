@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { FetchEventStream, parseEventBlock } from "./eventStream";
-import { signInCodeFrom } from "./localSession";
+import { FetchEventStream, openEventStream, parseEventBlock } from "./eventStream";
 
 describe("parseEventBlock", () => {
   it("reads a named event and joins its data lines", () => {
@@ -18,15 +17,6 @@ describe("parseEventBlock", () => {
   it("carries an id or retry delay from a block with no data", () => {
     assert.deepEqual(parseEventBlock(": keepalive"), { type: "message", data: null });
     assert.deepEqual(parseEventBlock("id: 9\nretry: 250"), { type: "message", data: null, id: "9", retry: 250 });
-  });
-});
-
-describe("signInCodeFrom", () => {
-  it("reads the code from the fragment only", () => {
-    assert.equal(signInCodeFrom("#code=abc%2Fdef"), "abc/def");
-    assert.equal(signInCodeFrom("#x=1&code=zz"), "zz");
-    assert.equal(signInCodeFrom(""), null);
-    assert.equal(signInCodeFrom("#codex=1"), null);
   });
 });
 
@@ -72,6 +62,33 @@ describe("FetchEventStream", () => {
       assert.equal(errors, 2);
     } finally {
       globalThis.fetch = previousFetch;
+    }
+  });
+
+  it("carries a held local session as a bearer instead of opening an EventSource", async () => {
+    const runtime = globalThis as unknown as { window?: unknown; fetch: typeof fetch };
+    const previousFetch = runtime.fetch;
+    const stored = new Map([["sparkwing.localSession", "held-session"]]);
+    runtime.window = {
+      __SPARKWING_REQUIRE_LOGIN__: "false",
+      sessionStorage: { getItem: (key: string) => stored.get(key) ?? null },
+      location: { hash: "" },
+    };
+    let auth: string | null = null;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      auth = new Headers(init?.headers).get("Authorization");
+      return new Response("unauthorized", { status: 401 });
+    }) as typeof fetch;
+    try {
+      await new Promise<void>((resolve) => {
+        const stream = openEventStream("/api/v1/runs/r/events/stream");
+        assert.ok(stream instanceof FetchEventStream);
+        stream.onerror = () => resolve();
+      });
+      assert.equal(auth, "Bearer held-session");
+    } finally {
+      globalThis.fetch = previousFetch;
+      delete runtime.window;
     }
   });
 

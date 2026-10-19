@@ -11,11 +11,15 @@ import (
 // LocalHTTP serves the shared controller handlers inside the elected local runtime.
 type LocalHTTP struct {
 	API, Dashboard http.Handler
+	// Shell serves the dashboard's static pages to a TCP browser that holds no session.
+	Shell http.Handler
 }
 
 type localPeerKey struct{}
 
-// LocalPeer reads the verified api.sock connection identity from a request context.
+// LocalPeer reads the peer identity api.sock verified for this request: the
+// connection's own peer, or on the TCP dashboard the peer that minted the
+// bearer session. It does not prove the request arrived on the private socket.
 func LocalPeer(ctx context.Context) (LocalPeerIdentity, bool) {
 	peer, ok := ctx.Value(localPeerKey{}).(LocalPeerIdentity)
 	return copyPeerIdentity(peer), ok

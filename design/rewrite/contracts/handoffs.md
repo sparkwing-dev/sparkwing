@@ -809,3 +809,35 @@ Assigned to an Opus implementer (env 1087).
 - Decision 6(c) stands for every personal machine, approved or not: no team git credentials and no App installation tokens. A personal machine fetches with its owner's own git access.
 - A personal machine is eligible for an automated run only if its owner can read the run's repository and every extra repository the run needs. The controller checks this server-side via the App installation (the owner's linked GitHub login's collaborator permission on each repository), cached briefly, never from the machine's claim. An ineligible machine is skipped by ranking; it does not claim and fail.
 - Korey's words: "people should still only be able to run the repositories that they have access to".
+
+## 2026-10-18 Korey decision 17: `sparkwing update` refreshes runner services
+
+- `sparkwing update` calls `service.Refresh` after installing a new binary, restarting installed runner services (launchd, systemd, Windows service) onto it and saying which it restarted. No installed service means no change.
+
+## 2026-10-18 Korey decision 18: operator holds and clean days
+
+- Any hold placed or released still restarts the clean-day count for history standing.
+- When an operator releases a hold they placed, they may mark it "no fault found"; that hold then does not restart the count (the count continues as if the hold never happened). Audited. Payment-dispute and automatic holds always restart it.
+
+## 2026-10-18 Korey decision 19: failed card charges hold new Cloud work
+
+- A failed charge on the team's saved card (decline, expired card, failed collection) puts the team on `credit_hold` for new Cloud admissions immediately. Running jobs finish. Runs on the team's own runners continue (unmetered).
+- The billing page and run notices say the card was declined and to update it.
+- A successful charge clears that hold automatically and does not restart the clean-day count (like a no-fault release).
+- Customer-visible and approved; GitHub Actions blocks new paid minutes on payment failure while free usage continues.
+- Superseded the same day (Korey: "Do what you think is best"): `sparkwing update` replaces only the CLI, while runner services run `sparkwing-runner`, which updates itself from its controller (drain, replace, refresh units, restart). `service.Refresh` and its test are deleted; `sparkwing update` prints that runner services update themselves from their controller.
+
+## 2026-10-19 lead amendment to decision 2 (run anywhere award deadline)
+
+- "At the end of the window the highest-ranked claimant that asked during it wins" needs that claimant to come back and claim, since claimants poll. After a unit's 5 s window, the best-ranked asker recorded during the window holds the award for at most 2 s (`RankingAward`); if it doesn't claim by then, the first eligible asker wins. Worst-case wait for a unit is therefore 7 s. Lead ruling, reported to Korey for ratification.
+
+## 2026-10-19 Korey decision 20: defer personal-machine automation and the controller host
+
+- Decisions 15 and 16 (admin-approved personal machines on automated runs, owner repo-access checks) are deferred past v0.68. Personal machines take only their owner's manual runs; App and schedule runs go to Actions, self-hosted runners and Cloud. The code is deleted, not disabled; it returns later as its own reviewed work.
+- The in-process controller host claimant (decision 13's "controller's host takes part") is deferred and deleted. A self-hosted controller needs at least one runner; with none, the no_eligible_runner notice says to start or register one. wingd's single-user local queue is unchanged.
+- Run-anywhere ranking stays for manual, App and schedule runs on Cloud and self-hosted controllers.
+
+## 2026-10-19 Korey decision 21: Cloud Docker is rootful dind in a user-namespaced pod on AL2023 job nodes
+
+- Supersedes decision 12's rootless sidecar. Job and team nodes run AL2023 with kubelet `idsPerPod` 262144 and runc writable cgroups; other nodes stay Bottlerocket. The Docker sidecar runs `docker:dind` (digest-pinned) as root inside the pod's user namespace (`hostUsers: false`), never privileged, with namespaced SYS_ADMIN, NET_ADMIN and SYS_PTRACE only; no tun device, no `super_t`. `docker run --memory` is enforced. The minimal job-node IAM role and IMDS hop limit 1 stay.
+- Bottlerocket with rootless Docker would have needed SELinux `super_t` on the sidecar, which leaves customer containers unconfined anyway, and could not enforce memory limits.

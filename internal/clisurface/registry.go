@@ -75,6 +75,7 @@ func Registry() []Command {
 			{Name: "tail", Argument: "N"},
 			{Name: "follow", Short: "f"},
 		}},
+		{Path: "sparkwing dashboard open", Rules: []string{"Print a one-time sign-in link for the running local dashboard. It is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard start", Rules: []string{"Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases and dashboard connections prevent idle exit."}, Flags: []Flag{
 			{Name: "addr", Argument: "HOST:PORT"},
 			{Name: "allow-remote"},
@@ -279,6 +280,7 @@ func Registry() []Command {
 			{Name: "pipeline-ref", Argument: "REF"},
 		}},
 		{Path: "sparkwing overflow", Flags: []Flag{}},
+		{Path: "sparkwing billing", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
 		{Path: "sparkwing team settings show", Authority: TeamCredential, Rules: []string{"Show the team's members_can_add_machines setting. It defaults to true and allows members to enroll only their own personal machines."}, Flags: []Flag{
@@ -295,6 +297,14 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "minutes", Argument: "N", HasMinimum: true, Minimum: 0, Conflicts: []string{"uncapped"}},
 			{Name: "uncapped", Conflicts: []string{"minutes"}},
+		}},
+		{Path: "sparkwing billing standing", Authority: TeamCredential, Rules: []string{"Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+		}},
+		{Path: "sparkwing billing request-tier", Authority: TeamCredential, Rules: []string{"Ask the Sparkwing operators to grant High standing. Only team owners request it, and a team has at most one open request. The message reaches the operator with the team's standing and payment history. The operator approves by granting standing or declines with a reason; see the outcome with sparkwing billing standing. JSON returns the stored request; plain prints its ID."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "tier", Argument: "TIER", Values: []string{"high"}, Required: true},
+			{Name: "message", Argument: "TEXT", Required: true},
 		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
 		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{
@@ -701,7 +711,7 @@ func Registry() []Command {
 			{Name: "version", Argument: "TAG"},
 			{Name: "dry-run"},
 		}},
-		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action."}, Flags: []Flag{
+		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. A CLI update reports that installed runner services update themselves from their controller; it does not restart them. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action."}, Flags: []Flag{
 			{Name: "dry-run"},
 			{Name: "force"},
 			{Name: "override-hold"},

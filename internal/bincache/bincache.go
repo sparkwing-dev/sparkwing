@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -275,7 +276,7 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 }
 
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
-	parts, err := keyParts(sparkwingDir, goos, goarch, os.Environ(), false)
+	parts, err := stableKeyParts(sparkwingDir, goos, goarch, os.Environ(), false)
 	if err != nil {
 		return "", err
 	}
@@ -308,12 +309,24 @@ func ExplainCacheKey(sparkwingDir string, env []string) (string, []KeyPart, erro
 	return explainCacheKey(sparkwingDir, env, false)
 }
 
+const stableKeyAttempts = 3
+
 func explainCacheKey(sparkwingDir string, env []string, hashAllFiles bool) (string, []KeyPart, error) {
-	parts, err := keyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH, env, hashAllFiles)
+	parts, err := stableKeyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH, env, hashAllFiles)
 	if err != nil {
 		return "", nil, err
 	}
 	return foldKey(parts), parts, nil
+}
+
+func stableKeyParts(sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
+	for range stableKeyAttempts {
+		parts, err := keyParts(sparkwingDir, goos, goarch, env, hashAllFiles)
+		if !errors.Is(err, ErrUnstableInputs) {
+			return parts, err
+		}
+	}
+	return nil, ErrUnstableInputs
 }
 
 func keyParts(sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
@@ -445,7 +458,56 @@ func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGT"[exp])
 }
 
+// ErrUnstableInputs reports build inputs that kept changing while the cache key was computed; the build must
+// neither use nor store a cached binary.
+var ErrUnstableInputs = errors.New("pipeline build inputs changed while the cache key was computed")
+
+type fileState struct {
+	size    int64
+	modTime int64
+}
+
+func snapshotHashable(dir string, keep fileFilter) (map[string]fileState, error) {
+	files, err := walkHashable(dir, keep)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]fileState, len(files))
+	for _, path := range files {
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, ErrUnstableInputs
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[path] = fileState{size: info.Size(), modTime: info.ModTime().UnixNano()}
+	}
+	return out, nil
+}
+
 func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (HashStats, error) {
+	before, err := snapshotHashable(dir, keep)
+	if err != nil {
+		return HashStats{}, err
+	}
+	var digest bytes.Buffer
+	stats, err := hashFilesInto(&digest, dir, keep, hashAllFiles)
+	if err != nil {
+		return stats, err
+	}
+	after, err := snapshotHashable(dir, keep)
+	if err != nil {
+		return stats, err
+	}
+	if !maps.Equal(before, after) {
+		return stats, ErrUnstableInputs
+	}
+	_, err = h.Write(digest.Bytes())
+	return stats, err
+}
+
+func hashFilesInto(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (HashStats, error) {
 	var stats HashStats
 	files, err := walkHashable(dir, keep)
 	if err != nil {
@@ -462,6 +524,9 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 		}
 		rel, _ := filepath.Rel(dir, path)
 		f, err := os.Open(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return stats, ErrUnstableInputs
+		}
 		if err != nil {
 			return stats, err
 		}
@@ -482,6 +547,9 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if path != dir && errors.Is(err, fs.ErrNotExist) {
+				return ErrUnstableInputs
+			}
 			return err
 		}
 		if d.IsDir() {
@@ -659,7 +727,7 @@ func EffectiveOverlay(dir string, env []string) string {
 
 func buildEnvironmentKey(env []string) []byte {
 	var input bytes.Buffer
-	for _, name := range strings.Fields("PATH GOOS GOARCH GO386 GOAMD64 GOARM GOARM64 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM GOEXPERIMENT GOFLAGS GOTOOLCHAIN GOROOT GOPATH GOENV CGO_ENABLED CC CXX FC AR PKG_CONFIG CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_FFLAGS CGO_LDFLAGS") {
+	for _, name := range strings.Fields("PATH GOOS GOARCH GO386 GOAMD64 GOARM GOARM64 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM GOEXPERIMENT GOFLAGS GOTOOLCHAIN GOROOT GOPATH GOENV GOSUMDB GONOSUMDB GOINSECURE GOPRIVATE GONOPROXY CGO_ENABLED CC CXX FC AR PKG_CONFIG CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_FFLAGS CGO_LDFLAGS") {
 		value, _ := gotoolchain.LookupEnv(env, name)
 		fmt.Fprintf(&input, "%s=%s\x00", name, value)
 	}

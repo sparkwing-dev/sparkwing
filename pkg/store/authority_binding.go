@@ -112,8 +112,6 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 		allowed = target.AccountID != "" && (slices.Contains(c.Grants, capability.TeamAdmin) || c.Subject.Kind == capability.SubjectAccount && c.Subject.ID == target.AccountID)
 	case capability.BindOwnToken:
 		return bindingTokenTx(ctx, tx, c, target)
-	case capability.BindMachineOwner:
-		return bindingMachineTx(ctx, tx, c, target)
 	case capability.BindExpansion:
 		return bindingExpansionTx(ctx, tx, c, target)
 	case capability.BindSourceReport:
@@ -239,20 +237,6 @@ func bindingTokenTx(ctx context.Context, tx *storeTx, c capability.Capability, t
 		return bindingRefusal()
 	}
 
-	return nil
-}
-
-func bindingMachineTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
-	if c.Subject.Kind != capability.SubjectAccount || target.TokenPrefix == "" {
-		return bindingRefusal()
-	}
-	var owner string
-	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=? AND subject_kind='machine'`, c.Team, target.TokenPrefix).Scan(&owner); err != nil {
-		return err
-	}
-	if owner != c.Subject.ID {
-		return bindingRefusal()
-	}
 	return nil
 }
 

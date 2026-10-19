@@ -24,7 +24,7 @@ func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "schedule-owner"}
 	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
 		GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		RepoURL: "https://git.example.com/acme/widgets.git",
+		RepoURL: "https://github.com/acme/widgets.git",
 		Branch:  "main",
 		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
@@ -234,7 +234,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 	seedTickAppConsent(t, st, "team-b")
 	report, err := (&crons.Service{Store: st, Schedules: tenantB, ArmedBy: "team-b-owner"}).ArmPushed(ctx, crons.ArmPush{
 		GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		RepoURL: "https://git.example.com/acme/widgets.git",
+		RepoURL: "https://github.com/acme/widgets.git",
 		Branch:  "main",
 		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{

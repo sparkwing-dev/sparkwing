@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -64,8 +65,13 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		return localRunRuntime{}, err
 	}
 	var standalone wingd.LocalLifecycle
+	claimed := make(chan struct{})
+	var release sync.Once
 	return localRunRuntime{
 		controller: controller,
+		ownerClaimed: func() {
+			release.Do(func() { close(claimed) })
+		},
 		openCache: func(ctx context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
 			environment, err := snapshots.Load(ctx, request.Env)
 			if err != nil {
@@ -81,7 +87,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		},
 		ensureController: func(ctx context.Context) error {
 			if options.standalone {
-				services, err := resolveLocalServicesAt(ctx, home)
+				services, err := resolveStandaloneServicesAt(ctx, home, claimed)
 				if err != nil {
 					return err
 				}
@@ -156,6 +162,13 @@ func openProfileCache(ctx context.Context, environment []string, profile string,
 	return cache, closeCache, nil
 }
 
+func gitAccess(owner bool) source.GitAccess {
+	if owner {
+		return source.GitAccessOwner
+	}
+	return source.GitAccessTeam
+}
+
 func hostSourceOptions(home string, captured []string, masker *secrets.Masker, local bool) (source.Options, error) {
 	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
 	if err != nil {
@@ -169,6 +182,7 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 		Engines: engines, SDK: engine.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: captured, SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
+		GitAccess: gitAccess(local),
 	}, nil
 }
 

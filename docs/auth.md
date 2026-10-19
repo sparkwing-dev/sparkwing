@@ -105,8 +105,9 @@ current team ownership. The final bind also rechecks the linked GitHub identity.
 
 Console mutations pass their verified authority to `WithConsoleWriter`.
 The transaction derives the audit actor and rechecks the direct operator session.
-This covers credit grants, billing trust, holds, account/team deletion, waitlist
-approval, credit settings and installation unbinding. Waitlist approval requires
+This covers credit grants, billing trust, standing-request declines, holds,
+account/team deletion, waitlist approval, credit settings and installation
+unbinding. Waitlist approval requires
 an `Idempotency-Key` header. A missing transaction adapter returns `policy_missing`.
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
@@ -325,13 +326,16 @@ and detail routes under `/api/v1/operator/tokens`, requiring `operator.tokens`
 or an operator console session.
 
 The collection returns `{tokens:[...]}`. Each row carries `prefix`, `team`,
-`subject`, `audience`, `grants`, `created_by`, `issued_at`, `git_credentials`,
+`subject`, `audience`, `grants`, `created_by`, `issued_at`,
 `metered`, and optional `expires_at`, `last_used_at` and `revoked_at`. Times are RFC3339
 timestamps. The response omits bearer secrets, digests, bindings and ancestry.
 `kind` filters by `account`, `machine`, `service` or `operator`.
 `include_revoked=1` includes revoked rows. Duplicate or invalid filters fail.
 
-`POST /api/v1/tokens/{token}/rotate` replaces an owned credential. Deployment
+`POST /api/v1/tokens/{token}/rotate` replaces an owned credential. Only the
+owner rotates an account token or a personal machine: a team admin who rotates
+another member's token gets 403 and the token keeps working, and revokes it
+instead. A team admin rotates shared runners. Deployment
 credentials use `/api/v1/operator/tokens/{token}/rotate`. The body accepts
 `grace_secs` and optional `expires_at`. Grace defaults to 24 hours and accepts
 zero through seven days. An omitted expiry keeps the original expiry. An
@@ -344,10 +348,9 @@ The rotation response returns `capability` once, `new` public metadata,
 `old_prefix` and the RFC3339 `old_revoked_at`. Do not replay a rotation after
 losing its response. Browser mutations require session-bound CSRF proof.
 
-A replacement retains the credential's owner, registration, scope, original
-parent and machine source-credential consent. A predecessor can be rotated once.
-Failed rotation leaves both the
-credential and its consent unchanged.
+A replacement retains the credential's owner, registration, scope and original
+parent. A predecessor can be rotated once. Failed rotation leaves the
+credential unchanged.
 
 All inventory and rotation responses use `Cache-Control: no-store` and the
 common error envelope. The controller uses its store manager by default. Embedded
@@ -654,7 +657,9 @@ deployment profile. Console sessions retain their separate account gate.
 ## Operator console
 
 Operator-console sessions own trust changes, credit grants, freezes, refunds
-and account deletion. Deployment tokens manage operational limits, object-store
+and account deletion. They also read the standing queue, where team owners'
+requests for High standing wait. A grant naming the reviewed request approves
+it, and a decline names the request and records the reason its owners see. Deployment tokens manage operational limits, object-store
 settings, deployment service credentials and new-team onboarding through their separate routes.
 They cannot exchange themselves for console powers.
 
@@ -734,8 +739,8 @@ membership, machine identity, reserved pools or metering.
 A browser session opened with an account capability retains that capability as
 its authority parent. Credential issuance through that session delegates from
 its existing ancestry and inherits the shortest remaining lifetime. Independent
-member roots and owner-consent routes require a direct account sign-in session.
-Changing a token into a browser cookie does not establish that consent.
+member roots require a direct account sign-in session.
+Changing a token into a browser cookie does not establish one.
 Account credentials carrying a data scope cannot sign in because browser
 sessions cannot preserve that scope.
 

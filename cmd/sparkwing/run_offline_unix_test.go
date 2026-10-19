@@ -323,6 +323,7 @@ func offlineDeniedEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker
 	return append(offlineBaseEnv(t, fixtureHome, toolPath, sparkwingHome, marker),
 		"GOPROXY="+recorder,
 		"GOFLAGS=-mod=readonly",
+		"GOSUMDB=off",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"HTTP_PROXY="+recorder,

@@ -32,6 +32,8 @@ func operatorRoutes(team string) [][2]string {
 		{"POST", base + "/unfreeze"},
 		{"GET", "/api/v1/operator/waitlist"},
 		{"POST", "/api/v1/operator/waitlist/approve"},
+		{"GET", "/api/v1/operator/standing-requests"},
+		{"POST", base + "/standing-request/decline"},
 	}
 }
 
@@ -360,5 +362,30 @@ func TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID(t *testing.T
 		if admitted[id] != want[id] {
 			t.Errorf("%s admission = %q want %q", name, admitted[id], want[id])
 		}
+	}
+}
+
+func TestOperatorConsoleReleasesItsHoldAsNoFault(t *testing.T) {
+	f, operator, owner := operatorFixture(t)
+	base := "/api/v1/operator/teams/" + owner.team
+	var held struct {
+		Holds      []string `json:"holds"`
+		HoldCauses []string `json:"hold_causes"`
+	}
+	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse report"}, &held); code != http.StatusOK || len(held.Holds) != 1 || held.HoldCauses[0] != store.HoldCauseOperator {
+		t.Fatalf("freeze = %d %+v", code, held)
+	}
+	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "x", "hold": "dp_missing", "no_fault": true}, nil); code != http.StatusBadRequest {
+		t.Errorf("no-fault release of a payment hold = %d want 400", code)
+	}
+	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "report was mistaken", "hold": held.Holds[0], "no_fault": true}, nil); code != http.StatusOK {
+		t.Fatalf("no-fault release = %d", code)
+	}
+	var team operatorTeam
+	if code := f.call("GET", base, operator.auth, nil, &team); code != http.StatusOK || team.Frozen {
+		t.Fatalf("read = %d %+v", code, team)
+	}
+	if ev := team.Events[0]; ev.Kind != store.BusinessEventTeamUnfrozen || ev.Attrs["no_fault"] != true || ev.Actor != operator.id {
+		t.Errorf("release audit = %+v", ev)
 	}
 }

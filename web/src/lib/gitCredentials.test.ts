@@ -319,18 +319,6 @@ describe("API helpers", () => {
     assert.equal(calls[0].url, "/api/v1/team/git-credentials/releases");
   });
 
-  it("opts a machine in with PUT", async () => {
-    respond = () =>
-      new Response(JSON.stringify({ enabled: true }), { status: 200 });
-    assert.equal(await lib.setMachineGitCredentials("swr_ab/c", true), true);
-    assert.equal(calls[0].method, "PUT");
-    assert.equal(
-      calls[0].url,
-      "/api/v1/tokens/swr_ab%2Fc/git-credentials",
-    );
-    assert.deepEqual(JSON.parse(calls[0].body), { enabled: true });
-  });
-
   it("surfaces the controller's refusal", async () => {
     respond = () =>
       new Response(

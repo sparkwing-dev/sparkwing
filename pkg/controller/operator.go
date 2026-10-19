@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -70,6 +71,7 @@ type operatorTeamJSON struct {
 	Billing      billingTrustJSON    `json:"billing"`
 	Frozen       bool                `json:"frozen"`
 	Holds        []string            `json:"holds"`
+	HoldCauses   []string            `json:"hold_causes"`
 	Events       []operatorEventJSON `json:"events"`
 }
 
@@ -109,7 +111,7 @@ func operatorTeamView(ctx context.Context, t *store.Tenant) (operatorTeamJSON, e
 	out := operatorTeamJSON{
 		Team: string(t.Team()), DisplayName: info.DisplayName, Owners: []string{},
 		BalanceMicro: credit.BalanceMicro, Billing: billingTrustBody(t.Team(), standing),
-		Frozen: freeze.Frozen, Holds: append([]string{}, freeze.Disputes...), Events: []operatorEventJSON{},
+		Frozen: freeze.Frozen, Holds: append([]string{}, freeze.Disputes...), HoldCauses: append([]string{}, freeze.Causes...), Events: []operatorEventJSON{},
 	}
 	for _, m := range members {
 		if m.Role == store.RoleOwner {
@@ -129,7 +131,8 @@ type operatorActionReq struct {
 	Key string `json:"key,omitempty"`
 	// safety: an unfreeze naming a hold releases that one, a payment dispute's
 	// included; one naming none releases only the console's own holds.
-	Hold string `json:"hold,omitempty"`
+	Hold    string `json:"hold,omitempty"`
+	NoFault bool   `json:"no_fault,omitempty"`
 }
 
 func decodeOperatorAction(r *http.Request) (operatorActionReq, error) {
@@ -145,11 +148,9 @@ func decodeOperatorAction(r *http.Request) (operatorActionReq, error) {
 	return req, nil
 }
 
-// OperatorReason trims the reason an operator gives for acting on a team and
-// refuses an empty one or one over 500 characters. The console and the
-// sparkwing-controller admin command record it on the action's business event.
+// OperatorReason trims an operator's reason and refuses an empty one or one over store.OperatorReasonLimit code points.
 func OperatorReason(reason string) (string, error) {
-	if reason = strings.TrimSpace(reason); reason == "" || len(reason) > 500 {
+	if reason = strings.TrimSpace(reason); reason == "" || utf8.RuneCountInString(reason) > store.OperatorReasonLimit {
 		return "", errors.New("reason is required, up to 500 characters")
 	}
 	return reason, nil
@@ -210,7 +211,10 @@ func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		return err
 	}
-	freeze, err := writer.ConsoleUnfreeze(r.Context(), authorized, strings.TrimSpace(req.Hold), req.Reason)
+	freeze, err := writer.ConsoleUnfreeze(r.Context(), authorized, strings.TrimSpace(req.Hold), req.Reason, req.NoFault)
+	if errors.Is(err, store.ErrInvalidInput) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
+	}
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -219,7 +223,7 @@ func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request, 
 }
 
 func writeOperatorFreeze(w http.ResponseWriter, team string, freeze store.TeamCreditFreeze) {
-	writeJSON(w, http.StatusOK, map[string]any{"team": team, "frozen": freeze.Frozen, "holds": append([]string{}, freeze.Disputes...)})
+	writeJSON(w, http.StatusOK, map[string]any{"team": team, "frozen": freeze.Frozen, "holds": append([]string{}, freeze.Disputes...), "hold_causes": append([]string{}, freeze.Causes...)})
 }
 
 const operatorWaitlistPage = 50

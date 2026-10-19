@@ -38,6 +38,12 @@ const billing = {
     headroom_cents: 12,
     binding: "balance",
   },
+  standing: {
+    tier: "Established",
+    history: { tier: "Established", paid_micro: 500_000_000, successful_charges: 0, first_paid_at: 1_790_000_000 },
+    prepay_ceiling: "Trusted",
+    can_request: true,
+  },
   grants: [
     {
       id: "grant-1",
@@ -56,7 +62,7 @@ type Mock = {
 };
 
 async function mockController(page: Page, mock: Mock = {}) {
-  const seen = { billingReads: 0, checkoutBodies: [] as string[] };
+  const seen = { billingReads: 0, checkoutBodies: [] as string[], standingBodies: [] as string[] };
   const role = mock.role ?? "owner";
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -82,6 +88,12 @@ async function mockController(page: Page, mock: Mock = {}) {
     } else if (path === "/api/v1/team/billing") {
       seen.billingReads++;
       await route.fulfill({ json: { ...billing, ...mock.billing } });
+    } else if (path === "/api/v1/team/billing/standing-request") {
+      seen.standingBodies.push(request.postData() ?? "");
+      await route.fulfill({
+        status: 201,
+        json: { id: "standing-1", team: "acme", tier: "High", message: "m", requested_at: 1_790_000_000, state: "open" },
+      });
     } else if (path === "/api/v1/team/billing/checkout") {
       seen.checkoutBodies.push(request.postData() ?? "");
       await route.fulfill(
@@ -107,9 +119,7 @@ test("an owner sees prices from the controller and starts a checkout", async ({
   await page.goto("/team/billing");
 
   await expect(page.getByText("1,230 credits", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(/\$1\.23 · a team balance holds up to \$5,000/),
-  ).toBeVisible();
+  await expect(page.getByText(/\$1\.23/)).toBeVisible();
   const twoCore = page.getByRole("row", { name: /2 vCPU/ });
   await expect(
     twoCore.getByRole("cell", { name: "0.09", exact: true }),
@@ -194,12 +204,14 @@ test("checkout stays hidden when the controller has no checkout service", async 
   );
 });
 
-test("a card-billed team with a failed charge pays it by hand and buys no credits", async ({
+test("a card-billed team with a failed charge pays it by hand and can still add funds", async ({
   page,
 }) => {
   await mockController(page, {
     billing: {
       balance_micro: -15_000_000_000,
+      frozen: true,
+      hold_cause: "decline",
       card_billed: true,
       can_add_card: true,
       card: { brand: "visa", last4: "4242", added_at: 1_790_000_000 },
@@ -218,19 +230,51 @@ test("a card-billed team with a failed charge pays it by hand and buys no credit
   });
   await page.goto("/team/billing");
   await expect(page.getByText("$150.00 owed")).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "The card was declined. Update the card or pay the charge" })).toBeVisible();
+  await expect(page.getByText(/payment dispute/)).toHaveCount(0);
   await expect(page.getByText("visa ending 4242")).toBeVisible();
   await expect(
     page.getByText(/A charge of \$150 failed \(insufficient_funds\)/),
   ).toBeVisible();
   await expect(
     page.getByText(
-      "The last card charge failed. Pay it now or update the card.",
+      "The card was declined. Update the card or pay the charge now; new Cloud work waits until then.",
     ),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Pay $150 now" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add funds" })).toHaveCount(
-    0,
-  );
+  await expect(page.getByRole("button", { name: "Add funds" })).toBeVisible();
+});
+
+test("an owner asks the operators for High standing", async ({ page }) => {
+  const seen = await mockController(page);
+  await page.goto("/team/billing");
+  await expect(
+    page.getByText(/Prepaid funds can raise standing to Trusted\. High needs \$500 paid/),
+  ).toBeVisible();
+  const message = page.getByLabel("Contact us to unlock higher tiers");
+  await page.getByRole("button", { name: "Request High standing" }).click();
+  await expect(page.getByText(/Tell us what the team runs/)).toBeVisible();
+  await message.fill("Release builds need 256 vCPU.");
+  await page.getByRole("button", { name: "Request High standing" }).click();
+  await expect.poll(() => seen.standingBodies.map((b) => JSON.parse(b))).toEqual([
+    { tier: "high", message: "Release builds need 256 vCPU." },
+  ]);
+});
+
+test("a declined request shows the operator's reason", async ({ page }) => {
+  await mockController(page, {
+    billing: {
+      standing: {
+        ...billing.standing,
+        can_request: true,
+        request: { id: "standing-1", team: "acme", tier: "High", message: "m", requested_at: 1_790_000_000, state: "declined", decided_at: 1_790_100_000, decision_reason: "Pay for 30 days first." },
+      },
+    },
+  });
+  await page.goto("/team/billing");
+  await expect(
+    page.getByText("An operator declined the request for High standing: Pay for 30 days first."),
+  ).toBeVisible();
 });

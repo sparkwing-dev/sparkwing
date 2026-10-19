@@ -735,8 +735,9 @@ The unused `Tenant.ReleaseGitCredential`, `GitCredentialReleases`,
 `SetGitCredentialMachine` and `GitCredentialMachine` APIs are removed with
 `GitCredentialRelease`, `SourceSpend`, `MaxSourceMints`,
 `ErrSourceCredentialSpent` and the legacy source-counter helpers.
-`ReleaseSourceCredential`, `SourceReleaseAudits` and `SetSourceMachineConsent`
-retain transactional authority, host confirmation, consent and audit ownership.
+`ReleaseSourceCredential` and `SourceReleaseAudits` retain transactional
+authority, host confirmation and audit ownership. **Superseded by decision 6c (2026-10-18):** `SetSourceMachineConsent`
+and the `git_credential_machines` table are removed.
 The unused capabilities.source_mints column is removed. No token-table release
 or caller-clock fallback remains.
 
@@ -1316,7 +1317,7 @@ These declarations leave transaction implementation with W1.
   registered team after verification. Only deployment token authority can set
   metering or authorize service issuance. Provisioning never grants console
   authority. Machine enrollment records the account authorizer in `created_by`,
-  so only that account can change source-credential consent. Roots retain no
+  which also decides whether a claim is the requester's own machine. Roots retain no
   revocation parent. The evidence providers remain W2's integration.
 - Claim selection checks every requested kind's grant before one ordered scan.
   Runner selection accepts trigger/node, launcher selection plan/eval/node. The
@@ -1562,8 +1563,10 @@ the credential host from the sealed source location. It resolves executor
 enrollment through `ClaimProfileResolver`. Repository permission requires the
 award's repository scope and the current enrollment filter. A cloud executor
 requires both the immutable cloud award class and enrolled cloud location.
-Other executors require the same team's machine root and its owner's persisted
-consent. Caller-supplied principal, binding and executor fields grant nothing.
+Other executors require the same team's shared machine root (enrollment origin
+not personal). **Superseded by decision 6c (2026-10-18):** owner consent no longer releases to a personal machine,
+which is refused with `personal_machine`. Caller-supplied principal, binding and
+executor fields grant nothing.
 
 The transaction calls C2's `AuthorizeSourceRelease` through a private contract
 dependency, reads the confirmed team credential, and commits the complete
@@ -1574,10 +1577,10 @@ clock check refuses a lease or authority that expires during policy work.
 and owner_account_id so the C2 audit survives without consulting mutable claims.
 Release timestamps use store-clock nanoseconds.
 
-`Tenant.SetSourceMachineConsent` reloads current account and machine authority,
-requires the account to match the root's persisted created_by, and writes or
-removes the consent under the same root lock used by release. Team administration
-cannot replace machine ownership. Its timestamp uses the store clock.
+**Superseded by decision 6c (2026-10-18):** `Tenant.SetSourceMachineConsent` is removed. `Tenant.OwnerMachineClaimant`
+reports whether an award's root is the run requester itself or a personal machine
+the requester enrolled; the controller returns it as the claim's `owner_machine`
+mark, and that host fetches with its owner's own Git access.
 The production C2 policy, route/decryption adapter, trusted machine-owner
 enrollment and GitHub App issuance path remain separate integrations.
 
@@ -2778,7 +2781,7 @@ hold no competing idempotency fields.
 The final baseline contains 83 tables and 101 explicit indexes. `SchemaTables`
 classifies 66 tenant and 17 operator tables. It retains accounts, identity,
 GitHub App/Actions, schedules, sizing, admission, approvals, logs, metrics,
-credits, cards, git credential opt-ins/audits and build trust. Obsolete token,
+credits, cards, git credential audits and build trust. Obsolete token,
 output, memo, agent-loss, dispatch, bounce and duplicate-plan tables are removed.
 `quota_admission` is the locked aggregate; `quota_reservations` persists each
 hold and its settlement. `settings.session_csrf_key` requires an envelope and
@@ -3124,8 +3127,8 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 
 | Export | Purpose |
 |---|---|
-| `Tenant.ReleaseSourceCredential` | Rechecks live source authority, sealed repository, enrollment, host confirmation and machine-owner consent, then commits C2's audit before returning the sealed team credential. |
-| `Tenant.SetSourceMachineConsent` | Changes a machine root's source-credential consent only for its current account owner in the same tenant. |
+| `Tenant.ReleaseSourceCredential` | Rechecks live source authority, sealed repository, enrollment, host confirmation and a Cloud or shared-runner executor (never a personal machine, decision 6c), then commits C2's audit before returning the sealed team credential. |
+| `Tenant.OwnerMachineClaimant` | Reports whether an award's root is the run requester or a personal machine the requester enrolled; `SetSourceMachineConsent` is superseded by decision 6c. |
 
 ### pkg/store/state_contract.go
 
@@ -3864,9 +3867,9 @@ and `SourceSpec` response declarations are removed. Their numeric-ID assertions
 now run through the release transaction and generated rename tests.
 
 The App and stored-credential paths share persisted source authority, fences and
-the audit writer. App tokens do not require machine-owner opt-in. Stored team
-credentials still require verified Cloud enrollment or the machine owner's
-consent. Both paths check the claim profile's Accept rule and require the root
+the audit writer. **Superseded by decision 6c (2026-10-18):** App tokens and stored team credentials
+both require verified Cloud placement or a shared runner, never a personal
+machine. Both paths check the claim profile's Accept rule and require the root
 machine in the same team, except for verified Cloud placement. The App path
 checks authority and lease again after provider I/O. Audit
 failure returns no token. An upstream token minted before a refused audit stays

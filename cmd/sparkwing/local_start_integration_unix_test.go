@@ -76,7 +76,18 @@ func TestRunStartsLocalControllerBeforeSubmitting(t *testing.T) {
 	}
 	read := exec.CommandContext(ctx, cli, "runs", "status", "--run", receipt.RunID, "-o=json")
 	read.Dir = root
-	if output, err := read.CombinedOutput(); err != nil {
-		t.Fatalf("started controller did not retain submitted run: %v\n%s", err, output)
+	var readErr strings.Builder
+	read.Stderr = &readErr
+	output, err = read.Output()
+	// runs status exits 3 for a run that has not finished, so the observed identity is the evidence.
+	var exit *exec.ExitError
+	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 3) {
+		t.Fatalf("started controller did not retain submitted run: %v\n%s\n%s", err, output, &readErr)
+	}
+	var observed struct {
+		ID string `json:"id"`
+	}
+	if decodeErr := json.NewDecoder(strings.NewReader(string(output))).Decode(&observed); decodeErr != nil || observed.ID != receipt.RunID {
+		t.Fatalf("started controller did not retain submitted run: %v, %v\n%s\n%s", err, decodeErr, output, &readErr)
 	}
 }

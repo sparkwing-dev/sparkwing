@@ -118,7 +118,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	}
 	for _, team := range []Team{"a", "neighbor_%'--"} {
 		payer := &Tenant{s: s, team: team}
-		if _, _, err := payer.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "fixture"}, *now); err != nil {
+		if _, _, err := payer.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "fixture"}, *now); err != nil {
 			t.Fatal(err)
 		}
 		checkout, err := payer.TestOnlyOpenCreditCheckout(t.Context(), 10000*MicroCreditsPerCent, *now, time.Hour)

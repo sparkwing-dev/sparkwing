@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,61 +12,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
-func FuzzRefreshPreservesInstalledSettings(f *testing.F) {
-	f.Add(false, []byte("credentials $USER 100%"))
-	f.Add(true, []byte("credentials $USER 100%"))
-	f.Fuzz(func(t *testing.T, darwin bool, value []byte) {
-		exec := &fakeExec{}
-		makeHost := linuxHost
-		if darwin {
-			makeHost = darwinHost
-		}
-		h := makeHost(t, exec)
-		state, err := Install(t.Context(), h)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := os.ReadFile(state.Path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		setting := "$USER 100% " + hex.EncodeToString(value)
-		args := []string{h.Binary, "start", "--config", filepath.Join(h.Home, "superseded.yaml"), "--config", h.ConfigPath, "--repos", "github.com/team/*", "--checkout", filepath.Join(h.Home, setting), "--output", "plain"}
-		installed, err := unitfile.RewriteCommand(h.GOOS, string(body), args, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		policy := "Environment=" + unitfile.Assignment("CUSTOM_SETTING", setting) + "\nRestartSec=17\n"
-		if darwin {
-			policy = "<key>CustomSetting</key><string>" + unitfile.XMLText(setting) + "</string>"
-			installed = strings.Replace(installed, "</dict>\n</plist>", policy+"</dict>\n</plist>", 1)
-		} else {
-			installed = strings.Replace(installed, "ExecStart=", "ExecStart=\nExecStart= \t\nExecStart=", 1)
-			installed += policy
-		}
-		if err := os.WriteFile(state.Path, []byte(installed), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		h.Binary = filepath.Join(h.Home, "updated $USER 100%", "sparkwing-runner")
-		state, err = Refresh(t.Context(), h)
-		if err != nil {
-			t.Fatal(err)
-		}
-		updated, err := os.ReadFile(state.Path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		args[0] = h.Binary
-		if !slices.Equal(unitfile.Arguments(h.GOOS, string(updated)), args) || !strings.Contains(string(updated), policy) || state.Binary != h.Binary || !slices.Equal(state.Arguments, args[1:]) {
-			t.Fatalf("refresh discarded installed settings: state=%+v body=%s", state, updated)
-		}
-		if inspected, err := Inspect(t.Context(), h); err != nil || inspected.Mismatch || inspected.Binary != h.Binary || !slices.Equal(inspected.Arguments, args[1:]) {
-			t.Fatalf("refreshed registration is unusable: %+v: %v", inspected, err)
-		}
-	})
+func refreshRegistration(ctx context.Context, h Host) (State, error) {
+	return State{}, RefreshRegistration(ctx, h)
 }
 
-func TestRefreshLeavesForeignAndOtherRegistrationsUntouched(t *testing.T) {
+func TestRefreshRegistrationLeavesForeignAndOtherRegistrationsUntouched(t *testing.T) {
 	for _, fixture := range []struct {
 		name string
 		host func(*testing.T, *fakeExec) Host
@@ -93,8 +42,9 @@ func TestRefreshLeavesForeignAndOtherRegistrationsUntouched(t *testing.T) {
 					t.Fatal(err)
 				}
 				exec.calls = nil
-				state, err := Refresh(t.Context(), h)
-				if err == nil || (foreign && !state.Foreign) || (!foreign && !state.Mismatch) {
+				err = RefreshRegistration(t.Context(), h)
+				state, inspectErr := Inspect(t.Context(), h)
+				if err == nil || inspectErr != nil || (foreign && !state.Foreign) || (!foreign && !state.Mismatch) {
 					t.Fatalf("refused registration=%+v err=%v", state, err)
 				}
 				after, err := os.ReadFile(path)
@@ -122,7 +72,7 @@ func TestServiceOperationsRefuseAnotherLoadedFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, operation := range []func(context.Context, Host) (State, error){Install, Refresh, Uninstall} {
+			for _, operation := range []func(context.Context, Host) (State, error){Install, refreshRegistration, Uninstall} {
 				calls := 0
 				h.Exec = func(context.Context, string, ...string) (string, error) {
 					calls++
@@ -140,50 +90,6 @@ func TestServiceOperationsRefuseAnotherLoadedFile(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestRefreshPreservesStoppedLaunchdRegistration(t *testing.T) {
-	exec := &fakeExec{}
-	h := darwinHost(t, exec)
-	if _, err := Install(t.Context(), h); err != nil {
-		t.Fatal(err)
-	}
-	exec.calls = nil
-	exec.fail = map[string]string{"launchctl print": "Could not find specified service"}
-	h.Binary = filepath.Join(h.Home, "updated-runner")
-	state, err := Refresh(t.Context(), h)
-	if err != nil || !state.Installed || state.Running {
-		t.Fatalf("stopped refresh=%+v %v", state, err)
-	}
-	if !slices.Equal(exec.calls, []string{"launchctl print gui/501/com.sparkwing.runner"}) {
-		t.Fatalf("started stopped runner: %v", exec.calls)
-	}
-	state, err = Inspect(t.Context(), h)
-	if err != nil || state.Binary != h.Binary {
-		t.Fatalf("updated registration=%+v %v", state, err)
-	}
-}
-
-func TestRefreshPreservesLoadedButStoppedLaunchdRegistration(t *testing.T) {
-	exec := &fakeExec{}
-	h := darwinHost(t, exec)
-	if _, err := Install(t.Context(), h); err != nil {
-		t.Fatal(err)
-	}
-	for _, output := range []string{"state = not running\n", "state = spawn scheduled\n", "unrecognized output"} {
-		var calls []string
-		h.Exec = func(_ context.Context, name string, args ...string) (string, error) {
-			calls = append(calls, name+" "+strings.Join(args, " "))
-			return "path = " + PlistPath(h) + "\n" + output, nil
-		}
-		state, err := Refresh(t.Context(), h)
-		if state.Running || (output == "unrecognized output" && err == nil) {
-			t.Fatalf("stopped registration=%+v err=%v", state, err)
-		}
-		if !slices.Equal(calls, []string{"launchctl print gui/501/com.sparkwing.runner"}) {
-			t.Fatalf("started a stopped registration: %v", calls)
-		}
 	}
 }
 
@@ -213,8 +119,8 @@ func TestRegistrationConfigUsesTheFinalFlag(t *testing.T) {
 				t.Fatal(err)
 			}
 			exec.calls = nil
-			state, err := Refresh(t.Context(), h)
-			if err == nil || !state.Mismatch || !strings.Contains(state.Detail, other) {
+			state, err := Inspect(t.Context(), h)
+			if err != nil || !state.Mismatch || !strings.Contains(state.Detail, other) {
 				t.Fatalf("conflicting config=%+v err=%v", state, err)
 			}
 			state, err = Uninstall(t.Context(), h)
@@ -245,8 +151,8 @@ func TestRegistrationConfigConsumesValuesUsingTheRunnerGrammar(t *testing.T) {
 			t.Fatal(err)
 		}
 		exec.calls = nil
-		state, err := Refresh(t.Context(), h)
-		if err == nil || !state.Mismatch || len(exec.calls) != 0 {
+		state, err := Inspect(t.Context(), h)
+		if err != nil || !state.Mismatch || len(exec.calls) != 0 {
 			t.Fatalf("consumed argument reinterpreted: %q %+v err=%v calls=%v", args, state, err, exec.calls)
 		}
 		after, err := os.ReadFile(UnitPath(h))
@@ -256,45 +162,12 @@ func TestRegistrationConfigConsumesValuesUsingTheRunnerGrammar(t *testing.T) {
 	}
 }
 
-func TestRefreshReportsEveryServiceManagerFailure(t *testing.T) {
-	for _, test := range []struct {
-		name, failure string
-		host          func(*testing.T, *fakeExec) Host
-	}{
-		{"reload", "systemctl --user daemon-reload", linuxHost},
-		{"restart", "systemctl --user try-restart", linuxHost},
-		{"inspect", "launchctl print", darwinHost},
-		{"unload", "launchctl bootout", darwinHost},
-		{"load", "launchctl bootstrap", darwinHost},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			exec := &fakeExec{}
-			h := test.host(t, exec)
-			if _, err := Install(t.Context(), h); err != nil {
-				t.Fatal(err)
-			}
-			exec.calls = nil
-			exec.fail = map[string]string{test.failure: "service manager refused"}
-			state, err := Refresh(t.Context(), h)
-			if err == nil || !state.Installed || !strings.Contains(err.Error(), "service manager refused") {
-				t.Fatalf("refresh failure=%+v %v", state, err)
-			}
-			if last := exec.calls[len(exec.calls)-1]; !strings.HasPrefix(last, test.failure) {
-				t.Fatalf("continued after failure: %v", exec.calls)
-			}
-			if _, err := os.Stat(state.Path); err != nil {
-				t.Fatalf("registration lost after failure: %v", err)
-			}
-		})
-	}
-}
-
 func TestServiceCancellationAndUnsupportedPlatform(t *testing.T) {
 	exec := &fakeExec{}
 	h := linuxHost(t, exec)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	for _, operation := range []func(context.Context, Host) (State, error){Install, Uninstall, Inspect, Refresh} {
+	for _, operation := range []func(context.Context, Host) (State, error){Install, Uninstall, Inspect, refreshRegistration} {
 		if _, err := operation(ctx, h); !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancellation=%v", err)
 		}
@@ -319,7 +192,7 @@ func TestServiceCancellationAndUnsupportedPlatform(t *testing.T) {
 		}
 		return "", want
 	}
-	if _, err := Refresh(ctx, h); !errors.Is(err, want) {
+	if err := RefreshRegistration(ctx, h); !errors.Is(err, want) {
 		t.Fatalf("manager failure lost: %v", err)
 	}
 }
@@ -340,7 +213,7 @@ func TestInspectRefusesMalformedManagedRegistration(t *testing.T) {
 			t.Fatal(err)
 		}
 		exec.calls = nil
-		for _, operation := range []func(context.Context, Host) (State, error){Inspect, Refresh, Uninstall} {
+		for _, operation := range []func(context.Context, Host) (State, error){Inspect, refreshRegistration, Uninstall} {
 			if _, err := operation(t.Context(), h); err == nil {
 				t.Fatalf("accepted malformed registration %q", command)
 			}

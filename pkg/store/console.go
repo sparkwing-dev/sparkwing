@@ -9,6 +9,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -69,9 +70,12 @@ func consoleTeamTx(ctx context.Context, tx *storeTx, name string) (*Tenant, erro
 	return t, nil
 }
 
+// OperatorReasonLimit is the most characters, counted as Unicode code points, an operator's reason carries.
+const OperatorReasonLimit = 500
+
 func consoleReason(reason string) (string, error) {
 	reason = strings.TrimSpace(reason)
-	if reason == "" || len(reason) > 500 {
+	if reason == "" || utf8.RuneCountInString(reason) > OperatorReasonLimit {
 		return "", authorityError(apierr.BadRequest, "reason is required, up to 500 characters")
 	}
 	return reason, nil
@@ -136,7 +140,7 @@ func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, re
 }
 
 // ConsoleUnfreeze releases a named hold or only operator holds when none is named.
-func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, hold, reason string) (TeamCreditFreeze, error) {
+func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, hold, reason string, noFault bool) (TeamCreditFreeze, error) {
 	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (TeamCreditFreeze, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
@@ -147,7 +151,7 @@ func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, 
 			return TeamCreditFreeze{}, err
 		}
 		hold = strings.TrimSpace(hold)
-		count, err := releaseCreditFreezesTx(ctx, tx, t.team, hold, hold == "", actor, reason, tx.now())
+		count, err := releaseCreditFreezesTx(ctx, tx, t.team, hold, hold == "", noFault, actor, reason, tx.now())
 		if err != nil {
 			return TeamCreditFreeze{}, err
 		}

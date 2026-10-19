@@ -11,13 +11,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// BillingWriter commits hosted-page reservations and budgets under current team authority.
+// BillingWriter commits hosted-page reservations, budgets and standing requests under current team authority.
 type BillingWriter interface {
 	Team() store.Team
 	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
 	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
 	RecordAuthorizedBillingPageFailure(context.Context, capability.Authorized, capability.BillingPage) error
 	SetAuthorizedSpendBudget(context.Context, capability.Authorized, int64) error
+	RequestAuthorizedStanding(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)
 }
 
 var _ BillingWriter = (*store.Tenant)(nil)
@@ -53,6 +54,7 @@ func (s *Server) billingWriter(r *http.Request, a capability.Authorized) (Billin
 func (s *Server) billingEndpoints() []Endpoint {
 	return []Endpoint{
 		{Method: "POST", Pattern: "/api/v1/team/billing/checkout", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamBillingCheckout},
+		{Method: "POST", Pattern: "/api/v1/team/billing/standing-request", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamStandingRequest},
 		{Method: "POST", Pattern: "/api/v1/team/billing/card", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamBillingCard},
 		{Method: "POST", Pattern: "/api/v1/team/billing/pay", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamBillingPay},
 		{Method: "PUT", Pattern: "/api/v1/team/billing/budget", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamBillingBudget},

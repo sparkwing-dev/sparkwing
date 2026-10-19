@@ -86,6 +86,7 @@ type ClaimRequest struct {
 // ClaimedUnit carries the one-time private execution award over authenticated transport.
 type ClaimedUnit struct {
 	SubmittedEnv           map[string][]byte             `json:"submitted_env,omitempty"`
+	OwnerMachine           bool                          `json:"owner_machine,omitempty"`
 	CloudResources         *match.Resources              `json:"cloud_resources,omitempty"`
 	Unit                   capability.UnitKind           `json:"unit"`
 	Purpose                capability.AwardPurpose       `json:"purpose"`

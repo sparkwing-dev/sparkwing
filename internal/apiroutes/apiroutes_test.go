@@ -170,8 +170,7 @@ func TestParseIdentityLinkEndpointsUsesNamedProof(t *testing.T) {
 
 func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
 	src := writeFile(t, "server.go", "s.sourceEndpoints()")
-	endpoints := `{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability},
-{Method: "PUT", Pattern: "/api/v1/tokens/{token}/git-credentials", Authentication: capability.AuthCapability},`
+	endpoints := `{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability},`
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "source_controller.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +178,7 @@ func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/source-credential", Scope: "source.read"}, {Method: "PUT", Path: "/api/v1/tokens/{token}/git-credentials", Scope: Authenticated}}
+	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/source-credential", Scope: "source.read"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("source registrations=%+v want=%+v", got, want)
 	}

@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -10,8 +11,9 @@ import (
 )
 
 type billingTrustReq struct {
-	Trust  string `json:"trust"`
-	Reason string `json:"reason"`
+	Trust           string `json:"trust"`
+	Reason          string `json:"reason"`
+	StandingRequest string `json:"standing_request,omitempty"`
 }
 
 type billingTrustJSON struct {
@@ -63,9 +65,11 @@ func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request, a
 	}
 	actor := authorized.Principal.Capability.Subject.ID
 	after, err := writer.ConsoleSetBillingTrust(r.Context(), authorized, store.BillingTrustChange{
-		Trust: trust, Actor: actor, Reason: req.Reason,
+		Trust: trust, Actor: actor, Reason: req.Reason, Request: strings.TrimSpace(req.StandingRequest),
 	})
 	switch {
+	case errors.Is(err, store.ErrStandingRequestClosed):
+		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	case errors.Is(err, store.ErrInvalidInput):
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	case err != nil:

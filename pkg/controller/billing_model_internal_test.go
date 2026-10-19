@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
@@ -274,7 +275,8 @@ func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler
 			t.Fatal(err)
 		}
 	}
-	verifier, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: capability.PaymentTest, APIKeyFile: key, WebhookSecretFile: secret})
+	provider := paymenttest.Provider{}.SettledCheckout("pi_fixture", false, "authenticated").SettledCheckout("payment", false, "authenticated")
+	verifier, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: capability.PaymentTest, APIKeyFile: key, WebhookSecretFile: secret, HTTPTransport: provider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +381,7 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 		t.Fatalf("card blocked prepay: %s", response.Body)
 	}
 	limits := body.Limits
-	if limits["standing"] != "High" || limits["cloud_vcpu"] != float64(512) || limits["max_job_seconds"] != float64(21600) {
+	if limits["standing"] != "Established" || limits["cloud_vcpu"] != float64(32) || limits["max_job_seconds"] != float64(14400) {
 		t.Fatalf("standing=%+v", limits)
 	}
 	for _, retired := range []string{"ceiling_cents", "daily_cap_cents", "credit_limit_cents"} {

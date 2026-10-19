@@ -8,7 +8,7 @@ Every `sparkwing update` command, flag, and argument, generated from the CLI's o
 
 Update the CLI binary
 
-Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action.
+Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. A CLI update reports that installed runner services update themselves from their controller; it does not restart them. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action.
 
 ### Flags
 
