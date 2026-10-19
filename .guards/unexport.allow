@@ -39,7 +39,7 @@ internal/gotoolchain	1
 internal/health	3
 internal/installsite	1
 internal/lease	2
-internal/license	5
+internal/license	4
 internal/limits	116
 internal/localsecrets	8
 internal/logpretty	6

@@ -33,8 +33,8 @@ const (
 	KindCloud Kind = "cloud"
 )
 
-// Kinds lists every declared kind in the order the flag documents them.
-func Kinds() []Kind { return []Kind{KindLocal, KindTeam, KindCloud} }
+// kinds lists every declared kind in the order the flag documents them.
+func kinds() []Kind { return []Kind{KindLocal, KindTeam, KindCloud} }
 
 // Store is the database a controller keeps its state in.
 type Store string
@@ -45,8 +45,8 @@ const (
 	StorePostgres Store = "postgres"
 )
 
-// Stores lists every declared store.
-func Stores() []Store { return []Store{StoreSQLite, StorePostgres} }
+// stores lists every declared store.
+func stores() []Store { return []Store{StoreSQLite, StorePostgres} }
 
 // KeyPair is a current key and the previous one kept for reading values
 // written before a rotation. A previous key without a current one is
@@ -157,7 +157,7 @@ func parseKind(raw string) (Kind, error) {
 	if raw == "" {
 		return KindLocal, nil
 	}
-	for _, k := range Kinds() {
+	for _, k := range kinds() {
 		if Kind(raw) == k {
 			return k, nil
 		}
@@ -169,7 +169,7 @@ func parseStore(raw string) (Store, error) {
 	if raw == "" {
 		return StoreSQLite, nil
 	}
-	for _, s := range Stores() {
+	for _, s := range stores() {
 		if Store(raw) == s {
 			return s, nil
 		}
