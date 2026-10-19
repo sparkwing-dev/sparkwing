@@ -875,3 +875,4 @@ Assigned to an Opus implementer (env 1087).
 - Teams can set their own spending limits on refills, per week and per month (for example "no more than $25 a week, $100 a month"). A refill that would exceed a limit is not made; credits then run down and Cloud work hard-stops at zero, with a notice naming the limit.
 - Larger, less frequent charges are preferred; smarter sizing for high-volume teams (for example suggesting about a week of recent usage) is a later improvement, not launch scope.
 - Standing tiers additionally cap refill size and frequency as a stolen-card brake. Korey agrees in principle; the lead proposes the specific per-tier values for ratification.
+- Ratified 2026-10-19 (decision 27 standing caps): New $50 per refill / 1 per day / $100 per week; Established $200 / 2 / $500; Trusted $1,000 / 3 / $3,000; High uses the team's own limits only. Plain constants; teams that outgrow them use the decision 11 tier request.
