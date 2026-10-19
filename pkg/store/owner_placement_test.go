@@ -280,3 +280,63 @@ func TestOwnerNodeReadsMatchTheSnapshotPlacementDecision(t *testing.T) {
 		t.Fatalf("missing node: %v", err)
 	}
 }
+
+func TestOwnerNodeReadsRefuseWhatTheSnapshotRefuses(t *testing.T) {
+	read := map[string]func(*Tenant, capability.AuthorityRef) error{
+		"nodes": func(tenant *Tenant, ref capability.AuthorityRef) error {
+			_, err := tenant.ReadOwnerNodes(t.Context(), ref, "run")
+			return err
+		},
+		"node": func(tenant *Tenant, ref capability.AuthorityRef) error {
+			_, err := tenant.ReadOwnerNode(t.Context(), ref, NodeRef{RunID: "run", NodeID: "job"})
+			return err
+		},
+	}
+	for name, readNodes := range read {
+		for _, change := range []string{"other_owner", "superseded_owner", "revoked_owner"} {
+			t.Run(name+"/"+change, func(t *testing.T) {
+				tenant, actor := ownerPlacementFixture(t)
+				s := tenant.s
+				ref := actor.Authority
+				switch change {
+				case "other_owner":
+					other := authorityRoot("other-owner", "a")
+					authorityPersist(t, s, other)
+					ref = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: other.Prefix}
+				case "superseded_owner":
+					rewriteSchemaExec(t, s.db, `UPDATE triggers SET generation=generation+1`)
+				case "revoked_owner":
+					member := authorityMember(t, s, "owner", RoleOwner)
+					if err := tenant.RevokeAuthority(t.Context(), member, ref); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if _, err := tenant.ReadOwnerSnapshot(t.Context(), ref, "run"); err == nil {
+					t.Fatal("fixture change did not refuse the full snapshot")
+				}
+				if err := readNodes(tenant, ref); err == nil {
+					t.Fatalf("%s read accepted a refused owner", name)
+				}
+			})
+		}
+	}
+}
+
+func TestOwnerNodeReadKeepsARefusedPlacementDecision(t *testing.T) {
+	tenant, actor := ownerPlacementFixture(t)
+	s := tenant.s
+	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{}})
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())
+	owner, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := tenant.ReadOwnerSnapshot(t.Context(), actor.Authority, "run")
+	if err != nil || len(snapshot.Nodes) == 0 || snapshot.Nodes[0].OwnerExecution == nil || OwnerCanExecute(owner)(snapshot.Nodes[0]) {
+		t.Fatalf("fixture did not refuse placement: %v", err)
+	}
+	node, err := tenant.ReadOwnerNode(t.Context(), actor.Authority, snapshot.Nodes[0].Ref)
+	if err != nil || node.OwnerExecution == nil || OwnerCanExecute(owner)(node) {
+		t.Fatalf("one-node read changed a refused placement decision: %+v %v", node.OwnerExecution, err)
+	}
+}

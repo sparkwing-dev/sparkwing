@@ -361,6 +361,12 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	if err != nil || row.NextDueAt == nil {
 		t.Fatalf("armed schedule: %+v %v", row, err)
 	}
+	// A consent saved before local schedules sealed host dispatch still fires a claimable run.
+	if result, err := st.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET consent_json=replace(consent_json,'"dispatch":"host"','"dispatch":"controller"') WHERE id=? AND consent_json LIKE '%"dispatch":"host"%'`, row.ID); err != nil {
+		t.Fatal(err)
+	} else if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		t.Fatalf("saved consent carries no host dispatch to age: %d %v", changed, err)
+	}
 	due := *row.NextDueAt
 	now = due.Add(-time.Nanosecond)
 	if _, err := manager.TickLocalSchedules(t.Context(), false); err != nil {
