@@ -751,7 +751,7 @@ Assigned to an Opus implementer (env 1087).
 
 2. Run anywhere (supersedes "Cloud triggers use controller dispatch" for unselected runs). A run or unit with no placement selection can be claimed by any eligible claimant.
    - Default ranking: (1) the machine that started the run (here); (2) the requester's other personal machines; (3) GitHub Actions runners; (4) self-hosted team runners; (5) the Cloud launcher. The launcher is eligible only when the team has billing enabled (prepaid funds, a saved card, or operator-granted credits).
-   - Each unit (plan step and every job) has its own 5-second window from readiness. If a claimant from the highest-ranked tier present in the ranking asks, it is awarded immediately. Otherwise, at the end of the window, the highest-ranked claimant that asked during the window wins. After the window, first eligible asker wins. A team that has never set a ranking uses the default ranking; a team that sets an empty ranking uses first-come, and a tier left out of a set ranking takes no unselected work. (Lead clarification 2026-10-18 of "if there is no ranking it's always first"; pending Korey ratification.)
+   - Each unit (plan step and every job) has its own 5-second window from readiness. If a claimant from the highest-ranked tier present in the ranking asks, it is awarded immediately. Otherwise, at the end of the window, the highest-ranked claimant that asked during the window wins. After the window, first eligible asker wins. A team that has never set a ranking uses the default ranking; a team that sets an empty ranking uses first-come, and a tier left out of a set ranking takes no unselected work. (Ratified by Korey 2026-10-18.)
    - Automatically started runs (push, PR, schedule) skip tiers 1-2 by default. A personal machine's owner may opt that machine in to the owner's automated runs (a per-machine setting, off by default).
    - The ranking is a per-team setting a team admin can change: reorder tiers or drop tiers. An explicit placement (`--runner`, pool requirement, App `runner:`) still pins the run and takes it out of run-anywhere.
    - Self-hosted runners, personal machines and Actions runners must be able to claim the plan unit too, not only jobs.
@@ -791,3 +791,7 @@ Assigned to an Opus implementer (env 1087).
 
 - Self-hosted controllers use run anywhere for unselected runs the same way Cloud does, without the Cloud tier. CLI triggers no longer run directly on the controller's host by host dispatch; the controller's host takes part as a self-hosted claimant, so a team with no runners online is still served.
 - The "here" tier is the authenticated machine that submitted the run (its machine credential identity sealed at intake), never a label. Lead ruling, recorded for ratification.
+
+## 2026-10-18 Korey decision 14: no-eligible-runner notice
+
+- A run-anywhere unit still waiting after its window with no eligible claimant shows a "no eligible runner" notice that names the cause: the team's ranking leaves a tier out (for example "Cloud is off in this team's runner ranking"), or the pipeline/job targets only a specific runner, pool or class ("this job targets pool=gpu only"), or no runner of the allowed tiers is online. Empty ranking = first come; never-set = default ranking; a dropped tier takes no unselected work. Ratified.
