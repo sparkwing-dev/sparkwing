@@ -512,6 +512,58 @@ func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, r
 	return commit.SHA, nil
 }
 
+// CommitAuthor returns the GitHub user ID linked to sha's author, or zero when GitHub links none.
+func (c *Client) CommitAuthor(ctx context.Context, installation int64, owner, repo, sha string) (int64, error) {
+	tok, err := c.InstallationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
+	if err != nil {
+		return 0, err
+	}
+	var commit struct {
+		SHA    string `json:"sha"`
+		Author *struct {
+			ID int64 `json:"id"`
+		} `json:"author"`
+	}
+	if err := c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/commits/"+url.PathEscape(sha), "Bearer "+tok.Token, &commit); err != nil {
+		return 0, err
+	}
+	if commit.SHA != sha || commit.Author == nil {
+		return 0, nil
+	}
+	return commit.Author.ID, nil
+}
+
+// CanRead reports whether the GitHub user id can read every repository, checked with the installation's token.
+func (c *Client) CanRead(ctx context.Context, installation, user int64, repos []string) (map[string]bool, error) {
+	names := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		_, name, _ := strings.Cut(repo, "/")
+		names = append(names, name)
+	}
+	tok, err := c.InstallationToken(ctx, installation, names, map[string]string{"metadata": "read"})
+	if err != nil {
+		return nil, err
+	}
+	var who struct {
+		Login string `json:"login"`
+	}
+	if err := c.getJSON(ctx, "/user/"+strconv.FormatInt(user, 10), "Bearer "+tok.Token, &who); err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, repo := range repos {
+		owner, name, _ := strings.Cut(repo, "/")
+		var permission struct {
+			Permission string `json:"permission"`
+		}
+		if err := c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name)+"/collaborators/"+url.PathEscape(who.Login)+"/permission", "Bearer "+tok.Token, &permission); err != nil {
+			return nil, err
+		}
+		out[repo] = who.Login != "" && permission.Permission != "" && permission.Permission != "none"
+	}
+	return out, nil
+}
+
 // RepositoryFileSnapshot reads one file at the current default-branch head
 // with a token restricted to this repository and contents:read. Found is false
 // only when GitHub confirms the file is absent at that commit.

@@ -414,10 +414,12 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
 		}},
-		{Path: "sparkwing runners automation", Authority: TeamCredential, Rules: []string{"Opt your personal machine in to your own automated runs (push, pull request, release and schedule), or out again. Machines start opted out. Only the machine's owner changes it. JSON and plain report the resulting setting."}, Flags: []Flag{
+		{Path: "sparkwing runners automation", Authority: TeamCredential, Rules: []string{"A personal machine takes its owner's automated runs (push, pull request, release, schedule) only after the owner requests it and a team administrator approves it. The owner passes --request with --session-stdin and an existing independent account session; an administrator passes --approve with a team-admin profile. --approve false or --request false revokes it, and revoking the machine ends it. An approved machine ranks as self-hosted for those runs. JSON and plain report none, requested or approved."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "runner", Argument: "RUNNER", Required: true},
-			{Name: "automated-runs", Argument: "BOOL", Values: []string{"true", "false"}, Required: true},
+			{Name: "request", Argument: "BOOL", Values: []string{"true", "false"}, Meaning: "As the machine's owner, request (true) or withdraw (false) automated runs."},
+			{Name: "approve", Argument: "BOOL", Values: []string{"true", "false"}, Meaning: "As a team administrator, approve (true) or revoke (false) the owner's request."},
+			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --request."},
 		}},
 		{Path: "sparkwing runners list", Authority: TeamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},

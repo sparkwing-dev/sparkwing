@@ -246,7 +246,11 @@ export interface TeamToken {
   last_used_at?: string;
   git_credentials?: boolean;
   metered?: boolean;
+  automation?: MachineAutomation;
 }
+
+// A personal machine's standing for its owner's automated runs.
+export type MachineAutomation = "none" | "requested" | "approved";
 
 // unixSecondsISO turns the controller's unix-second stamps into the ISO
 // string the time formatters read; Date takes milliseconds.

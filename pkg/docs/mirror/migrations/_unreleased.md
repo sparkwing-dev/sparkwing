@@ -2,26 +2,42 @@
 
 ## Runs without a runner selector run anywhere
 
-On Sparkwing Cloud, every trigger, App webhook run, schedule and child run
-that names no `--runner`, label, `here` or routed pool now runs anywhere. Any
-eligible claimant can take its plan step and each job. Before, CLI triggers and
-webhook runs waited for a self-hosted runner. The team's claim ranking orders
-claimants: `here`, `personal`, `github-actions`, `self-hosted`, then `cloud`.
-Each unit gives the best-ranked online claimant 5 seconds to take it. The Cloud
-launcher takes part only while the team has credits or a saved card. Runners
-now claim plan and evaluation units as well as triggers and jobs. Change the
-order with `sparkwing team settings set --profile work --claim-ranking
-cloud,self-hosted`; `none` means first come. Personal machines take automated
-runs only after their owner runs `sparkwing runners automation --profile work
---runner laptop --automated-runs true`. App automation and subscriptions take
-`runner: anywhere | cloud | github-actions | pool=<name>`, default `anywhere`.
-`cloud` now pins runs to the launcher. Set `github-actions` on repositories
-whose App runs a GitHub Actions workflow should own. `PUT
-/api/v1/team/settings` takes optional `members_can_add_machines` and
+On every controller, Cloud and self-hosted, each trigger, App webhook run,
+schedule and child run that names no `--runner`, label, `here` or routed pool
+now runs anywhere. Intake picks dispatch itself and ignores a client-supplied
+`dispatch`. Any eligible claimant can take its plan step, generator evaluations
+and each job; a local controller's own queue counts as a self-hosted runner.
+Before, CLI triggers and webhook runs waited for a self-hosted runner, and
+self-hosted controllers hosted CLI triggers whole. The team's claim ranking
+orders claimants: `here` (the personal runner on the machine whose CLI started
+the run), `personal`, `github-actions`, `self-hosted`, then `cloud`. Each unit
+gives the best-ranked online claimant 5 seconds, then the best-ranked claimant
+that asked during that window 2 more seconds. A job that requires a `pool=`,
+`name=` or `class=` term skips the ranking. The Cloud launcher takes part only
+while the team has credits or a saved card. Runners now claim plan and
+evaluation units as well as triggers and jobs. Change the order with
+`sparkwing team settings set --profile work --claim-ranking cloud,self-hosted`;
+`none` means first come.
+
+Personal machines take automated runs (App and schedule) only after their owner
+requests it with `sparkwing runners automation --profile work --runner laptop
+--request true --session-stdin` and a team administrator approves it with
+`--approve true`. The approved machine then takes only its owner's automated
+runs, in repositories the owner's linked GitHub account can read, and ranks as
+`self-hosted` for them. An App run's owner is the commit or pull request author,
+no longer the event's sender. The former owner toggle (`--automated-runs`,
+`{"automated_runs": ...}`) is removed with no alias. OIDC tokens minted on a
+personal machine carry `runner_kind=personal`.
+
+App automation and subscriptions take `runner: anywhere | cloud | github-actions
+| pool=<name>`, default `anywhere`. `cloud` now pins runs to the launcher. Set
+`github-actions` on repositories whose App runs a GitHub Actions workflow should
+own. `PUT /api/v1/team/settings` takes optional `members_can_add_machines` and
 `claim_ranking` fields, and the plain output of `sparkwing team settings show`
-adds the ranking. The schema baseline moves to version 11, so recreate the
+adds the ranking. The schema baseline moves to version 12, so recreate the
 database. Unclaimed runs carry an `unclaimed_work` notice, Cloud work held by
-the team's credits carries a `credit_hold` notice instead, and
+the team's credits carries a `credit_hold` notice instead, work no eligible
+runner can take carries a `no_eligible_runner` notice naming the cause, and
 `sparkwing_claim_empty_total` counts claim polls that matched nothing.
 
 ## Job outputs holding a secret are withheld

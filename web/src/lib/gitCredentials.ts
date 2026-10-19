@@ -241,3 +241,25 @@ export async function setMachineGitCredentials(
   const body = (await res.json()) as { enabled?: boolean };
   return body.enabled === true;
 }
+
+// requestMachineAutomation is the owner's request or withdrawal of automated runs for a personal machine.
+export async function requestMachineAutomation(runner: string, requested: boolean): Promise<string> {
+  const res = await send(
+    "PUT",
+    `/api/v1/runners/${seg(runner)}/automation`,
+    requested ? "Request automated runs" : "Withdraw automated runs",
+    { requested },
+  );
+  return ((await res.json()) as { state?: string }).state ?? "none";
+}
+
+// approveMachineAutomation is a team administrator's approval or revocation.
+export async function approveMachineAutomation(runner: string, approved: boolean): Promise<string> {
+  const res = await send(
+    "PUT",
+    `/api/v1/runners/${seg(runner)}/automation/approval`,
+    approved ? "Approve automated runs" : "Revoke automated runs",
+    { approved },
+  );
+  return ((await res.json()) as { state?: string }).state ?? "none";
+}

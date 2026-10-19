@@ -88,6 +88,7 @@ func NewScheduleManager(options EngineOptions) (controllerwire.ScheduleManager, 
 func NewScheduleRepositoryManager(options EngineOptions) (controllerwire.ScheduleRepositoryManager, error)
 func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, error)
 func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, session string) (RunnerTokenManager, error)
+func NewSessionTeamSettingsClient(ctx context.Context, options EngineOptions, session string) (*TeamSettingsClient, error)
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error)
 func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (source.Access, error)
 func NewTeamSettingsClient(options EngineOptions) (*TeamSettingsClient, error)
@@ -122,8 +123,10 @@ type RunnerTokenManager interface {
 }
 func SweepLocalSessions(ctx context.Context, options EngineOptions, dryRun bool) ([]wingd.LocalDoctorFinding, error)
 type TeamSettingsClient struct{}
+func (c *TeamSettingsClient) ApproveMachineAutomation(ctx context.Context, runner string, approved bool) (controllerwire.MachineAutomation, error)
 func (c *TeamSettingsClient) ReadTeamSettings(ctx context.Context) (controllerwire.TeamSettings, error)
-func (c *TeamSettingsClient) SetTeamSettings(ctx context.Context, settings controllerwire.TeamSettings) (controllerwire.TeamSettings, error)
+func (c *TeamSettingsClient) RequestMachineAutomation(ctx context.Context, runner string, requested bool) (controllerwire.MachineAutomation, error)
+func (c *TeamSettingsClient) SetTeamSettings(ctx context.Context, settings controllerwire.TeamSettingsUpdate) (controllerwire.TeamSettings, error)
 func UploadSourceSnapshot(ctx context.Context, options EngineOptions, publication source.Publication) (digestResult string, resultErr error)
 
 # methods on un-declared receiver types (likely a bug)

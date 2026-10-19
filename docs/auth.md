@@ -317,9 +317,16 @@ tiers from `here`, `personal`, `github-actions`, `self-hosted` and `cloud`, and
 an empty list means first come. Changes and their actor, store time and old/new
 values commit with an audit event.
 
-`PUT /api/v1/runners/{runner}/automation {"automated_runs": true}` opts a
-personal machine in to its owner's automated runs. Only the machine's owner can
-change it, and machines start opted out. Audit failure rolls back the setting. Administrators can use
+`PUT /api/v1/runners/{runner}/automation {"requested": true}` asks for a
+personal machine to take its owner's automated runs. Only the machine's owner
+can ask or withdraw, and only with a direct account session, never a stored
+token. `PUT /api/v1/runners/{runner}/automation/approval {"approved": true}`
+requires `team.admin` and approves an outstanding request; `false` revokes the
+approval and the request. Both answer `{runner, state}` with state `none`,
+`requested` or `approved`, and the machine inventory reports the same state.
+Requests, withdrawals, approvals and revocations each commit with an audit
+event. The approval is keyed by the machine's credential, so revoking the
+machine ends it. Administrators can use
 the console's team settings or `sparkwing team settings set --profile work
 --members-can-add-machines false`. Members can read it with `team settings show`.
 

@@ -62,7 +62,7 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 | `team` | The run's team slug. |
 | `pipeline` | The pipeline name. |
 | `trigger` | `push`, `pull_request`, `cron` or `manual`, described below. |
-| `runner_kind` | `runner`, `github-actions`, `user` or `service`, described below. |
+| `runner_kind` | `runner`, `personal`, `github-actions`, `user` or `service`, described below. |
 | `ref` | `refs/pull/<number>/head` for a pull request; `refs/tags/<tag>` for a tag push; otherwise `refs/heads/<branch>` when the run names a branch; absent when it names none. |
 | `sha` | The commit the run names; absent when it names none. |
 | `repository` | `<host>/<owner>/<name>`, for example `github.com/acme/api`, when the run names a repository; absent otherwise. |
@@ -101,7 +101,7 @@ The controller vouches for the team: it comes from the claimed run's row. The ot
   - `pull_request`: a verified GitHub `pull_request` delivery. The `ref` is `refs/pull/<number>/head` whatever the head branch is called, and the `sha` is the head commit. Pull requests from forks never run.
   - `cron`: a schedule on this controller launched the run. That proves the controller started it, not that anyone reviewed it: any principal with `runs.control` can create a schedule, point it at any branch, and fire it at once.
   - `manual`: every other start, including the CLI, the dashboard, the API and a retry. Its `pipeline`, `ref`, `sha` and `repository` are whatever the submitter sent.
-- `runner_kind` names the credential that holds the claim: `runner` for a runner token, `github-actions` for the credential a GitHub Actions job received through the [runner exchange](github-actions-runners.md), `user` for a person's token or session, which is how a laptop run reaches the controller, and `service` for a service token.
+- `runner_kind` names the credential that holds the claim: `runner` for a shared runner token, `personal` for a member's personal machine (including one approved for automated runs), `github-actions` for the credential a GitHub Actions job received through the [runner exchange](github-actions-runners.md), `user` for a person's token or session, which is how a laptop run reaches the controller, and `service` for a service token.
 
 A deploy role should therefore require one repository, `trigger:push` on a protected branch, and `runner:runner`, for example `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`. Branch protection on that repository then decides what reaches `main`; the protection of another repository that subscribes the same pipeline name does not matter, because its runs carry a different `repository_id`. A policy that leaves the repository open, such as `team:acme:repository_id:*:pipeline:deploy:...`, accepts a push to `main` of any repository the team subscribes, and so trusts the weakest branch protection among them. Data records retain their repository, ref and provenance. The controller
 authorizes every reference edge. Manual publication retains local provenance,

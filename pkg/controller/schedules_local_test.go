@@ -388,6 +388,9 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	if sealed.Request.Hash == "" || !sealed.Request.AdmittedAt.Equal(due) || request.Origin != runspec.OriginSchedule || request.Source.Entrypoint != "CI" || request.Source.Ref != request.Git.SHA || request.Source.RequestedRef != "origin/main" || request.Source.Location.LocalCheckout != checkout || request.Env.Digest == "" || request.Actor.ID == "" || request.Git.App.Set || !strings.HasPrefix(request.Actor.ID, "local:") {
 		t.Fatalf("schedule lost sealed source or authority: %+v", sealed.Request)
 	}
+	if request.Dispatch != runspec.DispatchController {
+		t.Fatalf("local schedule sealed %s dispatch; unselected schedules run anywhere", request.Dispatch)
+	}
 	fires, err := tenant.ListCronFires(t.Context(), row.ID, 10)
 	if err != nil || len(fires) != 1 || fires[0].RunID != sealed.ID || !fires[0].DueAt.Equal(due) {
 		t.Fatalf("fire history: %+v %v", fires, err)

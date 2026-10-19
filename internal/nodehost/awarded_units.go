@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Plan accepts a Cloud plan under its planning lease and leaves scheduling to the controller.
+// Plan accepts a controller-owned run's plan under its planning lease and leaves scheduling to the controller.
 func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted AcceptedRun, err error) {
 	if err := h.unitReady(input); err != nil {
 		return accepted, err

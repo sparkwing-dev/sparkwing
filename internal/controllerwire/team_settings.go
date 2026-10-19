@@ -13,8 +13,18 @@ type TeamSettingsUpdate struct {
 	ClaimRanking          *[]string `json:"claim_ranking,omitempty"`
 }
 
-// MachineAutomation is a personal machine's opt-in to its owner's automated runs.
+// MachineAutomation reports a personal machine's standing for its owner's automated runs: none, requested or approved.
 type MachineAutomation struct {
-	Runner        string `json:"runner"`
-	AutomatedRuns bool   `json:"automated_runs"`
+	Runner string `json:"runner"`
+	State  string `json:"state"`
+}
+
+// MachineAutomationRequest is the owner's request or withdrawal.
+type MachineAutomationRequest struct {
+	Requested *bool `json:"requested"`
+}
+
+// MachineAutomationApproval is a team administrator's approval or revocation.
+type MachineAutomationApproval struct {
+	Approved *bool `json:"approved"`
 }

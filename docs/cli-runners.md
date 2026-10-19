@@ -11,7 +11,7 @@ Manage runners
 ### Subcommands
 
 - `add` -- Register a runner
-- `automation` -- Opt a personal machine in to your automated runs
+- `automation` -- Request or approve a personal machine's automated runs
 - `list` -- List runners and their capacity
 - `remove` -- Remove a runner
 
@@ -53,9 +53,9 @@ Shared runner registration requires team administration. --personal registers ca
 
 ## `sparkwing runners automation`
 
-Opt a personal machine in to your automated runs
+Request or approve a personal machine's automated runs
 
-Opt your personal machine in to your own automated runs (push, pull request, release and schedule), or out again. Machines start opted out. Only the machine's owner changes it. JSON and plain report the resulting setting.
+A personal machine takes its owner's automated runs (push, pull request, release, schedule) only after the owner requests it and a team administrator approves it. The owner passes --request with --session-stdin and an existing independent account session; an administrator passes --approve with a team-admin profile. --approve false or --request false revokes it, and revoking the machine ends it. An approved machine ranks as self-hosted for those runs. JSON and plain report none, requested or approved.
 
 ### Flags
 
@@ -67,7 +67,9 @@ Opt your personal machine in to your own automated runs (push, pull request, rel
 | `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
 | `--runner RUNNER` | Runner name or selection. (required) |
-| `--automated-runs BOOL` | automated runs Values: true, false. (required) |
+| `--request BOOL` | As the machine's owner, request (true) or withdraw (false) automated runs. Values: true, false. |
+| `--approve BOOL` | As a team administrator, approve (true) or revoke (false) the owner's request. Values: true, false. |
+| `--session-stdin` | Read an existing independent account session from stdin without saving it; required with --request. |
 
 ## `sparkwing runners list`
 

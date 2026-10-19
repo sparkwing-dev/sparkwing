@@ -53,9 +53,6 @@ type githubAppDelivery struct {
 		AppID int64 `json:"app_id"`
 	} `json:"installation"`
 	Repository githubAppRepoRef `json:"repository"`
-	Sender     struct {
-		ID int64 `json:"id"`
-	} `json:"sender"`
 }
 
 type githubAppRun struct {
@@ -377,13 +374,14 @@ type githubAppPullRequestPayload struct {
 			Repo *githubAppRepoRef `json:"repo"`
 		} `json:"base"`
 		User struct {
+			ID    int64  `json:"id"`
 			Login string `json:"login"`
 		} `json:"user"`
 	} `json:"pull_request"`
 }
 
 type githubAppIntake struct {
-	sender int64
+	author int64
 	user   string
 	branch string
 	tag    string
@@ -465,6 +463,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 				TagName     string `json:"tag_name"`
 				PublishedAt string `json:"published_at"`
 				Author      struct {
+					ID    int64  `json:"id"`
 					Login string `json:"login"`
 				} `json:"author"`
 			} `json:"release"`
@@ -485,7 +484,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		if parsed, err := time.Parse(time.RFC3339, p.Release.PublishedAt); err == nil {
 			at = parsed
 		}
-		return githubAppIntake{user: p.Release.Author.Login, branch: p.Release.TagName, env: base, at: at}, "", nil
+		return githubAppIntake{author: p.Release.Author.ID, user: p.Release.Author.Login, branch: p.Release.TagName, env: base, at: at}, "", nil
 	}
 	if event == "create" || event == "delete" {
 		var p struct {
@@ -562,7 +561,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		updated = time.Time{}
 	}
 	return githubAppIntake{
-		user: pr.User.Login, branch: pr.Head.Ref, sha: pr.Head.SHA, env: base, at: updated,
+		author: pr.User.ID, user: pr.User.Login, branch: pr.Head.Ref, sha: pr.Head.SHA, env: base, at: updated,
 		prInfo: PullRequestForTrigger(base),
 	}, "", nil
 }
@@ -637,7 +636,6 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	intake, skip, err := githubAppIntakeFor(event, env, body)
-	intake.sender = env.Sender.ID
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode %s payload: %w", event, err))
 		return
@@ -1114,12 +1112,12 @@ func (s *Server) startGitHubAppRun(
 	key := runspec.RepoKey(fmt.Sprintf("gh:%d", repo.ID))
 	defaultBranch := in.env[EnvDefaultBranch]
 	request := runspec.Request{
-		Version: 1, Team: string(tenant.Team()), Pipeline: plan.pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,
+		Version: 1, Team: string(tenant.Team()), Pipeline: plan.pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginApp,
 		Actor: runspec.Actor{Kind: "github", ID: in.user, Display: in.user},
 		Git: runspec.Git{
 			Repository: runspec.Repository{Key: key, Display: repo.Slug()}, Ref: ref, SHA: in.sha,
 			DefaultBranch: runspec.Optional[string]{Set: defaultBranch != "", Value: defaultBranch},
-			App:           runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: in.env["GITHUB_EVENT_NAME"], Action: in.env["GITHUB_ACTION"], DeliveryKey: githubAppDeliveryDigest(body), InstallationID: installation.InstallationID, RepositoryID: repo.ID, Ref: ref, SHA: in.sha, DefaultBranch: defaultBranch, DefaultBranchPush: in.env["GITHUB_EVENT_NAME"] == "push" && ref == "refs/heads/"+defaultBranch, SenderID: in.sender, VerifiedAt: now}},
+			App:           runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: in.env["GITHUB_EVENT_NAME"], Action: in.env["GITHUB_ACTION"], DeliveryKey: githubAppDeliveryDigest(body), InstallationID: installation.InstallationID, RepositoryID: repo.ID, Ref: ref, SHA: in.sha, DefaultBranch: defaultBranch, DefaultBranchPush: in.env["GITHUB_EVENT_NAME"] == "push" && ref == "refs/heads/"+defaultBranch, AuthorID: s.githubAppAuthor(r.Context(), installation.InstallationID, repo, in), VerifiedAt: now}},
 		},
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/" + repo.Slug() + ".git", PipelineDir: ".sparkwing"}},
 	}
@@ -1151,4 +1149,16 @@ func (s *Server) startGitHubAppRun(
 		s.recordQueueActivity(now)
 	}
 	return githubAppRun{Pipeline: plan.pipeline, RunID: result.RunID, Status: status}, nil
+}
+
+func (s *Server) githubAppAuthor(ctx context.Context, installation int64, repo store.GitHubRepo, in githubAppIntake) int64 {
+	if in.author > 0 || in.env["GITHUB_EVENT_NAME"] != githubEventPush || in.sha == "" {
+		return in.author
+	}
+	author, err := s.githubApp.client.CommitAuthor(ctx, installation, repo.Owner, repo.Name, in.sha)
+	if err != nil {
+		s.logger.Warn("github app commit author lookup failed", "repo", repo.Slug(), "err", err)
+		return 0
+	}
+	return author
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strconv"
@@ -105,6 +106,9 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	}
 	transport.HTTP = runtimeConfig.Controller.HTTP
 	runtimeConfig.Controller, runtimeConfig.Loop, runtimeConfig.Repositories = transport, loop, repositories
+	if runtimeConfig.OnError == nil {
+		runtimeConfig.OnError = func(err error) { slog.Error("runner unit failed", "err", err) }
+	}
 	runner, err := runners.NewManagedRunner(ctx, runtimeConfig)
 	if err != nil {
 		return err
@@ -254,10 +258,10 @@ func warmOptions(options RunnerOptions, fs *flag.FlagSet) (RunnerOptions, error)
 		return options, errors.New("runner must claim jobs, triggers or both")
 	}
 	if claimTriggers {
-		options.Loop.Kinds = append(options.Loop.Kinds, capability.UnitTrigger)
+		options.Loop.Kinds = append(options.Loop.Kinds, capability.UnitTrigger, capability.UnitPlan)
 	}
 	if claimJobs {
-		options.Loop.Kinds = append(options.Loop.Kinds, capability.UnitNode)
+		options.Loop.Kinds = append(options.Loop.Kinds, capability.UnitEval, capability.UnitNode)
 	}
 	if fs.Changed("deadline") {
 		value, err := time.ParseDuration(textFlag(fs, "deadline"))

@@ -66,7 +66,7 @@ func TestTrigger_RecordsARunForRunnersToClaim(t *testing.T) {
 	f := newFloodServer(t, controller.FloodPolicy{})
 	created := floodRun(t, f.submit(f.token, "demo", fortyHex(1)), 201)
 	var units int
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM triggers WHERE team='default' AND id=? AND unit_kind='trigger' AND claimed_by IS NULL`, created.RunID).Scan(&units); err != nil || units != 1 {
+	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM triggers WHERE team='default' AND id=? AND unit_kind='plan' AND claimed_by IS NULL`, created.RunID).Scan(&units); err != nil || units != 1 {
 		t.Fatalf("claimable units=%d: %v", units, err)
 	}
 }

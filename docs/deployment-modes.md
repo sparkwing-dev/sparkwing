@@ -49,22 +49,39 @@ Add `--working-tree` to submit an immutable snapshot of tracked and unignored
 untracked files. The controller stores the bundle and seals its digest. Awarded
 workers acquire that exact source through their claim authority.
 
-A trigger, webhook run or schedule that selects no runner runs anywhere: any
-eligible claimant can take its plan step and each job. The team's claim
-ranking orders the claimants, best first: `here` (the machine that started the
-run), `personal` (the requester's own machines), `github-actions`,
-`self-hosted` (the team's shared runners) and `cloud` (the launcher). Each unit
-waits up to 5 seconds from readiness for the best-ranked claimant that is
-online. The best-ranked claimant present takes it at once. Otherwise, when the
-window closes, the best-ranked claimant that asked during it has 5 more
-seconds to take the unit. After that, the first eligible asker wins. The
-launcher takes part only while the team has credits or a saved card. Runs
-started by a push, pull request, release or schedule skip `here` and
-`personal`. A machine's owner opts it in to their own automated runs:
+A trigger, webhook run or schedule that selects no runner runs anywhere, on
+Cloud and on self-hosted controllers alike: any eligible claimant can take its
+plan step, generator evaluations and each job. The team's claim ranking orders
+the claimants, best first: `here` (the personal runner on the machine whose
+CLI started the run), `personal` (the requester's own machines),
+`github-actions`, `self-hosted` (the team's shared runners and a local
+controller's own queue) and `cloud` (the launcher, absent on self-hosted
+controllers). Each unit waits up to 5 seconds from readiness for the
+best-ranked claimant that is online. The best-ranked claimant present takes it
+at once. A claimant that asks while a better one is online is recorded. When
+the window closes, the best-ranked recorded asker has 2 more seconds to come
+back. After that, the first eligible asker wins. The launcher takes part only
+while the team has credits or a saved card. A job that requires a `pool=`,
+`name=` or `class=` term skips the ranking and goes to the runners it names.
+
+Runs started by a push, pull request, release or schedule skip `here` and
+`personal`. A personal machine takes them only after its owner requests it and
+a team administrator approves. The owner requests with their own account
+session, not a stored token:
 
 ```bash
-sparkwing runners automation --profile work --runner laptop --automated-runs true
+sparkwing runners automation --profile work --runner laptop --request true --session-stdin
+sparkwing runners automation --profile work --runner laptop --approve true
 ```
+
+An approved machine ranks as `self-hosted` for automated runs and takes only
+its owner's: schedules the owner armed, and App runs whose commit or pull
+request author is the owner's linked GitHub account (the sender of the event
+does not count). The owner's GitHub login must also be able to read the run's
+repository and every extra repository. The controller checks that through the
+GitHub App before each claim and caches the answer for 10 minutes. Revoking
+the machine or running `--approve false` ends the approval. The console's
+Machines page shows the same request and approval controls.
 
 A team administrator reorders or drops tiers. A dropped tier takes no
 unselected work, and `none` means first come:
@@ -83,7 +100,10 @@ a notice in `sparkwing runs status`. When only metered Cloud placement could
 take that work and the team has no credits or payment method left, the notice
 is `credit_hold` instead, naming the hold, and the launcher takes the work as
 soon as credits or a card arrive. Work an unmetered runner of the team could
-take keeps the `unclaimed_work` notice.
+take keeps the `unclaimed_work` notice. When no eligible runner is online at
+all, the notice is `no_eligible_runner` and names why: a tier the ranking drops
+("Cloud is off in this team's runner ranking"), a pin ("this job targets
+pool=gpu only"), or that no runner of the allowed tiers is online.
 
 ## Self-hosted runners
 

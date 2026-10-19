@@ -143,7 +143,7 @@ func TestSourceCredential_AppScheduleUsesLiveAutomationConsent(t *testing.T) {
 	}
 	machine, _ := f.teamRunner(owner, "schedule-host")
 	var award controllerwire.ClaimResponse
-	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitTrigger, admitted.RunID, ""), &award); code != http.StatusOK || award.Claim == nil || award.Claim.Request.Request.Git.App.Set || award.Claim.Request.Request.Git.DefaultBranch.Set {
+	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitPlan, admitted.RunID, ""), &award); code != http.StatusOK || award.Claim == nil || award.Claim.Request.Request.Git.App.Set || award.Claim.Request.Request.Git.DefaultBranch.Set {
 		t.Fatalf("schedule award=%+v status=%d", award, code)
 	}
 	claim := "Bearer " + award.Claim.Capability

@@ -42,6 +42,8 @@ type CreateRunRequest struct {
 	Request        runspec.Request   `json:"request"`
 	IdempotencyKey string            `json:"idempotency_key"`
 	LocalSecrets   map[string]string `json:"local_secrets,omitempty"`
+	// OriginMachine is the submitting machine's own runner credential, presented once so intake can seal that machine.
+	OriginMachine string `json:"origin_machine,omitempty"`
 }
 
 // CreateRunResponse returns the accepted run and any first-intake here bearer.

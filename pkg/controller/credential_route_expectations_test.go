@@ -116,6 +116,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"PUT", "/api/v1/team/settings", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"DELETE", "/api/v1/runners/{runner}", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"PUT", "/api/v1/runners/{runner}/automation", "controller", "team", "capability", []string{"unbound_member_or_local|runs.write|none|credential"}},
+		{"PUT", "/api/v1/runners/{runner}/automation/approval", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"POST", "/api/v1/runners/github", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"DELETE", "/api/v1/runners/github/{repository}", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"POST", "/api/v1/pools/{pool}/rules", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},

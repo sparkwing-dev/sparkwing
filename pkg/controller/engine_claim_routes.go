@@ -88,6 +88,7 @@ func (s *Server) claimHandler(engine *EngineController) func(http.ResponseWriter
 			return nil
 		}
 		ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
+		s.refreshPersonalRepoAccess(ctx, a.Principal.Capability)
 		response, err := engine.Claim(ctx, a, body)
 		if response.Claim != nil {
 			s.recordQueueActivity(time.Now())

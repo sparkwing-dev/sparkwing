@@ -68,7 +68,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if override := s.logRetention[team]; override > 0 {
 		days = override
 	}
-	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days, CloudDispatch: s.cloudDeployment}
+	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
 	if request.Authority.Kind == "schedule" {
 		location, err := store.VerifiedScheduleIntake(ctx, resolver, request)
 		facts.SourceLocation = &location

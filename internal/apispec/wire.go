@@ -135,7 +135,8 @@ func wireOperations() map[string]wireOperation {
 	}
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", client.EnrollRunnerRequest{}, client.CreatedToken{})
 	result["GET /api/v1/team/settings"] = operation("Read team machine enrollment settings and claim ranking", nil, wire.TeamSettings{})
-	result["PUT /api/v1/runners/{runner}/automation"] = operation("Opt the caller's personal machine in to the caller's automated runs", wire.MachineAutomation{}, wire.MachineAutomation{})
+	result["PUT /api/v1/runners/{runner}/automation"] = operation("Request or withdraw automated runs for the caller's personal machine", wire.MachineAutomationRequest{}, wire.MachineAutomation{})
+	result["PUT /api/v1/runners/{runner}/automation/approval"] = operation("Approve or revoke a personal machine's automated runs", wire.MachineAutomationApproval{}, wire.MachineAutomation{})
 	result["PUT /api/v1/team/settings"] = operation("Change and audit team machine enrollment settings and claim ranking", wire.TeamSettingsUpdate{}, wire.TeamSettings{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
 	result["POST /api/v1/data/records"] = operation("Commit a record", wire.DataRecordWriteRequest{}, wire.DataRecord{})

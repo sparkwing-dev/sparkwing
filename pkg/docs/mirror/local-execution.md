@@ -472,9 +472,12 @@ Turning the setting off preserves registered machines and their owner-only
 claim scope. An administrator can revoke a machine explicitly.
 
 A personal machine takes your own runs that select no runner, ranked under the
-team's claim ranking. Runs started by a push, pull request, release or schedule
-reach it only after you opt it in with
-`sparkwing runners automation --profile work --runner NAME --automated-runs true`.
+team's claim ranking. A run you trigger from this machine ranks it `here`. Runs
+started by a push, pull request, release or schedule reach it only after you
+request it with
+`sparkwing runners automation --profile work --runner NAME --request true --session-stdin`
+and a team administrator approves with `--approve true`. It then takes only
+runs you own, in repositories your linked GitHub account can read.
 
 Cloud routing requires an attached terminal session. The default local route
 continues to support `--sw-detached`.

@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -75,6 +79,9 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 	if err != nil {
 		return err
 	}
+	if request.OriginMachine, err = localRunnerCredential(options.URL); err != nil {
+		return err
+	}
 	return submitTriggeredRun(ctx, request, flags.detach, flags.output, out, triggerSubmission{
 		Controller: controller,
 		here: func(ctx context.Context, response controllerwire.CreateRunResponse) error {
@@ -90,4 +97,27 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 			return outcome, errors.Join(followErr, err)
 		},
 	})
+}
+
+func localRunnerCredential(controllerURL string) (string, error) {
+	path, err := agentConfigPath("")
+	if err != nil {
+		return "", err
+	}
+	section, err := userconfig.Node(path, userconfig.Runner)
+	if err != nil || section == nil {
+		return "", err
+	}
+	var runner userconfig.RunnerConfig
+	if err := section.Decode(&runner); err != nil {
+		return "", err
+	}
+	if runner.Controller == nil || runner.CredentialsDir == nil || strings.TrimRight(*runner.Controller, "/") != strings.TrimRight(controllerURL, "/") {
+		return "", nil
+	}
+	bearer, err := os.ReadFile(filepath.Join(*runner.CredentialsDir, "agent-token"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	return strings.TrimSpace(string(bearer)), err
 }

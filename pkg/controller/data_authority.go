@@ -47,7 +47,13 @@ func validateDataAuthority(a capability.Authorized, authority blob.Authority) er
 		return nil
 	}
 	i := authority.Upload.Value
-	if scope.Use == capability.DataRemoteCache || scope.Use == capability.DataExpansion || i.Team != c.Team || i.RunID == "" ||
+	if scope.Use == capability.DataExpansion {
+		if c.Unit != capability.UnitEval || i.Kind != blob.UploadOwnerUnit || i.Team != c.Team || i.RunID != scope.RunID || i.CapabilityRef != authority.CapabilityRef || !i.Unit.Set || i.Unit.Value.ID != c.UnitID {
+			return dataForbidden()
+		}
+		return nil
+	}
+	if scope.Use == capability.DataRemoteCache || i.Team != c.Team || i.RunID == "" ||
 		i.RunID != scope.RunID || i.Principal != authority.Principal || i.CapabilityRef != authority.CapabilityRef ||
 		scope.WriteRef == "" || authority.Ref.Scope.CapabilityScope() != scope.WriteRef || c.Delivery == capability.DeliveryBootstrap {
 		return dataForbidden()

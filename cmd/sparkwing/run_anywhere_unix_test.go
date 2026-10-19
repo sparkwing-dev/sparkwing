@@ -176,3 +176,36 @@ func runAnywhereAdmin(t *testing.T, f cloudDispatch) string {
 	}
 	return issued.Raw
 }
+
+func TestRunnersAutomationSeparatesTheOwnerRequestFromTheAdminApproval(t *testing.T) {
+	f := cloudDispatchTrigger(t)
+	admin := runAnywhereAdmin(t, f)
+	config, err := os.ReadFile(os.Getenv("SPARKWING_CONFIG"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config = []byte(strings.Replace(string(config), "profiles:\n", "profiles:\n  admin: { controller: { url: "+f.endpoint+", token: "+admin+" } }\n", 1))
+	if err := os.WriteFile(os.Getenv("SPARKWING_CONFIG"), config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cloudDispatchMachine(t, f, "builder")
+	for _, args := range [][]string{
+		{"runners", "automation", "--profile=admin", "--runner=builder"},
+		{"runners", "automation", "--profile=admin", "--runner=builder", "--request=true", "--approve=true"},
+		{"runners", "automation", "--profile=admin", "--runner=builder", "--request=true"},
+		{"runners", "automation", "--profile=admin", "--runner=builder", "--approve=true", "--session-stdin"},
+		{"runners", "automation", "--profile=admin", "--runner=builder", "--approve=true"},
+	} {
+		inv, err := clisurface.Parse("sparkwing", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runMachineAutomation(t.Context(), inv); err == nil {
+			t.Fatalf("%v changed a shared runner's automation", args)
+		}
+	}
+	var rows int
+	if err := f.state.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM machine_automation`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("automation rows=%d %v", rows, err)
+	}
+}

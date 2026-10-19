@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -121,6 +122,9 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 	runs, err := tenant.ListRuns(ctx, store.RunFilter{})
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("scheduled intake: %+v %v", runs, err)
+	}
+	if sealed, err := tenant.ReadRun(ctx, runs[0].ID); err != nil || sealed.Request.Request.Dispatch != runspec.DispatchController {
+		t.Fatalf("local schedule must run anywhere under controller dispatch: %+v %v", sealed.Request.Request.Dispatch, err)
 	}
 	output := captureStdout(t, func() {
 		err = runSparkwing([]string{"runs", "status", "--run", runs[0].ID, "--follow", "--timeout", "45s", "-o=json"})

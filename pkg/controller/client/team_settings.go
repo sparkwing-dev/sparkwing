@@ -33,10 +33,16 @@ func (c *TeamSettingsClient) SetTeamSettings(ctx context.Context, settings contr
 	return result, err
 }
 
-// SetMachineAutomation opts the caller's personal machine in to, or out of, the caller's automated runs.
-func (c *TeamSettingsClient) SetMachineAutomation(ctx context.Context, runner string, enabled bool) (controllerwire.MachineAutomation, error) {
+// RequestMachineAutomation requests or withdraws automated runs for the caller's personal machine.
+func (c *TeamSettingsClient) RequestMachineAutomation(ctx context.Context, runner string, requested bool) (controllerwire.MachineAutomation, error) {
 	var result controllerwire.MachineAutomation
-	path := "/api/v1/runners/" + url.PathEscape(runner) + "/automation"
-	err := c.client.request(ctx, "PUT", "/api/v1/runners/{runner}/automation", path, "", controllerwire.MachineAutomation{Runner: runner, AutomatedRuns: enabled}, &result)
+	err := c.client.request(ctx, "PUT", "/api/v1/runners/{runner}/automation", "/api/v1/runners/"+url.PathEscape(runner)+"/automation", "", controllerwire.MachineAutomationRequest{Requested: &requested}, &result)
+	return result, err
+}
+
+// ApproveMachineAutomation approves or revokes a personal machine's automated runs as a team administrator.
+func (c *TeamSettingsClient) ApproveMachineAutomation(ctx context.Context, runner string, approved bool) (controllerwire.MachineAutomation, error) {
+	var result controllerwire.MachineAutomation
+	err := c.client.request(ctx, "PUT", "/api/v1/runners/{runner}/automation/approval", "/api/v1/runners/"+url.PathEscape(runner)+"/automation/approval", "", controllerwire.MachineAutomationApproval{Approved: &approved}, &result)
 	return result, err
 }
