@@ -1,11 +1,13 @@
 package launcher
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -362,5 +364,31 @@ func TestProductionBoundaryMeasuresIngressAndDeniedEndpoints(t *testing.T) {
 				t.Errorf("measurement %q lacks %q", joined, want)
 			}
 		}
+	}
+}
+
+// The EKS network-policy agent shares policy among Pods whose names match up
+// to the last '-', so no two probe roles may share that part.
+func TestProbeRolesNeverShareANamePrefix(t *testing.T) {
+	_, kube := boundaryFixture()
+	p := &productionBoundary{kube: kube, cfg: productionBoundaryConfig(), required: "controller.example:443", api: "kubernetes.default:443"}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Hour)
+	defer cancel()
+	r := CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: "team", JobName: "job", ReservationID: "r"}
+	owners := map[string]string{}
+	for range 20 {
+		for role, pod := range map[string]*corev1.Pod{"control": p.canary(ctx, r, "nonce"), "peer": p.peer(ctx, r, "nonce"), "witness": p.witness(ctx, r, "nonce", "10.0.0.1", "10.0.0.2"), "measure": p.measure(ctx, r, nil, "10.0.0.1:18888")} {
+			prefix := pod.Name[:strings.LastIndex(pod.Name, "-")]
+			if owner, seen := owners[prefix]; seen && owner != role {
+				t.Fatalf("%s and %s share the name prefix %q", owner, role, prefix)
+			}
+			owners[prefix] = role
+			if !strings.HasPrefix(pod.Name, "sw-boundary-") || pod.Spec.Containers[0].Name != role {
+				t.Fatalf("%s probe is named %q with container %q", role, pod.Name, pod.Spec.Containers[0].Name)
+			}
+		}
+	}
+	if len(owners) != 4 {
+		t.Fatalf("probe name prefixes = %v", owners)
 	}
 }

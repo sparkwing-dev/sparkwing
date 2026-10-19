@@ -333,17 +333,26 @@ func probeSecurity() *corev1.SecurityContext {
 	return &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}
 }
 
+// boundaryName keeps each probe role's name distinct before its last '-'.
+// The EKS VPC CNI network-policy agent shares one policy map among Pods in a
+// namespace whose names match up to the last '-', so canaries named only
+// sw-boundary-<random> made the peer inherit the control's allow-all ingress.
+func boundaryName(role string) string {
+	return "sw-boundary-" + role + "-" + strings.ToLower(rand.Text())
+}
+
 func (p *productionBoundary) canary(ctx context.Context, r CloudNodeReservation, nonce string) *corev1.Pod {
 	raw, _ := json.Marshal(r)
 	deadline, _ := ctx.Deadline()
 	seconds := max(int64(time.Until(deadline).Seconds()), 1)
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "sw-boundary-" + strings.ToLower(rand.Text()), Namespace: p.cfg.Namespace, Labels: map[string]string{boundaryControlLabel: nonce, TeamLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}, Annotations: map[string]string{reservationAnnotation: string(raw), doNotDisrupt: "true"}}, Spec: corev1.PodSpec{NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}, Tolerations: teamTolerations(p.cfg.Namespace, r.Team), ActiveDeadlineSeconds: &seconds, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever, SecurityContext: probePodSecurity(), Containers: []corev1.Container{{Name: "control", Image: p.cfg.RunnerImage, Command: listenerCommand, SecurityContext: probeSecurity(), ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(18888)}}, TimeoutSeconds: 1, PeriodSeconds: 10, SuccessThreshold: 1, FailureThreshold: 3}}}}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: boundaryName("control"), Namespace: p.cfg.Namespace, Labels: map[string]string{boundaryControlLabel: nonce, TeamLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}, Annotations: map[string]string{reservationAnnotation: string(raw), doNotDisrupt: "true"}}, Spec: corev1.PodSpec{NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}, Tolerations: teamTolerations(p.cfg.Namespace, r.Team), ActiveDeadlineSeconds: &seconds, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever, SecurityContext: probePodSecurity(), Containers: []corev1.Container{{Name: "control", Image: p.cfg.RunnerImage, Command: listenerCommand, SecurityContext: probeSecurity(), ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(18888)}}, TimeoutSeconds: 1, PeriodSeconds: 10, SuccessThreshold: 1, FailureThreshold: 3}}}}}
 }
 
 func (p *productionBoundary) witness(ctx context.Context, r CloudNodeReservation, nonce, listener, peer string) *corev1.Pod {
 	pod := p.canary(ctx, r, nonce)
 	container := &pod.Spec.Containers[0]
 	container.Name, container.ReadinessProbe = "witness", nil
+	pod.Name = boundaryName(container.Name)
 	container.Command = witnessCommand
 	container.Args = []string{listener, peer}
 	return pod
@@ -356,6 +365,7 @@ func (p *productionBoundary) peer(ctx context.Context, r CloudNodeReservation, n
 	pod.Labels = map[string]string{boundaryControlLabel: nonce + "-peer", "app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName + "-peer", TeamLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}
 	container := &pod.Spec.Containers[0]
 	container.Name = "peer"
+	pod.Name = boundaryName(container.Name)
 	container.ReadinessProbe.ProbeHandler = corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: slices.Clone(peerReadiness)}}
 	return pod
 }
@@ -365,6 +375,7 @@ func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation
 	pod.Labels = map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: TeamNodeValue(p.cfg.Namespace, r.Team)}
 	container := &pod.Spec.Containers[0]
 	container.Name = "measure"
+	pod.Name = boundaryName(container.Name)
 	container.ReadinessProbe = nil
 	container.Command = measureCommand
 	for _, endpoint := range append([]string{control, p.required}, denied...) {
