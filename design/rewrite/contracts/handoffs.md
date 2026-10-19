@@ -826,3 +826,7 @@ Assigned to an Opus implementer (env 1087).
 - A successful charge clears that hold automatically and does not restart the clean-day count (like a no-fault release).
 - Customer-visible and approved; GitHub Actions blocks new paid minutes on payment failure while free usage continues.
 - Superseded the same day (Korey: "Do what you think is best"): `sparkwing update` replaces only the CLI, while runner services run `sparkwing-runner`, which updates itself from its controller (drain, replace, refresh units, restart). `service.Refresh` and its test are deleted; `sparkwing update` prints that runner services update themselves from their controller.
+
+## 2026-10-19 lead amendment to decision 2 (run anywhere award deadline)
+
+- "At the end of the window the highest-ranked claimant that asked during it wins" needs that claimant to come back and claim, since claimants poll. After a unit's 5 s window, the best-ranked asker recorded during the window holds the award for at most 2 s (`RankingAward`); if it doesn't claim by then, the first eligible asker wins. Worst-case wait for a unit is therefore 7 s. Lead ruling, reported to Korey for ratification.
