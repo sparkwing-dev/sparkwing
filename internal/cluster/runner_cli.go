@@ -176,6 +176,9 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 	if cfg.Controller == nil || strings.TrimSpace(*cfg.Controller) == "" {
 		return options, errors.New("runner controller is required")
 	}
+	if err := checkControllerTransport("runner controller", *cfg.Controller); err != nil {
+		return options, err
+	}
 	if cfg.MaxConcurrent != nil {
 		options.Loop.MaxConcurrent = *cfg.MaxConcurrent
 	}

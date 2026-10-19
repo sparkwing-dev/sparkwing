@@ -56,6 +56,9 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if err := checkControllerTransport("--controller", cfg.ControllerURL); err != nil {
+		return err
+	}
 	if factory == nil {
 		return errors.New("launcher runtime is unavailable: wire the controller Cloud awards and verified node/network boundary before launching Jobs")
 	}
