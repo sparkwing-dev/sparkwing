@@ -93,10 +93,17 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	}
 	path := filepath.Join(request.ExecutableDirectory, name)
 	var lease *bincache.Lease
-	if request.NoBincache {
+	uncached := request.NoBincache
+	if !uncached {
+		lease, _, err = bincache.MaterializePipeline(ctx, dir, options)
+		if errors.Is(err, bincache.ErrUnstableInputs) {
+			fmt.Fprintln(&buildDiagnostics, "pipeline build inputs kept changing; building without the binary cache")
+			uncached, err = true, nil
+		}
+	}
+	if uncached {
 		err = bincache.CompileUncachedPipeline(ctx, dir, path, options)
 	} else {
-		lease, _, err = bincache.MaterializePipeline(ctx, dir, options)
 		if lease != nil {
 			defer func() { result = errors.Join(result, lease.Release()) }()
 		}
@@ -130,7 +137,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	if module.Version != pin.Version || replacement != pin.Replacement {
 		return nil, "", &apierr.Error{Code: apierr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
 	}
-	if request.NoBincache {
+	if uncached {
 		return []string{path}, "", nil
 	}
 	source, err := os.Open(lease.Path())
