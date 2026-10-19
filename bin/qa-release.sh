@@ -34,11 +34,9 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 src=$work/src
 mkdir -p "$work/previous"
-# The engine check reads the release version from the main module version Go
-# stamps from an exact tag; -trimpath drops the -X ldflags from build info.
+# A clone rather than an archive: release builds stamp their version from git.
 git clone --quiet --no-checkout "$repo" "$src"
 git -C "$src" checkout --quiet --detach "$sha"
-git -C "$src" tag "$version"
 echo "==> building $version from $sha"
 
 bash "$src/bin/build-web.sh"

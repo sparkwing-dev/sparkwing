@@ -18,6 +18,7 @@ func TestReleaseTargetBuildsAllSupportedBinaries(t *testing.T) {
 			t.Run(target+"/"+arch, func(t *testing.T) {
 				dir := t.TempDir()
 				writeReleaseGoTool(t, dir)
+				initReleaseRepo(t, dir)
 				cmd := exec.Command("bash", script)
 				cmd.Dir = dir
 				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS="+target, "GOARCH="+arch, "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls"))
@@ -63,6 +64,7 @@ func TestReleaseTargetFailsWhenAnyBinaryBuildFails(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writeReleaseGoTool(t, dir)
+	initReleaseRepo(t, dir)
 	cmd := exec.Command("bash", script)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS=linux", "GOARCH=amd64", "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls"), "FAIL_PACKAGE=sparkwing-controller")
@@ -77,6 +79,10 @@ func writeReleaseGoTool(t *testing.T, dir string) {
 	t.Helper()
 	goTool := `#!/bin/sh
 set -eu
+if [ "$1" = version ]; then
+  printf '%s: go1.26.9\n\tmod\tgithub.com/sparkwing-dev/sparkwing\t%s\n' "$3" "${STAMPED_VERSION-$TAG}"
+  exit 0
+fi
 printf 'call\n' >>"$CALLS_FILE"
 out=
 packages=
@@ -106,5 +112,53 @@ done
 `
 	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(goTool), 0o700); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReleaseTargetRefusesABinaryThatDoesNotReportItsVersion(t *testing.T) {
+	script, err := filepath.Abs("build-release-target.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, setup := range map[string]struct {
+		env []string
+		tag string
+	}{
+		"unstamped":     {env: []string{"STAMPED_VERSION=(devel)"}},
+		"tag elsewhere": {tag: "v0.52.4"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeReleaseGoTool(t, dir)
+			initReleaseRepo(t, dir)
+			if setup.tag != "" {
+				gitIn(t, dir, "tag", setup.tag)
+				gitIn(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "next")
+			}
+			cmd := exec.Command("bash", script)
+			cmd.Dir = dir
+			cmd.Env = append(append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS=linux", "GOARCH=amd64", "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls")), setup.env...)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				t.Fatalf("release build accepted it: %s", out)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "dist", "sparkwing-linux-amd64")); err == nil {
+				t.Fatal("release build published an asset")
+			}
+		})
+	}
+}
+
+func initReleaseRepo(t *testing.T, dir string) {
+	t.Helper()
+	gitIn(t, dir, "init", "-q")
+	gitIn(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "release")
+}
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }
