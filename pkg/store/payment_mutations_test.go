@@ -2,11 +2,9 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"math/rand"
 	"reflect"
 	"slices"
@@ -18,9 +16,9 @@ import (
 )
 
 func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
-	for _, kind := range []string{"card_setup", "refund", "dispute_open", "dispute_close", "warning", "collection_paid", "collection_failed", "queued_refund"} {
+	for _, kind := range []string{"card_setup", "refund", "dispute_open", "dispute_close", "warning", "queued_refund"} {
 		t.Run(kind, func(t *testing.T) {
-			s, tenant, now := cardCollectionFixture(t)
+			s, tenant, now := cardFixture(t)
 			event := capability.PaymentEvent{EventID: "event", PaymentID: "payment", Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid}
 			if err := s.db.QueryRow("SELECT session_id,currency,amount_minor FROM credit_checkouts WHERE id='checkout'").Scan(&event.CheckoutID, &event.Currency, &event.AmountMinor); err != nil {
 				t.Fatal(err)
@@ -28,17 +26,13 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 			if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 				t.Fatal(err)
 			}
-			cardCollectionDebt(t, s, "debt", 15000)
-			work := cardCollectionDue(t, s, now)
-			payment := CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "collected", AmountCents: work.AmountCents}
 			if kind == "dispute_close" {
 				if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "dispute", event.PaymentID, "disputed", now); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if kind == "queued_refund" {
-				payment.AmountCents = 1
-				if _, _, err := settleCard(s.AsOperator(), t.Context(), payment, now); err != nil {
+				if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "queued", PaymentIntent: event.PaymentID, Actionable: true}, now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -57,16 +51,10 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 					_, err := releaseCreditFreezesTx(ctx, tx, tenant.team, "dispute", false, false, "provider", "", now)
 					return err
 				case "warning":
-					_, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, "", now)
-					return err
-				case "collection_paid":
-					_, err := settleCardPaymentTx(ctx, tx, payment, now)
-					return err
-				case "collection_failed":
-					_, _, err := failCardAttemptTx(ctx, tx, work.AttemptID, payment.PaymentIntent, "declined", now)
+					_, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, now)
 					return err
 				case "queued_refund":
-					changed, err := applyCardRefundTx(ctx, tx, tenant.team, payment.PaymentIntent, "provider-refund", "failed", `attempts = ? AND status = 'due'`, []any{0}, now)
+					changed, err := applyCardRefundTx(ctx, tx, tenant.team, event.PaymentID, "provider-refund", "failed", `attempts = ? AND status = 'due'`, []any{0}, now)
 					if err == nil && !changed {
 						return errors.New("refund queue did not change")
 					}
@@ -105,7 +93,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 func paymentMutationSnapshot(t *testing.T, s *Store) map[string][]string {
 	t.Helper()
 	out := make(map[string][]string)
-	for _, table := range []string{"teams", "credit_grants", "credit_freezes", "card_charges", "card_attempts", "card_refunds", "payment_warnings", "business_events"} {
+	for _, table := range []string{"teams", "credit_grants", "credit_checkouts", "credit_freezes", "card_refunds", "payment_warnings", "business_events"} {
 		rows, err := s.db.QueryContext(t.Context(), "SELECT * FROM "+table)
 		if err != nil {
 			t.Fatal(err)
@@ -204,7 +192,7 @@ func paymentMutationBalances(ctx context.Context, s *Store, want int64) bool {
 }
 
 func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
-	s, tenant, now := cardCollectionFixture(t)
+	s, tenant, now := cardFixture(t)
 	property := func(seed uint32) bool {
 		first := now.Add(time.Duration(seed%1000) * time.Second)
 		second := first.Add(time.Duration(seed%999999999 + 1))
@@ -245,72 +233,5 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 	standing, err := tenant.SpendStanding(t.Context(), now)
 	if err != nil || standing.Card.PaymentMethod != "newer" || !standing.Card.AddedAt.Equal(now.Add(-time.Second)) {
 		t.Fatalf("setup order did not survive reopening: %+v, %v", standing.Card, err)
-	}
-}
-
-func TestPaymentMutationCollectionAmountsCannotOverflowProperty(t *testing.T) {
-	s, _, now := cardCollectionFixture(t)
-	cardCollectionDebt(t, s, "debt", 15000)
-	w := cardCollectionDue(t, s, now)
-	before := paymentMutationSnapshot(t, s)
-	property := func(seed uint64) bool {
-		minimum := int64(math.MaxInt64/MicroCreditsPerCent + 1)
-		amount := minimum + int64(seed%uint64(math.MaxInt64-minimum))
-		p := CardPayment{ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "overflow", AmountCents: amount}
-		if created, warned, err := settleCard(s.AsOperator(), t.Context(), p, now); err == nil || created || warned != nil {
-			t.Logf("unrepresentable amount settled: %d, %t, %+v, %v", amount, created, warned, err)
-			return false
-		}
-		return reflect.DeepEqual(paymentMutationSnapshot(t, s), before)
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(42))}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCardSettlementRequiresMatchingTeamAndCommittedRows(t *testing.T) {
-	for _, problem := range []string{"foreign_charge", "ignored_charge", "ignored_attempt"} {
-		t.Run(problem, func(t *testing.T) {
-			s, _, now := cardCollectionFixture(t)
-			cardCollectionDebt(t, s, "debt", 15000)
-			work := cardCollectionDue(t, s, now)
-			switch problem {
-			case "foreign_charge":
-				rewriteSchemaExec(t, s.db, "UPDATE card_charges SET team='b' WHERE id=?", work.ChargeID)
-			case "ignored_charge":
-				rewriteSchemaExec(t, s.db, "CREATE TRIGGER ignore_settlement BEFORE UPDATE ON card_charges BEGIN SELECT RAISE(IGNORE); END")
-			case "ignored_attempt":
-				rewriteSchemaExec(t, s.db, "CREATE TRIGGER ignore_settlement BEFORE UPDATE ON card_attempts BEGIN SELECT RAISE(IGNORE); END")
-			}
-			before := paymentMutationSnapshot(t, s)
-			p := CardPayment{Team: work.Team, ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "settled", AmountCents: work.AmountCents}
-			if _, _, err := settleCard(s.AsOperator(), t.Context(), p, now); err == nil {
-				t.Fatal("invalid settlement committed")
-			}
-			if after := paymentMutationSnapshot(t, s); !reflect.DeepEqual(before, after) {
-				t.Fatal("refused settlement changed ledger")
-			}
-		})
-	}
-}
-
-func TestCardSettlementNeverTransfersForeignChargeDebtProperty(t *testing.T) {
-	property := func(suffix uint64, explicitTeam bool) bool {
-		s, _, now := cardCollectionFixture(t)
-		cardCollectionDebt(t, s, "debt", 15000)
-		work := cardCollectionDue(t, s, now)
-		foreign := fmt.Sprintf("foreign-%x", suffix)
-		rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)", foreign)
-		rewriteSchemaExec(t, s.db, "UPDATE card_charges SET team=? WHERE id=?", foreign, work.ChargeID)
-		before := paymentMutationSnapshot(t, s)
-		payment := CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "foreign-debt", AmountCents: work.AmountCents}
-		if explicitTeam {
-			payment.Team = work.Team
-		}
-		_, _, err := settleCard(s.AsOperator(), t.Context(), payment, now)
-		return errors.Is(err, sql.ErrNoRows) && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(6153))}); err != nil {
-		t.Fatal(err)
 	}
 }

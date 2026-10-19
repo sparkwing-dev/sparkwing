@@ -21,9 +21,7 @@ type cardRefusal struct {
 	reason, warning string
 }
 
-// safety: callers hold the ledger lock, so the refusal and the pin that follows it cannot interleave with another
-// team's first payment by the same card; a warning outranks the pin because it also holds the team.
-func refuseCardTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, fingerprint string) (cardRefusal, error) {
+func cardRefusalTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, fingerprint string) (cardRefusal, error) {
 	warning, err := paymentWarningTx(ctx, tx, paymentIntent, fingerprint)
 	if err != nil || warning != "" {
 		return cardRefusal{reason: CardRefusedWarning, warning: warning}, err
@@ -42,23 +40,38 @@ func refuseCardTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, fi
 	return cardRefusal{reason: CardRefusedPinned}, nil
 }
 
-func pinCardTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, fingerprint string, now time.Time) error {
-	if fingerprint == "" {
-		return nil
+// safety: a paid payment claims its card for its team with one insert, so two teams' first payments by one card
+// settle under their own ledger locks and still only one of them wins the pin; a warning outranks the pin because it
+// also holds the team.
+func claimCardTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, fingerprint string, now time.Time) (cardRefusal, error) {
+	warning, err := paymentWarningTx(ctx, tx, paymentIntent, fingerprint)
+	if err != nil || warning != "" {
+		return cardRefusal{reason: CardRefusedWarning, warning: warning}, err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO payment_cards (fingerprint, first_team, payment_intent, pinned_at)
-	    VALUES (?, ?, ?, ?) ON CONFLICT (fingerprint) DO NOTHING`, fingerprint, string(team), paymentIntent, now.UnixNano())
-	return err
+	if fingerprint == "" {
+		return cardRefusal{}, nil
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO payment_cards (fingerprint, first_team, payment_intent, pinned_at)
+	    VALUES (?, ?, ?, ?) ON CONFLICT (fingerprint) DO NOTHING`, fingerprint, string(team), paymentIntent, now.UnixNano()); err != nil {
+		return cardRefusal{}, err
+	}
+	var first Team
+	if err := tx.QueryRowContext(ctx, `SELECT first_team FROM payment_cards WHERE fingerprint = ?`, fingerprint).Scan(&first); err != nil {
+		return cardRefusal{}, err
+	}
+	if first != team {
+		return cardRefusal{reason: CardRefusedPinned}, nil
+	}
+	return cardRefusal{}, nil
 }
 
-// safety: a card is forgotten on the team named, or on every team that saved it when none is, so collection
-// there never charges it again.
-func forgetCardTx(ctx context.Context, tx *storeTx, fingerprint string, only Team, reason string, now time.Time) error {
+// safety: a blocked card is forgotten on every team that saved it, and its refill turned off, so no refill ever
+// charges it again.
+func forgetCardTx(ctx context.Context, tx *storeTx, fingerprint, reason string, now time.Time) error {
 	if fingerprint == "" {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT name, card_payment_method FROM teams WHERE card_fingerprint = ? AND (? = '' OR name = ?)`,
-		fingerprint, string(only), string(only))
+	rows, err := tx.QueryContext(ctx, `SELECT name, card_payment_method FROM teams WHERE card_fingerprint = ?`, fingerprint)
 	if err != nil {
 		return err
 	}
@@ -79,7 +92,7 @@ func forgetCardTx(ctx context.Context, tx *storeTx, fingerprint string, only Tea
 	}
 	for _, s := range found {
 		if _, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = '', card_payment_method = '', card_fingerprint = '',
-		    card_brand = '', card_last4 = '' WHERE name = ? AND card_fingerprint = ?`, string(s.team), fingerprint); err != nil {
+		    card_brand = '', card_last4 = '', refill_enabled = 0 WHERE name = ? AND card_fingerprint = ?`, string(s.team), fingerprint); err != nil {
 			return err
 		}
 		if err := RecordBusinessEvent(tx, BusinessEvent{
@@ -90,18 +103,4 @@ func forgetCardTx(ctx context.Context, tx *storeTx, fingerprint string, only Tea
 		}
 	}
 	return nil
-}
-
-// safety: a refused collection payment counts as a failed attempt, so the charge stays owed and is retried
-// on another card, and the card is forgotten so collection does not charge it again.
-func refusePinnedCardTx(ctx context.Context, tx *storeTx, team Team, p CardPayment, status string, now time.Time) error {
-	if status == CardAttemptLive {
-		if _, _, err := failCardAttemptTx(ctx, tx, p.AttemptID, p.PaymentIntent, CardRefusedPinned, now); err != nil {
-			return err
-		}
-	}
-	if err := forgetCardTx(ctx, tx, p.Fingerprint, team, CardRefusedPinned, now); err != nil {
-		return err
-	}
-	return queueCardRefundTx(ctx, tx, team, p, CardRefusedPinned, now)
 }

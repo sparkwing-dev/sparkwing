@@ -22,23 +22,15 @@ const (
 	// MicroCreditsPerCent is what one cent of a payment buys, which a checkout converts by.
 	MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 
-	// DefaultCreditGraceSeconds is how long a node keeps running after the balance reaches zero before the controller cancels it.
-	DefaultCreditGraceSeconds = 10 * 60
+	// SliceSeconds is the metered time paid for ahead: admission reserves the first slice and every lease renewal
+	// the next, so a team's balance never pays for more than one unreserved slice per running job.
+	SliceSeconds = 60
 
-	// MinBillableSeconds is the least one metered node or trigger step pays for, on every class.
-	MinBillableSeconds = 60
-
-	// MaxCreditGrantMicro caps the size of one grant at ten billion dollars.
+	// MaxCreditGrantMicro caps the size of one grant at ten million dollars.
 	MaxCreditGrantMicro = 1_000_000_000_000_000
-
-	// DefaultCreditMaxChargeSeconds caps the seconds one charge may bill.
-	DefaultCreditMaxChargeSeconds = 30
 
 	// MaxCreditRateMicro is the highest price an operator may put on a cloud runner second: ten thousand dollars.
 	MaxCreditRateMicro = 1_000_000_000_000
-
-	// MaxCreditMaxChargeSeconds is the highest charge cap an operator may set.
-	MaxCreditMaxChargeSeconds = 86_400
 )
 
 const (
@@ -49,9 +41,6 @@ const (
 	DispatchedHeartbeatInterval = 5 * time.Second
 )
 
-// MinCreditMaxChargeSeconds is the lowest charge cap an operator may set: one second past the longest heartbeat cadence.
-const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
-
 const (
 	CreditGrantFree     = "free"
 	CreditGrantPaid     = "paid"
@@ -60,6 +49,7 @@ const (
 
 const (
 	CreditChargeReservation = "reservation"
+	CreditChargeSlice       = "slice"
 	CreditChargeUsage       = "usage"
 	CreditChargeRefund      = "refund"
 	CreditChargeStorage     = "storage"
@@ -68,7 +58,7 @@ const (
 const (
 	// EventKindCreditsBlocked records a claim refused for an empty balance, so a run waiting on a metered runner says why.
 	EventKindCreditsBlocked = "credits_blocked"
-	// EventKindCreditsExhausted records a node cancelled after the balance reached zero and the grace period elapsed.
+	// EventKindCreditsExhausted records metered work stopped because the balance could not pay its next slice.
 	EventKindCreditsExhausted = "credits_exhausted"
 )
 
@@ -85,35 +75,22 @@ type InsufficientCreditsError struct {
 	// RunID and NodeID name the node the claim was refused for, which is in the claimant's own team; a record of the refusal belongs on that node and on no other team's.
 	RunID  string
 	NodeID string
-	// Frozen is set when a hold only support can lift refuses the claim, whatever the balance reads.
-	Frozen bool
-	// Limit names the spend limit that refused the claim, one of the SpendLimit values; empty is the balance.
-	Limit string
-	// Hold names the cause of the hold that refused the claim, from PrimaryHoldCause; empty when none did.
+	// Hold names the cause of the hold that refused the claim; empty when the balance did.
 	Hold string
 }
 
 func (e *InsufficientCreditsError) Error() string {
 	switch e.Hold {
 	case HoldCauseDispute:
-		return "credits held: a payment dispute on this team is open; new Cloud work waits until it is resolved; contact support"
-	case FreezeCauseWarning:
-		return "credits held: the card issuer reported possible fraud on a payment; new Cloud work waits; contact support"
+		return "credits held: a payment dispute on this team is open; Cloud work stops until it is resolved; contact support"
+	case HoldCauseWarning:
+		return "credits held: the card issuer reported possible fraud on a payment; Cloud work stops; contact support"
 	case HoldCauseOperator:
-		return "credits held by Sparkwing support; new Cloud work waits; contact support"
+		return "credits held by Sparkwing support; Cloud work stops; contact support"
 	case HoldCauseRevoked:
-		return "Cloud standing revoked by Sparkwing support; new Cloud work waits; contact support"
+		return "Cloud standing revoked by Sparkwing support; Cloud work stops; contact support"
 	}
-	if e.Limit == SpendLimitChargeFailed || e.Hold == FreezeCauseDecline {
-		return "card declined: new Cloud work waits until an owner updates the card or pays the charge on the billing page; running jobs finish and the team's own runners keep working"
-	}
-	switch e.Limit {
-	case SpendLimitChargePending:
-		return "Cloud work waits while the pending card charge completes"
-	case SpendLimitBudget:
-		return "spend limit: this team reached the budget its owner set; an owner can raise it on the billing page"
-	}
-	return fmt.Sprintf("insufficient credits: balance %s, need %s",
+	return fmt.Sprintf("out of credits: balance %s, need %s; add funds or turn on automatic refill on the billing page",
 		FormatCredits(e.BalanceMicro), FormatCredits(e.RequiredMicro))
 }
 
@@ -126,8 +103,6 @@ func (e *InsufficientCreditsError) Unwrap() error { return ErrInsufficientCredit
 // heartbeat cadence this binary ships rather than against any customer.
 const (
 	metaKeyCreditRateMicro = "credit_rate_micro_per_second"
-	metaKeyCreditGraceSecs = "credit_grace_seconds"
-	metaKeyCreditMaxCharge = "credit_max_charge_seconds"
 	metaKeyWarmCPUClass    = "warm_cpu_class_cores"
 )
 
@@ -188,15 +163,12 @@ type CreditState struct {
 	RateTableSet bool
 	// WarmCPUClassCores is the largest class a warm runner pool serves.
 	WarmCPUClassCores int64
-	GraceSeconds      int64
-	MaxChargeSeconds  int64
 	// StorageRateMicroPerGBDay is what one gibibyte kept for one day costs, and zero is an installation that bills no storage.
 	StorageRateMicroPerGBDay int64
 	// StorageFreeAllowanceBytes is how many retained bytes a team keeps without being billed for them.
 	StorageFreeAllowanceBytes int64
 	BurnWindow                time.Duration
 	BurnMicro                 int64
-	ExhaustedAt               *time.Time
 }
 
 // CreditGrantRequest carries an operator free grant and its idempotency reference.
@@ -219,9 +191,6 @@ type CreditGrantResult struct {
 func (req CreditGrantRequest) validate() error {
 	if req.Kind != CreditGrantFree || req.Reverses != "" {
 		return fmt.Errorf("%w: paid credits and reversals require verified payment settlement or an authorized refund", ErrInvalidInput)
-	}
-	if strings.HasPrefix(req.Reference, unappliedPrefix) {
-		return fmt.Errorf("%w: the reference prefix %q is reserved", ErrInvalidInput, unappliedPrefix)
 	}
 	if req.AmountMicro <= 0 || req.AmountMicro > MaxCreditGrantMicro {
 		return fmt.Errorf("%w: grant amount must be between 1 and %d micro-credits", ErrInvalidInput, MaxCreditGrantMicro)
@@ -259,16 +228,15 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 	if err != nil {
 		return CreditGrantResult{}, err
 	}
-	now := tx.now()
 	grant := CreditGrant{
 		ID: id, Team: team, Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses,
-		CreatedBy: req.CreatedBy, CreatedAt: now,
+		CreatedBy: req.CreatedBy, CreatedAt: tx.now(),
 	}
-
 	// safety: the lock is what makes the reference check and the insert one
-	// step, so two deliveries of the same payment cannot both find nothing.
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	// step, so two deliveries of the same grant cannot both find nothing.
+	l, err := lockLedgerTx(ctx, tx, team)
+	if err != nil {
 		return CreditGrantResult{}, err
 	}
 	if req.Reference != "" {
@@ -283,24 +251,11 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 			return CreditGrantResult{Grant: existing}, nil
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
-        INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(team), id, req.Kind, req.AmountMicro, req.Reference, req.Reverses,
-		req.CreatedBy, now.UnixNano()); err != nil {
-		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
+	if err := l.insertGrant(ctx, grant); err != nil {
+		return CreditGrantResult{}, err
 	}
 	if err := recordGrantEventTx(tx, grant, map[string]any{"reason": req.Reason}); err != nil {
 		return CreditGrantResult{}, err
-	}
-	room, err := headroomTx(ctx, tx, team, tx.now())
-	if err != nil {
-		return CreditGrantResult{}, err
-	}
-	if room > 0 {
-		if err := clearTeamCreditExhaustedTx(ctx, tx, team, now.UnixNano()); err != nil {
-			return CreditGrantResult{}, err
-		}
 	}
 	return CreditGrantResult{Grant: grant, Created: true}, nil
 }
@@ -398,17 +353,6 @@ func creditBalanceTx(ctx context.Context, tx rowQuerier, team Team) (int64, erro
 	return granted.Int64 - charged.Int64, nil
 }
 
-// safety: Postgres runs concurrent claims in their own transactions, so the
-// reservation that bounds the balance has to serialize on something; SQLite
-// allows one connection and is already serial.
-func lockCreditLedgerTx(ctx context.Context, tx *storeTx) error {
-	if tx.dialect != DialectPostgres {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/credit-ledger")
-	return err
-}
-
 // CreditLedgerTotals is the ledger summed the way a meter reads it: what was granted, split by whether the operator paid for it, and what the charge rows did with it.
 type CreditLedgerTotals struct {
 	// BalanceMicro is what is left to spend.
@@ -439,10 +383,6 @@ type CreditSettings struct {
 	RateTableSet bool
 	// WarmCPUClassCores is the largest cpu class a warm runner pool serves.
 	WarmCPUClassCores int64
-	// GraceSeconds is how long a node that has consumed its claim reservation on an empty balance keeps running before the controller cancels it.
-	GraceSeconds int64
-	// MaxChargeSeconds is the most seconds any one charge may bill.
-	MaxChargeSeconds int64
 	// StorageRateMicroPerGBDay is what one gibibyte kept for one day costs.
 	StorageRateMicroPerGBDay int64
 	// StorageFreeAllowanceBytes is how many retained bytes a team keeps without being billed for them.
@@ -454,8 +394,6 @@ type CreditSettingsUpdate struct {
 	RateMicroPerSecond        *int64
 	RateTable                 *CreditRateTable
 	WarmCPUClassCores         *int64
-	GraceSeconds              *int64
-	MaxChargeSeconds          *int64
 	StorageRateMicroPerGBDay  *int64
 	StorageFreeAllowanceBytes *int64
 }
@@ -522,12 +460,6 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 	if u.WarmCPUClassCores != nil {
 		out[metaKeyWarmCPUClass] = *u.WarmCPUClassCores
 	}
-	if u.GraceSeconds != nil {
-		out[metaKeyCreditGraceSecs] = *u.GraceSeconds
-	}
-	if u.MaxChargeSeconds != nil {
-		out[metaKeyCreditMaxCharge] = *u.MaxChargeSeconds
-	}
 	if u.StorageRateMicroPerGBDay != nil {
 		out[metaKeyStorageRateMicroPerGBDay] = *u.StorageRateMicroPerGBDay
 	}
@@ -541,11 +473,10 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 // names one good setting and one bad one moves neither.
 func (u CreditSettingsUpdate) validate() error {
 	if u.RateMicroPerSecond == nil && u.RateTable == nil && u.WarmCPUClassCores == nil &&
-		u.GraceSeconds == nil && u.MaxChargeSeconds == nil &&
 		u.StorageRateMicroPerGBDay == nil && u.StorageFreeAllowanceBytes == nil {
 		return fmt.Errorf(
-			"%w: name at least one of the rate, the warm cpu class, the grace period, "+
-				"the charge cap, the storage rate, or the free storage allowance",
+			"%w: name at least one of the rate, the warm cpu class, "+
+				"the storage rate, or the free storage allowance",
 			ErrInvalidCreditSetting)
 	}
 	if u.RateMicroPerSecond != nil && u.RateTable != nil {
@@ -565,16 +496,6 @@ func (u CreditSettingsUpdate) validate() error {
 	}
 	if u.RateMicroPerSecond != nil {
 		if err := validCreditRate(*u.RateMicroPerSecond); err != nil {
-			return err
-		}
-	}
-	if u.GraceSeconds != nil {
-		if err := validCreditGrace(*u.GraceSeconds); err != nil {
-			return err
-		}
-	}
-	if u.MaxChargeSeconds != nil {
-		if err := validCreditMaxCharge(*u.MaxChargeSeconds); err != nil {
 			return err
 		}
 	}
@@ -609,33 +530,9 @@ func validWarmCPUClass(cores int64) error {
 	return nil
 }
 
-func validCreditGrace(secs int64) error {
-	if secs < 0 {
-		return fmt.Errorf("%w: the grace period must not be negative, got %d",
-			ErrInvalidCreditSetting, secs)
-	}
-	return nil
-}
-
-func validCreditMaxCharge(secs int64) error {
-	if secs < MinCreditMaxChargeSeconds || secs > MaxCreditMaxChargeSeconds {
-		return fmt.Errorf("%w: the charge cap must be between %d and %d seconds, got %d",
-			ErrInvalidCreditSetting, MinCreditMaxChargeSeconds, int64(MaxCreditMaxChargeSeconds), secs)
-	}
-	return nil
-}
-
 func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) {
 	var out CreditSettings
 	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
-	if err != nil {
-		return out, err
-	}
-	grace, err := creditSettingTx(ctx, tx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
-	if err != nil {
-		return out, err
-	}
-	maxCharge, err := creditSettingTx(ctx, tx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
 	if err != nil {
 		return out, err
 	}
@@ -663,8 +560,6 @@ func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) 
 	out.RateTable = table
 	out.RateTableSet = tableRaw != ""
 	out.WarmCPUClassCores = warm
-	out.GraceSeconds = grace
-	out.MaxChargeSeconds = maxCharge
 	out.StorageRateMicroPerGBDay = storageRate
 	out.StorageFreeAllowanceBytes = storageFree
 	return out, nil
@@ -683,45 +578,6 @@ func parseCreditSetting(raw string, fallback int64) int64 {
 }
 
 func formatCreditSetting(v int64) string { return strconv.FormatInt(v, 10) }
-
-// safety: the first stamp is the one that stands, because the marker records
-// when this team's balance first read empty and every later heartbeat would
-// otherwise push it forward. The answer is the instant in force after the
-// write, so a caller reads what it stamped or what got there first.
-func stampTeamCreditExhaustedTx(
-	ctx context.Context, tx *storeTx, team Team, nowNS int64,
-) (int64, error) {
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE teams SET credit_exhausted_at = ?, updated_at = ?
-		  WHERE name = ? AND credit_exhausted_at = 0`,
-		nowNS, nowNS, string(team)); err != nil {
-		return 0, err
-	}
-	return teamCreditExhaustedAtTx(ctx, tx, team)
-}
-
-// safety: a team the registry does not hold reads zero rather than failing,
-// because the marker only reports how long a balance has been empty and the
-// cancellation deadline is the node's own anchor.
-func teamCreditExhaustedAtTx(ctx context.Context, tx *storeTx, team Team) (int64, error) {
-	var at int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT credit_exhausted_at FROM teams WHERE name = ?`, string(team)).Scan(&at)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil
-	}
-	return at, err
-}
-
-func clearTeamCreditExhaustedTx(ctx context.Context, tx *storeTx, team Team, nowNS int64) error {
-	// safety: the predicate keeps a funded team from writing the row on every
-	// heartbeat.
-	_, err := tx.ExecContext(ctx,
-		`UPDATE teams SET credit_exhausted_at = 0, updated_at = ?
-		  WHERE name = ? AND credit_exhausted_at != 0`,
-		nowNS, string(team))
-	return err
-}
 
 func creditLimit(limit int) int {
 	if limit <= 0 {
@@ -742,30 +598,6 @@ func WithoutCreditMetering(ctx context.Context) context.Context {
 
 func creditMeteringDisabled(ctx context.Context) bool {
 	return ctx.Value(creditMeteringDisabledKey{}) == true
-}
-
-func refuseFrozenTeamTx(
-	ctx context.Context, tx *storeTx, team Team, balance, required int64, runID, nodeID string,
-) error {
-	freeze, err := teamCreditFreezeTx(ctx, tx, team)
-	if err != nil || !freeze.Frozen {
-		return err
-	}
-	return holdRefusal(PrimaryHoldCause(freeze.Causes), &InsufficientCreditsError{
-		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID,
-	})
-}
-
-// safety: a declined charge's hold is the owner's to lift by paying, so only
-// that cause carries the charge-failed remedy; every other hold names support.
-func holdRefusal(cause string, out *InsufficientCreditsError) *InsufficientCreditsError {
-	out.Hold = cause
-	if cause == FreezeCauseDecline || cause == "" {
-		out.Limit = SpendLimitChargeFailed
-	} else {
-		out.Frozen = true
-	}
-	return out
 }
 
 func newCreditID(prefix string) (string, error) {

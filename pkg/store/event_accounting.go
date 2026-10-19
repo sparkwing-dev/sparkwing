@@ -42,7 +42,7 @@ func admitEventStorageTx(ctx context.Context, tx *storeTx, team Team, size int64
 	if creditMeteringDisabled(ctx) {
 		return nil
 	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return err
 	}
 	if holdsFreeAllowance(team) {

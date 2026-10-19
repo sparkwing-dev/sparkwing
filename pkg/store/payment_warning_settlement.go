@@ -4,19 +4,14 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // safety: an actionable warning blocks its card everywhere, and on a payment this deployment settled it holds the
 // team, takes back the credit the payment granted even when that leaves the balance negative, and queues a full
 // refund unless recorded refunds already returned it, so the payer is repaid before a dispute can open.
-func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, mode capability.PaymentMode, now time.Time) (Team, error) {
+func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, now time.Time) (Team, error) {
 	if w.WarningID == "" || w.PaymentIntent == "" {
 		return "", fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
-	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return "", err
 	}
 	actionable := 0
 	if w.Actionable {
@@ -40,10 +35,10 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 	if _, err := tx.ExecContext(ctx, "UPDATE payment_warnings SET actionable=1 WHERE warning_id=?", w.WarningID); err != nil {
 		return "", err
 	}
-	if err := forgetCardTx(ctx, tx, fingerprint, "", CardRefusedWarning, now); err != nil {
+	if err := forgetCardTx(ctx, tx, fingerprint, CardRefusedWarning, now); err != nil {
 		return "", err
 	}
-	team, err := paymentWarningTeamTx(ctx, tx, payment, mode)
+	team, err := paymentTeamTx(ctx, tx, "", payment)
 	if err != nil || team == "" {
 		return "", err
 	}
@@ -59,8 +54,7 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 			return "", err
 		}
 	}
-	refund := CardPayment{PaymentIntent: payment, AmountCents: grant.AmountMicro / MicroCreditsPerCent}
-	if err := queueCardRefundTx(ctx, tx, team, refund, CardRefusedWarning, now); err != nil {
+	if err := queueCardRefundTx(ctx, tx, team, payment, grant.AmountMicro/MicroCreditsPerCent, CardRefusedWarning, now); err != nil {
 		return "", err
 	}
 	return team, nil

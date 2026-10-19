@@ -526,7 +526,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 	go s.runBucketCeiling(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
-	go s.runCardBilling(ctx, CardBillingInterval)
+	go s.runBilling(ctx, BillingInterval)
 
 	errCh := make(chan error, 1+len(servers))
 

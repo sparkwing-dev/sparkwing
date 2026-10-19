@@ -42,7 +42,7 @@ func (t *Tenant) SetOverflowLimit(ctx context.Context, authority capability.Auth
 		if err != nil {
 			return err
 		}
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
 			return err
 		}
 		if minutes == nil {
@@ -79,7 +79,7 @@ func overflowControlTx(ctx context.Context, tx *storeTx, team Team, account stri
 	if err == nil {
 		out.MonthlyMinutes = &limit
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT a.capability_prefix,COALESCE((SELECT SUM(c.seconds) FROM credit_charges c WHERE c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind IN ('reservation','usage','refund')),0),i.started_at,i.finished_at,a.settled_at,a.awarded_at FROM billing_awards a LEFT JOIN billable_intervals i ON i.team=a.team AND i.reservation_id=a.reservation_id WHERE a.team=? AND a.requester_account=? AND a.executor_class='cloud' AND a.metered=1 AND (a.awarded_at>=? OR a.settled_at IS NULL OR a.settled_at>=?)`, team, account, out.PeriodStart.UnixNano(), out.PeriodStart.UnixNano())
+	rows, err := tx.QueryContext(ctx, `SELECT a.capability_prefix,COALESCE((SELECT SUM(c.seconds) FROM credit_charges c WHERE c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind IN ('reservation','slice','usage','refund')),0),i.started_at,i.finished_at,a.settled_at,a.awarded_at FROM billing_awards a LEFT JOIN billable_intervals i ON i.team=a.team AND i.reservation_id=a.reservation_id WHERE a.team=? AND a.requester_account=? AND a.executor_class='cloud' AND a.metered=1 AND (a.awarded_at>=? OR a.settled_at IS NULL OR a.settled_at>=?)`, team, account, out.PeriodStart.UnixNano(), out.PeriodStart.UnixNano())
 	if err != nil {
 		return out, err
 	}
@@ -148,7 +148,7 @@ func checkOverflowTx(ctx context.Context, tx *storeTx, team Team, run string) er
 	if burst.OverflowMinutes != nil && (limit == nil || *burst.OverflowMinutes < *limit) {
 		limit = burst.OverflowMinutes
 	}
-	if limit != nil && (control.UsedSeconds > *limit*60 || MinBillableSeconds > *limit*60-control.UsedSeconds) {
+	if limit != nil && (control.UsedSeconds > *limit*60 || SliceSeconds > *limit*60-control.UsedSeconds) {
 		return authorityError(apierr.LockHeld, "user monthly overflow budget reached; local capacity remains available")
 	}
 	return nil

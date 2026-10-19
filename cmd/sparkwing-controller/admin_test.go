@@ -46,7 +46,7 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	ctx := context.Background()
 	st := openState(t)
-	if _, err := st.DB().ExecContext(ctx, "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES (?,?,?,?,?)", "dp_1", store.DefaultTeam, "", "chargeback", time.Now().UnixNano()); err != nil {
+	if _, err := st.DB().ExecContext(ctx, "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_1", store.DefaultTeam, "", "chargeback", time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {

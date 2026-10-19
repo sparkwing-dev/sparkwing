@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"html"
 	"net/http"
 	"strings"
@@ -14,21 +13,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CardBillingInterval is how often the payment worker opens due charges and
-// makes their Stripe calls.
-const CardBillingInterval = 30 * time.Second
+// BillingInterval is how often the payment worker opens due refills, makes their Stripe calls and makes queued refunds.
+const BillingInterval = 30 * time.Second
 
-// Machine-readable codes on a refused card billing request.
+// Machine-readable codes on a refused billing request.
 const (
-	CardNotTrustedCode   = "card_not_trusted"
-	CardOnFileCode       = "card_on_file"
-	NoPayableChargeCode  = "no_payable_charge"
-	PaymentWarnedCode    = "payment_warned"
-	cardChargeSucceeded  = "succeeded"
-	cardChargeFailed     = "failed"
-	cardChargeProcessing = "processing"
-	cardChargeCreated    = "created"
+	NoCardCode = "no_card"
 )
+
+const refillCreated = "created"
 
 type hostedPageJSON struct {
 	URL string `json:"url"`
@@ -41,22 +34,19 @@ func (s *Server) handleTeamBillingCard(w http.ResponseWriter, r *http.Request, a
 	return s.openBillingPage(w, r, a, capability.BillingPageCard, 0)
 }
 
-func (s *Server) handleTeamBillingPay(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if err := emptyBillingBody(r); err != nil {
-		return err
-	}
-	return s.openBillingPage(w, r, a, capability.BillingPageRecovery, 0)
+type teamRefillReq struct {
+	Enabled         bool  `json:"enabled"`
+	ThresholdCents  int64 `json:"threshold_cents"`
+	AmountCents     int64 `json:"amount_cents"`
+	WeekLimitCents  int64 `json:"week_limit_cents"`
+	MonthLimitCents int64 `json:"month_limit_cents"`
 }
 
-type teamBudgetReq struct {
-	BudgetCents int64 `json:"budget_cents"`
-}
-
-func (s *Server) handleTeamBillingBudget(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+func (s *Server) handleTeamBillingRefill(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if !s.Metering() {
 		return &apierr.Error{Code: apierr.NotFound, Message: "billing is unavailable"}
 	}
-	var req teamBudgetReq
+	var req teamRefillReq
 	if err := decodeEngineRequest(r, &req); err != nil {
 		return err
 	}
@@ -64,96 +54,44 @@ func (s *Server) handleTeamBillingBudget(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		return err
 	}
-	if err := writer.SetAuthorizedSpendBudget(r.Context(), a, req.BudgetCents); err != nil {
+	if err := writer.SetAuthorizedRefill(r.Context(), a, store.RefillSettings(req)); err != nil {
 		return billingMutationError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
-type cardPaymentReq struct {
-	Team          string `json:"team"`
-	ChargeID      string `json:"charge_id"`
-	AttemptID     string `json:"attempt_id"`
-	PaymentIntent string `json:"payment_intent"`
-	AmountCents   int64  `json:"amount_cents"`
-	Status        string `json:"status"`
-	DeclineCode   string `json:"decline_code"`
-	Fingerprint   string `json:"fingerprint"`
-}
+// safety: operator alerting keys on this value, so renaming it silences the alert for a refused card payment.
+const cardPaymentRefusedAlert = "card_payment_refused"
 
-// safety: operator alerting keys on these values, so renaming one silences the
-// alert for a fraud-warned or refused card payment.
-const (
-	cardPaymentWarnedAlert  = "card_payment_warned"
-	cardPaymentRefusedAlert = "card_payment_refused"
-)
-
-// safety: the synchronous charge reply and the signed webhook both report through here, so a warned repayment
-// or refused payment alerts the operator whichever path settled it.
-func (s *Server) reportPaymentSettlement(settled store.PaymentSettlement) {
+// safety: every signed payment outcome reports through here, so a refused payment alerts the operator and a failed
+// refill reaches the owners whichever event settled it.
+func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.PaymentSettlement) {
 	attrs := []any{"team", string(settled.Team), "payment_intent", settled.Payment}
 	switch {
 	case settled.Replayed:
-	case settled.Warned != nil && settled.Warned.Repays:
-		s.logger.Error("billing alert: a card with a fraud warning repaid a debt; the team is held and any unapplied rest is the operator's to return",
-			append(attrs, "alert", cardPaymentWarnedAlert, "warning_id", settled.Warned.WarningID,
-				"repaid_micro", settled.Warned.RepaidMicro, "unapplied_micro", settled.Warned.UnappliedMicro)...)
-	case settled.Warned != nil:
-		s.logger.Error("billing alert: a payment by a card with a fraud warning granted nothing and is queued for refund",
-			append(attrs, "alert", cardPaymentWarnedAlert, "warning_id", settled.Warned.WarningID,
-				"unapplied_micro", settled.Warned.UnappliedMicro)...)
 	case settled.Refused != "":
 		s.logger.Warn("billing alert: a payment was refused and queued for refund",
-			append(attrs, "alert", cardPaymentRefusedAlert, "reason", settled.Refused, "granted", settled.Granted)...)
+			append(attrs, "alert", cardPaymentRefusedAlert, "reason", settled.Refused)...)
+	case settled.RefillFailed != "":
+		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
+		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
+			"We could not charge your card for an automatic refill ("+settled.RefillFailed+"). "+
+				"Refills stop until you update the card or the refill settings; Cloud work stops when the credits run out:")
 	case settled.Granted:
 		s.logger.Info("payment granted", append(attrs, "grant", settled.GrantID, "amount_micro", settled.AmountMicro)...)
 	}
 }
 
-func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error {
-	now := time.Now()
-	switch req.Status {
-	case cardChargeSucceeded:
-		settled, err := s.store.AsOperator().SettleCardPayment(ctx, store.CardPayment{
-			Team: store.Team(req.Team), ChargeID: req.ChargeID, AttemptID: req.AttemptID,
-			PaymentIntent: req.PaymentIntent, AmountCents: req.AmountCents, Fingerprint: req.Fingerprint,
-		}, now)
-		if err != nil {
-			return err
-		}
-		s.reportPaymentSettlement(settled)
-		return nil
-	case cardChargeFailed:
-		if req.AttemptID == "" {
-			return fmt.Errorf("%w: a failed payment names its attempt", store.ErrInvalidInput)
-		}
-		team, first, err := s.store.AsOperator().FailCardAttempt(ctx, req.AttemptID, req.PaymentIntent, req.DeclineCode, now)
-		if err != nil {
-			return err
-		}
-		s.logger.Warn("billing alert: a card charge failed", "alert", "card_charge_failed", "team", string(team),
-			"attempt", req.AttemptID, "decline_code", req.DeclineCode)
-		if first {
-			s.mailOwners(ctx, team, "Your Sparkwing card payment failed",
-				"We could not charge your card for Sparkwing Cloud usage ("+req.DeclineCode+"). "+
-					"New Cloud work waits until it is paid. Pay now or update the card on the billing page:")
-		}
-		return nil
-	case cardChargeProcessing, cardChargeCreated:
-		return nil
-	}
-	return fmt.Errorf("%w: status must be succeeded, failed or processing", store.ErrInvalidInput)
-}
-
-func (s *Server) runCardBilling(ctx context.Context, every time.Duration) {
+func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 	if s.checkout == nil {
 		return
 	}
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
-		s.cardBillingPass(ctx)
+		s.refillPass(ctx)
+		s.refundQueuedPayments(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -162,66 +100,42 @@ func (s *Server) runCardBilling(ctx context.Context, every time.Duration) {
 	}
 }
 
-// safety: the Stripe call runs outside the ledger lock, under the attempt the
-// store already committed; a crash between them leaves that attempt live,
-// and the next pass asks Stripe for it by the same id instead of charging
-// again.
-func (s *Server) cardBillingPass(ctx context.Context) {
-	work, alerts, err := s.store.AsOperator().DueCardCharges(ctx, time.Now())
+// safety: the store commits a refill before any Stripe call, the payment is created unconfirmed and its id recorded
+// before it is confirmed, and only the signed webhook moves money; a crash anywhere leaves a refill the next pass
+// finishes by its id.
+func (s *Server) refillPass(ctx context.Context) {
+	due, err := s.store.AsOperator().DueRefills(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
-			s.logger.Error("card billing pass", "err", err)
+			s.logger.Error("refill pass", "err", err)
 		}
 		return
 	}
-	for _, a := range alerts {
-		s.logger.Warn("billing alert: a team crossed its budget threshold", "alert", "budget_threshold",
-			"team", string(a.Team), "percent", a.Percent)
-		s.mailOwners(ctx, a.Team, fmt.Sprintf("Sparkwing Cloud: %d%% of your budget used", a.Percent),
-			fmt.Sprintf("Your team has spent $%.2f of its $%.2f budget over the last 30 days. "+
-				"At 100%% new Cloud work waits. Review the budget on the billing page:",
-				float64(a.Spent30dMicro)/float64(store.MicroCreditsPerCent*100),
-				float64(a.BudgetMicro)/float64(store.MicroCreditsPerCent*100)))
-	}
-	for _, wk := range work {
-		res, err := s.chargeCard(ctx, wk)
-		if err != nil {
-			s.logger.Error("card charge call failed; the attempt is retried", "team", string(wk.Team),
-				"charge", wk.ChargeID, "attempt", wk.AttemptID, "err", err)
-			continue
+	for _, r := range due {
+		if r.PaymentIntent == "" {
+			res, err := s.checkout.refill(ctx, s.deployment, r)
+			if err != nil || res.Status != refillCreated {
+				s.logger.Error("creating a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "status", res.Status, "err", err)
+				continue
+			}
+			if err := s.store.AsOperator().RecordRefillIntent(ctx, r.Team, r.ID, res.PaymentIntent); err != nil {
+				s.logger.Error("recording a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
+				continue
+			}
+			r.PaymentIntent = res.PaymentIntent
 		}
-		if err := s.applyCardResult(ctx, cardPaymentReq{
-			Team: string(wk.Team), ChargeID: wk.ChargeID, AttemptID: wk.AttemptID,
-			PaymentIntent: res.PaymentIntent, AmountCents: wk.AmountCents,
-			Status: res.Status, DeclineCode: res.DeclineCode, Fingerprint: res.Fingerprint,
-		}); err != nil {
-			s.logger.Error("recording a card charge failed", "team", string(wk.Team), "charge", wk.ChargeID,
-				"attempt", wk.AttemptID, "payment_intent", res.PaymentIntent, "err", err)
+		if res, err := s.checkout.refill(ctx, s.deployment, r); err != nil {
+			s.logger.Error("confirming a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
+		} else {
+			s.logger.Info("refill payment confirmed; the signed webhook settles it", "team", string(r.Team), "refill", r.ID,
+				"payment_intent", r.PaymentIntent, "status", res.Status)
 		}
 	}
-	s.refundQueuedPayments(ctx)
 }
 
-// safety: the payment is created unconfirmed and its id recorded before it
-// is confirmed, so a crash anywhere leaves an attempt the next pass finishes
-// by that id; no search of the customer's payments is needed.
-func (s *Server) chargeCard(ctx context.Context, wk store.CardChargeWork) (cardChargeResult, error) {
-	if wk.PaymentIntent == "" {
-		res, err := s.checkout.charge(ctx, s.deployment, wk)
-		if err != nil || res.Status != cardChargeCreated {
-			return res, err
-		}
-		if err := s.store.AsOperator().RecordAttemptIntent(ctx, wk.AttemptID, res.PaymentIntent, wk.Customer, time.Now()); err != nil {
-			return res, err
-		}
-		wk.PaymentIntent = res.PaymentIntent
-	}
-	return s.checkout.charge(ctx, s.deployment, wk)
-}
-
-// safety: a payment that paid no charge is refunded under a key naming its
-// retry, so a repeated pass repeats the same refund and a retry after a
-// failed one makes a new one; the refund's success reverses its grant.
+// safety: a refused payment is refunded under a key naming its retry, so a
+// repeated pass repeats the same refund and a retry after a failed one makes a
+// new one; the refund's success reverses any grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
 	due, err := s.store.AsOperator().DueCardRefunds(ctx, time.Now())
 	if err != nil {
@@ -239,7 +153,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 			s.logger.Error("recording a card refund failed", "payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		s.logger.Warn("billing alert: a card payment that paid no charge was refunded", "alert", "card_refund",
+		s.logger.Warn("billing alert: a refused card payment was refunded", "alert", "card_refund",
 			"team", string(d.Team), "payment_intent", d.PaymentIntent, "refund", refund, "status", status,
 			"reason", d.Reason)
 	}

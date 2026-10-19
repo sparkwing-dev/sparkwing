@@ -188,7 +188,7 @@ func unitCreditHoldTx(ctx context.Context, tx *storeTx, team Team, run RunRow, u
 	if !errors.As(err, &short) {
 		return "", err
 	}
-	if !short.Frozen && (short.Limit == "" || short.Limit == SpendLimitBalance) {
+	if short.Hold == "" {
 		return NoCreditsHold, nil
 	}
 	return short.Error(), nil

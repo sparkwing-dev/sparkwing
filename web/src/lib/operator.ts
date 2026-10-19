@@ -46,11 +46,10 @@ export interface OperatorTeam {
   events: OperatorEvent[];
 }
 
-export type HoldCause = "operator" | "dispute" | "decline" | "early_fraud_warning" | string;
+export type HoldCause = "operator" | "dispute" | "early_fraud_warning" | string;
 
 const holdCauseLabels: Record<string, string> = {
   dispute: "payment dispute",
-  decline: "declined card charge",
   early_fraud_warning: "early fraud warning",
 };
 
@@ -152,7 +151,7 @@ export function actionEffect(
   }
 }
 
-// paymentHolds are the holds a dispute, declined charge or fraud warning placed.
+// paymentHolds are the holds a dispute or fraud warning placed.
 export function paymentHolds(team: OperatorTeam): string[] {
   return team.holds.filter((h, i) => team.hold_causes[i] !== "operator");
 }
@@ -338,7 +337,6 @@ const dayMs = 24 * 60 * 60 * 1000;
 // historyFacts summarizes the payment record a team's history tier comes from.
 export function historyFacts(h: StandingHistory, now = Date.now()): string {
   const parts = [`${h.tier} history`, `${fmtCents(balanceCents(h.paid_micro))} paid`];
-  if (h.successful_charges > 0) parts.push(`${h.successful_charges} card charge(s)`);
   if (h.first_paid_at) {
     const since = Math.max(h.first_paid_at, h.last_incident_at ?? 0) * 1000;
     parts.push(`${Math.max(Math.floor((now - since) / dayMs), 0)} clean days`);

@@ -68,9 +68,7 @@ func TestStoreDataMeteredUsageByRunNetsHostJobAndRefunds(t *testing.T) {
 		}
 		now = now.Add(3 * time.Second)
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			_, err := accountBillingAwardTx(t.Context(), tx, tc.team, tc.id, now, true, func(p capability.BillingProvenance, _ []capability.BillableInterval) (capability.BillingSettlement, error) {
-				return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: tc.seconds}, nil
-			})
+			_, err := accountBillingAwardTx(t.Context(), tx, tc.team, tc.id, now, true)
 			return err
 		}); err != nil {
 			t.Fatal(err)

@@ -203,7 +203,7 @@ func TestPaymentOwnershipIsClassifiedBeforeProviderReads(t *testing.T) {
 	}
 	ours, theirs := `"sparkwing_deployment":"staging.sparkwing.dev"`, `"sparkwing_deployment":"api.sparkwing.dev"`
 	paid := string(paymentBody("checkout.session.completed", "paid", false))
-	expired := strings.Replace(stamp(stamp(paid, ours), `"purpose":"card_charge"`), "checkout.session.completed", "checkout.session.expired", 1)
+	expired := strings.Replace(stamp(stamp(paid, ours), `"purpose":"card_refill"`), "checkout.session.completed", "checkout.session.expired", 1)
 	refund := `{"id":"evt_refund","object":"event","type":"refund.updated","created":900,"livemode":false,"data":{"object":{"id":"re_1","object":"refund","payment_intent":"pi_parent","charge":"ch_parent","status":"succeeded","amount":600,"currency":"usd","livemode":false}}}`
 	parent := func(field string) http.RoundTripper {
 		return paymenttest.Provider{"/v1/payment_intents/pi_parent": `{"id":"pi_parent","object":"payment_intent","livemode":false,"metadata":{` + field + `}}`}
@@ -237,14 +237,13 @@ func TestPaymentOwnershipIsClassifiedBeforeProviderReads(t *testing.T) {
 	}
 }
 
-func TestCompletedPagesBindTheirIntent(t *testing.T) {
+func TestCompletedSetupPagesBindTheirIntent(t *testing.T) {
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	secret := "whsec_fixture_only"
 	v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }, provider: newPaymentProvider("sk_test_fixture")}
 	v.provider.client.Transport = noProvider{t}
 	for _, tc := range []struct{ object, intent string }{
 		{`{"id":"cs_setup","object":"checkout.session","mode":"setup","status":"complete","customer":"cus_1","setup_intent":"seti_1","livemode":false,"metadata":{"purpose":"card_setup","sparkwing_deployment":"staging.sparkwing.dev"}}`, "seti_1"},
-		{`{"id":"cs_pay","object":"checkout.session","mode":"payment","status":"complete","payment_status":"paid","customer":"cus_1","payment_intent":"pi_1","livemode":false,"metadata":{"purpose":"card_charge","sparkwing_deployment":"staging.sparkwing.dev"}}`, "pi_1"},
 	} {
 		body := []byte(`{"id":"evt_page","object":"event","type":"checkout.session.completed","created":900,"livemode":false,"data":{"object":` + tc.object + `}}`)
 		proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)}, PaymentScope{Deployment: "staging.sparkwing.dev", Records: recordsAll(false)})
@@ -262,7 +261,7 @@ func TestARecordedObjectStampedElsewhereIsAnIntegrityFault(t *testing.T) {
 	stamp := `"sparkwing_deployment":"dep-another"`
 	for name, tc := range map[string]struct{ body []byte }{
 		"paid checkout":           {[]byte(strings.Replace(string(paymentBody("checkout.session.completed", "paid", false)), `"metadata":{`, `"metadata":{`+stamp+`,`, 1))},
-		"expired recovery page":   {verifiedProviderBody(PaymentTest, "checkout.session.expired", `{"id":"cs_fixture","object":"checkout.session","mode":"payment","status":"expired","livemode":false,"metadata":{"purpose":"card_charge",`+stamp+`}}`)},
+		"expired setup page":      {verifiedProviderBody(PaymentTest, "checkout.session.expired", `{"id":"cs_fixture","object":"checkout.session","mode":"setup","status":"expired","livemode":false,"metadata":{"purpose":"card_setup",`+stamp+`}}`)},
 		"setup without a purpose": {verifiedProviderBody(PaymentTest, "setup_intent.succeeded", `{"id":"cs_fixture","object":"setup_intent","status":"succeeded","livemode":false,"metadata":{`+stamp+`}}`)},
 		"failed charge of a page": {verifiedProviderBody(PaymentTest, "payment_intent.payment_failed", `{"id":"cs_fixture","object":"payment_intent","status":"requires_payment_method","livemode":false,"metadata":{`+stamp+`}}`)},
 	} {

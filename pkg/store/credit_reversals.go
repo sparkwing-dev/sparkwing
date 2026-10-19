@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -25,34 +24,6 @@ type CreditReversal struct {
 	Created       bool
 }
 
-// safety: a refund returns a payment's unapplied rest first, released here up
-// to amountMicro, so its reversal takes back only what it returns beyond it.
-func releaseUnappliedTx(
-	ctx context.Context, tx *storeTx, team Team, paymentID, reference, createdBy string, amountMicro int64,
-) (int64, error) {
-	var held sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
-	    WHERE team = ? AND kind = ? AND reverses = ? AND reference LIKE ?`,
-		string(team), CreditGrantReversal, paymentID, unappliedPrefix+"%").Scan(&held); err != nil {
-		return 0, err
-	}
-	release := min(amountMicro, -held.Int64)
-	if release <= 0 {
-		return 0, nil
-	}
-	id, err := newCreditID("grant")
-	if err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses,
-	    created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(team), id, CreditGrantReversal, release, unappliedPrefix+"refund:"+reference, paymentID, createdBy,
-		tx.now().UnixNano()); err != nil {
-		return 0, fmt.Errorf("credits: release unapplied payment: %w", err)
-	}
-	return release, nil
-}
-
 // TeamCreditFreeze lists a team's open holds, named by id in Disputes, with each hold's cause in Causes.
 type TeamCreditFreeze struct {
 	Frozen   bool
@@ -60,35 +31,34 @@ type TeamCreditFreeze struct {
 	Causes   []string
 }
 
-// Hold causes the operator console names.
+// Hold causes. Every hold blocks new Cloud admissions and the renewal of running Cloud work alike; the cause only
+// names who can lift it.
 const (
 	HoldCauseOperator = "operator"
 	HoldCauseDispute  = "dispute"
+	HoldCauseWarning  = "early_fraud_warning"
 	HoldCauseRevoked  = "revoked"
 )
 
-// PrimaryHoldCause names the hold whose remedy applies first: holds only support can lift outrank a declined charge.
-func PrimaryHoldCause(causes []string) string {
-	for _, c := range []string{HoldCauseDispute, FreezeCauseWarning, HoldCauseOperator, FreezeCauseDecline} {
-		if slices.Contains(causes, c) {
-			return c
+// safety: the one reader of whether a team is held: revoked standing, or else its oldest open hold.
+func teamHoldTx(ctx context.Context, q rowQuerier, team Team) (string, error) {
+	var trust string
+	if err := q.QueryRowContext(ctx, `SELECT billing_trust FROM teams WHERE name = ?`, string(team)).Scan(&trust); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
 		}
+		return "", err
 	}
-	if len(causes) > 0 {
-		return causes[0]
+	if trust == BillingTrustRevoked {
+		return HoldCauseRevoked, nil
 	}
-	return ""
-}
-
-// HoldCause names why a hold was placed: an operator, a payment dispute, a declined charge or an early fraud warning.
-func HoldCause(id, cause string) string {
-	switch {
-	case strings.HasPrefix(id, OperatorHoldPrefix):
-		return HoldCauseOperator
-	case cause == "":
-		return HoldCauseDispute
+	var cause string
+	err := q.QueryRowContext(ctx, `SELECT cause FROM credit_freezes WHERE team = ? AND released_at IS NULL
+	    ORDER BY created_at, dispute_id LIMIT 1`, string(team)).Scan(&cause)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
 	}
-	return cause
+	return cause, err
 }
 
 // ErrDisputeConflict is returned when a hold or a reversal names a dispute
@@ -216,7 +186,7 @@ func scanCreditFreeze(rows *sql.Rows) (TeamCreditFreeze, error) {
 			return TeamCreditFreeze{}, err
 		}
 		out.Disputes = append(out.Disputes, id)
-		out.Causes = append(out.Causes, HoldCause(id, cause))
+		out.Causes = append(out.Causes, cause)
 	}
 	out.Frozen = len(out.Disputes) > 0
 	return out, rows.Err()

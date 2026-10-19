@@ -27,7 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (func(context.Context, string) (controllerwire.StandingManager, func(), error), *store.Store) {
+func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (func(context.Context, string) (controllerwire.BillingManager, func(), error), *store.Store) {
 	t.Helper()
 	state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -68,11 +68,11 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 		t.Fatal(err)
 	}
 	handler := server.Handler()
-	return func(_ context.Context, profile string) (controllerwire.StandingManager, func(), error) {
+	return func(_ context.Context, profile string) (controllerwire.BillingManager, func(), error) {
 		if profile != "work" {
 			t.Fatalf("profile=%q", profile)
 		}
-		manager, err := client.NewStandingManager(client.EngineOptions{URL: "https://controller.test", Bearer: func(context.Context) (string, error) { return member.Raw, nil }, HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
+		manager, err := client.NewBillingManager(client.EngineOptions{URL: "https://controller.test", Bearer: func(context.Context) (string, error) { return member.Raw, nil }, HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, r)
 			return w.Result(), nil
@@ -81,7 +81,7 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 	}, state
 }
 
-func runBillingArgs(ctx context.Context, args []string, out *bytes.Buffer, connect func(context.Context, string) (controllerwire.StandingManager, func(), error)) error {
+func runBillingArgs(ctx context.Context, args []string, out *bytes.Buffer, connect func(context.Context, string) (controllerwire.BillingManager, func(), error)) error {
 	inv, err := clisurface.Parse("sparkwing", append([]string{"billing"}, args...))
 	if err != nil {
 		return err
@@ -145,5 +145,64 @@ func TestBillingCLIRefusesMembersAndInvalidTiers(t *testing.T) {
 	}
 	if err := runBillingArgs(t.Context(), []string{"standing", "--profile", "work", "-o", "plain"}, &out, connect); err != nil || strings.TrimSpace(out.String()) != "New" {
 		t.Fatalf("member standing read: %q %v", out.String(), err)
+	}
+}
+
+func TestBillingCLIRefillChangesOnlyTheGivenSettings(t *testing.T) {
+	connect, state := billingCLIConnect(t, "owner", capability.RunsRead, capability.TeamAdmin)
+	read := func(args ...string) controllerwire.TeamRefill {
+		t.Helper()
+		var out bytes.Buffer
+		if err := runBillingArgs(t.Context(), append([]string{"refill", "--profile", "work", "-o", "json"}, args...), &out, connect); err != nil {
+			t.Fatalf("refill %v: %v", args, err)
+		}
+		var r controllerwire.TeamRefill
+		if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	if r := read(); r.Enabled || r.MinAmountCents != 1000 || r.MaxAmountCents != 500_000 || r.Caps.AmountCents != 5000 || r.Caps.PerDay != 1 || r.Caps.WeekCents != 10_000 {
+		t.Fatalf("default refill: %+v", r)
+	}
+	var out bytes.Buffer
+	err := runBillingArgs(t.Context(), []string{"refill", "--enable", "--threshold", "10", "--amount", "50", "--profile", "work"}, &out, connect)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.Conflict || refusal.Details["reason"] != "no_card" {
+		t.Fatalf("refill without a card: %v", err)
+	}
+	if _, err := state.DB().ExecContext(t.Context(), `UPDATE teams SET card_customer='cus_1', card_payment_method='pm_1', card_fingerprint='fp_1' WHERE name='billing-test'`); err != nil {
+		t.Fatal(err)
+	}
+	if r := read("--enable", "--threshold", "$10", "--amount", "25.50", "--week-limit", "1,000"); !r.Enabled || r.ThresholdCents != 1000 || r.AmountCents != 2550 || r.WeekLimitCents != 100_000 || r.MonthLimitCents != 0 {
+		t.Fatalf("enabled refill: %+v", r)
+	}
+	if r := read("--disable"); r.Enabled || r.AmountCents != 2550 || r.WeekLimitCents != 100_000 {
+		t.Fatalf("turning off kept the rest: %+v", r)
+	}
+	err = runBillingArgs(t.Context(), []string{"refill", "--enable", "--amount", "5", "--profile", "work"}, &out, connect)
+	if !errors.As(err, &refusal) || refusal.Code != apierr.BadRequest {
+		t.Fatalf("refill below the minimum: %v", err)
+	}
+	var usage *clisurface.UsageError
+	if err := runBillingArgs(t.Context(), []string{"refill", "--amount", "ten", "--profile", "work"}, &out, connect); !errors.As(err, &usage) {
+		t.Fatalf("bad dollars: %v", err)
+	}
+	if _, err := clisurface.Parse("sparkwing", []string{"billing", "refill", "--enable", "--disable", "--profile", "work"}); err == nil {
+		t.Fatal("parsed --enable with --disable")
+	}
+	out.Reset()
+	if err := runBillingArgs(t.Context(), []string{"refill", "--profile", "work", "-o", "pretty"}, &out, connect); err != nil || !strings.Contains(out.String(), "Automatic refill: off\nThreshold: $10\nAmount: $25.50 ($10 to $5000)\nTeam limits: $1000 a week, none a month\nStanding caps: $50 per refill, 1 a day, $100 a week\n") {
+		t.Fatalf("pretty refill: %q %v", out.String(), err)
+	}
+}
+
+func TestBillingCLIRefillRefusesMembers(t *testing.T) {
+	connect, _ := billingCLIConnect(t, "editor", capability.RunsRead, capability.RunsWrite)
+	var out bytes.Buffer
+	err := runBillingArgs(t.Context(), []string{"refill", "--disable", "--profile", "work"}, &out, connect)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || out.Len() != 0 {
+		t.Fatalf("editor refill: %q %v", out.String(), err)
 	}
 }

@@ -131,17 +131,3 @@ func TestAStolenCardIsPinnedRefusedAndRefundedOnWarning(t *testing.T) {
 		t.Fatalf("refunds %v, balance %d; want a charge already refunded reversed but not refunded again", got, balance(b))
 	}
 }
-
-// The synchronous charge reply and the signed webhook report through one path, so a warned card's debt
-// repayment raises the operator alert with its repaid and unapplied amounts.
-func TestAWarnedRepaymentAlertsWithItsAmounts(t *testing.T) {
-	var logs bytes.Buffer
-	s := New(nil, slog.New(slog.NewJSONHandler(&logs, nil)))
-	s.reportPaymentSettlement(store.PaymentSettlement{Team: "a", Payment: "pi_repay", Granted: true,
-		Warned: &store.WarnedCardPayment{WarningID: "issfr", Repays: true, RepaidMicro: 7, UnappliedMicro: 3}})
-	for _, want := range []string{`"alert":"card_payment_warned"`, `"repaid_micro":7`, `"unapplied_micro":3`, `"payment_intent":"pi_repay"`} {
-		if !strings.Contains(logs.String(), want) {
-			t.Fatalf("alert %s lacks %s", logs.String(), want)
-		}
-	}
-}

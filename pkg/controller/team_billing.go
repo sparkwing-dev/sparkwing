@@ -33,7 +33,7 @@ type teamBillingJSON struct {
 	BalanceMicro              int64                  `json:"balance_micro"`
 	MicroPerCredit            int64                  `json:"micro_per_credit"`
 	CreditsPerDollar          int64                  `json:"credits_per_dollar"`
-	MinBillableSeconds        int64                  `json:"min_billable_seconds"`
+	SliceSeconds              int64                  `json:"slice_seconds"`
 	PurchaseMinCents          int64                  `json:"purchase_min_cents"`
 	RateTable                 []creditRateJSON       `json:"rate_table"`
 	StorageRateMicroPerGBDay  int64                  `json:"storage_rate_micro_per_gb_day"`
@@ -45,9 +45,8 @@ type teamBillingJSON struct {
 	CheckoutEnabled           bool                   `json:"checkout_enabled"`
 	CanPurchase               bool                   `json:"can_purchase"`
 	Card                      *teamCardJSON          `json:"card,omitempty"`
-	CardBilled                bool                   `json:"card_billed"`
 	CanAddCard                bool                   `json:"can_add_card"`
-	OpenCharge                *teamChargeJSON        `json:"open_charge,omitempty"`
+	Refill                    teamRefillJSON         `json:"refill"`
 	Limits                    teamLimitsJSON         `json:"limits"`
 	Standing                  wire.TeamStanding      `json:"standing"`
 	Usage                     []teamBillingUsageJSON `json:"usage"`
@@ -60,37 +59,48 @@ type teamCardJSON struct {
 	AddedAt int64  `json:"added_at"`
 }
 
-type teamChargeJSON struct {
-	ID            string `json:"id"`
-	AmountCents   int64  `json:"amount_cents"`
-	Failures      int64  `json:"failures"`
-	DeclineCode   string `json:"decline_code,omitempty"`
-	NextAttemptAt int64  `json:"next_attempt_at,omitempty"`
-	OpenedAt      int64  `json:"opened_at"`
+type teamRefillJSON struct {
+	Enabled         bool               `json:"enabled"`
+	ThresholdCents  int64              `json:"threshold_cents"`
+	AmountCents     int64              `json:"amount_cents"`
+	WeekLimitCents  int64              `json:"week_limit_cents"`
+	MonthLimitCents int64              `json:"month_limit_cents"`
+	MinAmountCents  int64              `json:"min_amount_cents"`
+	MaxAmountCents  int64              `json:"max_amount_cents"`
+	Caps            teamRefillCapsJSON `json:"caps"`
+	FailedAt        int64              `json:"failed_at,omitempty"`
+	Failure         string             `json:"failure,omitempty"`
+	Open            bool               `json:"open"`
+	DayCount        int64              `json:"day_count"`
+	WeekCents       int64              `json:"week_cents"`
+	MonthCents      int64              `json:"month_cents"`
+	Limit           string             `json:"limit,omitempty"`
+}
+
+type teamRefillCapsJSON struct {
+	AmountCents int64 `json:"amount_cents"`
+	PerDay      int64 `json:"per_day"`
+	WeekCents   int64 `json:"week_cents"`
+}
+
+func teamRefillBody(r store.RefillState) teamRefillJSON {
+	out := teamRefillJSON{
+		Enabled: r.Enabled, ThresholdCents: r.ThresholdCents, AmountCents: r.AmountCents,
+		WeekLimitCents: r.WeekLimitCents, MonthLimitCents: r.MonthLimitCents,
+		MinAmountCents: store.MinRefillCents, MaxAmountCents: store.MaxRefillCents,
+		Caps:    teamRefillCapsJSON{AmountCents: r.Caps.AmountCents, PerDay: r.Caps.PerDay, WeekCents: r.Caps.WeekCents},
+		Failure: r.Failure, Open: r.Open, DayCount: r.DayCount, WeekCents: r.WeekCents, MonthCents: r.MonthCents, Limit: r.Limit,
+	}
+	if !r.FailedAt.IsZero() {
+		out.FailedAt = r.FailedAt.Unix()
+	}
+	return out
 }
 
 type teamLimitsJSON struct {
-	Standing        string `json:"standing"`
-	CloudVCPU       int64  `json:"cloud_vcpu"`
-	MaxJobSeconds   int64  `json:"max_job_seconds"`
-	BudgetCents     int64  `json:"budget_cents"`
-	RungCents       int64  `json:"rung_cents"`
-	Spent30dCents   int64  `json:"spent_30d_cents"`
-	SpentTodayCents int64  `json:"spent_today_cents"`
-	HeadroomCents   int64  `json:"headroom_cents"`
-	Binding         string `json:"binding"`
-}
-
-func teamLimitsBody(st store.SpendStanding) teamLimitsJSON {
-	room, limit := st.Headroom()
-	c := int64(store.MicroCreditsPerCent)
-	return teamLimitsJSON{
-		Standing: st.Billing.Tier, CloudVCPU: st.Billing.CloudVCPU, MaxJobSeconds: int64(st.Billing.MaxJobDuration.Seconds()),
-		BudgetCents:   st.BudgetMicro / c,
-		RungCents:     st.RungMicro / c,
-		Spent30dCents: st.Spent30dMicro / c, SpentTodayCents: st.SpentTodayMicro / c,
-		HeadroomCents: room / c, Binding: limit,
-	}
+	Standing      string `json:"standing"`
+	CloudVCPU     int64  `json:"cloud_vcpu"`
+	MaxJobSeconds int64  `json:"max_job_seconds"`
 }
 
 func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -137,7 +147,7 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		BalanceMicro:              state.BalanceMicro,
 		MicroPerCredit:            store.MicroCreditsPerCredit,
 		CreditsPerDollar:          store.CreditsPerDollar,
-		MinBillableSeconds:        store.MinBillableSeconds,
+		SliceSeconds:              store.SliceSeconds,
 		PurchaseMinCents:          store.MinCardChargeCents,
 		RateTable:                 creditRateTableToJSON(state.RateTable),
 		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,
@@ -148,24 +158,17 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		Trusted:                   standing.Trusted,
 		CheckoutEnabled:           s.checkout != nil,
 		CanPurchase:               s.checkout != nil && owner,
-		CardBilled:                spend.CardBilled(),
 		CanAddCard:                s.checkout != nil && owner,
-		Limits:                    teamLimitsBody(spend),
-		Standing:                  teamStanding,
-		Usage:                     make([]teamBillingUsageJSON, 0, len(usage)),
-		Grants:                    make([]teamBillingGrantJSON, 0, len(grants)),
+		Refill:                    teamRefillBody(spend.Refill),
+		Limits: teamLimitsJSON{
+			Standing: standing.Tier, CloudVCPU: standing.CloudVCPU, MaxJobSeconds: int64(standing.MaxJobDuration.Seconds()),
+		},
+		Standing: teamStanding,
+		Usage:    make([]teamBillingUsageJSON, 0, len(usage)),
+		Grants:   make([]teamBillingGrantJSON, 0, len(grants)),
 	}
 	if spend.Card.PaymentMethod != "" {
 		out.Card = &teamCardJSON{Brand: spend.Card.Brand, Last4: spend.Card.Last4, AddedAt: spend.Card.AddedAt.Unix()}
-	}
-	if c := spend.OpenCharge; c != nil {
-		out.OpenCharge = &teamChargeJSON{
-			ID: c.ID, AmountCents: c.AmountMicro / store.MicroCreditsPerCent, Failures: c.Failures,
-			DeclineCode: c.DeclineCode, OpenedAt: c.OpenedAt.Unix(),
-		}
-		if c.Failures > 0 && c.NextAttemptAt.Year() < 9999 {
-			out.OpenCharge.NextAttemptAt = c.NextAttemptAt.Unix()
-		}
 	}
 	for _, u := range usage {
 		out.Usage = append(out.Usage, teamBillingUsageJSON{

@@ -130,7 +130,7 @@ func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) 
 			if n != 1 && !out.Replayed {
 				return holderRefusal()
 			}
-			if err := accountOwnerBillingTx(ctx, tx, t.team, finish.Unit.RunID, finish.Unit.Generation, tx.now(), true); err != nil {
+			if err := settleOwnerBillingTx(ctx, tx, t.team, finish.Unit.RunID, finish.Unit.Generation, tx.now()); err != nil {
 				return err
 			}
 		}
@@ -425,7 +425,7 @@ func checkRunVerdictTx(ctx context.Context, tx *storeTx, team Team, row RunRow, 
 }
 
 func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, owner ownerRecovery, status string, actor Actor, now time.Time) error {
-	if err := accountOwnerBillingTx(ctx, tx, target.team, target.ref.RunID, owner.generation, billingRecoveryEnd(owner, now), true); err != nil {
+	if err := settleOwnerBillingTx(ctx, tx, target.team, target.ref.RunID, owner.generation, billingRecoveryEnd(owner, now)); err != nil {
 		return err
 	}
 	var started, finished any
@@ -488,7 +488,7 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 		return err
 	}
 	if count == 1 {
-		return accountOwnerBillingTx(ctx, tx, team, request.RunID, request.Actor.Owner.Generation, tx.now(), true)
+		return settleOwnerBillingTx(ctx, tx, team, request.RunID, request.Actor.Owner.Generation, tx.now())
 	}
 	if !replay {
 		return holderRefusal()
@@ -504,7 +504,7 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 }
 
 func writeEvalRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, unit ownerRecovery, status string, now time.Time) error {
-	if err := accountUnitBillingTx(ctx, tx, target.team, UnitRef{Kind: capability.UnitEval, RunID: target.ref.RunID, NodeID: target.ref.NodeID, SourceGeneration: target.sourceGeneration}, unit.generation, billingRecoveryEnd(unit, now), true); err != nil {
+	if err := settleUnitBillingTx(ctx, tx, target.team, UnitRef{Kind: capability.UnitEval, RunID: target.ref.RunID, NodeID: target.ref.NodeID, SourceGeneration: target.sourceGeneration}, unit.generation, billingRecoveryEnd(unit, now)); err != nil {
 		return err
 	}
 	var started, finished any

@@ -333,7 +333,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		c.Binding.Expansion = &capability.LeaseRef{Kind: spec.Unit, ID: spec.UnitID, Generation: row.generation, Holder: row.holder}
 	}
 	if launcher {
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		if _, err := lockLedgerTx(ctx, tx, Team(row.team)); err != nil {
 			return capability.Capability{}, err
 		}
 		standing, err := trustStandingTx(ctx, tx, Team(row.team), tx.now())

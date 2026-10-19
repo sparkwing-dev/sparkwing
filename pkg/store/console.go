@@ -34,9 +34,6 @@ func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorize
 	var result T
 	err := c.s.inTx(ctx, func(tx *storeTx) error {
 		result = zero
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
-			return err
-		}
 		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
 		if err != nil {
 			return err

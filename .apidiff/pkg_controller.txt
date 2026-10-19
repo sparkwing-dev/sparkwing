@@ -16,12 +16,13 @@ type AccountWriter interface {
 type AuthorityRevoker interface {
 	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
 }
+const BillingInterval = 30 * time.Second
 type BillingWriter interface {
 	Team() store.Team
 	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
 	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
 	RecordAuthorizedBillingPageFailure(context.Context, capability.Authorized, capability.BillingPage) error
-	SetAuthorizedSpendBudget(context.Context, capability.Authorized, int64) error
+	SetAuthorizedRefill(context.Context, capability.Authorized, store.RefillSettings) error
 	RequestAuthorizedStanding(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)
 }
 type BootstrapAdminIssuer interface {
@@ -41,9 +42,6 @@ type CapabilityManager interface {
 	ReadCapability(context.Context, capability.Authorized) (capability.Metadata, error)
 	RotateCapability(context.Context, capability.Authorized, time.Duration, *time.Time) (capability.Rotation, error)
 }
-const CardBillingInterval = 30 * time.Second
-const CardNotTrustedCode = "card_not_trusted"
-const CardOnFileCode = "card_on_file"
 const CheckoutAmountCode = "amount_out_of_range"
 const CheckoutUnavailableCode = "checkout_unavailable"
 type Cipher interface {
@@ -322,7 +320,7 @@ type MetricWriter interface {
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewCloudFrontDataBackend(objects *blob.S3, domain, keyPairID, privateKey string) (blob.ObjectBackend, error)
 func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter
-const NoPayableChargeCode = "no_payable_charge"
+const NoCardCode = "no_card"
 type OIDCReader interface {
 	Team() store.Team
 	ReadOIDCFacts(context.Context, capability.Authorized) (capability.OIDCFacts, error)
@@ -362,7 +360,6 @@ type PaymentSettler interface {
 	capability.PaymentRecords
 	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
 }
-const PaymentWarnedCode = "payment_warned"
 type PolicyRouter struct {
 }
 func (router *PolicyRouter) Register(endpoint Endpoint) (err error)
@@ -596,7 +593,6 @@ type SourceCredentialResponse struct {
 type SourceTransactions interface {
 	ReleaseSourceCredential(context.Context, capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error)
 }
-const SpendLimitCode = "spend_limit"
 const StorageMaintenanceInterval = time.Hour
 const TeamDeletionInterval = time.Minute
 type TeamWriter interface {

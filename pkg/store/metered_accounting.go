@@ -79,7 +79,8 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	if !b.Metered {
 		amount, reserveSeconds = 0, 0
 	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	l, err := lockLedgerTx(ctx, tx, Team(c.Team))
+	if err != nil {
 		return err
 	}
 	existing, err := readBillingAwardTx(ctx, tx, Team(c.Team), b.ReservationID)
@@ -88,7 +89,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			return authorityError(apierr.Conflict, "billing award is immutable")
 		}
 		if b.Metered {
-			rate, class, seconds, _, err := billingPriceTx(ctx, tx, existing)
+			rate, class, seconds, err := billingPriceTx(ctx, tx, existing)
 			if err != nil {
 				return err
 			}
@@ -109,14 +110,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		return authorityError(apierr.Conflict, "capability already has a billing award")
 	}
 	if b.Metered {
-		balance, err := creditBalanceTx(ctx, tx, Team(c.Team))
-		if err != nil {
-			return err
-		}
-		if err := refuseFrozenTeamTx(ctx, tx, Team(c.Team), balance, amount, c.Binding.RunID, c.Binding.NodeID); err != nil {
-			return err
-		}
-		if err := refuseAboveHeadroomTx(ctx, tx, Team(c.Team), amount, tx.now(), c.Binding.RunID, c.Binding.NodeID); err != nil {
+		if err := refuseUnfundedTx(ctx, l, amount, c.Binding.RunID, c.Binding.NodeID); err != nil {
 			return err
 		}
 	}
@@ -130,15 +124,12 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		return err
 	}
 	if b.Metered {
-		fingerprint, err := teamCardTx(ctx, tx, Team(c.Team))
-		if err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,principal,cpu_class,rate_micro_per_second,charged_at,card_fingerprint) VALUES (?,?,?,?,?,'reservation',?,?,?,?,?,?,?)`, billingID("reservation", Team(c.Team), b.ReservationID, ""), c.Team, c.Binding.RunID, c.Binding.NodeID, c.Prefix, reserveSeconds, amount, c.Subject.ID, price.Cores, price.MicroPerSecond, now, fingerprint)
-		if err != nil {
-			return err
-		}
-		if err := addSpendTx(ctx, tx, Team(c.Team), now, amount); err != nil {
+		if err := l.insertCharge(ctx, CreditCharge{
+			ID: billingID("reservation", Team(c.Team), b.ReservationID, ""), Team: Team(c.Team), RunID: c.Binding.RunID,
+			NodeID: c.Binding.NodeID, TokenPrefix: c.Prefix, Principal: c.Subject.ID, Kind: CreditChargeReservation,
+			Seconds: reserveSeconds, AmountMicro: amount, CPUClassCores: price.Cores, RateMicroPerSecond: price.MicroPerSecond,
+			ChargedAt: time.Unix(0, now),
+		}); err != nil {
 			return err
 		}
 	}
@@ -221,10 +212,9 @@ func finishBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reser
 	return err
 }
 
-type billingCalculator func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error)
-
-func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time, final bool, calculate billingCalculator) (capability.BillingSettlement, error) {
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time, final bool) (capability.BillingSettlement, error) {
+	l, err := lockLedgerTx(ctx, tx, team)
+	if err != nil {
 		return capability.BillingSettlement{}, err
 	}
 	a, err := readBillingAwardTx(ctx, tx, team, reservation)
@@ -243,14 +233,14 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	}
 	result := capability.BillingSettlement{ReservationID: a.provenance.ReservationID}
 	if a.provenance.Metered {
-		result, err = calculate(a.provenance, intervals)
+		result, err = capability.SettleBilling(a.provenance, intervals)
 		if err != nil {
 			return result, err
 		}
 		if err := validateBillingCalculation(a, intervals, result); err != nil {
 			return result, err
 		}
-		if err := settleBillingChargesTx(ctx, tx, a, result, through, final); err != nil {
+		if err := settleBillingChargesTx(ctx, l, a, result, through, final); err != nil {
 			return result, err
 		}
 	}
@@ -259,6 +249,47 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE billing_awards SET settled_at=? WHERE team=? AND reservation_id=? AND settled_at IS NULL", tx.now().UnixNano(), team, reservation)
 	return result, err
+}
+
+// safety: the next slice is reserved in the renewal's own transaction under the team's lock, so the balance it is
+// checked against is the one it is charged from; a refusal still charges what the work already used.
+func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time, reserve bool) error {
+	result, err := accountBillingAwardTx(ctx, tx, team, reservation, through, false)
+	if err != nil || !reserve {
+		return err
+	}
+	l, err := lockLedgerTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	a, err := readBillingAwardTx(ctx, tx, team, reservation)
+	if err != nil {
+		return err
+	}
+	rate, class, _, err := billingPriceTx(ctx, tx, a)
+	if err != nil {
+		return err
+	}
+	paid, paidSeconds, err := paidBillingTx(ctx, tx, a)
+	if err != nil {
+		return err
+	}
+	want, err := billingProduct(result.BillableSeconds+SliceSeconds, rate)
+	if err != nil {
+		return err
+	}
+	if err := refuseUnfundedTx(ctx, l, max(want-paid, 0), a.run, a.node); err != nil {
+		return err
+	}
+	ahead := result.BillableSeconds + SliceSeconds - paidSeconds
+	if ahead <= 0 {
+		return nil
+	}
+	return l.insertCharge(ctx, CreditCharge{
+		ID: billingID("slice", team, reservation, through.UTC().Format(time.RFC3339Nano)), Team: team, RunID: a.run,
+		NodeID: a.node, TokenPrefix: a.prefix, Kind: CreditChargeSlice, Seconds: ahead, AmountMicro: want - paid,
+		CPUClassCores: class, RateMicroPerSecond: rate, ChargedAt: tx.now(),
+	})
 }
 
 func validateBillingCalculation(a billingAward, intervals []capability.BillableInterval, result capability.BillingSettlement) error {
@@ -312,13 +343,18 @@ func billingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, throug
 	return intervals, err
 }
 
-func billingPriceTx(ctx context.Context, tx *storeTx, a billingAward) (rate, class, seconds int64, fingerprint string, err error) {
-	err = tx.QueryRowContext(ctx, "SELECT rate_micro_per_second,cpu_class,seconds,card_fingerprint FROM credit_charges WHERE team=? AND id=? AND kind='reservation'", a.team, billingID("reservation", a.team, a.provenance.ReservationID, "")).Scan(&rate, &class, &seconds, &fingerprint)
-	return rate, class, seconds, fingerprint, err
+func billingPriceTx(ctx context.Context, tx *storeTx, a billingAward) (rate, class, seconds int64, err error) {
+	err = tx.QueryRowContext(ctx, "SELECT rate_micro_per_second,cpu_class,seconds FROM credit_charges WHERE team=? AND id=? AND kind='reservation'", a.team, billingID("reservation", a.team, a.provenance.ReservationID, "")).Scan(&rate, &class, &seconds)
+	return rate, class, seconds, err
 }
 
-func settleBillingChargesTx(ctx context.Context, tx *storeTx, a billingAward, result capability.BillingSettlement, through time.Time, final bool) error {
-	rate, class, _, fingerprint, err := billingPriceTx(ctx, tx, a)
+func paidBillingTx(ctx context.Context, tx *storeTx, a billingAward) (paid, seconds int64, err error) {
+	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(amount_micro),0),COALESCE(SUM(seconds),0) FROM credit_charges WHERE team=? AND capability_prefix=? AND run_id=? AND node_id=? AND kind IN ('reservation','slice','usage','refund')", a.team, a.prefix, a.run, a.node).Scan(&paid, &seconds)
+	return paid, seconds, err
+}
+
+func settleBillingChargesTx(ctx context.Context, l *ledgerTx, a billingAward, result capability.BillingSettlement, through time.Time, final bool) error {
+	rate, class, _, err := billingPriceTx(ctx, l.storeTx, a)
 	if err != nil {
 		return err
 	}
@@ -326,8 +362,8 @@ func settleBillingChargesTx(ctx context.Context, tx *storeTx, a billingAward, re
 	if err != nil {
 		return err
 	}
-	var paid, paidSeconds int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(amount_micro),0),COALESCE(SUM(seconds),0) FROM credit_charges WHERE team=? AND capability_prefix=? AND run_id=? AND node_id=? AND kind IN ('reservation','usage','refund')", a.team, a.prefix, a.run, a.node).Scan(&paid, &paidSeconds); err != nil {
+	paid, paidSeconds, err := paidBillingTx(ctx, l.storeTx, a)
+	if err != nil {
 		return err
 	}
 	delta := total - paid
@@ -338,17 +374,15 @@ func settleBillingChargesTx(ctx context.Context, tx *storeTx, a billingAward, re
 	if !final {
 		id = billingID("checkpoint", a.team, a.provenance.ReservationID, through.UTC().Format(time.RFC3339Nano))
 	}
-	kind := "usage"
-	chargedAt := tx.now().UnixNano()
+	kind, chargedAt := CreditChargeUsage, l.now()
 	if delta < 0 {
-		kind = "refund"
-		chargedAt = a.awarded
+		kind, chargedAt = CreditChargeRefund, time.Unix(0, a.awarded)
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,cpu_class,rate_micro_per_second,charged_at,card_fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, id, a.team, a.run, a.node, a.prefix, kind, result.BillableSeconds-paidSeconds, delta, class, rate, chargedAt, fingerprint)
-	if err != nil {
-		return err
-	}
-	return addSpendTx(ctx, tx, a.team, chargedAt, delta)
+	return l.insertCharge(ctx, CreditCharge{
+		ID: id, Team: a.team, RunID: a.run, NodeID: a.node, TokenPrefix: a.prefix, Kind: kind,
+		Seconds: result.BillableSeconds - paidSeconds, AmountMicro: delta, CPUClassCores: class, RateMicroPerSecond: rate,
+		ChargedAt: chargedAt,
+	})
 }
 
 func settledBillingResultTx(ctx context.Context, tx *storeTx, a billingAward) (capability.BillingSettlement, error) {
@@ -357,7 +391,7 @@ func settledBillingResultTx(ctx context.Context, tx *storeTx, a billingAward) (c
 		return result, nil
 	}
 	var seconds int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(seconds),0) FROM credit_charges WHERE team=? AND capability_prefix=? AND run_id=? AND node_id=? AND kind IN ('reservation','usage','refund')", a.team, a.prefix, a.run, a.node).Scan(&seconds); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(seconds),0) FROM credit_charges WHERE team=? AND capability_prefix=? AND run_id=? AND node_id=? AND kind IN ('reservation','slice','usage','refund')", a.team, a.prefix, a.run, a.node).Scan(&seconds); err != nil {
 		return result, err
 	}
 	result.BillableSeconds = seconds

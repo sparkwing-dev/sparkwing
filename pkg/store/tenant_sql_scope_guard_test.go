@@ -26,7 +26,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
 	"revokeSelectedCapabilitiesTx":               "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
 
-	"readPaymentCorrelationTx":      "verified provider mode and object resolve the payer from the persisted correlation before its tenant is known",
 	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
 	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
 	"bindCompletedPageTx":           "a verified page completion resolves its team from the session correlation committed before payment",
@@ -54,19 +53,14 @@ var reviewedUnscopedSQL = map[string]string{
 	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
 	"deleteRetentionMetricsTx":            "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
 	"deleteRetentionIdentityTx":           "the elected deployment maintenance pass expires every team's spent identity rows while preserving session ancestry",
-	"paidGrantForPaymentTx":               "provider payment identity is resolved before the payer is known; the configured mode and persisted checkout select the grant",
 	"closeRefundedQueueTx":                "a provider refund names a payment identity, and a queued refund it covers is settled for whichever team queued it",
-	"paymentWarningTeamTx":                "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
+	"readSetupCorrelationTx":              "a verified setup event resolves its payer from the setup correlation committed before payment",
+	"applyProviderPaymentTx":              "a verified refill payment names its provider payment, which resolves the one refill that recorded it",
+	"paymentTeamTx":                       "a provider payment identity is resolved to the checkout or refill that took it before its team is known",
+	"(*Operator).CreditLedgerTotals":      "the deployment credit sampler totals every team's ledger in one snapshot",
+	"(*Operator).DueRefills":              "the elected refill worker lists teams with refill on and open refills, then opens or resumes each under that team's lock",
 	"(*Store).settlePaymentFacts":         "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
-	"(*Operator).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
-		"under the ledger lock",
-	"startDueAttemptsTx": "the payment worker starts the due attempts of every team's open charges; " +
-		"each row it touches is named by its global id",
-	"settleCardPaymentTx": "a payment names its charge by global id, and the charge row it reads " +
-		"is checked against the team the payment names",
-	"failCardAttemptTx":          "a decline names its attempt by global id; the team is read from that row",
-	"recordAttemptIntentTx":      "the worker binds a payment to the attempt it names by global id",
 	"(*Operator).DueCardRefunds": "the payment worker lists every team's queued refunds in one pass",
 	"globalRunsPerHourRefusal":   "the global hourly cap counts runs from every team",
 	"runOwnerTx":                 "asks which team owns an id, so an answer scoped to the asker is no answer",
@@ -111,8 +105,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
-	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
-		"grants, charges and reservations and name none",
 	"(*Operator).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
 		"principal",
 	"(*Operator).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +

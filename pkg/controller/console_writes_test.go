@@ -116,7 +116,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 		{"DELETE", "/api/v1/operator/teams/customer", ``, 202},
 		{"DELETE", "/api/v1/operator/accounts/target@example.test", ``, 200},
 		{"POST", "/api/v1/operator/waitlist/approve", `{"account_ids":["waiting"]}`, 200},
-		{"PUT", "/api/v1/operator/credits/settings", `{"grace_seconds":1}`, 200},
+		{"PUT", "/api/v1/operator/credits/settings", `{"warm_cpu_class_cores":1}`, 200},
 		{"DELETE", "/api/v1/operator/github-app/installations/17", ``, 204},
 	}
 	for _, tc := range cases {

@@ -37,7 +37,7 @@ func (s *Store) CloudAwardResources(ctx context.Context, ref capability.Authorit
 	if award.provenance != *c.Billing || award.run != c.Binding.RunID || award.node != c.Binding.NodeID || award.unit != c.Unit || award.generation != generation {
 		return nil, authorityError(apierr.IntegrityFailure, "Cloud allocation differs from its award")
 	}
-	_, class, _, _, err := billingPriceTx(ctx, tx, award)
+	_, class, _, err := billingPriceTx(ctx, tx, award)
 	if err != nil {
 		return nil, err
 	}

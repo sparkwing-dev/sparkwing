@@ -33,10 +33,10 @@ export interface Billing {
   balance_micro: number;
   // frozen is true while any hold is open; hold_cause names the one whose remedy applies first.
   frozen: boolean;
-  hold_cause?: "decline" | "dispute" | "early_fraud_warning" | "operator" | "revoked" | string;
+  hold_cause?: "dispute" | "early_fraud_warning" | "operator" | "revoked" | string;
   micro_per_credit: number;
   credits_per_dollar: number;
-  min_billable_seconds: number;
+  slice_seconds: number;
   purchase_min_cents: number;
   trusted: boolean;
   rate_table: RateRow[];
@@ -48,15 +48,8 @@ export interface Billing {
   storage_charged_micro: number;
   grants: GrantRow[];
   card?: { brand: string; last4: string; added_at: number };
-  card_billed: boolean;
   can_add_card: boolean;
-  open_charge?: {
-    id: string;
-    amount_cents: number;
-    failures: number;
-    decline_code?: string;
-    next_attempt_at?: number;
-  };
+  refill: Refill;
   limits: SpendLimits;
   standing: TeamStanding;
 }
@@ -77,7 +70,6 @@ export interface StandingRequest {
 export interface StandingHistory {
   tier: string;
   paid_micro: number;
-  successful_charges: number;
   // Unix seconds.
   first_paid_at?: number;
   last_incident_at?: number;
@@ -148,47 +140,105 @@ export async function requestHighStanding(message: string): Promise<StandingRequ
 }
 
 export interface SpendLimits {
- standing: string;
- cloud_vcpu: number;
- max_job_seconds: number;
-  budget_cents: number;
-  rung_cents: number;
-  spent_30d_cents: number;
-  spent_today_cents: number;
-  headroom_cents: number;
-  binding: string;
+  standing: string;
+  cloud_vcpu: number;
+  max_job_seconds: number;
 }
 
-// holdNotice says what blocks new Cloud work and how to lift it, by the hold's cause.
+// RefillCaps are the standing tier's stolen-card brake on refills; a zero
+// field is no cap, which leaves only the team's own limits.
+export interface RefillCaps {
+  amount_cents: number;
+  per_day: number;
+  week_cents: number;
+}
+
+// Refill is the team's opt-in automatic refill. Week and month are the last 7
+// and 30 days; a zero team limit is none.
+export interface Refill {
+  enabled: boolean;
+  threshold_cents: number;
+  amount_cents: number;
+  week_limit_cents: number;
+  month_limit_cents: number;
+  min_amount_cents: number;
+  max_amount_cents: number;
+  caps: RefillCaps;
+  // Unix seconds of the refill the card refused; refills wait until the card or settings change.
+  failed_at?: number;
+  failure?: string;
+  open: boolean;
+  day_count: number;
+  week_cents: number;
+  month_cents: number;
+  // The limit that stops the next refill, or absent.
+  limit?: string;
+}
+
+export type RefillSettings = Pick<
+  Refill,
+  "enabled" | "threshold_cents" | "amount_cents" | "week_limit_cents" | "month_limit_cents"
+>;
+
+// holdNotice says what stops Cloud work and how to lift it, by the hold's
+// cause. Any hold stops admission and running Cloud work alike.
 export function holdNotice(cause: string | undefined): string {
   switch (cause) {
-    case "decline":
-      return "The card was declined. Update the card or pay the charge to start new Cloud work; running jobs finish and your own runners keep working.";
     case "dispute":
-      return "New Cloud work is paused while a payment dispute is open. Contact support to resolve it.";
+      return "Cloud work is stopped while a payment dispute is open. Contact support to resolve it. Your own runners keep working.";
     case "early_fraud_warning":
-      return "New Cloud work is paused because the card issuer reported possible fraud. Contact support.";
+      return "Cloud work is stopped because the card issuer reported possible fraud. Contact support. Your own runners keep working.";
     case "revoked":
-      return "Sparkwing support revoked this team's Cloud standing. Contact support.";
+      return "Sparkwing support revoked this team's Cloud standing, so Cloud work is stopped. Contact support.";
     default:
-      return "Sparkwing support placed a hold on this team's Cloud work. Contact support.";
+      return "Sparkwing support placed a hold on this team, so Cloud work is stopped. Contact support.";
   }
 }
 
-// Why new Cloud work waits, by the limit the controller says binds first.
-export function limitReason(binding: string): string {
-  switch (binding) {
-    case "budget":
-      return "The team reached its budget.";
-    case "charge_pending":
-      return "New Cloud work waits while the pending card charge completes. Running work finishes.";
-    case "held":
-      return "New Cloud work waits while a hold is on the team. Running work finishes.";
-    case "charge_failed":
-      return "The card was declined. Update the card or pay the charge now; new Cloud work waits until then.";
+// refillLimitReason says which limit stops the next automatic refill.
+export function refillLimitReason(r: Refill): string {
+  switch (r.limit) {
+    case "standing_size":
+      return `The refill amount is above the ${fmtCents(r.caps.amount_cents)} per-refill cap of this team's standing.`;
+    case "standing_daily":
+      return `This team's standing allows ${r.caps.per_day} refill${r.caps.per_day === 1 ? "" : "s"} a day.`;
+    case "standing_weekly":
+      return `Another refill would pass the ${fmtCents(r.caps.week_cents)} weekly cap of this team's standing.`;
+    case "team_weekly":
+      return `Another refill would pass the team's weekly limit of ${fmtCents(r.week_limit_cents)}.`;
+    case "team_monthly":
+      return `Another refill would pass the team's monthly limit of ${fmtCents(r.month_limit_cents)}.`;
     default:
-      return "The balance is spent.";
+      return r.limit ? `Refills are stopped by the ${r.limit} limit.` : "";
   }
+}
+
+// refillStatus is the one line that explains why refills are not happening,
+// or "" when the next one can be made.
+export function refillStatus(r: Refill): string {
+  if (!r.enabled) return "";
+  if (r.failed_at)
+    return `The last refill failed${r.failure ? ` (${r.failure})` : ""}. Update your card or the refill settings to start refills again; Cloud work stops when the credits run out.`;
+  const reason = refillLimitReason(r);
+  return reason ? `${reason} No refill is made until it allows one, so Cloud work stops when the credits run out.` : "";
+}
+
+// Suggested settings for a first refill form; the owner may change any.
+export const suggestedRefill = { threshold_cents: 1_000, amount_cents: 5_000 };
+
+// refillProblem checks a refill form the way the controller does, or returns null.
+export function refillProblem(
+  s: { enabled: boolean; threshold: number | null; amount: number | null; week: number | null; month: number | null },
+  r: Pick<Refill, "min_amount_cents" | "max_amount_cents">,
+): string | null {
+  if (s.threshold === null) return "Enter the balance that starts a refill in dollars.";
+  if (s.week === null || s.month === null) return "Enter limits in dollars, or 0 for none.";
+  if (s.amount === null) return "Enter the refill amount in dollars.";
+  if (s.enabled || s.amount !== 0) {
+    if (s.amount < r.min_amount_cents) return `A refill is at least ${fmtCents(r.min_amount_cents)}.`;
+    if (s.amount > r.max_amount_cents) return `A refill is at most ${fmtCents(r.max_amount_cents)}.`;
+  }
+  return null;
 }
 
 // Units carries only the conversion factors, so the pure helpers can be fed a
@@ -436,6 +486,21 @@ export function checkoutErrorMessage(
   return detail ? `Checkout failed: ${detail}` : `Checkout failed (${status}).`;
 }
 
+const emptyRefill: Refill = {
+  enabled: false,
+  threshold_cents: 0,
+  amount_cents: 0,
+  week_limit_cents: 0,
+  month_limit_cents: 0,
+  min_amount_cents: 1_000,
+  max_amount_cents: 500_000,
+  caps: { amount_cents: 0, per_day: 0, week_cents: 0 },
+  open: false,
+  day_count: 0,
+  week_cents: 0,
+  month_cents: 0,
+};
+
 function normalize(body: Partial<Billing>): Billing {
   return {
     ...(body as Billing),
@@ -448,6 +513,11 @@ function normalize(body: Partial<Billing>): Billing {
     trusted: body.trusted === true,
     checkout_enabled: body.checkout_enabled === true,
     can_purchase: body.can_purchase === true,
+    refill: {
+      ...emptyRefill,
+      ...body.refill,
+      caps: { ...emptyRefill.caps, ...body.refill?.caps },
+    },
   };
 }
 
@@ -508,12 +578,9 @@ export function checkoutReturn(param: string | null): CheckoutReturn {
 // land a few seconds later; the page reloads billing at these offsets (ms).
 export const checkoutRefreshDelays = [2_000, 5_000, 10_000, 15_000, 20_000];
 
-// openHostedPage asks the controller for a Stripe page (card setup or "pay
-// now") and returns its link.
-export async function openHostedPage(
-  path: "/api/v1/team/billing/card" | "/api/v1/team/billing/pay",
-): Promise<string> {
-  const res = await authFetch(path, {
+// openCardPage asks the controller for a Stripe card setup page and returns its link.
+export async function openCardPage(): Promise<string> {
+  const res = await authFetch("/api/v1/team/billing/card", {
     method: "POST",
     headers: { "Idempotency-Key": crypto.randomUUID() },
   });
@@ -535,17 +602,19 @@ export async function openHostedPage(
   return body.url;
 }
 
-export async function setBudget(cents: number): Promise<void> {
-  const res = await authFetch("/api/v1/team/billing/budget", {
+export async function setRefill(settings: RefillSettings): Promise<void> {
+  const res = await authFetch("/api/v1/team/billing/refill", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ budget_cents: cents }),
+    body: JSON.stringify(settings),
   });
   if (!res.ok) {
     const body = await readErrorBody(res);
     throw new BillingApiError(
       res.status,
-      body.error || `Request failed (${res.status}).`,
+      body.code === "no_card"
+        ? "Save a card before turning on automatic refill."
+        : body.error || `Request failed (${res.status}).`,
       body.code,
     );
   }

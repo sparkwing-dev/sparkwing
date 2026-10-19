@@ -26,18 +26,15 @@ type creditStateJSON struct {
 	RateTable          []creditRateJSON `json:"rate_table"`
 	RateTableSet       bool             `json:"rate_table_set"`
 	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
-	GraceSeconds       int64            `json:"grace_seconds"`
-	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
 
 	StorageChargedMicro       int64 `json:"storage_charged_micro"`
 	StorageRateMicroPerGBDay  int64 `json:"storage_rate_micro_per_gb_day"`
 	StorageFreeAllowanceBytes int64 `json:"storage_free_allowance_bytes"`
 
-	BurnWindowSeconds int64  `json:"burn_window_seconds"`
-	BurnMicro         int64  `json:"burn_micro"`
-	ExhaustedAt       *int64 `json:"exhausted_at,omitempty"`
-	MicroPerCredit    int64  `json:"micro_per_credit"`
-	CreditsPerDollar  int64  `json:"credits_per_dollar"`
+	BurnWindowSeconds int64 `json:"burn_window_seconds"`
+	BurnMicro         int64 `json:"burn_micro"`
+	MicroPerCredit    int64 `json:"micro_per_credit"`
+	CreditsPerDollar  int64 `json:"credits_per_dollar"`
 }
 
 type creditSettingsJSON struct {
@@ -45,8 +42,6 @@ type creditSettingsJSON struct {
 	RateTable                 []creditRateJSON `json:"rate_table"`
 	RateTableSet              bool             `json:"rate_table_set"`
 	WarmCPUClassCores         int64            `json:"warm_cpu_class_cores"`
-	GraceSeconds              int64            `json:"grace_seconds"`
-	MaxChargeSeconds          int64            `json:"max_charge_seconds"`
 	StorageRateMicroPerGBDay  int64            `json:"storage_rate_micro_per_gb_day"`
 	StorageFreeAllowanceBytes int64            `json:"storage_free_allowance_bytes"`
 	MicroPerCredit            int64            `json:"micro_per_credit"`
@@ -66,8 +61,6 @@ type setCreditSettingsReq struct {
 	RateMicroPerSecond        *int64             `json:"rate_micro_per_second,omitempty"`
 	RateTable                 *creditRateTableIn `json:"rate_table,omitempty"`
 	WarmCPUClassCores         *int64             `json:"warm_cpu_class_cores,omitempty"`
-	GraceSeconds              *int64             `json:"grace_seconds,omitempty"`
-	MaxChargeSeconds          *int64             `json:"max_charge_seconds,omitempty"`
 	StorageRateMicroPerGBDay  *int64             `json:"storage_rate_micro_per_gb_day,omitempty"`
 	StorageFreeAllowanceBytes *int64             `json:"storage_free_allowance_bytes,omitempty"`
 }
@@ -76,8 +69,6 @@ func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
 	out := store.CreditSettingsUpdate{
 		RateMicroPerSecond:        r.RateMicroPerSecond,
 		WarmCPUClassCores:         r.WarmCPUClassCores,
-		GraceSeconds:              r.GraceSeconds,
-		MaxChargeSeconds:          r.MaxChargeSeconds,
 		StorageRateMicroPerGBDay:  r.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: r.StorageFreeAllowanceBytes,
 	}
@@ -92,8 +83,6 @@ func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error {
 		RateMicroPerSecond        optionalCreditInt64     `json:"rate_micro_per_second"`
 		RateTable                 optionalCreditRateTable `json:"rate_table"`
 		WarmCPUClassCores         optionalCreditInt64     `json:"warm_cpu_class_cores"`
-		GraceSeconds              optionalCreditInt64     `json:"grace_seconds"`
-		MaxChargeSeconds          optionalCreditInt64     `json:"max_charge_seconds"`
 		StorageRateMicroPerGBDay  optionalCreditInt64     `json:"storage_rate_micro_per_gb_day"`
 		StorageFreeAllowanceBytes optionalCreditInt64     `json:"storage_free_allowance_bytes"`
 	}
@@ -106,8 +95,6 @@ func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error {
 		RateMicroPerSecond:        wire.RateMicroPerSecond.pointer(),
 		RateTable:                 wire.RateTable.pointer(),
 		WarmCPUClassCores:         wire.WarmCPUClassCores.pointer(),
-		GraceSeconds:              wire.GraceSeconds.pointer(),
-		MaxChargeSeconds:          wire.MaxChargeSeconds.pointer(),
 		StorageRateMicroPerGBDay:  wire.StorageRateMicroPerGBDay.pointer(),
 		StorageFreeAllowanceBytes: wire.StorageFreeAllowanceBytes.pointer(),
 	}
@@ -240,8 +227,6 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a cap
 		RateTable:          creditRateTableToJSON(state.RateTable),
 		RateTableSet:       state.RateTableSet,
 		WarmCPUClassCores:  state.WarmCPUClassCores,
-		GraceSeconds:       state.GraceSeconds,
-		MaxChargeSeconds:   state.MaxChargeSeconds,
 
 		StorageChargedMicro:       state.StorageChargedMicro,
 		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,
@@ -251,10 +236,6 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a cap
 		BurnMicro:         state.BurnMicro,
 		MicroPerCredit:    store.MicroCreditsPerCredit,
 		CreditsPerDollar:  store.CreditsPerDollar,
-	}
-	if state.ExhaustedAt != nil {
-		v := state.ExhaustedAt.Unix()
-		out.ExhaustedAt = &v
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil
@@ -293,8 +274,6 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 	}
 	s.logger.Info("credit settings set",
 		"rate_micro_per_second", settings.RateMicroPerSecond,
-		"grace_seconds", settings.GraceSeconds,
-		"max_charge_seconds", settings.MaxChargeSeconds,
 		"storage_rate_micro_per_gb_day", settings.StorageRateMicroPerGBDay,
 		"storage_free_allowance_bytes", settings.StorageFreeAllowanceBytes)
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
@@ -307,8 +286,6 @@ func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
 		RateTable:                 creditRateTableToJSON(settings.RateTable),
 		RateTableSet:              settings.RateTableSet,
 		WarmCPUClassCores:         settings.WarmCPUClassCores,
-		GraceSeconds:              settings.GraceSeconds,
-		MaxChargeSeconds:          settings.MaxChargeSeconds,
 		StorageRateMicroPerGBDay:  settings.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: settings.StorageFreeAllowanceBytes,
 		MicroPerCredit:            store.MicroCreditsPerCredit,
@@ -379,16 +356,21 @@ func creditGrantToJSON(g store.CreditGrant) creditGrantJSON {
 	}
 }
 
-// safety: a runner tells this apart from a transport failure and keeps polling
-// rather than retrying the request.
-// CreditsRefusedCode identifies a claim refused for insufficient credits.
+// CreditsRefusedCode identifies a claim refused because the balance cannot pay its first slice.
 const CreditsRefusedCode = "insufficient_credits"
-
-// SpendLimitCode identifies a claim refused by a spend limit.
-const SpendLimitCode = "spend_limit"
 
 // CreditsFrozenCode identifies a claim refused by a billing hold.
 const CreditsFrozenCode = "credits_frozen"
+
+// safety: a runner tells an unfunded or held team apart from a transport failure and keeps polling rather than
+// retrying the request.
+func creditsRefusal(refused *store.InsufficientCreditsError) *apierr.Error {
+	reason := CreditsRefusedCode
+	if refused.Hold != "" {
+		reason = CreditsFrozenCode
+	}
+	return &apierr.Error{Code: apierr.InsufficientCredit, Message: refused.Error(), Details: map[string]any{"reason": reason, "hold": refused.Hold}}
+}
 
 // UnpricedCPUClassCode identifies a claim whose CPU class has no rate.
 const UnpricedCPUClassCode = "unpriced_cpu_class"

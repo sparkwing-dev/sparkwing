@@ -119,7 +119,7 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if a.Target.RunID != "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
 			return bindingRefusal()
 		}
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
 			return err
 		}
 		if err := t.lockTeamTx(ctx, tx); err != nil {

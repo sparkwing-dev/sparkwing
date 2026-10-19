@@ -14,7 +14,7 @@ import (
 
 func TestConsoleWritesRequireARecentSignIn(t *testing.T) {
 	s, h, raw, csrf := creditPolicyFixture(t)
-	creditPolicyWrite(t, h, raw, csrf, `{"grace_seconds":1}`, http.StatusOK)
+	creditPolicyWrite(t, h, raw, csrf, `{"warm_cpu_class_cores":1}`, http.StatusOK)
 	engineSQL(t, s.store, `UPDATE sessions SET created_at=?`, time.Now().Add(-11*time.Minute).UnixNano())
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/operator/tokens", nil)
@@ -27,9 +27,9 @@ func TestConsoleWritesRequireARecentSignIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	creditPolicyWrite(t, h, raw, csrf, `{"grace_seconds":2}`, http.StatusForbidden)
+	creditPolicyWrite(t, h, raw, csrf, `{"warm_cpu_class_cores":3}`, http.StatusForbidden)
 	after, err := s.store.AsOperator().CreditSettings(t.Context())
-	if err != nil || after.GraceSeconds != before.GraceSeconds {
+	if err != nil || after.WarmCPUClassCores != before.WarmCPUClassCores {
 		t.Fatalf("stale console write committed: %+v %v", after, err)
 	}
 }

@@ -176,12 +176,6 @@ type BlobManifestReader interface {
 	ReadBlobManifest(context.Context, Team, blob.Digest) ([]blob.Member, error)
 	VerifyBlobManifest(context.Context, Team, blob.Digest, []blob.Member) error
 }
-type BudgetAlert struct {
-	Team          Team
-	Percent       int64
-	Spent30dMicro int64
-	BudgetMicro   int64
-}
 type BusinessEvent struct {
 	ID        string
 	At        time.Time
@@ -194,15 +188,10 @@ type BusinessEvent struct {
 }
 const BusinessEventAccountAdmitted = "account.admitted"
 const BusinessEventBillingTrustChanged = "billing.trust_changed"
-const BusinessEventBudgetAlert = "billing.budget_alert"
 const BusinessEventCardAdded = "card.added"
 const BusinessEventCardBlocked = "card.blocked"
-const BusinessEventCardChargeOpen = "card.charge_opened"
-const BusinessEventCardCharged = "card.charge_paid"
-const BusinessEventCardFailed = "card.charge_failed"
 const BusinessEventCardRefundDue = "card.refund_due"
 const BusinessEventCardRefused = "card.refused"
-const BusinessEventCardWarned = "card.payment_warned"
 const BusinessEventCheckoutExpired = "checkout.expired"
 const BusinessEventCheckoutFailed = "checkout.failed"
 const BusinessEventCheckoutOpened = "checkout.opened"
@@ -210,6 +199,9 @@ const BusinessEventCheckoutPaid = "checkout.paid"
 const BusinessEventCreditGranted = "credit.granted"
 const BusinessEventCreditReversed = "credit.reversed"
 const BusinessEventFirstRunSucceeded = "run.first_succeeded"
+const BusinessEventRefillFailed = "billing.refill_failed"
+const BusinessEventRefillOpened = "billing.refill_opened"
+const BusinessEventRefillSettings = "billing.refill_settings"
 const BusinessEventStandingRequestDecided = "billing.standing_request_decided"
 const BusinessEventStandingRequested = "billing.standing_requested"
 const BusinessEventTeamCreated = "team.created"
@@ -268,44 +260,6 @@ type Card struct {
 
 	AddedAt time.Time
 }
-const CardAttemptFailed = "failed"
-const CardAttemptLive = "live"
-const CardAttemptOffSession = "off_session"
-const CardAttemptPaid = "succeeded"
-const CardAttemptRecovery = "recovery"
-const CardAttemptWarned = "warned"
-type CardCharge struct {
-	ID            string
-	Team          Team
-	AmountMicro   int64
-	Cause         string
-	State         string
-	Failures      int64
-	DeclineCode   string
-	NextAttemptAt time.Time
-	PaymentIntent string
-	OpenedAt      time.Time
-}
-const CardChargeOpen = "open"
-const CardChargePaid = "paid"
-type CardChargeWork struct {
-	Team          Team
-	ChargeID      string
-	AttemptID     string
-	AmountCents   int64
-	Customer      string
-	PaymentMethod string
-	PaymentIntent string
-}
-type CardPayment struct {
-	Team          Team
-	ChargeID      string
-	AttemptID     string
-	PaymentIntent string
-	AmountCents   int64
-
-	Fingerprint string
-}
 const CardRefundDue = "due"
 const CardRefundPending = "pending"
 const CardRefundSucceeded = "succeeded"
@@ -336,6 +290,8 @@ const CauseRetry TransitionCause = "retry"
 const CauseRevoke TransitionCause = "revoke"
 const CauseStart TransitionCause = "start"
 const CauseUnpriced TransitionCause = "unpriced"
+const CheckoutKindCheckout = "checkout"
+const CheckoutKindRefill = "refill"
 type ClaimAward struct {
 	CapabilityPrefix string
 	Holder           string
@@ -492,6 +448,7 @@ type CreditCharge struct {
 }
 const CreditChargeRefund = "refund"
 const CreditChargeReservation = "reservation"
+const CreditChargeSlice = "slice"
 const CreditChargeStorage = "storage"
 const CreditChargeUsage = "usage"
 type CreditGrant struct {
@@ -568,10 +525,6 @@ type CreditSettings struct {
 
 	WarmCPUClassCores int64
 
-	GraceSeconds int64
-
-	MaxChargeSeconds int64
-
 	StorageRateMicroPerGBDay int64
 
 	StorageFreeAllowanceBytes int64
@@ -580,8 +533,6 @@ type CreditSettingsUpdate struct {
 	RateMicroPerSecond        *int64
 	RateTable                 *CreditRateTable
 	WarmCPUClassCores         *int64
-	GraceSeconds              *int64
-	MaxChargeSeconds          *int64
 	StorageRateMicroPerGBDay  *int64
 	StorageFreeAllowanceBytes *int64
 }
@@ -600,15 +551,12 @@ type CreditState struct {
 	RateTableSet bool
 
 	WarmCPUClassCores int64
-	GraceSeconds      int64
-	MaxChargeSeconds  int64
 
 	StorageRateMicroPerGBDay int64
 
 	StorageFreeAllowanceBytes int64
 	BurnWindow                time.Duration
 	BurnMicro                 int64
-	ExhaustedAt               *time.Time
 }
 const CreditsPerDollar = 1_000
 type CronDeclaration struct {
@@ -734,8 +682,6 @@ const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
 var DefaultClaimRanking = []string{TierHere, TierPersonal, TierActions, TierSelfHosted, TierCloud}
 const DefaultConcurrencyLease = DefaultLeaseDuration
-const DefaultCreditGraceSeconds = 10 * 60
-const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 18_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
 func DefaultEventLimits() EventLimits
@@ -860,7 +806,7 @@ var ErrInvitationOpen = errors.New("store: that address already has an open invi
 var ErrLastOwner = errors.New("store: a team keeps at least one owner")
 var ErrLastSignInMethod = errors.New("store: an account keeps at least one sign-in method")
 var ErrLockHeld = errors.New("held by another holder")
-var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
+var ErrNoCard = errors.New("card billing: save a card before turning on automatic refill")
 var ErrNoTeam = errors.New("store: team is required")
 var ErrNodeMetricLimit = fmt.Errorf("store: a node holds at most %d metric samples", limits.MaxMetricSamples)
 var ErrNotFound = errors.New("not found")
@@ -882,7 +828,6 @@ var ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 var ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
 var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
 var ErrTeamLimit = errors.New("store: this user has created as many teams as one user may")
-var ErrTeamOwes = errors.New("store: the team owes for usage or has a card charge in progress; pay it before deleting the team")
 var ErrUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
@@ -977,8 +922,6 @@ var FreeTierQuota = StorageQuota{
 	MaxBytesPerMonth: 1 << 30,
 	MaxObjectsPerRun: 1000,
 }
-const FreezeCauseDecline = "decline"
-const FreezeCauseWarning = "early_fraud_warning"
 type GeneratedNode struct {
 	Source    string
 	Generator string
@@ -1101,10 +1044,10 @@ const GuardQueueDeadline EdgeGuard = "queue_or_owner_deadline"
 const GuardRetry EdgeGuard = "retryable_failure_with_budget"
 const GuardUnclaimed EdgeGuard = "unclaimed"
 const GuardUnpriced EdgeGuard = "authorized_unpriced_claim"
-func HoldCause(id, cause string) string
 const HoldCauseDispute = "dispute"
 const HoldCauseOperator = "operator"
 const HoldCauseRevoked = "revoked"
+const HoldCauseWarning = "early_fraud_warning"
 type Identity struct {
 	Provider string
 	Subject  string
@@ -1122,10 +1065,6 @@ type InsufficientCreditsError struct {
 
 	RunID  string
 	NodeID string
-
-	Frozen bool
-
-	Limit string
 
 	Hold string
 }
@@ -1224,7 +1163,6 @@ type MaterializedResultSource struct {
 }
 const MaxCreatedTeams = 3
 const MaxCreditGrantMicro = 1_000_000_000_000_000
-const MaxCreditMaxChargeSeconds = 86_400
 const MaxCreditRateMicro = 1_000_000_000_000
 const MaxCreditRateTableEntries = 32
 const MaxEventKindBytes = 128
@@ -1238,6 +1176,7 @@ const MaxNodeMetricMarkers = 8
 const MaxNodeMetricSamples = limits.MaxMetricSamples
 const MaxOpenInvitations = 50
 const MaxPlanBytes = 4 << 20
+const MaxRefillCents = 500_000
 const MaxRunListLimit = 1000
 const MaxRunnerTokensPerTeam = 100
 const MaxSecretValueBytes = 128 << 10
@@ -1272,9 +1211,8 @@ func (sample MetricSample) ValidateResourceValues() error
 const MetricUnknown MetricKind = ""
 const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 const MicroCreditsPerCredit = 100_000
-const MinBillableSeconds = 60
 const MinCardChargeCents = 50
-const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
+const MinRefillCents = 1000
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 const NoCreditsHold = "team has no remaining credits; add credits or a payment method"
@@ -1479,20 +1417,19 @@ func (o *Operator) ComputeLimits(ctx context.Context) (_ ComputeLimits, err erro
 func (o *Operator) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
 func (o *Operator) CountNodesByQueueState(ctx context.Context) (map[string]int, error)
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error
-func (o *Operator) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, error)
+func (o *Operator) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (o *Operator) CreditSettings(ctx context.Context) (_ CreditSettings, err error)
 func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error)
 func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease SingletonLease, limit int, objects StagingDeleter) error
 func (o *Operator) DeploymentID(ctx context.Context) (string, error)
-func (o *Operator) DueCardCharges(ctx context.Context, now time.Time) (_ []CardChargeWork, _ []BudgetAlert, err error)
 func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error)
 func (o *Operator) DueGitHubChecks(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
 func (o *Operator) DueProfileFolds(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
+func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error)
 func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
 func (o *Operator) EgressUsageAcrossTeams(ctx context.Context, period string) (_ []EgressUsage, err error)
 func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease, limit int, objects blob.ObjectBackend) error
-func (o *Operator) FailCardAttempt(ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time) (team Team, first bool, err error)
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error
 func (o *Operator) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (o *Operator) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
@@ -1514,8 +1451,8 @@ func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error
 func (o *Operator) ReadCapability(ctx context.Context, a capability.Authorized) (capability.Metadata, error)
 func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonLease, after string, limit int) ([]ControllerRun, error)
-func (o *Operator) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent, customer string, now time.Time) error
 func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error
+func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, paymentIntent string) error
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
 func (o *Operator) ReleaseSingletonLease(ctx context.Context, lease SingletonLease) error
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error)
@@ -1535,7 +1472,6 @@ func (o *Operator) SetNodeAttention(ctx context.Context, updates []NodeAttention
 func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMode) error
 func (o *Operator) SetRunnerMetered(ctx context.Context, a capability.Authorized, prefix string, metered bool) error
 func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) error
-func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (out PaymentSettlement, err error)
 func (o *Operator) StorageSettings(ctx context.Context) (StorageSettings, error)
 func (o *Operator) Team() Team
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
@@ -1617,9 +1553,9 @@ type PaymentSettlement struct {
 
 	Granted bool
 
-	Warned *WarnedCardPayment
-
 	Refused string
+
+	RefillFailed string
 }
 type PaymentWarning struct {
 	WarningID     string
@@ -1710,7 +1646,6 @@ type PoolAccessRule struct {
 }
 const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
-func PrimaryHoldCause(causes []string) string
 type ProfileObservation struct {
 	Partial         bool
 	Duration        time.Duration
@@ -1792,6 +1727,46 @@ type ReconciledNode struct {
 	Bearer []byte
 }
 func RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error
+type Refill struct {
+	Team          Team
+	ID            string
+	AmountCents   int64
+	Customer      string
+	PaymentMethod string
+	PaymentIntent string
+}
+type RefillCaps struct {
+	AmountCents int64
+	PerDay      int64
+	WeekCents   int64
+}
+const RefillLimitStandingDaily = "standing_daily"
+const RefillLimitStandingSize = "standing_size"
+const RefillLimitStandingWeekly = "standing_weekly"
+const RefillLimitTeamMonthly = "team_monthly"
+const RefillLimitTeamWeekly = "team_weekly"
+type RefillSettings struct {
+	Enabled         bool
+	ThresholdCents  int64
+	AmountCents     int64
+	WeekLimitCents  int64
+	MonthLimitCents int64
+}
+type RefillState struct {
+	RefillSettings
+	Caps RefillCaps
+
+	FailedAt time.Time
+	Failure  string
+
+	Open bool
+
+	DayCount   int64
+	WeekCents  int64
+	MonthCents int64
+
+	Limit string
+}
 type RegisteredAgent struct {
 	Name, CapabilityPrefix string
 
@@ -2057,8 +2032,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "blobs", Owner: SchemaTenant},
 	{Name: "business_events", Owner: SchemaOperator},
 	{Name: "capabilities", Owner: SchemaOperator},
-	{Name: "card_attempts", Owner: SchemaTenant},
-	{Name: "card_charges", Owner: SchemaTenant},
 	{Name: "card_refunds", Owner: SchemaTenant},
 	{Name: "concurrency_entries", Owner: SchemaTenant},
 	{Name: "concurrency_holders", Owner: SchemaTenant},
@@ -2127,7 +2100,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "team_counters", Owner: SchemaTenant},
 	{Name: "team_deletions", Owner: SchemaOperator},
 	{Name: "team_download_day", Owner: SchemaTenant},
-	{Name: "team_spend_days", Owner: SchemaTenant},
 	{Name: "team_storage", Owner: SchemaTenant},
 	{Name: "teams", Owner: SchemaOperator},
 	{Name: "triggers", Owner: SchemaTenant},
@@ -2300,6 +2272,7 @@ type SingletonLease struct {
 	Generation int64
 	ExpiresAt  time.Time
 }
+const SliceSeconds = 60
 const SourceCoalesced SourcePolicy = "coalesced"
 const SourceManualRetry SourcePolicy = "manual_retry"
 const SourceMemo SourcePolicy = "memo"
@@ -2323,35 +2296,20 @@ type SpawnedChild struct {
 	Pipeline     string
 	ChildRunID   string
 }
-const SpendLimitBalance = "balance"
-const SpendLimitBudget = "budget"
-const SpendLimitChargeFailed = "charge_failed"
-const SpendLimitChargePending = "charge_pending"
-const SpendLimitHeld = "held"
 type SpendStanding struct {
-	Billing         BillingStanding
-	Card            Card
-	OpenCharge      *CardCharge
-	BalanceMicro    int64
-	RungMicro       int64
-	BudgetMicro     int64
-	Spent30dMicro   int64
-	SpentTodayMicro int64
+	Billing      BillingStanding
+	Card         Card
+	BalanceMicro int64
+	Refill       RefillState
 }
-func (s SpendStanding) CardBilled() bool
-func (s SpendStanding) ChargeFailed() bool
-func (s SpendStanding) Headroom() (int64, string)
-func (s SpendStanding) RunningWorkContinues() bool
-const SpendWindowDays = 30
 type StagingDeleter interface {
 	DeleteObject(context.Context, string) error
 }
 type StandingHistory struct {
-	Tier              string
-	PaidMicro         int64
-	SuccessfulCharges int64
-	FirstPaidAt       time.Time
-	LastIncidentAt    time.Time
+	Tier           string
+	PaidMicro      int64
+	FirstPaidAt    time.Time
+	LastIncidentAt time.Time
 }
 type StandingRequest struct {
 	ID             string
@@ -2816,7 +2774,7 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 func (t *Tenant) RunAuthorizedSchedule(ctx context.Context, a capability.Authorized, id, key string) (string, string, bool, error)
 func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Authorized, trust bool) error
 func (t *Tenant) SetAuthorizedGitHubExtraRepos(ctx context.Context, a capability.Authorized, repository string, extras []string, ids map[string]int64) ([]string, error)
-func (t *Tenant) SetAuthorizedSpendBudget(ctx context.Context, a capability.Authorized, cents int64) error
+func (t *Tenant) SetAuthorizedRefill(ctx context.Context, a capability.Authorized, s RefillSettings) error
 func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update controllerwire.TeamSettingsUpdate) error
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
@@ -3049,15 +3007,6 @@ type WaitlistedAccount struct {
 	Reason       string
 
 	Provider string
-}
-type WarnedCardPayment struct {
-	WarningID string
-
-	Repays bool
-
-	RepaidMicro int64
-
-	UnappliedMicro int64
 }
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
 func WithoutCreditMetering(ctx context.Context) context.Context

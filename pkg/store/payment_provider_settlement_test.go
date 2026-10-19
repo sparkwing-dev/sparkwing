@@ -18,7 +18,7 @@ import (
 
 func providerPaymentFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	t.Helper()
-	s, tenant, now := cardCollectionFixture(t)
+	s, tenant, now := cardFixture(t)
 	rewriteSchemaExec(t, s.db, "UPDATE credit_checkouts SET amount_micro=?", 100*MicroCreditsPerCent)
 	return s, tenant, now
 }
@@ -35,18 +35,13 @@ func providerCheckoutPaid(t *testing.T, s *Store) {
 	}
 }
 
-func providerCollectionEvent(t *testing.T, s *Store, now time.Time, kind capability.PaymentEventKind) capability.PaymentEvent {
+func providerRefillEvent(t *testing.T, s *Store, now time.Time, kind capability.PaymentEventKind) capability.PaymentEvent {
 	t.Helper()
-	cardCollectionDebt(t, s, "debt", 15000)
-	work := cardCollectionDue(t, s, now)
-	if err := s.AsOperator().RecordAttemptIntent(t.Context(), work.AttemptID, "payment", work.Customer, now); err != nil {
-		t.Fatal(err)
-	}
-	e := providerPaymentEvent(now, kind)
-	e.ObjectID, e.AmountMinor, e.CustomerID, e.MethodID = e.PaymentID, work.AmountCents, "cus_1", "pm_1"
-	e.Status, e.Fingerprint = "succeeded", "fp_1"
+	openRefill(t, s, "a", 15000, "payment")
+	e := refillPaid(now, "payment", 15000)
+	e.EventID, e.Kind = "event-"+string(kind), kind
 	if kind == capability.PaymentCardFailed {
-		e.Status, e.Fingerprint, e.ChargeID = "requires_payment_method", "", ""
+		e.Status, e.Fingerprint, e.ChargeID, e.DeclineCode = "requires_payment_method", "", "", "card_declined"
 	}
 	return e
 }
@@ -63,7 +58,7 @@ func TestProviderPaymentsCommitFinancialStateWithReceipt(t *testing.T) {
 				e.CustomerID, e.MethodID, e.Fingerprint, e.Brand, e.Last4, e.Status = "new-customer", "new-method", "new-card", "visa", "4242", "succeeded"
 				e.Created++
 			case capability.PaymentCardPaid, capability.PaymentCardFailed:
-				e = providerCollectionEvent(t, s, now, kind)
+				e = providerRefillEvent(t, s, now, kind)
 			default:
 				providerCheckoutPaid(t, s)
 				switch kind {
@@ -116,7 +111,7 @@ func TestProviderPaymentsCommitFinancialStateWithReceipt(t *testing.T) {
 
 func TestProviderPaymentAssociationCannotChangeProperty(t *testing.T) {
 	s, _, now := providerPaymentFixture(t)
-	e := providerCollectionEvent(t, s, now, capability.PaymentCardPaid)
+	e := providerRefillEvent(t, s, now, capability.PaymentCardPaid)
 	before := paymentMutationSnapshot(t, s)
 	property := func(seed uint32, field uint8) bool {
 		changed := e
@@ -152,52 +147,6 @@ func TestProviderPaymentAssociationCannotChangeProperty(t *testing.T) {
 	}
 	if !reflect.DeepEqual(after, paymentMutationSnapshot(t, s)) {
 		t.Fatal("late failure changed paid attempt")
-	}
-}
-
-func TestProviderPaymentRejectsConflictingPersistedPayerProperty(t *testing.T) {
-	s, _, now := providerPaymentFixture(t)
-	paid := providerCollectionEvent(t, s, now, capability.PaymentCardPaid)
-	if _, err := s.settlePaymentFacts(t.Context(), paid); err != nil {
-		t.Fatal(err)
-	}
-	before := paymentMutationSnapshot(t, s)
-	property := func(seed uint32, foreignTeam bool) bool {
-		team, mode := "a", "live"
-		if foreignTeam {
-			team, mode = "b", "test"
-		}
-		rewriteSchemaExec(t, s.db, "UPDATE payment_correlations SET team=?,payment_mode=? WHERE provider_id='payment'", team, mode)
-		defer rewriteSchemaExec(t, s.db, "UPDATE payment_correlations SET team='a',payment_mode='test' WHERE provider_id='payment'")
-		kinds := []capability.PaymentEventKind{capability.PaymentCardPaid, capability.PaymentCardFailed, capability.PaymentRefund, capability.PaymentWarningEvent, capability.PaymentDisputeOpened, capability.PaymentDisputeClosed}
-		e := providerPaymentEvent(now, kinds[seed%uint32(len(kinds))])
-		e.EventID, e.ObjectID, e.Status = fmt.Sprintf("conflicting-payer-%d", seed), fmt.Sprintf("conflicting-object-%d", seed), "succeeded"
-		if e.Kind == capability.PaymentCardPaid || e.Kind == capability.PaymentCardFailed {
-			e.ObjectID, e.AmountMinor = e.PaymentID, paid.AmountMinor
-		}
-		if e.Kind == capability.PaymentWarningEvent {
-			e.AmountMinor, e.Currency, e.Actionable = 0, "", true
-		}
-		switch e.Kind {
-		case capability.PaymentCardFailed:
-			e.Status = "requires_payment_method"
-		case capability.PaymentDisputeOpened:
-			e.Status = "needs_response"
-		case capability.PaymentDisputeClosed:
-			e.Status = "won"
-		}
-		got, err := s.settlePaymentFacts(t.Context(), e)
-		return err != nil && got == (PaymentSettlement{}) && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
-	}
-	for seed := range uint32(6) {
-		for _, foreign := range []bool{false, true} {
-			if !property(seed, foreign) {
-				t.Fatalf("conflicting payer committed: kind=%d foreign_team=%t", seed, foreign)
-			}
-		}
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(745))}); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -240,7 +189,7 @@ func TestProviderRefundIdentityAndConservationProperty(t *testing.T) {
 func TestProviderWarningBeforeCollectionAndCloseBeforeOpen(t *testing.T) {
 	t.Run("warning", func(t *testing.T) {
 		s, tenant, now := providerPaymentFixture(t)
-		payment := providerCollectionEvent(t, s, now, capability.PaymentCardPaid)
+		payment := providerRefillEvent(t, s, now, capability.PaymentCardPaid)
 		warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
 		warning.AmountMinor, warning.Currency, warning.Fingerprint = 0, "", "fp_1"
 		for _, actionable := range []bool{false, true, false} {
@@ -251,16 +200,16 @@ func TestProviderWarningBeforeCollectionAndCloseBeforeOpen(t *testing.T) {
 			}
 		}
 		settled, err := s.settlePaymentFacts(t.Context(), payment)
-		if err != nil || settled.Warned == nil || settled.Refused != CardRefusedWarning || settled.Granted {
+		if err != nil || settled.Refused != CardRefusedWarning || settled.Granted {
 			t.Fatalf("webhook settlement = %+v, %v; want the warned payment's consequences returned", settled, err)
 		}
 		freeze, err := tenant.CreditFreeze(t.Context())
 		if err != nil || !freeze.Frozen {
 			t.Fatalf("warned payment did not hold team: %+v: %v", freeze, err)
 		}
-		var warned int
-		if err := s.db.QueryRow("SELECT COUNT(*) FROM card_attempts WHERE status='warned'").Scan(&warned); err != nil || warned != 1 {
-			t.Fatalf("warned attempts=%d: %v", warned, err)
+		var refused int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM credit_checkouts WHERE kind='refill' AND paid_at IS NULL AND closed_at IS NOT NULL").Scan(&refused); err != nil || refused != 1 {
+			t.Fatalf("refused refills=%d: %v", refused, err)
 		}
 	})
 	t.Run("dispute", func(t *testing.T) {
@@ -345,13 +294,13 @@ func TestProviderWarningProtectionIsMonotonicProperty(t *testing.T) {
 
 func TestProviderPaymentModeSwitchCannotReassignAnExistingPayment(t *testing.T) {
 	s, _, now := providerPaymentFixture(t)
-	payment := providerCollectionEvent(t, s, now, capability.PaymentCardPaid)
+	payment := providerRefillEvent(t, s, now, capability.PaymentCardPaid)
 	if _, err := s.settlePaymentFacts(t.Context(), payment); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE settings SET value=? WHERE key='payment_mode'", []byte(`"live"`))
 	before := paymentMutationSnapshot(t, s)
-	for _, kind := range []capability.PaymentEventKind{capability.PaymentRefund, capability.PaymentDisputeOpened, capability.PaymentWarningEvent} {
+	for _, kind := range []capability.PaymentEventKind{capability.PaymentRefund, capability.PaymentDisputeOpened} {
 		e := providerPaymentEvent(now, kind)
 		e.Mode = capability.PaymentLive
 		switch kind {
@@ -360,9 +309,16 @@ func TestProviderPaymentModeSwitchCannotReassignAnExistingPayment(t *testing.T) 
 		case capability.PaymentDisputeOpened:
 			e.Status, e.Reason = "needs_response", "fraudulent"
 		case capability.PaymentWarningEvent:
-			e.AmountMinor, e.Currency, e.Fingerprint, e.Actionable = 0, "", "fp_1", true
+			e.AmountMinor, e.Currency, e.Actionable = 0, "", true
 		}
-		if got, err := s.settlePaymentFacts(t.Context(), e); err == nil || got != (PaymentSettlement{}) {
+		got, err := s.settlePaymentFacts(t.Context(), e)
+		if kind == capability.PaymentRefund || kind == capability.PaymentWarningEvent {
+			if err != nil || got.Team != "" || got.GrantID != "" {
+				t.Fatalf("a live %s of a test payment = %+v, %v; want it kept against no live payment", kind, got, err)
+			}
+			continue
+		}
+		if err == nil || got != (PaymentSettlement{}) {
 			t.Fatalf("mode switch reassigned %s: %+v: %v", kind, got, err)
 		}
 	}
@@ -407,53 +363,33 @@ func TestProviderRefundUsesOpaqueVerifiedEvent(t *testing.T) {
 	}
 }
 
-func TestProviderPaymentSuccessAfterFailureUsesItsVerifiedAmount(t *testing.T) {
-	s, _, now := providerPaymentFixture(t)
-	e := providerCollectionEvent(t, s, now, capability.PaymentCardFailed)
-	if _, err := s.settlePaymentFacts(t.Context(), e); err != nil {
-		t.Fatal(err)
-	}
-	e.Kind, e.EventID, e.Status = capability.PaymentCardPaid, "paid-after-failure", "succeeded"
-	e.AmountMinor++
-	e.MethodID, e.Fingerprint, e.ChargeID = "replacement-method", "replacement-fingerprint", "replacement-charge"
-	got, err := s.settlePaymentFacts(t.Context(), e)
-	if err != nil || got.Team != "a" || got.AmountMicro != e.AmountMinor*MicroCreditsPerCent {
-		t.Fatalf("success treated earlier failure as immutable payment facts: %+v: %v", got, err)
-	}
-	var queued int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM card_refunds WHERE payment_intent=?", e.PaymentID).Scan(&queued); err != nil || queued != 1 {
-		t.Fatalf("late success lost its refund obligation: %d: %v", queued, err)
-	}
-}
-
-func TestProviderSameAmountRetryAfterDeclineSettlesOnceAndClearsTheHold(t *testing.T) {
+// A refill whose payment failed records the failure without holding the team; a later success of the same payment
+// grants once and clears the failure, and a success naming another amount is refused.
+func TestProviderRefillSuccessAfterFailureGrantsOnce(t *testing.T) {
 	s, tenant, now := providerPaymentFixture(t)
-	e := providerCollectionEvent(t, s, now, capability.PaymentCardFailed)
-	if _, err := s.settlePaymentFacts(t.Context(), e); err != nil {
-		t.Fatal(err)
+	e := providerRefillEvent(t, s, now, capability.PaymentCardFailed)
+	got, err := s.settlePaymentFacts(t.Context(), e)
+	if err != nil || got.RefillFailed != "card_declined" {
+		t.Fatalf("failed refill = %+v, %v", got, err)
 	}
-	if freeze, err := tenant.CreditFreeze(t.Context()); err != nil || !freeze.Frozen {
-		t.Fatalf("decline did not hold: %+v %v", freeze, err)
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Refill.Failure != "card_declined" || st.Billing.Tier == "Held" {
+		t.Fatalf("after a failed refill: %+v, %v; want the failure recorded and no hold", st.Refill, err)
 	}
-	e.Kind, e.EventID, e.Status = capability.PaymentCardPaid, "paid-after-retry", "succeeded"
-	e.MethodID, e.Fingerprint, e.ChargeID = "replacement-method", "replacement-fingerprint", "replacement-charge"
+	wrong := e
+	wrong.Kind, wrong.EventID, wrong.Status, wrong.AmountMinor = capability.PaymentCardPaid, "paid-wrong", "succeeded", e.AmountMinor+1
+	if _, err := s.settlePaymentFacts(t.Context(), wrong); err == nil {
+		t.Fatal("a refill paid with another amount was settled")
+	}
+	e.Kind, e.EventID, e.Status, e.Fingerprint, e.ChargeID = capability.PaymentCardPaid, "paid-after-retry", "succeeded", "fp_1", "provider-charge"
 	for range 2 {
 		if _, err := s.settlePaymentFacts(t.Context(), e); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var refunds, paid, grants int
-	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM card_refunds),(SELECT COUNT(*) FROM card_charges WHERE state=?),(SELECT COUNT(*) FROM credit_grants WHERE reference LIKE '%payment%' OR kind='paid')`, CardChargePaid).Scan(&refunds, &paid, &grants); err != nil {
-		t.Fatal(err)
-	}
-	if refunds != 0 || paid != 1 {
-		t.Fatalf("retried success: refunds=%d paid charges=%d grants=%d", refunds, paid, grants)
-	}
-	if freeze, err := tenant.CreditFreeze(t.Context()); err != nil || freeze.Frozen {
-		t.Fatalf("retried success left the hold: %+v %v", freeze, err)
-	}
-	if b, err := tenant.BillingStanding(t.Context(), now); err != nil || b.Tier == "Held" || !b.History.LastIncidentAt.IsZero() {
-		t.Fatalf("standing after retry: %+v %v", b, err)
+	rewriteSchemaCount(t, s.db, "credit_grants", 1)
+	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Failure != "" || st.BalanceMicro != e.AmountMinor*MicroCreditsPerCent {
+		t.Fatalf("after the retried success: %+v, %v", st, err)
 	}
 }
 

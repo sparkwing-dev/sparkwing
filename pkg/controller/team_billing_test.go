@@ -124,13 +124,13 @@ func billingFixture(t *testing.T) (*identityFixture, *fakeCheckout) {
 }
 
 type teamBilling struct {
-	Team               string `json:"team"`
-	BalanceMicro       int64  `json:"balance_micro"`
-	MicroPerCredit     int64  `json:"micro_per_credit"`
-	CreditsPerDollar   int64  `json:"credits_per_dollar"`
-	MinBillableSeconds int64  `json:"min_billable_seconds"`
-	PurchaseMinCents   int64  `json:"purchase_min_cents"`
-	RateTable          []struct {
+	Team             string `json:"team"`
+	BalanceMicro     int64  `json:"balance_micro"`
+	MicroPerCredit   int64  `json:"micro_per_credit"`
+	CreditsPerDollar int64  `json:"credits_per_dollar"`
+	SliceSeconds     int64  `json:"slice_seconds"`
+	PurchaseMinCents int64  `json:"purchase_min_cents"`
+	RateTable        []struct {
 		Cores          int64 `json:"cores"`
 		MicroPerSecond int64 `json:"micro_per_second"`
 	} `json:"rate_table"`
@@ -182,7 +182,7 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 		if len(b.Grants) != 1 || b.Grants[0].Kind != store.CreditGrantPaid || b.Grants[0].Reference != reference {
 			t.Errorf("%s grants = %+v", tc.name, b.Grants)
 		}
-		if b.MicroPerCredit != 100_000 || b.CreditsPerDollar != 1_000 || b.MinBillableSeconds != 60 ||
+		if b.MicroPerCredit != 100_000 || b.CreditsPerDollar != 1_000 || b.SliceSeconds != 60 ||
 			b.PurchaseMinCents != 50 || b.Trusted || len(b.RateTable) == 0 {
 			t.Errorf("%s reads prices %+v", tc.name, b)
 		}

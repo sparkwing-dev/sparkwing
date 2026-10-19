@@ -62,7 +62,7 @@ const billing = {
   balance_micro: 123_000_000,
   micro_per_credit: 100_000,
   credits_per_dollar: 1_000,
-  min_billable_seconds: 60,
+  slice_seconds: 60,
   purchase_min_cents: 50,
   trusted: true,
   rate_table: [
@@ -333,7 +333,7 @@ it("prepay accepts the provider minimum and refuses smaller amounts", () => {
 describe("standing requests", () => {
   const standing = {
     tier: "Trusted",
-    history: { tier: "Established", paid_micro: 0, successful_charges: 0 },
+    history: { tier: "Established", paid_micro: 0 },
     prepay_ceiling: "Trusted",
     can_request: true,
   };
@@ -381,11 +381,81 @@ describe("standing requests", () => {
 
 describe("hold notices", () => {
   it("names each blocker and its remedy", () => {
-    assert.match(lib.holdNotice("decline"), /card was declined\. Update the card/);
     assert.match(lib.holdNotice("dispute"), /payment dispute is open\. Contact support/);
     assert.match(lib.holdNotice("early_fraud_warning"), /possible fraud/);
     assert.match(lib.holdNotice("operator"), /support placed a hold/);
-    assert.doesNotMatch(lib.holdNotice("decline"), /dispute|support/);
-    assert.match(lib.limitReason("held"), /hold is on the team/);
+    assert.match(lib.holdNotice("revoked"), /revoked/);
+    for (const cause of ["dispute", "early_fraud_warning", "operator", "revoked"])
+      assert.match(lib.holdNotice(cause), /Cloud work is stopped|Cloud work\. Contact|so Cloud work is stopped/);
+  });
+});
+
+describe("automatic refill", () => {
+  const refill = {
+    enabled: true,
+    threshold_cents: 1_000,
+    amount_cents: 5_000,
+    week_limit_cents: 0,
+    month_limit_cents: 0,
+    min_amount_cents: 1_000,
+    max_amount_cents: 500_000,
+    caps: { amount_cents: 5_000, per_day: 1, week_cents: 10_000 },
+    open: false,
+    day_count: 0,
+    week_cents: 0,
+    month_cents: 0,
+  };
+
+  it("checks the form the way the controller does", () => {
+    const ok = { enabled: true, threshold: 1_000, amount: 5_000, week: 0, month: 0 };
+    assert.equal(lib.refillProblem(ok, refill), null);
+    assert.match(lib.refillProblem({ ...ok, amount: 999 }, refill) ?? "", /at least \$10/);
+    assert.match(lib.refillProblem({ ...ok, amount: 500_001 }, refill) ?? "", /at most \$5,000/);
+    assert.match(lib.refillProblem({ ...ok, threshold: null }, refill) ?? "", /balance that starts a refill/);
+    assert.match(lib.refillProblem({ ...ok, week: null }, refill) ?? "", /0 for none/);
+    assert.equal(lib.refillProblem({ ...ok, enabled: false, amount: 0 }, refill), null);
+    assert.match(lib.refillProblem({ ...ok, enabled: false, amount: 500 }, refill) ?? "", /at least/);
+  });
+
+  it("names the limit that stops the next refill", () => {
+    assert.equal(lib.refillStatus(refill), "");
+    assert.equal(lib.refillStatus({ ...refill, enabled: false, limit: "team_weekly" }), "");
+    assert.match(lib.refillStatus({ ...refill, limit: "standing_size" }), /\$50 per-refill cap/);
+    assert.match(lib.refillStatus({ ...refill, limit: "standing_daily" }), /1 refill a day/);
+    assert.match(lib.refillStatus({ ...refill, limit: "standing_weekly" }), /\$100 weekly cap/);
+    assert.match(lib.refillStatus({ ...refill, week_limit_cents: 2_500, limit: "team_weekly" }), /weekly limit of \$25/);
+    assert.match(lib.refillStatus({ ...refill, month_limit_cents: 10_000, limit: "team_monthly" }), /monthly limit of \$100.*Cloud work stops/);
+  });
+
+  it("tells the owner to update the card after a failed refill", () => {
+    assert.match(lib.refillStatus({ ...refill, failed_at: 1, failure: "card_declined" }), /failed \(card_declined\)\. Update your card/);
+  });
+
+  it("defaults a response without refill to off", async () => {
+    respond = () => Response.json(billing);
+    const b = await lib.getBilling();
+    assert.equal(b.refill.enabled, false);
+    assert.equal(b.refill.min_amount_cents, 1_000);
+    assert.equal(b.refill.caps.per_day, 0);
+  });
+
+  it("puts the settings and explains a missing card", async () => {
+    const settings = { enabled: true, threshold_cents: 1_000, amount_cents: 5_000, week_limit_cents: 2_500, month_limit_cents: 0 };
+    await lib.setRefill(settings);
+    assert.equal(calls[0].url, "/api/v1/team/billing/refill");
+    assert.equal(calls[0].method, "PUT");
+    assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
+    assert.deepEqual(JSON.parse(calls[0].body), settings);
+    respond = () =>
+      Response.json(
+        { error: { code: "conflict", message: "card billing: save a card", details: { reason: "no_card" } } },
+        { status: 409 },
+      );
+    await assert.rejects(lib.setRefill(settings), (err: Error) => {
+      assert.ok(err instanceof lib.BillingApiError);
+      assert.equal(err.code, "no_card");
+      assert.match(err.message, /Save a card before turning on automatic refill/);
+      return true;
+    });
   });
 });

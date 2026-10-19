@@ -30,26 +30,7 @@ func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Tim
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
-	s.billing = unitBillingCalculation
 	return s, demand, &now
-}
-
-func unitBillingCalculation(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-	result := capability.BillingSettlement{ReservationID: p.ReservationID, RefundUnstarted: len(intervals) == 0}
-	if !p.Metered || len(intervals) == 0 {
-		return result, nil
-	}
-	var elapsed time.Duration
-	for _, interval := range intervals {
-		elapsed += interval.End.Sub(interval.Start)
-	}
-	result.BillableSeconds = int64((elapsed + time.Second - 1) / time.Second)
-	for _, rule := range capability.BillingRules {
-		if rule.Unit == p.Unit {
-			result.BillableSeconds = max(result.BillableSeconds, rule.MinimumSeconds)
-		}
-	}
-	return result, nil
 }
 
 func meteredUnitClaim(t *testing.T, s *Store, demand UnitDemand) (UnitClaim, Actor) {
@@ -86,49 +67,6 @@ func unitBillingTotal(t *testing.T, s *Store, want int64, settled bool) {
 	var pending int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM billing_awards WHERE settled_at IS NULL`).Scan(&pending); err != nil || (pending == 0) != settled {
 		t.Fatalf("pending=%d, %v; settled=%t", pending, err, settled)
-	}
-}
-
-func TestUnmeteredUnitLifecycleNeedsNoCalculator(t *testing.T) {
-	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
-		for _, end := range []string{"release", "unstarted_lapse", "started_lapse"} {
-			t.Run(string(kind)+"/"+end, func(t *testing.T) {
-				s, _, claim, now := renewalFixture(t, kind)
-				s.billing = func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error) {
-					t.Error("unmetered lifecycle called the billing calculator")
-					return capability.BillingSettlement{}, errors.New("no unmetered calculator")
-				}
-				started := end == "started_lapse"
-				if started && kind == capability.UnitNode {
-					ordinal := int64(0)
-					actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-					if _, err := (&Tenant{s: s, team: claim.Team}).TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{claim.RunID, claim.NodeID}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: &ordinal}); err != nil {
-						t.Fatal(err)
-					}
-				}
-				beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, started)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if end == "release" {
-					if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					*now = beat.ExpiresAt
-					lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-					if err != nil {
-						t.Fatal(err)
-					}
-					units, err := s.ReapUnits(t.Context(), lease, 10)
-					if err != nil || len(units) != 1 || !units[0].Requeued {
-						t.Fatalf("unmetered recovery: %+v, %v", units, err)
-					}
-				}
-				unitBillingTotal(t, s, 0, true)
-				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
-			})
-		}
 	}
 }
 
@@ -198,7 +136,6 @@ func TestMeteredUnitQueuePassesOverUnaffordableWork(t *testing.T) {
 func TestMeteredUnitEvalSettlementUsesPersistedLease(t *testing.T) {
 	tenant, now, request := expansionFixture(t)
 	s := tenant.s
-	s.billing = unitBillingCalculation
 	id, err := encodeAwardUnit(UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +264,7 @@ func TestMeteredUnitRenewalCheckpointsAfterComputeStarts(t *testing.T) {
 	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
-	unitBillingTotal(t, s, 600, false)
+	unitBillingTotal(t, s, 1200, false)
 }
 
 func TestMeteredUnitIssuanceCannotOutliveClaimAuthorityProperty(t *testing.T) {
@@ -412,27 +349,6 @@ func TestMeteredUnitReaperSettlesAtLeaseLapse(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT finished_at FROM billable_intervals`).Scan(&end); err != nil || end != claim.Award.LeaseExpiresAt.UnixNano() {
 		t.Fatalf("interval ended at %d, %v; lease %v", end, err, claim.Award.LeaseExpiresAt)
 	}
-}
-
-func TestMeteredUnitSettlementFailureRollsBackResult(t *testing.T) {
-	s, demand, _ := meteredUnitFixture(t, false)
-	_, actor := meteredUnitClaim(t, s, demand)
-	tenant := &Tenant{s: s, team: "a"}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
-		t.Fatal(err)
-	}
-	boom := errors.New("billing unavailable")
-	s.billing = func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error) {
-		return capability.BillingSettlement{}, boom
-	}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); !errors.Is(err, boom) {
-		t.Fatalf("settlement error: %v", err)
-	}
-	row, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
-	if err != nil || row.Status != StatusRunning || row.Attempt != 1 || row.StateSeq != 2 {
-		t.Fatalf("failed settlement changed job: %+v, %v", row, err)
-	}
-	unitBillingTotal(t, s, 600, false)
 }
 
 func TestMeteredUnitApplicationRetryKeepsOneReservation(t *testing.T) {

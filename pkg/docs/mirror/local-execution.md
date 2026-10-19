@@ -582,8 +582,8 @@ Use `-o json` for the saved `monthly_minutes`, `used_seconds` and UTC
 `period_start`. `GET /api/v1/overflow` reports `monthly_minutes`,
 `used_seconds` and the UTC `period_start`. `PUT /api/v1/overflow` saves
 `{"monthly_minutes":120}`, and `{"monthly_minutes":null}` removes the saved cap. These operations
-use the selected account credential. Team standing tiers, owner budgets and the
-billing charge ladder still apply. Once the allowance is reached, new Cloud
+use the selected account credential. Team standing tiers and the prepaid
+balance still apply. Once the allowance is reached, new Cloud
 claims wait while local and registered-machine capacity remains eligible.
 Running work finishes.
 Deleting run history keeps its usage in the monthly total.

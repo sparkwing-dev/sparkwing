@@ -151,7 +151,7 @@ type billingWriterFake struct {
 	prepared, completed, failed int
 	err                         error
 	completeErr                 error
-	budget                      int64
+	refill                      store.RefillSettings
 }
 
 func (f *billingWriterFake) Team() store.Team { return f.team }
@@ -177,8 +177,8 @@ func (f *billingWriterFake) RecordAuthorizedBillingPageFailure(_ context.Context
 	return nil
 }
 
-func (f *billingWriterFake) SetAuthorizedSpendBudget(_ context.Context, a capability.Authorized, cents int64) error {
-	f.seen, f.budget = a, cents
+func (f *billingWriterFake) SetAuthorizedRefill(_ context.Context, a capability.Authorized, settings store.RefillSettings) error {
+	f.seen, f.refill = a, settings
 	return f.err
 }
 
@@ -223,11 +223,10 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 	}{
 		{"checkout", `{"amount_cents":1000}`, capability.BillingPageCredits},
 		{"card", "", capability.BillingPageCard},
-		{"pay", "", capability.BillingPageRecovery},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			property := func(selector []byte, phase uint8) bool {
-				*writer = billingWriterFake{team: store.DefaultTeam, page: capability.BillingPage{ReservationID: "reservation", ExpiresAt: time.Unix(190, 0), Customer: "cus_17", ChargeID: "charge", AttemptID: "attempt"}}
+				*writer = billingWriterFake{team: store.DefaultTeam, page: capability.BillingPage{ReservationID: "reservation", ExpiresAt: time.Unix(190, 0), Customer: "cus_17"}}
 				calls, mode = 0, phase%5
 				want := 200
 				switch mode {
@@ -264,12 +263,12 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 		})
 	}
 	writer.err = nil
-	f.call(t, "PUT", "/api/v1/team/billing/budget", `{"budget_cents":2500}`, "", 204, nil)
-	if writer.budget != 2500 {
-		t.Fatal("budget lost")
+	f.call(t, "PUT", "/api/v1/team/billing/refill", `{"enabled":true,"threshold_cents":500,"amount_cents":2500}`, "", 204, nil)
+	if writer.refill != (store.RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 2500}) {
+		t.Fatalf("refill settings lost: %+v", writer.refill)
 	}
 	for _, tc := range []struct{ path, body string }{
-		{"checkout", `{"amount_cents":1000,"team":"foreign"}`}, {"card", `{}`}, {"pay", `{}`},
+		{"checkout", `{"amount_cents":1000,"team":"foreign"}`}, {"card", `{}`},
 	} {
 		f.call(t, "POST", "/api/v1/team/billing/"+tc.path, tc.body, "request-key", 400, nil)
 	}

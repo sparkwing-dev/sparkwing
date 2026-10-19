@@ -12,7 +12,6 @@ import (
 func cloudRenewalBillingFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim, Actor, *time.Time) {
 	t.Helper()
 	s, demand, now := meteredUnitFixture(t, true)
-	s.billing = nil
 	if kind != capability.UnitNode {
 		demand.Target = &UnitRef{Kind: kind, RunID: "run"}
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)

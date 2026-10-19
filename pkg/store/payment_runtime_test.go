@@ -109,7 +109,6 @@ func TestPaymentSettlementRollbackAndLatePayment(t *testing.T) {
 
 func TestPaymentSettlementAuditsTransitionsAndResumesFundedTeam(t *testing.T) {
 	s, event := paymentFixture(t, capability.PaymentTest)
-	rewriteSchemaExec(t, s.db, "UPDATE teams SET credit_exhausted_at=1 WHERE name='a'")
 	event.Kind = capability.PaymentCheckoutExpired
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
@@ -123,10 +122,6 @@ func TestPaymentSettlementAuditsTransitionsAndResumesFundedTeam(t *testing.T) {
 		if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 			t.Fatal(err)
 		}
-	}
-	var exhausted int64
-	if err := s.db.QueryRow("SELECT credit_exhausted_at FROM teams WHERE name='a'").Scan(&exhausted); err != nil || exhausted != 0 {
-		t.Fatalf("paid team remains exhausted: %d, %v", exhausted, err)
 	}
 	for kind, want := range map[string]int{BusinessEventCheckoutExpired: 1, BusinessEventCheckoutFailed: 0, BusinessEventCheckoutPaid: 1} {
 		var count int

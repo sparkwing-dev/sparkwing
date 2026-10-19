@@ -128,8 +128,6 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	var state struct {
 		BalanceMicro       int64 `json:"balance_micro"`
 		RateMicroPerSecond int64 `json:"rate_micro_per_second"`
-		GraceSeconds       int64 `json:"grace_seconds"`
-		MaxChargeSeconds   int64 `json:"max_charge_seconds"`
 		MicroPerCredit     int64 `json:"micro_per_credit"`
 		CreditsPerDollar   int64 `json:"credits_per_dollar"`
 	}
@@ -142,11 +140,8 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	if state.RateMicroPerSecond != store.DefaultCreditRateMicro {
 		t.Fatalf("rate = %d, want %d", state.RateMicroPerSecond, store.DefaultCreditRateMicro)
 	}
-	if state.GraceSeconds != store.DefaultCreditGraceSeconds {
-		t.Fatalf("grace = %d, want %d", state.GraceSeconds, store.DefaultCreditGraceSeconds)
-	}
-	if state.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
-		t.Fatalf("charge cap = %d, want %d", state.MaxChargeSeconds, store.DefaultCreditMaxChargeSeconds)
+	if strings.Contains(string(body), "grace_seconds") || strings.Contains(string(body), "max_charge_seconds") || strings.Contains(string(body), "exhausted_at") {
+		t.Fatalf("credit state reports a retired field: %s", body)
 	}
 	if state.MicroPerCredit != store.MicroCreditsPerCredit || state.CreditsPerDollar != store.CreditsPerDollar {
 		t.Fatalf("unit constants = %d/%d", state.MicroPerCredit, state.CreditsPerDollar)
@@ -211,8 +206,6 @@ type creditSettingsView struct {
 	RateTable          []creditRateView `json:"rate_table"`
 	RateTableSet       bool             `json:"rate_table_set"`
 	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
-	GraceSeconds       int64            `json:"grace_seconds"`
-	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
 	MicroPerCredit     int64            `json:"micro_per_credit"`
 	CreditsPerDollar   int64            `json:"credits_per_dollar"`
 }
@@ -239,7 +232,7 @@ func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
 		t.Fatalf("read with runs.read = %d, want 200", status)
 	}
 	status, _ = f.request(t, http.MethodPut, "/api/v1/operator/credits/settings", f.readonly,
-		map[string]any{"grace_seconds": 0})
+		map[string]any{"warm_cpu_class_cores": 1})
 	if status != http.StatusForbidden {
 		t.Fatalf("write without admin = %d, want 403", status)
 	}
@@ -295,8 +288,8 @@ func TestCreditSettings_TakesTheRateTableAsAListOrAsAnObject(t *testing.T) {
 	if view.rateFor(2) != 11_000 || view.rateFor(4) != 22_000 || len(view.RateTable) != 2 {
 		t.Fatalf("rate table after the object write = %+v", view.RateTable)
 	}
-	if view.GraceSeconds != store.DefaultCreditGraceSeconds {
-		t.Fatalf("writing the table moved the grace period to %d", view.GraceSeconds)
+	if view.WarmCPUClassCores != store.DefaultWarmCPUClassCores {
+		t.Fatalf("writing the table moved the warm cpu class to %d", view.WarmCPUClassCores)
 	}
 }
 

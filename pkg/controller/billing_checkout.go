@@ -54,10 +54,6 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 	case capability.BillingPageCard:
 		path = "/internal/card-setup"
 		body["setup_id"], body["customer"], body["email"] = page.ReservationID, page.Customer, page.Email
-	case capability.BillingPageRecovery:
-		path = "/internal/charge-checkout"
-		body["charge_id"], body["attempt_id"] = page.ChargeID, page.AttemptID
-		body["amount_cents"], body["customer"] = page.AmountCents, page.Customer
 	default:
 		return missingEndpointPolicy()
 	}
@@ -124,20 +120,20 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	return nil
 }
 
-type cardChargeResult struct {
+type refillResult struct {
 	PaymentIntent string `json:"payment_intent"`
 	Status        string `json:"status"`
-	DeclineCode   string `json:"decline_code"`
-	Fingerprint   string `json:"fingerprint"`
 }
 
-func (c *billingCheckout) charge(ctx context.Context, deployment string, w store.CardChargeWork) (cardChargeResult, error) {
-	var out cardChargeResult
-	err := c.post(ctx, "/internal/charge", map[string]any{
-		"team": string(w.Team), "deployment": deployment, "charge_id": w.ChargeID, "attempt_id": w.AttemptID,
-		"amount_cents": w.AmountCents, "customer": w.Customer, "payment_method": w.PaymentMethod,
-		"payment_intent": w.PaymentIntent,
+func (c *billingCheckout) refill(ctx context.Context, deployment string, r store.Refill) (refillResult, error) {
+	var out refillResult
+	err := c.post(ctx, "/internal/refill", map[string]any{
+		"team": string(r.Team), "deployment": deployment, "refill_id": r.ID, "amount_cents": r.AmountCents,
+		"customer": r.Customer, "payment_method": r.PaymentMethod, "payment_intent": r.PaymentIntent,
 	}, &out)
+	if err == nil && (out.PaymentIntent == "" || out.Status == "") {
+		err = fmt.Errorf("%w: it named no payment and status", errCheckoutRefused)
+	}
 	return out, err
 }
 

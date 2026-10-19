@@ -50,7 +50,7 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 			}
 			defer func() { _ = s.Close() }()
 
-			createLiveRunT(t,s,fmt.Sprintf("r-%d",i))
+			createLiveRunT(t, s, fmt.Sprintf("r-%d", i))
 			<-start
 			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 				Key: key, HolderID: fmt.Sprintf("h-%d", i),
@@ -123,7 +123,7 @@ func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 			}
 			defer func() { _ = s.Close() }()
 
-			createLiveRunT(t,s,fmt.Sprintf("r-%d",i))
+			createLiveRunT(t, s, fmt.Sprintf("r-%d", i))
 			<-start
 			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 				Key: key, HolderID: fmt.Sprintf("h-%d", i),

@@ -74,7 +74,7 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return len(charges) == 1 && charges[0].CPUClassCores == 16 && charges[0].RateMicroPerSecond == 70000 && charges[0].AmountMicro == 70000*store.MinBillableSeconds
+		return len(charges) == 1 && charges[0].CPUClassCores == 16 && charges[0].RateMicroPerSecond == 70000 && charges[0].AmountMicro == 70000*store.SliceSeconds
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 	_, tenant, h, root := creditClaimFixture(t, 0.25, nil)
 	engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job","available_cores":128}`, http.StatusOK)
 	charges, err := tenant.ListCreditCharges(t.Context(), 10)
-	if err != nil || len(charges) != 1 || charges[0].CPUClassCores != 2 || charges[0].RateMicroPerSecond != 9000 || charges[0].AmountMicro != 9000*store.MinBillableSeconds {
+	if err != nil || len(charges) != 1 || charges[0].CPUClassCores != 2 || charges[0].RateMicroPerSecond != 9000 || charges[0].AmountMicro != 9000*store.SliceSeconds {
 		t.Fatalf("quarter-core reservation=%+v: %v", charges, err)
 	}
 }

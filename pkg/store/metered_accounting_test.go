@@ -67,15 +67,9 @@ func TestStoreDataMeteredReservationImmutableAndAtomic(t *testing.T) {
 func TestStoreDataMeteredUnstartedRefundAndReplay(t *testing.T) {
 	s, c := meteringFixture(t, capability.UnitNode, capability.BillingAtStart)
 	reserveMetering(t, s, c)
-	calculate := func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-		if len(intervals) != 0 || p != *c.Billing {
-			t.Fatalf("settlement inputs=%+v %+v", p, intervals)
-		}
-		return capability.BillingSettlement{ReservationID: p.ReservationID, RefundUnstarted: true}, nil
-	}
 	for range 2 {
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), true, calculate)
+			_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), true)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -109,17 +103,8 @@ func TestStoreDataMeteredIntervalsExcludeWaitAndSettleAfterAuthorityPruning(t *t
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM capabilities")
-	calculate := func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-		if p != *c.Billing || len(intervals) != 2 {
-			t.Fatalf("lost immutable award: %+v, %+v", p, intervals)
-		}
-		if intervals[0].End.Sub(intervals[0].Start) != 5*time.Second || intervals[1].End.Sub(intervals[1].Start) != 7*time.Second {
-			t.Fatal("customer wait entered billing")
-		}
-		return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: 60}, nil
-	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", at.Add(2*time.Hour), true, calculate)
+		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", at.Add(2*time.Hour), true)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -210,16 +195,9 @@ func TestStoreDataMeteredHeartbeatChargesOnlyNewCompute(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	calculate := func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-		if len(intervals) != 1 {
-			t.Fatalf("intervals=%+v", intervals)
-		}
-		seconds := max(int64(intervals[0].End.Sub(intervals[0].Start)/time.Second), 60)
-		return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: seconds}, nil
-	}
 	for _, elapsed := range []time.Duration{30 * time.Second, 70 * time.Second, 70 * time.Second} {
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(elapsed), false, calculate)
+			_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(elapsed), false)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -227,7 +205,7 @@ func TestStoreDataMeteredHeartbeatChargesOnlyNewCompute(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "credit_charges", 2)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(75*time.Second), true, calculate)
+		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(75*time.Second), true)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -237,7 +215,7 @@ func TestStoreDataMeteredHeartbeatChargesOnlyNewCompute(t *testing.T) {
 		t.Fatalf("usage=%d seconds, %d micro, %v", seconds, amount, err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		got, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(80*time.Second), true, calculate)
+		got, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(80*time.Second), true)
 		if got.BillableSeconds != 75 {
 			t.Fatalf("settlement replay=%+v", got)
 		}
@@ -254,9 +232,7 @@ func TestStoreDataMeteredPauseCannotUndoRenewedCompute(t *testing.T) {
 	start := s.now()
 	s.clock = func() time.Time { return start.Add(2 * time.Minute) }
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(70*time.Second), false, func(p capability.BillingProvenance, _ []capability.BillableInterval) (capability.BillingSettlement, error) {
-			return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: 70}, nil
-		})
+		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(70*time.Second), false)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -281,11 +257,8 @@ func TestStoreDataUnmeteredSettlementNeedsNoCalculator(t *testing.T) {
 				award.RootMetered, award.Billing.Metered = false, false
 				reserveMetering(t, s, award)
 				want := capability.BillingSettlement{ReservationID: award.Billing.ReservationID}
-				unavailable := func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error) {
-					return capability.BillingSettlement{}, errors.New("unmetered settlement called calculator")
-				}
 				if err := s.inTx(t.Context(), func(tx *storeTx) error {
-					got, err := accountBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now(), false, unavailable)
+					got, err := accountBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now(), false)
 					if err == nil && got != want {
 						t.Fatalf("checkpoint=%+v, want %+v", got, want)
 					}
@@ -296,7 +269,7 @@ func TestStoreDataUnmeteredSettlementNeedsNoCalculator(t *testing.T) {
 				rewriteSchemaExec(t, s.db, "DELETE FROM capabilities")
 				for range 2 {
 					if err := s.inTx(t.Context(), func(tx *storeTx) error {
-						got, err := accountBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now(), true, nil)
+						got, err := accountBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now(), true)
 						if err == nil && got != want {
 							t.Fatalf("settlement=%+v, want %+v", got, want)
 						}
@@ -308,7 +281,6 @@ func TestStoreDataUnmeteredSettlementNeedsNoCalculator(t *testing.T) {
 				rewriteSchemaCount(t, s.db, "billing_awards WHERE settled_at IS NOT NULL", 1)
 				rewriteSchemaCount(t, s.db, "credit_charges", 0)
 				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
-				rewriteSchemaCount(t, s.db, "team_spend_days", 0)
 			})
 		}
 	}

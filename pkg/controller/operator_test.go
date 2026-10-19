@@ -187,7 +187,7 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 		t.Fatalf("committed revocation = %d %+v", code, team.Billing)
 	}
 
-	if _, err := f.store.DB().ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES (?,?,?,?,?)", "dp_1", owner.team, "", "chargeback", time.Now().UnixNano()); err != nil {
+	if _, err := f.store.DB().ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_1", owner.team, "", "chargeback", time.Now().UnixNano()); err != nil {
 		t.Fatalf("dispute hold: %v", err)
 	}
 	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse"}, nil); code != http.StatusOK {

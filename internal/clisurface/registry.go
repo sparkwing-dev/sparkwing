@@ -308,6 +308,15 @@ func Registry() []Command {
 			{Name: "tier", Argument: "TIER", Values: []string{"high"}, Required: true},
 			{Name: "message", Argument: "TEXT", Required: true},
 		}},
+		{Path: "sparkwing billing refill", Authority: TeamCredential, Rules: []string{"Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the standing caps, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $5,000. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "enable", Conflicts: []string{"disable"}, Meaning: "Turn automatic refill on; the team needs a saved card."},
+			{Name: "disable", Conflicts: []string{"enable"}, Meaning: "Turn automatic refill off, keeping its settings."},
+			{Name: "threshold", Argument: "DOLLARS", Meaning: "Refill when the balance falls below this many dollars."},
+			{Name: "amount", Argument: "DOLLARS", Meaning: "Dollars added by each refill, $10 to $5,000."},
+			{Name: "week-limit", Argument: "DOLLARS", Meaning: "Most dollars refilled in any 7 days; 0 is no limit."},
+			{Name: "month-limit", Argument: "DOLLARS", Meaning: "Most dollars refilled in any 30 days; 0 is no limit."},
+		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
 		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},

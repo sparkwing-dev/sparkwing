@@ -32,7 +32,7 @@ func TestStoreDataCreditUsageStaysInTenantWithoutOperationalRows(t *testing.T) {
 						seconds, value = -seconds/2, -value/2
 					}
 					id := fmt.Sprintf("%d_%d_%d_%d", iteration, owner, row, k)
-					rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES (?,?,?,'job','award',?,?,?,?)`, id, team, run, kind, seconds, value, at.UnixNano())
+					rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES (?,?,?,'job',?,?,?,?,?)`, id, team, run, "award_"+run, kind, seconds, value, at.UnixNano())
 					usage.Seconds += seconds
 					usage.AmountMicro += value
 					balance -= value

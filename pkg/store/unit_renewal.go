@@ -143,10 +143,7 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 		return err
 	}
 	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
-	if err := accountUnitBillingTx(ctx, tx, team, unit, actor.Generation, tx.now(), false); err != nil {
-		return err
-	}
-	if err := applyBillingCancellationTx(ctx, tx, team, unit, actor.Generation, beat); err != nil {
+	if err := renewUnitBillingTx(ctx, tx, team, unit, actor.Generation, beat); err != nil {
 		return err
 	}
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)

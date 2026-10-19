@@ -16,22 +16,16 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 	if paymentID == "" || reference == "" {
 		return CreditReversal{}, errors.New("credits: a reversal names the payment and its own reference")
 	}
-	if strings.HasPrefix(reference, unappliedPrefix) {
-		return CreditReversal{}, fmt.Errorf("%w: the reference prefix %q is reserved", ErrInvalidInput, unappliedPrefix)
-	}
-	id, err := newCreditID("grant")
-	if err != nil {
-		return CreditReversal{}, err
-	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return CreditReversal{}, err
-	}
 	paid, found, err := paidGrantForPaymentTx(ctx, tx, paymentID)
 	if err != nil {
 		return CreditReversal{}, err
 	}
 	if !found {
 		return CreditReversal{}, fmt.Errorf("%w: %q", ErrUnknownPayment, paymentID)
+	}
+	l, err := lockLedgerTx(ctx, tx, paid.Team)
+	if err != nil {
+		return CreditReversal{}, err
 	}
 	if _, err := refuseBoundDisputeTx(ctx, tx, reference, paid.Team, paymentID); err != nil {
 		return CreditReversal{}, err
@@ -52,29 +46,21 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 	if err != nil {
 		return CreditReversal{}, err
 	}
-	if out.Grant == nil && amountMicro > 0 {
-		released, err := releaseUnappliedTx(ctx, tx, paid.Team, paid.Reference, reference, createdBy, amountMicro)
+	if out.Grant == nil && already < paid.AmountMicro {
+		id, err := newCreditID("grant")
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		already -= released
-	}
-	if out.Grant == nil && already < paid.AmountMicro {
-		now := tx.now()
 		take := paid.AmountMicro - already
 		if amountMicro > 0 && amountMicro < take {
 			take = amountMicro
 		}
 		grant := CreditGrant{
 			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: -take,
-			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: now,
+			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: tx.now(),
 		}
-		if _, err := tx.ExecContext(ctx, `
-        INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			string(grant.Team), grant.ID, grant.Kind, grant.AmountMicro, grant.Reference, grant.Reverses,
-			grant.CreatedBy, now.UnixNano()); err != nil {
-			return CreditReversal{}, fmt.Errorf("credits: insert reversal: %w", err)
+		if err := l.insertGrant(ctx, grant); err != nil {
+			return CreditReversal{}, err
 		}
 		if err := recordGrantEventTx(tx, grant, nil); err != nil {
 			return CreditReversal{}, err
@@ -83,7 +69,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 		already += take
 	}
 	out.ReversedMicro = already
-	if out.BalanceMicro, err = creditBalanceTx(ctx, tx, paid.Team); err != nil {
+	if out.BalanceMicro, err = l.balance(ctx); err != nil {
 		return CreditReversal{}, err
 	}
 	return out, nil
@@ -94,8 +80,8 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if disputeID == "" {
 		return false, errors.New("credits: a hold names the dispute it is for")
 	}
-	// safety: admission and freezes serialize on the same ledger lock.
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	// safety: admission and holds serialize on the team's ledger lock.
+	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return false, err
 	}
 	var registered int
@@ -109,13 +95,13 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if err != nil || bound {
 		return false, err
 	}
-	stored := reason
+	stored, cause := reason, HoldCauseOperator
 	if actor == "" {
-		stored = truncate(reason, 500)
+		stored, cause = truncate(reason, 500), HoldCauseDispute
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, placed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		disputeID, string(team), paymentID, stored, actor, now.UnixNano()); err != nil {
+		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, placed_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		disputeID, string(team), paymentID, stored, cause, actor, now.UnixNano()); err != nil {
 		return false, err
 	}
 	attrs := map[string]any{"payment_id": paymentID}
@@ -136,28 +122,27 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 		return 0, errors.New("credits: a release names the team")
 	}
 	disputeID = strings.TrimSpace(disputeID)
-	if noFault {
-		if disputeID != "" && !strings.HasPrefix(disputeID, OperatorHoldPrefix) {
-			return 0, fmt.Errorf("%w: only an operator hold can be released as no fault found", ErrInvalidInput)
-		}
-		operatorOnly = true
-	}
+	operatorOnly = operatorOnly || noFault
 	query := `UPDATE credit_freezes SET released_at = ?, no_fault = ? WHERE team = ? AND released_at IS NULL`
 	args := []any{now.UnixNano(), boolInt(noFault), string(team)}
-	if disputeID = strings.TrimSpace(disputeID); disputeID != "" {
+	if disputeID != "" {
 		query, args = query+` AND dispute_id = ?`, append(args, disputeID)
 	}
 	if operatorOnly {
-		query, args = query+` AND dispute_id LIKE ?`, append(args, OperatorHoldPrefix+"%")
+		query, args = query+` AND cause = ?`, append(args, HoldCauseOperator)
 	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return 0, err
 	}
 	if noFault {
-		var others int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM credit_freezes WHERE team = ? AND released_at IS NULL AND dispute_id LIKE ? AND (? = '' OR dispute_id = ?) AND placed_by <> ?`,
-			string(team), OperatorHoldPrefix+"%", disputeID, disputeID, actor).Scan(&others); err != nil {
+		var operator, others int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN placed_by <> ? THEN 1 ELSE 0 END), 0)
+		    FROM credit_freezes WHERE team = ? AND released_at IS NULL AND cause = ? AND (? = '' OR dispute_id = ?)`,
+			actor, string(team), HoldCauseOperator, disputeID, disputeID).Scan(&operator, &others); err != nil {
 			return 0, err
+		}
+		if disputeID != "" && operator == 0 {
+			return 0, fmt.Errorf("%w: only an operator hold can be released as no fault found", ErrInvalidInput)
 		}
 		if actor == "" || others > 0 {
 			return 0, authorityError(apierr.Forbidden, "only the operator who placed a hold can release it as no fault found")
@@ -188,13 +173,10 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	if c.Customer == "" || c.PaymentMethod == "" || c.Fingerprint == "" {
 		return fmt.Errorf("%w: a card names its customer, payment method and fingerprint", ErrInvalidInput)
 	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return err
-	}
 	if err := (&Tenant{s: tx.store, team: team}).lockTeamTx(ctx, tx); err != nil {
 		return err
 	}
-	refusal, err := refuseCardTx(ctx, tx, team, "", c.Fingerprint)
+	refusal, err := cardRefusalTx(ctx, tx, team, "", c.Fingerprint)
 	if err != nil {
 		return err
 	}
@@ -209,7 +191,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 		addedAt = c.AddedAt.UnixNano()
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
-	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?
+	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?, refill_failed_at = 0, refill_failure = ''
 	    WHERE name = ? AND card_added_at <= ?`,
 		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, addedAt, string(team), addedAt)
 	if err != nil {
@@ -222,10 +204,6 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	if saved == 0 {
 		return ErrStaleCardSetup
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE card_charges SET next_attempt_at = ? WHERE team = ? AND state = ?`,
-		now.UnixNano(), string(team), CardChargeOpen); err != nil {
-		return err
-	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardAdded, SubjectID: c.PaymentMethod, Actor: actor, At: now,
 		Attrs: map[string]any{"brand": c.Brand, "last4": c.Last4},
@@ -235,201 +213,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	return nil
 }
 
-func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now time.Time) (PaymentSettlement, error) {
-	out := PaymentSettlement{Team: p.Team, Payment: p.PaymentIntent}
-	if p.PaymentIntent == "" || p.AmountCents <= 0 || p.ChargeID == "" || p.AttemptID == "" {
-		return PaymentSettlement{}, fmt.Errorf("%w: a card payment names its charge, attempt, payment intent and amount", ErrInvalidInput)
-	}
-	amount, err := billingProduct(p.AmountCents, MicroCreditsPerCent)
-	if err != nil {
-		return PaymentSettlement{}, err
-	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return PaymentSettlement{}, err
-	}
-	var a cardAttemptRow
-	err = tx.QueryRowContext(ctx, `SELECT team, charge_id, kind, status, payment_intent FROM card_attempts WHERE id = ?`,
-		p.AttemptID).Scan(&a.team, &a.chargeID, &a.kind, &a.status, &a.paymentIntent)
-	if errors.Is(err, sql.ErrNoRows) {
-		return PaymentSettlement{}, fmt.Errorf("%w: card attempt %q", ErrNotFound, p.AttemptID)
-	}
-	if err != nil {
-		return PaymentSettlement{}, err
-	}
-	if a.chargeID != p.ChargeID || (p.Team != "" && Team(a.team) != p.Team) {
-		return PaymentSettlement{}, fmt.Errorf("%w: card attempt %q is not for charge %q of this team", ErrInvalidInput, p.AttemptID, p.ChargeID)
-	}
-	team := Team(a.team)
-	out.Team = team
-	if done, err := cardPaymentSeenTx(ctx, tx, team, p.PaymentIntent); err != nil || done {
-		out.Replayed = done
-		return out, err
-	}
-	var state string
-	var frozenAmount int64
-	if err := tx.QueryRowContext(ctx, `SELECT state, amount_micro FROM card_charges WHERE team = ? AND id = ?`+tx.forUpdate(), team, p.ChargeID).
-		Scan(&state, &frozenAmount); err != nil {
-		return PaymentSettlement{}, err
-	}
-	nowNS := now.UnixNano()
-	// safety: a failure is an observation on its payment intent, so that intent's later success still pays the obligation.
-	correlated := a.paymentIntent == p.PaymentIntent && (a.status == CardAttemptLive || a.status == CardAttemptFailed) ||
-		a.paymentIntent == "" && a.status == CardAttemptLive
-	payable := state == CardChargeOpen && amount == frozenAmount && correlated
-	refusal, err := refuseCardTx(ctx, tx, team, p.PaymentIntent, p.Fingerprint)
-	if err != nil {
-		return PaymentSettlement{}, err
-	}
-	if refusal.reason == CardRefusedPinned {
-		out.Refused = CardRefusedPinned
-		return out, refusePinnedCardTx(ctx, tx, team, p, a.status, now)
-	}
-	if refusal.warning != "" {
-		repays, repaid, err := warnedCardRepaidTx(ctx, tx, team, a.kind, p.PaymentIntent, payable, amount)
-		if err != nil {
-			return PaymentSettlement{}, err
-		}
-		warned := &WarnedCardPayment{WarningID: refusal.warning, Repays: repays, RepaidMicro: repaid, UnappliedMicro: amount - repaid}
-		if err := settleWarnedTx(ctx, tx, team, p, *warned, now); err != nil {
-			return PaymentSettlement{}, err
-		}
-		out.Warned = warned
-		if !repays {
-			out.Refused = CardRefusedWarning
-			return out, queueCardRefundTx(ctx, tx, team, p, CardRefusedWarning, now)
-		}
-	}
-	if err := insertCardGrantTx(ctx, tx, team, amount, p.PaymentIntent, nowNS); err != nil {
-		return PaymentSettlement{}, err
-	}
-	if err := pinCardTx(ctx, tx, team, p.PaymentIntent, p.Fingerprint, now); err != nil {
-		return PaymentSettlement{}, err
-	}
-	out.Granted = true
-	grant, _, err := paidGrantForPaymentTx(ctx, tx, p.PaymentIntent)
-	if err != nil {
-		return PaymentSettlement{}, err
-	}
-	out.GrantID, out.AmountMicro = grant.ID, grant.AmountMicro
-	if out.Warned != nil && out.Warned.UnappliedMicro > 0 {
-		if err := insertUnappliedTx(ctx, tx, team, p.PaymentIntent, out.Warned.UnappliedMicro, nowNS); err != nil {
-			return PaymentSettlement{}, err
-		}
-	}
-	if err := applyPaymentRefundsTx(ctx, tx, p.PaymentIntent); err != nil {
-		return PaymentSettlement{}, err
-	}
-	if !payable {
-		reason := "duplicate"
-		if amount != frozenAmount {
-			reason = "amount_mismatch"
-		}
-		out.Refused = reason
-		return out, queueCardRefundTx(ctx, tx, team, p, reason, now)
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, updated_at = ?
-     WHERE team = ? AND id = ? AND charge_id = ? AND status IN (?,?)`, CardAttemptPaid, p.PaymentIntent, nowNS, team, p.AttemptID, p.ChargeID, CardAttemptLive, CardAttemptFailed)
-	if err != nil {
-		return PaymentSettlement{}, err
-	}
-	if err := requireOneRow(result, "card attempt settlement"); err != nil {
-		return PaymentSettlement{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, decline_code = 'superseded', updated_at = ?
-     WHERE team = ? AND charge_id = ? AND status = ? AND id <> ?`, CardAttemptFailed, nowNS, team, p.ChargeID, CardAttemptLive, p.AttemptID); err != nil {
-		return PaymentSettlement{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_rung_index=CASE WHEN billing_rung_index<? THEN billing_rung_index+1 ELSE billing_rung_index END WHERE name=?`, len(billingPolicy)-1, team); err != nil {
-		return PaymentSettlement{}, err
-	}
-	result, err = tx.ExecContext(ctx, `UPDATE card_charges SET state = ?, payment_intent = ?, closed_at = ?
-     WHERE team = ? AND id = ? AND state = ?`, CardChargePaid, p.PaymentIntent, nowNS, team, p.ChargeID, CardChargeOpen)
-	if err != nil {
-		return PaymentSettlement{}, err
-	}
-	if err := requireOneRow(result, "card charge settlement"); err != nil {
-		return PaymentSettlement{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE credit_freezes SET released_at = ?, no_fault = 1
-	    WHERE team = ? AND cause = ? AND released_at IS NULL`, nowNS, string(team), FreezeCauseDecline); err != nil {
-		return PaymentSettlement{}, err
-	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
-		Team: team, Kind: BusinessEventCardCharged, SubjectID: p.PaymentIntent, Actor: "card", At: now,
-		Attrs: map[string]any{"charge_id": p.ChargeID, "attempt_id": p.AttemptID, "amount_micro": amount},
-	}); err != nil {
-		return PaymentSettlement{}, err
-	}
-	room, err := headroomTx(ctx, tx, team, tx.now())
-	if err != nil {
-		return PaymentSettlement{}, err
-	}
-	if room > 0 {
-		if err := clearTeamCreditExhaustedTx(ctx, tx, team, nowNS); err != nil {
-			return PaymentSettlement{}, err
-		}
-	}
-	// safety: partial settlement must retain an open obligation for the unpaid debt.
-	if err := decideCardChargeTx(ctx, tx, team, now); err != nil {
-		return PaymentSettlement{}, err
-	}
-	return out, nil
-}
-
-func failCardAttemptTx(ctx context.Context, tx *storeTx, attemptID, paymentIntent, declineCode string, now time.Time) (team Team, first bool, err error) {
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return "", false, err
-	}
-	var chargeID, status, name string
-	err = tx.QueryRowContext(ctx, `SELECT charge_id, status, team FROM card_attempts WHERE id = ?`, attemptID).
-		Scan(&chargeID, &status, &name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, fmt.Errorf("%w: card attempt %q", ErrNotFound, attemptID)
-	}
-	if err != nil || status != CardAttemptLive {
-		return Team(name), false, err
-	}
-	nowNS := now.UnixNano()
-	if _, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, decline_code = ?,
-	    updated_at = ? WHERE id = ?`, CardAttemptFailed, paymentIntent, declineCode, nowNS, attemptID); err != nil {
-		return "", false, err
-	}
-	var failures int64
-	if err := tx.QueryRowContext(ctx, `SELECT failures FROM card_charges WHERE id = ? AND state = ?`,
-		chargeID, CardChargeOpen).Scan(&failures); errors.Is(err, sql.ErrNoRows) {
-		return Team(name), false, nil
-	} else if err != nil {
-		return "", false, err
-	}
-	next := int64(1<<63 - 1)
-	if int(failures) < len(cardRetryAfter) {
-		next = now.Add(cardRetryAfter[failures]).UnixNano()
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE card_charges SET failures = failures + 1, decline_code = ?,
-	    next_attempt_at = ? WHERE id = ?`, declineCode, next, chargeID); err != nil {
-		return "", false, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_rung_index=CASE WHEN billing_rung_index>0 THEN billing_rung_index-1 ELSE 0 END WHERE name=?`, name); err != nil {
-		return "", false, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)
-	    VALUES (?, ?, ?, ?, ?, ?)`, "decline-"+attemptID, name, paymentIntent,
-		"card charge declined: "+declineCode, FreezeCauseDecline, nowNS); err != nil {
-		return "", false, err
-	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
-		Team: Team(name), Kind: BusinessEventCardFailed, SubjectID: attemptID, Actor: "card", At: now,
-		Attrs: map[string]any{"charge_id": chargeID, "decline_code": declineCode, "failures": failures + 1},
-	}); err != nil {
-		return "", false, err
-	}
-	return Team(name), failures == 0, nil
-}
-
 func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, refundID, status, when string, whenArgs []any, now time.Time) (bool, error) {
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return false, err
-	}
 	var attempts int64
 	args := append([]any{team, paymentIntent}, whenArgs...)
 	err := tx.QueryRowContext(ctx, `SELECT attempts FROM card_refunds WHERE team = ? AND payment_intent = ? AND `+when+tx.forUpdate(), args...).Scan(&attempts)

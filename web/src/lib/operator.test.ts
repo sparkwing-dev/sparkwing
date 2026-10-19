@@ -200,7 +200,7 @@ describe("waitlist", () => {
 
 describe("standing requests", () => {
   it("reads the queue and declines with a reason", async () => {
-    respond = () => Response.json({ requests: [{ request: { id: "standing-1", team: "a b", tier: "High", message: "m", requested_at: 1, state: "open" }, display_name: "A", standing: "Trusted", prepay_ceiling: "High", balance_micro: 0, history: { tier: "Trusted", paid_micro: 0, successful_charges: 0 } }] });
+    respond = () => Response.json({ requests: [{ request: { id: "standing-1", team: "a b", tier: "High", message: "m", requested_at: 1, state: "open" }, display_name: "A", standing: "Trusted", prepay_ceiling: "High", balance_micro: 0, history: { tier: "Trusted", paid_micro: 0 } }] });
     const queue = await lib.getStandingRequests();
     assert.equal(queue[0].request.id, "standing-1");
     assert.equal(calls[0].url, "/api/v1/operator/standing-requests");
@@ -221,23 +221,22 @@ describe("standing requests", () => {
     const now = Date.UTC(2026, 9, 31);
     const first = Date.UTC(2026, 9, 1) / 1000;
     assert.equal(
-      lib.historyFacts({ tier: "Established", paid_micro: 50_000_000_000, successful_charges: 0, first_paid_at: first }, now),
+      lib.historyFacts({ tier: "Established", paid_micro: 50_000_000_000, first_paid_at: first }, now),
       "Established history · $500 paid · 30 clean days",
     );
     assert.equal(
-      lib.historyFacts({ tier: "Established", paid_micro: 50_000_000_000, successful_charges: 2, first_paid_at: first, last_incident_at: first + 20 * 86400 }, now),
-      "Established history · $500 paid · 2 card charge(s) · 10 clean days",
+      lib.historyFacts({ tier: "Established", paid_micro: 50_000_000_000, first_paid_at: first, last_incident_at: first + 20 * 86400 }, now),
+      "Established history · $500 paid · 10 clean days",
     );
-    assert.equal(lib.historyFacts({ tier: "New", paid_micro: 0, successful_charges: 0 }, now), "New history · $0 paid · no payments");
+    assert.equal(lib.historyFacts({ tier: "New", paid_micro: 0 }, now), "New history · $0 paid · no payments");
   });
 });
 
 describe("hold causes and no-fault releases", () => {
   it("labels each payment hold by its recorded cause", () => {
-    const held = { ...team, holds: ["decline-a1", "early_fraud_warning:ch_1", "dp_1", "operator-x"], hold_causes: ["decline", "early_fraud_warning", "dispute", "operator"] };
-    assert.deepEqual(lib.paymentHolds(held), ["decline-a1", "early_fraud_warning:ch_1", "dp_1"]);
+    const held = { ...team, holds: ["early_fraud_warning:ch_1", "dp_1", "operator-x"], hold_causes: ["early_fraud_warning", "dispute", "operator"] };
+    assert.deepEqual(lib.paymentHolds(held), ["early_fraud_warning:ch_1", "dp_1"]);
     assert.deepEqual(lib.operatorHolds(held), ["operator-x"]);
-    assert.equal(lib.holdLabel(held, "decline-a1"), "declined card charge decline-a1");
     assert.equal(lib.holdLabel(held, "early_fraud_warning:ch_1"), "early fraud warning early_fraud_warning:ch_1");
     assert.equal(lib.holdLabel(held, "dp_1"), "payment dispute dp_1");
   });

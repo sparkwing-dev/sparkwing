@@ -14,7 +14,6 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 	for _, metered := range []bool{false, true} {
 		t.Run(fmt.Sprintf("metered=%t", metered), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, false)
-			s.billing = capability.SettleBilling
 			if !metered {
 				root := authorityRoot("unmetered-runner", "a")
 				root.Grants = []capability.Grant{capability.NodesClaim}
@@ -28,7 +27,7 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 			claim, err := s.ClaimUnit(t.Context(), demand)
 			if metered {
 				var refused *InsufficientCreditsError
-				if !errors.As(err, &refused) || !refused.Frozen {
+				if !errors.As(err, &refused) || refused.Hold != HoldCauseDispute {
 					t.Fatalf("frozen metered award=%+v: %v", claim, err)
 				}
 				rewriteSchemaCount(t, s.db, "billing_awards", 0)
@@ -107,25 +106,5 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(5319))}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestAReversalMayNotUseTheUnappliedPrefix(t *testing.T) {
-	s, event := paymentFixture(t, capability.PaymentTest)
-	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "unapplied:refund", "console", 300000); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("reserved reference=%v", err)
-	}
-	tenant := &Tenant{s: s, team: "a"}
-	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantReversal, AmountMicro: -300000, Reference: "unapplied:refund", Reverses: "payment:test:checkout", CreatedBy: "console"}); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("reserved grant reference=%v", err)
-	}
-	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "refund", "console", 200000); err != nil {
-		t.Fatal(err)
-	}
-	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 800000 {
-		t.Fatalf("balance=%d: %v", balance, err)
 	}
 }

@@ -44,15 +44,7 @@ func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditS
 		return out, err
 	}
 	out.RateMicroPerSecond, out.RateTable, out.RateTableSet = settings.RateMicroPerSecond, settings.RateTable, settings.RateTableSet
-	out.WarmCPUClassCores, out.GraceSeconds, out.MaxChargeSeconds = settings.WarmCPUClassCores, settings.GraceSeconds, settings.MaxChargeSeconds
+	out.WarmCPUClassCores = settings.WarmCPUClassCores
 	out.StorageRateMicroPerGBDay, out.StorageFreeAllowanceBytes = settings.StorageRateMicroPerGBDay, settings.StorageFreeAllowanceBytes
-	var exhausted int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT credit_exhausted_at FROM teams WHERE name=?),0)", t.team).Scan(&exhausted); err != nil {
-		return out, err
-	}
-	if exhausted != 0 {
-		at := time.Unix(0, exhausted).UTC()
-		out.ExhaustedAt = &at
-	}
 	return out, tx.Commit()
 }

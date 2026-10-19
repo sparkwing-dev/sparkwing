@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"math/rand"
 	"slices"
@@ -15,8 +14,8 @@ import (
 
 func TestStoreDataLedgerTotalsUseFinancialRows(t *testing.T) {
 	s := authorityStore(t)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES
-	 ('free','a','free',100,1),('paid','b','paid',1000,1),('reversal','b','reversal',-25,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,reverses,created_at) VALUES
+	 ('free','a','free',100,'',1),('paid','b','paid',1000,'',1),('reversal','b','reversal',-25,'payment:test:paid',1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES
 	 ('reserve','a','pruned','job','award','reservation',60,600,1),
 	 ('refund','a','pruned','job','award','refund',-57,-570,1),
@@ -34,25 +33,16 @@ func TestStoreDataLedgerTotalsUseFinancialRows(t *testing.T) {
 func TestStoreDataLedgerTotalsExcludeUnstartedReservation(t *testing.T) {
 	s, demand, _ := meteredUnitFixture(t, true)
 	claim, _ := meteredUnitClaim(t, s, demand)
-	calculate := capability.SettleBilling
-	calls := 0
-	s.billing = func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-		calls++
-		if p.ReservationID == "" || p.Unit != capability.BillingJob || len(intervals) != 0 {
-			t.Fatalf("unstarted inputs=%+v, %+v", p, intervals)
-		}
-		return calculate(p, intervals)
-	}
 	got, err := s.AsOperator().CreditLedgerTotals(t.Context())
-	if err != nil || calls != 1 || got.SettledSeconds != 0 || got.ReservedMicro != 600 || got.BalanceMicro != 999400 {
-		t.Fatalf("unstarted totals=%+v, calls=%d, %v", got, calls, err)
+	if err != nil || got.SettledSeconds != 0 || got.ReservedMicro != 600 || got.BalanceMicro != 999400 {
+		t.Fatalf("unstarted totals=%+v, %v", got, err)
 	}
 	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 		t.Fatal(err)
 	}
 	got, err = s.AsOperator().CreditLedgerTotals(t.Context())
-	if err != nil || calls != 2 || got.SettledSeconds != 0 || got.ReservedMicro != 600 || got.RefundedMicro != 600 || got.BalanceMicro != 1000000 {
-		t.Fatalf("released totals=%+v, calls=%d, %v", got, calls, err)
+	if err != nil || got.SettledSeconds != 0 || got.ReservedMicro != 600 || got.RefundedMicro != 600 || got.BalanceMicro != 1000000 {
+		t.Fatalf("released totals=%+v, %v", got, err)
 	}
 }
 
@@ -125,25 +115,16 @@ func TestStoreDataLedgerTotalsReadAwardsWithoutAdvancingBilling(t *testing.T) {
 			}
 			s.db = blobAccountingDB(t, path)
 		}
-		calls := 0
-		calculate := func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-			calls++
-			expected, ok := want[p.PayerTeam]
-			if !ok || expected.provenance != p || !slices.Equal(expected.intervals, intervals) {
-				t.Fatalf("calculation inputs=%+v, %+v; want %+v", p, intervals, expected)
-			}
-			return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: expected.seconds, RefundUnstarted: len(intervals) == 0}, nil
-		}
 		before := billingIntervalCheckpoints(t, s)
 		wantTotals := CreditLedgerTotals{GrantedPaidMicro: int64(iteration) * 2_000_000, ReservedMicro: wantReserved, SettledSeconds: wantSeconds, BalanceMicro: int64(iteration)*2_000_000 - wantReserved}
 		for range 2 {
-			got, err := s.creditLedgerTotalsWith(t.Context(), calculate)
+			got, err := s.AsOperator().CreditLedgerTotals(t.Context())
 			if err != nil || got != wantTotals {
 				t.Logf("totals=%+v, %v; want %+v", got, err, wantTotals)
 				return false
 			}
 		}
-		if calls != 4 || !slices.Equal(before, billingIntervalCheckpoints(t, s)) {
+		if !slices.Equal(before, billingIntervalCheckpoints(t, s)) {
 			t.Fatal("report advanced billing or skipped an award")
 		}
 		rewriteSchemaExec(t, s.db, "DELETE FROM billable_intervals")
@@ -183,44 +164,11 @@ func billingIntervalCheckpoints(t *testing.T, s *Store) []string {
 	return out
 }
 
-func TestStoreDataLedgerTotalsRefuseFailedCalculation(t *testing.T) {
-	s, c := meteringFixture(t, capability.UnitNode, capability.BillingAtAward)
-	reserveMetering(t, s, c)
-	before := billingIntervalCheckpoints(t, s)
-	boom := errors.New("calculator unavailable")
-	for _, test := range []struct {
-		result capability.BillingSettlement
-		err    error
-	}{
-		{err: boom},
-		{result: capability.BillingSettlement{ReservationID: "other"}},
-		{result: capability.BillingSettlement{ReservationID: "reservation", BillableSeconds: -1}},
-		{result: capability.BillingSettlement{ReservationID: "reservation", RefundUnstarted: true}},
-	} {
-		got, err := s.creditLedgerTotalsWith(t.Context(), func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error) {
-			return test.result, test.err
-		})
-		if err == nil || got != (CreditLedgerTotals{}) || (test.err != nil && !errors.Is(err, test.err)) {
-			t.Fatalf("invalid calculation=%+v returned %+v, %v", test, got, err)
-		}
-		if !slices.Equal(before, billingIntervalCheckpoints(t, s)) {
-			t.Fatal("failed report advanced billing")
-		}
-	}
-}
-
 func TestStoreDataLedgerTotalsObserveOnlyConfirmedCompute(t *testing.T) {
 	s, c := meteringFixture(t, capability.UnitPlan, capability.BillingAtAward)
 	reserveMetering(t, s, c)
 	at := s.now()
 	confirmed := int64(0)
-	calculate := func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-		want := []capability.BillableInterval{{CapabilityPrefix: c.Prefix, Unit: capability.BillingPlan, Start: at, End: at.Add(time.Duration(confirmed) * time.Second)}}
-		if p != *c.Billing || !slices.Equal(intervals, want) {
-			t.Fatalf("checkpoint inputs=%+v, %+v; want %+v", p, intervals, want)
-		}
-		return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: confirmed}, nil
-	}
 	for _, step := range []struct {
 		now   int64
 		renew bool
@@ -230,14 +178,14 @@ func TestStoreDataLedgerTotalsObserveOnlyConfirmedCompute(t *testing.T) {
 		if step.renew {
 			confirmed = step.now
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), false, calculate)
+				_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), false)
 				return err
 			}); err != nil {
 				t.Fatal(err)
 			}
 		}
 		before := billingIntervalCheckpoints(t, s)
-		got, err := s.creditLedgerTotalsWith(t.Context(), calculate)
+		got, err := s.AsOperator().CreditLedgerTotals(t.Context())
 		if err != nil || got.SettledSeconds != step.want || got.ReservedMicro != 600 || got.ChargedMicro != max(step.want-60, 0)*10 {
 			t.Fatalf("confirmed totals=%+v, %v; step=%+v", got, err, step)
 		}
@@ -247,7 +195,7 @@ func TestStoreDataLedgerTotalsObserveOnlyConfirmedCompute(t *testing.T) {
 	}
 	confirmed = 75
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", at.Add(75*time.Second), true, calculate)
+		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", at.Add(75*time.Second), true)
 		return err
 	}); err != nil {
 		t.Fatal(err)

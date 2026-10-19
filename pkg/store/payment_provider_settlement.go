@@ -26,9 +26,6 @@ func (s *Store) settleProviderPaymentFacts(ctx context.Context, event capability
 	}
 	var result PaymentSettlement
 	err = s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
-			return err
-		}
 		if err := configuredPaymentModeTx(ctx, tx, event.Mode); err != nil {
 			return err
 		}
@@ -143,24 +140,20 @@ func samePaymentObject(a, b capability.PaymentEvent) bool {
 	return a.Kind != capability.PaymentDisputeClosed || b.Kind != capability.PaymentDisputeClosed || a.Status == b.Status
 }
 
-type paymentCorrelation struct {
-	team                                Team
-	customer, currency, attempt, charge string
-}
-
-func readPaymentCorrelationTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, kind string) (paymentCorrelation, error) {
-	var c paymentCorrelation
-	err := tx.QueryRowContext(ctx, `SELECT team,customer_id,currency,attempt_id,charge_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind=?`+tx.forShare(), event.Mode, event.ObjectID, kind).Scan(&c.team, &c.customer, &c.currency, &c.attempt, &c.charge)
+func readSetupCorrelationTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent) (Team, string, error) {
+	var team Team
+	var customer string
+	err := tx.QueryRowContext(ctx, `SELECT team,customer_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup'`+tx.forShare(), event.Mode, event.ObjectID).Scan(&team, &customer)
 	if errors.Is(err, sql.ErrNoRows) {
-		return c, authorityError(apierr.NotFound, "committed provider association is unavailable")
+		return "", "", authorityError(apierr.NotFound, "committed provider association is unavailable")
 	}
 	if err != nil {
-		return c, err
+		return "", "", err
 	}
-	if c.team == "" || c.customer == "" || event.CustomerID != "" && c.customer != event.CustomerID || kind == "collection" && c.currency != event.Currency {
-		return paymentCorrelation{}, authorityError(apierr.Conflict, "provider facts conflict with committed billing association")
+	if team == "" || customer == "" || event.CustomerID != "" && customer != event.CustomerID {
+		return "", "", authorityError(apierr.Conflict, "provider facts conflict with committed billing association")
 	}
-	return c, nil
+	return team, customer, nil
 }
 
 func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
@@ -169,11 +162,11 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 	case capability.PaymentPageCompleted:
 		return bindCompletedPageTx(ctx, tx, e)
 	case capability.PaymentCardSetup:
-		c, err := readPaymentCorrelationTx(ctx, tx, e, "setup")
+		team, customer, err := readSetupCorrelationTx(ctx, tx, e)
 		if err != nil {
 			return result, err
 		}
-		result.Team = c.team
+		result.Team = team
 		var saved int
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM payment_events WHERE payment_mode=? AND object_id=? AND event_kind=?", e.Mode, e.ObjectID, e.Kind).Scan(&saved); err != nil {
 			return result, err
@@ -182,32 +175,31 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 			result.Replayed = true
 			return result, nil
 		}
-		err = saveCardTx(ctx, tx, c.team, Card{Customer: c.customer, PaymentMethod: e.MethodID, Fingerprint: e.Fingerprint, Brand: e.Brand, Last4: e.Last4, AddedAt: time.Unix(e.Created, 0)}, "payment_provider", tx.now())
+		err = saveCardTx(ctx, tx, team, Card{Customer: customer, PaymentMethod: e.MethodID, Fingerprint: e.Fingerprint, Brand: e.Brand, Last4: e.Last4, AddedAt: time.Unix(e.Created, 0)}, "payment_provider", tx.now())
 		return result, err
 	case capability.PaymentCardPaid, capability.PaymentCardFailed:
-		c, err := readPaymentCorrelationTx(ctx, tx, e, "collection")
+		var checkout paymentCheckout
+		var customer string
+		err := tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id,customer_id FROM credit_checkouts WHERE payment_mode=? AND payment_id=? AND kind=?`+tx.forUpdate(), e.Mode, e.PaymentID, CheckoutKindRefill).Scan(append(checkout.scan(), &customer)...)
+		if errors.Is(err, sql.ErrNoRows) {
+			return result, authorityError(apierr.NotFound, "committed refill is unavailable")
+		}
 		if err != nil {
 			return result, err
 		}
-		result.Team = c.team
-		var boundPayment, boundCharge string
-		if err := tx.QueryRowContext(ctx, "SELECT charge_id,payment_intent FROM card_attempts WHERE id=? AND team=?", c.attempt, c.team).Scan(&boundCharge, &boundPayment); err != nil {
-			return result, err
+		if checkout.currency != e.Currency || e.CustomerID != customer || e.Kind == capability.PaymentCardPaid && checkout.amount != e.AmountMinor {
+			return result, authorityError(apierr.Conflict, "payment facts conflict with committed refill")
 		}
-		if c.charge != boundCharge || e.PaymentID != boundPayment {
-			return PaymentSettlement{}, authorityError(apierr.Conflict, "payment does not match its committed collection attempt")
-		}
-		if e.Kind == capability.PaymentCardFailed {
-			_, _, err = failCardAttemptTx(ctx, tx, c.attempt, e.PaymentID, e.DeclineCode, tx.now())
-			return result, err
-		}
-		return settleCardPaymentTx(ctx, tx, CardPayment{Team: c.team, ChargeID: c.charge, AttemptID: c.attempt, PaymentIntent: e.PaymentID, AmountCents: e.AmountMinor, Fingerprint: e.Fingerprint}, tx.now())
+		checkout.result.Payment, checkout.result.GrantID = e.PaymentID, checkout.grant.String
+		checkout.result.Replayed = checkout.paid.Valid
+		err = applyPaymentOutcomeTx(ctx, tx, e, &checkout)
+		return checkout.result, err
 	case capability.PaymentWarningEvent:
-		owner, err := paymentWarningTeamTx(ctx, tx, e.PaymentID, e.Mode)
+		owner, err := paymentTeamTx(ctx, tx, e.Mode, e.PaymentID)
 		if err != nil {
 			return result, err
 		}
-		team, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}, e.Mode, tx.now())
+		team, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}, tx.now())
 		if err == nil && team != "" && team != owner {
 			return result, authorityError(apierr.Conflict, "warning changed its persisted payer")
 		}
@@ -216,7 +208,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 	case capability.PaymentRefund:
 		return settleProviderRefundTx(ctx, tx, e)
 	case capability.PaymentDisputeOpened, capability.PaymentDisputeClosed:
-		team, err := paymentWarningTeamTx(ctx, tx, e.PaymentID, e.Mode)
+		team, err := paymentTeamTx(ctx, tx, e.Mode, e.PaymentID)
 		if err != nil {
 			return result, err
 		}
@@ -251,7 +243,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 }
 
 func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
-	team, err := paymentWarningTeamTx(ctx, tx, e.PaymentID, e.Mode)
+	team, err := paymentTeamTx(ctx, tx, e.Mode, e.PaymentID)
 	if err != nil {
 		return PaymentSettlement{}, err
 	}
@@ -282,8 +274,8 @@ func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.Payme
 }
 
 func bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
-	var kind, team, customer, attempt string
-	err := tx.QueryRowContext(ctx, `SELECT kind,team,customer_id,attempt_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind IN ('setup_session','collection_session')`+tx.forShare(), e.Mode, e.ObjectID).Scan(&kind, &team, &customer, &attempt)
+	var team, customer string
+	err := tx.QueryRowContext(ctx, `SELECT team,customer_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup_session'`+tx.forShare(), e.Mode, e.ObjectID).Scan(&team, &customer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PaymentSettlement{}, authorityError(apierr.NotFound, "committed payment page is unavailable")
 	}
@@ -294,9 +286,6 @@ func bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentE
 		return PaymentSettlement{}, authorityError(apierr.Conflict, "completed page names another customer")
 	}
 	result := PaymentSettlement{Team: Team(team)}
-	if kind == "collection_session" {
-		return result, recordAttemptIntentTx(ctx, tx, attempt, e.IntentID, customer, tx.now())
-	}
 	var bound string
 	err = tx.QueryRowContext(ctx, `SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup' AND customer_id=?`, e.Mode, e.IntentID, customer).Scan(&bound)
 	switch {
@@ -311,13 +300,12 @@ func bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentE
 	return result, err
 }
 
-// RecordsPaymentParent reports whether this deployment committed the checkout, page, intent or attempt an event concerns.
+// RecordsPaymentParent reports whether this deployment committed the checkout, refill, page or intent an event concerns.
 func (s *Store) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (bool, error) {
 	var found int
 	err := s.queryRow(ctx, `SELECT CASE WHEN
  EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode=? AND (session_id=? OR payment_id<>'' AND payment_id=?))
  OR EXISTS(SELECT 1 FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?))
- OR EXISTS(SELECT 1 FROM card_attempts WHERE payment_intent<>'' AND payment_intent=?)
- THEN 1 ELSE 0 END`, r.Mode, r.CheckoutID, r.PaymentID, r.Mode, r.CheckoutID, r.PaymentID, r.ObjectID, r.PaymentID).Scan(&found)
+ THEN 1 ELSE 0 END`, r.Mode, r.CheckoutID, r.PaymentID, r.Mode, r.CheckoutID, r.PaymentID, r.ObjectID).Scan(&found)
 	return found == 1, err
 }

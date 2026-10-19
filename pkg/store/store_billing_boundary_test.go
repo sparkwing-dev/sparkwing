@@ -108,7 +108,6 @@ func TestStoreBillingRetention(t *testing.T) {
 func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	t.Helper()
 	s, demand, now := meteredUnitFixture(t, false)
-	s.billing = nil
 	tenant := &Tenant{s: s, team: "a"}
 	op := s.AsOperator()
 	rewriteSchemaExec(t, s.db, "DELETE FROM credit_grants")
@@ -169,30 +168,24 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	if _, err := op.TestOnlyReversePayment(t.Context(), "payment-a", "refund", "provider", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := op.DueCardCharges(t.Context(), *now); err != nil {
-		t.Fatal(err)
-	}
-	*now = time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
-	workItems, _, err := op.DueCardCharges(t.Context(), *now)
-	if err != nil || len(workItems) != 1 {
-		t.Fatalf("collection work: %+v: %v", workItems, err)
-	}
-	work := workItems[0]
-	payment := CardPayment{Team: "a", ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "recovery", AmountCents: work.AmountCents, Fingerprint: "fp_fixture"}
-	if _, _, err := settleCard(op, t.Context(), payment, *now); err != nil {
-		t.Fatal(err)
-	}
+	payment := "recovery"
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return queueCardRefundTx(t.Context(), tx, tenant.team, payment, "fixture", *now)
+		_, err := claimCardTx(t.Context(), tx, tenant.team, payment, "fp_fixture", *now)
+		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return recordProviderRefundTx(t.Context(), tx, capability.PaymentEvent{Mode: capability.PaymentTest, ObjectID: "refund-fixture", PaymentID: payment.PaymentIntent, AmountMinor: 1, Status: "pending"})
+		return queueCardRefundTx(t.Context(), tx, tenant.team, payment, 1, "fixture", *now)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := op.TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: payment.PaymentIntent}, *now); err != nil {
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return recordProviderRefundTx(t.Context(), tx, capability.PaymentEvent{Mode: capability.PaymentTest, ObjectID: "refund-fixture", PaymentID: payment, AmountMinor: 1, Status: "pending"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: payment}, *now); err != nil {
 		t.Fatal(err)
 	}
 	hold, err := tenant.HoldByOperator(t.Context(), "console", "fixture", *now)

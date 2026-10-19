@@ -7,11 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-// NewStandingManager uses authenticated transport for the team's standing and its requests.
-func NewStandingManager(options EngineOptions) (controllerwire.StandingManager, error) {
-	return newEngineClient(options)
-}
-
 func (c *engineClient) ReadStanding(ctx context.Context) (controllerwire.TeamStanding, error) {
 	var billing struct {
 		Standing *controllerwire.TeamStanding `json:"standing"`

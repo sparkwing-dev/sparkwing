@@ -12,7 +12,7 @@ const PaymentDeploymentMetadata = "sparkwing_deployment"
 const (
 	paymentPurposeMetadata = "purpose"
 	paymentPurposeSetup    = "card_setup"
-	paymentPurposeCharge   = "card_charge"
+	paymentPurposeRefill   = "card_refill"
 )
 
 // PaymentRoute names the provider objects a signed event concerns, read from the event before any provider call.
@@ -95,13 +95,13 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 	purpose := head.Metadata.get(paymentPurposeMetadata)
 	switch {
 	case checkout && (purpose != "" || head.Mode != "payment"):
-		if policy.Kind != PaymentCheckoutPaid || purpose != paymentPurposeSetup && purpose != paymentPurposeCharge {
+		if policy.Kind != PaymentCheckoutPaid || purpose != paymentPurposeSetup {
 			return route, false, nil
 		}
 		route.Kind = PaymentPageCompleted
 	case policy.Kind == PaymentCardSetup && purpose != paymentPurposeSetup:
 		return route, false, nil
-	case (policy.Kind == PaymentCardPaid || policy.Kind == PaymentCardFailed) && purpose != paymentPurposeCharge:
+	case (policy.Kind == PaymentCardPaid || policy.Kind == PaymentCardFailed) && purpose != paymentPurposeRefill:
 		return route, false, nil
 	}
 	switch {
@@ -124,28 +124,20 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 
 func (a *paymentAuthenticator) pageEvent(id string, created int64, body []byte) (*VerifiedPaymentEvent, error) {
 	var session struct {
-		ID            string           `json:"id"`
-		Object        string           `json:"object"`
-		Mode          string           `json:"mode"`
-		Status        string           `json:"status"`
-		PaymentStatus string           `json:"payment_status"`
-		LiveMode      *bool            `json:"livemode"`
-		Customer      paymentReference `json:"customer"`
-		PaymentIntent paymentReference `json:"payment_intent"`
-		SetupIntent   paymentReference `json:"setup_intent"`
+		ID          string           `json:"id"`
+		Object      string           `json:"object"`
+		Mode        string           `json:"mode"`
+		Status      string           `json:"status"`
+		LiveMode    *bool            `json:"livemode"`
+		Customer    paymentReference `json:"customer"`
+		SetupIntent paymentReference `json:"setup_intent"`
 	}
 	if err := json.Unmarshal(body, &session); err != nil || session.Object != "checkout.session" || session.Status != "complete" ||
 		session.LiveMode == nil || *session.LiveMode != (a.mode == PaymentLive) || session.Customer == "" || created <= 0 {
 		return nil, invalidPaymentEvent()
 	}
 	intent := string(session.SetupIntent)
-	if session.Mode == "payment" {
-		if session.PaymentStatus != "paid" {
-			return nil, nil
-		}
-		intent = string(session.PaymentIntent)
-	}
-	if intent == "" {
+	if session.Mode != "setup" || intent == "" {
 		return nil, invalidPaymentEvent()
 	}
 	return &VerifiedPaymentEvent{event: PaymentEvent{

@@ -39,8 +39,8 @@ func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {
 	if _, err := def.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_local", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
-	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('local',?,'run-local','build','award','usage',?,?,?)`), store.DefaultTeam, store.MinBillableSeconds, floor, time.Now().UnixNano()); err != nil {
+	floor := unpinnedNodeRateMicro * store.SliceSeconds
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('local',?,'run-local','build','award','usage',?,?,?)`), store.DefaultTeam, store.SliceSeconds, floor, time.Now().UnixNano()); err != nil {
 		t.Fatalf("seed debit: %v", err)
 	}
 	balance, err := def.CreditBalanceMicro(ctx)

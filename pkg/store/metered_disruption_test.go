@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"reflect"
 	"slices"
-	"sync/atomic"
 	"testing"
 	"testing/quick"
 	"time"
@@ -47,7 +46,6 @@ func checkMeteredDisruption(t *testing.T, unitIndex, elapsed, tariff uint8, atAw
 	}
 	s, award := meteringFixture(t, unit, mode)
 	path := blobAccountingDiskStore(t, s)
-	rewriteSchemaExec(t, s.db, "UPDATE teams SET card_fingerprint='original' WHERE name='a'")
 	root := authorityRoot("root", "a")
 	root.RootMetered = true
 	authorityPersist(t, s, root)
@@ -73,29 +71,9 @@ func checkMeteredDisruption(t *testing.T, unitIndex, elapsed, tariff uint8, atAw
 		}
 	}
 	through := began.Add(lapse.Sub(began) / 2)
-	var calls atomic.Int32
-	calculate := func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-		calls.Add(1)
-		var expected []capability.BillableInterval
-		var seconds int64
-		if started {
-			expected = []capability.BillableInterval{{CapabilityPrefix: award.Prefix, Unit: award.Billing.Unit, Start: began, End: through}}
-			seconds = int64(through.Sub(began) / time.Second)
-			if through.Sub(began)%time.Second != 0 {
-				seconds++
-			}
-			if unit == capability.UnitNode || unit == capability.UnitTrigger {
-				seconds = max(seconds, 60)
-			}
-		}
-		if p != *award.Billing || !slices.Equal(intervals, expected) {
-			return capability.BillingSettlement{}, fmt.Errorf("settlement inputs=%+v, %+v; want %+v, %+v", p, intervals, *award.Billing, expected)
-		}
-		return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: seconds, RefundUnstarted: !started}, nil
-	}
 	if started {
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", through, false, calculate)
+			_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", through, false)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -103,20 +81,12 @@ func checkMeteredDisruption(t *testing.T, unitIndex, elapsed, tariff uint8, atAw
 	}
 	through = lapse
 	rewriteSchemaExec(t, s.db, "DELETE FROM capabilities")
-	rewriteSchemaExec(t, s.db, "UPDATE teams SET card_fingerprint='replacement' WHERE name='a'")
 	newRate := price.MicroPerSecond + 10000
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &newRate}); err != nil {
 		t.Fatal(err)
 	}
-	rollbackMeteredDisruption(t, s, lapse, calculate)
-	raceMeteredDisruptionReplay(t, s, path, lapse, calculate)
-	wantCalls := int32(2)
-	if started {
-		wantCalls++
-	}
-	if calls.Load() != wantCalls {
-		t.Fatalf("calculator ran %d times, want %d", calls.Load(), wantCalls)
-	}
+	rollbackMeteredDisruption(t, s, lapse)
+	raceMeteredDisruptionReplay(t, s, path, lapse)
 	wantSeconds := int64(0)
 	if started {
 		wantSeconds = int64(lapse.Sub(began) / time.Second)
@@ -130,7 +100,7 @@ func checkMeteredDisruption(t *testing.T, unitIndex, elapsed, tariff uint8, atAw
 	}
 	s.db = blobAccountingDB(t, path)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		got, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), true, calculate)
+		got, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), true)
 		if err == nil && got != want {
 			return fmt.Errorf("replayed settlement=%+v, want %+v", got, want)
 		}
@@ -138,15 +108,12 @@ func checkMeteredDisruption(t *testing.T, unitIndex, elapsed, tariff uint8, atAw
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != wantCalls {
-		t.Fatal("replay invoked the calculator")
-	}
 	if !checkMeteredDisruptionLedger(t, s, price, awarded, wantSeconds) {
 		t.Fatal("settlement changed awarded terms")
 	}
 }
 
-func rollbackMeteredDisruption(t *testing.T, s *Store, lapse time.Time, calculate billingCalculator) {
+func rollbackMeteredDisruption(t *testing.T, s *Store, lapse time.Time) {
 	t.Helper()
 	tenant := &Tenant{s: s, team: "a"}
 	before, err := tenant.ListCreditCharges(t.Context(), 100)
@@ -156,7 +123,7 @@ func rollbackMeteredDisruption(t *testing.T, s *Store, lapse time.Time, calculat
 	intervalsBefore := billingIntervalCheckpoints(t, s)
 	refused := errors.New("terminal state write failed")
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		if _, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", lapse, true, calculate); err != nil {
+		if _, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", lapse, true); err != nil {
 			return err
 		}
 		return refused
@@ -169,7 +136,7 @@ func rollbackMeteredDisruption(t *testing.T, s *Store, lapse time.Time, calculat
 	}
 }
 
-func raceMeteredDisruptionReplay(t *testing.T, s *Store, path string, lapse time.Time, calculate billingCalculator) {
+func raceMeteredDisruptionReplay(t *testing.T, s *Store, path string, lapse time.Time) {
 	t.Helper()
 	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
@@ -183,7 +150,7 @@ func raceMeteredDisruptionReplay(t *testing.T, s *Store, path string, lapse time
 		go func() {
 			<-start
 			done <- client.inTx(ctx, func(tx *storeTx) error {
-				_, err := accountBillingAwardTx(ctx, tx, "a", "reservation", lapse, true, calculate)
+				_, err := accountBillingAwardTx(ctx, tx, "a", "reservation", lapse, true)
 				return err
 			})
 		}()
@@ -224,20 +191,6 @@ func checkMeteredDisruptionLedger(t *testing.T, s *Store, price CreditRate, awar
 			t.Logf("charge lost awarded terms: %+v", charge)
 			return false
 		}
-	}
-	var changedCard, originalSpend, laterSpend, cardSpend int64
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM credit_charges WHERE team='a' AND card_fingerprint<>'original'").Scan(&changedCard); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.db.QueryRow("SELECT COALESCE(SUM(CASE WHEN day=0 THEN amount_micro ELSE 0 END),0),COALESCE(SUM(CASE WHEN day=2 THEN amount_micro ELSE 0 END),0) FROM team_spend_days WHERE team='a'").Scan(&originalSpend, &laterSpend); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.db.QueryRow("SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE card_fingerprint='original'").Scan(&cardSpend); err != nil {
-		t.Fatal(err)
-	}
-	if changedCard != 0 || originalSpend != min(wantSeconds, 60)*price.MicroPerSecond || laterSpend != max(wantSeconds-60, 0)*price.MicroPerSecond || cardSpend != amount {
-		t.Logf("spend card changed=%d original=%d later=%d card=%d amount=%d", changedCard, originalSpend, laterSpend, cardSpend, amount)
-		return false
 	}
 	return true
 }

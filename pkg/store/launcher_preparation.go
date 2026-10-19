@@ -82,11 +82,8 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 		return false, bindingRefusal()
 	}
 	unitRef := UnitRef{Kind: award.Claim.Kind, RunID: award.Claim.RunID, NodeID: award.Claim.NodeID, SourceGeneration: award.Claim.SourceGeneration}
-	if err = accountUnitBillingTx(ctx, tx, award.Claim.Team, unitRef, fence.Generation, tx.now(), false); err != nil {
-		return false, err
-	}
 	beat := LeaseBeat{}
-	if err = applyBillingCancellationTx(ctx, tx, award.Claim.Team, unitRef, fence.Generation, &beat); err != nil {
+	if err = renewUnitBillingTx(ctx, tx, award.Claim.Team, unitRef, fence.Generation, &beat); err != nil {
 		return false, err
 	}
 	expiry, err := boundedClaimExpiryTx(ctx, tx, Actor{CapabilityPrefix: current.Capability.Prefix}, tx.now())

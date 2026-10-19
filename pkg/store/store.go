@@ -99,7 +99,6 @@ type Store struct {
 	intake           intakeContracts
 	intakePolicy     IntakePolicy
 	plans            planContracts
-	billing          billingCalculator
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
 	provisions       ProvisionPolicy
@@ -1636,7 +1635,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 12
+const expectedSchemaVersion = 13
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

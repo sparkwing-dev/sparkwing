@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -18,9 +19,6 @@ func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMo
 		return ErrInvalidInput
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
-			return err
-		}
 		data, err := json.Marshal(mode)
 		if err != nil {
 			return err
@@ -41,10 +39,10 @@ type PaymentSettlement struct {
 	Payment string
 	// Granted reports that the payment funded a grant.
 	Granted bool
-	// Warned reports a payment by a card under an actionable early fraud warning, which the operator is alerted to.
-	Warned *WarnedCardPayment
 	// Refused names why the payment was queued for a full refund, or is empty.
 	Refused string
+	// RefillFailed is the decline code of a refill that failed, which the owners are told to fix by updating the card.
+	RefillFailed string
 }
 
 // SettlePayment settles verified provider events against committed billing facts.
@@ -56,11 +54,19 @@ func (s *Store) SettlePayment(ctx context.Context, proof capability.VerifiedPaym
 }
 
 type paymentCheckout struct {
-	result            PaymentSettlement
-	payment, currency string
-	amount            int64
-	paid, closed      sql.NullInt64
-	grant             sql.NullString
+	result                  PaymentSettlement
+	kind, payment, currency string
+	amount                  int64
+	paid, closed            sql.NullInt64
+	grant                   sql.NullString
+}
+
+func (c *paymentCheckout) scan() []any {
+	return []any{&c.result.CheckoutID, &c.result.Team, &c.kind, &c.payment, &c.currency, &c.amount, &c.result.AmountMicro, &c.paid, &c.closed, &c.grant}
+}
+
+func paymentPaid(kind capability.PaymentEventKind) bool {
+	return kind == capability.PaymentCheckoutPaid || kind == capability.PaymentCardPaid
 }
 
 func (s *Store) settlePaymentFacts(ctx context.Context, event capability.PaymentEvent) (PaymentSettlement, error) {
@@ -81,14 +87,11 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 		return PaymentSettlement{}, err
 	}
 	defer rollbackOrLog(tx)
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return PaymentSettlement{}, err
-	}
 	if err := configuredPaymentModeTx(ctx, tx, event.Mode); err != nil {
 		return PaymentSettlement{}, err
 	}
 	var checkout paymentCheckout
-	err = tx.QueryRowContext(ctx, `SELECT id,team,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id FROM credit_checkouts WHERE payment_mode = ? AND session_id = ? AND session_id <> id`+tx.forUpdate(), string(event.Mode), event.CheckoutID).Scan(&checkout.result.CheckoutID, &checkout.result.Team, &checkout.payment, &checkout.currency, &checkout.amount, &checkout.result.AmountMicro, &checkout.paid, &checkout.closed, &checkout.grant)
+	err = tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id FROM credit_checkouts WHERE payment_mode = ? AND session_id = ? AND session_id <> id`+tx.forUpdate(), string(event.Mode), event.CheckoutID).Scan(checkout.scan()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PaymentSettlement{}, authorityError(apierr.NotFound, "committed checkout is unavailable")
 	}
@@ -189,71 +192,79 @@ func paymentEventReplayTx(ctx context.Context, tx *storeTx, event capability.Pay
 	return true, nil
 }
 
+// safety: Add funds and refills settle through this one path, under the team's ledger lock: a refused card closes
+// the row unpaid and queues its refund, a paid one funds one grant and takes back any refund that arrived first.
 func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {
-	now := tx.now().UnixNano()
+	team, now := checkout.result.Team, tx.now()
+	l, err := lockLedgerTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
 	if checkout.payment == "" && event.PaymentID != "" {
-		if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND id = ? AND payment_mode = ?", event.PaymentID, string(checkout.result.Team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND id = ? AND payment_mode = ?", event.PaymentID, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 			return err
 		}
 	}
 	if checkout.paid.Valid {
 		return nil
 	}
-	if event.Kind != capability.PaymentCheckoutPaid {
+	if !paymentPaid(event.Kind) {
 		if checkout.closed.Valid {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at = ? WHERE team = ? AND id = ? AND payment_mode = ?", now, string(checkout.result.Team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
-			return err
-		}
-		kind := BusinessEventCheckoutFailed
-		if event.Kind == capability.PaymentCheckoutExpired {
-			kind = BusinessEventCheckoutExpired
-		}
-		return RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: checkout.result.Team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID}})
+		return closeUnpaidTx(ctx, tx, event, checkout)
 	}
-	team := checkout.result.Team
-	refusal, err := refuseCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint)
+	refusal, err := claimCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint, now)
 	if err != nil {
 		return err
 	}
 	if refusal.reason != "" {
 		return refuseCheckoutTx(ctx, tx, event, checkout, refusal)
 	}
-	grant, err := newCreditID("paid")
+	id, err := newCreditID("paid")
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO credit_grants(id,team,kind,amount_micro,reference,created_by,created_at) VALUES (?,?,'paid',?,?,?,?)`, grant, string(checkout.result.Team), checkout.result.AmountMicro, "payment:"+string(event.Mode)+":"+checkout.result.CheckoutID, "payment_provider", now)
-	if err != nil {
+	grant := CreditGrant{ID: id, Team: team, Kind: CreditGrantPaid, AmountMicro: checkout.result.AmountMicro, Reference: "payment:" + string(event.Mode) + ":" + checkout.result.CheckoutID, CreatedBy: "payment_provider", CreatedAt: now}
+	if err := l.insertGrant(ctx, grant); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), three_d_secure = ? WHERE team = ? AND id = ? AND payment_mode = ?", now, grant, now, event.ThreeDS, string(checkout.result.Team), checkout.result.CheckoutID, string(event.Mode))
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), three_d_secure = ?, failure = '' WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), id, now.UnixNano(), event.ThreeDS, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
-	checkout.result.GrantID = grant
-	checkout.result.Granted = true
-	if err := pinCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint, tx.now()); err != nil {
-		return err
+	if checkout.kind == CheckoutKindRefill {
+		if _, err := tx.ExecContext(ctx, "UPDATE teams SET refill_failed_at = 0, refill_failure = '' WHERE name = ?", string(team)); err != nil {
+			return err
+		}
 	}
+	checkout.result.GrantID, checkout.result.Granted = id, true
 	if err := applyPaymentRefundsTx(ctx, tx, event.PaymentID); err != nil {
 		return err
 	}
-	if err := recordGrantEventTx(tx, CreditGrant{ID: grant, Team: checkout.result.Team, Kind: CreditGrantPaid, AmountMicro: checkout.result.AmountMicro, Reference: "payment:" + string(event.Mode) + ":" + checkout.result.CheckoutID, CreatedBy: "payment_provider", CreatedAt: tx.now()}, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS}); err != nil {
-		return err
-	}
-	room, err := headroomTx(ctx, tx, checkout.result.Team, tx.now())
-	if err != nil {
-		return err
-	}
-	if room > 0 {
-		return clearTeamCreditExhaustedTx(ctx, tx, checkout.result.Team, now)
-	}
-	return nil
+	return recordGrantEventTx(tx, grant, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS, "refill": checkout.kind == CheckoutKindRefill})
 }
 
-// safety: a refused Add funds payment closes its checkout without a grant and is queued for a full refund, whose
+func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {
+	team, now := checkout.result.Team, tx.now()
+	failure := ""
+	kind := BusinessEventCheckoutFailed
+	switch {
+	case checkout.kind == CheckoutKindRefill:
+		failure, kind = cmp.Or(event.DeclineCode, "payment_failed"), BusinessEventRefillFailed
+		checkout.result.RefillFailed = failure
+		if _, err := tx.ExecContext(ctx, `UPDATE teams SET refill_failed_at = ?, refill_failure = ? WHERE name = ?`, now.UnixNano(), failure, string(team)); err != nil {
+			return err
+		}
+	case event.Kind == capability.PaymentCheckoutExpired:
+		kind = BusinessEventCheckoutExpired
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at = ?, failure = ? WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+		return err
+	}
+	return RecordBusinessEvent(tx, BusinessEvent{At: now, Team: team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID, "failure": failure}})
+}
+
+// safety: a refused Add funds or refill payment closes its row without a grant and is queued for a full refund, whose
 // settlement finds the team through the checkout's payment; a warned card also holds the team.
 func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
 	team, now := checkout.result.Team, tx.now()
@@ -272,7 +283,7 @@ func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.Payment
 	}); err != nil {
 		return err
 	}
-	return queueCardRefundTx(ctx, tx, team, CardPayment{PaymentIntent: event.PaymentID, AmountCents: event.AmountMinor}, refusal.reason, now)
+	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, refusal.reason, now)
 }
 
 // DeploymentID returns this store's payment deployment identity, created once at first use and never changed by

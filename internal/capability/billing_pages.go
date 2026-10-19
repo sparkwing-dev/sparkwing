@@ -6,9 +6,8 @@ import "time"
 type BillingPageKind string
 
 const (
-	BillingPageCredits  BillingPageKind = "credits"
-	BillingPageCard     BillingPageKind = "card"
-	BillingPageRecovery BillingPageKind = "recovery"
+	BillingPageCredits BillingPageKind = "credits"
+	BillingPageCard    BillingPageKind = "card"
 )
 
 // BillingPage carries store-derived reservation facts and the provider's completed page.
@@ -19,8 +18,6 @@ type BillingPage struct {
 	AmountCents   int64
 	Customer      string
 	Email         string
-	ChargeID      string
-	AttemptID     string
 	ProviderID    string
 	URL           string
 	ExpiresAt     time.Time

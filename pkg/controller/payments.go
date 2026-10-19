@@ -96,7 +96,7 @@ func (s *Server) settlePaymentRequest(w http.ResponseWriter, r *http.Request, _ 
 	if err != nil {
 		return err
 	}
-	s.reportPaymentSettlement(settled)
+	s.reportPaymentSettlement(r.Context(), settled)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

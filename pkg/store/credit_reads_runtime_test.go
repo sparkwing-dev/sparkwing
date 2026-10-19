@@ -23,11 +23,11 @@ func TestStoreDataCreditReadsStayInTenantAndUseStoreClock(t *testing.T) {
 		for i, team := range teams {
 			rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)", team)
 			for j, kind := range []string{CreditGrantFree, CreditGrantPaid, CreditGrantReversal} {
-				value := int64(amount) + int64(i+1)*100 + int64(j)
+				value, reverses := int64(amount)+int64(i+1)*100+int64(j), ""
 				if kind == CreditGrantReversal {
-					value = -value
+					value, reverses = -value, "payment:test:checkout"
 				}
-				rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES (?,?,?,?,?)", fmt.Sprintf("%d_%d_%d", iteration, i, j), team, kind, value, j+1)
+				rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,reverses,created_at) VALUES (?,?,?,?,?,?)", fmt.Sprintf("%d_%d_%d", iteration, i, j), team, kind, value, reverses, j+1)
 			}
 			for j, kind := range []string{CreditChargeUsage, CreditChargeStorage, CreditChargeRefund} {
 				at := now.Add(-window)

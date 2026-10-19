@@ -3885,14 +3885,11 @@ components:
           type: integer
         paid_micro:
           type: integer
-        successful_charges:
-          type: integer
         tier:
           type: string
       required:
         - tier
         - paid_micro
-        - successful_charges
       type: object
       x-sparkwing-go-type: controllerwire.StandingHistory
     internal.controllerwire.StandingRequest:
@@ -14686,31 +14683,6 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
-  /api/v1/team/billing/budget:
-    put:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: PUT /api/v1/team/billing/budget
-      x-sparkwing-policy:
-        method: PUT
-        path: /api/v1/team/billing/budget
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: unbound_member_or_local
-            grants:
-              - team.admin
-            binding: none
-            liveness: credential
-        retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/team/billing/card:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -14773,15 +14745,9 @@ paths:
             liveness: credential
         retry: idempotency_key
       x-sparkwing-wire: undocumented
-  /api/v1/team/billing/pay:
-    post:
+  /api/v1/team/billing/refill:
+    put:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
       responses:
         default:
           content:
@@ -14789,10 +14755,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/team/billing/pay
+      summary: PUT /api/v1/team/billing/refill
       x-sparkwing-policy:
-        method: POST
-        path: /api/v1/team/billing/pay
+        method: PUT
+        path: /api/v1/team/billing/refill
         audience: controller
         owner: team
         authentication: capability
@@ -14802,7 +14768,7 @@ paths:
               - team.admin
             binding: none
             liveness: credential
-        retry: idempotency_key
+        retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/team/billing/standing-request:
     post:

@@ -48,19 +48,18 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initial.RateMicroPerSecond != DefaultCreditRateMicro || initial.RateTableSet || initial.GraceSeconds != DefaultCreditGraceSeconds || initial.MaxChargeSeconds != DefaultCreditMaxChargeSeconds || initial.WarmCPUClassCores != DefaultWarmCPUClassCores || initial.StorageRateMicroPerGBDay != 0 || initial.StorageFreeAllowanceBytes != 0 {
+	if initial.RateMicroPerSecond != DefaultCreditRateMicro || initial.RateTableSet || initial.WarmCPUClassCores != DefaultWarmCPUClassCores || initial.StorageRateMicroPerGBDay != 0 || initial.StorageFreeAllowanceBytes != 0 {
 		t.Fatalf("defaults=%+v", initial)
 	}
 	table := CreditRateTable{{Cores: 8, MicroPerSecond: 40000}, {Cores: 4, MicroPerSecond: 20000}, {Cores: 2, MicroPerSecond: 10000}}
-	warm, grace, capSeconds, rent, free := int64(4), int64(0), int64(45), int64(123), int64(1<<30)
+	warm, rent, free := int64(4), int64(123), int64(1<<30)
 	want, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{
-		RateTable: &table, WarmCPUClassCores: &warm, GraceSeconds: &grace,
-		MaxChargeSeconds: &capSeconds, StorageRateMicroPerGBDay: &rent, StorageFreeAllowanceBytes: &free,
+		RateTable: &table, WarmCPUClassCores: &warm, StorageRateMicroPerGBDay: &rent, StorageFreeAllowanceBytes: &free,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !want.RateTableSet || want.RateMicroPerSecond != 20000 || !reflect.DeepEqual(want.RateTable, table.Sorted()) || want.WarmCPUClassCores != warm || want.GraceSeconds != grace || want.MaxChargeSeconds != capSeconds || want.StorageRateMicroPerGBDay != rent || want.StorageFreeAllowanceBytes != free {
+	if !want.RateTableSet || want.RateMicroPerSecond != 20000 || !reflect.DeepEqual(want.RateTable, table.Sorted()) || want.WarmCPUClassCores != warm || want.StorageRateMicroPerGBDay != rent || want.StorageFreeAllowanceBytes != free {
 		t.Fatalf("stored settings=%+v", want)
 	}
 	rows, err := s.db.Query("SELECT key,value FROM settings")
@@ -82,8 +81,8 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		t.Fatal(err)
 	}
-	if count != 7 {
-		t.Fatalf("persisted settings=%d, want 7", count)
+	if count != 5 {
+		t.Fatalf("persisted settings=%d, want 5", count)
 	}
 	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
@@ -108,8 +107,6 @@ func TestStoreDataCreditSettingsCorruptionNeverChoosesAnotherPrice(t *testing.T)
 		{metaKeyCreditRateMicro, `0`},
 		{metaKeyCreditRateMicro, `1000000000001`},
 		{metaKeyCreditRateMicro, `9223372036854775808`},
-		{metaKeyCreditGraceSecs, `-1`},
-		{metaKeyCreditMaxCharge, `0`},
 		{metaKeyWarmCPUClass, `-1`},
 		{metaKeyStorageRateMicroPerGBDay, `-1`},
 		{metaKeyStorageFreeAllowanceBytes, `-1`},
@@ -136,7 +133,7 @@ func TestStoreDataCreditSettingsFailureRollsBackBatch(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_rate_table BEFORE INSERT ON settings WHEN NEW.key='credit_rate_table' BEGIN SELECT RAISE(ABORT,'rate table refused'); END`)
 	grace := int64(0)
 	table := CreditRateTable{{Cores: 4, MicroPerSecond: 20000}}
-	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table, GraceSeconds: &grace}); err == nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table, WarmCPUClassCores: &grace}); err == nil {
 		t.Fatal("rejected rate table committed")
 	}
 	got, err := s.AsOperator().CreditSettings(t.Context())
@@ -154,7 +151,7 @@ func TestStoreDataCreditSettingsCannotReplaceSealedValues(t *testing.T) {
 		t.Fatalf("sealed price read=%v", err)
 	}
 	rate, grace := int64(30000), int64(0)
-	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &rate, GraceSeconds: &grace}); err == nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &rate, WarmCPUClassCores: &grace}); err == nil {
 		t.Fatal("sealed setting was overwritten")
 	}
 	var raw []byte
@@ -208,7 +205,7 @@ func TestStoreDataCreditSettingsScalarCannotRewriteInstalledTableProperty(t *tes
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &scalar, GraceSeconds: &grace})
+		_, err = s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &scalar, WarmCPUClassCores: &grace})
 		if !errors.Is(err, ErrInvalidCreditSetting) {
 			t.Logf("installed table accepted scalar price: %v", err)
 			return false

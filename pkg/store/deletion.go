@@ -1,7 +1,6 @@
 package store
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -42,9 +41,6 @@ var (
 	// ErrTeamFrozen refuses deleting a team held over a disputed payment,
 	// because the hold and the ledger it points at are the dispute's record.
 	ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
-	// ErrTeamOwes refuses deleting a team that owes for usage or has a card
-	// charge in flight; it is deleted once the charge is paid.
-	ErrTeamOwes = errors.New("store: the team owes for usage or has a card charge in progress; pay it before deleting the team")
 	// ErrTeamBeingDeleted refuses opening a checkout for a team whose deletion
 	// has begun, since the payment would land after the purge.
 	ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
@@ -106,7 +102,7 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 }
 
 func (t *Tenant) requestTeamDeletionTx(ctx context.Context, tx *storeTx, now time.Time) (TeamDeletion, []string, error) {
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
 		return TeamDeletion{}, nil, err
 	}
 	if err := t.lockTeamTx(ctx, tx); err != nil {
@@ -142,24 +138,6 @@ func refuseDeletionWithMoneyInFlightTx(ctx context.Context, tx *storeTx, team Te
 	}
 	if freeze.Frozen {
 		return ErrTeamFrozen
-	}
-	// safety: a deleted team's card could no longer be charged, so a debt or
-	// an open charge keeps the team until it is paid.
-	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil {
-		return err
-	}
-	charge, err := openCardChargeTx(ctx, tx, team)
-	if err != nil {
-		return err
-	}
-	if charge != nil {
-		return ErrTeamOwes
-	}
-	if balance < 0 {
-		if card, err := teamHasCardTx(ctx, tx, team); err != nil || card {
-			return cmp.Or(err, ErrTeamOwes)
-		}
 	}
 	return nil
 }
@@ -503,9 +481,6 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	if err != nil {
 		return AccountDeletion{}, err
 	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return AccountDeletion{}, err
-	}
 	if err := lockOwnedTeamsTx(ctx, tx, s, accountID); err != nil {
 		return AccountDeletion{}, err
 	}
@@ -621,6 +596,13 @@ func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID stri
 	teams, err := scanPrefixes(rows)
 	if err != nil {
 		return err
+	}
+	// safety: every owned team's ledger is locked before any team row, in name order, the order a single team's
+	// settlement takes them in, so deleting an account never deadlocks a payment.
+	for _, team := range teams {
+		if _, err := lockLedgerTx(ctx, tx, Team(team)); err != nil {
+			return err
+		}
 	}
 	for _, team := range teams {
 		if err := (&Tenant{s: s, team: Team(team)}).lockTeamTx(ctx, tx); err != nil && !errors.Is(err, ErrNotFound) {

@@ -11,7 +11,6 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 	for _, cloud := range []bool{false, true} {
 		t.Run(map[bool]string{false: "runner", true: "cloud"}[cloud], func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, cloud)
-			s.billing = nil
 			path := blobAccountingDiskStore(t, s)
 			awardedAt := *now
 			claim, actor := meteredUnitClaim(t, s, demand)

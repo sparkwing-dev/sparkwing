@@ -148,7 +148,7 @@ test("the operator releases a dispute hold", async ({
 });
 
 test("the operator releases its own hold as no fault found", async ({ page }) => {
-  const held = { ...acme, frozen: true, holds: ["operator-x", "decline-a1"], hold_causes: ["operator", "decline"] };
+  const held = { ...acme, frozen: true, holds: ["operator-x", "dp_2"], hold_causes: ["operator", "dispute"] };
   const seen = await mockOperator(page, held);
   await page.goto("/operator?team=acme");
   await page.getByLabel("Action").selectOption({ label: "Unfreeze" });
@@ -265,7 +265,7 @@ test("the operator grants or declines standing requests with a reason", async ({
             standing: "Trusted",
             prepay_ceiling: "High",
             balance_micro: 0,
-            history: { tier: "Trusted", paid_micro: 10_000_000_000, successful_charges: 1, first_paid_at: 1_780_000_000 },
+            history: { tier: "Trusted", paid_micro: 10_000_000_000, first_paid_at: 1_780_000_000 },
           })),
         },
       });
@@ -280,7 +280,7 @@ test("the operator grants or declines standing requests with a reason", async ({
   await page.goto("/operator");
   await page.getByRole("navigation", { name: "Operator console" }).getByRole("link", { name: "Standing requests" }).click();
   await expect(page.getByText("acme needs 256 vCPU")).toBeVisible();
-  await expect(page.getByText(/Trusted history · \$100 paid · 1 card charge\(s\)/).first()).toBeVisible();
+  await expect(page.getByText(/Trusted history · \$100 paid · \d+ clean days/).first()).toBeVisible();
   await page.getByRole("button", { name: "Grant High standing" }).first().click();
   await expect(page.getByText("Give a reason; the requester sees it and it is recorded.")).toBeVisible();
   await page.getByLabel("Reason for acme").fill("Known customer");

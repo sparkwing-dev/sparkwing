@@ -102,160 +102,6 @@ func TestBillingModelPrepayImmediatelyLiftsCloudStanding(t *testing.T) {
 	}
 }
 
-func TestBillingModelPendingChargePausesAdmissionsWhileRunningJobFinishes(t *testing.T) {
-	s, demand, now := billingModelFixture(t)
-	claim, actor := meteredUnitClaim(t, s, demand)
-	tenant := &Tenant{s: s, team: "a"}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
-		t.Fatal(err)
-	}
-	cardCollectionDebt(t, s, "debt", 1000)
-	work := cardCollectionDue(t, s, *now)
-	billingModelJob(t, s, "second")
-	demand.Target.NodeID = "second"
-	if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
-		t.Fatal("pending charge admitted new Cloud work")
-	}
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
-		t.Fatal(err)
-	}
-	*now = now.Add(time.Duration(DefaultCreditGraceSeconds+1) * time.Second)
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE node_id='job'`, now.Add(time.Minute).UnixNano())
-	beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
-	if err != nil || beat.CancelRequested {
-		t.Fatalf("pending collection stopped running job: %+v: %v", beat, err)
-	}
-	if _, _, err := s.AsOperator().FailCardAttempt(t.Context(), work.AttemptID, "declined", "insufficient_funds", *now); err != nil {
-		t.Fatal(err)
-	}
-	beat, err = s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
-	if err != nil || beat.CancelRequested {
-		t.Fatalf("Held standing stopped running work: %+v: %v", beat, err)
-	}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
-		t.Fatalf("running work could not finish: %v", err)
-	}
-}
-
-func TestBillingModelCardStartsAtFiveDollarsOrDaySeven(t *testing.T) {
-	for _, age := range []time.Duration{0, 7 * 24 * time.Hour} {
-		t.Run(age.String(), func(t *testing.T) {
-			s, _, now := billingModelFixture(t)
-			rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
-			cardCollectionDebt(t, s, "small", 100)
-			if work, _, err := s.AsOperator().DueCardCharges(t.Context(), *now); err != nil || len(work) != 0 {
-				t.Fatalf("first $1 prematurely charged: %+v: %v", work, err)
-			}
-			if age == 0 {
-				cardCollectionDebt(t, s, "more", 400)
-			} else {
-				*now = now.Add(age)
-			}
-			work := cardCollectionDue(t, s, *now)
-			want := int64(500)
-			if age > 0 {
-				want = 100
-			}
-			if work.AmountCents != want {
-				t.Fatalf("first charge=%d, want %d", work.AmountCents, want)
-			}
-		})
-	}
-}
-
-func TestBillingModelDeclineHoldsAndSuccessfulChargeAdvancesLadder(t *testing.T) {
-	s, tenant, now := providerPaymentFixture(t)
-	rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust=''`)
-	event := providerCollectionEvent(t, s, now, capability.PaymentCardFailed)
-	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
-		t.Fatal(err)
-	}
-	standing, err := tenant.BillingStanding(t.Context(), now)
-	if err != nil || standing.Tier != "Held" {
-		t.Fatalf("decline standing=%+v: %v", standing, err)
-	}
-	now = now.Add(25 * time.Hour)
-	retry := cardCollectionDue(t, s, now)
-	if err := s.AsOperator().RecordAttemptIntent(t.Context(), retry.AttemptID, "retry", retry.Customer, now); err != nil {
-		t.Fatal(err)
-	}
-	failed := providerPaymentEvent(now, capability.PaymentCardFailed)
-	failed.ObjectID, failed.PaymentID, failed.EventID = "retry", "retry", "retry-declined"
-	failed.CustomerID, failed.AmountMinor, failed.Status = retry.Customer, retry.AmountCents, "requires_payment_method"
-	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
-		t.Fatal(err)
-	}
-	if holds, err := tenant.CreditFreeze(t.Context()); err != nil || len(holds.Disputes) != 2 {
-		t.Fatalf("distinct attempts did not retain independent holds: %+v: %v", holds, err)
-	}
-	now = now.Add(4 * 24 * time.Hour)
-	retry = cardCollectionDue(t, s, now)
-	if err := s.AsOperator().RecordAttemptIntent(t.Context(), retry.AttemptID, "recovered", retry.Customer, now); err != nil {
-		t.Fatal(err)
-	}
-	paid := providerPaymentEvent(now, capability.PaymentCardPaid)
-	paid.ObjectID, paid.PaymentID, paid.CustomerID, paid.AmountMinor = "recovered", "recovered", retry.Customer, retry.AmountCents
-	if _, err := s.settlePaymentFacts(t.Context(), paid); err != nil {
-		t.Fatal(err)
-	}
-	st, err := tenant.SpendStanding(t.Context(), now)
-	if err != nil || st.RungMicro != 2000*MicroCreditsPerCent || st.Billing.Tier != "Established" {
-		t.Fatalf("successful first collection=%+v: %v", st, err)
-	}
-}
-
-func TestBillingModelEveryDeclinedAttemptHoldsUntilReleasedProperty(t *testing.T) {
-	property := func(seed uint8) bool {
-		s, tenant, now := providerPaymentFixture(t)
-		rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust=''`)
-		event := providerCollectionEvent(t, s, now, capability.PaymentCardFailed)
-		for attempt := range 2 + int(seed%3) {
-			if attempt > 0 {
-				now = now.Add(8 * 24 * time.Hour)
-				work := cardCollectionDue(t, s, now)
-				payment := fmt.Sprintf("retry-payment-%d", attempt)
-				if err := s.AsOperator().RecordAttemptIntent(t.Context(), work.AttemptID, payment, work.Customer, now); err != nil {
-					t.Fatal(err)
-				}
-				event = providerPaymentEvent(now, capability.PaymentCardFailed)
-				event.EventID, event.ObjectID, event.PaymentID = payment, payment, payment
-				event.AmountMinor, event.CustomerID, event.Status = work.AmountCents, work.Customer, "requires_payment_method"
-			}
-			for range 1 + int(seed%3) {
-				if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
-					t.Fatal(err)
-				}
-				standing, err := tenant.BillingStanding(t.Context(), now)
-				if err != nil || standing.Tier != "Held" {
-					t.Logf("attempt %d standing=%+v: %v", attempt, standing, err)
-					return false
-				}
-			}
-			holds, err := tenant.CreditFreeze(t.Context())
-			if err != nil || len(holds.Disputes) != 1 {
-				t.Fatalf("decline holds=%+v: %v", holds, err)
-			}
-			if released, err := tenant.ReleaseCreditFreezes(t.Context(), holds.Disputes[0], "operator", "reviewed", now); err != nil || released != 1 {
-				t.Fatalf("release=%d: %v", released, err)
-			}
-			for range 1 + int(seed%3) {
-				if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
-					t.Fatal(err)
-				}
-				standing, err := tenant.BillingStanding(t.Context(), now)
-				if err != nil || standing.Tier == "Held" {
-					t.Logf("released attempt %d replay changed standing=%+v: %v", attempt, standing, err)
-					return false
-				}
-			}
-		}
-		return true
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(1123))}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestBillingModelDisputeOutcomePreservesStandingProperty(t *testing.T) {
 	property := func(seed uint32) bool {
 		s, tenant, now := providerPaymentFixture(t)
@@ -338,37 +184,6 @@ func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
 	}
 }
 
-func TestBillingModelLadderReplaysAndDeclinesMoveOneRung(t *testing.T) {
-	s, tenant, now := providerPaymentFixture(t)
-	rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust=''`)
-	for i, rung := range []int64{500, 2000, 5000, 10000, 25000, 50000, 100000, 100000} {
-		cardCollectionDebt(t, s, fmt.Sprint("ladder-", i), rung)
-		work := cardCollectionDue(t, s, now)
-		if work.AmountCents != rung {
-			t.Fatalf("rung %d charge=%d", i, work.AmountCents)
-		}
-		payment := CardPayment{Team: tenant.team, ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: fmt.Sprint("ladder-payment-", i), AmountCents: rung}
-		for replay := range 2 {
-			first, _, err := settleCard(s.AsOperator(), t.Context(), payment, now)
-			if err != nil || first != (replay == 0) {
-				t.Fatalf("settlement replay=%d first=%t: %v", replay, first, err)
-			}
-		}
-	}
-	cardCollectionDebt(t, s, "decline", 100000)
-	work := cardCollectionDue(t, s, now)
-	for replay := range 2 {
-		_, first, err := s.AsOperator().FailCardAttempt(t.Context(), work.AttemptID, "declined", "insufficient_funds", now)
-		if err != nil || first != (replay == 0) {
-			t.Fatalf("decline replay=%d first=%t: %v", replay, first, err)
-		}
-	}
-	st, err := tenant.SpendStanding(t.Context(), now)
-	if err != nil || st.RungMicro != 50000*MicroCreditsPerCent || st.Billing.Tier != "Held" {
-		t.Fatalf("decline did not move down one rung and hold: %+v: %v", st, err)
-	}
-}
-
 func TestBillingModelTrustedNeedsPaidHistoryAndCleanAge(t *testing.T) {
 	s, _, now := billingModelFixture(t)
 	tenant := &Tenant{s: s, team: "a"}
@@ -414,24 +229,6 @@ func TestBillingModelIndependentClaimantsCannotOversubscribe(t *testing.T) {
 	}
 }
 
-func TestBillingModelMonthEndCollectsTheProviderMinimum(t *testing.T) {
-	s, _, now := billingModelFixture(t)
-	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
-	*now = time.Date(2026, 10, 31, 23, 59, 0, 0, time.UTC)
-	cardCollectionDebt(t, s, "small", 49)
-	if work, _, err := s.AsOperator().DueCardCharges(t.Context(), *now); err != nil || len(work) != 0 {
-		t.Fatalf("under minimum: %+v: %v", work, err)
-	}
-	*now = now.Add(time.Minute)
-	if work, _, err := s.AsOperator().DueCardCharges(t.Context(), *now); err != nil || len(work) != 0 {
-		t.Fatalf("under minimum on first: %+v: %v", work, err)
-	}
-	cardCollectionDebt(t, s, "penny", 1)
-	if work := cardCollectionDue(t, s, *now); work.AmountCents != 50 {
-		t.Fatalf("month-end charge=%d", work.AmountCents)
-	}
-}
-
 func TestBillingModelCustomerRunnerHasNoStandingCapacityOrDeadline(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
 	deadline := now.Add(24 * time.Hour)
@@ -465,14 +262,15 @@ func TestBillingModelCloudReclaimCannotRestartJobDeadline(t *testing.T) {
 	}
 }
 
-func TestBillingModelEveryHoldLetsRunningCloudWorkFinish(t *testing.T) {
+// Every hold and an unpaid next slice stop running Cloud work at its next renewal, with no grace, and refuse new
+// Cloud work; only a funded, unheld team keeps running. The old code let a held team run to its full deadline (B8).
+func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 	for _, hold := range []struct{ name, id, cause string }{
-		{"decline", "decline-a1", FreezeCauseDecline},
-		{"dispute", "dp_1", ""},
-		{"warning", "efw_1", FreezeCauseWarning},
-		{"operator", OperatorHoldPrefix + "x", ""},
-		{"future cause", "hold_future", "future"},
-		{"revoked", "", ""},
+		{"dispute", "dp_1", HoldCauseDispute},
+		{"warning", "efw_1", HoldCauseWarning},
+		{"operator", OperatorHoldPrefix + "x", HoldCauseOperator},
+		{"revoked", "", HoldCauseRevoked},
+		{"out of credits", "", "unpaid"},
 		{"no hold", "", "control"},
 	} {
 		t.Run(hold.name, func(t *testing.T) {
@@ -484,22 +282,24 @@ func TestBillingModelEveryHoldLetsRunningCloudWorkFinish(t *testing.T) {
 			}
 			switch {
 			case hold.id != "":
-				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,created_at) VALUES (?,'a','r',?,?)`, hold.id, hold.cause, now.UnixNano())
-			case hold.cause == "":
+				placed := ""
+				if hold.cause == HoldCauseOperator {
+					placed = "console"
+				}
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES (?,'a','r',?,?,?)`, hold.id, hold.cause, placed, now.UnixNano())
+			case hold.cause == HoldCauseRevoked:
 				rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='revoked' WHERE name='a'`)
-			default:
-				rewriteSchemaExec(t, s.db, `UPDATE teams SET card_payment_method='' WHERE name='a'`)
+			case hold.cause == "unpaid":
 				rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
 			}
-			rewriteSchemaExec(t, s.db, `UPDATE teams SET credit_exhausted_at=1 WHERE name='a'`)
-			*now = now.Add(time.Duration(DefaultCreditGraceSeconds+1) * time.Second)
+			*now = now.Add(30 * time.Second)
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE node_id='job'`, now.Add(time.Minute).UnixNano())
 			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if control := hold.cause == "control"; beat.CancelRequested != control {
-				t.Fatalf("cancel requested=%v with %s", beat.CancelRequested, hold.name)
+			if stopped := hold.cause != "control"; beat.CancelRequested != stopped || stopped && beat.CancelReason != EventKindCreditsExhausted {
+				t.Fatalf("cancel requested=%v (%s) with %s", beat.CancelRequested, beat.CancelReason, hold.name)
 			}
 			if hold.cause == "control" {
 				return

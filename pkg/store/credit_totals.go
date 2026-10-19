@@ -8,17 +8,9 @@ import (
 )
 
 // CreditLedgerTotals reports deployment-wide financial totals from one snapshot.
-func (o *Operator) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, error) {
-	calculate := o.s.billing
-	if calculate == nil {
-		calculate = capability.SettleBilling
-	}
-	return o.s.creditLedgerTotalsWith(ctx, calculate)
-}
-
-func (s *Store) creditLedgerTotalsWith(ctx context.Context, calculate billingCalculator) (_ CreditLedgerTotals, err error) {
+func (o *Operator) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error) {
 	var out CreditLedgerTotals
-	tx, err := s.beginSnapshotReadTx(ctx)
+	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return CreditLedgerTotals{}, err
 	}
@@ -35,21 +27,21 @@ func (s *Store) creditLedgerTotalsWith(ctx context.Context, calculate billingCal
 	}
 	var settled, charged int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
+		`SELECT COALESCE(SUM(CASE WHEN kind IN (?, ?) THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN -amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(amount_micro), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN 0 ELSE seconds END), 0)
                    FROM credit_charges`,
-		CreditChargeReservation, CreditChargeUsage, CreditChargeRefund,
+		CreditChargeReservation, CreditChargeSlice, CreditChargeUsage, CreditChargeRefund,
 		CreditChargeStorage, CreditChargeStorage,
 	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro, &out.StorageMicro,
 		&settled, &charged); err != nil {
 		return CreditLedgerTotals{}, err
 	}
 
-	refundable, err := refundableBillingSecondsTx(ctx, tx, calculate)
+	refundable, err := refundableBillingSecondsTx(ctx, tx)
 	if err != nil {
 		return CreditLedgerTotals{}, err
 	}
@@ -67,12 +59,12 @@ type pendingBillingSeconds struct {
 	paid  int64
 }
 
-func refundableBillingSecondsTx(ctx context.Context, tx *storeTx, calculate billingCalculator) (int64, error) {
+func refundableBillingSecondsTx(ctx context.Context, tx *storeTx) (int64, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT a.team,a.reservation_id,a.capability_prefix,a.run_id,a.node_id,
 	 a.payer_team,a.executor_class,a.billing_start,a.billing_unit,
 	 (SELECT COALESCE(SUM(c.seconds),0) FROM credit_charges c WHERE c.team=a.team
 	 AND c.capability_prefix=a.capability_prefix AND c.run_id=a.run_id AND c.node_id=a.node_id
-	 AND c.kind IN ('reservation','usage','refund'))
+	 AND c.kind IN ('reservation','slice','usage','refund'))
 	 FROM billing_awards a WHERE a.metered=1 AND a.settled_at IS NULL`)
 	if err != nil {
 		return 0, err
@@ -99,7 +91,7 @@ func refundableBillingSecondsTx(ctx context.Context, tx *storeTx, calculate bill
 		if err != nil {
 			return 0, err
 		}
-		result, err := calculate(p.award.provenance, intervals)
+		result, err := capability.SettleBilling(p.award.provenance, intervals)
 		if err != nil {
 			return 0, err
 		}

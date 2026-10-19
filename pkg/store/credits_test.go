@@ -67,7 +67,7 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &highest}); err != nil {
 		t.Fatalf("the highest allowed rate was refused: %v", err)
 	}
-	if floor := highest * store.MinBillableSeconds; floor <= 0 {
+	if floor := highest * store.SliceSeconds; floor <= 0 {
 		t.Fatalf("minimum reservation = %d at the highest allowed rate; it must stay positive", floor)
 	}
 
@@ -91,50 +91,25 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 	}
 }
 
-func TestCreditSettingsBoundTheChargeCap(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-
-	lowest := store.MinCreditMaxChargeSeconds
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{MaxChargeSeconds: &lowest}); err != nil {
-		t.Fatalf("the lowest allowed cap was refused: %v", err)
-	}
-	highest := int64(store.MaxCreditMaxChargeSeconds)
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{MaxChargeSeconds: &highest}); err != nil {
-		t.Fatalf("the highest allowed cap was refused: %v", err)
-	}
-	for name, cap := range map[string]int64{
-		"one under the floor":  store.MinCreditMaxChargeSeconds - 1,
-		"one past the ceiling": store.MaxCreditMaxChargeSeconds + 1,
-		"zero":                 0,
-		"the int64 maximum":    math.MaxInt64,
-	} {
-		if _, err := s.AsOperator().SetCreditSettings(ctx,
-			store.CreditSettingsUpdate{MaxChargeSeconds: &cap}); !errors.Is(err, store.ErrInvalidCreditSetting) {
-			t.Errorf("%s was accepted as a charge cap: %v", name, err)
-		}
-	}
-}
-
 func TestSetCreditSettingsWritesEveryNamedValueOrNone(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	rate, grace, maxCharge := int64(30_000), int64(0), int64(45)
+	rate, warm := int64(30_000), int64(8)
 	got, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{
-		RateMicroPerSecond: &rate, GraceSeconds: &grace, MaxChargeSeconds: &maxCharge,
+		RateMicroPerSecond: &rate, WarmCPUClassCores: &warm,
 	})
 	if err != nil {
-		t.Fatalf("set all three: %v", err)
+		t.Fatalf("set both: %v", err)
 	}
-	if got.RateMicroPerSecond != rate || got.GraceSeconds != grace || got.MaxChargeSeconds != maxCharge {
+	if got.RateMicroPerSecond != rate || got.WarmCPUClassCores != warm {
 		t.Fatalf("settings = %+v", got)
 	}
 
 	bad := int64(-5)
-	keep := int64(20)
+	keep := int64(16)
 	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{
-		MaxChargeSeconds: &keep, RateMicroPerSecond: &bad,
+		WarmCPUClassCores: &keep, RateMicroPerSecond: &bad,
 	}); !errors.Is(err, store.ErrInvalidCreditSetting) {
 		t.Fatalf("a mixed update = %v, want a refusal", err)
 	}
@@ -142,8 +117,8 @@ func TestSetCreditSettingsWritesEveryNamedValueOrNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read settings: %v", err)
 	}
-	if got.MaxChargeSeconds != maxCharge {
-		t.Fatalf("charge cap = %d; the good half of a refused update was written", got.MaxChargeSeconds)
+	if got.WarmCPUClassCores != warm {
+		t.Fatalf("warm class = %d; the good half of a refused update was written", got.WarmCPUClassCores)
 	}
 
 	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{}); !errors.Is(

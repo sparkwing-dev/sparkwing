@@ -25,7 +25,8 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 	for _, queued := range []bool{false, true} {
 		t.Run(fmt.Sprint(queued), func(t *testing.T) {
 			e, tenant := engineRuntimeStore(t)
-			engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)
+			engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp' WHERE name='a'`)
+			engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 			budget := int64(1)
 			seal := runspec.SealedRequest{Request: runspec.Request{Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}, OverflowMinutes: &budget}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}
 			request, err := json.Marshal(seal)

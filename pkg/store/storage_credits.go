@@ -56,12 +56,8 @@ func validStorageFreeAllowance(bytes int64) error {
 func refuseStorageGrowthOnEmptyBalanceTx(
 	ctx context.Context, tx *storeTx, team Team, bytes int64,
 ) error {
-	room, err := headroomTx(ctx, tx, team, tx.now())
-	if err != nil || room > 0 {
-		return err
-	}
 	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil {
+	if err != nil || balance > 0 {
 		return err
 	}
 	return fmt.Errorf(
@@ -106,24 +102,17 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 	if err != nil {
 		return nil, err
 	}
-	card, err := teamCardTx(ctx, tx, c.Team)
+	l, err := lockLedgerTx(ctx, tx, c.Team)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-        INSERT INTO credit_charges (team, id, run_id, node_id, capability_prefix, principal, kind,
-                seconds, amount_micro, storage_bytes, charged_at, card_fingerprint)
-        VALUES (?, ?, '', '', '', ?, ?, ?, ?, ?, ?, ?)`,
-		string(c.Team), id, c.Principal, CreditChargeStorage,
-		c.Seconds, c.AmountMicro, c.Bytes, c.NowNS, card); err != nil {
-		return nil, fmt.Errorf("credits: insert storage charge: %w", err)
-	}
-	if err := addSpendTx(ctx, tx, c.Team, c.NowNS, c.AmountMicro); err != nil {
-		return nil, err
-	}
-	return &CreditCharge{
+	charge := CreditCharge{
 		ID: id, Team: c.Team, Principal: c.Principal, Kind: CreditChargeStorage,
 		Seconds: c.Seconds, AmountMicro: c.AmountMicro, StorageBytes: c.Bytes,
 		ChargedAt: time.Unix(0, c.NowNS).UTC(),
-	}, nil
+	}
+	if err := l.insertCharge(ctx, charge); err != nil {
+		return nil, err
+	}
+	return &charge, nil
 }

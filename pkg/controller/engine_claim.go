@@ -97,6 +97,10 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil
 	}
+	var refused *store.InsufficientCreditsError
+	if errors.As(err, &refused) {
+		return controllerwire.ClaimResponse{}, creditsRefusal(refused)
+	}
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}

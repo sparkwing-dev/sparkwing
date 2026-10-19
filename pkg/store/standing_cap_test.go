@@ -73,7 +73,7 @@ func TestStandingCapIncidentRestartsHighCleanAge(t *testing.T) {
 	s, tenant, now := standingCapFixture(t)
 	standingCapPay(t, tenant, "pi_incident", 50000)
 	incident := now.Add(29 * 24 * time.Hour)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,created_at,released_at) VALUES ('dp_old','a','warning',?,?)`, incident.UnixNano(), incident.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,created_at,released_at) VALUES ('dp_old','a','warning','dispute',?,?)`, incident.UnixNano(), incident.UnixNano())
 	standingCapWant(t, tenant, now.Add(30*24*time.Hour), "Trusted", "Established", "Trusted")
 	standingCapWant(t, tenant, incident.Add(30*24*time.Hour), "High", "High", "High")
 }
@@ -93,11 +93,11 @@ func TestStandingCapGrantAndHoldOverrideTheCap(t *testing.T) {
 func TestStandingCapAdmissionUsesTheCappedTier(t *testing.T) {
 	s, tenant, _ := standingCapFixture(t)
 	standingCapPay(t, tenant, "pi_admit", 50000)
-	err := s.inTx(t.Context(), func(tx *storeTx) error { return checkCloudCapacityTx(t.Context(), tx, "a", 129) })
+	err := s.inTx(t.Context(), func(tx *storeTx) error { return cloudCapacityFixture(t, tx, "a", 129) })
 	if err == nil {
 		t.Fatal("prepaid funds admitted a High-sized Cloud job without High history")
 	}
-	if err := s.inTx(t.Context(), func(tx *storeTx) error { return checkCloudCapacityTx(t.Context(), tx, "a", 128) }); err != nil {
+	if err := s.inTx(t.Context(), func(tx *storeTx) error { return cloudCapacityFixture(t, tx, "a", 128) }); err != nil {
 		t.Fatalf("Trusted job refused: %v", err)
 	}
 }
@@ -161,7 +161,7 @@ func TestStandingCapPaidCheckoutRecordsThreeDSecure(t *testing.T) {
 
 func standingCapOperatorHold(t *testing.T, s *Store, id string, placed, released time.Time, noFault bool) {
 	t.Helper()
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,placed_by,created_at) VALUES (?,'a','review','operator',?)`, id, placed.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES (?,'a','review','operator','operator',?)`, id, placed.UnixNano())
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", id, false, noFault, "operator", "checked", released)
 		return err
@@ -188,7 +188,7 @@ func TestStandingCapNoFaultOperatorReleaseKeepsCleanDays(t *testing.T) {
 
 func TestStandingCapNoFaultReleaseOnlyForOperatorHolds(t *testing.T) {
 	s, _, now := standingCapFixture(t)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,created_at) VALUES ('dp_1','a','dispute',?)`, now.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,created_at) VALUES ('dp_1','a','dispute','dispute',?)`, now.UnixNano())
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
 		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", "dp_1", false, true, "operator", "checked", *now)
 		return err
@@ -205,28 +205,36 @@ func TestHeldAdmissionNamesTheBlockingHoldAndItsRemedy(t *testing.T) {
 		cause  string
 		remedy string
 	}{
-		{[][2]string{{"decline-a1", FreezeCauseDecline}}, FreezeCauseDecline, "updates the card"},
-		{[][2]string{{"dp_1", ""}}, HoldCauseDispute, "payment dispute"},
-		{[][2]string{{"efw_1", FreezeCauseWarning}}, FreezeCauseWarning, "possible fraud"},
-		{[][2]string{{OperatorHoldPrefix + "x", ""}}, HoldCauseOperator, "Sparkwing support"},
-		{[][2]string{{"decline-a1", FreezeCauseDecline}, {"dp_1", ""}}, HoldCauseDispute, "payment dispute"},
+		{[][2]string{{"dp_1", HoldCauseDispute}}, HoldCauseDispute, "payment dispute"},
+		{[][2]string{{"efw_1", HoldCauseWarning}}, HoldCauseWarning, "possible fraud"},
+		{[][2]string{{OperatorHoldPrefix + "x", HoldCauseOperator}}, HoldCauseOperator, "Sparkwing support"},
+		{[][2]string{{"dp_1", HoldCauseDispute}, {"efw_1", HoldCauseWarning}}, HoldCauseDispute, "payment dispute"},
 	} {
 		s, tenant, now := standingCapFixture(t)
 		for _, h := range tc.holds {
-			rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,created_at) VALUES (?,'a','r',?,1)`, h[0], h[1])
+			placed := ""
+			if h[1] == HoldCauseOperator {
+				placed = "console"
+			}
+			rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES (?,'a','r',?,?,1)`, h[0], h[1], placed)
 		}
 		b := standingCapWant(t, tenant, *now, "Held", "New", "Established")
 		if b.HoldCause != tc.cause {
 			t.Fatalf("%v: cause=%s", tc.holds, b.HoldCause)
 		}
-		err := s.inTx(t.Context(), func(tx *storeTx) error { return checkCloudCapacityTx(t.Context(), tx, "a", 1) })
+		err := s.inTx(t.Context(), func(tx *storeTx) error { return cloudCapacityFixture(t, tx, "a", 1) })
 		var refusal *InsufficientCreditsError
-		if !errors.As(err, &refusal) || refusal.Hold != tc.cause || !strings.Contains(err.Error(), tc.remedy) || tc.cause != FreezeCauseDecline && strings.Contains(err.Error(), "card declined") {
+		if !errors.As(err, &refusal) || refusal.Hold != tc.cause || !strings.Contains(err.Error(), tc.remedy) {
 			t.Fatalf("%v: refusal %v", tc.holds, err)
 		}
-		st, err := tenant.SpendStanding(t.Context(), *now)
-		if _, limit := st.Headroom(); err != nil || (tc.cause == FreezeCauseDecline) != (limit == SpendLimitChargeFailed) {
-			t.Fatalf("%v: binding %s %v", tc.holds, limit, err)
-		}
 	}
+}
+
+func cloudCapacityFixture(t *testing.T, tx *storeTx, team Team, cores int64) error {
+	t.Helper()
+	l, err := lockLedgerTx(t.Context(), tx, team)
+	if err != nil {
+		return err
+	}
+	return checkCloudCapacityTx(t.Context(), l, cores)
 }

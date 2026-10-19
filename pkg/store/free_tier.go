@@ -102,19 +102,14 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 }
 
 func teamFundedTx(ctx context.Context, tx *storeTx, team Team) (bool, error) {
-	// safety: a card-billed team is funded by its card's credit, not only by
-	// what it prepaid; a spent limit pauses its work but not its tier.
-	st, err := spendStandingTx(ctx, tx, team, tx.now())
-	if err != nil || st.BalanceMicro <= 0 && !st.CardBilled() {
+	// safety: a held team, revoked standing included, may not keep what its
+	// payments bought, so it stores and runs as an unfunded team does.
+	balance, err := creditBalanceTx(ctx, tx, team)
+	if err != nil || balance <= 0 {
 		return false, err
 	}
-	// safety: a team held over a disputed payment may not keep what that
-	// payment bought, so it stores and runs as an unfunded team does.
-	freeze, err := teamCreditFreezeTx(ctx, tx, team)
-	if err != nil {
-		return false, err
-	}
-	return !freeze.Frozen, nil
+	cause, err := teamHoldTx(ctx, tx, team)
+	return cause == "", err
 }
 
 // safety: Postgres runs concurrent writers in their own transactions, so

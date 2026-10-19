@@ -18,7 +18,6 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("cores=%g/memory=%d", pin.cores, pin.memory), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, true)
-			s.billing = nil
 			if _, _, err := (&Tenant{s: s, team: "a"}).TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "price coverage"}, *now); err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +60,7 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			unitBillingTotal(t, s, 70*pin.rate, false)
+			unitBillingTotal(t, s, (70+SliceSeconds)*pin.rate, false)
 			if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 				t.Fatal(err)
 			}
@@ -95,25 +94,4 @@ func TestMeteredAwardRefusesUnpricedResourcesAtomically(t *testing.T) {
 			rewriteSchemaCount(t, s.db, "credit_charges", 0)
 		})
 	}
-}
-
-func TestARefundDebitsTheCardThatPaid(t *testing.T) {
-	s, demand, _ := meteredUnitFixture(t, true)
-	rewriteSchemaExec(t, s.db, "UPDATE teams SET card_fingerprint='original' WHERE name='a'")
-	claim, _ := meteredUnitClaim(t, s, demand)
-	rewriteSchemaExec(t, s.db, "UPDATE teams SET card_fingerprint='replacement' WHERE name='a'")
-	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
-		t.Fatal(err)
-	}
-	charges, err := (&Tenant{s: s, team: claim.Team}).ListCreditCharges(t.Context(), 100)
-	if err != nil || len(charges) != 2 {
-		t.Fatalf("charges: %+v, %v", charges, err)
-	}
-	for _, fingerprint := range []string{"original", "replacement"} {
-		var amount int64
-		if err := s.db.QueryRow("SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE card_fingerprint=?", fingerprint).Scan(&amount); err != nil || amount != 0 {
-			t.Fatalf("%s spend=%d, %v", fingerprint, amount, err)
-		}
-	}
-	unitBillingTotal(t, s, 0, true)
 }

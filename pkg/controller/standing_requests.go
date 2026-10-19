@@ -31,7 +31,7 @@ func standingRequestBody(r store.StandingRequest) controllerwire.StandingRequest
 
 func standingHistoryBody(h store.StandingHistory) controllerwire.StandingHistory {
 	return controllerwire.StandingHistory{
-		Tier: h.Tier, PaidMicro: h.PaidMicro, SuccessfulCharges: h.SuccessfulCharges,
+		Tier: h.Tier, PaidMicro: h.PaidMicro,
 		FirstPaidAt: unixOrZero(h.FirstPaidAt), LastIncidentAt: unixOrZero(h.LastIncidentAt),
 	}
 }

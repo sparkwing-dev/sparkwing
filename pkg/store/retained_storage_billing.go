@@ -69,9 +69,6 @@ func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease,
 	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
 		return nil, err
 	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return nil, err
-	}
 	charge, err := chargeRetainedTeamTx(ctx, tx, team)
 	if err != nil {
 		return nil, err

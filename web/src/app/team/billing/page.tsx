@@ -28,9 +28,7 @@ import {
   getBilling,
   grantLabel,
   holdNotice,
-  limitReason,
-  openHostedPage,
-  setBudget,
+  openCardPage,
   parseDollars,
   prepayNote,
   priceRows,
@@ -38,7 +36,11 @@ import {
   standingOutcome,
   standingRequestProblem,
   purchaseProblem,
+  refillProblem,
+  refillStatus,
+  setRefill,
   startCheckout,
+  suggestedRefill,
   storagePrice,
 } from "@/lib/billing";
 import { billingEnabled, unixSecondsISO } from "@/lib/teams";
@@ -122,13 +124,21 @@ function BillingRoute() {
             >
               {holdNotice(billing.hold_cause)}
             </div>
+          ) : billing.balance_micro <= 0 ? (
+            <div
+              role="alert"
+              className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+            >
+              The balance is empty, so Cloud work cannot run. Add funds or turn
+              on automatic refill; your own runners keep working.
+            </div>
           ) : null}
           {cardReturn === "added" ? (
             <Notice>Card added. It is saved once Stripe confirms it.</Notice>
           ) : null}
           <BalancePanel billing={billing} />
           <CardPanel billing={billing} />
-          <LimitsPanel billing={billing} reload={load} />
+          <RefillPanel billing={billing} reload={load} />
           <StandingPanel billing={billing} reload={load} />
           {billing.checkout_enabled ? (
             <BuyPanel billing={billing} />
@@ -144,23 +154,6 @@ function BillingRoute() {
 
 function BalancePanel({ billing }: { billing: Billing }) {
   const credits = balanceCredits(billing.balance_micro, billing);
-  if (billing.card_billed) {
-    const usd = balanceUSD(billing.balance_micro, billing);
-    return (
-      <Panel title="Balance">
-        <div className="p-4">
-          <div className="text-2xl font-bold">
-            {usd < 0 ? `${fmtUSD(-usd)} owed` : `${fmtUSD(usd)} prepaid`}
-          </div>
-          <div className="text-sm text-[var(--muted)] mt-1">
-            Usage is charged to the card at{" "}
-            {fmtCents(billing.limits.rung_cents)} owed, or on the 1st of the
-            month.
-          </div>
-        </div>
-      </Panel>
-    );
-  }
   return (
     <Panel title="Balance">
       <div className="p-4">
@@ -205,7 +198,7 @@ function BuyPanel({ billing }: { billing: Billing }) {
   return (
     <Panel
       title="Add funds"
-      hint={`Minimum purchase ${fmtCents(billing.purchase_min_cents)}. Usage draws prepaid funds before card billing resumes.`}
+      hint={`Minimum purchase ${fmtCents(billing.purchase_min_cents)}. Cloud usage draws on the balance.`}
     >
       <form onSubmit={submit} className="p-4 space-y-2">
         {owner ? null : (
@@ -310,8 +303,8 @@ function PricesPanel({ billing }: { billing: Billing }) {
       )}
       <div className="px-4 py-3 border-t border-[var(--border)] text-xs text-[var(--muted)] space-y-1">
         <p>
-          Each node is billed for at least {billing.min_billable_seconds}{" "}
-          seconds. {fmtCredits(billing.credits_per_dollar)} credits cost $1.
+          Usage is charged in {billing.slice_seconds}-second slices, each paid
+          before it runs; unused slice time is refunded. {fmtCredits(billing.credits_per_dollar)} credits cost $1.
         </p>
         {storage ? (
           <p>
@@ -448,23 +441,19 @@ function HistoryPanel({ billing }: { billing: Billing }) {
 function CardPanel({ billing }: { billing: Billing }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  if (!billing.card && !billing.can_add_card && !billing.open_charge)
-    return null;
+  if (!billing.card && !billing.can_add_card) return null;
 
-  async function go(
-    path: "/api/v1/team/billing/card" | "/api/v1/team/billing/pay",
-  ) {
+  async function go() {
     setBusy(true);
     setError("");
     try {
-      window.location.assign(await openHostedPage(path));
+      window.location.assign(await openCardPage());
     } catch (err) {
       setError(errorText(err));
       setBusy(false);
     }
   }
 
-  const charge = billing.open_charge;
   return (
     <Panel title="Card on file">
       <div className="p-4 space-y-2 text-sm">
@@ -474,43 +463,19 @@ function CardPanel({ billing }: { billing: Billing }) {
           </p>
         ) : (
           <p className="text-[var(--muted)]">
-            Add a card for automatic usage billing. You can also add prepaid funds.
+            Save a card to turn on automatic refill.
           </p>
         )}
-        {charge && charge.failures > 0 ? (
-          <p role="alert" className="text-red-300">
-            A charge of {fmtCents(charge.amount_cents)} failed
-            {charge.decline_code ? ` (${charge.decline_code})` : ""}. New Cloud
-            work waits until it is paid.
-            {charge.next_attempt_at
-              ? ` It is retried ${fmtDateTime(unixSecondsISO(charge.next_attempt_at))}.`
-              : ""}
-          </p>
-        ) : charge ? (
-          <p className="text-[var(--muted)]">
-            A charge of {fmtCents(charge.amount_cents)} is in progress.
-          </p>
-        ) : null}
         {billing.can_add_card ? (
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               className={buttonClass}
               disabled={busy}
-              onClick={() => go("/api/v1/team/billing/card")}
+              onClick={go}
             >
               {billing.card ? "Replace card" : "Add a card"}
             </button>
-            {charge ? (
-              <button
-                type="button"
-                className={buttonClass}
-                disabled={busy}
-                onClick={() => go("/api/v1/team/billing/pay")}
-              >
-                Pay {fmtCents(charge.amount_cents)} now
-              </button>
-            ) : null}
           </div>
         ) : null}
         {error ? (
@@ -523,82 +488,197 @@ function CardPanel({ billing }: { billing: Billing }) {
   );
 }
 
-function LimitsPanel({
+function centsText(cents: number): string {
+  return cents > 0 ? String(cents / 100) : "";
+}
+
+function RefillPanel({
   billing,
   reload,
 }: {
   billing: Billing;
   reload: () => Promise<void>;
 }) {
-  const l = billing.limits;
-  const [budget, setBudgetText] = useState(() => String(l.budget_cents / 100));
+  const r = billing.refill;
+  const owner = billing.can_add_card;
+  const [enabled, setEnabled] = useState(r.enabled);
+  const [threshold, setThreshold] = useState(() =>
+    centsText(r.threshold_cents || suggestedRefill.threshold_cents),
+  );
+  const [amount, setAmount] = useState(() =>
+    centsText(r.amount_cents || suggestedRefill.amount_cents),
+  );
+  const [week, setWeek] = useState(() => centsText(r.week_limit_cents));
+  const [month, setMonth] = useState(() => centsText(r.month_limit_cents));
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const owner = billing.can_purchase || billing.can_add_card;
-  const heldAbove = !!billing.hold_cause && (l.binding === "charge_failed" || l.binding === "held");
-  const waiting = l.headroom_cents <= 0 && !heldAbove;
+  const [saved, setSaved] = useState(false);
+
+  // An empty limit field means no limit, which the controller reads as zero.
+  const limit = (text: string) => (text.trim() === "" ? 0 : parseDollars(text));
+  const form = {
+    enabled,
+    threshold: parseDollars(threshold),
+    amount: parseDollars(amount),
+    week: limit(week),
+    month: limit(month),
+  };
+  const problem = refillProblem(form, r);
+  const status = refillStatus(r);
+  const needsCard = enabled && !billing.card;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    const cents = parseDollars(budget);
-    if (cents === null) {
-      setError("Enter a dollar amount.");
-      return;
-    }
+    if (!owner || problem || needsCard) return;
+    setBusy(true);
+    setError("");
+    setSaved(false);
     try {
-      await setBudget(cents);
-      setError("");
+      await setRefill({
+        enabled,
+        threshold_cents: form.threshold ?? 0,
+        amount_cents: form.amount ?? 0,
+        week_limit_cents: form.week ?? 0,
+        month_limit_cents: form.month ?? 0,
+      });
+      setSaved(true);
       await reload();
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setBusy(false);
     }
   }
 
+  const field = (
+    id: string,
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    placeholder?: string,
+  ) => (
+    <div>
+      <label htmlFor={id} className={labelClass}>
+        {label}
+      </label>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-[var(--muted)]" aria-hidden="true">
+          $
+        </span>
+        <input
+          id={id}
+          inputMode="decimal"
+          autoComplete="off"
+          className={`${inputClass} w-28`}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            set(e.target.value);
+            setSaved(false);
+            setError("");
+          }}
+        />
+      </div>
+    </div>
+  );
+
+  const caps = r.caps;
+  const capped =
+    caps.amount_cents > 0 || caps.per_day > 0 || caps.week_cents > 0;
+
   return (
     <Panel
-      title="Spend limits"
-      hint="Standing limits new Cloud admissions and each job’s duration. Running work finishes during card collection."
+      title="Automatic refill"
+      hint="When the balance falls below the threshold, the saved card is charged the refill amount. Off unless you turn it on."
     >
-      <div className="p-4 space-y-2 text-sm">
-        {waiting ? (
+      <form onSubmit={save} className="p-4 space-y-3 text-sm">
+        {status ? (
           <p role="alert" className="text-red-300">
-            {limitReason(l.binding)}
+            {status}
           </p>
         ) : null}
-        <p>
-          {l.standing} standing: {l.cloud_vcpu} concurrent Cloud vCPU and {l.max_job_seconds / 3600} hours per job.
-          Last 30 days: {fmtCents(l.spent_30d_cents)}. Today: {fmtCents(l.spent_today_cents)}.
-        </p>
-        <form onSubmit={save} className="flex flex-wrap items-center gap-2">
-          <label htmlFor="budget" className={labelClass}>
-            Budget per 30 days ($)
+        {r.open ? (
+          <p role="status" className="text-[var(--muted)]">
+            A refill is in progress.
+          </p>
+        ) : null}
+        {owner ? null : (
+          <p className="text-[var(--muted)]">
+            Only a team owner can change automatic refill.
+          </p>
+        )}
+        <fieldset disabled={!owner || busy} className="space-y-3">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => {
+                setEnabled(e.target.checked);
+                setSaved(false);
+                setError("");
+              }}
+            />
+            Refill automatically
           </label>
-          <input
-            id="budget"
-            inputMode="decimal"
-            className={`${inputClass} w-28`}
-            value={budget}
-            disabled={!owner}
-            onChange={(e) => setBudgetText(e.target.value)}
-          />
-          {owner ? (
-            <button type="submit" className={buttonClass}>
-              Save
-            </button>
-          ) : null}
-        </form>
-        <p className="text-xs text-[var(--muted)]">
-          Owners are emailed at 50, 80 and 100% of the budget. Zero removes the owner budget.
+          <div className="flex flex-wrap gap-4">
+            {field(
+              "refill-threshold",
+              "When the balance is below",
+              threshold,
+              setThreshold,
+            )}
+            {field("refill-amount", "Add this amount", amount, setAmount)}
+            {field("refill-week", "Weekly limit", week, setWeek, "No limit")}
+            {field(
+              "refill-month",
+              "Monthly limit",
+              month,
+              setMonth,
+              "No limit",
+            )}
+          </div>
+          <button
+            type="submit"
+            className={buttonClass}
+            disabled={problem !== null || needsCard}
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </fieldset>
+        <p
+          className={`text-xs ${(problem || needsCard) && owner ? "text-red-300" : "text-[var(--muted)]"}`}
+        >
+          {problem && owner
+            ? problem
+            : needsCard && owner
+              ? "Save a card before turning on automatic refill."
+              : `A refill is between ${fmtCents(r.min_amount_cents)} and ${fmtCents(r.max_amount_cents)}. Leave a limit empty for none.`}
         </p>
+        <p className="text-[var(--muted)]">
+          Refills in the last 7 days: {fmtCents(r.week_cents)}. Last 30 days:{" "}
+          {fmtCents(r.month_cents)}.
+        </p>
+        <p className="text-[var(--muted)]">
+          {capped
+            ? `${billing.standing.tier} standing allows at most ${fmtCents(caps.amount_cents)} per refill, ${caps.per_day} refill${caps.per_day === 1 ? "" : "s"} a day and ${fmtCents(caps.week_cents)} a week.`
+            : `${billing.standing.tier} standing leaves refills to the team's own limits.`}{" "}
+          A refill a limit stops is not made, and Cloud work stops when the
+          credits run out.
+        </p>
+        {saved ? (
+          <p role="status" className="text-green-300">
+            Saved.
+          </p>
+        ) : null}
         {error ? (
           <p role="alert" className="text-red-300">
             {error}
           </p>
         ) : null}
-      </div>
+      </form>
     </Panel>
   );
 }
-
 function StandingPanel({
   billing,
   reload,
@@ -635,11 +715,15 @@ function StandingPanel({
   return (
     <Panel
       title="Standing"
-      hint="Payment history and prepaid funds set standing. Operators can grant higher tiers."
+      hint="Payment history and prepaid funds set standing, which limits Cloud concurrency, job length and refills. Operators can grant higher tiers."
     >
       <div className="p-4 space-y-2 text-sm">
         <p>
           {s.tier} standing. {note}
+        </p>
+        <p>
+          {billing.limits.cloud_vcpu} concurrent Cloud vCPU and{" "}
+          {billing.limits.max_job_seconds / 3600} hours per job.
         </p>
         {s.request ? (
           <p role="status" className="text-[var(--muted)]">

@@ -42,9 +42,9 @@ func TestPaymentConsequencesSurviveEveryDeliveryOrder(t *testing.T) {
 			}
 			return fixture{s: s, tenant: tenant, pay: pay, now: s.now()}
 		},
-		"collection": func(t *testing.T) fixture {
+		"refill": func(t *testing.T) fixture {
 			s, tenant, now := providerPaymentFixture(t)
-			return fixture{s: s, tenant: tenant, pay: providerCollectionEvent(t, s, now, capability.PaymentCardPaid), now: now}
+			return fixture{s: s, tenant: tenant, pay: providerRefillEvent(t, s, now, capability.PaymentCardPaid), now: now}
 		},
 	}
 	sets := [][]string{{"pay", "refund"}, {"pay", "warning"}, {"pay", "refund", "warning"}}

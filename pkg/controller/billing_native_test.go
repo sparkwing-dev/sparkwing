@@ -49,7 +49,7 @@ func billingNativeServer(t *testing.T) (*Server, string, string) {
 	return s, session, csrf
 }
 
-func TestBillingModelProductionPagesAndBudget(t *testing.T) {
+func TestBillingModelProductionPages(t *testing.T) {
 	s, session, csrf := billingNativeServer(t)
 	calls := 0
 	s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
@@ -82,17 +82,12 @@ func TestBillingModelProductionPagesAndBudget(t *testing.T) {
 	call("POST", "checkout", `{"amount_cents":2000}`, 200)
 	call("POST", "checkout", `{"amount_cents":2000}`, 200)
 	call("POST", "checkout", `{"amount_cents":2001}`, 409)
-	call("PUT", "budget", `{"budget_cents":2500}`, 204)
 	if calls != 1 {
 		t.Fatalf("provider calls=%d", calls)
 	}
-	var budget int64
-	if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&budget); err != nil || budget != 2500 {
-		t.Fatalf("budget=%d: %v", budget, err)
-	}
 }
 
-func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
+func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	s, session, csrf := billingNativeServer(t)
 	key, secret := filepath.Join(t.TempDir(), "key"), filepath.Join(t.TempDir(), "secret")
 	for path, value := range map[string]string{key: "sk_test_fixture", secret: "whsec_fixture"} {
@@ -105,10 +100,10 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/payment_methods/pm_native":
 			body = `{"id":"pm_native","object":"payment_method","livemode":false,"customer":"cus_native","type":"card","card":{"fingerprint":"fp_native","brand":"visa","last4":"4242"}}`
-		case "/v1/charges/ch_native":
-			body = `{"id":"ch_native","object":"charge","livemode":false,"payment_intent":"pi_recovery","payment_method_details":{"card":{"fingerprint":"fp_native"}}}`
+		case "/v1/charges/ch_auto":
+			body = `{"id":"ch_auto","object":"charge","livemode":false,"payment_intent":"pi_auto","payment_method_details":{"card":{"fingerprint":"fp_native"}}}`
 		case "/v1/payment_intents/pi_prepay":
-			body = `{"id":"pi_prepay","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"latest_charge":"ch_prepay"}`
+			body = `{"id":"pi_prepay","object":"payment_intent","livemode":false,"latest_charge":"ch_prepay"}`
 		case "/v1/charges/ch_prepay":
 			body = `{"id":"ch_prepay","object":"charge","livemode":false,"payment_intent":"pi_prepay","payment_method_details":{"card":{"fingerprint":"fp_native","three_d_secure":{"result":"authenticated"}}}}`
 		default:
@@ -139,20 +134,15 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.test/setup"}`
 		case "/internal/checkout":
 			body = `{"id":"cs_prepay","url":"https://checkout.test/prepay"}`
-		case "/internal/charge":
-			if in["amount_cents"] != float64(600) || in["customer"] != "cus_native" || in["payment_method"] != "pm_native" {
-				t.Fatalf("charge=%v", in)
+		case "/internal/refill":
+			if in["amount_cents"] != float64(1000) || in["customer"] != "cus_native" || in["payment_method"] != "pm_native" {
+				t.Fatalf("refill=%v", in)
 			}
 			status := "created"
 			if counts[r.URL.Path] > 1 {
 				status = "processing"
 			}
 			body = fmt.Sprintf(`{"payment_intent":"pi_auto","status":%q}`, status)
-		case "/internal/charge-checkout":
-			if in["amount_cents"] != float64(600) || in["customer"] != "cus_native" || in["attempt_id"] != in["key"] {
-				t.Fatalf("recovery=%v", in)
-			}
-			body = `{"id":"cs_recovery","customer":"cus_native","url":"https://checkout.test/recovery"}`
 		default:
 			t.Fatalf("payment page %s", r.URL.Path)
 		}
@@ -161,7 +151,11 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 	h := s.Handler()
 	call := func(path, body string, status int) {
 		t.Helper()
-		r := httptest.NewRequest("POST", "https://controller.test/api/v1/team/billing/"+path, strings.NewReader(body))
+		method := "POST"
+		if path == "refill" {
+			method = "PUT"
+		}
+		r := httptest.NewRequest(method, "https://controller.test/api/v1/team/billing/"+path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Idempotency-Key", path)
 		r.Header.Set("Origin", "https://controller.test")
@@ -197,7 +191,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 	}
 	const stamp = `"sparkwing_deployment":"staging.sparkwing.dev"`
 	setupIntent := `{"id":"seti_native","object":"setup_intent","livemode":false,"metadata":{"purpose":"card_setup",` + stamp + `},"status":"succeeded","customer":"cus_native","payment_method":"pm_native"}`
-	recovered := `{"id":"pi_recovery","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge",` + stamp + `},"status":"succeeded","amount":600,"amount_received":600,"currency":"usd","customer":"cus_native","latest_charge":"ch_native"}`
+	refilled := `{"id":"pi_auto","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_refill",` + stamp + `},"status":"succeeded","amount":1000,"amount_received":1000,"currency":"usd","customer":"cus_native","latest_charge":"ch_auto"}`
 	for range 2 {
 		call("card", "", 200)
 	}
@@ -205,7 +199,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 		t.Fatal("a setup intent of this deployment was acknowledged before its page bound it")
 	}
 	for range 2 {
-		webhook("evt_setup_page", "checkout.session.completed", `{"id":"cs_setup","object":"checkout.session","mode":"setup","status":"complete","livemode":false,"customer":"cus_native","setup_intent":"seti_native","metadata":{"purpose":"card_setup",` + stamp + `}}`)
+		webhook("evt_setup_page", "checkout.session.completed", `{"id":"cs_setup","object":"checkout.session","mode":"setup","status":"complete","livemode":false,"customer":"cus_native","setup_intent":"seti_native","metadata":{"purpose":"card_setup",`+stamp+`}}`)
 		webhook("evt_setup", "setup_intent.succeeded", setupIntent)
 	}
 	tenant, err := s.store.ForTeam(t.Context(), "a")
@@ -226,34 +220,26 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 	if err != nil || standing.Tier != "Established" {
 		t.Fatalf("prepay standing=%+v: %v", standing, err)
 	}
-	engineSQL(t, s.store, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,seconds,kind,amount_micro,charged_at) VALUES ('debt','a','','','',0,'storage',?,?)`, 2600*store.MicroCreditsPerCent, time.Now().UnixNano())
-	s.cardBillingPass(t.Context())
+	call("refill", `{"enabled":true,"threshold_cents":500,"amount_cents":1000}`, 204)
+	engineSQL(t, s.store, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,seconds,kind,amount_micro,charged_at) VALUES ('spent','a','','','',0,'storage',?,?)`, 2000*store.MicroCreditsPerCent, time.Now().UnixNano())
 	for range 2 {
-		webhook("evt_decline", "payment_intent.payment_failed", `{"id":"pi_auto","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"status":"requires_payment_method","amount":600,"currency":"usd","customer":"cus_native","last_payment_error":{"decline_code":"insufficient_funds"}}`)
+		s.refillPass(t.Context())
 	}
-	standing, err = tenant.BillingStanding(t.Context(), time.Now())
-	if err != nil || standing.Tier != "Held" {
-		t.Fatalf("decline standing=%+v: %v", standing, err)
-	}
-	for range 2 {
-		call("pay", "", 200)
-	}
-	if w := deliver("evt_recovery", "payment_intent.succeeded", recovered); w.Code == 204 {
-		t.Fatal("a pay-now payment was acknowledged before its page bound it")
+	if w := deliver("evt_refill", "payment_intent.succeeded", strings.Replace(refilled, "pi_auto", "pi_other", 1)); w.Code == 204 {
+		t.Fatal("a refill payment this deployment never recorded was acknowledged")
 	}
 	for range 2 {
-		webhook("evt_recovery_page", "checkout.session.completed", `{"id":"cs_recovery","object":"checkout.session","mode":"payment","status":"complete","payment_status":"paid","livemode":false,"customer":"cus_native","payment_intent":"pi_recovery","metadata":{"purpose":"card_charge",` + stamp + `}}`)
-		webhook("evt_recovery", "payment_intent.succeeded", recovered)
+		webhook("evt_refill", "payment_intent.succeeded", refilled)
 	}
 	spend, err = tenant.SpendStanding(t.Context(), time.Now())
-	if err != nil || spend.OpenCharge != nil || spend.BalanceMicro != 0 || spend.Billing.Tier != "Established" {
-		t.Fatalf("recovered=%+v: %v", spend, err)
+	if err != nil || spend.BalanceMicro != 1000*store.MicroCreditsPerCent || spend.Refill.Open || spend.Billing.Tier != "Established" {
+		t.Fatalf("refilled=%+v: %v", spend, err)
 	}
 	if !spend.Billing.History.LastIncidentAt.IsZero() {
-		t.Fatalf("a successful charge restarted clean days: %+v", spend.Billing.History)
+		t.Fatalf("a successful refill restarted clean days: %+v", spend.Billing.History)
 	}
-	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/charge-checkout"] != 1 {
-		t.Fatalf("duplicate provider calls: %v", counts)
+	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/refill"] != 3 {
+		t.Fatalf("provider calls: %v; want one page each, then creation and two confirmations of one refill", counts)
 	}
 }
 
@@ -327,12 +313,12 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 	}
 }
 
-func TestCardBilling_OwnerSetsABudget(t *testing.T) {
+func TestCardBilling_OwnerSetsARefill(t *testing.T) {
 	s, session, csrf := billingNativeServer(t)
 	h := s.Handler()
 	call := func(method, body string, want int) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest(method, "https://controller.test/api/v1/team/billing/budget", strings.NewReader(body))
+		r := httptest.NewRequest(method, "https://controller.test/api/v1/team/billing/refill", strings.NewReader(body))
 		if method == "GET" {
 			r.URL.Path = "/api/v1/team/billing"
 		}
@@ -344,52 +330,88 @@ func TestCardBilling_OwnerSetsABudget(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != want {
-			t.Fatalf("%s budget: %d %s, want %d", method, w.Code, w.Body, want)
+			t.Fatalf("%s refill: %d %s, want %d", method, w.Code, w.Body, want)
 		}
 		return w
 	}
+	settings := func(team string) (enabled bool, threshold, amount int64) {
+		t.Helper()
+		if err := s.store.DB().QueryRow(`SELECT refill_enabled,refill_threshold_cents,refill_amount_cents FROM teams WHERE name=?`, team).Scan(&enabled, &threshold, &amount); err != nil {
+			t.Fatal(err)
+		}
+		return enabled, threshold, amount
+	}
 	engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
+	const on = `{"enabled":true,"threshold_cents":500,"amount_cents":2000,"week_limit_cents":6000,"month_limit_cents":0}`
 	for _, role := range []string{"editor", "reader"} {
 		engineSQL(t, s.store, `UPDATE memberships SET role=? WHERE team='a' AND account_id='owner'`, role)
-		call("PUT", `{"budget_cents":1000}`, 403)
+		call("PUT", on, 403)
 	}
 	engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE team='a' AND account_id='owner'`)
-	call("PUT", `{"budget_cents":1000}`, 204)
+	var refused struct {
+		Error struct {
+			Details struct {
+				Reason string `json:"reason"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(call("PUT", on, 409).Body.Bytes(), &refused); err != nil || refused.Error.Details.Reason != NoCardCode {
+		t.Fatalf("refill without a card: %+v: %v", refused, err)
+	}
+	if enabled, _, _ := settings("a"); enabled {
+		t.Fatal("a refused refill turned on")
+	}
+	engineSQL(t, s.store, `UPDATE teams SET card_customer='cus',card_payment_method='pm',card_fingerprint='fp',card_brand='visa',card_last4='4242' WHERE name='a'`)
+	call("PUT", on, 204)
 	var answer struct {
-		Limits struct {
-			BudgetCents int64 `json:"budget_cents"`
-		} `json:"limits"`
+		Refill struct {
+			Enabled         bool   `json:"enabled"`
+			ThresholdCents  int64  `json:"threshold_cents"`
+			AmountCents     int64  `json:"amount_cents"`
+			WeekLimitCents  int64  `json:"week_limit_cents"`
+			MonthLimitCents int64  `json:"month_limit_cents"`
+			MinAmountCents  int64  `json:"min_amount_cents"`
+			MaxAmountCents  int64  `json:"max_amount_cents"`
+			Open            bool   `json:"open"`
+			Limit           string `json:"limit"`
+			Caps            struct {
+				AmountCents int64 `json:"amount_cents"`
+				PerDay      int64 `json:"per_day"`
+				WeekCents   int64 `json:"week_cents"`
+			} `json:"caps"`
+		} `json:"refill"`
 	}
-	if err := json.Unmarshal(call("GET", "", 200).Body.Bytes(), &answer); err != nil || answer.Limits.BudgetCents != 1000 {
-		t.Fatalf("budget=%+v: %v", answer, err)
+	if err := json.Unmarshal(call("GET", "", 200).Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
 	}
-	for _, cents := range []int64{-1, store.MaxCreditGrantMicro/store.MicroCreditsPerCent + 1} {
-		call("PUT", fmt.Sprintf(`{"budget_cents":%d}`, cents), 400)
+	r := answer.Refill
+	if !r.Enabled || r.ThresholdCents != 500 || r.AmountCents != 2000 || r.WeekLimitCents != 6000 || r.MonthLimitCents != 0 ||
+		r.MinAmountCents != store.MinRefillCents || r.MaxAmountCents != store.MaxRefillCents || r.Open || r.Limit != "" ||
+		r.Caps.AmountCents != 5000 || r.Caps.PerDay != 1 || r.Caps.WeekCents != 10000 {
+		t.Fatalf("refill block=%+v", r)
 	}
-	var unchanged int64
-	if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&unchanged); err != nil || unchanged != 1000 {
-		t.Fatalf("refused budget changed balance: %d: %v", unchanged, err)
+	for _, body := range []string{
+		`{"enabled":true,"threshold_cents":500,"amount_cents":999}`,
+		fmt.Sprintf(`{"enabled":true,"threshold_cents":500,"amount_cents":%d}`, store.MaxRefillCents+1),
+		`{"enabled":true,"threshold_cents":-1,"amount_cents":2000}`,
+	} {
+		call("PUT", body, 400)
 	}
-	property := func(roleIndex uint8, cents uint16) bool {
+	if enabled, threshold, amount := settings("a"); !enabled || threshold != 500 || amount != 2000 {
+		t.Fatalf("a refused refill changed the settings: %t %d %d", enabled, threshold, amount)
+	}
+	property := func(roleIndex uint8, threshold uint16) bool {
 		role := []string{"owner", "editor", "reader"}[roleIndex%3]
 		engineSQL(t, s.store, `UPDATE memberships SET role=? WHERE team='a' AND account_id='owner'`, role)
-		var before int64
-		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&before); err != nil {
-			t.Fatal(err)
-		}
-		wantStatus, wantBudget := 403, before
+		_, before, _ := settings("a")
+		wantStatus, wantThreshold := 403, before
 		if role == "owner" {
-			wantStatus, wantBudget = 204, int64(cents)
+			wantStatus, wantThreshold = 204, int64(threshold)
 		}
-		call("PUT", fmt.Sprintf(`{"budget_cents":%d}`, cents), wantStatus)
-		var actual, foreign int64
-		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&actual); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='foreign'`).Scan(&foreign); err != nil {
-			t.Fatal(err)
-		}
-		return actual == wantBudget && foreign == 0
+		call("PUT", fmt.Sprintf(`{"enabled":true,"threshold_cents":%d,"amount_cents":2000}`, threshold), wantStatus)
+		_, actual, _ := settings("a")
+		foreignOn, foreign, _ := settings("foreign")
+		return actual == wantThreshold && !foreignOn && foreign == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
 		t.Fatal(err)

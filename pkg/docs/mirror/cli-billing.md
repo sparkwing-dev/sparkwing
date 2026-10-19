@@ -6,12 +6,13 @@ Every `sparkwing billing` command, flag, and argument, generated from the CLI's 
 
 ## `sparkwing billing`
 
-Inspect Cloud standing and request a higher tier
+Inspect Cloud standing, request a higher tier and set automatic refill
 
 ### Subcommands
 
 - `standing` -- Show the team's Cloud standing and latest tier request
 - `request-tier` -- Ask the operators to grant High standing
+- `refill` -- Show or change the team's automatic refill
 
 ### Flags
 
@@ -21,6 +22,28 @@ Inspect Cloud standing and request a higher tier
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+## `sparkwing billing refill`
+
+Show or change the team's automatic refill
+
+Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the standing caps, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $5,000. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
+| `--enable` | Turn automatic refill on; the team needs a saved card. |
+| `--disable` | Turn automatic refill off, keeping its settings. |
+| `--threshold DOLLARS` | Refill when the balance falls below this many dollars. |
+| `--amount DOLLARS` | Dollars added by each refill, $10 to $5,000. |
+| `--week-limit DOLLARS` | Most dollars refilled in any 7 days; 0 is no limit. |
+| `--month-limit DOLLARS` | Most dollars refilled in any 30 days; 0 is no limit. |
 
 ## `sparkwing billing request-tier`
 

@@ -29,11 +29,10 @@ type StandingRequest struct {
 
 // StandingHistory is the payment record a team's history tier is earned from; times are Unix seconds.
 type StandingHistory struct {
-	Tier              string `json:"tier"`
-	PaidMicro         int64  `json:"paid_micro"`
-	SuccessfulCharges int64  `json:"successful_charges"`
-	FirstPaidAt       int64  `json:"first_paid_at,omitempty"`
-	LastIncidentAt    int64  `json:"last_incident_at,omitempty"`
+	Tier           string `json:"tier"`
+	PaidMicro      int64  `json:"paid_micro"`
+	FirstPaidAt    int64  `json:"first_paid_at,omitempty"`
+	LastIncidentAt int64  `json:"last_incident_at,omitempty"`
 }
 
 // TeamStanding is the team's standing, what earned it and its latest request.

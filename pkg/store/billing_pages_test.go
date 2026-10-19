@@ -48,13 +48,13 @@ func TestBillingPagesRecheckAuthorityProperty(t *testing.T) {
 		page.URL, page.ProviderID = "https://checkout.test/page", "cs_test"
 		complete := tenant.CompleteAuthorizedBillingPage(t.Context(), a, page)
 		failure := tenant.RecordAuthorizedBillingPageFailure(t.Context(), a, page)
-		budget := tenant.SetAuthorizedSpendBudget(t.Context(), a, 2000)
+		refill := tenant.SetAuthorizedRefill(t.Context(), a, RefillSettings{ThresholdCents: 2000})
 		_, standing := tenant.RequestAuthorizedStanding(t.Context(), a, "High", "lost authority")
 		var requests int
 		if err := s.db.QueryRow(`SELECT COUNT(*) FROM standing_requests`).Scan(&requests); err != nil {
 			t.Fatal(err)
 		}
-		return prepare != nil && complete != nil && failure != nil && budget != nil && standing != nil && requests == 0 && reflect.DeepEqual(before, billingPageRows(t, s))
+		return prepare != nil && complete != nil && failure != nil && refill != nil && standing != nil && requests == 0 && reflect.DeepEqual(before, billingPageRows(t, s))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 28}); err != nil {
 		t.Fatal(err)
@@ -64,17 +64,17 @@ func TestBillingPagesRecheckAuthorityProperty(t *testing.T) {
 func billingPageRows(t *testing.T, s *Store) []string {
 	t.Helper()
 	var page, checkout string
-	var budget int64
+	var threshold int64
 	if err := s.db.QueryRow(`SELECT CAST(page_json AS TEXT)||COALESCE(CAST(failed_at AS TEXT),'') FROM billing_pages`).Scan(&page); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.QueryRow(`SELECT session_id FROM credit_checkouts`).Scan(&checkout); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&budget); err != nil {
+	if err := s.db.QueryRow(`SELECT refill_threshold_cents FROM teams WHERE name='a'`).Scan(&threshold); err != nil {
 		t.Fatal(err)
 	}
-	return []string{page, checkout, fmt.Sprint(budget)}
+	return []string{page, checkout, fmt.Sprint(threshold)}
 }
 
 func TestBillingPagesImmutableReservationProperty(t *testing.T) {
@@ -95,9 +95,9 @@ func TestBillingPagesImmutableReservationProperty(t *testing.T) {
 		case 3:
 			page.Email = "forged@example.test"
 		case 4:
-			page.ChargeID = "forged"
+			page.AmountCents--
 		case 5:
-			page.AttemptID = "forged"
+			page.Email = ""
 		case 6:
 			page.Kind = capability.BillingPageCard
 		case 7:

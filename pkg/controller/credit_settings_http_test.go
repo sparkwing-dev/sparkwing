@@ -65,15 +65,15 @@ func creditPolicyWrite(t *testing.T, h http.Handler, raw, csrf, body string, wan
 func TestCreditSettingsHTTPPolicyWritesPersist(t *testing.T) {
 	s, h, raw, csrf := creditPolicyFixture(t)
 	initial, err := s.store.AsOperator().CreditSettings(t.Context())
-	if err != nil || initial.RateTableSet || initial.GraceSeconds != store.DefaultCreditGraceSeconds || initial.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds || !reflect.DeepEqual(initial.RateTable, store.DefaultCreditRateTable(store.DefaultCreditRateMicro)) {
+	if err != nil || initial.RateTableSet || initial.WarmCPUClassCores != store.DefaultWarmCPUClassCores || initial.StorageFreeAllowanceBytes != 0 || !reflect.DeepEqual(initial.RateTable, store.DefaultCreditRateTable(store.DefaultCreditRateMicro)) {
 		t.Fatalf("default policy=%+v: %v", initial, err)
 	}
-	view := creditPolicyWrite(t, h, raw, csrf, `{"rate_micro_per_second":30000,"grace_seconds":0,"max_charge_seconds":45}`, 200)
-	if view.RateMicroPerSecond != 30000 || view.GraceSeconds != 0 || view.MaxChargeSeconds != 45 || view.MicroPerCredit != store.MicroCreditsPerCredit || view.CreditsPerDollar != store.CreditsPerDollar {
+	view := creditPolicyWrite(t, h, raw, csrf, `{"rate_micro_per_second":30000,"warm_cpu_class_cores":0,"storage_free_allowance_bytes":45}`, 200)
+	if view.RateMicroPerSecond != 30000 || view.WarmCPUClassCores != 0 || view.StorageFreeAllowanceBytes != 45 || view.MicroPerCredit != store.MicroCreditsPerCredit || view.CreditsPerDollar != store.CreditsPerDollar {
 		t.Fatalf("scalar policy=%+v", view)
 	}
-	view = creditPolicyWrite(t, h, raw, csrf, `{"GRACE_SECONDS":1}`, 200)
-	if view.GraceSeconds != 1 || view.RateMicroPerSecond != 30000 || view.MaxChargeSeconds != 45 {
+	view = creditPolicyWrite(t, h, raw, csrf, `{"WARM_CPU_CLASS_CORES":1}`, 200)
+	if view.WarmCPUClassCores != 1 || view.RateMicroPerSecond != 30000 || view.StorageFreeAllowanceBytes != 45 {
 		t.Fatalf("unnamed settings changed=%+v", view)
 	}
 	for _, body := range []string{`{"rate_table":[{"cores":4,"micro_per_second":20000},{"cores":2,"micro_per_second":10000}]}`, `{"rate_table":{"2":10000,"4":20000}}`} {
@@ -86,7 +86,7 @@ func TestCreditSettingsHTTPPolicyWritesPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	creditPolicyWrite(t, h, raw, csrf, `{"rate_micro_per_second":99000,"grace_seconds":2}`, 400)
+	creditPolicyWrite(t, h, raw, csrf, `{"rate_micro_per_second":99000,"warm_cpu_class_cores":2}`, 400)
 	after, err := s.store.AsOperator().CreditSettings(t.Context())
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("refused scalar changed policy=%+v: %v", after, err)
@@ -101,9 +101,9 @@ func TestCreditSettingsHTTPInvalidBodiesLeavePolicyUnchanged(t *testing.T) {
 	}
 	for _, body := range []string{
 		`{}`, `{"rate_micro_per_second":0}`, `{"rate_micro_per_second":-1}`, `{"rate_micro_per_second":1000000000001}`,
-		`{"grace_seconds":-1}`, `{"max_charge_seconds":0}`, `{"max_charge_seconds":86401}`,
-		`{"grace_seconds":0,"rate_micro_per_second":-5}`, `{"rate_table":{"4":20000},"grace_seconds":-1}`,
-		`{"rate_table":{"4":20000},"grace_seconds":null}`, `{"rate_table":{"4":20000},"grace_seconds":null,"grace_seconds":0}`,
+		`{"warm_cpu_class_cores":-1}`, `{"storage_free_allowance_bytes":-1}`, `{"grace_seconds":0}`, `{"max_charge_seconds":60}`,
+		`{"warm_cpu_class_cores":0,"rate_micro_per_second":-5}`, `{"rate_table":{"4":20000},"warm_cpu_class_cores":-1}`,
+		`{"rate_table":{"4":20000},"warm_cpu_class_cores":null}`, `{"rate_table":{"4":20000},"warm_cpu_class_cores":null,"warm_cpu_class_cores":0}`,
 		`{"rate_table":[]}`, `{"rate_table":null}`, `{"rate_table":[{"cores":0,"micro_per_second":1}]}`,
 		`{"rate_table":[{"cores":4,"micro_per_second":0}]}`, `{"rate_table":[{"cores":4,"micro_per_second":1},{"cores":4,"micro_per_second":2}]}`,
 		`{"rate_table":{"large":1}}`, `{"rate_table":"4=20000"}`, `{"rate_micro_per_second":21000,"rate_table":{"4":20000}}`,

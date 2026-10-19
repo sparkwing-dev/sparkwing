@@ -67,6 +67,7 @@ type NativeStorage struct {
 	Records   blob.RecordStore
 	Authority blob.Authority
 }
+func NewBillingManager(options EngineOptions) (controllerwire.BillingManager, error)
 func NewDataClient(options EngineOptions) (blob.DataSigner, blob.RecordStore, error)
 func NewDebugControl(options EngineOptions) (controllerwire.DebugControl, error)
 func NewDebugReader(options EngineOptions) (controllerwire.DebugReader, error)
@@ -90,7 +91,6 @@ func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, erro
 func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, session string) (RunnerTokenManager, error)
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error)
 func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (source.Access, error)
-func NewStandingManager(options EngineOptions) (controllerwire.StandingManager, error)
 func NewTeamSettingsClient(options EngineOptions) (*TeamSettingsClient, error)
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error)
 func OpenProfileData(ctx context.Context, options EngineOptions, scope capability.DataScope) (ProfileData, error)
@@ -173,6 +173,7 @@ func (c *engineClient) ReadOverflowControl(ctx context.Context) (controllerwire.
 func (c *engineClient) ReadQueue(ctx context.Context) (wingwire.QueueState, error)
 func (c *engineClient) ReadQueueGroup(ctx context.Context, group string) (controllerwire.QueueGroup, error)
 func (c *engineClient) ReadReceipt(ctx context.Context, run string) (controllerwire.Receipt, error)
+func (c *engineClient) ReadRefill(ctx context.Context) (controllerwire.TeamRefill, error)
 func (c *engineClient) ReadRun(ctx context.Context, run string) (controllerwire.RunDetail, error)
 func (c *engineClient) ReadSchedule(ctx context.Context, name string, q controllerwire.ScheduleReadQuery) (controllerwire.DetailView, error)
 func (c *engineClient) ReadSecret(ctx context.Context, selector controllerwire.SecretSelector) (controllerwire.SecretValue, error)
@@ -197,6 +198,7 @@ func (c *engineClient) SearchLogs(ctx context.Context, q controllerwire.LogSearc
 func (c *engineClient) SetGroupPriority(ctx context.Context, group string, input controllerwire.QueuePriorityWrite) (controllerwire.QueuePriorityResult, error)
 func (c *engineClient) SetLocalSchedulePinned(ctx context.Context, name string, pin bool) (controllerwire.ScheduleView, error)
 func (c *engineClient) SetOverflowLimit(ctx context.Context, minutes *int64) (controllerwire.OverflowControl, error)
+func (c *engineClient) SetRefill(ctx context.Context, w controllerwire.RefillWrite) error
 func (c *engineClient) SetSchedulePaused(ctx context.Context, name string, pause bool) (controllerwire.ScheduleView, error)
 func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (c *engineClient) TickLocalSchedules(ctx context.Context, dryRun bool) (controllerwire.TickView, error)

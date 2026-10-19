@@ -1,5 +1,44 @@
 # Migrating to the next release
 
+## Cloud billing is prepaid
+
+Cloud usage now draws only on a prepaid balance; a team never owes for usage.
+Collections, the collection ladder, declined-charge holds, pay-now pages, owner
+budgets and the credit grace period are removed. Teams top up with Add funds or
+opt in to automatic refill. See [Cloud billing](../billing.md).
+
+No data migration is needed: the staging and production stores had no open
+card charges, no negative balances and no saved cards at the cut. The store
+schema baseline moves to version 13, which drops `card_charges`,
+`card_attempts` and `team_spend_days` and adds the refill settings to `teams`;
+recreate stores at an earlier version. Saved cards, card pins, fraud warnings
+and refunds carry over in schema terms. Automatic refill starts off for every
+team.
+
+Clients reading these fields must stop:
+
+- `GET /api/v1/team/billing` drops `card_billed`, `open_charge` and
+  `limits.budget_cents`, `limits.rung_cents`, `limits.spent_30d_cents`,
+  `limits.spent_today_cents`, `limits.headroom_cents` and `limits.binding`.
+  `min_billable_seconds` is renamed `slice_seconds`. `standing.history` drops
+  `successful_charges`. The response adds a `refill` object with the team's
+  settings, its standing caps, the counts in the current windows and the
+  `limit`, if any, that stops the next refill.
+- `POST /api/v1/team/billing/pay` and `PUT /api/v1/team/billing/budget` are
+  removed. `PUT /api/v1/team/billing/refill` takes `enabled`,
+  `threshold_cents`, `amount_cents`, `week_limit_cents` and
+  `month_limit_cents`; it answers 409 with reason `no_card` when turning refill
+  on without a saved card, and 400 for an amount outside $10 to $5,000.
+- Operator credit settings no longer accept or report `grace_seconds` or
+  `max_charge_seconds`, and operator credit state no longer reports
+  `exhausted_at`.
+
+A Cloud job whose balance cannot pay its next 60-second slice now stops at that
+lease renewal with `credits_exhausted`, with no grace period. A held team's
+running Cloud work stops at its next renewal too. The checkout service drops
+its pay-now page and charge route and adds `POST /internal/refill`; deploy the
+matching sparkwing-platform release with this controller.
+
 ## Local dashboard sign-in link
 
 The local dashboard's TCP listener now answers 401 to every API request without
@@ -216,7 +255,7 @@ transaction. Actors and timestamps come from that transaction.
 Invitation creation requires a nonempty request key. The same actor, tenant and
 key retain the first invitation and its expiry. A different email or role
 conflicts. Withdrawal retains the original replay result and daily count.
-Team deletion preserves owner, last-team, checkout, debt and hold guards.
+Team deletion preserves owner, last-team, checkout and hold guards.
 Run deletion requires terminal state and drained claims, removes operational rows and success pins,
 and preserves financial records. A repeated store call checks current authority
 before accepting an already-removed run.
@@ -1396,9 +1435,9 @@ Local stores use the handle for `store.DefaultTeam`.
 ## Rate-table presence uses the settings snapshot
 
 `Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond` and
-`Store.CreditGraceSeconds` are removed. Read `CreditSettings.RateTableSet`,
-`CreditSettings.RateMicroPerSecond` and `CreditSettings.GraceSeconds` from the
-same settings snapshot.
+`Store.CreditGraceSeconds` are removed. Read `CreditSettings.RateTableSet` and
+`CreditSettings.RateMicroPerSecond` from the same settings snapshot; the grace
+setting is gone (see [Cloud billing is prepaid](#cloud-billing-is-prepaid)).
 
 `Store.SetCreditRateTable` is removed. Write the table through
 `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
@@ -2370,7 +2409,7 @@ Embedded transaction adapters use `WithTeamWriter`, `WithGitHubAppWriter` and
 recheck current authority and membership inside its committing transaction.
 No former raw write is a fallback.
 
-Invitation creation and billing checkout, card setup and pay-now require an
+Invitation creation, billing checkout and card setup require an
 `Idempotency-Key` header. Their JSON failures use the canonical error envelope.
 Billing refusal fields live under `error.details`, with their business code in
 `reason`. A completed billing-page replay returns the saved URL. The checkout
@@ -2683,16 +2722,14 @@ Compute usage counts live metered node awards. Unused raw token identity, scope
 and lease-limit declarations are removed. Controller fixtures issue current
 capabilities, and the browser fixture uses the bootstrap-capability gate.
 
-## Cloud billing uses collection rungs and standing
+## Cloud billing uses standing
 
-Decision 112 replaces the team and shared-card dollar caps with the
-[Cloud billing model](../billing.md). That page contains the standing, ladder,
-first-collection, monthly-collection and launch-signup policy table.
+Standing replaces the team and shared-card dollar caps in the
+[Cloud billing model](../billing.md). That page contains the standing and
+launch-signup policy table.
 
 `GET /api/v1/team/billing` reports `standing`, `cloud_vcpu` and
-`max_job_seconds` inside `limits`. Owner `budget_cents`, current `rung_cents`,
-usage, balance and pending charge remain. An owner can add funds while using
-card billing. New accounts receive no automatic grant.
+`max_job_seconds` inside `limits`. New accounts receive no automatic grant.
 
 The billing trust action accepts `trust` and `reason`. Granting standing selects
 High. Revocation selects Held. Automatic standing uses payment history and
@@ -2702,14 +2739,12 @@ The corresponding override fields and purchase-window totals are removed from
 operator and team billing responses. Team billing also removes
 `balance_cap_micro`, `purchase_max_cents`, `purchase_limit_cents` and
 `purchased_30d_cents`. Its limits remove `ceiling_cents`, `daily_cap_cents` and
-`credit_limit_cents`. The dashboard consumes standing and keeps the owner budget.
+`credit_limit_cents`. The dashboard consumes standing.
 
-The final rewrite schema replaces the saved rung override with a bounded ladder index and
-removes dollar-cap columns and shared-card spend buckets. Recreate development
+The final rewrite schema removes dollar-cap columns and shared-card spend buckets. Recreate development
 stores made before this final schema. Released older stores remain unsupported. Existing
 awards retain immutable pricing and their captured deadline. New Cloud awards
-serialize capacity admission with reservation and issuance. Running work can
-finish during collection or a payment hold. The signup gate serializes launch
+serialize capacity admission with reservation and issuance. The signup gate serializes launch
 admission and leaves operator approval available beyond the launch cap.
 
 The operator signup status includes `account_limit` and `counts.admitted` and
@@ -2721,23 +2756,17 @@ jobs larger than that standing permits. Named oversized claims still refuse
 with the standing named. A lost payment dispute retains the team's hold until
 an operator releases it. Winning a dispute releases that dispute's hold.
 
-Decline holds identify the collection attempt. A declined retry creates its own
-hold after an operator releases an earlier one. Replayed declines preserve the
-release. Successful collection clears the team's decline holds together.
-
-
 Billing page routes now use tenant transactions through the production controller.
-Checkout, card setup and pay-now preserve the caller's idempotency key across
+Checkout and card setup preserve the caller's idempotency key across
 provider failures. The checkout service returns its hosted-session `id` and
-`url`, plus `customer` and `setup_intent` for card setup or `payment_intent`
-for pay-now. These facts bind verified callbacks to the reserved payer.
-Owner budget updates recheck current team administration at commit.
+`url`, plus `customer` and `setup_intent` for card setup. These facts bind
+verified callbacks to the reserved payer.
 
 The raw tenant methods `OpenCreditCheckout`, `AttachCreditCheckout`,
 `DropCreditCheckout`, `SetSpendBudget` and `StartRecoveryAttempt` are removed.
 Embedded callers use `PrepareAuthorizedBillingPage`,
-`CompleteAuthorizedBillingPage`, `RecordAuthorizedBillingPageFailure` and
-`SetAuthorizedSpendBudget` with current team authority. An interrupted provider
+`CompleteAuthorizedBillingPage` and `RecordAuthorizedBillingPageFailure` with
+current team authority. An interrupted provider
 request retains its reservation because delivery may have succeeded.
 Controller startup persists `--payment-mode` through the operator billing owner,
 so the verifier and new reservations use the same mode without a separate

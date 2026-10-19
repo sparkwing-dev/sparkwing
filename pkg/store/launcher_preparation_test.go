@@ -162,28 +162,10 @@ func FuzzLauncherPreparationBillingAndGrace(f *testing.F) {
 		if total() != before {
 			t.Fatal("Cloud preparation charged before the pod started")
 		}
-		rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=0`)
-		if _, err = s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
-			t.Fatal(err)
-		}
-		began := *now
-		interval := time.Duration(15+step%45) * time.Second
-		for {
-			*now = now.Add(interval)
-			prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence})
-			if err != nil {
-				t.Fatal(err)
-			}
-			reached := !now.Before(began.Add(DefaultCreditGraceSeconds * time.Second))
-			if len(prepared) == 0 {
-				if !reached {
-					t.Fatal("preparation ended before existing financial grace")
-				}
-				break
-			}
-			if reached {
-				t.Fatal("preparation bypassed financial grace")
-			}
+		rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+		*now = now.Add(time.Duration(15+step%45) * time.Second)
+		if prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil || len(prepared) != 0 {
+			t.Fatalf("an unpaid balance kept preparing: %+v %v; want a hard stop at the next renewal", prepared, err)
 		}
 		awards, err = s.ReadLauncherAwards(t.Context(), root, nil)
 		if err != nil || len(awards) != 0 {

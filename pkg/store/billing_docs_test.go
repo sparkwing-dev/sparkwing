@@ -18,12 +18,7 @@ func TestBillingModelDocumentationTracksPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := strings.ReplaceAll(string(raw), ",", "")
-	var rungs []string
 	for _, row := range billingPolicy {
-		rungs = append(rungs, fmt.Sprintf("$%d", row.rungCents/100))
-		if row.tier == "" {
-			continue
-		}
 		prefix := fmt.Sprintf("| %s | %d | %d hours |", row.tier, row.vCPU, int(row.duration.Hours()))
 		if !strings.Contains(body, prefix) {
 			t.Errorf("billing documentation is missing policy row %q", prefix)
@@ -34,8 +29,11 @@ func TestBillingModelDocumentationTracksPolicy(t *testing.T) {
 				t.Errorf("billing documentation row %q omits %q", prefix, days)
 			}
 		}
-	}
-	if !strings.Contains(body, strings.Join(rungs, " → ")) {
-		t.Error("billing documentation differs from the collection ladder")
+		if row.refillCents > 0 {
+			caps := fmt.Sprintf("| %s | $%d | %d | $%d |", row.tier, row.refillCents/100, row.refillsPerDay, row.refillWeekCents/100)
+			if !strings.Contains(body, caps) {
+				t.Errorf("billing documentation is missing refill caps row %q", caps)
+			}
+		}
 	}
 }

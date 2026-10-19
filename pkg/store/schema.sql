@@ -6,7 +6,6 @@ CREATE TABLE teams (
     name TEXT NOT NULL PRIMARY KEY,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
-    credit_exhausted_at BIGINT NOT NULL DEFAULT 0,
     display_name TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',
     members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
@@ -20,11 +19,17 @@ CREATE TABLE teams (
     card_fingerprint TEXT NOT NULL DEFAULT '',
     card_brand TEXT NOT NULL DEFAULT '',
     card_added_at BIGINT NOT NULL DEFAULT 0,
-    card_owed_since BIGINT NOT NULL DEFAULT 0,
-    billing_rung_index BIGINT NOT NULL DEFAULT 0 CHECK(billing_rung_index BETWEEN 0 AND 6),
     card_last4 TEXT NOT NULL DEFAULT '',
-    billing_budget_cents BIGINT NOT NULL DEFAULT 0,
-    next_run_number BIGINT NOT NULL DEFAULT 1 CHECK(next_run_number > 0)
+    refill_enabled BIGINT NOT NULL DEFAULT 0 CHECK(refill_enabled IN (0,1)),
+    refill_threshold_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_threshold_cents >= 0),
+    refill_amount_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_amount_cents = 0 OR refill_amount_cents >= 1000),
+    refill_week_limit_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_week_limit_cents >= 0),
+    refill_month_limit_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_month_limit_cents >= 0),
+    refill_failed_at BIGINT NOT NULL DEFAULT 0,
+    refill_failure TEXT NOT NULL DEFAULT '',
+    next_run_number BIGINT NOT NULL DEFAULT 1 CHECK(next_run_number > 0),
+    CHECK((card_payment_method = '') = (card_fingerprint = '') AND (card_payment_method = '') = (card_customer = '')),
+    CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_payment_method <> ''))
 );
 
 CREATE TABLE runs (
@@ -382,7 +387,10 @@ CREATE TABLE credit_grants (
     created_by TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
     reverses TEXT NOT NULL DEFAULT '',
-    team TEXT NOT NULL REFERENCES teams(name)
+    team TEXT NOT NULL REFERENCES teams(name),
+    UNIQUE(team,id),
+    CHECK((kind IN ('free','paid') AND amount_micro > 0 AND reverses = '')
+       OR (kind = 'reversal' AND amount_micro < 0 AND reverses <> ''))
 );
 
 CREATE TABLE credit_charges (
@@ -390,7 +398,7 @@ CREATE TABLE credit_charges (
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
     capability_prefix TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'usage' CHECK(kind IN ('reservation','usage','refund','storage')),
+    kind TEXT NOT NULL DEFAULT 'usage' CHECK(kind IN ('reservation','slice','usage','refund','storage')),
     seconds BIGINT NOT NULL,
     amount_micro BIGINT NOT NULL,
     principal TEXT NOT NULL DEFAULT '',
@@ -399,7 +407,7 @@ CREATE TABLE credit_charges (
     rate_micro_per_second BIGINT NOT NULL DEFAULT 0,
     charged_at BIGINT NOT NULL,
     team TEXT NOT NULL REFERENCES teams(name),
-    card_fingerprint TEXT NOT NULL DEFAULT ''
+    CHECK((kind = 'refund' AND amount_micro <= 0 AND seconds <= 0) OR (kind <> 'refund' AND amount_micro >= 0 AND seconds >= 0))
 );
 
 CREATE TABLE storage_quotas (
@@ -703,11 +711,18 @@ CREATE TABLE credit_checkouts (
     expires_at BIGINT NOT NULL,
     paid_at BIGINT,
     closed_at BIGINT,
-    grant_id TEXT UNIQUE REFERENCES credit_grants(id),
+    grant_id TEXT UNIQUE,
     three_d_secure TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'checkout' CHECK(kind IN ('checkout','refill')),
+    customer_id TEXT NOT NULL DEFAULT '',
+    failure TEXT NOT NULL DEFAULT '',
     UNIQUE(team,id,payment_mode),
     UNIQUE(payment_mode,session_id),
-    CHECK((paid_at IS NULL) = (grant_id IS NULL))
+    FOREIGN KEY(team,grant_id) REFERENCES credit_grants(team,id),
+    CHECK((paid_at IS NULL) = (grant_id IS NULL)),
+    CHECK(paid_at IS NULL OR closed_at IS NOT NULL),
+    CHECK(failure = '' OR (closed_at IS NOT NULL AND paid_at IS NULL)),
+    CHECK(kind = 'checkout' OR (session_id = id AND customer_id <> ''))
 );
 
 -- safety: provider-event deduplication and credit settlement survive operational run pruning.
@@ -747,15 +762,10 @@ CREATE TABLE billing_pages (
 CREATE TABLE payment_correlations (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     provider_id TEXT NOT NULL CHECK(provider_id <> ''),
-    kind TEXT NOT NULL CHECK(kind IN ('setup','collection','setup_session','collection_session')),
+    kind TEXT NOT NULL CHECK(kind IN ('setup','setup_session')),
     team TEXT NOT NULL REFERENCES teams(name),
     customer_id TEXT NOT NULL CHECK(customer_id <> ''),
-    currency TEXT NOT NULL DEFAULT '',
-    attempt_id TEXT NOT NULL DEFAULT '',
-    charge_id TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY(payment_mode,provider_id),
-    CHECK((kind IN ('setup','setup_session') AND currency = '' AND attempt_id = '' AND charge_id = '')
-       OR (kind IN ('collection','collection_session') AND currency <> '' AND attempt_id <> '' AND charge_id <> ''))
+    PRIMARY KEY(payment_mode,provider_id)
 );
 
 CREATE TABLE credit_freezes (
@@ -765,9 +775,12 @@ CREATE TABLE credit_freezes (
     reason TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
     released_at BIGINT,
-    cause TEXT NOT NULL DEFAULT '',
+    cause TEXT NOT NULL CHECK(cause IN ('operator','dispute','early_fraud_warning')),
     no_fault BIGINT NOT NULL DEFAULT 0 CHECK(no_fault IN (0,1)),
-    placed_by TEXT NOT NULL DEFAULT ''
+    placed_by TEXT NOT NULL DEFAULT '',
+    CHECK(released_at IS NULL OR released_at >= created_at),
+    CHECK(no_fault = 0 OR (cause = 'operator' AND released_at IS NOT NULL)),
+    CHECK((cause = 'operator') = (placed_by <> ''))
 );
 
 CREATE TABLE standing_requests (
@@ -911,32 +924,6 @@ CREATE TABLE repos (
     PRIMARY KEY(team,repo_key)
 );
 
-CREATE TABLE card_charges (
-    id TEXT NOT NULL PRIMARY KEY,
-    team TEXT NOT NULL REFERENCES teams(name),
-    amount_micro BIGINT NOT NULL,
-    cause TEXT NOT NULL CHECK(cause IN ('settle','rung','month_end','first_week')),
-    state TEXT NOT NULL CHECK(state IN ('open','paid')),
-    failures BIGINT NOT NULL DEFAULT 0,
-    decline_code TEXT NOT NULL DEFAULT '',
-    next_attempt_at BIGINT NOT NULL,
-    payment_intent TEXT NOT NULL DEFAULT '',
-    opened_at BIGINT NOT NULL,
-    closed_at BIGINT
-);
-
-CREATE TABLE card_attempts (
-    id TEXT NOT NULL PRIMARY KEY,
-    team TEXT NOT NULL REFERENCES teams(name),
-    charge_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('off_session','recovery')),
-    status TEXT NOT NULL CHECK(status IN ('live','succeeded','failed','warned')),
-    payment_intent TEXT NOT NULL DEFAULT '',
-    decline_code TEXT NOT NULL DEFAULT '',
-    created_at BIGINT NOT NULL,
-    updated_at BIGINT NOT NULL
-);
-
 CREATE TABLE card_refunds (
     team TEXT NOT NULL REFERENCES teams(name),
     payment_intent TEXT NOT NULL,
@@ -948,13 +935,6 @@ CREATE TABLE card_refunds (
     next_attempt_at BIGINT NOT NULL DEFAULT 0,
     created_at BIGINT NOT NULL,
     PRIMARY KEY (team, payment_intent)
-);
-
-CREATE TABLE team_spend_days (
-    team TEXT NOT NULL REFERENCES teams(name),
-    day BIGINT NOT NULL,
-    amount_micro BIGINT NOT NULL,
-    PRIMARY KEY (team, day)
 );
 
 
@@ -1390,7 +1370,8 @@ CREATE TABLE billable_intervals (
     charged_through BIGINT NOT NULL,
     CHECK((unit_kind = 'trigger' AND billing_unit = 'host') OR (unit_kind = 'node' AND billing_unit = 'job') OR (unit_kind IN ('plan','eval') AND billing_unit = unit_kind)),
     FOREIGN KEY(team,reservation_id) REFERENCES billing_awards(team,reservation_id),
-    CHECK(finished_at IS NULL OR finished_at >= started_at)
+    CHECK(finished_at IS NULL OR finished_at >= started_at),
+    CHECK(charged_through >= started_at AND (finished_at IS NULL OR charged_through <= finished_at))
 );
 
 CREATE INDEX idx_runs_started ON runs(started_at DESC);
@@ -1516,15 +1497,10 @@ CREATE INDEX idx_business_events_kind_ts ON business_events(team,kind, ts);
 
 CREATE INDEX idx_triggers_team_pending ON triggers(team, status) WHERE status = 'pending';
 
-CREATE UNIQUE INDEX idx_card_charges_one_open ON card_charges(team) WHERE state = 'open';
 
-CREATE INDEX idx_card_charges_due ON card_charges(team,state, next_attempt_at);
 
-CREATE UNIQUE INDEX idx_card_attempts_one_live ON card_attempts(team,charge_id) WHERE status = 'live';
 
-CREATE INDEX idx_card_attempts_team ON card_attempts(team, status, updated_at);
 
-CREATE INDEX idx_card_attempts_intent ON card_attempts(team,payment_intent);
 
 CREATE INDEX idx_payment_warnings_intent ON payment_warnings(payment_intent);
 CREATE INDEX idx_payment_refunds_intent ON payment_refunds(payment_intent);
@@ -1607,3 +1583,5 @@ CREATE TABLE source_uploads (
 );
 
 CREATE INDEX idx_source_uploads_expiry ON source_uploads(expires_at,team,id);
+CREATE UNIQUE INDEX idx_credit_charges_one_reservation ON credit_charges(team,capability_prefix) WHERE kind = 'reservation';
+CREATE UNIQUE INDEX idx_credit_checkouts_one_open_refill ON credit_checkouts(team) WHERE kind = 'refill' AND closed_at IS NULL;

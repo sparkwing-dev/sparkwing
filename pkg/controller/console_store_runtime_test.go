@@ -28,7 +28,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 		{"DELETE", "/api/v1/operator/teams/b", "", 202, `SELECT COUNT(*) FROM team_deletions WHERE slug='b' AND requested_by='operator'`},
 		{"DELETE", "/api/v1/operator/accounts/victim@example.test", "", 200, `SELECT COUNT(*) FROM accounts WHERE id='operator' AND NOT EXISTS(SELECT 1 FROM accounts WHERE id='victim')`},
 		{"POST", "/api/v1/operator/waitlist/approve", `{"account_ids":["waiting"]}`, 200, `SELECT COUNT(*) FROM accounts WHERE id='waiting' AND waitlisted_at=0`},
-		{"PUT", "/api/v1/operator/credits/settings", `{"grace_seconds":1}`, 200, ""},
+		{"PUT", "/api/v1/operator/credits/settings", `{"warm_cpu_class_cores":1}`, 200, ""},
 		{"DELETE", "/api/v1/operator/github-app/installations/17", "", 204, `SELECT COUNT(*) FROM teams WHERE name='b' AND NOT EXISTS(SELECT 1 FROM github_app_installations WHERE installation_id=17)`},
 	}
 	for _, tc := range cases {
@@ -42,11 +42,12 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 					t.Fatal(err)
 				}
 				engineSQL(t, st, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('b','refund-paid','paid',1000000,'pi_refund','provider',1)`)
+				engineSQL(t, st, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,payment_id,currency,amount_minor,amount_micro,opened_at,expires_at,paid_at,closed_at,grant_id) VALUES ('refund-checkout','b','cs_refund','test','pi_refund','usd',100,1000000,1,2,1,1,'refund-paid')`)
 			}
 			engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at,waitlisted_at) VALUES ('operator','operator@example.test',1,1,0),('victim','victim@example.test',1,1,0),('waiting','waiting@example.test',1,1,1)`)
 			engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','operator','reader',1)`)
 			if strings.HasSuffix(tc.path, "/unfreeze") {
-				engineSQL(t, st, `INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES ('held','b','','review',1)`)
+				engineSQL(t, st, `INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause,placed_by) VALUES ('held','b','','review',1,'operator','operator')`)
 			}
 			engineSQL(t, st, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (17,'b',17,'owner','User',1,1)`)
 			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
@@ -78,7 +79,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 				}
 			} else {
 				settings, err := st.AsOperator().CreditSettings(t.Context())
-				if err != nil || settings.GraceSeconds != 1 {
+				if err != nil || settings.WarmCPUClassCores != 1 {
 					t.Fatalf("settings: %+v %v", settings, err)
 				}
 			}

@@ -98,8 +98,8 @@ func FinancialTables() []string {
 	return []string{
 		"credit_grants", "credit_charges", "credit_checkouts", "credit_freezes",
 		"billing_awards", "billable_intervals",
-		"card_charges", "card_attempts", "card_refunds", "payment_warnings", "payment_cards", "payment_refunds",
-		"team_spend_days", "storage_run_usage", "storage_month_usage",
+		"card_refunds", "payment_warnings", "payment_cards", "payment_refunds",
+		"storage_run_usage", "storage_month_usage",
 	}
 }
 
