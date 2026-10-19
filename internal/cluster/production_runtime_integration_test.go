@@ -33,6 +33,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -98,7 +99,8 @@ func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
 					args = []string{"--controller=" + hosting.ControllerURL, "--repos=github.com/acme/*", "--credentials-dir=" + credentials, "--max-concurrent=1", "--max-claims-before-restart=1"}
 				}
 				err := ProductionRuntime("dev").Runner.Run(ctx, command, args, "dev")
-				if claims == 0 || renewals != 1 || private == 0 {
+				// Hosting renews once before binding and its keeper's first beat gates source acquisition.
+				if claims == 0 || renewals != 2 || private == 0 {
 					t.Fatalf("command did not claim, renew and bind its award: claims=%d renewals=%d private=%d error=%v", claims, renewals, private, err)
 				}
 				var socket *net.OpError
@@ -251,9 +253,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			_, unit := productionNativeAward(t, capability.UnitNode)
 			unit.Unit = kind
-			unit.Execution.Resources = runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
-				Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: 1}}, MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: 1 << 30}},
-			}}}
+			unit.CloudResources = &match.Resources{Cores: 1, MemoryBytes: 1 << 30}
 			expires := time.Now().Add(time.Hour)
 			unit.ParentCapabilityExpiry = &expires
 			binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation, ParentCapabilityExpiry: expires}
