@@ -36,7 +36,7 @@ func pendingScenarios(t *testing.T, group string) {
 					continue
 				}
 				t.Run(target.ID, func(t *testing.T) {
-					t.Skipf("contract skeleton: requires %s and the T1 driver; %s; no product assertions executed",
+					skipCell(t, scenario.ID, target.ID, "contract skeleton: requires %s and the T1 driver; %s; no product assertions executed",
 						strings.Join(areas, ", "), strings.Join(scenario.Sections, ", "))
 				})
 			}

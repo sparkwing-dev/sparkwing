@@ -1,0 +1,8 @@
+# depguard rule wire-is-leaf in .golangci-guards.yml. One line per package edge:
+# <importing package dir><TAB><imported package>.
+# Only delete lines: guardcheck fails a finding missing here and a line no
+# finding matches. See .guards/README.md.
+internal/controllerwire	github.com/sparkwing-dev/sparkwing/internal/engine
+internal/localhostwire	github.com/sparkwing-dev/sparkwing/internal/wingd
+internal/localhostwire	github.com/sparkwing-dev/sparkwing/pkg/store
+internal/runspec	github.com/sparkwing-dev/sparkwing/internal/engine
