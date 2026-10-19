@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -124,7 +125,7 @@ func sourceAcquisitionFixture(t *testing.T) (runspec.Spec, source.Options, *sour
 	spec.Request.Request.Git.DefaultBranch.Set, spec.Request.Request.Git.DefaultBranch.Value = true, "trunk"
 	options := source.Options{
 		Workspace: t.TempDir(), Access: a, Engines: a, Target: a.resolved.Target, InstallSDK: a.Install,
-		Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment,
+		Base: procenv.Base{Ambient: sourcetest.Environment(t), Masker: secrets.NewMasker()}, BuildEnvironment: sourcetest.BuildEnvironment,
 		ReadPin:         func(string, engine.SDKKind) (engine.Pin, error) { return a.resolved.Identity.Pin, nil },
 		BundleTransport: a,
 	}
