@@ -795,3 +795,11 @@ Assigned to an Opus implementer (env 1087).
 ## 2026-10-18 Korey decision 14: no-eligible-runner notice
 
 - A run-anywhere unit still waiting after its window with no eligible claimant shows a "no eligible runner" notice that names the cause: the team's ranking leaves a tier out (for example "Cloud is off in this team's runner ranking"), or the pipeline/job targets only a specific runner, pool or class ("this job targets pool=gpu only"), or no runner of the allowed tiers is online. Empty ranking = first come; never-set = default ranking; a dropped tier takes no unselected work. Ratified.
+
+## 2026-10-18 Korey decision 15: personal machines on automated runs need admin approval
+
+- Source: Opus run-anywhere security review C1/M1/M3 (review/areas/ranking-security-opus.md).
+- Opting a personal machine in to automated (App, schedule) runs requires a team admin's approval, recorded and audited; the owner requests it, an admin approves or revokes it, and it dies with the machine's revocation. Without approval the machine takes no automated runs.
+- An approved machine is treated as a self-hosted claimant for those runs (admin-trusted, the GitHub self-hosted-runner model). OIDC distinguishes it: `runner_kind=personal` vs `runner`.
+- The owner of an automated App run, for routing to a personal machine, is the commit/PR author's linked identity, never the webhook sender; retries keep the author. Schedules use the account that armed them.
+- Customer-visible and approved.
