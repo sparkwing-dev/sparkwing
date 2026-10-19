@@ -1,11 +1,26 @@
 package acceptance_test
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
 
 func TestMain(m *testing.M) {
-	testleak.Main(m)
+	code := m.Run()
+	if code == 0 {
+		if err := staleSkippedCells(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+	}
+	if code == 0 {
+		if err := testleak.Check(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+	}
+	os.Exit(code)
 }
