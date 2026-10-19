@@ -20,6 +20,8 @@ import (
 	"regexp"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
@@ -59,14 +61,9 @@ func run(args []string) error {
 			return err
 		}
 	}
-	for _, record := range index.Versions {
-		if record.Version == *version {
-			return fmt.Errorf("%s is already published", *version)
-		}
+	if index, err = nextIndex(index, *version, now); err != nil {
+		return err
 	}
-	index.PublishedAt = now
-	index.Latest = *version
-	index.Versions = append(index.Versions, engine.VersionInfo{Version: *version, PublishedAt: now, SupportUntil: now.AddDate(0, limits.ControllerCompatibilityMonths, 0)})
 	body, err := json.MarshalIndent(index, "", "  ")
 	if err != nil {
 		return err
@@ -98,4 +95,19 @@ func readPrevious(dir string, now time.Time) (engine.VersionIndex, error) {
 		return engine.VersionIndex{}, fmt.Errorf("published QA index: %w", err)
 	}
 	return verified.Policy(), nil
+}
+
+// nextIndex appends version and keeps Latest at the highest published version.
+func nextIndex(index engine.VersionIndex, version string, now time.Time) (engine.VersionIndex, error) {
+	for _, record := range index.Versions {
+		if record.Version == version {
+			return index, fmt.Errorf("%s is already published", version)
+		}
+	}
+	index.PublishedAt = now
+	if index.Latest == "" || semver.Compare(version, index.Latest) > 0 {
+		index.Latest = version
+	}
+	index.Versions = append(index.Versions, engine.VersionInfo{Version: version, PublishedAt: now, SupportUntil: now.AddDate(0, limits.ControllerCompatibilityMonths, 0)})
+	return index, nil
 }

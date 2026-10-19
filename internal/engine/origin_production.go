@@ -13,7 +13,8 @@ const (
 	VersionIndexURL          = "https://sparkwing.dev/versions.json"
 	VersionIndexSignatureURL = "https://sparkwing.dev/versions.json.sig"
 	ReleaseBase              = "https://github.com/sparkwing-dev/sparkwing/releases/download"
-	qaTrust                  = false
+	// QATrust reports a qatrust build; production builds never carry the tag.
+	QATrust = false
 )
 
 func releaseAssetURL(u *url.URL) bool {

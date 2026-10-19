@@ -78,7 +78,7 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 
 // releaseBuild lets a qatrust pre-release enforce the QA policy rather than pass as a development build.
 func releaseBuild(version string) bool {
-	return buildinfo.IsReleaseVersion(version) || qaTrust && releaseVersion(version)
+	return buildinfo.IsReleaseVersion(version) || QATrust && releaseVersion(version)
 }
 
 func (r *Resolver) localIndex(now time.Time) IndexResult {
