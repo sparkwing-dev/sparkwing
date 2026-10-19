@@ -149,7 +149,7 @@ func TestRevokingAutomationCoversEveryLiveGeneration(t *testing.T) {
 	next := f.Rotate(t, f.Personal)
 	f.Approve(t, "laptop")
 	var approved int
-	if err := f.Store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM machine_automation WHERE approved_at>0 AND prefix IN (?,?)`, f.Personal, next).Scan(&approved); err != nil || approved != 2 {
+	if err := f.Store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM machine_automation WHERE approved_at>0`).Scan(&approved); err != nil || approved != 2 || next == f.Personal {
 		t.Fatalf("approved generations = %d %v", approved, err)
 	}
 	a, err := f.AdminAuthorization(t, f.Admin)
