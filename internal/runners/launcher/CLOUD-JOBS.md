@@ -59,16 +59,16 @@ and the probe commands are CEL literals.
   `valueFrom` or `envFrom`. Capacity requests and probes carry none. AWS role,
   web-identity and container-credential variables are refused, as is any
   projected token volume.
-- Volumes are only the Job's `scratch` emptyDir, its own bootstrap Secret and
-  the `/dev/net/tun` CharDevice hostPath, which only the `docker` sidecar
-  mounts. No other hostPath, no hostNetwork, hostPID, hostIPC, hostPort or
-  added capability. No container in the namespace runs privileged.
+- Volumes are only the Job's `scratch` emptyDir and its own bootstrap Secret.
+  No hostPath, hostNetwork, hostPID, hostIPC or hostPort. No container in the
+  namespace runs privileged.
 - Job Pods set `hostUsers: false`, run as UID 1000 (`runAsNonRoot`) and use the
-  RuntimeDefault seccomp profile. Only the `docker` sidecar may relax that: it
-  runs as UID 1000 with Unconfined seccomp and AppArmor and an Unmasked
-  `/proc`, which rootlesskit needs to build its own user, mount and network
-  namespaces. Every other container keeps the runtime profiles and the default
-  `/proc` mask.
+  RuntimeDefault seccomp profile. Only the `docker` sidecar differs: it runs as
+  root of the Pod's user namespace with exactly the capabilities `SYS_ADMIN`,
+  `NET_ADMIN` and `SYS_PTRACE`, Unconfined seccomp and AppArmor and an Unmasked
+  `/proc`. All of that is namespaced; on the node the sidecar is an unmapped
+  UID. Every other container adds no capability, never runs as UID 0 and keeps
+  the runtime profiles and the default `/proc` mask.
 - The service account is `sparkwing-customer-job` with
   `automountServiceAccountToken: false`.
 - Every Pod selects `node-restriction.kubernetes.io/sparkwing-team-node` equal
@@ -232,15 +232,15 @@ another launcher may still be publishing its bootstrap. Suspension alone never
 authorizes teardown. Cancelled or expired awards still retire suspended Jobs.
 Controller errors preserve ownership and reach the caller.
 
-The builder uses a readiness-gated native rootless DinD sidecar, fixed
-aggregate 20 GiB scratch, a separate customer service account and no API-token
-automount. The sidecar runs the `docker:<version>-dind-rootless` entrypoint
-with `dockerd`, which starts dockerd under rootlesskit with the vpnkit network
-driver and no TCP listener. Every container runs as UID 1000, the image's
-`rootless` user, so the source and scratch files are writable to the
-containers Docker starts. The bootstrap Secret is mode 0440 with fsGroup 1000.
-Nodes need user-namespaced Pods with at least 196608 IDs each, because the
-image maps subordinate IDs 100000-165535; the chart README lists the rest. Its
+The builder uses a readiness-gated native DinD sidecar, fixed aggregate 20 GiB
+scratch, a separate customer service account and no API-token automount. The
+sidecar runs the `docker:<version>-dind` entrypoint with `dockerd`, which adds
+no TCP listener. dockerd owns the Pod's network namespace and, on nodes whose
+runc mounts cgroups writable for user-namespaced Pods, the Pod's cgroup, so
+container networks and `docker run --memory` work. `SYS_PTRACE` lets dockerd
+join the network namespace of a container that runs as a non-root user. The
+other containers run as UID 1000; the bootstrap Secret is mode 0440 with
+fsGroup 1000. Node requirements are in the chart README. Its
 bootstrap mount is absent from Docker. Pipeline execution starts after source
 acquisition. Plan resolves the exact SDK pin. Eval and work use the accepted
 engine identity.
@@ -440,9 +440,9 @@ credential or service-account token enters a canary.
 The known required destination is the controller. Source, blob and provider
 origins depend on deployment and still need native verification. The checks do
 not exhaust every network destination. A kernel escape from the user namespace
-is outside them; the sidecar's Unconfined seccomp widens that kernel surface.
-Native enforcement, UDP services, image execution, rootless DinD startup and
-shutdown and kubelet reclamation remain cluster acceptance requirements.
+is outside them; the sidecar's Unconfined seccomp and namespaced capabilities
+widen that kernel surface. Native enforcement, UDP services, image execution,
+DinD shutdown and kubelet reclamation remain cluster acceptance requirements.
 
 All authored workload state uses container writable layers and emptyDir storage.
 Release waits for all non-DaemonSet Pods to disappear, then removes
