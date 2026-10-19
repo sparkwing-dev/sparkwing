@@ -917,7 +917,7 @@ func TestArmCronScheduleKeysTheRepositoryPipelineAndNamePerTeam(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	armCron(t, st, "crn_default", "https://git.example.com/acme/app.git", "nightly", cronBase)
-	if err := st.AsOperator().CreateTeam(ctx, "team-b"); err != nil {
+	if err := st.AsOperator().TestOnlyCreateTeam(ctx, "team-b"); err != nil {
 		t.Fatal(err)
 	}
 	tenantB, err := st.ForTeam(ctx, "team-b")

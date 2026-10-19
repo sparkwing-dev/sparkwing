@@ -20,9 +20,7 @@ const teamB store.Team = "team-b"
 func teamTenant(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	ctx := context.Background()
-	if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
-		t.Fatalf("CreateTeam %s: %v", team, err)
-	}
+	teststore.SeedTeam(t, st, team)
 	tenant, err := st.ForTeam(ctx, team)
 	if err != nil {
 		t.Fatalf("ForTeam %s: %v", team, err)

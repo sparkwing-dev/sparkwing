@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestIdentityLinkHTTPAddressDoesNotSelectAccountProperty(t *testing.T) {
@@ -21,7 +22,7 @@ func TestIdentityLinkHTTPAddressDoesNotSelectAccountProperty(t *testing.T) {
 		f.provider.emailsBody = string(body)
 		w := f.complete(f.ready(t))
 		var linked, account string
-		if err := f.store.DB().QueryRowContext(t.Context(), `SELECT i.email,a.email FROM identities i JOIN accounts a ON a.id=i.account_id WHERE i.provider='github' AND i.subject='123' AND i.account_id='member'`).Scan(&linked, &account); err != nil {
+		if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT i.email,a.email FROM identities i JOIN accounts a ON a.id=i.account_id WHERE i.provider='github' AND i.subject='123' AND i.account_id='member'`).Scan(&linked, &account); err != nil {
 			t.Fatal(err)
 		}
 		return w.Code == 303 && linked != "member@example.test" && account == "member@example.test" && oauthCookie(w, "__Host-sw_session") == nil

@@ -32,6 +32,6 @@ func SeedTriggerWithRun(s *store.Store, ctx context.Context, team store.Team, v 
 	if s.Dialect() == store.DialectPostgres {
 		query = `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key) VALUES ($1,$2,$3,'trigger',$4,$5,$6,$7,$8,$9)`
 	}
-	_, err := s.DB().ExecContext(ctx, query, team, v.ID, status, now.UnixNano(), now.UnixNano(), []byte(`[]`), []byte(`[]`), v.WebhookDelivery, v.WebhookReplayKey)
+	_, err := Exec(ctx, s, query, team, v.ID, status, now.UnixNano(), now.UnixNano(), []byte(`[]`), []byte(`[]`), v.WebhookDelivery, v.WebhookReplayKey)
 	return err
 }

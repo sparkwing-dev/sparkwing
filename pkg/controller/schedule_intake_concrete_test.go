@@ -15,10 +15,15 @@ import (
 )
 
 func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	var now time.Time
+	f := newBrowserFixture(t, nil, store.WithClock(func() time.Time {
+		if now.IsZero() {
+			return time.Now()
+		}
+		return now
+	}))
 	sha := sourcetest.FixedRemote(t, "https://gitlab.com/acme/ci.git")
-	now := time.Now().UTC().Add(time.Minute).Truncate(time.Minute)
-	f.st.SetTestClock(t, func() time.Time { return now })
+	now = time.Now().UTC().Add(time.Minute).Truncate(time.Minute)
 	body := `{"mode":"replace","repo_url":"https://gitlab.com/acme/ci.git","branch":"main","sha":"` + sha + `","follow":false,"schedules":[{"pipeline":"nightly","cron":"* * * * *","args":{"channel":"nightly"}}]}`
 	response := f.serve(f.cookieRequest("PUT", "/api/v1/schedules/repos", body))
 	var written controllerwire.ScheduleRepoWritten

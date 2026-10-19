@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func billingNativeServer(t *testing.T) (*Server, string, string) {
@@ -87,7 +88,7 @@ func TestBillingModelProductionPagesAndBudget(t *testing.T) {
 		t.Fatalf("provider calls=%d", calls)
 	}
 	var budget int64
-	if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&budget); err != nil || budget != 2500 {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&budget); err != nil || budget != 2500 {
 		t.Fatalf("budget=%d: %v", budget, err)
 	}
 }
@@ -295,12 +296,12 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 				call(403)
 			}
 			var n int
-			if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team='a'`).Scan(&n); err != nil || n != 1 {
+			if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team='a'`).Scan(&n); err != nil || n != 1 {
 				t.Fatalf("checkouts=%d: %v", n, err)
 			}
 			if phase == "revoked" {
 				var data []byte
-				if err := s.store.DB().QueryRow(`SELECT page_json FROM billing_pages WHERE team='a'`).Scan(&data); err != nil {
+				if err := teststore.SQL(t, s.store).QueryRow(`SELECT page_json FROM billing_pages WHERE team='a'`).Scan(&data); err != nil {
 					t.Fatal(err)
 				}
 				var page capability.BillingPage
@@ -352,14 +353,14 @@ func TestCardBilling_OwnerSetsABudget(t *testing.T) {
 		call("PUT", fmt.Sprintf(`{"budget_cents":%d}`, cents), 400)
 	}
 	var unchanged int64
-	if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&unchanged); err != nil || unchanged != 1000 {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&unchanged); err != nil || unchanged != 1000 {
 		t.Fatalf("refused budget changed balance: %d: %v", unchanged, err)
 	}
 	property := func(roleIndex uint8, cents uint16) bool {
 		role := []string{"owner", "editor", "reader"}[roleIndex%3]
 		engineSQL(t, s.store, `UPDATE memberships SET role=? WHERE team='a' AND account_id='owner'`, role)
 		var before int64
-		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&before); err != nil {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&before); err != nil {
 			t.Fatal(err)
 		}
 		wantStatus, wantBudget := 403, before
@@ -368,10 +369,10 @@ func TestCardBilling_OwnerSetsABudget(t *testing.T) {
 		}
 		call("PUT", fmt.Sprintf(`{"budget_cents":%d}`, cents), wantStatus)
 		var actual, foreign int64
-		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&actual); err != nil {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&actual); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='foreign'`).Scan(&foreign); err != nil {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='foreign'`).Scan(&foreign); err != nil {
 			t.Fatal(err)
 		}
 		return actual == wantBudget && foreign == 0

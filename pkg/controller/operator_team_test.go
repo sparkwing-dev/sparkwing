@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestOperatorCreateTeamHTTP(t *testing.T) {
@@ -107,7 +108,7 @@ func TestOperatorCreateTeamHTTPRollsBackEveryWrite(t *testing.T) {
 				t.Fatalf("private failure: %s", w.Body)
 			}
 			var count int
-			if err := e.Store.DB().QueryRow(`SELECT (SELECT COUNT(*) FROM accounts)+(SELECT COUNT(*) FROM teams WHERE name='atomic-team')+(SELECT COUNT(*) FROM capabilities WHERE team='atomic-team')+(SELECT COUNT(*) FROM memberships WHERE team='atomic-team')+(SELECT COUNT(*) FROM business_events WHERE team='atomic-team')`).Scan(&count); err != nil || count != 0 {
+			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT (SELECT COUNT(*) FROM accounts)+(SELECT COUNT(*) FROM teams WHERE name='atomic-team')+(SELECT COUNT(*) FROM capabilities WHERE team='atomic-team')+(SELECT COUNT(*) FROM memberships WHERE team='atomic-team')+(SELECT COUNT(*) FROM business_events WHERE team='atomic-team')`).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("partial writes=%d %v", count, err)
 			}
 		})
@@ -128,9 +129,8 @@ func TestOperatorCreateTeamHTTPRejectsUntrustedInputs(t *testing.T) {
 }
 
 func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
-	e, _ := engineRuntimeStore(t)
 	clock := time.Now().UTC()
-	e.Store.SetTestClock(t, func() time.Time { return clock })
+	e, _ := engineRuntimeStore(t, store.WithClock(func() time.Time { return clock }))
 	raw := reviewSeed(t, e.Store)
 	parent, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
@@ -182,7 +182,7 @@ func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
 			return err == nil && len(events) == 1 && events[0].Actor == "bootstrap:admin"
 		}
 		var count int
-		if err := e.Store.DB().QueryRow(`SELECT (SELECT COUNT(*) FROM memberships WHERE team=?)+(SELECT COUNT(*) FROM capabilities WHERE team=?)+(SELECT COUNT(*) FROM business_events WHERE team=?)`, slug, slug, slug).Scan(&count); err != nil {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT (SELECT COUNT(*) FROM memberships WHERE team=?)+(SELECT COUNT(*) FROM capabilities WHERE team=?)+(SELECT COUNT(*) FROM business_events WHERE team=?)`, slug, slug, slug).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		return (w.Code == 401 || w.Code == 403) && err != nil && count == 0
@@ -252,7 +252,7 @@ func TestOperatorCreateTeamHTTPConcurrentReplicas(t *testing.T) {
 	var handlers []http.Handler
 	var raw string
 	for range 2 {
-		st, err := store.Open(path)
+		st, err := teststore.OpenExisting(path)
 		if err != nil {
 			t.Fatal(err)
 		}

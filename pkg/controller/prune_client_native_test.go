@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRunPrunerAcknowledgesCommittedDeletion(t *testing.T) {
@@ -19,13 +20,13 @@ func TestRunPrunerAcknowledgesCommittedDeletion(t *testing.T) {
 			}
 			deleteErr := pruner.DeleteRun(t.Context(), selector)
 			var count int
-			if err := server.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a' AND id='run'`).Scan(&count); err != nil || count != 0 {
+			if err := teststore.SQL(t, server.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a' AND id='run'`).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("run remains after deletion: count=%d %v", count, err)
 			}
 			if deleteErr != nil {
 				t.Fatalf("client rejected committed deletion: %v", deleteErr)
 			}
-			if err := server.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a' AND id='run-1'`).Scan(&count); err != nil || count != 1 {
+			if err := teststore.SQL(t, server.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a' AND id='run-1'`).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("numeric selector changed a different stable ID: count=%d %v", count, err)
 			}
 		})

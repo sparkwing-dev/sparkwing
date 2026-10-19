@@ -47,7 +47,7 @@ func TestGitHubCommitStatusModeIsScopedProperty(t *testing.T) {
 		}
 		writer, run := tenant, admitted.RunID+"different"+suffix
 		if foreign {
-			if err := st.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
+			if err := st.AsOperator().TestOnlyCreateTeam(t.Context(), "foreign"); err != nil {
 				t.Fatal(err)
 			}
 			writer, err = st.ForTeam(t.Context(), "foreign")

@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func storedCloudClaimantW8(t *testing.T) (*controller.EngineController, capability.Issued) {
@@ -40,7 +41,7 @@ func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*controller.E
 		t.Fatalf("run owner acquisition: present=%v error=%v", owner.Claim != nil, err)
 	}
 	var prefix string
-	if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator' AND parent_id IS NULL`).Scan(&prefix); err != nil {
+	if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator' AND parent_id IS NULL`).Scan(&prefix); err != nil {
 		t.Fatal(err)
 	}
 	parent := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
@@ -63,7 +64,7 @@ func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*controller.E
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, body); err != nil {
+	if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, body); err != nil {
 		t.Fatal(err)
 	}
 	return server, root

@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )

@@ -33,10 +33,10 @@ func secretClaim(t *testing.T, f *browserFixture, team store.Team, pipeline stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.st.DB().ExecContext(t.Context(), `UPDATE runs SET spec_json=?,spec_hash='fixture-spec',plan_json=?,plan_hash='fixture-plan',sealed_at=1,dispatch='controller' WHERE team=? AND id=?`, spec, []byte(`{"jobs":[{"id":"job"}]}`), team, id); err != nil {
+	if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `UPDATE runs SET spec_json=?,spec_hash='fixture-spec',plan_json=?,plan_hash='fixture-plan',sealed_at=1,dispatch='controller' WHERE team=? AND id=?`, spec, []byte(`{"jobs":[{"id":"job"}]}`), team, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.st.DB().ExecContext(t.Context(), `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES (?,?,'plan',1,1,?,?,?)`, team, id, time.Now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`)); err != nil {
+	if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES (?,?,'plan',1,1,?,?,?)`, team, id, time.Now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedNode(f.st, t.Context(), store.Node{RunID: id, NodeID: "job", Status: "pending"}); err != nil {
@@ -110,7 +110,7 @@ func checkSecretBindingMutation(t *testing.T, field, private string) {
 		edited.Masked = false
 	case "team":
 		team = "other"
-		if _, err := f.st.DB().ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('other',1,1)`); err != nil {
+		if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('other',1,1)`); err != nil {
 			t.Fatal(err)
 		}
 	default:

@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestAnnotationClientAcknowledgesCommittedNativeWrite(t *testing.T) {
@@ -33,7 +34,7 @@ func TestAnnotationClientAcknowledgesCommittedNativeWrite(t *testing.T) {
 			annotation := controllerwire.Annotation{Level: "info", Message: "recorded once", File: "source.go", Line: 7}
 			writeErr := review.AppendAnnotation(t.Context(), selector, "job", controllerwire.AnnotationWrite{Annotation: annotation})
 			var body []byte
-			if err := engine.Store.DB().QueryRow(`SELECT annotations_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&body); err != nil {
+			if err := teststore.SQL(t, engine.Store).QueryRow(`SELECT annotations_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&body); err != nil {
 				t.Fatal(err)
 			}
 			var annotations []controllerwire.Annotation
@@ -88,7 +89,7 @@ func FuzzMetadataNumericSelectorsRetainJobAuthority(f *testing.F) {
 			}
 		}
 		var annotations, summaries int
-		err := engine.Store.DB().QueryRow(`SELECT annotation_count,(SELECT COUNT(*) FROM nodes WHERE summary<>'')+(SELECT COUNT(*) FROM node_steps WHERE summary<>'') FROM runs WHERE team='a' AND id='run'`).Scan(&annotations, &summaries)
+		err := teststore.SQL(t, engine.Store).QueryRow(`SELECT annotation_count,(SELECT COUNT(*) FROM nodes WHERE summary<>'')+(SELECT COUNT(*) FROM node_steps WHERE summary<>'') FROM runs WHERE team='a' AND id='run'`).Scan(&annotations, &summaries)
 		want := 0
 		if wantWrite {
 			want = 2
@@ -136,7 +137,7 @@ func TestNativeProcessReportingCommitsJobAndStepMetadata(t *testing.T) {
 		}
 		var body []byte
 		var summary string
-		if err := engine.Store.DB().QueryRow(query).Scan(&body, &summary); err != nil {
+		if err := teststore.SQL(t, engine.Store).QueryRow(query).Scan(&body, &summary); err != nil {
 			t.Fatal(err)
 		}
 		var annotations []controllerwire.Annotation

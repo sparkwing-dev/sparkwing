@@ -66,7 +66,7 @@ func TestTrigger_RecordsARunForRunnersToClaim(t *testing.T) {
 	f := newFloodServer(t, controller.FloodPolicy{})
 	created := floodRun(t, f.submit(f.token, "demo", fortyHex(1)), 201)
 	var units int
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM triggers WHERE team='default' AND id=? AND unit_kind='plan' AND claimed_by IS NULL`, created.RunID).Scan(&units); err != nil || units != 1 {
+	if err := teststore.SQL(t, f.st).QueryRow(`SELECT COUNT(*) FROM triggers WHERE team='default' AND id=? AND unit_kind='plan' AND claimed_by IS NULL`, created.RunID).Scan(&units); err != nil || units != 1 {
 		t.Fatalf("claimable units=%d: %v", units, err)
 	}
 }
@@ -111,7 +111,7 @@ func TestRunIntakeRefusesClientSuppliedTriggerEnvironment(t *testing.T) {
 		}
 	}
 	var n int
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&n); err != nil || n != 0 {
+	if err := teststore.SQL(t, f.st).QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("refused env persisted %d runs: %v", n, err)
 	}
 }
@@ -259,7 +259,7 @@ func TestRunIntakeRejectsUntrustedRevisionSelectorsProperty(t *testing.T) {
 	floodRun(t, f.submit(f.token, "demo", strings.Repeat("a", 40)), 201)
 	floodRun(t, f.submit(f.token, "demo", strings.Repeat("b", 64)), 201)
 	var count int
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 2 {
+	if err := teststore.SQL(t, f.st).QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("invalid revision persisted runs: %d: %v", count, err)
 	}
 }
@@ -277,7 +277,7 @@ func TestRunIntakeSourceBoundaryProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, f.st).QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("private source persisted runs: %d: %v", count, err)
 	}
 }

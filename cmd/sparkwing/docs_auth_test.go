@@ -25,11 +25,11 @@ func TestAuthGuideGrantVocabularyMatchesCredentialContract(t *testing.T) {
 	}
 	var expected strings.Builder
 	expected.WriteString("| Grant |\n| --- |\n")
-	for _, grant := range capability.Grants {
+	for _, grant := range capability.Grants() {
 		fmt.Fprintf(&expected, "| `%s` |\n", grant)
 	}
 	if rows != expected.String() {
-		t.Fatalf("update docs/auth.md grant reference from capability.Grants, then sync embedded docs:\n%s", expected.String())
+		t.Fatalf("update docs/auth.md grant reference from capability.Grants(), then sync embedded docs:\n%s", expected.String())
 	}
 }
 

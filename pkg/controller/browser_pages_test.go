@@ -157,9 +157,7 @@ func TestBrowserLocalModeServesPagesWithoutSignIn(t *testing.T) {
 func TestDashboardReadsStayInsideTheTeamBoundary(t *testing.T) {
 	f := newBrowserFixture(t, nil)
 	ctx := t.Context()
-	if err := f.st.AsOperator().CreateTeam(ctx, "other"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, f.st, "other")
 	own, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}})
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +267,7 @@ func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
 	f.srv.WithTeamWriter(func(context.Context, store.Team) (controller.TeamWriter, error) { return writer, nil })
 	f.h = f.srv.Handler()
 	for i, id := range []string{"r1", "r2", `a\b`} {
-		if _, err := f.st.DB().ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default',?,?,'demo','success',?,'request',1,'github.com/acme/app','host','execute',?,'alice',1,2,'r30',30)`, id, i+1, []byte(`{}`), []byte(`[]`)); err != nil {
+		if _, err := teststore.SQL(t, f.st).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default',?,?,'demo','success',?,'request',1,'github.com/acme/app','host','execute',?,'alice',1,2,'r30',30)`, id, i+1, []byte(`{}`), []byte(`[]`)); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.MkdirAll(filepath.Join(p.RunDir(id), "logs"), 0o755); err != nil {

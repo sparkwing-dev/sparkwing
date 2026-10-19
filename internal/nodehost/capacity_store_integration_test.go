@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func capacityPlan(policy string, timeout int64, ids ...string) nodeproto.PlanDoc {
@@ -223,7 +224,7 @@ func (s capacityMutationBoundary) AcquireCapacity(ctx context.Context, request s
 func TestStoreAdmissionSQLiteFencesAcquisitionAfterAdoption(t *testing.T) {
 	fixture := newStoreHostFixture(t, capacityPlan("queue", 0, "a"))
 	boundary := capacityMutationBoundary{Tenant: fixture.Tenant, beforeAcquire: func() {
-		if _, err := fixture.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET generation=generation+1 WHERE team=? AND id=?`, store.DefaultTeam, fixture.Accepted.RunID); err != nil {
+		if _, err := teststore.SQL(t, fixture.Store).ExecContext(t.Context(), `UPDATE triggers SET generation=generation+1 WHERE team=? AND id=?`, store.DefaultTeam, fixture.Accepted.RunID); err != nil {
 			t.Fatal(err)
 		}
 	}}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestTeamPurgeWaitsForDeletionDelay(t *testing.T) {
@@ -32,7 +33,7 @@ func TestDeleteAccountRetiredSelfServiceCannotMutate(t *testing.T) {
 	f := newIdentityFixture(t)
 	u := f.user("u", "uma@example.com")
 	for _, age := range []time.Duration{0, time.Hour} {
-		if _, err := f.store.DB().Exec(`UPDATE sessions SET created_at = ?`, time.Now().Add(-age).UnixNano()); err != nil {
+		if _, err := teststore.SQL(t, f.store).Exec(`UPDATE sessions SET created_at = ?`, time.Now().Add(-age).UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		if code := f.call("DELETE", "/api/v1/me", u.auth, map[string]string{"confirm_email": "uma@example.com"}, nil); code != http.StatusMethodNotAllowed {
@@ -49,7 +50,7 @@ func TestDeleteAccountRetiredSelfServiceCannotMutate(t *testing.T) {
 func TestDeleteAccountOwningTheDefaultTeamIsABadRequest(t *testing.T) {
 	f := newIdentityFixture(t)
 	u := f.user("u", "uma@example.com")
-	if _, err := f.store.DB().Exec(`INSERT INTO memberships (team, account_id, role, created_at) VALUES ('default', ?, 'owner', 1)`, u.id); err != nil {
+	if _, err := teststore.SQL(t, f.store).Exec(`INSERT INTO memberships (team, account_id, role, created_at) VALUES ('default', ?, 'owner', 1)`, u.id); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("DELETE", "/api/v1/operator/accounts/uma@example.com", f.consoleAuth(), nil, nil); code != http.StatusBadRequest {
@@ -66,7 +67,7 @@ func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
 	f := newDeletionFixture(t)
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")
-	if _, err := f.store.DB().ExecContext(t.Context(), `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('pending','acme','pending','test','usd',100,?,1,?)`, store.MicroCreditsPerCredit, time.Now().Add(time.Hour).UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('pending','acme','pending','test','usd',100,?,1,?)`, store.MicroCreditsPerCredit, time.Now().Add(time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	var refused struct {
@@ -83,7 +84,7 @@ func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
 	}
 
 	f.createTeam(&owner, "held")
-	if _, err := f.store.DB().ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES (?,?,?,?,?)", "dp_held", "held", "", "dispute opened", time.Now().UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES (?,?,?,?,?)", "dp_held", "held", "", "dispute opened", time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "held"}, &refused); code != http.StatusConflict ||

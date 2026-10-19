@@ -28,7 +28,7 @@ func TestOpenKeepsStateSeparate(t *testing.T) {
 			t.Fatalf("store %d schema = %d, %v", i, version, err)
 		}
 		var runs int
-		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&runs); err != nil || runs != 0 {
+		if err := teststore.SQL(t, st).QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&runs); err != nil || runs != 0 {
 			t.Fatalf("store %d starts with %d runs: %v", i, runs, err)
 		}
 		info, err := os.Stat(path)
@@ -40,7 +40,7 @@ func TestOpenKeepsStateSeparate(t *testing.T) {
 			t.Fatalf("fixture permissions: %v, %v", info, err)
 		}
 	}
-	if _, err := fixtures[0].DB().ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,'r1',1,'demo','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, store.DefaultTeam, []byte(`{"version":1}`), []byte(`[]`)); err != nil {
+	if _, err := teststore.SQL(t, fixtures[0]).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,'r1',1,'demo','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, store.DefaultTeam, []byte(`{"version":1}`), []byte(`[]`)); err != nil {
 		t.Fatal(err)
 	}
 	tenant := teststore.ForTeam(t, fixtures[1], store.DefaultTeam)

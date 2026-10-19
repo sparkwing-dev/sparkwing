@@ -8,11 +8,12 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestNodeHostAdmissionReadsItsRealRun(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "runs.db"))
+	db, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "runs.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +22,7 @@ func TestNodeHostAdmissionReadsItsRealRun(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	_, err = db.DB().ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
+	_, err = teststore.SQL(t, db).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
 VALUES ('default','real-run',1,'example','running','{}','request',1,'gh:1','host','execute','[]','account',1,'r30',30)`)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +70,7 @@ VALUES ('default','real-run',1,'example','running','{}','request',1,'gh:1','host
 	}, &quick.Config{MaxCount: 24}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.DB().ExecContext(t.Context(), `UPDATE runs SET status='failed',finished_at=1 WHERE id='real-run'`); err != nil {
+	if _, err := teststore.SQL(t, db).ExecContext(t.Context(), `UPDATE runs SET status='failed',finished_at=1 WHERE id='real-run'`); err != nil {
 		t.Fatal(err)
 	}
 	host, peer := handlerConn(t, d)

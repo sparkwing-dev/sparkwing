@@ -80,9 +80,7 @@ func TestDeploymentHTTPAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.AsOperator().CreateTeam(t.Context(), "customer"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, st, "customer")
 
 	for _, route := range deploymentRequests {
 		for _, name := range []string{"anonymous", "wrong grant", "member", "service", "run-bound operator", "session", "revoked", "expired", "console without csrf"} {

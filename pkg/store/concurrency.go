@@ -5,9 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
-	"testing"
 	"time"
 )
 
@@ -876,8 +874,6 @@ func txLiveCapacityRunIDs(ctx context.Context, tx *storeTx, team Team, ids []str
 	return live, rows.Err()
 }
 
-var concurrencyInvariantFailFast = testing.Testing()
-
 func txCommitChecked(ctx context.Context, tx *storeTx, nowNS int64, keys ...concurrencyKey) error {
 	seen := make(map[concurrencyKey]bool, len(keys))
 	for _, k := range keys {
@@ -941,12 +937,7 @@ func txCheckConcurrencyInvariants(ctx context.Context, tx *storeTx, team Team, k
 	if len(violations) == 0 {
 		return nil
 	}
-	msg := fmt.Sprintf("concurrency invariants violated for key %q: %s", key, strings.Join(violations, "; "))
-	if concurrencyInvariantFailFast {
-		return errors.New(msg)
-	}
-	slog.Error(msg)
-	return nil
+	return fmt.Errorf("concurrency invariants violated for key %q: %s", key, strings.Join(violations, "; "))
 }
 
 type holderRow struct {

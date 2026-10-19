@@ -40,12 +40,12 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					}
 					cpu = 0
 				}
-				if err := teststore.SeedMetric(st.DB(), t.Context(), "r", id, store.MetricSample{Kind: store.MetricInterval, TS: start, CPUMillicores: cpu, MemoryBytes: 100}); err != nil {
+				if err := teststore.SeedMetric(teststore.SQL(t, st), t.Context(), "r", id, store.MetricSample{Kind: store.MetricInterval, TS: start, CPUMillicores: cpu, MemoryBytes: 100}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if mode == "unreadable" {
-				if _, err := st.DB().Exec(`UPDATE node_metrics SET memory_bytes='invalid' WHERE run_id='r' AND node_id='c'`); err != nil {
+				if _, err := teststore.SQL(t, st).Exec(`UPDATE node_metrics SET memory_bytes='invalid' WHERE run_id='r' AND node_id='c'`); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(t.Context(), "r", "c"); err == nil {
@@ -69,7 +69,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				if _, err := runProfileObservations(t.Context(), tenant, &run); err == nil {
 					t.Fatal("corrupt metrics did not fail the fold")
 				}
-				if _, err := st.DB().Exec(`UPDATE node_metrics SET memory_bytes=100 WHERE run_id='r' AND node_id='c'`); err != nil {
+				if _, err := teststore.SQL(t, st).Exec(`UPDATE node_metrics SET memory_bytes=100 WHERE run_id='r' AND node_id='c'`); err != nil {
 					t.Fatal(err)
 				}
 			}

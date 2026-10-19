@@ -170,7 +170,7 @@ func TestEngineJobsHTTPRefusals(t *testing.T) {
 					status, code = 403, apierr.Forbidden
 				case "bootstrap":
 					b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
-					b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants
+					b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants()
 					status, code = 403, apierr.Forbidden
 				case "wrong run":
 					path = strings.Replace(path, "/run/", "/other/", 1)

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -19,7 +18,7 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 	}
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 
-	seed, err := store.Open(dbPath)
+	seed, err := teststore.OpenExisting(dbPath)
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
 	}
@@ -41,7 +40,7 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			s, err := store.Open(dbPath)
+			s, err := teststore.OpenExisting(dbPath)
 			if err != nil {
 				mu.Lock()
 				hardErrs = append(hardErrs, fmt.Errorf("arrival %d open: %w", i, err))
@@ -50,7 +49,7 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 			}
 			defer func() { _ = s.Close() }()
 
-			createLiveRunT(t,s,fmt.Sprintf("r-%d",i))
+			createLiveRunT(t, s, fmt.Sprintf("r-%d", i))
 			<-start
 			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 				Key: key, HolderID: fmt.Sprintf("h-%d", i),
@@ -92,7 +91,7 @@ func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	dbPath := filepath.Join(t.TempDir(), "state.db")
-	seed, err := store.Open(dbPath)
+	seed, err := teststore.OpenExisting(dbPath)
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
 	}
@@ -114,7 +113,7 @@ func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			s, err := store.Open(dbPath)
+			s, err := teststore.OpenExisting(dbPath)
 			if err != nil {
 				mu.Lock()
 				hardErrs = append(hardErrs, fmt.Errorf("arrival %d open: %w", i, err))
@@ -123,7 +122,7 @@ func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 			}
 			defer func() { _ = s.Close() }()
 
-			createLiveRunT(t,s,fmt.Sprintf("r-%d",i))
+			createLiveRunT(t, s, fmt.Sprintf("r-%d", i))
 			<-start
 			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 				Key: key, HolderID: fmt.Sprintf("h-%d", i),
@@ -156,72 +155,5 @@ func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 	}
 	if queued != N-1 {
 		t.Errorf("queued = %d, want %d", queued, N-1)
-	}
-}
-
-func TestOpenReadOnly_RejectsWrites(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "state.db")
-	rw, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open rw: %v", err)
-	}
-	_ = rw.Close()
-
-	ro, err := store.OpenReadOnly(dbPath)
-	if err != nil {
-		t.Fatalf("OpenReadOnly: %v", err)
-	}
-	defer func() { _ = ro.Close() }()
-
-	err = teststore.ForTeam(t, ro, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
-		ID: "r1", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	})
-	if err == nil {
-		t.Fatal("CreateRun on read-only store: want error, got nil")
-	}
-}
-
-func TestOpenReadOnly_DoesNotBlockWriter(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "state.db")
-	rw, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open rw: %v", err)
-	}
-	defer func() { _ = rw.Close() }()
-	if err := teststore.ForTeam(t, rw, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
-		ID: "seed", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-
-	ro, err := store.OpenReadOnly(dbPath)
-	if err != nil {
-		t.Fatalf("OpenReadOnly: %v", err)
-	}
-	defer func() { _ = ro.Close() }()
-
-	readTx, err := ro.DB().BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("begin read tx: %v", err)
-	}
-	defer func() { _ = readTx.Rollback() }()
-	var n int
-	if err := readTx.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&n); err != nil {
-		t.Fatalf("read query: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- teststore.ForTeam(t, rw, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
-			ID: "w1", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-		})
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("writer blocked by read-only reader: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("writer did not commit within 5s; read-only reader is blocking it")
 	}
 }

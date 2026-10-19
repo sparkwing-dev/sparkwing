@@ -52,7 +52,7 @@ func TestFoldRunProfilesPartialSamplesRaiseOnly(t *testing.T) {
 				{Kind: store.MetricInterval, TS: start.Add(2 * time.Second), CPUMillicores: tc.cores, MemoryBytes: tc.memory},
 				{Kind: tc.marker, TS: start.Add(4 * time.Second)},
 			} {
-				if err := teststore.SeedMetric(st.DB(), ctx, "partial", "build", sample); err != nil {
+				if err := teststore.SeedMetric(teststore.SQL(t, st), ctx, "partial", "build", sample); err != nil {
 					t.Fatalf("sample %d: %v", i, err)
 				}
 			}

@@ -557,7 +557,7 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 
 func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	f := newSessionFlow(t)
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner' WHERE team='team' AND account_id='member'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner' WHERE team='team' AND account_id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{34}, secrets.KeySize))
@@ -609,7 +609,7 @@ func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"releases":[]`) {
 		t.Fatalf("real audit reader: %d %s", w.Code, w.Body.String())
 	}
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team='team' AND account_id='member'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team='team' AND account_id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	w = httptest.NewRecorder()

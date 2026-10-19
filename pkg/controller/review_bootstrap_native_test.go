@@ -63,7 +63,7 @@ func TestReviewBootstrapCannotUseOrdinaryAlternativeProperty(t *testing.T) {
 	s, bootstrap := reviewPodBootstrap(t)
 	ordinary := []capability.CredentialRule{}
 	seen := map[capability.CredentialRule]bool{}
-	for _, route := range capability.Routes {
+	for _, route := range capability.Routes() {
 		for _, rule := range route.Access {
 			if rule.Credential != capability.CredentialBootstrap && !seen[rule.Credential] {
 				seen[rule.Credential] = true

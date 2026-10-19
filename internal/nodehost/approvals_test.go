@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func approvalFixture(t *testing.T, gate nodeproto.ApprovalSpec) *storeHostFixture {
@@ -53,7 +54,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 			ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "gate"}
 			change := store.NodeTransition{Ref: ref, Actor: f.Control, To: tc.outcome, Cause: store.CauseApprovalResolve, Extra: store.TransitionExtra{Approval: &store.ApprovalResolution{Decision: tc.resolution, Comment: "looks good"}}}
 			if tc.resolution == "timed_out" {
-				if _, err := f.Store.DB().ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
+				if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
 					t.Fatal(err)
 				}
 				change.Actor, change.Cause, change.Extra = f.Actor, store.CauseApprovalTimeout, store.TransitionExtra{}
@@ -115,7 +116,7 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 	timeout := int64(1000)
 	f := approvalFixture(t, nodeproto.ApprovalSpec{TimeoutMS: &timeout})
 	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "gate"}
-	if _, err := f.Store.DB().ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
+	if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Control, To: store.NodeSuccess, Cause: store.CauseApprovalResolve, Extra: store.TransitionExtra{Approval: &store.ApprovalResolution{Decision: "approved"}}}); err != nil {
@@ -134,7 +135,7 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 
 func TestApprovalGateFailsOnAStoreThatCannotRecover(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}}}})
-	if _, err := f.Store.DB().ExecContext(t.Context(), `CREATE TRIGGER refuse_approval BEFORE INSERT ON approvals BEGIN SELECT RAISE(ABORT,'locking protocol'); END`); err != nil {
+	if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), `CREATE TRIGGER refuse_approval BEFORE INSERT ON approvals BEGIN SELECT RAISE(ABORT,'locking protocol'); END`); err != nil {
 		t.Fatal(err)
 	}
 	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "gate"}

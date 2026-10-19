@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -269,7 +270,8 @@ func TestLocalControllerScheduleFiresOneSealedRunAtDueInstant(t *testing.T) {
 }
 
 func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
-	st := newStoreForAuth(t)
+	clock := &testClock{}
+	st := newStoreForAuth(t, clock.option())
 	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
@@ -303,7 +305,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	st.SetTestClock(t, func() time.Time { return now })
+	clock.pin(func() time.Time { return now })
 	service := &crons.Service{Store: st, Schedules: tenant, Side: store.CronWhereLocal, PinRoot: filepath.Join(home, "crons"), LockPath: filepath.Join(home, "crons.lock"), Now: func() time.Time { return now }, Host: "native", Version: "test"}
 	snapshots := &localScheduleSnapshots{values: map[runspec.Hash][]string{}}
 	server := New(st, nil).WithLocalSchedules(service, func(context.Context, string, string, []string) (crons.Proof, error) {
@@ -361,7 +363,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	if err != nil || row.NextDueAt == nil {
 		t.Fatalf("armed schedule: %+v %v", row, err)
 	}
-	if result, err := st.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET consent_json=replace(consent_json,'"dispatch":""','"dispatch":"host"') WHERE id=? AND consent_json LIKE '%"dispatch":""%'`, row.ID); err != nil {
+	if result, err := teststore.SQL(t, st).ExecContext(t.Context(), `UPDATE cron_schedules SET consent_json=replace(consent_json,'"dispatch":""','"dispatch":"host"') WHERE id=? AND consent_json LIKE '%"dispatch":""%'`, row.ID); err != nil {
 		t.Fatal(err)
 	} else if changed, err := result.RowsAffected(); err != nil || changed != 1 {
 		t.Fatalf("saved consent leaves dispatch to intake: %d %v", changed, err)

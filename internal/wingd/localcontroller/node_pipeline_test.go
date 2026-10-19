@@ -332,7 +332,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		rows, readErr := b.Tenant.ReadSnapshot(ctx, admitted.RunID)
 		for _, row := range rows.Nodes {
 			var failure []byte
-			readFailure := b.Store.DB().QueryRowContext(ctx, "SELECT failure_json FROM nodes WHERE run_id=? AND node_id=?", admitted.RunID, row.Ref.NodeID).Scan(&failure)
+			readFailure := stateSQL(t, b).QueryRowContext(ctx, "SELECT failure_json FROM nodes WHERE run_id=? AND node_id=?", admitted.RunID, row.Ref.NodeID).Scan(&failure)
 			t.Logf("job %s: %s read=%v", row.Ref.NodeID, failure, readFailure)
 		}
 		t.Fatalf("local pipeline: %+v: %v read=%v", completion, err, readErr)

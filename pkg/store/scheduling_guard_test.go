@@ -1,8 +1,9 @@
 package store
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestSchedulingGuardRefusalNeverReleasesWork(t *testing.T) {

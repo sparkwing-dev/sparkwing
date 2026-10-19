@@ -43,22 +43,22 @@ func openPostgresStore(t *testing.T) *store.Store {
 	}, t.Name())
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	admin, err := store.OpenPostgres(ctx, base)
+	admin, err := teststore.OpenPostgres(ctx, base)
 	if err != nil {
 		t.Fatalf("open postgres: %v", err)
 	}
-	if _, err := admin.DB().ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+schema); err != nil {
+	if _, err := teststore.Exec(ctx, admin, `CREATE SCHEMA IF NOT EXISTS `+schema); err != nil {
 		_ = admin.Close()
 		t.Fatalf("create schema %s: %v", schema, err)
 	}
 	_ = admin.Close()
 	t.Cleanup(func() {
-		cleanup, err := store.OpenPostgres(context.Background(), base)
+		cleanup, err := teststore.OpenPostgres(context.Background(), base)
 		if err != nil {
 			t.Errorf("open postgres to drop schema %s: %v", schema, err)
 			return
 		}
-		if _, err := cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`); err != nil {
+		if _, err := teststore.Exec(context.Background(), cleanup, `DROP SCHEMA IF EXISTS `+schema+` CASCADE`); err != nil {
 			t.Errorf("drop schema %s: %v", schema, err)
 		}
 		_ = cleanup.Close()
@@ -67,7 +67,7 @@ func openPostgresStore(t *testing.T) *store.Store {
 	if strings.Contains(base, "?") {
 		sep = "&"
 	}
-	st, err := store.OpenPostgres(ctx, base+sep+"search_path="+schema)
+	st, err := teststore.OpenPostgres(ctx, base+sep+"search_path="+schema)
 	if err != nil {
 		t.Fatalf("open postgres schema %s: %v", schema, err)
 	}
@@ -142,7 +142,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if err := teststore.SeedNode(st, ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES ($1,$2,$3,$4,$5,$6)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES ($1,$2,$3,$4,$5,$6)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {
 		t.Fatal(err)
 	}
 	seedControllerCapacityHolder(t, st, f.teamA.Team(), "deploy", "holder-a", f.runA, "n1", 0)
@@ -329,7 +329,7 @@ func TestTeamBoundary_AFreshAccountCannotReachAnotherTeamsRun(t *testing.T) {
 func cancelRequests(t *testing.T, st *store.Store) int {
 	t.Helper()
 	var n int
-	if err := st.DB().QueryRowContext(context.Background(),
+	if err := teststore.SQL(t, st).QueryRowContext(context.Background(),
 		`SELECT COUNT(*) FROM runs WHERE cancel_requested_at IS NOT NULL`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}

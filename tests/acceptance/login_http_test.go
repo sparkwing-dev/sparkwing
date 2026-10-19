@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
@@ -77,10 +78,10 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	}
 	digest := sha256.Sum256([]byte(raw))
 	var stored, plaintext int
-	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*), COUNT(CASE WHEN hash=? THEN 1 END) FROM sessions WHERE hash IN (?,?)`, raw, raw, hex.EncodeToString(digest[:])).Scan(&stored, &plaintext); err != nil || stored != 1 || plaintext != 0 {
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*), COUNT(CASE WHEN hash=? THEN 1 END) FROM sessions WHERE hash IN (?,?)`, raw, raw, hex.EncodeToString(digest[:])).Scan(&stored, &plaintext); err != nil || stored != 1 || plaintext != 0 {
 		t.Fatalf("session digest: stored=%d plaintext=%d err=%v", stored, plaintext, err)
 	}
-	columns, err := f.store.DB().QueryContext(t.Context(), `SELECT * FROM sessions LIMIT 0`)
+	columns, err := teststore.SQL(t, f.store).QueryContext(t.Context(), `SELECT * FROM sessions LIMIT 0`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 			case "machine", "operator":
 				spec := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}}
 				if state == "machine" {
-					if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+					if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
 						t.Fatal(err)
 					}
 					digest := sha256.Sum256([]byte(f.raw))
@@ -260,7 +261,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 			case "session presentation":
 				r = loginRequest(f.raw, "browser-proof", "/")
 			case "membership":
-				if _, err := f.store.DB().ExecContext(t.Context(), `DELETE FROM memberships`); err != nil {
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `DELETE FROM memberships`); err != nil {
 					t.Fatal(err)
 				}
 			case "duplicate token", "unknown field":
@@ -274,7 +275,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 			case "large body":
 				r.Body, code = io.NopCloser(strings.NewReader("token="+strings.Repeat("x", 65536))), apierr.BadRequest
 			case "backend":
-				if _, err := f.store.DB().ExecContext(t.Context(), `DROP TABLE capabilities`); err != nil {
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `DROP TABLE capabilities`); err != nil {
 					t.Fatal(err)
 				}
 				code = apierr.Unavailable

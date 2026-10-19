@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestPublicNumericSelectorsReadAndCommitCanonicalRun(t *testing.T) {
@@ -40,7 +41,7 @@ func TestPublicNumericSelectorsReadAndCommitCanonicalRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a' AND id='run' AND cancel_requested_at IS NOT NULL`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a' AND id='run' AND cancel_requested_at IS NOT NULL`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("canonical run cancellation: %d %v", count, err)
 	}
 }

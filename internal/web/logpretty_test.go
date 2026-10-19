@@ -318,7 +318,7 @@ func TestRunsGrep_OnlyReadsRequestedRuns(t *testing.T) {
 
 func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestRunsGrep_StopsAtItsByteBoundAndSaysSo(t *testing.T) {
 }
 
 func TestRunsGrep_PagesOlderRunsByCursorWithExclusionsAppliedBeforeTheLimit(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

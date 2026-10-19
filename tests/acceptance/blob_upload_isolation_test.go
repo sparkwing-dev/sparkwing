@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -16,14 +17,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func checkBlobUploadIsolation(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
+func checkBlobUploadIsolation(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
 	path := filepath.Join(root, "upload-isolation.db")
-	s, err := store.Open(path)
+	s, err := teststore.OpenExisting(path)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := teststore.SeedPresence(ctx, s.DB())
+	request, err := teststore.SeedPresence(ctx, teststore.SQL(t, s))
 	if err != nil {
 		return err
 	}
@@ -102,7 +103,7 @@ func checkBlobUploadIsolation(ctx context.Context, root string, objects blob.Obj
 		if err := s.Close(); err != nil {
 			return err
 		}
-		reopened, err := store.Open(path)
+		reopened, err := teststore.OpenExisting(path)
 		if err != nil {
 			return err
 		}

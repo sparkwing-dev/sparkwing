@@ -5,11 +5,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 	f := newSessionFlow(t)
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner' WHERE team='team' AND account_id='member'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner' WHERE team='team' AND account_id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	h := f.server.Handler()
@@ -53,7 +55,7 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 	}
 	call("DELETE", "/api/v1/team/git-credentials/git.example.test", "", 204)
 	call("DELETE", "/api/v1/secrets/KEY?pipeline=deploy", "", 204)
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team='team' AND account_id='member'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team='team' AND account_id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	call("POST", "/api/v1/secrets", `{"name":"DENIED","value":"private-value"}`, 403)

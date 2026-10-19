@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestReviewRetryModeIsPartOfCommittedReplay(t *testing.T) {
@@ -26,7 +27,7 @@ func TestReviewRetryModeIsPartOfCommittedReplay(t *testing.T) {
 		t.Fatalf("changing retry mode reused a committed selection: run=%q replayed=%t error=%v", result.RunID, result.Replayed, err)
 	}
 	var count int
-	if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("conflicting selection wrote another execution: %d %v", count, err)
 	}
 }
