@@ -40,6 +40,14 @@ receipt contains `managed_units: "refreshed"`. Plain output is the installed
 version. A current CLI still refreshes its managed units so repeating an update
 can recover from a previous refresh failure.
 
+The update replaces only the `sparkwing` CLI. A runner service runs
+`sparkwing-runner`, which updates itself when its controller directs it: it
+drains held claims, replaces its binary, refreshes its units and restarts. So
+`sparkwing update` does not restart runner services. After installing a new
+CLI it prints `Installed runner services update themselves from their
+controller.`, and the JSON receipt carries the same sentence in
+`runner_services`. A current CLI omits it.
+
 If refresh fails after replacement, the CLI remains installed. The command fails
 without a success receipt and names the version, destination and retry command.
 A download or verification failure leaves managed units untouched.

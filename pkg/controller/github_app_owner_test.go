@@ -286,7 +286,7 @@ func TestGitHubAppRunsReachAnApprovedPersonalMachineOnlyForItsAuthorWithAccess(t
 				}
 				return
 			}
-			if code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != pushed[0] {
+			if code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != pushed[0] || !claimed.Claim.OwnerMachine {
 				t.Fatalf("approved laptop claim of the author's push = %d %+v", code, claimed.Claim)
 			}
 		})

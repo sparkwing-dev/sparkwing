@@ -465,13 +465,13 @@ func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installatio
 	return res.RowsAffected()
 }
 
-// WithdrawOtherGitHubCronBindings stops App schedules for a repository that
-// another team or installation used before the verified current binding.
-func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error) {
-	res, err := o.s.exec(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-		WHERE github_repository_id = ? AND github_repository_id > 0
-		  AND (team != ? OR github_installation_id != ?) AND declared = 1`,
-		now.UnixNano(), repositoryID, string(team), installationID)
+// WithdrawOtherGitHubCronInstallations stops this team's App schedules for a
+// repository that another of its installations armed.
+func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error) {
+	res, err := t.s.exec(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+		WHERE team = ? AND github_repository_id = ? AND github_repository_id > 0
+		  AND github_installation_id != ? AND declared = 1`,
+		now.UnixNano(), string(t.team), repositoryID, installationID)
 	if err != nil {
 		return 0, err
 	}

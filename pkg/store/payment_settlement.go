@@ -206,12 +206,12 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?) WHERE team = ? AND id = ? AND payment_mode = ?", now, grant, now, string(checkout.result.Team), checkout.result.CheckoutID, string(event.Mode))
+	_, err = tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), three_d_secure = ? WHERE team = ? AND id = ? AND payment_mode = ?", now, grant, now, event.ThreeDS, string(checkout.result.Team), checkout.result.CheckoutID, string(event.Mode))
 	if err != nil {
 		return err
 	}
 	checkout.result.GrantID = grant
-	if err := recordGrantEventTx(tx, CreditGrant{ID: grant, Team: checkout.result.Team, Kind: CreditGrantPaid, AmountMicro: checkout.result.AmountMicro, Reference: "payment:" + string(event.Mode) + ":" + checkout.result.CheckoutID, CreatedBy: "payment_provider", CreatedAt: tx.now()}, event.CheckoutID, ""); err != nil {
+	if err := recordGrantEventTx(tx, CreditGrant{ID: grant, Team: checkout.result.Team, Kind: CreditGrantPaid, AmountMicro: checkout.result.AmountMicro, Reference: "payment:" + string(event.Mode) + ":" + checkout.result.CheckoutID, CreatedBy: "payment_provider", CreatedAt: tx.now()}, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS}); err != nil {
 		return err
 	}
 	room, err := headroomTx(ctx, tx, checkout.result.Team, tx.now())

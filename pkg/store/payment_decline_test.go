@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,8 +30,11 @@ func TestPaymentDeclineHoldsPrepaidClaimsUntilCollectionSucceeds(t *testing.T) {
 	demand.CapabilityPrefix = root.Prefix
 	_, err := s.ClaimUnit(t.Context(), demand)
 	var refusal *InsufficientCreditsError
-	if !errors.As(err, &refusal) || refusal.Limit != SpendLimitChargeFailed {
+	if !errors.As(err, &refusal) || refusal.Limit != SpendLimitChargeFailed || !strings.Contains(refusal.Error(), "card declined") || !strings.Contains(refusal.Error(), "updates the card") {
 		t.Fatalf("declined prepaid claim=%v", err)
+	}
+	if standing, err := tenant.BillingStanding(t.Context(), now); err != nil || standing.Tier != "Held" || !standing.History.LastIncidentAt.Equal(now) {
+		t.Fatalf("decline did not hold at once: %+v: %v", standing, err)
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 0)
 	row, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
@@ -52,7 +56,7 @@ func TestPaymentDeclineHoldsPrepaidClaimsUntilCollectionSucceeds(t *testing.T) {
 	if freeze, err := tenant.CreditFreeze(t.Context()); err != nil || freeze.Frozen {
 		t.Fatalf("paid collection retained hold=%+v: %v", freeze, err)
 	}
-	if standing, err := tenant.BillingStanding(t.Context(), now); err != nil || !standing.Trusted {
+	if standing, err := tenant.BillingStanding(t.Context(), now); err != nil || !standing.Trusted || !standing.History.LastIncidentAt.IsZero() {
 		t.Fatalf("paid collection standing=%+v: %v", standing, err)
 	}
 	if claim, err := s.ClaimUnit(t.Context(), demand); err != nil || claim.RunID != "run" || claim.NodeID != "job" || len(claim.Bearer) == 0 {

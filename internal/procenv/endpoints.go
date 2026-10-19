@@ -19,7 +19,12 @@ func proxyCredentials(name, value string) ([]string, error) {
 		}
 	case "PIP_EXTRA_INDEX_URL":
 		endpoints = strings.Fields(value)
+	case "GOSUMDB":
+		if fields := strings.Fields(value); len(fields) > 1 {
+			endpoints = fields[1:]
+		}
 	}
+	goEndpoint := strings.EqualFold(name, "GOPROXY") || strings.EqualFold(name, "GOSUMDB")
 	var credentials []string
 	for _, endpoint := range endpoints {
 		parts, err := endpointCredentials(endpoint)
@@ -27,8 +32,22 @@ func proxyCredentials(name, value string) ([]string, error) {
 			return nil, fmt.Errorf("invalid proxy URL in %q", name)
 		}
 		credentials = append(credentials, parts...)
+		if goEndpoint && pathOrQueryEndpoint(endpoint) {
+			credentials = append(credentials, endpoint)
+			credentials = append(credentials, queryCredentials(endpoint)...)
+		}
 	}
 	return credentials, nil
+}
+
+// safety: Go module proxies may carry an access token in the path or query, which no userinfo parse finds.
+func pathOrQueryEndpoint(endpoint string) bool {
+	rest := strings.TrimPrefix(endpoint, "//")
+	if _, after, ok := strings.Cut(endpoint, "://"); ok {
+		rest = after
+	}
+	end := strings.IndexAny(rest, "/?#")
+	return end >= 0 && strings.Trim(rest[end:], "/") != ""
 }
 
 func endpointCredentials(endpoint string) ([]string, error) {
@@ -78,3 +97,29 @@ func endpointCredentials(endpoint string) ([]string, error) {
 	}
 	return append(parts, rawUser, rawUsername, rawPassword), nil
 }
+
+// safety: Go inserts the module path before a proxy's query when it reports a URL, so the configured endpoint never
+// appears whole; the raw query and each long value are masked on their own.
+func queryCredentials(endpoint string) []string {
+	_, query, ok := strings.Cut(endpoint, "?")
+	if !ok {
+		return nil
+	}
+	query, _, _ = strings.Cut(query, "#")
+	if query == "" {
+		return nil
+	}
+	out := []string{query}
+	for _, pair := range strings.FieldsFunc(query, func(r rune) bool { return r == '&' || r == ';' }) {
+		_, value, _ := strings.Cut(pair, "=")
+		if len(value) >= goQueryValueMaskMinLength {
+			out = append(out, value)
+		}
+		if decoded, err := url.QueryUnescape(value); err == nil && decoded != value && len(decoded) >= goQueryValueMaskMinLength {
+			out = append(out, decoded)
+		}
+	}
+	return out
+}
+
+const goQueryValueMaskMinLength = 8

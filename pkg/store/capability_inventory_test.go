@@ -51,21 +51,20 @@ func TestCapabilityInventoryScopesAndMetadata(t *testing.T) {
 	inventoryRoot(t, s, "foreign", "b", "member")
 	at := s.now().Add(-time.Minute)
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET last_used_at=? WHERE prefix=?`, at.UnixNano(), c.Prefix)
-	rewriteSchemaExec(t, s.db, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) VALUES ('a',?,'member',?)`, c.Prefix, at.UnixNano())
 	a := inventoryAuthorization(t, s, actor, "a", "")
 	rows, err := tenant.ListCapabilities(t.Context(), a, capability.InventoryFilter{})
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("inventory: %+v %v", rows, err)
 	}
 	row := rows[0]
-	if row.Prefix != c.Prefix || row.CreatedBy != "member" || row.Subject != c.Subject || row.LastUsedAt == nil || !row.LastUsedAt.Equal(at) || !row.GitCredentials || row.Metered {
+	if row.Prefix != c.Prefix || row.CreatedBy != "member" || row.Subject != c.Subject || row.LastUsedAt == nil || !row.LastUsedAt.Equal(at) || row.Metered {
 		t.Fatalf("metadata: %+v", row)
 	}
 	body, err := json.Marshal(row)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, private := range []string{"digest", "binding", "parent", "reserved_pools", "billing", "authority", "registration"} {
+	for _, private := range []string{"digest", "binding", "parent", "reserved_pools", "billing", "authority", "registration", "git_credentials"} {
 		if strings.Contains(string(body), `"`+private+`"`) {
 			t.Fatalf("private metadata %s", body)
 		}
@@ -351,7 +350,7 @@ func TestCapabilityRotationScopeProperty(t *testing.T) {
 	}
 }
 
-func TestCapabilityRotationRegisteredOriginsAndConsent(t *testing.T) {
+func TestCapabilityRotationRegisteredOrigins(t *testing.T) {
 	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, spec := provisionOrigin(t, kind)
@@ -374,9 +373,6 @@ func TestCapabilityRotationRegisteredOriginsAndConsent(t *testing.T) {
 				actor.Authority = *spec.Authority
 			}
 			a := inventoryAuthorization(t, s, actor, spec.Team, old.Capability.Prefix)
-			if kind == capability.ProvisionMachine {
-				rewriteSchemaExec(t, s.db, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) VALUES ('a',?,'owner',1)`, old.Capability.Prefix)
-			}
 			rotation, err := s.rotateCapability(t.Context(), Team(spec.Team), a, time.Hour, nil)
 			if err != nil || !sameRotationScope(old.Capability, rotation.Issued.Capability) {
 				t.Fatalf("registered rotation: %+v %v", rotation, err)
@@ -402,8 +398,8 @@ func TestCapabilityRotationRegisteredOriginsAndConsent(t *testing.T) {
 			if kind == capability.ProvisionMachine {
 				a.Target.TokenPrefix = rotation.Issued.Capability.Prefix
 				metadata, err := (&Tenant{s: s, team: "a"}).ReadCapability(t.Context(), a)
-				if err != nil || !metadata.GitCredentials || metadata.CreatedBy != "owner" {
-					t.Fatalf("lost owner consent: %+v %v", metadata, err)
+				if err != nil || metadata.CreatedBy != "owner" {
+					t.Fatalf("lost owner: %+v %v", metadata, err)
 				}
 			}
 		})
@@ -519,7 +515,7 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 	}
 }
 
-func TestCapabilityRotationAdministratorRetainsMemberIdentity(t *testing.T) {
+func TestCapabilityRotationAdministratorCannotRotateMemberToken(t *testing.T) {
 	s := authorityStore(t)
 	member := authorityMember(t, s, "member", RoleEditor)
 	owner := authorityMember(t, s, "owner", RoleOwner)
@@ -527,13 +523,16 @@ func TestCapabilityRotationAdministratorRetainsMemberIdentity(t *testing.T) {
 	a := inventoryAuthorization(t, s, owner, "a", old.Capability.Prefix)
 	tenant := &Tenant{s: s, team: "a"}
 	rotation, err := tenant.RotateCapability(t.Context(), a, time.Hour, nil)
-	if err != nil || rotation.Issued.Capability.Subject != old.Capability.Subject || rotation.Previous.CreatedBy != "member" {
-		t.Fatalf("admin rotation changed member identity: %+v %v", rotation, err)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || rotation.Issued.Raw != "" {
+		t.Fatalf("admin rotated a member token: %+v %v", rotation, err)
 	}
-	a.Target.TokenPrefix = rotation.Issued.Capability.Prefix
-	row, err := tenant.ReadCapability(t.Context(), a)
-	if err != nil || row.CreatedBy != "member" {
-		t.Fatalf("admin replaced creator: %+v %v", row, err)
+	rewriteSchemaCount(t, s.db, "capabilities", 1)
+	if _, err := s.LookupCapability(t.Context(), old.Capability.Digest); err != nil {
+		t.Fatalf("refused rotation ended the member token: %v", err)
+	}
+	if err := tenant.RevokeAuthority(t.Context(), owner, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}); err != nil {
+		t.Fatalf("admin revoke: %v", err)
 	}
 }
 

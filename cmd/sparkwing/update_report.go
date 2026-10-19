@@ -51,6 +51,7 @@ type updateReceipt struct {
 	Replacement     string         `json:"sdk_replace,omitempty"`
 	ResolvedRelease string         `json:"resolved_release,omitempty"`
 	ManagedUnits    string         `json:"managed_units,omitempty"`
+	RunnerServices  string         `json:"runner_services,omitempty"`
 }
 
 func installedArtifactIdentity(path string) updateIdentity {
@@ -583,6 +584,9 @@ func writeUpdateReceipt(w io.Writer, result updateReceipt, mode string) error {
 	}
 	if result.ManagedUnits != "" {
 		fmt.Fprintf(&text, "  managed units: %s\n", result.ManagedUnits)
+	}
+	if result.RunnerServices != "" {
+		fmt.Fprintf(&text, "%s\n", result.RunnerServices)
 	}
 	_, err := io.WriteString(w, text.String())
 	return err

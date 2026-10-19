@@ -54,7 +54,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 					_, err := holdCreditFreezeTx(ctx, tx, tenant.team, "dispute", event.PaymentID, "disputed", "", now)
 					return err
 				case "dispute_close":
-					_, err := releaseCreditFreezesTx(ctx, tx, tenant.team, "dispute", false, "provider", "", now)
+					_, err := releaseCreditFreezesTx(ctx, tx, tenant.team, "dispute", false, false, "provider", "", now)
 					return err
 				case "warning":
 					_, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, now)

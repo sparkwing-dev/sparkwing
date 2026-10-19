@@ -24,7 +24,7 @@ func (sharedSourceReleaseContracts) AuthorizeSourceRelease(request capability.So
 }
 
 // ReleaseSourceCredential returns the sealed credential only after its authorization audit commits.
-// Repository, host, executor and consent come from persisted authority and the sealed request.
+// Repository, host and executor come from persisted authority and the sealed request.
 // The controller decrypts the returned credential; neither a host nor executor facts are client inputs.
 func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capability.Authorized) (GitCredential, capability.SourceReleaseAudit, error) {
 	var credential GitCredential
@@ -49,7 +49,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run, true)
+		request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run)
 		if err != nil {
 			return err
 		}
@@ -149,7 +149,7 @@ func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Ca
 	return nil
 }
 
-func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []authorityNode, run RunRow, requireConsent bool) (capability.SourceExecutor, error) {
+func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []authorityNode, run RunRow) (capability.SourceExecutor, error) {
 	if t.s.claimProfiles == nil {
 		return capability.SourceExecutor{}, authorityError(apierr.Unavailable, "source executor enrollment is unavailable")
 	}
@@ -178,53 +178,15 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, t.team, root.Prefix).Scan(&executor.OwnerAccountID); err != nil {
 		return capability.SourceExecutor{}, err
 	}
-	var consent int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM git_credential_machines WHERE team=? AND capability_prefix=? AND enabled_by=?`, t.team, root.Prefix, executor.OwnerAccountID).Scan(&consent); err != nil {
+	record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+	if err != nil {
 		return capability.SourceExecutor{}, err
 	}
-	executor.OwnerOptedIn = executor.OwnerAccountID != "" && consent == 1
-	if requireConsent && !executor.OwnerOptedIn {
-		return capability.SourceExecutor{}, bindingRefusal()
+	executor.Shared = record.Origin != nil && !record.Origin.Personal
+	if !executor.Shared {
+		return capability.SourceExecutor{}, apierr.Authorization(apierr.ReasonPersonalMachine, "team git credentials are released only to shared runners and Cloud work, never to a personal machine")
 	}
 	return executor, nil
-}
-
-// SetSourceMachineConsent changes only the authenticated account owner's machine consent.
-// Team administration cannot substitute for ownership, including when disabling consent.
-func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capability.AuthorityRef, machine string, enabled bool) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error {
-		p, err := tx.ResolveAuthority(ctx, authority)
-		if err != nil {
-			return err
-		}
-		if !p.DirectAccountSession() || p.Capability.Team != string(t.team) || p.Capability.Audience != capability.Controller {
-			return bindingRefusal()
-		}
-		root, err := readAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: machine}, true)
-		if err != nil {
-			return err
-		}
-		c := root.principal.Capability
-		if c.Team != string(t.team) || c.Subject.Kind != capability.SubjectMachine || c.Parent != nil || c.Binding.Kind != capability.BindingNone {
-			return bindingRefusal()
-		}
-		var owner string
-		if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, t.team, machine).Scan(&owner); err != nil {
-			return err
-		}
-		if owner != p.Capability.Subject.ID {
-			return bindingRefusal()
-		}
-		if _, err := authorityChainTx(ctx, tx, authority, false); err != nil {
-			return err
-		}
-		if !enabled {
-			_, err = tx.ExecContext(ctx, `DELETE FROM git_credential_machines WHERE team=? AND capability_prefix=?`, t.team, machine)
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) VALUES (?,?,?,?) ON CONFLICT(team,capability_prefix) DO UPDATE SET enabled_by=excluded.enabled_by,enabled_at=excluded.enabled_at`, t.team, machine, owner, tx.now().UnixNano())
-		return err
-	})
 }
 
 func insertSourceReleaseAuditTx(ctx context.Context, tx *storeTx, audit capability.SourceReleaseAudit) error {

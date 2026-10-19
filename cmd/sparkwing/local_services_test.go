@@ -155,12 +155,16 @@ func TestProductionLocalControllerReconcilesAndServesSharedHandlers(t *testing.T
 	}{
 		{"API", "/api/v1/auth/whoami"},
 		{"dashboard", "/sparkwing-runtime.js"},
+		{"shell", "/sparkwing-runtime.js"},
 	} {
 		response := httptest.NewRecorder()
 		h := owner.HTTP().API
 		want := 401
-		if handler.name == "dashboard" {
+		switch handler.name {
+		case "dashboard":
 			h, want = owner.HTTP().Dashboard, 200
+		case "shell":
+			h, want = owner.HTTP().Shell, 200
 		}
 		h.ServeHTTP(response, httptest.NewRequest("GET", handler.path, nil))
 		if response.Code != want {

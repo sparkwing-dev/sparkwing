@@ -295,8 +295,8 @@ func Scenarios() []Scenario {
 			ID: "credentials-source-release-opt-in", Group: "credentials",
 			Sections: []string{"§2.5", "§5.1", "A19", "decision 98"}, Requires: []Area{C1, C2, C3},
 			Placements: []Placement{RunnerHosted, Launcher, GitHubActions}, Fixtures: []string{"repo", "identities", "secrets", "store"},
-			Steps:      []string{"Request team git credentials as a live authorized team Cloud claim, a machine before and after owner opt-in, a wrong-team machine and a claimless root.", "Read source-release audit records and inspect generated process environment and home files."},
-			Assertions: []string{"Only a live source.read claim on the team's Cloud runner or an owner-opted-in machine receives team credentials.", "Each successful release has an audit row tied to the requester and source; no credential lands in process env or .netrc."},
+			Steps:      []string{"Request team git credentials and App tokens as a live authorized team Cloud claim, a shared runner, a personal machine, a wrong-team machine and a claimless root.", "Read source-release audit records and inspect generated process environment and home files."},
+			Assertions: []string{"Only a live source.read claim on the team's Cloud work or a shared runner receives team credentials or App tokens; a personal machine never does and fetches with its owner's own Git access (decision 6c, 2026-10-18, supersedes the owner opt-in).", "Each successful release has an audit row tied to the requester and source; no credential lands in process env or .netrc."},
 		},
 		{
 			ID: "credentials-revocation-residuals", Group: "credentials",

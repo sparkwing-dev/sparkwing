@@ -11,6 +11,7 @@ Run a pipeline on the machine where you invoke Sparkwing:
 ```bash
 sparkwing run build
 sparkwing dashboard start
+sparkwing dashboard open
 ```
 
 The local controller starts on demand and owns its home and state store. The
@@ -330,8 +331,8 @@ triggered and that the runner can reach the configured controller and logs
 URLs.
 
 **A private repository cannot be cloned.** Check the sealed source location,
-live claim, repository permission and source-release audit. A stored team
-credential also needs executor consent. See [team git credentials](git-credentials.md).
+live claim, repository permission and source-release audit. A team
+credential reaches only shared runners and Cloud work, never a personal machine. See [team git credentials](git-credentials.md).
 
 **A Docker step fails.** Docker is a pipeline dependency, not a Sparkwing
 service requirement. Install and start Docker only on machines assigned jobs

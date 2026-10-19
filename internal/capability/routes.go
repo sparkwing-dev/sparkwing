@@ -141,7 +141,6 @@ var Routes = []RoutePolicy{
 	route("GET", "/api/v1/tokens/{token}", OwnerTeam, RetrySafe, tokenOwner()),
 	route("DELETE", "/api/v1/tokens/{token}", OwnerTeam, RetrySafe, tokenOwner()),
 	route("POST", "/api/v1/tokens/{token}/rotate", OwnerTeam, RetryNever, tokenOwner()),
-	route("PUT", "/api/v1/tokens/{token}/git-credentials", OwnerTeam, RetrySafe, machineOwner()),
 	route("GET", "/api/v1/secrets", OwnerTeam, RetrySafe, member(RunsRead), member(TeamAdmin)),
 	route("POST", "/api/v1/secrets", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
 	route("GET", "/api/v1/secrets/{name}", OwnerTeam, RetrySafe, member(SecretsRead), member(TeamAdmin), claim(SecretsRelease, BindDeclaredSecret, LiveSensitive)),
@@ -165,6 +164,7 @@ var Routes = []RoutePolicy{
 	route("DELETE", "/api/v1/team/github-app/automation", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("PUT", "/api/v1/team/github-app/extra-repos", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("POST", "/api/v1/team/billing/checkout", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
+	route("POST", "/api/v1/team/billing/standing-request", OwnerTeam, RetryNever, member(TeamAdmin)),
 	route("POST", "/api/v1/team/billing/card", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
 	route("POST", "/api/v1/team/billing/pay", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
 	route("PUT", "/api/v1/team/billing/budget", OwnerTeam, RetrySafe, member(TeamAdmin)),
@@ -228,6 +228,8 @@ var Routes = []RoutePolicy{
 	route("DELETE", "/api/v1/operator/accounts/{account}", OwnerDeployment, RetrySafe, console()),
 	route("GET", "/api/v1/operator/waitlist", OwnerDeployment, RetrySafe, console()),
 	route("POST", "/api/v1/operator/waitlist/approve", OwnerDeployment, RetryIdempotencyKey, console()),
+	route("GET", "/api/v1/operator/standing-requests", OwnerDeployment, RetrySafe, console()),
+	route("POST", "/api/v1/operator/teams/{team}/standing-request/decline", OwnerDeployment, RetryIdempotencyKey, console()),
 	route("DELETE", "/api/v1/operator/github-app/installations/{installation}", OwnerDeployment, RetrySafe, console()),
 	route("PUT", "/api/v1/operator/credits/settings", OwnerDeployment, RetrySafe, console()),
 	route("POST", "/api/v1/operator/runners/{runner}/metered", OwnerDeployment, RetryIdempotencyKey, console()),
@@ -332,10 +334,6 @@ func intake() AccessRule {
 
 func tokenOwner() AccessRule {
 	return AccessRule{CredentialMember, []Grant{RunsRead}, BindOwnToken, LiveCredential}
-}
-
-func machineOwner() AccessRule {
-	return AccessRule{CredentialAccount, nil, BindMachineOwner, LiveCredential}
 }
 
 func selfOrTeamAdmin() AccessRule {

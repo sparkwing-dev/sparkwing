@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Local dashboard sign-in link
+
+The local dashboard's TCP listener now answers 401 to every API request without
+an `Authorization: Bearer` session; no cookie is set or accepted. Run
+`sparkwing dashboard open` after `sparkwing dashboard start` and visit the link
+it prints. The link works once and expires after 60 seconds, and the session
+lives in that browser tab's `sessionStorage`, so a separately opened tab needs a new
+link. The session ends after 12 hours without a request, 24 hours after sign-in,
+on Log out, or when the local controller restarts. Tools that call the local API
+should use the private socket, which needs no session.
+
 ## Runs without a runner selector run anywhere
 
 On every controller, Cloud and self-hosted, each trigger, App webhook run,
@@ -39,6 +50,25 @@ database. Unclaimed runs carry an `unclaimed_work` notice, Cloud work held by
 the team's credits carries a `credit_hold` notice instead, work no eligible
 runner can take carries a `no_eligible_runner` notice naming the cause, and
 `sparkwing_claim_empty_total` counts claim polls that matched nothing.
+
+## Team git credentials never reach personal machines
+
+Shared runners and Cloud work now receive the team's stored git credentials and
+GitHub App tokens without a per-machine opt-in. Personal machines never receive
+either: the source-credential release answers 403 with reason
+`personal_machine`, and they fetch with their owner's own git access.
+`PUT /api/v1/tokens/{token}/git-credentials`, the Machines page toggle, the
+`git_credentials` field on token metadata, `Tenant.SetSourceMachineConsent`,
+the `machineOwner` binding rule and the `git_credential_machines` table are
+removed with no replacement. Reason `owner_opt_in_required` is replaced by
+`personal_machine`. Drop scripts that called the consent route.
+
+## Only a token's owner rotates it
+
+`POST /api/v1/tokens/{token}/rotate` answers 403 when a team admin rotates
+another member's account token or personal machine, and the token keeps
+working. The owner rotates their own; the admin can still revoke it. Team
+admins still rotate shared runners.
 
 ## Job outputs holding a secret are withheld
 
@@ -448,10 +478,9 @@ checks still inspect sealed samples, and keyless secret access remains refused.
 
 Use `Tenant.ReleaseSourceCredential(ctx, authorized)` with the current
 capability authority. It derives the sealed source and executor, checks live
-ancestry, claim fences, SSH confirmation and owner consent, and commits the
-audit before returning a sealed credential. Read committed audits with
-`SourceReleaseAudits`. Change machine consent with `SetSourceMachineConsent`
-and the current machine owner's authority. These calls use the store clock. The unused `capabilities.source_mints`
+ancestry, claim fences, SSH confirmation and the shared-runner or Cloud
+executor, and commits the audit before returning a sealed credential. Read
+committed audits with `SourceReleaseAudits`. These calls use the store clock. The unused `capabilities.source_mints`
 column is removed from the final schema.
 
 ## Run completion and planning units
@@ -1136,10 +1165,6 @@ existing read methods. Its reader must belong to the authenticated team.
 `secret`, optional `username` and optional `known_hosts`. Checkout identity and
 policy come from the sealed execution input. The store commits authorization
 and its audit before the controller decrypts the credential.
-
-Move machine consent to `PUT /api/v1/tokens/{token}/git-credentials` with
-`{"enabled":true}` or `{"enabled":false}`. The machine owner's account session
-and CSRF proof are required. Team administration cannot substitute for ownership.
 
 Embedded controllers may supply `WithSourceController` with the declared
 transaction and bound-cipher interfaces. `WithSecretsCipher` also configures

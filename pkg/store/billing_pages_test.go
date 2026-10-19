@@ -49,7 +49,12 @@ func TestBillingPagesRecheckAuthorityProperty(t *testing.T) {
 		complete := tenant.CompleteAuthorizedBillingPage(t.Context(), a, page)
 		failure := tenant.RecordAuthorizedBillingPageFailure(t.Context(), a, page)
 		budget := tenant.SetAuthorizedSpendBudget(t.Context(), a, 2000)
-		return prepare != nil && complete != nil && failure != nil && budget != nil && reflect.DeepEqual(before, billingPageRows(t, s))
+		_, standing := tenant.RequestAuthorizedStanding(t.Context(), a, "High", "lost authority")
+		var requests int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM standing_requests`).Scan(&requests); err != nil {
+			t.Fatal(err)
+		}
+		return prepare != nil && complete != nil && failure != nil && budget != nil && standing != nil && requests == 0 && reflect.DeepEqual(before, billingPageRows(t, s))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 28}); err != nil {
 		t.Fatal(err)

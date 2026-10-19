@@ -53,7 +53,7 @@ export const emptyDraft: GitCredentialDraft = {
 export const defaultHTTPSUsername = "x-access-token";
 
 export const recipientsHelp =
-  "Cloud runners receive a team's git credentials, and so do machines an owner opts in on the Machines page.";
+  "Shared runners and Cloud work receive a team's git credentials. Personal machines never do; they use their owner's own git access.";
 
 export function normalizeHost(host: string): string {
   return host.trim().toLowerCase();
@@ -226,20 +226,6 @@ export async function listGitCredentialReleases(): Promise<
     "List credential releases",
   );
   return asList<GitCredentialRelease>(await res.json(), "releases");
-}
-
-export async function setMachineGitCredentials(
-  prefix: string,
-  enabled: boolean,
-): Promise<boolean> {
-  const res = await send(
-    "PUT",
-    `/api/v1/tokens/${seg(prefix)}/git-credentials`,
-    enabled ? "Send git credentials" : "Stop git credentials",
-    { enabled },
-  );
-  const body = (await res.json()) as { enabled?: boolean };
-  return body.enabled === true;
 }
 
 // requestMachineAutomation is the owner's request or withdrawal of automated runs for a personal machine.

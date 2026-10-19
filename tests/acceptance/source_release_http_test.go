@@ -24,20 +24,12 @@ type sourceTransactions struct {
 	audit            capability.SourceReleaseAudit
 	err              error
 	releases         int
-	consentAuthority capability.AuthorityRef
-	consentMachine   string
-	consentEnabled   bool
 }
 
 func (f *sourceTransactions) ReleaseSourceCredential(_ context.Context, a capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error) {
 	f.authorized = a
 	f.releases++
 	return f.credential, f.audit, f.err
-}
-
-func (f *sourceTransactions) SetSourceMachineConsent(_ context.Context, a capability.AuthorityRef, machine string, enabled bool) error {
-	f.consentAuthority, f.consentMachine, f.consentEnabled = a, machine, enabled
-	return f.err
 }
 
 type sourceCipher struct {
@@ -179,17 +171,13 @@ func FuzzSourceReleaseHTTPAuditCannotChangeCredentialScope(f *testing.F) {
 	})
 }
 
-func TestSourceMachineConsentHTTPUsesAccountAuthority(t *testing.T) {
+func TestSourceMachineConsentRouteIsGone(t *testing.T) {
 	b := authorityMember()
 	p := &b.snapshot.Authorities[0].Principal
 	p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 	tx, _, h := sourceHTTPFixture(t, b)
 	w := authorityHTTP(h, b, "PUT", "/api/v1/tokens/machine/git-credentials", `{"enabled":true}`)
-	if w.Code != 200 || tx.consentAuthority != b.snapshot.Authorities[0].Principal.Authority || tx.consentMachine != "machine" || !tx.consentEnabled || tx.releases != 0 {
-		t.Fatalf("HTTP %d %s tx=%+v", w.Code, w.Body.String(), tx)
-	}
-	for _, body := range []string{`{}`, `{"enabled":null}`, `{"enabled":true,"account":"other"}`} {
-		w = authorityHTTP(h, b, "PUT", "/api/v1/tokens/machine/git-credentials", body)
-		assertEngineError(t, w, 400, apierr.BadRequest)
+	if w.Code != 404 || tx.releases != 0 {
+		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 }

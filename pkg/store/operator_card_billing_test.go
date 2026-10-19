@@ -18,7 +18,7 @@ func cardCollectionFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	now := time.Date(2026, 10, 15, 12, 0, 0, 123, time.UTC)
 	s.clock = func() time.Time { return now }
 	tenant := &Tenant{s: s, team: "a"}
-	if _, _, err := tenant.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
+	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {

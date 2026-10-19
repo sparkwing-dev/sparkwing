@@ -164,6 +164,8 @@ The hourly run budget uses store-wide counters shared by controller replicas.
 
 `installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source credential route mints directly against the approved repository IDs, so the listing limit does not limit source releases. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery answers 502 without withdrawing any schedule except those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
 
+A run an App-armed schedule starts seals its repository as `owner/name`, the same display a push run carries. Only a team's own installations withdraw its App-armed schedules. A push to a repository's default branch withdraws the pushing team's schedules that another of its installations armed for that repository, and never touches another team's. When a repository moves to an installation another team binds, the former team's schedules stop when its own installation reports the removal, transfer or deletion.
+
 ### Pull requests from forks
 
 A pull request whose head repository is not its base repository, or whose head repository was deleted, is not run. The controller logs it and acknowledges the delivery as ignored; no subscription setting changes this. A fork's code would run on the team's runner with the runner's token in reach, and that token can claim the team's other work and read its secrets. If your team needs pull requests from forks built, contact support.
@@ -187,10 +189,9 @@ minting runs outside database transactions. A second short transaction rechecks
 the installation, subscription or schedule consent, approved IDs and claim fence.
 GitHub refusing the approved ID set returns 409 and names that set. Other mint
 failures return 503. No token is returned after failed reauthorization or audit.
-App tokens require the executor's repository match and same-team machine
-identity, or verified Cloud placement, but do not require machine-owner opt-in.
-
-Stored team credentials require executor consent as well as repository permission.
+App tokens and stored team credentials require the executor's repository match
+and either a same-team shared runner or verified Cloud placement. A personal
+machine never receives either.
 The store records each release before exposing a credential. The source owner
 passes credentials through memory or private fetch configuration, applies the
 shared Git environment policy and removes acquisition-owned files after use.

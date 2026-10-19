@@ -182,6 +182,11 @@ func (f *billingWriterFake) SetAuthorizedSpendBudget(_ context.Context, a capabi
 	return f.err
 }
 
+func (f *billingWriterFake) RequestAuthorizedStanding(_ context.Context, a capability.Authorized, tier, message string) (store.StandingRequest, error) {
+	f.seen = a
+	return store.StandingRequest{ID: "standing-fake", Team: f.team, Tier: tier, Message: message, State: store.StandingRequestOpen}, f.err
+}
+
 type billingPageTransport func(*http.Request) (*http.Response, error)
 
 func (f billingPageTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

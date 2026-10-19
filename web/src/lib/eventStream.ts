@@ -1,10 +1,7 @@
-import { localAuthHeaders, localSession, signedIn } from "./localSession";
+import { localAuthHeaders, localSession } from "./localSession";
 
 type Listener = (e: MessageEvent) => void;
 
-// EventStream is the part of EventSource the dashboard uses. A browser
-// EventSource cannot send an Authorization header, so a page holding a local
-// session reads the stream through fetch instead.
 export interface EventStream {
   onopen: (() => void) | null;
   onmessage: Listener | null;
@@ -15,7 +12,9 @@ export interface EventStream {
 
 export function openEventStream(url: string): EventStream {
   if (!localSession()) {
-    return new EventSource(url, { withCredentials: true }) as unknown as EventStream;
+    return new EventSource(url, {
+      withCredentials: true,
+    }) as unknown as EventStream;
   }
   return new FetchEventStream(url);
 }
@@ -27,8 +26,6 @@ export interface ParsedEvent {
   retry?: number;
 }
 
-// parseEventBlock reads one server-sent event block. data is null for a
-// block that carries no data, which still may set the id or retry delay.
 export function parseEventBlock(block: string): ParsedEvent {
   const event: ParsedEvent = { type: "message", data: null };
   const data: string[] = [];
@@ -41,7 +38,8 @@ export function parseEventBlock(block: string): ParsedEvent {
     if (field === "event") event.type = value;
     else if (field === "data") data.push(value);
     else if (field === "id" && !value.includes("\0")) event.id = value;
-    else if (field === "retry" && /^\d+$/.test(value)) event.retry = Number(value);
+    else if (field === "retry" && /^\d+$/.test(value))
+      event.retry = Number(value);
   }
   if (data.length > 0) event.data = data.join("\n");
   return event;
@@ -49,11 +47,6 @@ export function parseEventBlock(block: string): ParsedEvent {
 
 const MAX_RETRY_MS = 30_000;
 
-// FetchEventStream reads a server-sent event stream over fetch so it can
-// send an Authorization header, and reconnects the way EventSource does: a
-// dropped connection or a server error fires onerror, waits, and resumes
-// with Last-Event-ID so the server replays only what was missed. A 4xx
-// answer, like an EventSource's non-200, ends the stream for good.
 export class FetchEventStream implements EventStream {
   onopen: (() => void) | null = null;
   onmessage: Listener | null = null;
@@ -86,13 +79,15 @@ export class FetchEventStream implements EventStream {
   }
 
   private dispatch(type: string, data: string) {
-    const event = new MessageEvent(type, { data, lastEventId: this.lastEventId });
+    const event = new MessageEvent(type, {
+      data,
+      lastEventId: this.lastEventId,
+    });
     if (type === "message") this.onmessage?.(event);
     for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
 
   private async run() {
-    await signedIn();
     while (!this.closed) {
       const fatal = await this.connect();
       if (this.closed) return;
@@ -103,11 +98,12 @@ export class FetchEventStream implements EventStream {
     }
   }
 
-  // connect reads one connection to its end and reports whether the
-  // stream must not be retried.
   private async connect(): Promise<boolean> {
     try {
-      const headers: Record<string, string> = { Accept: "text/event-stream", ...localAuthHeaders() };
+      const headers: Record<string, string> = {
+        Accept: "text/event-stream",
+        ...localAuthHeaders(),
+      };
       if (this.lastEventId) headers["Last-Event-ID"] = this.lastEventId;
       const res = await fetch(this.url, { headers, signal: this.abort.signal });
       if (res.status >= 400 && res.status < 500) return true;
@@ -120,13 +116,16 @@ export class FetchEventStream implements EventStream {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) return false;
-        buffered += decoder.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
+        buffered += decoder
+          .decode(value, { stream: true })
+          .replace(/\r\n?/g, "\n");
         let end = buffered.indexOf("\n\n");
         while (end >= 0 && !this.closed) {
           const event = parseEventBlock(buffered.slice(0, end));
           buffered = buffered.slice(end + 2);
           if (event.id !== undefined) this.lastEventId = event.id;
-          if (event.retry !== undefined) this.retryMs = this.backoffMs = event.retry;
+          if (event.retry !== undefined)
+            this.retryMs = this.backoffMs = event.retry;
           if (event.data !== null) this.dispatch(event.type, event.data);
           end = buffered.indexOf("\n\n");
         }

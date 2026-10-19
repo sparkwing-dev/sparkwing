@@ -119,7 +119,7 @@ func TestGitHubAppCronLifecycleWithdrawsOldBindings(t *testing.T) {
 	}
 }
 
-func TestGitHubAppCronTransferWithdrawsFormerTeamBeforeNewArm(t *testing.T) {
+func TestGitHubAppCronPushNeverWithdrawsAnotherTeamsSchedule(t *testing.T) {
 	f := newAppFixture(t)
 	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
 	f.connect(olga, 501, 7, acmeAdmin)
@@ -136,7 +136,7 @@ func TestGitHubAppCronTransferWithdrawsFormerTeamBeforeNewArm(t *testing.T) {
 		t.Fatalf("new team's push = %d", code)
 	}
 	oldRows, newRows := appCronRows(t, f, olga.team), appCronRows(t, f, bob.team)
-	if len(oldRows) != 1 || oldRows[0].Declared || len(newRows) != 1 || !newRows[0].Declared ||
+	if len(oldRows) != 1 || !oldRows[0].Declared || len(newRows) != 1 || !newRows[0].Declared ||
 		oldRows[0].ID == newRows[0].ID || newRows[0].GitHubRepositoryID != 701 {
 		t.Fatalf("transfer schedules old=%+v new=%+v", oldRows, newRows)
 	}

@@ -244,7 +244,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 			}
 			return result, nil
 		}
-		_, err = releaseCreditFreezesTx(ctx, tx, team, e.ObjectID, false, "", "", tx.now())
+		_, err = releaseCreditFreezesTx(ctx, tx, team, e.ObjectID, false, false, "", "", tx.now())
 		return result, err
 	}
 	return result, authorityError(apierr.BadRequest, "unsupported provider outcome")

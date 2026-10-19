@@ -1,5 +1,5 @@
 import { readCSRFCookie } from "./csrfCookie";
-import { localAuthHeaders, signedIn } from "./localSession";
+import { localAuthHeaders } from "./localSession";
 import type { LogCompleteness } from "./logCompleteness";
 import type { TriggerGit } from "./triggerSource";
 
@@ -43,7 +43,7 @@ function getSessionCSRFHeaders(method: string | undefined): HeadersInit {
 }
 
 export type ConnectionStatus =
-  "ok" | "unreachable" | "unauthorized" | "session-expired";
+  "ok" | "unreachable" | "unauthorized" | "forbidden" | "session-expired";
 type StatusListener = (status: ConnectionStatus) => void;
 
 let _connectionStatus: ConnectionStatus = "ok";
@@ -103,18 +103,15 @@ export function authFetch(
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
-  return signedIn()
-    .then(() =>
-      fetch(url, {
-        ...opts,
-        headers: {
-          ...opts.headers,
-          ...getSessionCSRFHeaders(opts.method),
-          ...localAuthHeaders(),
-        },
-        signal: controller.signal,
-      }),
-    )
+  return fetch(url, {
+    ...opts,
+    headers: {
+      ...opts.headers,
+      ...getSessionCSRFHeaders(opts.method),
+      ...localAuthHeaders(),
+    },
+    signal: controller.signal,
+  })
     .then((res) => {
       if (res.status === 429) {
         _backoffUntil = Date.now() + 10_000;
@@ -126,8 +123,10 @@ export function authFetch(
       }
       if (res.status === 401 && sessionMode()) {
         endSession();
-      } else if (res.status === 401 || res.status === 403) {
+      } else if (res.status === 401) {
         setConnectionStatus("unauthorized");
+      } else if (res.status === 403) {
+        setConnectionStatus("forbidden");
       } else {
         setConnectionStatus("ok");
       }

@@ -19,7 +19,7 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 		t.Run(fmt.Sprintf("cores=%g/memory=%d", pin.cores, pin.memory), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, true)
 			s.billing = nil
-			if _, _, err := (&Tenant{s: s, team: "a"}).SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "price coverage"}, *now); err != nil {
+			if _, _, err := (&Tenant{s: s, team: "a"}).TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "price coverage"}, *now); err != nil {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, s.db, "UPDATE credit_grants SET amount_micro=100000000")

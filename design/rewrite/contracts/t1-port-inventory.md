@@ -667,7 +667,7 @@ replaces `TestAuditKeepsABearerInATargetOutOfTheLog`. Generated bearers pasted
 into token selectors or invalid roles never reach logs. Token targets retain
 only their public 16-character prefix. The three old tests and their obsolete
 rotation fixture are deleted. These are fake-backed HTTP proofs. They do not
-prove the committing rotation, grace, source-consent transfer or native route
+prove the committing rotation, grace, source-consent transfer (superseded by decision 6c) or native route
 matrix and add no archived source-function identity to the inventory.
 
 `pkg/store/download_accounting_runtime_test.go` ports

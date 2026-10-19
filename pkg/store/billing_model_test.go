@@ -464,3 +464,51 @@ func TestBillingModelCloudReclaimCannotRestartJobDeadline(t *testing.T) {
 		t.Fatalf("reclaim restarted job deadline: %+v: %v", p.Capability.Binding.Deadline, err)
 	}
 }
+
+func TestBillingModelEveryHoldLetsRunningCloudWorkFinish(t *testing.T) {
+	for _, hold := range []struct{ name, id, cause string }{
+		{"decline", "decline-a1", FreezeCauseDecline},
+		{"dispute", "dp_1", ""},
+		{"warning", "efw_1", FreezeCauseWarning},
+		{"operator", OperatorHoldPrefix + "x", ""},
+		{"future cause", "hold_future", "future"},
+		{"revoked", "", ""},
+		{"no hold", "", "control"},
+	} {
+		t.Run(hold.name, func(t *testing.T) {
+			s, demand, now := billingModelFixture(t)
+			claim, actor := meteredUnitClaim(t, s, demand)
+			tenant := &Tenant{s: s, team: "a"}
+			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case hold.id != "":
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,created_at) VALUES (?,'a','r',?,?)`, hold.id, hold.cause, now.UnixNano())
+			case hold.cause == "":
+				rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='revoked' WHERE name='a'`)
+			default:
+				rewriteSchemaExec(t, s.db, `UPDATE teams SET card_payment_method='' WHERE name='a'`)
+				rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE teams SET credit_exhausted_at=1 WHERE name='a'`)
+			*now = now.Add(time.Duration(DefaultCreditGraceSeconds+1) * time.Second)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE node_id='job'`, now.Add(time.Minute).UnixNano())
+			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if control := hold.cause == "control"; beat.CancelRequested != control {
+				t.Fatalf("cancel requested=%v with %s", beat.CancelRequested, hold.name)
+			}
+			if hold.cause == "control" {
+				return
+			}
+			billingModelJob(t, s, "second")
+			demand.Target.NodeID = "second"
+			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+				t.Fatalf("%s admitted new Cloud work", hold.name)
+			}
+		})
+	}
+}

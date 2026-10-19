@@ -809,3 +809,20 @@ Assigned to an Opus implementer (env 1087).
 - Decision 6(c) stands for every personal machine, approved or not: no team git credentials and no App installation tokens. A personal machine fetches with its owner's own git access.
 - A personal machine is eligible for an automated run only if its owner can read the run's repository and every extra repository the run needs. The controller checks this server-side via the App installation (the owner's linked GitHub login's collaborator permission on each repository), cached briefly, never from the machine's claim. An ineligible machine is skipped by ranking; it does not claim and fail.
 - Korey's words: "people should still only be able to run the repositories that they have access to".
+
+## 2026-10-18 Korey decision 17: `sparkwing update` refreshes runner services
+
+- `sparkwing update` calls `service.Refresh` after installing a new binary, restarting installed runner services (launchd, systemd, Windows service) onto it and saying which it restarted. No installed service means no change.
+
+## 2026-10-18 Korey decision 18: operator holds and clean days
+
+- Any hold placed or released still restarts the clean-day count for history standing.
+- When an operator releases a hold they placed, they may mark it "no fault found"; that hold then does not restart the count (the count continues as if the hold never happened). Audited. Payment-dispute and automatic holds always restart it.
+
+## 2026-10-18 Korey decision 19: failed card charges hold new Cloud work
+
+- A failed charge on the team's saved card (decline, expired card, failed collection) puts the team on `credit_hold` for new Cloud admissions immediately. Running jobs finish. Runs on the team's own runners continue (unmetered).
+- The billing page and run notices say the card was declined and to update it.
+- A successful charge clears that hold automatically and does not restart the clean-day count (like a no-fault release).
+- Customer-visible and approved; GitHub Actions blocks new paid minutes on payment failure while free usage continues.
+- Superseded the same day (Korey: "Do what you think is best"): `sparkwing update` replaces only the CLI, while runner services run `sparkwing-runner`, which updates itself from its controller (drain, replace, refresh units, restart). `service.Refresh` and its test are deleted; `sparkwing update` prints that runner services update themselves from their controller.

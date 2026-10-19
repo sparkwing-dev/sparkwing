@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -33,6 +36,25 @@ func (t *Tenant) AdmitScheduledRun(ctx context.Context, schedule CronSchedule, d
 	return t.admitSchedule(ctx, schedule, schedule.ID+"@"+due.UTC().Format(time.RFC3339Nano), due, nil)
 }
 
+func scheduleDisplay(schedule CronSchedule) (string, error) {
+	if schedule.GitHubRepositoryID == 0 {
+		return schedule.RepoPath, nil
+	}
+	remote, err := sourceurl.ValidateCloneURL(schedule.RepoPath)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(remote)
+	if err != nil || !strings.EqualFold(parsed.Hostname(), "github.com") {
+		return "", fmt.Errorf("%w: App schedule repository is not a GitHub URL", ErrInvalidInput)
+	}
+	repo, ok := ParseGitHubRepo(strings.TrimSuffix(strings.Trim(parsed.Path, "/"), ".git"))
+	if !ok {
+		return "", fmt.Errorf("%w: App schedule repository must name owner/name", ErrInvalidInput)
+	}
+	return repo.Slug(), nil
+}
+
 func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key string, due time.Time, caller *capability.Authorized) (AdmissionResult, error) {
 	if schedule.Team != t.team || schedule.Where != CronWhereController && schedule.Where != CronWhereLocal {
 		return AdmissionResult{}, ErrInvalidInput
@@ -45,9 +67,13 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 		}
 		return AdmissionResult{}, err
 	}
+	display, err := scheduleDisplay(schedule)
+	if err != nil {
+		return AdmissionResult{}, err
+	}
 	input := runspec.Request{
 		Version: 1, Team: string(t.team), Pipeline: schedule.Pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginSchedule,
-		RequestedArgs: schedule.Effective().Args, Git: runspec.Git{Repository: runspec.Repository{Key: schedule.RepositoryKey, Display: schedule.RepoPath}, Ref: schedule.GitBranch, SHA: schedule.LockedRef},
+		RequestedArgs: schedule.Effective().Args, Git: runspec.Git{Repository: runspec.Repository{Key: schedule.RepositoryKey, Display: display}, Ref: schedule.GitBranch, SHA: schedule.LockedRef},
 	}
 	if in.consent != "" {
 		if json.Unmarshal([]byte(in.consent), &saved) != nil || saved.Version != 1 {
@@ -127,7 +153,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	input.RequestedArgs = schedule.Effective().Args
 	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input}
 	var result AdmissionResult
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		tx.scheduleAdmission = &in
 		if !schedule.Declared || caller == nil && schedule.Paused {
 			return bindingRefusal()

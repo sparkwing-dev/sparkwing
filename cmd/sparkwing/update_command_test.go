@@ -65,6 +65,27 @@ func TestUpdateCommandRefreshesManagedUnitsAfterVerifiedInstall(t *testing.T) {
 	}
 }
 
+func TestUpdateCommandSaysRunnerServicesUpdateThemselves(t *testing.T) {
+	for _, status := range []string{"updated", "current"} {
+		t.Run(status, func(t *testing.T) {
+			command, out, _ := updateCommandFixture(t)
+			install := command.install
+			command.install = func(version string, force, override bool) (updateReceipt, error) {
+				receipt, err := install(version, force, override)
+				receipt.Status = status
+				return receipt, err
+			}
+			if err := command.runArgs(t.Context(), []string{"--force", "--override-hold", "-o", "pretty"}); err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Count(out.String(), updateRunnerServicesNote+"\n")
+			if status == "updated" && lines != 1 || status == "current" && lines != 0 {
+				t.Fatalf("%s receipt:\n%s", status, out)
+			}
+		})
+	}
+}
+
 func TestUpdateCommandDryRunNeverInstallsOrTouchesUnits(t *testing.T) {
 	command, out, calls := updateCommandFixture(t)
 	err := command.runArgs(t.Context(), []string{"--dry-run", "--version", "v1.2.3", "-o", "json"})

@@ -87,13 +87,9 @@ func TestProvisionMachineRecordsAccountOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tenant := &Tenant{s: s, team: "a"}
-	if err := tenant.SetSourceMachineConsent(t.Context(), *spec.Authority, issued.Capability.Prefix, true); err != nil {
-		t.Fatalf("registered owner could not consent: %v", err)
-	}
-	other := authorityMember(t, s, "other", RoleOwner)
-	if err := tenant.SetSourceMachineConsent(t.Context(), other.Authority, issued.Capability.Prefix, false); err == nil {
-		t.Fatal("another team owner replaced machine ownership")
+	var owner string
+	if err := s.db.QueryRow(`SELECT created_by FROM capabilities WHERE prefix=?`, issued.Capability.Prefix).Scan(&owner); err != nil || owner == "" {
+		t.Fatalf("machine owner = %q: %v", owner, err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, spec.Authority.ID)
 	if _, err := s.LookupCapability(t.Context(), issued.Capability.Digest); err != nil {

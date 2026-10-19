@@ -48,11 +48,13 @@ type Var struct {
 	Doc        string
 	RemoteBase bool
 	Startup    bool
+	GoTool     bool
 }
 
 // Base makes inherited input explicit; local children reuse Captured, never the daemon's ambient environment.
 type Base struct {
 	Local          bool
+	OwnerMachine   bool
 	Captured       []string
 	Ambient        []string
 	SubmitEnvAllow []string

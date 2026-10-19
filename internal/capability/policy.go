@@ -43,7 +43,6 @@ const (
 	BindExpansion          BindingRule = "expansion"
 	BindClaimSelection     BindingRule = "claimSelection"
 	BindOwnToken           BindingRule = "ownToken"
-	BindMachineOwner       BindingRule = "machineOwner"
 	BindSelfOrTeamAdmin    BindingRule = "selfOrTeamAdmin"
 	BindOwnCleanup         BindingRule = "ownCleanup"
 	BindPlanOwner          BindingRule = "planOwner"
@@ -479,7 +478,7 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 	b := p.Capability.Binding
 	run := b.RunID != "" && b.RunID == t.RunID
 	switch rule {
-	case BindNone, BindOperatorSettings, BindOwnToken, BindMachineOwner, BindSelfOrTeamAdmin:
+	case BindNone, BindOperatorSettings, BindOwnToken, BindSelfOrTeamAdmin:
 		return true
 	case BindRun:
 		return run
@@ -584,7 +583,7 @@ func validateRoutePolicy(route RoutePolicy) error {
 		}, access.Credential) ||
 			!slices.Contains([]BindingRule{
 				BindNone, BindOperatorSettings, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
-				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindSourceBundle, BindData, BindExpansion, BindClaimSelection, BindOwnToken, BindMachineOwner,
+				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindSourceBundle, BindData, BindExpansion, BindClaimSelection, BindOwnToken,
 				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval, BindSourceReport,
 			}, access.Binding) ||
 			!slices.ContainsFunc(LivenessPolicies, func(policy LivenessPolicy) bool { return policy.Class == access.Liveness }) {

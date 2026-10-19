@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -52,11 +53,42 @@ func releaseUnappliedTx(
 	return release, nil
 }
 
-// TeamCreditFreeze is whether a team's cloud usage is held, and by which
-// disputes.
+// TeamCreditFreeze lists a team's open holds, named by id in Disputes, with each hold's cause in Causes.
 type TeamCreditFreeze struct {
 	Frozen   bool
 	Disputes []string
+	Causes   []string
+}
+
+// Hold causes the operator console names.
+const (
+	HoldCauseOperator = "operator"
+	HoldCauseDispute  = "dispute"
+	HoldCauseRevoked  = "revoked"
+)
+
+// PrimaryHoldCause names the hold whose remedy applies first: holds only support can lift outrank a declined charge.
+func PrimaryHoldCause(causes []string) string {
+	for _, c := range []string{HoldCauseDispute, FreezeCauseWarning, HoldCauseOperator, FreezeCauseDecline} {
+		if slices.Contains(causes, c) {
+			return c
+		}
+	}
+	if len(causes) > 0 {
+		return causes[0]
+	}
+	return ""
+}
+
+// HoldCause names why a hold was placed: an operator, a payment dispute, a declined charge or an early fraud warning.
+func HoldCause(id, cause string) string {
+	switch {
+	case strings.HasPrefix(id, OperatorHoldPrefix):
+		return HoldCauseOperator
+	case cause == "":
+		return HoldCauseDispute
+	}
+	return cause
 }
 
 // ErrDisputeConflict is returned when a hold or a reversal names a dispute
@@ -129,7 +161,7 @@ func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string,
 
 func (t *Tenant) releaseFreezes(ctx context.Context, disputeID string, operatorOnly bool, actor, reason string, now time.Time) (count int64, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, actor, reason, now)
+		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, false, actor, reason, now)
 		return err
 	})
 	if err != nil {
@@ -157,7 +189,7 @@ func releasedDisputesTx(ctx context.Context, tx *storeTx, query string, args ...
 
 // CreditFreeze reports whether t's cloud usage is held.
 func (t *Tenant) CreditFreeze(ctx context.Context) (_ TeamCreditFreeze, err error) {
-	rows, err := t.s.query(ctx, `SELECT dispute_id FROM credit_freezes
+	rows, err := t.s.query(ctx, `SELECT dispute_id, cause FROM credit_freezes
 	  WHERE team = ? AND released_at IS NULL ORDER BY created_at, dispute_id`, string(t.team))
 	if err != nil {
 		return TeamCreditFreeze{}, err
@@ -167,7 +199,7 @@ func (t *Tenant) CreditFreeze(ctx context.Context) (_ TeamCreditFreeze, err erro
 }
 
 func teamCreditFreezeTx(ctx context.Context, tx *storeTx, team Team) (_ TeamCreditFreeze, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT dispute_id FROM credit_freezes
+	rows, err := tx.QueryContext(ctx, `SELECT dispute_id, cause FROM credit_freezes
 	  WHERE team = ? AND released_at IS NULL ORDER BY created_at, dispute_id`, string(team))
 	if err != nil {
 		return TeamCreditFreeze{}, err
@@ -179,11 +211,12 @@ func teamCreditFreezeTx(ctx context.Context, tx *storeTx, team Team) (_ TeamCred
 func scanCreditFreeze(rows *sql.Rows) (TeamCreditFreeze, error) {
 	var out TeamCreditFreeze
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, cause string
+		if err := rows.Scan(&id, &cause); err != nil {
 			return TeamCreditFreeze{}, err
 		}
 		out.Disputes = append(out.Disputes, id)
+		out.Causes = append(out.Causes, HoldCause(id, cause))
 	}
 	out.Frozen = len(out.Disputes) > 0
 	return out, rows.Err()

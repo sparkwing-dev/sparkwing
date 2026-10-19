@@ -159,12 +159,16 @@ type BillingStanding struct {
 	TrustAt        time.Time
 	TrustReason    string
 	Trusted        bool
+	History        StandingHistory
+	PrepayCeiling  string
+	HoldCause      string
 }
 const BillingTrustAutomatic = ""
 type BillingTrustChange struct {
-	Trust  string
-	Actor  string
-	Reason string
+	Trust   string
+	Actor   string
+	Reason  string
+	Request string
 }
 const BillingTrustGranted = "granted"
 const BillingTrustRevoked = "revoked"
@@ -207,6 +211,8 @@ const BusinessEventCheckoutPaid = "checkout.paid"
 const BusinessEventCreditGranted = "credit.granted"
 const BusinessEventCreditReversed = "credit.reversed"
 const BusinessEventFirstRunSucceeded = "run.first_succeeded"
+const BusinessEventStandingRequestDecided = "billing.standing_request_decided"
+const BusinessEventStandingRequested = "billing.standing_requested"
 const BusinessEventTeamCreated = "team.created"
 const BusinessEventTeamFrozen = "team.frozen"
 const BusinessEventTeamUnfrozen = "team.unfrozen"
@@ -437,6 +443,7 @@ type ConcurrencyWaiter struct {
 type Console struct {
 }
 func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Authorized, ids []string, oldest int, key string) ([]Account, error)
+func (c *Console) ConsoleDeclineStandingRequest(ctx context.Context, a capability.Authorized, id, reason string) (StandingRequest, error)
 func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authorized) (AccountDeletion, error)
 func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized) (TeamDeletion, error)
 func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, reason string) (TeamCreditFreeze, error)
@@ -445,7 +452,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 func (c *Console) ConsoleSetBillingTrust(ctx context.Context, a capability.Authorized, change BillingTrustChange) (BillingStanding, error)
 func (c *Console) ConsoleSetCreditSettings(ctx context.Context, a capability.Authorized, up CreditSettingsUpdate) (CreditSettings, error)
 func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capability.Authorized, installation int64) (Team, error)
-func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, hold, reason string) (TeamCreditFreeze, error)
+func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, hold, reason string, noFault bool) (TeamCreditFreeze, error)
 type ControllerRun struct {
 	Team  Team
 	RunID string
@@ -867,6 +874,8 @@ var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
+var ErrStandingRequestClosed = errors.New("the standing request is no longer open")
+var ErrStandingRequestOpen = errors.New("the team already has an open standing request")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 var ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
@@ -1091,6 +1100,10 @@ const GuardQueueDeadline EdgeGuard = "queue_or_owner_deadline"
 const GuardRetry EdgeGuard = "retryable_failure_with_budget"
 const GuardUnclaimed EdgeGuard = "unclaimed"
 const GuardUnpriced EdgeGuard = "authorized_unpriced_claim"
+func HoldCause(id, cause string) string
+const HoldCauseDispute = "dispute"
+const HoldCauseOperator = "operator"
+const HoldCauseRevoked = "revoked"
 type Identity struct {
 	Provider string
 	Subject  string
@@ -1112,6 +1125,8 @@ type InsufficientCreditsError struct {
 	Frozen bool
 
 	Limit string
+
+	Hold string
 }
 func (e *InsufficientCreditsError) Error() string
 func (e *InsufficientCreditsError) Unwrap() error
@@ -1524,13 +1539,13 @@ func (o *Operator) Team() Team
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
 func (o *Operator) WarmCPUClassCores(ctx context.Context) (int64, error)
-func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error)
 func (o *Operator) WriteComputeLimits(ctx context.Context, a capability.Authorized, updates map[string]int64) (ComputeLimits, error)
 func (o *Operator) WriteSignUpSettings(ctx context.Context, a capability.Authorized, req SignUpSettingsChange) error
 func (o *Operator) WriteStorageAllowance(ctx context.Context, a capability.Authorized, bytes int64) (StorageQuota, error)
 func (o *Operator) WriteStorageQuota(ctx context.Context, a capability.Authorized, in StorageQuota) (StorageQuota, error)
 func (o *Operator) WriteStorageSettings(ctx context.Context, a capability.Authorized, in StorageSettings) error
 const OperatorHoldPrefix = "operator-"
+const OperatorReasonLimit = 500
 type OperatorStore interface {
 	AcquireSingletonLease(context.Context, string, string, time.Duration) (SingletonLease, error)
 	RenewSingletonLease(context.Context, SingletonLease, time.Duration) (SingletonLease, error)
@@ -1689,6 +1704,7 @@ type PoolAccessRule struct {
 }
 const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
+func PrimaryHoldCause(causes []string) string
 type ProfileObservation struct {
 	Partial         bool
 	Duration        time.Duration
@@ -2053,7 +2069,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "events", Owner: SchemaTenant},
 	{Name: "flow_nonces", Owner: SchemaOperator},
 	{Name: "free_slots", Owner: SchemaTenant},
-	{Name: "git_credential_machines", Owner: SchemaTenant},
 	{Name: "git_credential_releases", Owner: SchemaTenant},
 	{Name: "git_credentials", Owner: SchemaTenant},
 	{Name: "github_app_automation", Owner: SchemaTenant},
@@ -2098,6 +2113,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "signup_gate", Owner: SchemaOperator},
 	{Name: "sparkwing_schema_version", Owner: SchemaOperator},
 	{Name: "source_uploads", Owner: SchemaTenant},
+	{Name: "standing_requests", Owner: SchemaTenant},
 	{Name: "storage_month_usage", Owner: SchemaTenant},
 	{Name: "storage_quotas", Owner: SchemaTenant},
 	{Name: "storage_run_usage", Owner: SchemaTenant},
@@ -2305,6 +2321,7 @@ const SpendLimitBalance = "balance"
 const SpendLimitBudget = "budget"
 const SpendLimitChargeFailed = "charge_failed"
 const SpendLimitChargePending = "charge_pending"
+const SpendLimitHeld = "held"
 type SpendStanding struct {
 	Billing         BillingStanding
 	Card            Card
@@ -2318,10 +2335,35 @@ type SpendStanding struct {
 func (s SpendStanding) CardBilled() bool
 func (s SpendStanding) ChargeFailed() bool
 func (s SpendStanding) Headroom() (int64, string)
+func (s SpendStanding) RunningWorkContinues() bool
 const SpendWindowDays = 30
 type StagingDeleter interface {
 	DeleteObject(context.Context, string) error
 }
+type StandingHistory struct {
+	Tier              string
+	PaidMicro         int64
+	SuccessfulCharges int64
+	FirstPaidAt       time.Time
+	LastIncidentAt    time.Time
+}
+type StandingRequest struct {
+	ID             string
+	Team           Team
+	Tier           string
+	Message        string
+	RequestedBy    string
+	RequesterEmail string
+	RequestedAt    time.Time
+	State          string
+	DecidedBy      string
+	DecidedAt      time.Time
+	DecisionReason string
+}
+const StandingRequestApproved = "approved"
+const StandingRequestDeclined = "declined"
+const StandingRequestMessageLimit = 1000
+const StandingRequestOpen = "open"
 type StateEvent struct {
 	Seq      int64
 	StateSeq int64
@@ -2476,6 +2518,7 @@ func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session,
 func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error)
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error)
+func (s *Store) OpenStandingRequests(ctx context.Context, limit int) (_ []StandingRequest, err error)
 func (s *Store) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error)
 func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error)
@@ -2528,6 +2571,7 @@ type Team string
 type TeamCreditFreeze struct {
 	Frozen   bool
 	Disputes []string
+	Causes   []string
 }
 type TeamDeletion struct {
 	Team        Team
@@ -2648,6 +2692,7 @@ func (t *Tenant) HeartbeatAuthorizedSlot(ctx context.Context, a capability.Autho
 func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error)
 func (t *Tenant) Info(ctx context.Context) (TeamInfo, error)
 func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation, err error)
+func (t *Tenant) LatestStandingRequest(ctx context.Context) (StandingRequest, bool, error)
 func (t *Tenant) LinkedGitHubSubject(ctx context.Context, a capability.Authorized) (string, error)
 func (t *Tenant) ListApprovalsForRun(ctx context.Context, runID string) (_ []*Approval, err error)
 func (t *Tenant) ListCapabilities(ctx context.Context, a capability.Authorized, filter capability.InventoryFilter) ([]capability.Metadata, error)
@@ -2681,6 +2726,7 @@ func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) NodeIsAncestor(ctx context.Context, runID, ancestor, node string) (found bool, err error)
 func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, body *controllerwire.ScheduleOverride) (string, error)
+func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Principal, run string) (bool, error)
 func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, paused bool) (string, error)
 func (t *Tenant) PersonalRepoAccessNeeds(ctx context.Context, prefix string) ([]PersonalRepoAccessNeed, error)
 func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.Authorized, kind capability.BillingPageKind, amount int64, key string) (capability.BillingPage, error)
@@ -2743,6 +2789,7 @@ func (t *Tenant) ReplaceAuthorizedLocalSchedules(ctx context.Context, a capabili
 func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Authorized, body controllerwire.ScheduleRepoRequest) ([]string, []string, error)
 func (t *Tenant) ReplayRun(ctx context.Context, request IntakeRequest) (AdmissionResult, bool, error)
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error
+func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Authorized, tier, message string) (StandingRequest, error)
 func (t *Tenant) RequestMachineAutomation(ctx context.Context, authority capability.AuthorityRef, machine string, requested bool) (string, error)
 func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error)
 func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error)
@@ -2766,7 +2813,6 @@ func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Autho
 func (t *Tenant) SetAuthorizedGitHubExtraRepos(ctx context.Context, a capability.Authorized, repository string, extras []string, ids map[string]int64) ([]string, error)
 func (t *Tenant) SetAuthorizedSpendBudget(ctx context.Context, a capability.Authorized, cents int64) error
 func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update controllerwire.TeamSettingsUpdate) error
-func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
 func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
@@ -2774,7 +2820,6 @@ func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *ti
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (t *Tenant) SetOverflowLimit(ctx context.Context, authority capability.AuthorityRef, minutes *int64) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
-func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capability.AuthorityRef, machine string, enabled bool) error
 func (t *Tenant) SetStorageAllowance(ctx context.Context, bytes int64) (StorageQuota, error)
 func (t *Tenant) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error
@@ -2798,6 +2843,7 @@ func (t *Tenant) UseGitHubCommitStatuses(ctx context.Context, runID string) erro
 func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)
 func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
+func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
 func (t *Tenant) WriteActivity(ctx context.Context, ref NodeRef, actor Actor, detail string) error
 func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error
 func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, sealed SealedGitCredential) (GitCredential, error)

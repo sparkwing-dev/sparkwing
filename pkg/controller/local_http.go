@@ -35,11 +35,13 @@ func (s *Server) HTTP() wingd.LocalHTTP {
 			writeRouteMiss(w, allowedRouteMethods(policy, r, routeProbeMethods))
 		})
 		api := s.observedHandler(router.ServeMux)
-		dashboard := api
+		s.localHTTP = wingd.LocalHTTP{API: api, Dashboard: api}
 		if s.dashboard != nil {
-			dashboard = s.browserHandler(api)
+			s.localHTTP.Dashboard = s.browserHandler(api)
 		}
-		s.localHTTP = wingd.LocalHTTP{API: api, Dashboard: dashboard}
+		if s.dashboard != nil && s.dashboard.Local {
+			s.localHTTP.Shell = s.localShell()
+		}
 	})
 	return s.localHTTP
 }

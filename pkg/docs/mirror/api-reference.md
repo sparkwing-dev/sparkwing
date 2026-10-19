@@ -150,7 +150,6 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/tokens/{token}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
 | `DELETE` | `/api/v1/tokens/{token}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
 | `POST` | `/api/v1/tokens/{token}/rotate` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
-| `PUT` | `/api/v1/tokens/{token}/git-credentials` | `controller` | `team` | `capability` | `safe` | `account_session` / `` / `machineOwner` / `credential` |
 | `GET` | `/api/v1/secrets` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/secrets` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `GET` | `/api/v1/secrets/{name}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `secrets.read` / `none` / `credential`<br>`unbound_member_or_local` / `team.admin` / `none` / `credential`<br>`awarded_or_delegated_claim` / `secrets.release` / `declaredSecret` / `sensitive` |
@@ -174,6 +173,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `DELETE` | `/api/v1/team/github-app/automation` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `PUT` | `/api/v1/team/github-app/extra-repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/team/billing/checkout` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/team/billing/standing-request` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/team/billing/card` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/team/billing/pay` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `PUT` | `/api/v1/team/billing/budget` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
@@ -237,6 +237,8 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `DELETE` | `/api/v1/operator/accounts/{account}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `GET` | `/api/v1/operator/waitlist` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `POST` | `/api/v1/operator/waitlist/approve` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/standing-requests` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/teams/{team}/standing-request/decline` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `DELETE` | `/api/v1/operator/github-app/installations/{installation}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `PUT` | `/api/v1/operator/credits/settings` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `POST` | `/api/v1/operator/runners/{runner}/metered` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |

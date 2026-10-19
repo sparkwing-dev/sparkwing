@@ -19,6 +19,7 @@ mode needs no account, profile or network listener.
 ```bash
 sparkwing run build
 sparkwing dashboard start
+sparkwing dashboard open
 ```
 
 After the first successful build, exact-pinned pipelines can run offline. See

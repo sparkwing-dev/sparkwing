@@ -64,6 +64,7 @@ sparkwing run hello
 
 # Dashboard lifecycle (requires the native runtime binding)
 sparkwing dashboard start
+sparkwing dashboard open    # one-time browser sign-in link
 ```
 
 When a team should see the same runs, connect the machine to a

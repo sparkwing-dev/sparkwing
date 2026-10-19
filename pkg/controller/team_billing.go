@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -39,6 +40,7 @@ type teamBillingJSON struct {
 	StorageFreeAllowanceBytes int64                  `json:"storage_free_allowance_bytes"`
 	StorageChargedMicro       int64                  `json:"storage_charged_micro"`
 	Frozen                    bool                   `json:"frozen"`
+	HoldCause                 string                 `json:"hold_cause,omitempty"`
 	Trusted                   bool                   `json:"trusted"`
 	CheckoutEnabled           bool                   `json:"checkout_enabled"`
 	CanPurchase               bool                   `json:"can_purchase"`
@@ -47,6 +49,7 @@ type teamBillingJSON struct {
 	CanAddCard                bool                   `json:"can_add_card"`
 	OpenCharge                *teamChargeJSON        `json:"open_charge,omitempty"`
 	Limits                    teamLimitsJSON         `json:"limits"`
+	Standing                  wire.TeamStanding      `json:"standing"`
 	Usage                     []teamBillingUsageJSON `json:"usage"`
 	Grants                    []teamBillingGrantJSON `json:"grants"`
 }
@@ -125,6 +128,10 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		return engineLookupError(err)
 	}
 	owner := slices.Contains(a.Principal.Capability.Grants, capability.TeamAdmin)
+	teamStanding, err := teamStandingBody(ctx, t, standing, owner)
+	if err != nil {
+		return engineLookupError(err)
+	}
 	out := teamBillingJSON{
 		Team:                      string(t.Team()),
 		BalanceMicro:              state.BalanceMicro,
@@ -137,12 +144,14 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		StorageFreeAllowanceBytes: state.StorageFreeAllowanceBytes,
 		StorageChargedMicro:       state.StorageChargedMicro,
 		Frozen:                    freeze.Frozen,
+		HoldCause:                 standing.HoldCause,
 		Trusted:                   standing.Trusted,
 		CheckoutEnabled:           s.checkout != nil,
 		CanPurchase:               s.checkout != nil && owner,
 		CardBilled:                spend.CardBilled(),
 		CanAddCard:                s.checkout != nil && owner,
 		Limits:                    teamLimitsBody(spend),
+		Standing:                  teamStanding,
 		Usage:                     make([]teamBillingUsageJSON, 0, len(usage)),
 		Grants:                    make([]teamBillingGrantJSON, 0, len(grants)),
 	}

@@ -11,10 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// SourceTransactions commits source authorization and machine-owner consent.
+// SourceTransactions commits source authorization and its release audit.
 type SourceTransactions interface {
 	ReleaseSourceCredential(context.Context, capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error)
-	SetSourceMachineConsent(context.Context, capability.AuthorityRef, string, bool) error
 }
 
 // SourceController releases source access only after its store audit commits.
@@ -139,7 +138,6 @@ func (s *Server) sourceEndpoints() []Endpoint {
 	e := s.engineController
 	return []Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleSourceRelease},
-		{Method: "PUT", Pattern: "/api/v1/tokens/{token}/git-credentials", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSourceConsent},
 	}
 }
 
@@ -156,27 +154,6 @@ func (s *Server) handleSourceRelease(w http.ResponseWriter, r *http.Request, a c
 		return err
 	}
 	writeJSON(w, http.StatusOK, credential)
-	return nil
-}
-
-func (s *Server) handleSourceConsent(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var request struct {
-		Enabled *bool `json:"enabled"`
-	}
-	if err := decodeEngineRequest(r, &request); err != nil {
-		return err
-	}
-	if request.Enabled == nil {
-		return invalidEngineBody("enabled must be a boolean")
-	}
-	tenant, err := s.sourceAdapter().transactions(r.Context(), a.Target.Team)
-	if err != nil {
-		return err
-	}
-	if err := tenant.SetSourceMachineConsent(r.Context(), a.Principal.Authority, a.Target.TokenPrefix, *request.Enabled); err != nil {
-		return engineLookupError(err)
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"enabled": *request.Enabled})
 	return nil
 }
 

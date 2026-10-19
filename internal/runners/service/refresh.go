@@ -13,32 +13,27 @@ import (
 
 // Inspect reads the registration command and configuration without contacting its service manager.
 func Inspect(ctx context.Context, h Host) (State, error) {
-	state, _, err := inspect(ctx, h)
-	return state, err
-}
-
-func inspect(ctx context.Context, h Host) (State, string, error) {
 	if err := ctx.Err(); err != nil {
-		return State{}, "", err
+		return State{}, err
 	}
 	path, err := registrationPath(h)
 	if err != nil {
-		return State{}, "", err
+		return State{}, err
 	}
 	body, exists, managed, err := unitfile.Read(path, Marker)
 	if err != nil {
-		return State{}, "", err
+		return State{}, err
 	}
 	if exists && !managed {
-		return foreignState(path), body, nil
+		return foreignState(path), nil
 	}
 	state := State{Path: path, Installed: exists}
 	if !exists {
-		return state, body, nil
+		return state, nil
 	}
 	args := unitfile.Arguments(h.GOOS, body)
 	if len(args) < 2 || !filepath.IsAbs(args[0]) {
-		return state, body, fmt.Errorf("runner service: unreadable command in %s", path)
+		return state, fmt.Errorf("runner service: unreadable command in %s", path)
 	}
 	state.Binary, state.Arguments = args[0], slices.Clone(args[1:])
 	if config := configArgument(args); config == "" || config != h.ConfigPath {
@@ -48,7 +43,7 @@ func inspect(ctx context.Context, h Host) (State, string, error) {
 		}
 		state.Detail = fmt.Sprintf("%s runs the runner config %s, not %s, so sparkwing left it alone", path, config, h.ConfigPath)
 	}
-	return state, body, nil
+	return state, nil
 }
 
 // RefreshRegistration reloads a matching installed registration without restarting its process.
@@ -72,7 +67,7 @@ func RefreshRegistration(ctx context.Context, h Host) error {
 	if err := requireHost(h); err != nil {
 		return err
 	}
-	if _, _, err := h.registration(ctx, state.Path); err != nil {
+	if _, err := h.registration(ctx, state.Path); err != nil {
 		return err
 	}
 	if h.GOOS == "linux" {
@@ -81,87 +76,18 @@ func RefreshRegistration(ctx context.Context, h Host) error {
 	return context.Cause(ctx)
 }
 
-// Refresh updates a matching registration and restarts it if active, from outside the service.
-func Refresh(ctx context.Context, h Host) (State, error) {
-	state, body, err := inspect(ctx, h)
-	if err != nil {
-		return state, err
-	}
-	if state.Foreign {
-		return state, foreignError(state.Path)
-	}
-	if state.Mismatch {
-		return state, errors.New(state.Detail)
-	}
-	if !state.Installed {
-		return state, nil
-	}
-	if err := requireHost(h); err != nil {
-		return state, err
-	}
-	if h.Exec == nil {
-		return state, errors.New("runner service: Host.Exec is required")
-	}
-	if err := ctx.Err(); err != nil {
-		return state, err
-	}
-	loaded, agentStatus, err := h.registration(ctx, state.Path)
-	if err != nil {
-		return state, err
-	}
-	body, err = unitfile.RewriteCommand(h.GOOS, body, append([]string{h.Binary}, state.Arguments...), unitfile.Version(body))
-	if err != nil {
-		return state, err
-	}
-	if err := unitfile.Write(state.Path, body); err != nil {
-		return state, err
-	}
-	state.Binary = h.Binary
-	if h.GOOS == "linux" {
-		if err := runCommand(ctx, h, "systemctl", "--user", "daemon-reload"); err != nil {
-			return state, err
-		}
-		// safety: updating software must not start a registration its operator stopped.
-		return state, runCommand(ctx, h, "systemctl", "--user", "try-restart", ServiceName)
-	}
-	if !loaded {
-		return state, nil
-	}
-	running, err := launchdRunning(agentStatus)
-	if err != nil || !running {
-		return state, err
-	}
-	if err := runCommand(ctx, h, "launchctl", "bootout", h.serviceTarget()); err != nil {
-		return state, err
-	}
-	if err := runCommand(ctx, h, "launchctl", "bootstrap", h.domainTarget(), state.Path); err != nil {
-		return state, err
-	}
-	state.Running = true
-	return state, nil
-}
-
-func agentRegistration(ctx context.Context, h Host) (bool, string, error) {
+func agentRegistration(ctx context.Context, h Host) (bool, error) {
 	out, err := h.run(ctx, "launchctl", "print", h.serviceTarget())
 	if err != nil && ctx.Err() == nil && notLoaded(out) {
-		return false, out, nil
+		return false, nil
 	}
 	if err != nil {
-		return false, out, fmt.Errorf("runner service: inspect launchd registration: %w: %s", err, strings.TrimSpace(out))
+		return false, fmt.Errorf("runner service: inspect launchd registration: %w: %s", err, strings.TrimSpace(out))
 	}
 	if err := unitfile.CheckAgentSource(out, PlistPath(h)); err != nil {
-		return false, out, err
+		return false, err
 	}
-	return true, out, nil
-}
-
-func launchdRunning(output string) (bool, error) {
-	for _, line := range strings.Split(output, "\n") {
-		if state, ok := strings.CutPrefix(strings.TrimSpace(line), "state = "); ok {
-			return state == "running", nil
-		}
-	}
-	return false, errors.New("runner service: launchctl did not report the registration's state")
+	return true, nil
 }
 
 func registrationPath(h Host) (string, error) {

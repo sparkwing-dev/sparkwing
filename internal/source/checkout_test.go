@@ -170,7 +170,7 @@ func TestPrepareCheckoutCancellationStopsCredentialRelease(t *testing.T) {
 		return source.Credential{}, context.Cause(ctx)
 	}}
 	workspace := t.TempDir()
-	options := source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: workspace, Access: a}
+	options := source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: workspace, Access: a}
 	var returned *source.Entry
 	done := make(chan error, 1)
 	go func() {
@@ -205,7 +205,7 @@ func TestPrepareCheckoutCancellationStopsCredentialRelease(t *testing.T) {
 
 func TestPrepareCheckoutRequiresSealedSHAAndAuthorizedCredential(t *testing.T) {
 	for _, sha := range []string{"", "main", "--upload-pack=evil", strings.Repeat("z", 40)} {
-		_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:github.com/team/repo", RemoteURL: "https://github.com/team/repo", SHA: sha}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir()})
+		_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:github.com/team/repo", RemoteURL: "https://github.com/team/repo", SHA: sha}, source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir()})
 		if err == nil {
 			t.Fatalf("accepted noncommit %q", sha)
 		}
@@ -213,12 +213,12 @@ func TestPrepareCheckoutRequiresSealedSHAAndAuthorizedCredential(t *testing.T) {
 	spec := source.Spec{RepoKey: "git:github.com/team/repo", RemoteURL: "https://github.com/team/repo", SHA: strings.Repeat("a", 40)}
 	denied := errors.New("source release denied")
 	a := &access{err: denied}
-	_, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: a})
+	_, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: a})
 	if !errors.Is(err, denied) || a.calls != 1 {
 		t.Fatalf("release denial = %v; calls = %d", err, a.calls)
 	}
 	a = &access{credential: source.Credential{Kind: "https", Host: "other.example", Username: "owner", Secret: "private-password"}}
-	_, err = source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: a})
+	_, err = source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: a})
 	if err == nil || strings.Contains(err.Error(), a.credential.Secret) {
 		t.Fatalf("credential host refusal = %v", err)
 	}

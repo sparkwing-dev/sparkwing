@@ -55,19 +55,19 @@ func credentialRemote(remote string, credential Credential) (string, error) {
 func (g *gitClient) authentication(ctx context.Context, remote string) (args, env []string, cleanup func() error, err error) {
 	cleanup = func() error { return nil }
 	credential := g.credential
-	if credential.Kind == "" {
+	if credential.Kind == "" && g.owner {
 		credential, err = g.ownerHTTPSCredential(ctx, remote)
 		if err != nil {
 			return nil, nil, cleanup, err
 		}
-		if credential.Kind == "" {
-			command := "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes"
-			if !g.owner {
-				command = "ssh -F " + shellQuote(os.DevNull) + " -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=none -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes"
-			}
-			env = []string{"GIT_SSH_COMMAND=" + command}
-			return nil, env, cleanup, nil
+	}
+	if credential.Kind == "" {
+		command := "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes"
+		if !g.owner {
+			command = "ssh -F " + shellQuote(os.DevNull) + " -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=none -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes"
 		}
+		env = []string{"GIT_SSH_COMMAND=" + command}
+		return nil, env, cleanup, nil
 	}
 	directory, err := fssecure.MkdirPrivateTemp(g.workspace, "credential-")
 	if err != nil {

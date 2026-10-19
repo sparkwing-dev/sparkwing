@@ -44,6 +44,12 @@ the files in `--credentials-dir`, so no service configuration appears here.
 |---|---|
 | `SPARKWING_RELEASE_SIGNING_KEY` | [security](security.md) |
 
+## Configuration: controller administration
+
+| Variable | Described in |
+|---|---|
+| `SPARKWING_ADMIN_GRANT_ALLOW_LARGE` | [auth](auth.md); set to `1` in the controller pod to allow a break-glass credit grant above $100 |
+
 ## Runtime
 
 The job protocol supplies runtime identity. These names also have consumers in
@@ -111,9 +117,21 @@ Sparkwing code. See [node protocol](node-protocol.md).
 
 The registry owns these classifications. A trailing `*` denotes a name family.
 Credential and removed-transport rows describe exclusions, not configuration.
-Process-specific delivery rules come from `procenv.Policies()`: local pipeline
+Process-specific delivery rules come from `procenv.Build`: local pipeline
 processes use captured values, remote pipelines use the configured allow list,
 and Git receives the credential-free base plus proxy and CA settings.
+
+Go toolchain settings (`GOPROXY`, `GOFLAGS`, `GOPATH`, `GOPRIVATE`,
+`GONOPROXY`, `GONOSUMDB`, `GOSUMDB`, `GOTOOLCHAIN`, `GOINSECURE`) reach pipeline
+processes on the requester's own machine: from the captured environment for a
+local run, and from the hosting process's environment when the controller
+authenticates the claimant as the requester's own host or a personal machine
+the requester enrolled. Credentials embedded in a
+`GOPROXY` entry or the `GOSUMDB` URL are registered with the masker before any
+process starts, so logs show `***` in their place. A `GOPROXY` entry or
+`GOSUMDB` URL with a path or query is masked whole, because proxies may carry an
+access token there. Cloud and shared runners drop
+these settings unless the operator's allow list names them.
 
 | Variable | Class | Policy |
 |---|---|---|
@@ -157,8 +175,15 @@ and Git receives the credential-free base plus proxy and CA settings.
 | `TERM_PROGRAM` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
 | `MSYSTEM` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
 | `GOCACHE` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
-| `GONOSUMDB` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
-| `GONOPROXY` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `GOPROXY` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
+| `GOFLAGS` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
+| `GOPATH` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
+| `GOPRIVATE` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
+| `GONOPROXY` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
+| `GONOSUMDB` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
+| `GOSUMDB` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
+| `GOTOOLCHAIN` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
+| `GOINSECURE` | Tool | Go toolchain; inherited on the requester's own machine with embedded credentials masked, dropped by Cloud and shared runners unless allow-listed. |
 | `npm_config_cache` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
 | `PIP_INDEX_URL` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
 | `PIP_TRUSTED_HOST` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
