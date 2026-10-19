@@ -168,3 +168,13 @@ func (f *RankingFixture) LinkGitHub(t *testing.T, account string, id int64) {
 	t.Helper()
 	f.Store.testOnlyExec(t, `INSERT INTO identities(provider,subject,account_id,created_at) VALUES (?,?,?,1)`, ProviderGitHub, strconv.FormatInt(id, 10), account)
 }
+
+// RequireOnJobs sets every node's resolved requirements to terms.
+func (f *RankingFixture) RequireOnJobs(t *testing.T, terms ...string) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"requires": map[string]any{"set": true, "value": terms}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Store.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, body)
+}

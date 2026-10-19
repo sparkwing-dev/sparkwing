@@ -303,9 +303,7 @@ func TestRankingLeavesExplicitPlacementsAlone(t *testing.T) {
 
 func TestRankingLeavesAPinnedJobInsideARunAnywhereRun(t *testing.T) {
 	f := rankingFixture(t, true)
-	if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["name=runner"]}}`)); err != nil {
-		t.Fatal(err)
-	}
+	f.RequireOnJobs(t, "name=runner")
 	if err := f.Rank(t, f.Admin, store.TierCloud); err != nil {
 		t.Fatal(err)
 	}
@@ -357,9 +355,7 @@ func TestRankingNoEligibleRunnerNamesTheCause(t *testing.T) {
 			}
 		}, want: "Personal machines, GitHub Actions runners and Cloud are off in this team's runner ranking"},
 		"a pinned job": {setup: func(t *testing.T, f *store.RankingFixture) {
-			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["pool=gpu"]}}`)); err != nil {
-				t.Fatal(err)
-			}
+			f.RequireOnJobs(t, "pool=gpu")
 		}, want: "this job targets pool=gpu only"},
 		"nobody online":    {setup: func(*testing.T, *store.RankingFixture) {}, want: "no runner of the allowed tiers (here, personal, github-actions, self-hosted, cloud) is online"},
 		"an online runner": {setup: func(t *testing.T, f *store.RankingFixture) { f.Poll(t, f.Self) }},
