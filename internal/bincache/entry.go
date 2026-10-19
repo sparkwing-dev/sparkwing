@@ -1,7 +1,10 @@
 package bincache
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -85,11 +88,41 @@ func pipelineEntryAt(root, key string) (Entry, error) {
 	return Entry{root: root, key: key}, nil
 }
 
-func (l *Lease) Path() string {
-	if l == nil {
-		return ""
+// VerifiedBinary is the only handle to a cached executable. Its bytes matched the digest
+// recorded when the entry was published, at the moment the handle was made.
+type VerifiedBinary struct{ path string }
+
+// Path names the verified executable.
+func (b VerifiedBinary) Path() string { return b.path }
+
+// Verify re-hashes the leased executable against its publication record. A job that can
+// write the cache could otherwise leave an executable for a later, more trusted run.
+func (l *Lease) Verify() (VerifiedBinary, error) {
+	recorded, err := os.ReadFile(l.entry.recordPath())
+	if err != nil {
+		return VerifiedBinary{}, fmt.Errorf("pipeline cache record: %w", err)
 	}
-	return l.entry.binaryPath()
+	actual, err := fileDigest(l.entry.binaryPath())
+	if err != nil {
+		return VerifiedBinary{}, err
+	}
+	if !bytes.Equal(bytes.TrimSpace(recorded), []byte(actual)) {
+		return VerifiedBinary{}, errors.New("cached pipeline binary differs from its publication record")
+	}
+	return VerifiedBinary{path: l.entry.binaryPath()}, nil
+}
+
+func fileDigest(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	_, copyErr := io.Copy(hash, file)
+	if err := errors.Join(copyErr, file.Close()); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func (l *Lease) Release() error {
@@ -109,7 +142,7 @@ func (e Entry) Acquire(ctx context.Context) (*Lease, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if _, err := os.Stat(e.binaryPath()); err != nil {
+	if _, err := os.Stat(e.recordPath()); err != nil {
 		closeErr := errors.Join(cacheUnlock(lease), lease.Close())
 		if os.IsNotExist(err) {
 			return nil, false, closeErr
@@ -162,7 +195,7 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 			err = errors.Join(err, cacheUnlock(lease), lease.Close())
 		}
 	}()
-	if _, statErr := os.Stat(e.binaryPath()); statErr == nil {
+	if _, statErr := os.Stat(e.recordPath()); statErr == nil {
 		if err := cacheLeaseReady(lease); err != nil {
 			return nil, false, err
 		}
@@ -194,7 +227,18 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	if !info.Mode().IsRegular() {
 		return nil, false, fmt.Errorf("materialized pipeline binary is not a regular file")
 	}
+	digest, err := fileDigest(tempBinary)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := os.WriteFile(filepath.Join(stage, filepath.Base(e.recordPath())), []byte(digest+"\n"), 0o644); err != nil {
+		return nil, false, err
+	}
 	if err := os.MkdirAll(filepath.Dir(e.entryDir()), 0o700); err != nil {
+		return nil, false, err
+	}
+	// safety: an entry without a record is unverifiable, so publication replaces it.
+	if err := os.RemoveAll(e.entryDir()); err != nil {
 		return nil, false, err
 	}
 	if err := os.Rename(stage, e.entryDir()); err != nil {
@@ -418,6 +462,10 @@ func (e Entry) binaryPath() string {
 		name += ".exe"
 	}
 	return filepath.Join(e.root, "entries", e.key, name)
+}
+
+func (e Entry) recordPath() string {
+	return filepath.Join(e.entryDir(), "pipelines.sha256")
 }
 
 func (e Entry) entryDir() string {

@@ -50,7 +50,11 @@ func DescribeRepo(absPath string) ([]nodeproto.PipelineDescription, error) {
 		return nil, fmt.Errorf("compile %s: %w", sparkwingDir, err)
 	}
 	defer func() { _ = lease.Release() }()
-	return describePipelines(pipelineentry.Binary(lease.Path()), absPath)
+	binary, err := lease.Verify()
+	if err != nil {
+		return nil, err
+	}
+	return describePipelines(pipelineentry.Binary(binary.Path()), absPath)
 }
 
 func PipelineNamesForRepo(absPath string) ([]string, error) {
@@ -91,7 +95,11 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 		return nil, false
 	}
 	defer func() { _ = lease.Release() }()
-	got, err := describePipelines(pipelineentry.Binary(lease.Path()), absPath)
+	binary, err := lease.Verify()
+	if err != nil {
+		return nil, false
+	}
+	got, err := describePipelines(pipelineentry.Binary(binary.Path()), absPath)
 	if err != nil {
 		return nil, false
 	}

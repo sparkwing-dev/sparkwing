@@ -38,8 +38,8 @@ func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
 	if err := lease.Release(); err != nil {
 		t.Fatal(err)
 	}
-	if published || lease.Key() != key || lease.Path() != seed.Path() {
-		t.Fatalf("cached binary replaced: published=%t key=%s path=%s", published, lease.Key(), lease.Path())
+	if published || lease.Key() != key || lease.entry.binaryPath() != seed.entry.binaryPath() {
+		t.Fatalf("cached binary replaced: published=%t key=%s", published, lease.Key())
 	}
 	writeCacheConfig(t, "cache:\n  max_bytes: lots\n")
 	if _, _, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: env, Diagnostics: io.Discard}); err == nil || !strings.Contains(err.Error(), "cache.max_bytes") {
@@ -88,7 +88,11 @@ func TestMaterializePipelineUsesTheCompilationWorkspace(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			result, err := exec.CommandContext(t.Context(), lease.Path()).CombinedOutput()
+			binary, err := lease.Verify()
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := exec.CommandContext(t.Context(), binary.Path()).CombinedOutput()
 			if err != nil || string(result) != "workspace pipeline" {
 				t.Fatalf("materialized workspace pipeline: %q %v", result, err)
 			}

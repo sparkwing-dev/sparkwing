@@ -140,7 +140,11 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	if uncached {
 		return []string{path}, "", nil
 	}
-	source, err := os.Open(lease.Path())
+	binary, err := lease.Verify()
+	if err != nil {
+		return nil, "", err
+	}
+	source, err := os.Open(binary.Path())
 	if err != nil {
 		return nil, "", err
 	}
@@ -153,7 +157,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	if err := errors.Join(copyErr, destination.Close()); err != nil {
 		return nil, "", err
 	}
-	return []string{path}, lease.Path(), nil
+	return []string{path}, binary.Path(), nil
 }
 
 func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {

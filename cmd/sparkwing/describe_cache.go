@@ -74,7 +74,12 @@ func builtEntry(ctx context.Context, sparkwingDir, key string) (pipelineentry.Co
 	if err != nil || !found {
 		return nil, nil, false
 	}
-	return pipelineentry.Binary(lease.Path()), func() { _ = lease.Release() }, true //nolint:errcheck // a lease left held only delays pruning
+	binary, err := lease.Verify()
+	if err != nil {
+		_ = lease.Release() //nolint:errcheck // a lease left held only delays pruning
+		return nil, nil, false
+	}
+	return pipelineentry.Binary(binary.Path()), func() { _ = lease.Release() }, true //nolint:errcheck // a lease left held only delays pruning
 }
 
 // safety: the versioned cache directory separates protocol document shapes.
