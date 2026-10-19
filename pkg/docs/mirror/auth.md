@@ -628,9 +628,12 @@ runner enrollment or operator-console authority.
 A live seed can be reused while setup is unfinished. Issuing the first real
 deployment administrator closes the gate, revokes the seed and its descendants,
 and advances revocation generation in one transaction. Remove the mounted seed
-after that handoff. An empty input provisions nothing. Private routes require
-live credentials even on an empty store. `--require-auth` also refuses startup
-without a live deployment administrator capability.
+after that handoff. A seed left mounted after its handoff only logs a warning
+at startup, because its digest matches the one that bootstrapped the store; a
+different seed still stops startup. An empty input provisions nothing. Private
+routes require live credentials even on an empty store. `--require-auth`, which
+the chart always passes, also refuses startup without a live deployment
+administrator capability.
 
 Create a team and its first team-admin credential with
 `sparkwing operator teams create --team support-test --display-name Support --profile deployment -o json`.
@@ -657,9 +660,9 @@ does not gain arbitrary data downloads. Uploaded source has local provenance
 and cannot assert GitHub App trust.
 
 
-Licensed self-hosted controllers refuse deployment-admin bearers. Hosted
-controllers select Cloud eligibility through the `cloud` or `cloud-free`
-deployment profile. Console sessions retain their separate account gate.
+A `--deployment=team` controller refuses deployment-admin bearers. `local` and
+`cloud` controllers accept them. Console sessions retain their separate account
+gate.
 
 ## Operator console
 
@@ -681,6 +684,12 @@ credential does not open it. It freezes and releases teams and grants credits:
 kubectl exec -n NAMESPACE deploy/RELEASE-sparkwing-full-controller -- \
   sparkwing-controller admin grant --team qa-team --cents 500 --reason "QA fixture" --key qa-1
 ```
+
+It acts on the store the running controller declared. At startup the
+controller records its `--deployment`, `--store` and `--credentials-dir` in
+`$SPARKWING_HOME/deployment.json`, and `admin` reads that record and opens the
+existing store. It never creates one: without the record, or when the store it
+names does not exist, it refuses.
 
 A grant with a `--key` it has seen reports the first grant instead of granting
 again. One grant is capped at 10,000 cents ($100); set

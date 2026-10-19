@@ -50,6 +50,11 @@ the files in `--credentials-dir`, so no service configuration appears here.
 |---|---|
 | `SPARKWING_ADMIN_GRANT_ALLOW_LARGE` | [auth](auth.md); set to `1` in the controller pod to allow a break-glass credit grant above $100 |
 
+`sparkwing-controller admin` takes no store flags. It reads the deployment
+record the running controller writes to `$SPARKWING_HOME/deployment.json`, so
+it must run with the controller's `SPARKWING_HOME`, which `kubectl exec` into
+the controller pod provides. See [auth](auth.md#break-glass).
+
 ## Runtime
 
 The job protocol supplies runtime identity. These names also have consumers in

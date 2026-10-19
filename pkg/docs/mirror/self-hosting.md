@@ -67,29 +67,70 @@ integration evidence. See [log completeness](observability.md#log-completeness).
 
 ### Overlapping controllers during an upgrade
 
-One controller replica is the supported topology. SQLite has one controller
-owner. PostgreSQL coordination uses persistent claim fences and singleton leases
-for maintenance and recovery. Replica-safe storage alone does not establish
-cross-replica live-log fan-out or coordinated request limiting. Validate upgrades
-against the deployment's native acceptance driver.
+One controller serves a store at a time. Before it writes anything or opens its
+listener, a controller takes the `controller.serve` lease in the store and
+renews it every 10 seconds. A second controller pointed at the same store, such
+as a new pod during an upgrade or a laptop given the production `pg-url`, logs
+that it is standing by and waits until the first stops or its lease lapses after
+30 seconds. A controller that loses the lease stops serving. Flood budgets, live
+logs and per-token limits live in one process's memory, so they are right only
+with one controller.
+
+### Declared deployment
+
+The controller is told what it is; it never infers it from which files happen
+to exist, and it settles the answer once at startup.
+
+| Flag | Values | Meaning |
+|---|---|---|
+| `--deployment` | `local` (default), `team`, `cloud` | `local` holds one team. `team` holds many teams under a multi-team license and meters usage. `cloud` is the hosted service. |
+| `--store` | `sqlite` (default), `postgres` | Where state lives. `postgres` reads the `pg-url` credential. |
+| `--external-url` | an absolute `http(s)` URL, or empty | The origin runners, OIDC tokens and GitHub Actions workflows name. |
+| `--payment-mode` | `test`, `live` or empty | Which Stripe credentials settle payments. |
+
+Startup refuses, before it opens the store or writes any setting, when:
+
+- `--deployment=team` or `cloud` has no license, or the license does not verify,
+  has expired or does not grant multi-team;
+- a `local` deployment has a license that grants multi-team, or one that does not
+  verify;
+- `--store=postgres` has no `pg-url`, a `pg-url` is present under `--store=sqlite`,
+  or `--deployment=cloud` is not on PostgreSQL;
+- `--deployment=cloud` has no `--external-url`, or a `cloud` limits profile runs
+  under another kind;
+- any other flag is invalid. Settings startup writes to the database, the payment
+  mode and the free team slots, are written only after every check passes.
+
+A license that expires while the controller runs does not change the
+deployment. Metering, the free tier and sign-in keep working, and
+`GET /api/v1/health` reports `degraded` with a `license: expired` problem
+while the controller logs an error every hour. The next start refuses until the
+license is renewed.
+
+Without `--external-url`, the GitHub runner binding routes answer
+`capability_unsupported` instead of handing out a workflow that points at
+whatever host name the request used.
 
 ### Controller credentials
 
 `sparkwing-controller` reads every secret from one directory, named with
 `--credentials-dir`, holding one file per credential under a fixed name. A file
 that is absent leaves the feature it guards off, and a file that is present
-but empty or only whitespace stops startup, naming the file; there is no
-environment or flag form of any of them. The chart projects its Secret values into this
+but empty or only whitespace stops startup, naming the file. A file whose name
+is not in the table below also stops startup, so a misspelled `pg_url` cannot
+leave the controller on an empty SQLite store. A `.previous` or `.published`
+file without its current key stops startup too. There is no environment or
+flag form of any of them. The chart projects its Secret values into this
 directory, and `controller.credentialsSecret` names a Secret whose keys are
 these file names, mounted whole.
 
 | File | Holds | Without it |
 |---|---|---|
-| `pg-url` | PostgreSQL connection string for the state store | SQLite at `$SPARKWING_HOME/state.db` |
+| `pg-url` | PostgreSQL connection string for the state store | `--store=postgres` refuses to start |
 | `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-at-rest) |
 | `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
 | `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |
-| `license` | Signed multi-team license | one team |
+| `license` | Signed multi-team license | `--deployment=team` and `cloud` refuse to start |
 | `oidc-key`, `oidc-key.published` | OIDC signing key and the extra key the key set publishes | no ID tokens; see [OIDC](oidc.md) |
 | `google-client-secret`, `github-client-secret` | OAuth client secrets for sign-in | no sign-in with that provider |
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
@@ -166,7 +207,9 @@ gateway endpoint. Without an S3 bucket, the standalone controller opens filesyst
 its home directory's `data` directory and mounts signed data and log transfers.
 It uses `--external-url` when set, otherwise its listener address. Wildcard
 listener addresses use localhost in signed URLs. Set `--external-url` for remote
-runners. Filesystem storage needs no CloudFront signing keys.
+runners. The key that signs these URLs is kept in `$SPARKWING_HOME/data-signing.key`,
+so a restart does not invalidate transfers in flight. Filesystem storage needs
+no CloudFront signing keys.
 Controller embedders configure authenticated data routes through
 `WithDataController`. Host storage bindings need separate wiring. See
 [Data downloads](api.md#data-downloads) for route behavior.
@@ -207,18 +250,20 @@ kubectl -n sparkwing create secret generic sparkwing-database \
     --from-file=dsn=/private/path/database-dsn
 
 helm upgrade --install sparkwing ./charts/sparkwing-full -f my-values.yaml \
+    --set controller.store=postgres \
     --set controller.databaseSecret.name=sparkwing-database \
     --set controller.databaseSecret.key=dsn \
     --set controller.storage.type=emptyDir
 ```
 
-The controller reads the Secret as its `pg-url` credential. Keep the DSN out of Helm
+The chart passes `--store=postgres`, and the controller reads the Secret as its
+`pg-url` credential. Keep the DSN out of Helm
 values and command arguments. Initialize and verify the PostgreSQL data before
 starting the controller against it.
 
 Filesystem node outputs use signed URLs on the controller. Behind a proxy, set
 the controller's `--external-url` to the address runners can reach. Without that
-setting, the URLs use the controller request's address. Uploads and downloads
+setting, the URLs use the controller's listener address. Uploads and downloads
 use the signed URL's authority and carry no runner token.
 
 Working-tree source bundles use the source-bundle authority and upload contract.

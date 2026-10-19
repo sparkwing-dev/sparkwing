@@ -2792,3 +2792,49 @@ The duplicate-trigger sentinel errors, `controller.CronIdempotencyKey` and
 `store.WithCreatingPrincipal` are removed. Ordinary run intake derives its
 principal from live authority. The sealed request's authority ID identifies a
 scheduled run's cadence without the legacy trigger environment column.
+
+## The controller declares its deployment
+
+`sparkwing-controller` no longer works out what kind of deployment it is from
+which credential files exist. Declare it:
+
+- `--deployment=local|team|cloud` (default `local`). A controller with a
+  multi-team license must pass `--deployment=team`; the hosted service passes
+  `cloud`. `team` and `cloud` refuse to start without a license that verifies
+  and grants multi-team. A `cloud` or `cloud-free` limits profile needs
+  `--deployment=cloud`, which also needs `--external-url`.
+- `--store=sqlite|postgres` (default `sqlite`). A controller with a `pg-url`
+  credential must pass `--store=postgres`; `cloud` requires it.
+
+A license that expires while the controller runs no longer turns metering, the
+free tier and sign-in off. Health reports `degraded` with a `license: expired`
+problem, and the next start refuses until the license is renewed.
+
+The credentials directory now refuses any file whose name the controller does
+not read, so a Secret key such as `pg_url` stops startup instead of leaving the
+controller on an empty SQLite store. Move unrelated keys out of the Secret named
+by `controller.credentialsSecret`. A `.previous` or `.published` key without its
+current key, including `github-app-webhook-secret.previous` on its own, stops
+startup.
+
+Startup writes `--payment-mode` and `--free-team-slots` to the database only
+after every other check passes, and only while it holds the new
+`controller.serve` lease; a second controller on the same store waits. Without
+`--external-url`, the GitHub runner binding routes answer
+`capability_unsupported` rather than a workflow built from the request's host.
+
+`sparkwing-controller admin` drops `--credentials-dir`. It opens the store the
+running controller recorded in `$SPARKWING_HOME/deployment.json` and refuses
+when there is none, instead of creating a SQLite store.
+
+Runners and the launcher refuse a plain `http://` controller URL unless its host
+is loopback or a Kubernetes Service (`*.svc`, `*.svc.cluster.local`); use
+`https://`.
+
+The `sparkwing-full` chart (0.3.0) adds `controller.deployment` and
+`controller.store`, validates mode values against `values.schema.json`, and
+always passes `--require-auth`. `controller.requireAuth` and
+`controller.allowOpenBootstrap` are removed: unset them. A bootstrap seed left
+mounted after its handoff now only logs a warning, so you can remove it from
+the Secret whenever convenient. Charts that set
+`controller.databaseSecret.name` must also set `controller.store=postgres`.
