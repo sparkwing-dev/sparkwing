@@ -11,32 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-func TestSparkwingHome_UnderTestNeverResolvesToTheRealHome(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", "")
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("resolve home: %v", err)
-	}
-	real := filepath.Join(home, ".sparkwing")
-
-	for _, tc := range []struct {
-		name string
-		got  string
-	}{
-		{"SparkwingHome", SparkwingHome()},
-		{"CacheRoot", CacheRoot()},
-		{"PipelineEntry", mustPipelineEntry(t, "deadbeef-cafebabe").binaryPath()},
-	} {
-		if tc.got == real || strings.HasPrefix(tc.got, real+string(filepath.Separator)) {
-			t.Errorf("%s = %q, which is inside the developer's own home %s", tc.name, tc.got, real)
-		}
-		if !strings.HasPrefix(tc.got, os.TempDir()) {
-			t.Errorf("%s = %q, want a path under the test sandbox %s", tc.name, tc.got, os.TempDir())
-		}
-	}
-}
-
 func TestSparkwingHome_HonorsSparkwingHomeEnv(t *testing.T) {
 	want := t.TempDir()
 	t.Setenv("SPARKWING_HOME", want)

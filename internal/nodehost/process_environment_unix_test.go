@@ -88,10 +88,16 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				var actual []string
-				// safety: the fixture binary's testleak initializer adds its own marker after exec.
-				observed := append(append([]string{}, want...), "SPARKWING_TESTLEAK_HOST="+exe)
-				if err := json.Unmarshal(reply.Result, &actual); err != nil || !reflect.DeepEqual(actual, observed) {
+				var reported, actual []string
+				// safety: the fixture binary's testleak initializer adds its marker and sandbox home after exec.
+				err = json.Unmarshal(reply.Result, &reported)
+				for _, entry := range reported {
+					name, _, _ := strings.Cut(entry, "=")
+					if !slices.Contains([]string{"SPARKWING_TESTLEAK_HOST", "HOME", "SPARKWING_HOME", "XDG_CONFIG_HOME"}, name) {
+						actual = append(actual, entry)
+					}
+				}
+				if err != nil || !reflect.DeepEqual(actual, want) || !slices.Contains(reported, "SPARKWING_TESTLEAK_HOST="+exe) {
 					t.Fatalf("environment=%v error=%v", actual, err)
 				}
 				if err := process.Close(); err != nil || revoked != 1 || session.cmd.ProcessState == nil {
