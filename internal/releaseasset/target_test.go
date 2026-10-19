@@ -51,14 +51,15 @@ func TestTargetNameRejectsNonReleaseCombinations(t *testing.T) {
 	}
 }
 
-func TestNamesForVersionFollowsThePublisherFromV068(t *testing.T) {
+// A publisher change fails this until the change adds a new matrix range.
+func TestNewestMatrixRangeMatchesThePublisher(t *testing.T) {
 	for _, version := range []string{"v0.68.0-qa.1", "v0.68.0", "v1.2.3"} {
 		names, err := NamesForVersion(version)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if strings.Join(names, " ") != strings.Join(Names(), " ") {
-			t.Fatalf("NamesForVersion(%s) = %v, want the published set %v", version, names, Names())
+			t.Fatalf("NamesForVersion(%s) = %v, but the publisher builds %v; add a matrix range", version, names, Names())
 		}
 	}
 	cache := Target{Binary: "sparkwing-cache", GOOS: "linux", GOARCH: "amd64"}
