@@ -33,12 +33,16 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 src=$work/src
-mkdir -p "$src" "$work/previous"
-git -C "$repo" archive "$sha" | tar -x -C "$src"
+mkdir -p "$work/previous"
+# The engine check reads the release version from the main module version Go
+# stamps from an exact tag; -trimpath drops the -X ldflags from build info.
+git clone --quiet --no-checkout "$repo" "$src"
+git -C "$src" checkout --quiet --detach "$sha"
+git -C "$src" tag "$version"
 echo "==> building $version from $sha"
 
 bash "$src/bin/build-web.sh"
-export GOFLAGS="-tags=qatrust -buildvcs=false"
+export GOFLAGS=-tags=qatrust
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
   env -C "$src" GOOS="${target%/*}" GOARCH="${target#*/}" TAG="$version" bash bin/build-release-target.sh
 done
