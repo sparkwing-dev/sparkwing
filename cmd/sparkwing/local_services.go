@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -37,6 +38,16 @@ func resolveLocalServices(ctx context.Context) (dashboardServices, error) {
 }
 
 func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices, error) {
+	return resolveLocalServicesWith(ctx, home, openLocalController)
+}
+
+func resolveStandaloneServicesAt(ctx context.Context, home string) (dashboardServices, error) {
+	return resolveLocalServicesWith(ctx, home, func(ctx context.Context, home string) (wingd.LocalController, error) {
+		return (localcontroller.Config{Bind: bindStandaloneController}).Open(ctx, home)
+	})
+}
+
+func resolveLocalServicesWith(ctx context.Context, home string, open func(context.Context, string) (wingd.LocalController, error)) (dashboardServices, error) {
 	if err := ctx.Err(); err != nil {
 		return dashboardServices{}, err
 	}
@@ -52,6 +63,7 @@ func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices
 	if err != nil {
 		return dashboardServices{}, err
 	}
+	config.Open = open
 	return composeLocalServices(ctx, config, host)
 }
 
@@ -96,6 +108,15 @@ func resolveLocalRuntimeConfig(home string) (wingd.LocalRuntimeConfig, error) {
 
 func openLocalController(ctx context.Context, home string) (wingd.LocalController, error) {
 	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
+}
+
+// bindStandaloneController keeps the in-process queue off triggers: a
+// standalone run cannot detach, so its trigger belongs to the foreground CLI,
+// and an immediate queue claim would refuse the CLI's own here handoff.
+func bindStandaloneController(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
+	services, err := bindLocalController(ctx, b)
+	services.Runner.Loop.Kinds = []capability.UnitKind{capability.UnitNode}
+	return services, err
 }
 
 func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ localcontroller.Services, err error) {

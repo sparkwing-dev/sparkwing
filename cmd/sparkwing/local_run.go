@@ -81,7 +81,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		},
 		ensureController: func(ctx context.Context) error {
 			if options.standalone {
-				services, err := resolveLocalServicesAt(ctx, home)
+				services, err := resolveStandaloneServicesAt(ctx, home)
 				if err != nil {
 					return err
 				}

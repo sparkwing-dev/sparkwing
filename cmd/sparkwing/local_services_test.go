@@ -323,3 +323,25 @@ func FuzzLocalServicesKeepOneCapturedHome(f *testing.F) {
 		}
 	})
 }
+
+func TestStandaloneLocalQueueLeavesTheForegroundTriggerToItsCLI(t *testing.T) {
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
+	var runner runners.StoreRunnerConfig
+	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
+		services, err := bindStandaloneController(ctx, binding)
+		runner = services.Runner
+		return services, err
+	}}).Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := owner.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if len(runner.Loop.Kinds) != 1 || runner.Loop.Kinds[0] != capability.UnitNode {
+		t.Fatalf("standalone queue claims %v; the foreground CLI must claim its own trigger", runner.Loop.Kinds)
+	}
+}
