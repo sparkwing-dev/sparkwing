@@ -11,8 +11,8 @@ const (
 	LogManifestBytes int64 = 4 << 20
 	// MaxLogSegmentNumber bounds maximum log segment number.
 	MaxLogSegmentNumber int = 1000000
-	// StoredAttemptLogBytes bounds stored attempt logs including compression headroom.
-	StoredAttemptLogBytes int64 = AttemptLogBytes + LogSegmentBytes
+	// storedAttemptLogBytes bounds stored attempt logs including compression headroom.
+	storedAttemptLogBytes int64 = AttemptLogBytes + LogSegmentBytes
 	// JSONRequestBytes bounds the ordinary controller JSON request envelope.
 	JSONRequestBytes int64 = 1 << 20
 	// SecretJSONRequestBytes bounds secret controller JSON request envelope.
