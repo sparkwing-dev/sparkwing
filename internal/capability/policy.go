@@ -454,7 +454,7 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 func checkOwner(p Principal, owner Owner, rule AccessRule, target Target) error {
 	switch owner {
 	case OwnerTeam, OwnerRun:
-		if rule.Credential == CredentialLauncher && rule.Binding == BindClaimSelection {
+		if rule.Binding == BindClaimSelection && (rule.Credential == CredentialLauncher || HostClaimant(p.Capability)) {
 			return nil
 		}
 		if target.Team == "" || p.Capability.Team == "" {

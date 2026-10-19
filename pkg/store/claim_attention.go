@@ -50,7 +50,7 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 			return err
 		}
 		c := principal.Capability
-		if !registeredClaimant(c) && !actionsClaimant(c) && !launcherClaimant(c) && !here {
+		if !registeredClaimant(c) && !actionsClaimant(c) && !launcherClaimant(c) && !hostClaimant(c) && !here {
 			return authorityError(apierr.Forbidden, "runner observations require a machine, Actions or launcher claimant")
 		}
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})

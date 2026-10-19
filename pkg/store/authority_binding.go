@@ -39,7 +39,7 @@ func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Princi
 		}
 	}
 	c := current.Capability
-	deployment := rule == capability.BindNone && target.RunID == "" && target.NodeID == "" && target.Team == "" || rule == capability.BindOperatorSettings && target.RunID == "" && target.NodeID == "" && (capability.DeploymentAuthority(current) || current.Class == capability.CredentialConsole) || rule == capability.BindClaimSelection && launcherClaimant(c)
+	deployment := rule == capability.BindNone && target.RunID == "" && target.NodeID == "" && target.Team == "" || rule == capability.BindOperatorSettings && target.RunID == "" && target.NodeID == "" && (capability.DeploymentAuthority(current) || current.Class == capability.CredentialConsole) || rule == capability.BindClaimSelection && (launcherClaimant(c) || hostClaimant(c))
 	if c.Audience != capability.Controller || c.Team == "" && !deployment || c.Team != "" && target.Team != "" && c.Team != target.Team {
 		return bindingRefusal()
 	}

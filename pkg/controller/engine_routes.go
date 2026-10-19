@@ -23,6 +23,9 @@ func (s *Server) WithEngineController(engine *EngineController) *Server {
 	return s
 }
 
+// EngineController returns the engine WithEngineController composed.
+func (s *Server) EngineController() *EngineController { return s.engineController }
+
 func (s *Server) engineEndpoints() []Endpoint {
 	engine := s.engineController
 	return []Endpoint{

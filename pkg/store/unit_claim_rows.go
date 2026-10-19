@@ -271,7 +271,7 @@ func queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int
 	}
 	query += ` AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=?)`
 	args = append(args, now)
-	if !launcherClaimant(c) {
+	if !launcherClaimant(c) && !hostClaimant(c) {
 		query += ` AND r.team=?`
 		args = append(args, c.Team)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerhost"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
@@ -173,7 +174,9 @@ func run(args []string) error {
 			"and it fills a guard only where the command line and the environment "+
 			"named none, so an explicit setting always wins, zero included. Empty, "+
 			"the default, supplies none and leaves a self-hosted controller exactly "+
-			"as it was.",
+			"as it was. cloud and cloud-free also mark a Cloud deployment, which leaves "+
+			"run-anywhere work to the launcher; any other value runs the controller "+
+			"host, an in-process claimant that executes that work on this machine.",
 			strings.Join(controller.LimitsProfileNames(), ", ")))
 	idleClaimPoll := fs.Duration("idle-claim-poll", controller.DefaultMaxIdleClaimPoll,
 		"widest poll interval this controller suggests to a claim loop while it "+
@@ -442,12 +445,13 @@ func run(args []string) error {
 			"the checkout service refuses a controller without its token")
 	}
 
+	host := hostConfig(*limitsProfile, p.Root)
 	srv, err := newControllerServer(st, p.Root, readProvenance().Version, nil)
 	if err != nil {
 		return err
 	}
 	srv = srv.
-		WithCloudDeployment(*limitsProfile == controller.LimitsProfileCloud || *limitsProfile == controller.LimitsProfileCloudFree).
+		WithCloudDeployment(host.Cloud).
 		WithTrustedProxyAddr(*trustedProxyAddr).
 		WithTrustedProxyCIDRs(proxyCIDRs).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
@@ -509,7 +513,7 @@ func run(args []string) error {
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
 		return err
 	}
-	if err := checkInsecureCookies(srv, *limitsProfile == controller.LimitsProfileCloud || *limitsProfile == controller.LimitsProfileCloudFree, *insecureCookies); err != nil {
+	if err := checkInsecureCookies(srv, host.Cloud, *insecureCookies); err != nil {
 		return err
 	}
 	if *teamDownloadFree < 0 || *teamDownloadFunded < 0 {
@@ -576,7 +580,7 @@ func run(args []string) error {
 		return err
 	}
 	srv.WithDashboard(dashboard(p, *hsts, *insecureCookies))
-	return controller.ServeWith(ctx, srv, *addr)
+	return controllerhost.Serve(ctx, srv, *addr, host)
 }
 
 // safety: a runner honoring a suggestion longer than these windows stops
@@ -675,6 +679,11 @@ func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
 		}
 	}
 	return nil
+}
+
+func hostConfig(limitsProfile, root string) controllerhost.Config {
+	cloud := limitsProfile == controller.LimitsProfileCloud || limitsProfile == controller.LimitsProfileCloudFree
+	return controllerhost.Config{Cloud: cloud, Home: root, Version: readProvenance().Version}
 }
 
 func firstNonEmpty(values ...string) string {

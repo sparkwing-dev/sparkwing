@@ -108,7 +108,7 @@ func placementRunnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		return match.Profile{}, match.Demand{}, err
 	}
 	c := chain[0].principal.Capability
-	if !launcherClaimant(c) && (c.Team != string(team) || !registeredClaimant(c) && !actionsClaimant(c) && c.Binding.RunID != unit.RunID) {
+	if !launcherClaimant(c) && !hostClaimant(c) && (c.Team != string(team) || !registeredClaimant(c) && !actionsClaimant(c) && c.Binding.RunID != unit.RunID) {
 		return match.Profile{}, match.Demand{}, bindingRefusal()
 	}
 	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil {

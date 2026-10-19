@@ -34,6 +34,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -238,7 +239,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		body, err := json.Marshal(response)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 	})}}
-	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", false), unit
+	return localcontroller.RunnerHosting(filepath.Join(home, "state"), "v1.2.3", connection, "", "", false), unit
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
