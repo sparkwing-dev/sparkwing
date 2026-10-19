@@ -230,3 +230,47 @@ test("a long waitlist pages fifty at a time", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Older" })).toBeDisabled();
   expect(seen.offsets).toEqual(["0", "50", "100"]);
 });
+
+test("the operator grants or declines standing requests with a reason", async ({ page }) => {
+  let open = ["acme", "beta"];
+  const posts: { path: string; body: unknown }[] = [];
+  await page.route("**/api/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/v1/operator/standing-requests") {
+      await route.fulfill({
+        json: {
+          requests: open.map((team) => ({
+            request: { id: `standing-${team}`, team, tier: "High", message: `${team} needs 256 vCPU`, requested_by: `owner@${team}.test`, requested_at: 1_790_000_000, state: "open" },
+            display_name: team.toUpperCase(),
+            standing: "Trusted",
+            prepay_ceiling: "High",
+            balance_micro: 0,
+            history: { tier: "Trusted", paid_micro: 10_000_000_000, successful_charges: 1, first_paid_at: 1_780_000_000 },
+          })),
+        },
+      });
+    } else if (route.request().method() === "POST") {
+      posts.push({ path: url.pathname, body: JSON.parse(route.request().postData() ?? "{}") });
+      open = open.filter((team) => !url.pathname.includes(`/teams/${team}/`));
+      await route.fulfill({ json: {} });
+    } else {
+      await route.fulfill({ json: {} });
+    }
+  });
+  await page.goto("/operator");
+  await page.getByRole("navigation", { name: "Operator console" }).getByRole("link", { name: "Standing requests" }).click();
+  await expect(page.getByText("acme needs 256 vCPU")).toBeVisible();
+  await expect(page.getByText(/Trusted history · \$100 paid · 1 card charge\(s\)/).first()).toBeVisible();
+  await page.getByRole("button", { name: "Grant High standing" }).first().click();
+  await expect(page.getByText("Give a reason; the requester sees it and it is recorded.")).toBeVisible();
+  await page.getByLabel("Reason for acme").fill("Known customer");
+  await page.getByRole("button", { name: "Grant High standing" }).first().click();
+  await expect(page.getByText("acme needs 256 vCPU")).toHaveCount(0);
+  await page.getByLabel("Reason for beta").fill("Pay for 30 days first.");
+  await page.getByRole("button", { name: "Decline" }).click();
+  await expect(page.getByText("No open requests.")).toBeVisible();
+  expect(posts).toEqual([
+    { path: "/api/v1/operator/teams/acme/trust", body: { trust: "granted", reason: "Known customer" } },
+    { path: "/api/v1/operator/teams/beta/standing-request/decline", body: { reason: "Pay for 30 days first." } },
+  ]);
+});

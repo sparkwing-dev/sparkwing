@@ -16,6 +16,7 @@ import { fmtCents } from "@/lib/billing";
 import {
   type ActionExtra,
   type ActionKind,
+  type OperatorStandingRequest,
   type OperatorTeam,
   type TeamMatch,
   type WaitlistPage,
@@ -23,12 +24,16 @@ import {
   actionLabels,
   actionProblem,
   actionRequest,
+  approveStandingRequest,
   approveWaitlisted,
   availableActions,
   balanceCents,
+  declineStandingRequest,
   disputeHolds,
   getOperatorTeam,
+  getStandingRequests,
   getWaitlist,
+  historyFacts,
   needsAmount,
   performAction,
   searchTeams,
@@ -51,7 +56,9 @@ const labelClass =
 function OperatorConsole() {
   const params = useSearchParams();
   const team = params.get("team") ?? "";
-  const waitlist = params.get("view") === "waitlist";
+  const view = params.get("view");
+  const waitlist = view === "waitlist";
+  const standing = view === "standing";
   const [waiting, setWaiting] = useState<number | null>(null);
   useEffect(() => {
     getWaitlist(0, 1).then(
@@ -65,8 +72,11 @@ function OperatorConsole() {
     <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
       <h1 className="text-xl font-bold mb-4">Operator console</h1>
       <nav aria-label="Operator console" className="flex gap-2 mb-6 text-sm">
-        <Link className={tab(!waitlist)} href="/operator">
+        <Link className={tab(!waitlist && !standing)} href="/operator">
           Teams
+        </Link>
+        <Link className={tab(standing)} href="/operator?view=standing">
+          Standing requests
         </Link>
         <Link className={tab(waitlist)} href="/operator?view=waitlist">
           Waitlist{waiting === null ? "" : ` (${waiting})`}
@@ -74,6 +84,8 @@ function OperatorConsole() {
       </nav>
       {waitlist ? (
         <WaitlistView onTotal={setWaiting} />
+      ) : standing ? (
+        <StandingQueue />
       ) : (
         <>
           <TeamSearch />
@@ -81,6 +93,97 @@ function OperatorConsole() {
         </>
       )}
     </div>
+  );
+}
+
+function StandingQueue() {
+  const [items, setItems] = useState<OperatorStandingRequest[] | null>(null);
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    getStandingRequests().then(setItems, (err) => setError(errorText(err)));
+  }, []);
+  useEffect(load, [load]);
+
+  const decide = async (item: OperatorStandingRequest, approve: boolean) => {
+    const team = item.request.team;
+    const reason = (reasons[item.request.id] ?? "").trim();
+    if (reason === "") {
+      setError("Give a reason; the requester sees it and it is recorded.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      if (approve) await approveStandingRequest(team, reason);
+      else await declineStandingRequest(team, reason);
+      toast(approve ? `Granted ${team} High standing.` : `Declined ${team}'s request.`);
+      load();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!items) return error ? <Notice>{error}</Notice> : <Notice>Loading…</Notice>;
+  return (
+    <Panel
+      title="Standing requests"
+      hint="Oldest first. Approving grants the team High standing; declining sends the reason to its owners."
+    >
+      {error ? (
+        <p role="alert" className="px-4 pt-3 text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
+      {items.length === 0 ? (
+        <p className="p-4 text-sm text-[var(--muted)]">No open requests.</p>
+      ) : (
+        <ul>
+          {items.map((item) => (
+            <li key={item.request.id} className="border-t border-[var(--border)] first:border-t-0 p-4 space-y-2 text-sm">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <Link className="font-bold" href={`/operator?team=${encodeURIComponent(item.request.team)}`}>
+                  {item.display_name || item.request.team}
+                </Link>
+                <span className="text-[var(--muted)]">
+                  {item.request.requested_by || "former member"} asked for {item.request.tier} on{" "}
+                  {fmtDateTime(unixSecondsISO(item.request.requested_at))}
+                </span>
+              </div>
+              <p>
+                {item.standing} standing, prepaid funds reach {item.prepay_ceiling}. {historyFacts(item.history)}.
+                Balance {fmtCents(balanceCents(item.balance_micro))}.
+              </p>
+              <blockquote className="border-l-2 border-[var(--border)] pl-3 whitespace-pre-wrap">
+                {item.request.message}
+              </blockquote>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="sr-only" htmlFor={`reason-${item.request.id}`}>
+                  Reason for {item.request.team}
+                </label>
+                <input
+                  id={`reason-${item.request.id}`}
+                  className={`${inputClass} flex-1 min-w-48`}
+                  maxLength={500}
+                  placeholder="Reason"
+                  value={reasons[item.request.id] ?? ""}
+                  onChange={(e) => setReasons((cur) => ({ ...cur, [item.request.id]: e.target.value }))}
+                />
+                <button className={buttonClass} disabled={busy} onClick={() => decide(item, true)}>
+                  Grant High standing
+                </button>
+                <button className={quietButtonClass} disabled={busy} onClick={() => decide(item, false)}>
+                  Decline
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }
 

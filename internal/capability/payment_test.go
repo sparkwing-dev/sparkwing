@@ -6,11 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 )
 
 func paymentSignature(body []byte, secret string, at time.Time) string {
@@ -28,7 +31,9 @@ func paymentBody(kind, paid string, live bool) []byte {
 func TestPaymentProof(t *testing.T) {
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	secret := "whsec_fixture_only"
-	v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }}
+	provider := newPaymentProvider("sk_test_fixture")
+	provider.client.Transport = paymenttest.Provider{}.SettledCheckout("pi_fixture", false, "authenticated")
+	v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }, provider: provider}
 	for _, tc := range []struct {
 		kind, paid string
 		want       PaymentEventKind
@@ -53,6 +58,9 @@ func TestPaymentProof(t *testing.T) {
 				return
 			}
 			want := PaymentEvent{EventID: "evt_fixture", CheckoutID: "cs_fixture", PaymentID: "pi_fixture", Currency: "usd", AmountMinor: 1200, Mode: PaymentTest, Kind: tc.want}
+			if tc.want == PaymentCheckoutPaid {
+				want.ThreeDS = "authenticated"
+			}
 			if proof == nil || proof.Event() != want {
 				t.Fatalf("proof=%+v want=%+v", proof, want)
 			}
@@ -123,5 +131,47 @@ func TestPaymentPrivateConfiguration(t *testing.T) {
 	}
 	if _, err := NewPaymentAuthenticator(PaymentConfig{}); err == nil {
 		t.Fatal("unset configuration accepted")
+	}
+}
+
+type paymentHeaders struct {
+	next    http.RoundTripper
+	version []string
+}
+
+func (h *paymentHeaders) RoundTrip(r *http.Request) (*http.Response, error) {
+	h.version = append(h.version, r.Header.Get("Stripe-Version"))
+	return h.next.RoundTrip(r)
+}
+
+func TestPaidCheckoutReadsThreeDSecureFromTheSettledCharge(t *testing.T) {
+	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	secret := "whsec_fixture_only"
+	body := paymentBody("checkout.session.completed", "paid", false)
+	verify := func(objects paymenttest.Provider) (*VerifiedPaymentEvent, []string, error) {
+		headers := &paymentHeaders{next: objects}
+		provider := newPaymentProvider("sk_test_fixture")
+		provider.client.Transport = headers
+		v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }, provider: provider}
+		proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)})
+		return proof, headers.version, err
+	}
+	for _, result := range []string{"authenticated", "attempt_acknowledged", ""} {
+		proof, versions, err := verify(paymenttest.Provider{}.SettledCheckout("pi_fixture", false, result))
+		if err != nil || proof == nil || proof.Event().ThreeDS != result {
+			t.Fatalf("%q: proof=%+v err=%v", result, proof, err)
+		}
+		if len(versions) != 2 || versions[0] != PaymentProviderAPIVersion || versions[1] != PaymentProviderAPIVersion {
+			t.Fatalf("provider reads used Stripe versions %q", versions)
+		}
+	}
+	foreign := paymenttest.Provider{}.SettledCheckout("pi_fixture", false, "authenticated")
+	foreign["/v1/charges/ch_fixture"] = strings.Replace(foreign["/v1/charges/ch_fixture"], `"payment_intent":"pi_fixture"`, `"payment_intent":"pi_other"`, 1)
+	uncharged := paymenttest.Provider{}.SettledCheckout("pi_fixture", false, "authenticated")
+	uncharged["/v1/payment_intents/pi_fixture"] = `{"id":"pi_fixture","object":"payment_intent","livemode":false,"latest_charge":null}`
+	for name, objects := range map[string]paymenttest.Provider{"foreign charge": foreign, "no charge": uncharged, "unreachable": {}} {
+		if proof, _, err := verify(objects); err == nil || proof != nil {
+			t.Fatalf("%s: accepted %+v", name, proof)
+		}
 	}
 }

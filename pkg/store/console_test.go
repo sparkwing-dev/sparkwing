@@ -44,6 +44,10 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 		},
 		func(a capability.Authorized) error { _, err := c.ConsoleFreeze(t.Context(), a, "test"); return err },
 		func(a capability.Authorized) error {
+			_, err := c.ConsoleDeclineStandingRequest(t.Context(), a, "test")
+			return err
+		},
+		func(a capability.Authorized) error {
 			_, err := c.ConsoleUnfreeze(t.Context(), a, "", "test")
 			return err
 		},

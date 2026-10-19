@@ -38,6 +38,12 @@ const billing = {
     headroom_cents: 12,
     binding: "balance",
   },
+  standing: {
+    tier: "Established",
+    history: { tier: "Established", paid_micro: 500_000_000, successful_charges: 0, first_paid_at: 1_790_000_000 },
+    prepay_ceiling: "Trusted",
+    can_request: true,
+  },
   grants: [
     {
       id: "grant-1",
@@ -56,7 +62,7 @@ type Mock = {
 };
 
 async function mockController(page: Page, mock: Mock = {}) {
-  const seen = { billingReads: 0, checkoutBodies: [] as string[] };
+  const seen = { billingReads: 0, checkoutBodies: [] as string[], standingBodies: [] as string[] };
   const role = mock.role ?? "owner";
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -82,6 +88,12 @@ async function mockController(page: Page, mock: Mock = {}) {
     } else if (path === "/api/v1/team/billing") {
       seen.billingReads++;
       await route.fulfill({ json: { ...billing, ...mock.billing } });
+    } else if (path === "/api/v1/team/billing/standing-request") {
+      seen.standingBodies.push(request.postData() ?? "");
+      await route.fulfill({
+        status: 201,
+        json: { id: "standing-1", team: "acme", tier: "High", message: "m", requested_at: 1_790_000_000, state: "open" },
+      });
     } else if (path === "/api/v1/team/billing/checkout") {
       seen.checkoutBodies.push(request.postData() ?? "");
       await route.fulfill(
@@ -233,4 +245,36 @@ test("a card-billed team with a failed charge pays it by hand and buys no credit
   await expect(page.getByRole("button", { name: "Add funds" })).toHaveCount(
     0,
   );
+});
+
+test("an owner asks the operators for High standing", async ({ page }) => {
+  const seen = await mockController(page);
+  await page.goto("/team/billing");
+  await expect(
+    page.getByText(/Prepaid funds can raise standing to Trusted, one tier above history/),
+  ).toBeVisible();
+  const message = page.getByLabel("Contact us to unlock higher tiers");
+  await page.getByRole("button", { name: "Request High standing" }).click();
+  await expect(page.getByText(/Tell us what the team runs/)).toBeVisible();
+  await message.fill("Release builds need 256 vCPU.");
+  await page.getByRole("button", { name: "Request High standing" }).click();
+  await expect.poll(() => seen.standingBodies.map((b) => JSON.parse(b))).toEqual([
+    { tier: "high", message: "Release builds need 256 vCPU." },
+  ]);
+});
+
+test("a declined request shows the operator's reason", async ({ page }) => {
+  await mockController(page, {
+    billing: {
+      standing: {
+        ...billing.standing,
+        can_request: true,
+        request: { id: "standing-1", team: "acme", tier: "High", message: "m", requested_at: 1_790_000_000, state: "declined", decided_at: 1_790_100_000, decision_reason: "Pay for 30 days first." },
+      },
+    },
+  });
+  await page.goto("/team/billing");
+  await expect(
+    page.getByText("An operator declined the request for High standing: Pay for 30 days first."),
+  ).toBeVisible();
 });

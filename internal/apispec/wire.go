@@ -108,6 +108,9 @@ func wireOperations() map[string]wireOperation {
 	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared terminal artifact selectors", nil, localhostwire.LocalNodeSnapshot{})
 
 	result["POST /api/v1/operator/teams/{team}/refunds"] = operation("Record a completed provider refund", wire.OperatorRefund{}, wire.OperatorRefundRecorded{})
+	result["POST /api/v1/team/billing/standing-request"] = operation("Request operator-granted High standing", wire.StandingRequestWrite{}, wire.StandingRequest{})
+	result["GET /api/v1/operator/standing-requests"] = operation("List open standing requests", nil, wire.OperatorStandingQueue{})
+	result["POST /api/v1/operator/teams/{team}/standing-request/decline"] = operation("Decline a team's open standing request", wire.StandingDecline{}, wire.StandingRequest{})
 	result["GET /api/v1/runs/{run}/jobs/{job}/output"] = operation("Read an authorized committed job output", nil, wire.JobOutput{})
 	result["GET /api/v1/runs/{run}/children/{child}/jobs/{job}/output"] = operation("Read an authorized child output", nil, wire.JobOutput{})
 

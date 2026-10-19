@@ -58,6 +58,87 @@ export interface Billing {
     next_attempt_at?: number;
   };
   limits: SpendLimits;
+  standing: TeamStanding;
+}
+
+export interface StandingRequest {
+  id: string;
+  team: string;
+  tier: string;
+  message: string;
+  requested_by?: string;
+  // Unix seconds.
+  requested_at: number;
+  state: "open" | "approved" | "declined" | string;
+  decided_at?: number;
+  decision_reason?: string;
+}
+
+export interface StandingHistory {
+  tier: string;
+  paid_micro: number;
+  successful_charges: number;
+  // Unix seconds.
+  first_paid_at?: number;
+  last_incident_at?: number;
+}
+
+export interface TeamStanding {
+  tier: string;
+  history: StandingHistory;
+  prepay_ceiling: string;
+  can_request: boolean;
+  request?: StandingRequest;
+}
+
+export const standingMessageLimit = 1000;
+
+// standingRequestProblem says why a tier request cannot be sent yet, or "".
+export function standingRequestProblem(message: string): string {
+  const text = message.trim();
+  if (text === "") return "Tell us what the team runs and why it needs more capacity.";
+  if (text.length > standingMessageLimit)
+    return `Keep the message to ${standingMessageLimit} characters.`;
+  return "";
+}
+
+// standingOutcome describes the team's latest tier request for its owners.
+export function standingOutcome(r: StandingRequest): string {
+  switch (r.state) {
+    case "open":
+      return `Your request for ${r.tier} standing is waiting for an operator.`;
+    case "approved":
+      return `An operator granted ${r.tier} standing.`;
+    case "declined":
+      return `An operator declined the request for ${r.tier} standing${r.decision_reason ? `: ${r.decision_reason}` : "."}`;
+    default:
+      return `Your request for ${r.tier} standing is ${r.state}.`;
+  }
+}
+
+// prepayNote explains how far prepaid funds can raise the team's standing.
+export function prepayNote(s: TeamStanding): string {
+  if (s.tier === "High") return "";
+  if (s.prepay_ceiling === s.history.tier)
+    return `Payment history earns ${s.history.tier}. Higher standing needs an operator grant.`;
+  return `Payment history earns ${s.history.tier}. Prepaid funds can raise standing to ${s.prepay_ceiling}, one tier above history. High needs $500 paid and 30 clean days, or an operator grant.`;
+}
+
+export async function requestHighStanding(message: string): Promise<StandingRequest> {
+  const res = await authFetch("/api/v1/team/billing/standing-request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tier: "high", message: message.trim() }),
+  });
+  if (!res.ok) {
+    const body = await readErrorBody(res);
+    throw new BillingApiError(
+      res.status,
+      body.error || `Request failed (${res.status}).`,
+      body.code,
+    );
+  }
+  return (await res.json()) as StandingRequest;
 }
 
 export interface SpendLimits {

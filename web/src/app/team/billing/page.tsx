@@ -31,7 +31,12 @@ import {
   openHostedPage,
   setBudget,
   parseDollars,
+  prepayNote,
   priceRows,
+  requestHighStanding,
+  standingMessageLimit,
+  standingOutcome,
+  standingRequestProblem,
   purchaseProblem,
   startCheckout,
   storagePrice,
@@ -125,6 +130,7 @@ function BillingRoute() {
           <BalancePanel billing={billing} />
           <CardPanel billing={billing} />
           <LimitsPanel billing={billing} reload={load} />
+          <StandingPanel billing={billing} reload={load} />
           {billing.checkout_enabled ? (
             <BuyPanel billing={billing} />
           ) : null}
@@ -583,6 +589,82 @@ function LimitsPanel({
         <p className="text-xs text-[var(--muted)]">
           Owners are emailed at 50, 80 and 100% of the budget. Zero removes the owner budget.
         </p>
+        {error ? (
+          <p role="alert" className="text-red-300">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
+function StandingPanel({
+  billing,
+  reload,
+}: {
+  billing: Billing;
+  reload: () => Promise<void>;
+}) {
+  const s = billing.standing;
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const note = prepayNote(s);
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    const problem = standingRequestProblem(message);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setBusy(true);
+    try {
+      await requestHighStanding(message);
+      setMessage("");
+      setError("");
+      await reload();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel
+      title="Standing"
+      hint="Payment history and prepaid funds set standing. Operators can grant higher tiers."
+    >
+      <div className="p-4 space-y-2 text-sm">
+        <p>
+          {s.tier} standing. {note}
+        </p>
+        {s.request ? (
+          <p role="status" className="text-[var(--muted)]">
+            {standingOutcome(s.request)}
+          </p>
+        ) : null}
+        {s.can_request ? (
+          <form onSubmit={send} className="space-y-2">
+            <label htmlFor="standing-message" className={labelClass}>
+              Contact us to unlock higher tiers
+            </label>
+            <textarea
+              id="standing-message"
+              className={`${inputClass} w-full`}
+              rows={3}
+              maxLength={standingMessageLimit}
+              placeholder="What the team runs and the capacity it needs"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+            />
+            <button type="submit" className={buttonClass} disabled={busy}>
+              Request High standing
+            </button>
+          </form>
+        ) : null}
         {error ? (
           <p role="alert" className="text-red-300">
             {error}

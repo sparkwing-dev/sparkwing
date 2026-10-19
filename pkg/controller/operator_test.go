@@ -32,6 +32,8 @@ func operatorRoutes(team string) [][2]string {
 		{"POST", base + "/unfreeze"},
 		{"GET", "/api/v1/operator/waitlist"},
 		{"POST", "/api/v1/operator/waitlist/approve"},
+		{"GET", "/api/v1/operator/standing-requests"},
+		{"POST", base + "/standing-request/decline"},
 	}
 }
 

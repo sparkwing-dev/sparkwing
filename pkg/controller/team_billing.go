@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -47,6 +48,7 @@ type teamBillingJSON struct {
 	CanAddCard                bool                   `json:"can_add_card"`
 	OpenCharge                *teamChargeJSON        `json:"open_charge,omitempty"`
 	Limits                    teamLimitsJSON         `json:"limits"`
+	Standing                  wire.TeamStanding      `json:"standing"`
 	Usage                     []teamBillingUsageJSON `json:"usage"`
 	Grants                    []teamBillingGrantJSON `json:"grants"`
 }
@@ -125,6 +127,10 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		return engineLookupError(err)
 	}
 	owner := slices.Contains(a.Principal.Capability.Grants, capability.TeamAdmin)
+	teamStanding, err := teamStandingBody(ctx, t, standing, owner)
+	if err != nil {
+		return engineLookupError(err)
+	}
 	out := teamBillingJSON{
 		Team:                      string(t.Team()),
 		BalanceMicro:              state.BalanceMicro,
@@ -143,6 +149,7 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		CardBilled:                spend.CardBilled(),
 		CanAddCard:                s.checkout != nil && owner,
 		Limits:                    teamLimitsBody(spend),
+		Standing:                  teamStanding,
 		Usage:                     make([]teamBillingUsageJSON, 0, len(usage)),
 		Grants:                    make([]teamBillingGrantJSON, 0, len(grants)),
 	}

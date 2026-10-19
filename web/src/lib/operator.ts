@@ -1,5 +1,10 @@
 import { authFetch } from "./api";
-import { fmtCents, parseDollars } from "./billing";
+import {
+  type StandingHistory,
+  type StandingRequest,
+  fmtCents,
+  parseDollars,
+} from "./billing";
 
 // The operator console's reads and writes. The controller answers them only
 // for a listed operator's own session, so nothing here decides access.
@@ -272,4 +277,51 @@ export async function approveWaitlisted(ids: string[]): Promise<string[]> {
   );
   const body = await readJSON<{ approved: { email: string }[] }>(res);
   return body.approved.map((a) => a.email);
+}
+
+export interface OperatorStandingRequest {
+  request: StandingRequest;
+  display_name: string;
+  standing: string;
+  prepay_ceiling: string;
+  balance_micro: number;
+  history: StandingHistory;
+}
+
+export async function getStandingRequests(): Promise<OperatorStandingRequest[]> {
+  const res = await authFetch("/api/v1/operator/standing-requests", {}, quiet);
+  return (await readJSON<{ requests: OperatorStandingRequest[] }>(res)).requests;
+}
+
+// approveStandingRequest grants standing, which closes the team's open request.
+export function approveStandingRequest(team: string, reason: string): Promise<void> {
+  return performAction(actionRequest(team, "grant-trust", reason, "", ""));
+}
+
+export async function declineStandingRequest(team: string, reason: string): Promise<void> {
+  const res = await authFetch(
+    `/api/v1/operator/teams/${encodeURIComponent(team)}/standing-request/decline`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason.trim() }),
+    },
+    quiet,
+  );
+  await readJSON<unknown>(res);
+}
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+// historyFacts summarizes the payment record a team's history tier comes from.
+export function historyFacts(h: StandingHistory, now = Date.now()): string {
+  const parts = [`${h.tier} history`, `${fmtCents(balanceCents(h.paid_micro))} paid`];
+  if (h.successful_charges > 0) parts.push(`${h.successful_charges} card charge(s)`);
+  if (h.first_paid_at) {
+    const since = Math.max(h.first_paid_at, h.last_incident_at ?? 0) * 1000;
+    parts.push(`${Math.max(Math.floor((now - since) / dayMs), 0)} clean days`);
+  } else {
+    parts.push("no payments");
+  }
+  return parts.join(" · ");
 }

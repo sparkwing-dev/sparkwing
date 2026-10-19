@@ -22,6 +22,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -51,7 +52,7 @@ func paymentVerifier(t *testing.T, mode capability.PaymentMode) capability.Payme
 			t.Fatal(err)
 		}
 	}
-	auth, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: mode, APIKeyFile: keyFile, WebhookSecretFile: secretFile})
+	auth, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: mode, APIKeyFile: keyFile, WebhookSecretFile: secretFile, HTTPTransport: paymenttest.Provider{}.SettledCheckout("pi_committed", mode == capability.PaymentLive, "authenticated")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +107,9 @@ func TestPaymentHTTPAuthenticationBoundary(t *testing.T) {
 						return
 					}
 					want := capability.PaymentEvent{EventID: "evt_verified", CheckoutID: "cs_committed", PaymentID: "pi_committed", Currency: "usd", AmountMinor: 2500, Mode: mode, Kind: tc.want}
+					if tc.want == capability.PaymentCheckoutPaid {
+						want.ThreeDS = "authenticated"
+					}
 					if len(ledger.events) != 1 || ledger.events[0] != want {
 						t.Fatalf("settlement events = %+v, want %+v", ledger.events, want)
 					}

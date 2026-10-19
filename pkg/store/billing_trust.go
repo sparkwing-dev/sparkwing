@@ -24,6 +24,8 @@ type BillingStanding struct {
 	TrustAt        time.Time
 	TrustReason    string
 	Trusted        bool
+	History        StandingHistory
+	PrepayCeiling  string
 }
 
 // BillingStanding reports the team's history and balance backed standing.
@@ -52,7 +54,8 @@ func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 	if err != nil {
 		return b, err
 	}
-	b.Tier, b.CloudVCPU, b.MaxJobDuration = policy.tier, policy.vCPU, policy.duration
+	b.Tier, b.CloudVCPU, b.MaxJobDuration = policy.row.tier, policy.row.vCPU, policy.row.duration
+	b.History, b.PrepayCeiling = policy.history, policy.prepayCeiling
 	b.Trusted = b.Tier == "Trusted" || b.Tier == "High"
 	return b, nil
 }
@@ -94,6 +97,11 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 	}
 	if after, err = trustStandingTx(ctx, tx, t.team, now); err != nil {
 		return before, after, err
+	}
+	if c.Trust == BillingTrustGranted {
+		if _, _, err = decideStandingRequestTx(ctx, tx, t.team, StandingRequestApproved, c.Actor, c.Reason); err != nil {
+			return before, after, err
+		}
 	}
 	subject, err := newCreditID("trust")
 	if err != nil {

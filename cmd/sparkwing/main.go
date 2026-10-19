@@ -238,6 +238,8 @@ func runSparkwing(args []string) (result error) {
 		return runPools(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing overflow "):
 		return runOverflow(context.Background(), inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing billing "):
+		return runBilling(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing operator teams "):
 		return runOperatorTeams(inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing operator limits "):

@@ -279,6 +279,7 @@ func Registry() []Command {
 			{Name: "pipeline-ref", Argument: "REF"},
 		}},
 		{Path: "sparkwing overflow", Flags: []Flag{}},
+		{Path: "sparkwing billing", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
 		{Path: "sparkwing team settings show", Authority: TeamCredential, Rules: []string{"Show the team's members_can_add_machines setting. It defaults to true and allows members to enroll only their own personal machines."}, Flags: []Flag{
@@ -295,6 +296,14 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "minutes", Argument: "N", HasMinimum: true, Minimum: 0, Conflicts: []string{"uncapped"}},
 			{Name: "uncapped", Conflicts: []string{"minutes"}},
+		}},
+		{Path: "sparkwing billing standing", Authority: TeamCredential, Rules: []string{"Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+		}},
+		{Path: "sparkwing billing request-tier", Authority: TeamCredential, Rules: []string{"Ask the Sparkwing operators to grant High standing. Only team owners request it, and a team has at most one open request. The message reaches the operator with the team's standing and payment history. The operator approves by granting standing or declines with a reason; see the outcome with sparkwing billing standing. JSON returns the stored request; plain prints its ID."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "tier", Argument: "TIER", Values: []string{"high"}, Required: true},
+			{Name: "message", Argument: "TEXT", Required: true},
 		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
 		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{

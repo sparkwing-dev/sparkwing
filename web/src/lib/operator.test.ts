@@ -196,3 +196,37 @@ describe("waitlist", () => {
     assert.equal(calls[0].url, "/api/v1/operator/waitlist?limit=50&offset=50");
   });
 });
+
+describe("standing requests", () => {
+  it("reads the queue and declines with a reason", async () => {
+    respond = () => Response.json({ requests: [{ request: { id: "standing-1", team: "a b", tier: "High", message: "m", requested_at: 1, state: "open" }, display_name: "A", standing: "Trusted", prepay_ceiling: "High", balance_micro: 0, history: { tier: "Trusted", paid_micro: 0, successful_charges: 0 } }] });
+    const queue = await lib.getStandingRequests();
+    assert.equal(queue[0].request.id, "standing-1");
+    assert.equal(calls[0].url, "/api/v1/operator/standing-requests");
+    await lib.declineStandingRequest("a b", "  Pay for 30 days first.  ");
+    assert.equal(calls[1].url, "/api/v1/operator/teams/a%20b/standing-request/decline");
+    assert.equal(calls[1].method, "POST");
+    assert.equal(calls[1].headers.get("X-CSRF-Token"), "session-csrf");
+    assert.deepEqual(JSON.parse(calls[1].body), { reason: "Pay for 30 days first." });
+  });
+
+  it("approves through the standing grant", async () => {
+    await lib.approveStandingRequest("acme", "Known customer");
+    assert.equal(calls[0].url, "/api/v1/operator/teams/acme/trust");
+    assert.deepEqual(JSON.parse(calls[0].body), { trust: "granted", reason: "Known customer" });
+  });
+
+  it("summarizes payment history and clean days", () => {
+    const now = Date.UTC(2026, 9, 31);
+    const first = Date.UTC(2026, 9, 1) / 1000;
+    assert.equal(
+      lib.historyFacts({ tier: "Established", paid_micro: 50_000_000_000, successful_charges: 0, first_paid_at: first }, now),
+      "Established history · $500 paid · 30 clean days",
+    );
+    assert.equal(
+      lib.historyFacts({ tier: "Established", paid_micro: 50_000_000_000, successful_charges: 2, first_paid_at: first, last_incident_at: first + 20 * 86400 }, now),
+      "Established history · $500 paid · 2 card charge(s) · 10 clean days",
+    );
+    assert.equal(lib.historyFacts({ tier: "New", paid_micro: 0, successful_charges: 0 }, now), "New history · $0 paid · no payments");
+  });
+});

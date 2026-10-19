@@ -28,6 +28,12 @@ func TestBillingModelDocumentationTracksPolicy(t *testing.T) {
 		if !strings.Contains(body, prefix) {
 			t.Errorf("billing documentation is missing policy row %q", prefix)
 		}
+		if row.cleanAge > 0 {
+			line, _, _ := strings.Cut(body[strings.Index(body, prefix)+len(prefix):], "\n")
+			if days := fmt.Sprintf("%d clean days", int(row.cleanAge.Hours()/24)); !strings.Contains(line, days) {
+				t.Errorf("billing documentation row %q omits %q", prefix, days)
+			}
+		}
 	}
 	if !strings.Contains(body, strings.Join(rungs, " → ")) {
 		t.Error("billing documentation differs from the collection ladder")

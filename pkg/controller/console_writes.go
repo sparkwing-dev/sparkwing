@@ -13,6 +13,7 @@ type ConsoleWriter interface {
 	ConsoleRefund(context.Context, capability.Authorized, controllerwire.OperatorRefund, string) (store.CreditReversal, error)
 	ConsoleGrantCredit(context.Context, capability.Authorized, store.CreditGrantRequest) (store.CreditGrantResult, error)
 	ConsoleSetBillingTrust(context.Context, capability.Authorized, store.BillingTrustChange) (store.BillingStanding, error)
+	ConsoleDeclineStandingRequest(context.Context, capability.Authorized, string) (store.StandingRequest, error)
 	ConsoleFreeze(context.Context, capability.Authorized, string) (store.TeamCreditFreeze, error)
 	ConsoleUnfreeze(context.Context, capability.Authorized, string, string) (store.TeamCreditFreeze, error)
 	ConsoleDeleteAccount(context.Context, capability.Authorized) (store.AccountDeletion, error)

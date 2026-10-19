@@ -281,7 +281,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 		req.CreatedBy, now.UnixNano()); err != nil {
 		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
 	}
-	if err := recordGrantEventTx(tx, grant, "", req.Reason); err != nil {
+	if err := recordGrantEventTx(tx, grant, map[string]any{"reason": req.Reason}); err != nil {
 		return CreditGrantResult{}, err
 	}
 	room, err := headroomTx(ctx, tx, team, tx.now())
@@ -298,7 +298,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 
 // safety: a paid grant is the checkout's payment arriving, so it is recorded
 // as the checkout paid rather than as a grant.
-func recordGrantEventTx(tx *storeTx, g CreditGrant, checkout, reason string) error {
+func recordGrantEventTx(tx *storeTx, g CreditGrant, extra map[string]any) error {
 	kind := BusinessEventCreditGranted
 	switch g.Kind {
 	case CreditGrantPaid:
@@ -310,11 +310,10 @@ func recordGrantEventTx(tx *storeTx, g CreditGrant, checkout, reason string) err
 	if g.Reverses != "" {
 		attrs["reverses"] = g.Reverses
 	}
-	if checkout != "" {
-		attrs["session_id"] = checkout
-	}
-	if reason != "" {
-		attrs["reason"] = reason
+	for k, v := range extra {
+		if v != "" {
+			attrs[k] = v
+		}
 	}
 	return RecordBusinessEvent(tx, BusinessEvent{
 		At: g.CreatedAt, Team: g.Team, Kind: kind, SubjectID: g.ID, Actor: g.CreatedBy, Attrs: attrs,

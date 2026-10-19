@@ -74,7 +74,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 			grant.CreatedBy, now.UnixNano()); err != nil {
 			return CreditReversal{}, fmt.Errorf("credits: insert reversal: %w", err)
 		}
-		if err := recordGrantEventTx(tx, grant, "", ""); err != nil {
+		if err := recordGrantEventTx(tx, grant, nil); err != nil {
 			return CreditReversal{}, err
 		}
 		out.Grant, out.Created = &grant, true

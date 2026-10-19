@@ -26,46 +26,98 @@ var billingPolicy = [...]billingPolicyRow{
 	{5000, "", 0, 0, 0, 0},
 	{10000, "Trusted", 128, 6 * time.Hour, 5000, 30 * 24 * time.Hour},
 	{25000, "", 0, 0, 0, 0},
-	{50000, "High", 512, 6 * time.Hour, 50000, 0},
+	{50000, "High", 512, 6 * time.Hour, 50000, 30 * 24 * time.Hour},
 	{100000, "", 0, 0, 0, 0},
 }
 
-func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Time, trust string, held bool) (billingPolicyRow, error) {
-	if held || trust == BillingTrustRevoked {
-		return billingPolicyRow{tier: "Held"}, nil
+// StandingHistory is the payment record a team's history tier is earned from.
+type StandingHistory struct {
+	Tier              string
+	PaidMicro         int64
+	SuccessfulCharges int64
+	FirstPaidAt       time.Time
+	LastIncidentAt    time.Time
+}
+
+type standingPolicy struct {
+	row           billingPolicyRow
+	history       StandingHistory
+	prepayCeiling string
+}
+
+func (h StandingHistory) earns(row billingPolicyRow, now time.Time) bool {
+	earned := h.SuccessfulCharges > 0 || h.PaidMicro > 0
+	if row.paidCents > 0 {
+		earned = h.PaidMicro >= row.paidCents*MicroCreditsPerCent
 	}
+	if row.cleanAge > 0 {
+		earned = earned && !h.FirstPaidAt.IsZero() && !now.Before(h.FirstPaidAt.Add(row.cleanAge)) && (h.LastIncidentAt.IsZero() || !now.Before(h.LastIncidentAt.Add(row.cleanAge)))
+	}
+	return earned
+}
+
+func nextStandingTier(i int) int {
+	for j := i + 1; j < len(billingPolicy); j++ {
+		if billingPolicy[j].tier != "" {
+			return j
+		}
+	}
+	return i
+}
+
+func topStandingTier() int {
+	i := len(billingPolicy) - 1
+	for billingPolicy[i].tier == "" {
+		i--
+	}
+	return i
+}
+
+func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Time, trust string, held bool) (standingPolicy, error) {
 	var paid, first, incident sql.NullInt64
-	var successful int64
+	var p standingPolicy
 	err := q.QueryRowContext(ctx, `SELECT
  (SELECT SUM(amount_micro) FROM credit_grants WHERE team=? AND kind IN (?,?)),
  (SELECT MIN(g.created_at) FROM credit_grants g WHERE g.team=? AND g.kind=? AND
  g.amount_micro+COALESCE((SELECT SUM(r.amount_micro) FROM credit_grants r WHERE r.team=g.team AND r.kind='reversal' AND r.reverses=g.reference AND g.reference<>''),0)>0),
  (SELECT COUNT(*) FROM card_charges WHERE team=? AND state=?),
- (SELECT MAX(COALESCE(released_at,created_at)) FROM credit_freezes WHERE team=?)`, team, CreditGrantPaid, CreditGrantReversal, team, CreditGrantPaid, team, CardChargePaid, team).Scan(&paid, &first, &successful, &incident)
+ (SELECT MAX(COALESCE(released_at,created_at)) FROM credit_freezes WHERE team=?)`, team, CreditGrantPaid, CreditGrantReversal, team, CreditGrantPaid, team, CardChargePaid, team).Scan(&paid, &first, &p.history.SuccessfulCharges, &incident)
 	if err != nil {
-		return billingPolicyRow{}, err
+		return p, err
+	}
+	p.history.PaidMicro = paid.Int64
+	if first.Valid {
+		p.history.FirstPaidAt = time.Unix(0, first.Int64)
+	}
+	if incident.Valid {
+		p.history.LastIncidentAt = time.Unix(0, incident.Int64)
 	}
 	balance, err := creditBalanceTx(ctx, q, team)
 	if err != nil {
-		return billingPolicyRow{}, err
+		return p, err
 	}
-	chosen := billingPolicy[0]
+	earned, backed := 0, 0
 	for i, row := range billingPolicy {
 		if row.tier == "" || i == 0 {
 			continue
 		}
-		history := successful > 0 || paid.Int64 > 0
-		if row.paidCents > 0 {
-			history = paid.Int64 >= row.paidCents*MicroCreditsPerCent
+		if p.history.earns(row, now) {
+			earned = i
 		}
-		if row.cleanAge > 0 {
-			history = history && first.Valid && !now.Before(time.Unix(0, first.Int64).Add(row.cleanAge)) && (!incident.Valid || !now.Before(time.Unix(0, incident.Int64).Add(row.cleanAge)))
-		}
-		if history || balance >= row.rungCents*MicroCreditsPerCent || trust == BillingTrustGranted {
-			chosen = row
+		if balance >= row.rungCents*MicroCreditsPerCent {
+			backed = i
 		}
 	}
-	return chosen, nil
+	ceiling := nextStandingTier(earned)
+	p.history.Tier, p.prepayCeiling = billingPolicy[earned].tier, billingPolicy[ceiling].tier
+	p.row = billingPolicy[max(earned, min(backed, ceiling))]
+	switch {
+	case held || trust == BillingTrustRevoked:
+		p.row = billingPolicyRow{tier: "Held"}
+	case trust == BillingTrustGranted:
+		p.row = billingPolicy[topStandingTier()]
+	}
+	return p, nil
 }
 
 func admitCloudTx(ctx context.Context, tx *storeTx, team Team, cores int64) error {
