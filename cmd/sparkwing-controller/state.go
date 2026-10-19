@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -10,13 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func openControllerStore(ctx context.Context, sqlitePath, pgURL string) (*store.Store, error) {
-	if pgURL != "" {
-		return store.OpenPostgres(ctx, pgURL)
-	}
-	return store.Open(sqlitePath) //nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
-}
 
 func newControllerServer(st *store.Store, root, version string, policy *http.Client) (*controller.Server, error) {
 	engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(root, "engines"), HTTPClient: policy})

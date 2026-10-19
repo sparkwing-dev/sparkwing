@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -33,7 +33,7 @@ import (
 
 // Server serves controller HTTP requests.
 type Server struct {
-	cloudDeployment            bool
+	deployment                 deployment.Config
 	resolveQueuePriorityWriter func(context.Context, store.Team) (QueuePriorityWriter, error)
 	store                      *store.Store
 	logger                     *slog.Logger
@@ -104,7 +104,6 @@ type Server struct {
 	egress           *egress.Meter
 
 	dashboardURL string
-	externalURL  string
 	oidc         oidcState
 
 	downloadFree, downloadFunded int64
@@ -359,11 +358,11 @@ func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux
 		withRequestLog(router, s.logger, muxRouteLabeler(labels...), func(r *http.Request) string {
 			return ratelimit.ClientIP(r)
 		})))
+	if s.Metering() {
+		return h
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.Metering() {
-			r = r.WithContext(store.WithoutCreditMetering(r.Context()))
-		}
-		h.ServeHTTP(w, r)
+		h.ServeHTTP(w, r.WithContext(store.WithoutCreditMetering(r.Context())))
 	})
 }
 
@@ -526,6 +525,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runBucketCeiling(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 	go s.runCardBilling(ctx, CardBillingInterval)
+	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
 
 	errCh := make(chan error, 1+len(servers))
 
@@ -580,12 +580,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 }
 
-// WithExternalURL declares the externally reachable controller base URL.
-func (s *Server) WithExternalURL(rawURL string) *Server {
-	s.externalURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
-	return s
-}
-
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -605,6 +599,26 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 }
 
 const reaperLeaseTTL = time.Minute
+
+const licenseAlarmInterval = time.Hour
+
+// safety: an expired license leaves the deployment running as declared, so
+// the operator learns of it from this error and from health, never from
+// metering or sign-in quietly switching off.
+func (s *Server) runLicenseAlarm(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if problem := s.deployment.LicenseProblem(time.Now()); problem != "" {
+			s.logger.Error("deployment license is no longer valid", "kind", s.deployment.Kind(), "problem", problem)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
 
 func (s *Server) reapLeased(ctx context.Context) bool {
 	lease, err := s.store.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", s.measureHolder(), reaperLeaseTTL)

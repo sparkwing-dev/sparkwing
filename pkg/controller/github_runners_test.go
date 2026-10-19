@@ -14,6 +14,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
@@ -40,7 +42,6 @@ type ghFixture struct {
 
 func newGHFixture(t *testing.T) *ghFixture {
 	t.Helper()
-	raw, pub := multiTeamLicense(t)
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -52,9 +53,8 @@ func newGHFixture(t *testing.T) *ghFixture {
 	}
 	google, gh := googletest.New(t), githuboidctest.New(t)
 	srv := controller.New(st, nil).WithSecretsCipher(testCipher(t)).
-		WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
+		WithDeployment(deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: ghAudience}, license.FeatureMultiTeam)).
 		WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
-		WithExternalURL(ghAudience).
 		WithGitHubRunners(gh.Config(ghAudience)).
 		WithDashboard(controller.Dashboard{})
 	configureGitHubClaims(srv, st)

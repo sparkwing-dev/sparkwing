@@ -5,17 +5,14 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type identityFlags struct {
-	License            string
 	GoogleClientID     string
 	GoogleClientSecret string
 	GitHubClientID     string
@@ -24,15 +21,8 @@ type identityFlags struct {
 	SignUpGate         string
 }
 
-// safety: an unusable license only logs, because a local install runs without one; a half-configured
-// Google client is refused, because it would draw a sign-in button that cannot finish.
+// safety: a half-configured Google client is refused, because it would draw a sign-in button that cannot finish.
 func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Logger) error {
-	raw := f.License
-	key, err := license.EmbeddedKey()
-	if err != nil {
-		return err
-	}
-	srv.WithLicense(license.Resolve(raw, key, time.Now(), logger))
 	gate, err := store.ParseSignUpMode(f.SignUpGate)
 	if err != nil {
 		return fmt.Errorf("--signup-gate: %w", err)
@@ -65,7 +55,7 @@ func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Log
 		srv.WithGitHubSignIn(githubauth.New(githubauth.GitHub(f.GitHubClientID, f.GitHubClientSecret)), uris)
 	}
 	if !srv.MultiTeam() {
-		logger.Warn("sign-in is configured but not offered: it needs a multi-team license")
+		logger.Warn("sign-in is configured but not offered: it needs --deployment=team or cloud")
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -89,7 +90,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := New(e.Store, nil).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t))
+	server := New(e.Store, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('reader','reader@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','reader','reader',1)`)
 	session, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "reader"}, "a", time.Hour)

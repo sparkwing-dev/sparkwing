@@ -64,7 +64,7 @@ func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation
 	if p := authenticated.Principal; p.Class == capability.CredentialConsole && unsafeMethod(route.Method) && !recentSignIn(p.Capability.IssuedAt, time.Now()) {
 		return capability.Authenticated{}, apierr.Authorization(apierr.ReasonReauthRequired, "operator console changes need a sign-in from the last 10 minutes; sign out, sign in again and retry")
 	}
-	if capability.DeploymentAuthority(authenticated.Principal) && !a.server.deploymentBearerEligible() && slices.ContainsFunc(route.Access, func(rule capability.AccessRule) bool { return rule.Credential == capability.CredentialDeployment }) {
+	if capability.DeploymentAuthority(authenticated.Principal) && !a.server.deployment.DeploymentBearer() && slices.ContainsFunc(route.Access, func(rule capability.AccessRule) bool { return rule.Credential == capability.CredentialDeployment }) {
 		return capability.Authenticated{}, sessionUnavailable()
 	}
 	return authenticated, nil
@@ -80,10 +80,6 @@ func (s *Server) consoleAccount(p capability.Principal) bool {
 
 func (s *Server) consoleAuthority(p capability.Principal, now time.Time) bool {
 	return capability.ConsoleAuthority(p, s.MultiTeam() && s.operatorAccount(p.Capability.Subject.ID), now, s.sessionMaxLifetime)
-}
-
-func (s *Server) deploymentBearerEligible() bool {
-	return s.identity.license == nil || s.cloudDeployment
 }
 
 type policyStoreBindings struct{ server *Server }
@@ -133,6 +129,3 @@ func (s *Server) checkSessionCSRF(r *http.Request, p capability.Principal) error
 	}
 	return nil
 }
-
-// WithCloudDeployment selects hosted deployment credential eligibility.
-func (s *Server) WithCloudDeployment(cloud bool) *Server { s.cloudDeployment = cloud; return s }

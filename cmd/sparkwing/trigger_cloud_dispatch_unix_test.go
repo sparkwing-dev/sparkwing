@@ -24,6 +24,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
@@ -77,7 +78,7 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	t.Cleanup(api.Close)
 	endpoint := "http://" + api.Listener.Addr().String()
 	state, server, member := burstIntakeController(t, endpoint)
-	server.WithCloudDeployment(true)
+	server.WithDeployment(deploymenttest.Cloud(t, endpoint))
 	api.Config.Handler = server.Handler()
 	api.Start()
 	if err := os.WriteFile(os.Getenv("SPARKWING_CONFIG"), []byte("profiles:\n  cloud: { controller: { url: "+endpoint+", token: "+member+" } }\n"), 0o600); err != nil {

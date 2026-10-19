@@ -19,6 +19,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
@@ -46,7 +48,6 @@ type appFixture struct {
 
 func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Server) *appFixture {
 	t.Helper()
-	raw, pub := multiTeamLicense(t)
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +70,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	replica := func() (*controller.Server, string) {
 		srv := controller.New(st, logger).WithSecretsCipher(testCipher(t)).
-			WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
+			WithDeployment(deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)).
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect, appCallback}).
 			WithDashboardURL("https://dash.example.com").

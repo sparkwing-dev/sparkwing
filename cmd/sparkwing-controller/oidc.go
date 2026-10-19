@@ -7,19 +7,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 )
 
-func loadOIDCIssuer(active, published []byte, externalURL string, ttl time.Duration, log io.Writer) (*oidcissuer.Issuer, error) {
+func loadOIDCIssuer(cfg deployment.Config, ttl time.Duration, log io.Writer) (*oidcissuer.Issuer, error) {
+	active, published := cfg.OIDCKey().Current(), cfg.OIDCKey().Previous()
 	if active == nil {
-		if published != nil {
-			return nil, errors.New("the " + credOIDCPublishedKey + " credential is present without " +
-				credOIDCKey + "; add the key that signs now")
-		}
 		return nil, nil
 	}
-	issuerURL := strings.TrimRight(strings.TrimSpace(externalURL), "/")
-	if issuerURL == "" {
+	issuerURL, ok := cfg.PublicOrigin()
+	if !ok {
 		return nil, errors.New("an OIDC signing key needs --external-url, which becomes the token issuer")
 	}
 	if !strings.HasPrefix(issuerURL, "https://") {

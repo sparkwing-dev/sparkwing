@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -28,8 +28,7 @@ func storageRetentionServer(t *testing.T, multiTeam bool) (*store.Store, *contro
 	}
 	srv := controller.New(s, nil)
 	if multiTeam {
-		raw, pub := multiTeamLicense(t)
-		srv.WithLicense(license.Resolve(raw, pub, time.Now(), nil))
+		srv.WithDeployment(deploymenttest.Team(t))
 	}
 	return s, srv
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -195,7 +196,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
 	f.s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = append(f.facts.snapshot.Authorities[0].Principal.Capability.Grants, capability.TeamAdmin)
-	f.s.WithLicense(meteringTestLicense(t))
+	f.s.WithDeployment(deploymenttest.Metered(t))
 	writer := &billingWriterFake{team: store.DefaultTeam}
 	f.s.WithBillingWriter(func(context.Context, store.Team) (BillingWriter, error) { return writer, nil })
 	calls := 0

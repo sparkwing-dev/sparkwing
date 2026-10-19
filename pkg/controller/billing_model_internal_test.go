@@ -19,8 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -319,7 +318,7 @@ func TestBillingModelControllerWaitlistsThe101stAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, nil).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t)).withProvider(store.ProviderGoogle, billingIdentityProvider{}, []string{"https://app.test/callback"})
+	s := New(e.Store, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t)).withProvider(store.ProviderGoogle, billingIdentityProvider{}, []string{"https://app.test/callback"})
 	for i := range 101 {
 		_, _, err := s.oauthSignIn(t.Context(), store.ProviderGoogle, fmt.Sprint("signup", i), "verifier", "https://app.test/callback")
 		if err != nil {
@@ -348,10 +347,7 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	terms := licensetest.Terms{Features: []string{license.FeatureMultiTeam, license.FeatureMetering}, IssuedTo: "test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
-	server := New(e.Store, nil).WithSecretsCipher(cipher).WithLicense(license.Resolve(licensetest.Sign(t, priv, terms), pub, now, nil)).WithBillingCheckout("https://checkout.test", "credential")
+	server := New(e.Store, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t)).WithBillingCheckout("https://checkout.test", "credential")
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
 	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)

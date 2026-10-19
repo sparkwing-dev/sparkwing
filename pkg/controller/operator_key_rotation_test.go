@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -89,8 +89,7 @@ func newKeyRotationFixture(t *testing.T, st *store.Store) *keyRotationFixture {
 
 func (f *keyRotationFixture) server(t *testing.T, c *secrets.Cipher) http.Handler {
 	t.Helper()
-	raw, pub := multiTeamLicense(t)
-	return controller.New(f.st, nil).WithSecretsCipher(c).WithLicense(license.Resolve(raw, pub, time.Now(), nil)).WithCloudDeployment(true).Handler()
+	return controller.New(f.st, nil).WithSecretsCipher(c).WithDeployment(deploymenttest.Cloud(t, "https://controller.test")).Handler()
 }
 
 func (f *keyRotationFixture) rotate(t *testing.T, h http.Handler, auth string, query ...string) (int, map[string]any) {

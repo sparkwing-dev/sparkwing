@@ -21,23 +21,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
-
-func meteringTestLicense(t *testing.T) *license.License {
-	t.Helper()
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	raw := licensetest.Sign(t, priv, licensetest.Terms{
-		Features: []string{license.FeatureMetering}, IssuedTo: "test",
-		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
-	})
-	return license.Resolve(raw, pub, now, nil)
-}
 
 func scrapeRegistry(t *testing.T) string {
 	t.Helper()
@@ -409,7 +397,7 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 
-	srv := New(st, nil).WithLicense(meteringTestLicense(t))
+	srv := New(st, nil).WithDeployment(deploymenttest.Metered(t))
 	srv.WithRunnerInventory(func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
 		snapshot := capability.RunnerSnapshot{Now: time.Now()}
 		if team == "a" {

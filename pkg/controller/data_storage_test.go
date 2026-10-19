@@ -13,8 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -36,9 +35,7 @@ func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
 		}
 	})
 	now := time.Now()
-	pub, priv := licensetest.NewKey(t)
-	raw := licensetest.Sign(t, priv, licensetest.Terms{Features: []string{license.FeatureMetering}, IssuedTo: "fixture", IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
-	server := New(st, nil).WithDataObjects(failedDataDeletion{}).WithLicense(license.Resolve(raw, pub, now, nil))
+	server := New(st, nil).WithDataObjects(failedDataDeletion{}).WithDeployment(deploymenttest.Metered(t))
 	if !server.Metering() {
 		t.Fatal("fixture has no metering authority")
 	}

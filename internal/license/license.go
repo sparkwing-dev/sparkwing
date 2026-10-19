@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -72,8 +71,8 @@ func (l *License) IssuedTo() string { return l.issuedTo }
 func (l *License) ExpiresAt() time.Time { return l.expiresAt }
 
 // Allows reports whether the license grants feature at now. A nil license
-// grants nothing, so a caller holding the result of a failed Resolve asks the
-// same question and gets the unlicensed answer.
+// grants nothing. Only the deployment package asks, once at startup for the
+// declared kind and afterwards for health, so expiry never changes the kind.
 func (l *License) Allows(feature string, now time.Time) bool {
 	if l == nil || !now.Before(l.expiresAt) {
 		return false
@@ -135,25 +134,4 @@ func Verify(raw string, key ed25519.PublicKey, now time.Time) (*License, error) 
 		issuedAt:  p.IssuedAt,
 		expiresAt: p.ExpiresAt,
 	}, nil
-}
-
-// Resolve verifies raw against key and logs the outcome once. It never fails:
-// an absent or unusable license returns nil, which grants nothing, because a
-// local install runs without a license and must keep starting.
-func Resolve(raw string, key ed25519.PublicKey, now time.Time, logger *slog.Logger) *License {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	if strings.TrimSpace(raw) == "" {
-		logger.Info("no license configured; this controller holds one team")
-		return nil
-	}
-	lic, err := Verify(raw, key, now)
-	if err != nil {
-		logger.Warn("license refused; this controller holds one team", "reason", err.Error())
-		return nil
-	}
-	logger.Info("license accepted",
-		"issued_to", lic.issuedTo, "features", lic.features, "expires_at", lic.expiresAt.Format(time.RFC3339))
-	return lic
 }

@@ -22,9 +22,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -316,10 +315,7 @@ func burstIntakeController(t *testing.T, endpoint string) (*store.Store, *contro
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	terms := licensetest.Terms{Features: []string{license.FeatureMultiTeam}, IssuedTo: "burst test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
-	server := controller.New(state, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")}).WithLicense(license.Resolve(licensetest.Sign(t, priv, terms), pub, now, nil))
+	server := controller.New(state, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")}).WithDeployment(deploymenttest.Team(t))
 	for _, query := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('burst-user','burst@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','burst-user','editor',1)`,

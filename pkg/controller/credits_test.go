@@ -12,9 +12,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -31,10 +30,6 @@ type creditsFixture struct {
 }
 
 func newCreditsFixture(t *testing.T) creditsFixture {
-	return newCreditsFixtureWithLicense(t, license.FeatureMetering)
-}
-
-func newCreditsFixtureWithLicense(t *testing.T, feature string) creditsFixture {
 	t.Helper()
 	browser := newBrowserFixture(t, nil)
 	st := browser.st
@@ -47,15 +42,7 @@ func newCreditsFixtureWithLicense(t *testing.T, feature string) creditsFixture {
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
-	ctrl := browser.srv.WithCloudDeployment(true).WithOperatorAccounts([]string{"alice"})
-	if feature != "" {
-		pub, priv := licensetest.NewKey(t)
-		raw := licensetest.Sign(t, priv, licensetest.Terms{
-			Features: []string{feature, license.FeatureMultiTeam}, IssuedTo: "test",
-			IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
-		})
-		ctrl.WithLicense(license.Resolve(raw, pub, time.Now(), nil))
-	}
+	ctrl := browser.srv.WithDeployment(deploymenttest.Cloud(t, "https://controller.test")).WithOperatorAccounts([]string{"alice"})
 	return creditsFixture{
 		srv: ctrl, handler: ctrl.Handler(), console: sessionAuth(browser.sessID), store: st, writer: browser.token,
 		admin: admin, readonly: readonly,

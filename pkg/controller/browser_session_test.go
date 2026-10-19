@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -39,10 +39,9 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	rawLicense, key := multiTeamLicense(t)
 	logs := &syncBuffer{}
 	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t)).
-		WithLicense(license.Resolve(rawLicense, key, time.Now(), nil))
+		WithDeployment(deploymenttest.Team(t))
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('alice','alice@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','alice','owner',1)`,

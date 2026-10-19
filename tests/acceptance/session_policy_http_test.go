@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -60,7 +61,7 @@ func TestSessionPolicyHTTPRefusals(t *testing.T) {
 			case "membership":
 				query = `DELETE FROM memberships`
 			case "license":
-				f.server.WithLicense(nil)
+				f.server.WithDeployment(deployment.Config{})
 			case "backend":
 				query, code = `DROP TABLE memberships`, apierr.Unavailable
 			}
@@ -284,7 +285,7 @@ func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 			case "revoked":
 				query = `UPDATE sessions SET revoked_at=1`
 			case "license":
-				f.server.WithLicense(nil)
+				f.server.WithDeployment(deployment.Config{})
 			case "key":
 				f.server.WithSecretsCipher(nil)
 				code = apierr.Unavailable

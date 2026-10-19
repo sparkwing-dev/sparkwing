@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -101,7 +102,7 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t))
+	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
 	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +187,7 @@ func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t)).WithOperatorAccounts([]string{"operator"})
+	s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t)).WithOperatorAccounts([]string{"operator"})
 	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 )
 
 type runnerMeteringWriter func(context.Context, capability.Authorized, string, bool) error
@@ -90,7 +91,7 @@ func TestRunnerMeteringHTTPRefusals(t *testing.T) {
 				want = apierr.PolicyMissing
 			}
 			if name == "unlicensed" {
-				s.WithLicense(nil)
+				s.WithDeployment(deployment.Config{})
 			}
 			if name != "writer" {
 				s.WithRunnerMeteringWriter(runnerMeteringWriter(func(context.Context, capability.Authorized, string, bool) error { calls++; return failure }))

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
@@ -48,7 +49,7 @@ func failedTokenLogin(t *testing.T, srv *Server, h http.Handler, remoteAddr stri
 
 func multiTeamLoginServer(t *testing.T) *Server {
 	t.Helper()
-	return loginServer(t, nil).WithLicense(accountSessionTestLicense(t))
+	return loginServer(t, nil).WithDeployment(deploymenttest.Team(t))
 }
 
 func TestLoginLimiter_IPv6RotationWithinOnePrefixCannotBlockOthers(t *testing.T) {

@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 )
 
 func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
@@ -18,7 +21,7 @@ func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	actions := newActionsExchangeFixture(t)
-	actions.server = f.server.WithGitHubRunners(githuboidc.Config{
+	actions.server = f.server.WithDeployment(deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)).WithGitHubRunners(githuboidc.Config{
 		Audience: "https://controller.test", Issuer: "https://actions.test", JWKSURL: "https://actions.test/keys",
 		HTTP: &http.Client{Transport: reportTransport{http.HandlerFunc(actions.signer.ServeKeys)}},
 	})

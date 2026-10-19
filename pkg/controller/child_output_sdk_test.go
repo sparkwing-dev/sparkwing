@@ -17,7 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
@@ -307,8 +307,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rawLicense, licenseKey := multiTeamLicense(t)
-	handler := controller.New(e.Store, nil).WithLicense(license.Resolve(rawLicense, licenseKey, time.Now(), nil)).WithSecretsCipher(cipher).WithEngineController(e).WithDataObjects(objects).HTTP().API
+	handler := controller.New(e.Store, nil).WithDeployment(deploymenttest.Team(t)).WithSecretsCipher(cipher).WithEngineController(e).WithDataObjects(objects).HTTP().API
 	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
 	var award struct {
 		Claim struct {

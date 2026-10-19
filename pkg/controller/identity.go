@@ -13,16 +13,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type identityConfig struct {
 	providers    map[string]signInProvider
 	redirectURIs []string
-	license      *license.License
 	signup       signUpConfig
 }
 
@@ -53,22 +52,20 @@ func (s *Server) withProvider(name string, p signInProvider, redirectURIs []stri
 	return s
 }
 
-// WithLicense installs a verified license. A nil license grants nothing, so
-// the controller holds one team and offers no identity-provider sign-in.
-func (s *Server) WithLicense(lic *license.License) *Server {
-	s.identity.license = lic
+// WithDeployment installs the declared deployment. Without one the server
+// is a local, one-team deployment with no public origin.
+func (s *Server) WithDeployment(cfg deployment.Config) *Server {
+	s.deployment = cfg
 	return s
 }
 
-// MultiTeam reports whether this controller may hold more than one team.
-func (s *Server) MultiTeam() bool {
-	return s.identity.license.Allows(license.FeatureMultiTeam, time.Now())
-}
+// MultiTeam reports whether this controller may hold more than one team,
+// as the deployment declared it at startup.
+func (s *Server) MultiTeam() bool { return s.deployment.MultiTeam() }
 
-// Metering reports whether the signed license grants credit billing.
-func (s *Server) Metering() bool {
-	return s.identity.license.Allows(license.FeatureMetering, time.Now())
-}
+// Metering reports whether usage is charged to credits, as the deployment
+// declared it at startup.
+func (s *Server) Metering() bool { return s.deployment.Metering() }
 
 func (s *Server) signInProviders() []string {
 	out := []string{}

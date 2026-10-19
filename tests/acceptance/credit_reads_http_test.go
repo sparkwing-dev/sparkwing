@@ -14,8 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -57,15 +56,8 @@ func (f *creditReads) ListCreditCharges(_ context.Context, limit int) ([]store.C
 
 func licensedCreditServer(t *testing.T, b *credentialBoundary) *controller.Server {
 	t.Helper()
-	pub, key := licensetest.NewKey(t)
-	now := time.Now()
-	raw := licensetest.Sign(t, key, licensetest.Terms{Features: []string{license.FeatureMetering}, IssuedTo: "synthetic", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)})
-	lic, err := license.Verify(raw, pub, now)
-	if err != nil {
-		t.Fatal(err)
-	}
 	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).
-		WithLicense(lic).
+		WithDeployment(deploymenttest.Metered(t)).
 		WithAuthorization(consoleAuthorization(b))
 }
 

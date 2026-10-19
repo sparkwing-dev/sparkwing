@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -58,7 +59,7 @@ func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithEngineController(e).WithLicense(accountSessionTestLicense(t)).WithEgressMeter(meter).WithDataController(&DataController{Store: e.Store, Objects: objects})
+	s := New(e.Store, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithEngineController(e).WithDeployment(deploymenttest.Team(t)).WithEgressMeter(meter).WithDataController(&DataController{Store: e.Store, Objects: objects})
 	h := s.Handler()
 	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse

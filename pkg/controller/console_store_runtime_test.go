@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -53,7 +54,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t)).WithOperatorAccounts([]string{"operator"})
+			s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t)).WithOperatorAccounts([]string{"operator"})
 			s.githubApp = &githubAppState{}
 			raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 			if err != nil {

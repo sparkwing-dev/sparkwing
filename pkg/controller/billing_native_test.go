@@ -18,9 +18,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -43,9 +42,7 @@ func billingNativeServer(t *testing.T) (*Server, string, string) {
 	if err := s.store.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	s.WithLicense(license.Resolve(licensetest.Sign(t, priv, licensetest.Terms{Features: []string{license.FeatureMultiTeam, license.FeatureMetering}, IssuedTo: "test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}), pub, now, nil)).WithBillingCheckout("https://checkout.test", "credential")
+	s.WithDeployment(deploymenttest.Team(t)).WithBillingCheckout("https://checkout.test", "credential")
 	return s, session, csrf
 }
 

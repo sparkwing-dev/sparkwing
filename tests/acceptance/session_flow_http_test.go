@@ -15,8 +15,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -41,15 +41,8 @@ func newSessionFlow(t *testing.T) sessionFlow {
 			t.Fatal(err)
 		}
 	}
-	pub, key := licensetest.NewKey(t)
-	now := time.Now()
-	signed := licensetest.Sign(t, key, licensetest.Terms{Features: []string{license.FeatureMultiTeam}, IssuedTo: "synthetic", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)})
-	lic, err := license.Verify(signed, pub, now)
-	if err != nil {
-		t.Fatal(err)
-	}
 	logs := &bytes.Buffer{}
-	server := controller.New(s, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher).WithLicense(lic)
+	server := controller.New(s, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
 	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +265,7 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 			case "future creation":
 				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(time.Hour).UnixNano()
 			case "license":
-				f.server.WithLicense(nil)
+				f.server.WithDeployment(deployment.Config{})
 			case "missing key":
 				f.server.WithSecretsCipher(nil)
 				code = apierr.Unavailable

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -62,7 +63,7 @@ func TestOperatorCreateTeamHTTP(t *testing.T) {
 func TestOperatorCreateTeamCloudHTTP(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	seed := reviewSeed(t, e.Store)
-	s := New(e.Store, nil).WithLicense(accountSessionTestLicense(t)).WithCloudDeployment(true)
+	s := New(e.Store, nil).WithDeployment(deploymenttest.Cloud(t, "https://controller.test"))
 	h := s.Handler()
 	w := engineClaimHTTP(t, h, seed, "POST", "/api/v1/operator/tokens", `{"name":"cloud-support","grants":["operator.tokens"]}`, 201)
 	var operator credentialResponse

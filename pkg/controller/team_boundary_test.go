@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -112,9 +112,8 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if _, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	raw, pub := multiTeamLicense(t)
 	srv := controller.New(st, nil).WithSecretsCipher(testCipher(t)).
-		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
+		WithDeployment(deploymenttest.Team(t))
 	f := &tenancyFixture{t: t, srv: srv, url: "https://controller.test", st: st}
 
 	alice, teamA := signUp(t, st, "alice")

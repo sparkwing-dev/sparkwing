@@ -15,6 +15,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -245,7 +246,7 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 				assertEngineError(t, w, 400, apierr.BadRequest)
 				return
 			case "license":
-				f.server.WithLicense(nil)
+				f.server.WithDeployment(deployment.Config{})
 				code = apierr.NotFound
 			case "missing store":
 				if err := f.store.Close(); err != nil {

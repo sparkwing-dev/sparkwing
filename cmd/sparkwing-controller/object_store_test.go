@@ -4,15 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 )
 
 // A multi-team controller enforces free allowances only over the object
 // store, so it refuses to start without one; a single-team install keeps its
 // disk-backed stores.
 func TestAMultiTeamControllerRequiresAnObjectStore(t *testing.T) {
-	multi, _ := secretsTestServer(t, license.FeatureMultiTeam)
-	single, _ := secretsTestServer(t)
+	multi, single := deploymenttest.Team(t), deployment.Config{}
 	err := checkMultiTeamObjectStore(multi, "")
 	if err == nil || !strings.Contains(err.Error(), "--bucket-store") {
 		t.Fatalf("multi-team with no object store = %v, want a refusal naming --bucket-store", err)

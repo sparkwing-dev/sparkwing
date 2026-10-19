@@ -117,9 +117,8 @@ func (fc *fakeCheckout) calls() []checkoutCall {
 func billingFixture(t *testing.T) (*identityFixture, *fakeCheckout) {
 	t.Helper()
 	fc, url := newFakeCheckout(t)
-	raw, pub := multiTeamLicense(t)
 	return newIdentityFixtureWith(t, fixtureOpts{
-		license: raw, key: pub, checkoutURL: url, checkoutToken: checkoutToken,
+		checkoutURL: url, checkoutToken: checkoutToken,
 	}), fc
 }
 

@@ -5,28 +5,27 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 type githubAppFlags struct {
-	AppID         string
-	Slug          string
-	ClientID      string
-	ClientSecret  string
-	PrivateKey    string
-	WebhookSecret string
-	PreviousHook  string
+	AppID        string
+	Slug         string
+	ClientID     string
+	ClientSecret string
+	PrivateKey   string
 }
 
-func configureGitHubApp(srv *controller.Server, f githubAppFlags) error {
+func configureGitHubApp(srv *controller.Server, f githubAppFlags, hook deployment.KeyPair) error {
 	keyText := f.PrivateKey
-	if f.AppID == "" && f.Slug == "" && keyText == "" && f.WebhookSecret == "" {
+	if f.AppID == "" && f.Slug == "" && keyText == "" && hook.Current() == nil {
 		return nil
 	}
 	cfg := githubapp.Config{
 		Slug: strings.TrimSpace(f.Slug), ClientID: f.ClientID, ClientSecret: f.ClientSecret,
-		WebhookSecret: f.WebhookSecret, PreviousWebhookSecret: f.PreviousHook,
+		WebhookSecret: string(hook.Current()), PreviousWebhookSecret: string(hook.Previous()),
 	}
 	if f.AppID != "" {
 		id, err := strconv.ParseInt(strings.TrimSpace(f.AppID), 10, 64)

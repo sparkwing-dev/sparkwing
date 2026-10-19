@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -45,7 +46,7 @@ func TestQueuePriorityHTTPPreservesTenantAuthorityProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t))
+	s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
 	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

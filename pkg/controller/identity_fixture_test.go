@@ -3,7 +3,6 @@ package controller_test
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -19,13 +18,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth/githubtest"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth/googletest"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -49,28 +47,15 @@ type identityFixture struct {
 
 type fixtureOpts struct {
 	store     *store.Store
-	license   string
-	key       ed25519.PublicKey
 	configure func(*controller.Server)
 	logger    *slog.Logger
 
 	checkoutURL, checkoutToken string
 }
 
-func multiTeamLicense(t *testing.T) (string, ed25519.PublicKey) {
-	t.Helper()
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	return licensetest.Sign(t, priv, licensetest.Terms{
-		Features: []string{license.FeatureMultiTeam}, IssuedTo: "test",
-		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
-	}), pub
-}
-
 func newIdentityFixture(t *testing.T) *identityFixture {
 	t.Helper()
-	raw, pub := multiTeamLicense(t)
-	return newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub})
+	return newIdentityFixtureWith(t, fixtureOpts{})
 }
 
 func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
@@ -90,13 +75,8 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	}
 	iss := googletest.New(t)
 	gh := githubtest.New(t)
-	key := o.key
-	if key == nil {
-		key, _ = licensetest.NewKey(t)
-	}
 	srv := controller.New(st, o.logger).WithSecretsCipher(testCipher(t)).
-		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
-		WithCloudDeployment(true).
+		WithDeployment(deploymenttest.Cloud(t, "https://controller.test")).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
 		WithBillingCheckout(o.checkoutURL, o.checkoutToken).

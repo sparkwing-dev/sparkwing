@@ -31,6 +31,16 @@ const (
 	credStripeWebhookSecret    = "stripe-webhook-secret"
 )
 
+// controllerCredentialNames is every file the credentials directory may
+// hold; any other name is refused, so a misspelled one fails startup
+// instead of reading as absent.
+var controllerCredentialNames = []string{
+	credPGURL, credSecretsKey, credSecretsPreviousKey, credOIDCKey, credOIDCPublishedKey,
+	credBootstrapAdminToken, credLicense, credGitHubClientSecret, credGoogleClientSecret,
+	credGitHubAppKey, credGitHubAppWebhookSecret, credGitHubAppPreviousHook, credCloudFrontKey,
+	credBillingToken, credStripeAPIKey, credStripeWebhookSecret,
+}
+
 func readPaymentAuthenticator(dir, mode string) (capability.PaymentAuthenticator, error) {
 	if mode == "" {
 		if dir != "" {
@@ -72,7 +82,7 @@ type controllerCredentials struct {
 
 func readCredentials(path string) (controllerCredentials, error) {
 	var c controllerCredentials
-	dir, err := credentials.Open(path)
+	dir, err := credentials.OpenNamed(path, controllerCredentialNames)
 	if err != nil {
 		return c, err
 	}

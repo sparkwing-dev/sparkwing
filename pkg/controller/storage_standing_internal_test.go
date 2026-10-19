@@ -5,10 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -31,13 +29,7 @@ func TestCallerStorageStandingUsesFinalTenantInventory(t *testing.T) {
 	if _, err := s.DB().ExecContext(t.Context(), "INSERT INTO team_storage(team,store,used_bytes,reserved_bytes,updated_at) VALUES ('a','cache',999999,999999,1)"); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now()
-	pub, priv := licensetest.NewKey(t)
-	lic := license.Resolve(licensetest.Sign(t, priv, licensetest.Terms{
-		Features: []string{license.FeatureMultiTeam}, IssuedTo: "test",
-		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
-	}), pub, now, nil)
-	server := New(s, nil).WithLicense(lic)
+	server := New(s, nil).WithDeployment(deploymenttest.Team(t))
 	request := httptest.NewRequest("GET", "/", nil)
 	got, err := server.teamStorageStanding(request, "a")
 	if err != nil || got == nil || got.Team != "a" || got.CacheBytes != 3 || got.LogBytes != 0 || got.EventBytes != 0 {
