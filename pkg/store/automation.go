@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,45 +23,66 @@ func automationTx(ctx context.Context, tx *storeTx, team Team, input runspec.Req
 	var identity runspec.Automation
 	switch {
 	case input.Origin == runspec.OriginApp && input.Git.App.Set:
-		identity.SenderID, identity.AuthorID = input.Git.App.Value.SenderID, input.Git.App.Value.AuthorID
+		app := input.Git.App.Value
+		identity.SenderID, identity.AuthorID = app.SenderID, app.AuthorID
+		identity.Pushed = app.Event == "push" || app.Event == "pull_request" && (app.Action == "opened" || app.Action == "synchronize")
 	case input.Origin == runspec.OriginSchedule && tx.scheduleAdmission != nil:
 		identity.ArmedBy = tx.scheduleAdmission.schedule.ArmedBy
 	case input.Origin == runspec.OriginChild && input.Lineage.ParentRunID != "":
 		parent, err := sealedRequestTx(ctx, tx, team, input.Lineage.ParentRunID)
-		return parent.Request.Automation, err
+		if err != nil || !parent.Request.Automation.Set {
+			return runspec.Optional[runspec.Automation]{}, err
+		}
+		identity = parent.Request.Automation.Value
+		identity.Repos = slices.Clone(identity.Repos)
 	default:
 		return runspec.Optional[runspec.Automation]{}, nil
 	}
-	raw, keyed := strings.CutPrefix(string(input.Git.Repository.Key), "gh:")
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if keyed && err == nil && id > 0 {
-		identity.Repos = append(identity.Repos, input.Git.Repository.Key)
-		rows, err := tx.QueryContext(ctx, `SELECT extra_repo_id FROM github_app_extra_repos WHERE team=? AND repository_id=? ORDER BY extra_repo`, team, id)
-		if err != nil {
-			return runspec.Optional[runspec.Automation]{}, err
-		}
-		for rows.Next() {
-			var extra int64
-			if err := rows.Scan(&extra); err != nil {
-				return runspec.Optional[runspec.Automation]{}, errors.Join(err, rows.Close())
-			}
-			identity.Repos = append(identity.Repos, runspec.RepoKey("gh:"+strconv.FormatInt(extra, 10)))
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return runspec.Optional[runspec.Automation]{}, err
+	repos, err := sealedRepoKeysTx(ctx, tx, team, input.Git.Repository.Key)
+	if err != nil {
+		return runspec.Optional[runspec.Automation]{}, err
+	}
+	for _, repo := range repos {
+		if !slices.Contains(identity.Repos, repo) {
+			identity.Repos = append(identity.Repos, repo)
 		}
 	}
 	return runspec.Optional[runspec.Automation]{Set: true, Value: identity}, nil
 }
 
-// safety: an App run belongs to a member only when its author is also its sender, so an email match never suffices.
+// safety: a repository without a gh:<id> key is kept as is, so the access check, which needs an ID, refuses it.
+func sealedRepoKeysTx(ctx context.Context, tx *storeTx, team Team, key runspec.RepoKey) ([]runspec.RepoKey, error) {
+	if key == "" {
+		return nil, nil
+	}
+	repos := []runspec.RepoKey{key}
+	raw, keyed := strings.CutPrefix(string(key), "gh:")
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if !keyed || err != nil || id <= 0 {
+		return repos, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT extra_repo_id FROM github_app_extra_repos WHERE team=? AND repository_id=? ORDER BY extra_repo`, team, id)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var extra int64
+		if err := rows.Scan(&extra); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		repos = append(repos, runspec.RepoKey("gh:"+strconv.FormatInt(extra, 10)))
+	}
+	return repos, errors.Join(rows.Err(), rows.Close())
+}
+
+// safety: an App run belongs to a member only when that member pushed the code it runs and wrote it.
 func automationOwnerTx(ctx context.Context, tx *storeTx, team Team, identity runspec.Automation) (string, error) {
 	var account string
 	var err error
 	switch {
 	case identity.ArmedBy != "":
 		err = tx.QueryRowContext(ctx, `SELECT account_id FROM memberships WHERE team=? AND account_id=?`, team, identity.ArmedBy).Scan(&account)
-	case identity.AuthorID > 0 && identity.SenderID == identity.AuthorID:
+	case identity.Pushed && identity.AuthorID > 0 && identity.SenderID == identity.AuthorID:
 		err = tx.QueryRowContext(ctx, `SELECT i.account_id FROM identities i JOIN memberships m ON m.account_id=i.account_id AND m.team=? WHERE i.provider=? AND i.subject=?`, team, ProviderGitHub, strconv.FormatInt(identity.AuthorID, 10)).Scan(&account)
 	}
 	if errors.Is(err, sql.ErrNoRows) {

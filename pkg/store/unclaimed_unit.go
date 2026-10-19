@@ -167,7 +167,7 @@ func noEligibleCauseTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	if len(ranking) > 0 {
 		allowed = strings.Join(ranking, ", ")
 	}
-	return "no runner of the allowed tiers (" + allowed + ") is online", nil
+	return "no runner of the allowed tiers (" + allowed + ") is online; start or register a runner", nil
 }
 
 func unitCreditHoldTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef) (string, error) {

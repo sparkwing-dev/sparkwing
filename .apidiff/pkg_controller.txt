@@ -457,6 +457,7 @@ type Server struct {
 }
 func (s *Server) CheckFreeTierSource()
 func (s *Server) EgressMeter() *egress.Meter
+func (s *Server) EngineController() *EngineController
 func (s *Server) HTTP() wingd.LocalHTTP
 func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)

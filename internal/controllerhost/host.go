@@ -21,8 +21,8 @@ import (
 
 // Config selects whether and where a controller hosts units itself.
 type Config struct {
-	// Cloud marks a deployment whose launcher hosts unselected runs; it composes no host claimant.
-	Cloud bool
+	// Enabled composes the host claimant; only a self-hosted deployment may set it.
+	Enabled bool
 	// Home holds the host's engine cache and workspaces.
 	Home    string
 	Version string
@@ -54,9 +54,9 @@ type Host struct {
 	prefix string
 }
 
-// New mints the host claim root of a self-hosted controller. A Cloud deployment gets nil.
+// New mints the host claim root of a self-hosted controller. A Config that is not Enabled gets nil.
 func New(ctx context.Context, srv *controller.Server, cfg Config) (*Host, error) {
-	if cfg.Cloud {
+	if !cfg.Enabled {
 		return nil, nil
 	}
 	engine := srv.EngineController()

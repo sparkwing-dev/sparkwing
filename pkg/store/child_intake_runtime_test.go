@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,12 +112,14 @@ func TestChildIntakeInheritsItsParentsAutomationIdentity(t *testing.T) {
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
 	request.Request.Automation = runspec.Optional[runspec.Automation]{Set: true, Value: runspec.Automation{SenderID: 7, AuthorID: 7, Repos: []runspec.RepoKey{"gh:1"}}}
+	request.Request.Git.Repository.Key = "gh:5"
 	child, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := child.Request.Request.Automation; !got.Set || got.Value.AuthorID != 42 || got.Value.SenderID != 42 || len(got.Value.Repos) != 2 {
-		t.Fatalf("child automation = %+v, want the parent's", got)
+	got := child.Request.Request.Automation
+	if !got.Set || got.Value.AuthorID != 42 || got.Value.SenderID != 42 || !slices.Equal(got.Value.Repos, []runspec.RepoKey{"gh:1", "gh:9", "gh:5"}) {
+		t.Fatalf("child automation = %+v, want the parent's owner and both runs' repositories", got)
 	}
 }
 

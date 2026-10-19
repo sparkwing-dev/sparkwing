@@ -145,11 +145,13 @@ type AppFacts struct {
 }
 
 // Automation is an automated run's owner identity: intake derives it, and children and retries keep it unchanged.
-// SenderID and AuthorID are linked GitHub user IDs for App runs; ArmedBy is a schedule's arming account.
+// SenderID and AuthorID are linked GitHub user IDs for App runs, and Pushed says the sender pushed the code the run
+// executes (a push, or a pull request opened or synchronized). ArmedBy is a schedule's arming account.
 // Repos are the immutable gh:<id> keys of the primary and every extra repository the run reads.
 type Automation struct {
 	SenderID int64     `json:"sender_id,omitempty"`
 	AuthorID int64     `json:"author_id,omitempty"`
+	Pushed   bool      `json:"pushed,omitempty"`
 	ArmedBy  string    `json:"armed_by,omitempty"`
 	Repos    []RepoKey `json:"repos"`
 }

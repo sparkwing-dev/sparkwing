@@ -36,7 +36,8 @@ requests it with `sparkwing runners automation --profile work --runner laptop
 `--approve true`. The approved machine then takes only its owner's automated
 runs, in repositories the owner's linked GitHub account can read, and ranks as
 `self-hosted` for them. An App run belongs to the owner only when the owner both
-wrote and sent it; release and branch events belong to nobody. Child runs and
+wrote and pushed it (a push, or opening or synchronizing a pull request); other
+pull request actions, release and branch events belong to nobody. Child runs and
 retries keep their run's owner. Clients can no longer submit a run with the
 `schedule` origin. The trigger CLI proves its machine's runner credential with
 a short-lived signature instead of sending it. The former owner toggle (`--automated-runs`,

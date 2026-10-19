@@ -285,6 +285,13 @@ func TestGitHubAppRunsReachAnApprovedPersonalMachineOnlyForItsAuthorWithAccess(t
 			own["pull_request"].(map[string]any)["head"].(map[string]any)["sha"] = strings.Repeat("b", 40)
 			own["sender"] = map[string]any{"id": 601, "login": "contributor"}
 			laptopTakes(own, "pull_request", false)
+			reopened := prPayload(7, 701, "acme/widgets", 701)
+			reopened["action"] = "reopened"
+			reopened["pull_request"].(map[string]any)["user"] = map[string]any{"id": 501, "login": "olga"}
+			reopened["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]any{"id": 701, "full_name": "acme/widgets"}
+			reopened["pull_request"].(map[string]any)["head"].(map[string]any)["sha"] = strings.Repeat("d", 40)
+			reopened["sender"] = map[string]any{"id": 501, "login": "olga"}
+			laptopTakes(reopened, "pull_request", false)
 			f.app.SetCommitAuthor("acme/widgets", headSHA, 501)
 			spoofed := pushPayload(7, 701, "acme/widgets", headSHA)
 			spoofed["sender"] = map[string]any{"id": 601, "login": "contributor"}

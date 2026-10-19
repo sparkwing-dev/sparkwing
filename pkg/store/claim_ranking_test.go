@@ -238,12 +238,13 @@ func TestRankingAutomatedRunsUseOnlyApprovedPersonalMachinesOfTheAuthor(t *testi
 	}{
 		"schedule armed by the owner":                         {seal: seal(runspec.Automation{ArmedBy: "owner"}), eligible: true},
 		"schedule armed by an App":                            {seal: seal(runspec.Automation{ArmedBy: "github-app:7"})},
-		"code the owner wrote and sent":                       {seal: seal(runspec.Automation{SenderID: 42, AuthorID: 42}), eligible: true},
-		"another member's code":                               {seal: seal(runspec.Automation{SenderID: 43, AuthorID: 43})},
-		"another member pushing a commit in the owner's name": {seal: seal(runspec.Automation{SenderID: 43, AuthorID: 42})},
-		"the owner sending another member's code":             {seal: seal(runspec.Automation{SenderID: 42, AuthorID: 43})},
-		"an author with no linked identity":                   {seal: seal(runspec.Automation{SenderID: 44, AuthorID: 44})},
+		"code the owner wrote and sent":                       {seal: seal(runspec.Automation{SenderID: 42, AuthorID: 42, Pushed: true}), eligible: true},
+		"another member's code":                               {seal: seal(runspec.Automation{SenderID: 43, AuthorID: 43, Pushed: true})},
+		"another member pushing a commit in the owner's name": {seal: seal(runspec.Automation{SenderID: 43, AuthorID: 42, Pushed: true})},
+		"the owner sending another member's code":             {seal: seal(runspec.Automation{SenderID: 42, AuthorID: 43, Pushed: true})},
+		"an author with no linked identity":                   {seal: seal(runspec.Automation{SenderID: 44, AuthorID: 44, Pushed: true})},
 		"a release with no author":                            {seal: seal(runspec.Automation{SenderID: 42})},
+		"the owner labeling their own pull request":           {seal: seal(runspec.Automation{SenderID: 42, AuthorID: 42})},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := rankingFixture(t, true)
@@ -438,7 +439,7 @@ func TestRankingNoEligibleRunnerNamesTheCause(t *testing.T) {
 		"a pinned job": {setup: func(t *testing.T, f *store.RankingFixture) {
 			f.RequireOnJobs(t, "pool=gpu")
 		}, want: "this job targets pool=gpu only"},
-		"nobody online":    {setup: func(*testing.T, *store.RankingFixture) {}, want: "no runner of the allowed tiers (here, personal, github-actions, self-hosted, cloud) is online"},
+		"nobody online":    {setup: func(*testing.T, *store.RankingFixture) {}, want: "no runner of the allowed tiers (here, personal, github-actions, self-hosted, cloud) is online; start or register a runner"},
 		"an online runner": {setup: func(t *testing.T, f *store.RankingFixture) { f.Poll(t, f.Self) }},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -46,7 +46,7 @@ func TestSelfHostedControllerHostsAnUnselectedTriggerWithoutRunners(t *testing.T
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	served := make(chan error, 1)
 	go func() {
-		served <- controllerhost.Serve(ctx, server, addr, controllerhost.Config{Home: t.TempDir(), Version: installedVersion()})
+		served <- controllerhost.Serve(ctx, server, addr, controllerhost.Config{Enabled: true, Home: t.TempDir(), Version: installedVersion()})
 	}()
 	t.Cleanup(func() {
 		cancel()

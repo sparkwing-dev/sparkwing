@@ -41,8 +41,11 @@ whether that scan awards another unit or nothing. Awards read asks under the
 same lock. `RankingAward` (2 s after the window, worst case 7 s) is the lead
 amendment to decision 2.
 
-The non-Cloud `sparkwing-controller` composes the same host claimant runtime
-as wingd, so every self-hosted controller can host unselected runs.
+The non-Cloud `sparkwing-controller` can compose an in-process host claimant
+(`internal/controllerhost`), but it stays off on every deployment: it would
+run every team's code as the controller's OS user beside its credentials and
+database (Opus review 3, C1). Korey decides its isolation; until then a
+self-hosted controller without runners shows `no_eligible_runner`.
 
 ## Which runs
 
@@ -162,9 +165,10 @@ an automated run only when all of these hold (decisions 15 and 16):
   approval. Machine revocation ends it too.
 - the sealed owner is the machine's owner: the arming member of a schedule, or
   for an App run the member linked to the author when the author is also the
-  event's sender. A release or branch event is unowned. A commit whose email
-  matches a member never routes to that member's machine unless that member
-  pushed it.
+  event's sender and the event is the sender's push (a push, or a pull request
+  opened or synchronized). Labeled, reopened, release and branch events are
+  unowned. A child's repositories are its parent's plus its own, checked in
+  full.
 - the owner's linked GitHub login can read every sealed repository, by
   immutable ID. The controller resolves each name from its ID under a token
   restricted to those IDs, checks the collaborator permission, caches the
