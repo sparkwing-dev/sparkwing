@@ -80,7 +80,9 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		}
 	}
 	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
-	qa, err := engine.QAModuleEnvironment(ctx, dir, pin, environment)
+	qa, err := engine.QAModuleEnvironment(pin, func(args ...string) ([]byte, error) {
+		return installTool(ctx, dir, environment, "go", args...)
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -207,7 +209,7 @@ func installTool(ctx context.Context, dir string, environment []string, name str
 	if err := gotoolchain.Run(ctx, command); err != nil {
 		return append(stdout.Bytes(), stderr.Bytes()...), fmt.Errorf("SDK dependency tool %s: %w", name, err)
 	}
-	if name == "go" && len(args) > 0 && args[0] == "list" {
+	if name == "go" && len(args) > 0 && (args[0] == "list" || args[0] == "env") {
 		return stdout.Bytes(), nil
 	}
 	return append(stdout.Bytes(), stderr.Bytes()...), nil
