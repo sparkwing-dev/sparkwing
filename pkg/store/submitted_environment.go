@@ -43,7 +43,7 @@ func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx,
 	if err := runspec.VerifyEnvironment(request.Env, values); err != nil {
 		return authorityError(apierr.SpecDrift, err.Error())
 	}
-	if _, err := procenv.WithSubmitted(procenv.Base{Masker: secrets.NewMasker()}, values); err != nil {
+	if err := procenv.CheckSubmitted(values, secrets.NewMasker()); err != nil {
 		return authorityError(apierr.BadRequest, "invalid submitted environment")
 	}
 	assignments := make([]string, 0, len(values))

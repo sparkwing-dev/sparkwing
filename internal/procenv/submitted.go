@@ -20,8 +20,7 @@ func Submit(environment, allowed []string, masker *secrets.Masker) (map[string][
 		if err != nil {
 			return nil, err
 		}
-		row, _ := Lookup(name)
-		if row.Owner == "engine" || credentialName(row, name) || !submitAllowed(name, allowed) {
+		if !submittable(name) || !submitAllowed(name, allowed) {
 			continue
 		}
 		if seen[envKey(name)] {
@@ -36,6 +35,13 @@ func Submit(environment, allowed []string, masker *secrets.Masker) (map[string][
 	return values, nil
 }
 
+// safety: a submitted value comes from the requester, so it may not reconfigure the executing
+// host's Go toolchain or network base, nor carry an engine-owned or credential-shaped name.
+func submittable(name string) bool {
+	row, _ := Lookup(name)
+	return submitEnvName.MatchString(name) && row.Owner != "engine" && !row.GoTool && !row.RemoteBase && !credentialName(row, name)
+}
+
 func submitAllowed(name string, allowed []string) bool {
 	for _, pattern := range allowed {
 		if envKey(pattern) == envKey(name) || strings.HasSuffix(pattern, "_*") && strings.HasPrefix(envKey(name), envKey(strings.TrimSuffix(pattern, "*"))) {
@@ -45,21 +51,55 @@ func submitAllowed(name string, allowed []string) bool {
 	return false
 }
 
+// SubmitAccept is the executing host operator's policy for requester-submitted names.
+type SubmitAccept struct {
+	patterns []string
+	every    bool
+}
+
+// OperatorSubmitAccept accepts the submitted names the host operator lists in its own
+// run.submit_env_allow. An empty list accepts none.
+func OperatorSubmitAccept(patterns []string) (SubmitAccept, error) {
+	if err := ValidateSubmitEnvAllow(patterns); err != nil {
+		return SubmitAccept{}, err
+	}
+	return SubmitAccept{patterns: slices.Clone(patterns)}, nil
+}
+
+// SubmitAcceptAll accepts every submittable name: for the submitting machine itself, or
+// for a sandbox that serves one claim and is then discarded, so no value outlives the claim.
+func SubmitAcceptAll() SubmitAccept { return SubmitAccept{every: true} }
+
+func (a SubmitAccept) accepts(name string) bool { return a.every || submitAllowed(name, a.patterns) }
+
+// CheckSubmitted refuses a reserved, refused or duplicate submitted name and registers value masks.
+func CheckSubmitted(values map[string][]byte, masker *secrets.Masker) error {
+	seen := map[string]bool{}
+	for name, value := range values {
+		if !submittable(name) || strings.ContainsRune(string(value), 0) || seen[envKey(name)] {
+			return errors.New("submitted environment contains a reserved or invalid variable")
+		}
+		seen[envKey(name)] = true
+		if err := registerMasks(masker, name, string(value), true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // WithSubmitted binds private submitted values to a remote base before any process starts.
-func WithSubmitted(base Base, values map[string][]byte) (Base, error) {
+// Only names the host operator accepts reach the base; the rest are dropped.
+func WithSubmitted(base Base, values map[string][]byte, accept SubmitAccept) (Base, error) {
 	if base.Local {
 		return Base{}, errors.New("submitted values require a remote environment")
 	}
+	if err := CheckSubmitted(values, base.Masker); err != nil {
+		return Base{}, err
+	}
 	base.Ambient, base.SubmitEnvAllow = slices.Clone(base.Ambient), slices.Clone(base.SubmitEnvAllow)
-	seen := map[string]bool{}
 	for name, value := range values {
-		row, _ := Lookup(name)
-		if !submitEnvName.MatchString(name) || row.Owner == "engine" || credentialName(row, name) || strings.ContainsRune(string(value), 0) || seen[envKey(name)] {
-			return Base{}, errors.New("submitted environment contains a reserved or invalid variable")
-		}
-		seen[envKey(name)] = true
-		if err := registerMasks(base.Masker, name, string(value), true); err != nil {
-			return Base{}, err
+		if !accept.accepts(name) {
+			continue
 		}
 		base.Ambient = append(base.Ambient, name+"="+string(value))
 		base.SubmitEnvAllow = append(base.SubmitEnvAllow, name)

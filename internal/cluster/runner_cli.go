@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -26,6 +27,7 @@ import (
 type RunnerOptions struct {
 	Config           userconfig.RunnerConfig
 	ConfigPath       string
+	SubmitAccept     procenv.SubmitAccept
 	Loop             runners.LoopConfig
 	Heartbeat, Lease time.Duration
 	WarmModules      []string
@@ -58,12 +60,15 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	if err != nil {
 		return parsedHelp(err)
 	}
-	config, err := cli.config(command, fs)
+	config, accepted, err := cli.config(command, fs)
 	if err != nil {
 		return err
 	}
 	options, err := runnerOptions(config, fs, version)
 	if err != nil {
+		return err
+	}
+	if options.SubmitAccept, err = procenv.OperatorSubmitAccept(accepted); err != nil {
 		return err
 	}
 	if command == "start" {
@@ -116,8 +121,8 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	return runRunner(ctx, runner, options.MetricsAddress)
 }
 
-func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (userconfig.RunnerConfig, error) {
-	var cfg userconfig.RunnerConfig
+// config also returns the operator's run.submit_env_allow, the submitted names this host accepts.
+func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (cfg userconfig.RunnerConfig, accepted []string, err error) {
 	if command == "start" {
 		read := cli.ReadConfig
 		if read == nil {
@@ -125,25 +130,27 @@ func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (userconfig.Runner
 		}
 		path := textFlag(fs, "config")
 		if fs.Changed("config") && path == "" {
-			return cfg, errors.New("--config must not be empty")
+			return cfg, nil, errors.New("--config must not be empty")
 		}
 		if path == "" {
-			var err error
 			path, err = userconfig.Path()
 			if err != nil {
-				return cfg, err
+				return cfg, nil, err
 			}
 		}
 		file, err := read(path)
 		if err != nil {
-			return cfg, err
+			return cfg, nil, err
 		}
 		if file.Runner == nil {
-			return cfg, errors.New("config requires a runner section")
+			return cfg, nil, errors.New("config requires a runner section")
 		}
 		cfg = *file.Runner
+		if file.Run != nil {
+			accepted = file.Run.SubmitEnvAllow
+		}
 	}
-	stringFields := map[string]**string{"controller": &cfg.Controller, "credentials-dir": &cfg.CredentialsDir, "holder-prefix": &cfg.HolderPrefix, "poll": &cfg.Poll, "heartbeat": &cfg.Heartbeat, "lease": &cfg.Lease, "keep-free": &cfg.KeepFree}
+	stringFields := map[string]**string{"controller": &cfg.Controller, "credentials-dir": &cfg.CredentialsDir, "holder-prefix": &cfg.HolderPrefix, "poll": &cfg.Poll, "heartbeat": &cfg.Heartbeat, "lease": &cfg.Lease, "keep-free": &cfg.KeepFree, "trust": &cfg.Trust}
 	for name, target := range stringFields {
 		if fs.Changed(name) {
 			value := textFlag(fs, name)
@@ -156,7 +163,7 @@ func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (userconfig.Runner
 			*target = &value
 		}
 	}
-	for name, target := range map[string]*[]string{"repos": &cfg.Repos, "label": &cfg.Labels} {
+	for name, target := range map[string]*[]string{"repos": &cfg.Repos, "label": &cfg.Labels, "submit-env-allow": &accepted} {
 		if fs.Changed(name) {
 			*target, _ = fs.GetStringSlice(name)
 		}
@@ -164,11 +171,11 @@ func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (userconfig.Runner
 	if fs.Changed("max-concurrent") {
 		value, err := strconv.Atoi(textFlag(fs, "max-concurrent"))
 		if err != nil {
-			return cfg, errors.New("--max-concurrent requires an integer")
+			return cfg, nil, errors.New("--max-concurrent requires an integer")
 		}
 		cfg.MaxConcurrent = &value
 	}
-	return cfg, nil
+	return cfg, accepted, nil
 }
 
 func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string) (RunnerOptions, error) {
@@ -187,6 +194,12 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 	}
 	if _, err := sourceurl.ParseRepoAllowlist(cfg.Repos); err != nil {
 		return options, fmt.Errorf("runner repos: %w", err)
+	}
+	if cfg.Trust != nil {
+		if !slices.Contains([]string{"verified-default", "any"}, *cfg.Trust) {
+			return options, errors.New("runner trust must be verified-default or any")
+		}
+		options.Loop.Trust = *cfg.Trust
 	}
 	if cfg.KeepFree != nil {
 		if _, err := userconfig.ParseBudget(*cfg.KeepFree); err != nil {

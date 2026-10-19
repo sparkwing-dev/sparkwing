@@ -89,6 +89,7 @@ type RunnerConfig struct {
 	Heartbeat         *string  `yaml:"heartbeat,omitempty" json:"heartbeat,omitempty"`
 	LocalAdmission    *bool    `yaml:"local_admission,omitempty" json:"local_admission,omitempty"`
 	KeepFree          *string  `yaml:"keep_free,omitempty" json:"keep_free,omitempty"`
+	Trust             *string  `yaml:"trust,omitempty" json:"trust,omitempty"`
 }
 
 // CacheConfig bounds only the local binary cache; explicit zero disables a bound.

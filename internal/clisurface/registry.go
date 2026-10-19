@@ -867,6 +867,8 @@ func Registry() []Command {
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
 			{Name: "repos", Argument: "REPO", Repeatable: true, CommaList: true},
 			{Name: "credentials-dir", Argument: "PATH"},
+			{Name: "submit-env-allow", Argument: "NAME", Repeatable: true, CommaList: true},
+			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "any"}},
 		}},
 	}
 }

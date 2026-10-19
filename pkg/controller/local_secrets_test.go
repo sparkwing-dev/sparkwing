@@ -77,7 +77,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		t.Fatal("private direct award lost submitted environment")
 	}
 	masker := secrets.NewMasker()
-	base, err := procenv.WithSubmitted(procenv.Base{Ambient: []string{"BUILD_REGION=runner-value", "UNLISTED=runner-private"}, Masker: masker}, award.SubmittedEnv)
+	base, err := procenv.WithSubmitted(procenv.Base{Ambient: []string{"BUILD_REGION=runner-value", "UNLISTED=runner-private"}, Masker: masker}, award.SubmittedEnv, procenv.SubmitAcceptAll())
 	if err != nil {
 		t.Fatal(err)
 	}

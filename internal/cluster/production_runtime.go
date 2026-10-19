@@ -42,7 +42,7 @@ func ProductionRuntime(version string) Runtime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission)}
+			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept)}
 			installation, err := productionInstallation(options.ConfigPath, hosting)
 			if err != nil {
 				return runners.RuntimeConfig{}, err
@@ -67,7 +67,7 @@ func ProductionRuntime(version string) Runtime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, false)}, nil, nil
+				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, false, procenv.SubmitAcceptAll())}, nil, nil
 			},
 		},
 	}
@@ -77,7 +77,9 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) { return raw, context.Cause(ctx) }
 }
 
-func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool) runners.Hosting {
+// accept is the operator's policy for requester-submitted names; a Cloud Job serves one
+// claim and is discarded, so it accepts every submittable name.
+func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool, accept procenv.SubmitAccept) runners.Hosting {
 	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services runners.NativeServices, principal capability.Principal, err error) {
 		options := connection
 		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
@@ -133,8 +135,8 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			return services, principal, err
 		}
 		services, err = localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
-			SubmittedEnv: unit.SubmittedEnv,
-			Home:         home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
+			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: accept,
+			Home: home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
 			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
 			Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 				return state.RenewOwner(ctx, store.Actor{}, computing)

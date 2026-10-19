@@ -180,7 +180,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, err := procenv.WithSubmitted(procenv.Base{Masker: secrets.NewMasker()}, values)
+	base, err := procenv.WithSubmitted(procenv.Base{Masker: secrets.NewMasker()}, values, procenv.SubmitAcceptAll())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 			t.Fatal("eval grants widened")
 		}
 	}
-	base, err = procenv.WithSubmitted(procenv.Base{Masker: secrets.NewMasker()}, claim.SubmittedEnv)
+	base, err = procenv.WithSubmitted(procenv.Base{Masker: secrets.NewMasker()}, claim.SubmittedEnv, procenv.SubmitAcceptAll())
 	if err != nil {
 		t.Fatal(err)
 	}

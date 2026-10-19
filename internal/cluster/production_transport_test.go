@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -34,7 +35,7 @@ func TestProductionHostingRetainsPrivateTransport(t *testing.T) {
 				return nil, boundary
 			})}
 			connection := client.EngineOptions{URL: "http://private.invalid", HTTP: transport, Launcher: true, Bearer: fixedBearer("ambient-root")}
-			hosting := productionHostingAt(t.TempDir(), "v1.2.3", connection, "", "", false)
+			hosting := productionHostingAt(t.TempDir(), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{})
 			if hosting.HTTP != transport || hosting.ControllerURL != connection.URL {
 				t.Fatal("hosting lost its configured transport")
 			}
@@ -67,7 +68,7 @@ func FuzzProductionHostingUsesOnlyAwardedCredential(f *testing.F) {
 			}
 			return nil, boundary
 		})}
-		hosting := productionHostingAt(t.TempDir(), "v1.2.3", client.EngineOptions{URL: "http://private.invalid", HTTP: httpClient, Bearer: fixedBearer(ambient)}, "", "", false)
+		hosting := productionHostingAt(t.TempDir(), "v1.2.3", client.EngineOptions{URL: "http://private.invalid", HTTP: httpClient, Bearer: fixedBearer(ambient)}, "", "", false, procenv.SubmitAccept{})
 		unit := controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, RunID: "run", Capability: bearer}
 		if node {
 			unit.Unit, unit.JobID = capability.UnitNode, "build"
