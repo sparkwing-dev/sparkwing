@@ -355,7 +355,7 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		if c.Unit == "" {
 			allowed := ScopesForRole(role)
 			if c.Data != nil {
-				if c.Data.Use == capability.DataRemoteCache && slices.Contains(allowed, ScopeRunsRead) {
+				if c.Data.Use == capability.DataRemoteCache && slices.Contains(allowed, ScopeRunsWrite) {
 					allowed = append(allowed, string(capability.DataRead))
 				}
 				if c.Data.Use == capability.DataPublish && slices.Contains(allowed, ScopeRunsWrite) {

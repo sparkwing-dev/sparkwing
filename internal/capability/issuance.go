@@ -251,7 +251,8 @@ func accountDataDelegation(parent Principal, child DelegateSpec) bool {
 	}
 	switch d.Use {
 	case DataRemoteCache:
-		return slices.Contains(p.Grants, RunsRead) && slices.Equal(child.Grants, []Grant{DataRead}) &&
+		// safety: dependency-cache archives are not mask-checked, so remote cache reads need the role that runs code.
+		return slices.Contains(p.Grants, RunsWrite) && slices.Equal(child.Grants, []Grant{DataRead}) &&
 			child.Binding == (Binding{Kind: BindingNone}) && d.VerifiedDefaultOnly && d.WriteRef == "" && d.RunID == "" && len(d.ReadRefs) > 0
 	case DataPublish:
 		return slices.Contains(p.Grants, RunsWrite) && slices.Equal(child.Grants, []Grant{DataWrite}) &&
