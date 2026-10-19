@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -251,5 +252,31 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 				t.Fatalf("recheck=%s want=%s error=%v", result.Kind, want, err)
 			}
 		})
+	}
+}
+
+func TestOwnerNodeReadsMatchTheSnapshotPlacementDecision(t *testing.T) {
+	tenant, actor := ownerPlacementFixture(t)
+	s := tenant.s
+	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())
+	owner, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := tenant.ReadOwnerSnapshot(t.Context(), actor.Authority, "run")
+	if err != nil || len(snapshot.Nodes) == 0 || !OwnerCanExecute(owner)(snapshot.Nodes[0]) {
+		t.Fatalf("snapshot eligibility: %v", err)
+	}
+	node, err := tenant.ReadOwnerNode(t.Context(), actor.Authority, snapshot.Nodes[0].Ref)
+	if err != nil || !OwnerCanExecute(owner)(node) {
+		t.Fatalf("one-node read lost the placement decision: %+v %v", node.OwnerExecution, err)
+	}
+	nodes, err := tenant.ReadOwnerNodes(t.Context(), actor.Authority, "run")
+	if err != nil || len(nodes) != len(snapshot.Nodes) || nodes[0].OwnerExecution != nil {
+		t.Fatalf("authority read computed placement decisions: %+v %v", nodes, err)
+	}
+	if _, err := tenant.ReadOwnerNode(t.Context(), actor.Authority, NodeRef{RunID: "run", NodeID: "missing"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing node: %v", err)
 	}
 }

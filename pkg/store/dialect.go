@@ -121,6 +121,7 @@ type storeTx struct {
 	rotatingRoot         *capability.Capability
 	createdTeam          *TeamInfo
 	blobIO               *blobIO
+	matchingRuns         map[matchingRunKey]*matchingRun
 }
 
 // SetTestClock overrides the SQLite store clock until the test ends.

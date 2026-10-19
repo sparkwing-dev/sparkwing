@@ -19,56 +19,110 @@ func resolveMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDeman
 	return readMatchingInputsTx(ctx, tx, request, unit, true)
 }
 
-func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef, lock bool) (match.Profile, match.Demand, error) {
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: request.CapabilityPrefix}, lock)
-	if err != nil {
-		return match.Profile{}, match.Demand{}, err
+// matchingRun holds the run-level matching reads, which a snapshot's per-node
+// placement decisions would otherwise repeat once per node. Only read-only
+// snapshot transactions reuse it, so no write in the same transaction can stale it.
+type matchingRun struct {
+	chain   []authorityNode
+	here    bool
+	profile match.Profile
+	team    string
+	display string
+	request runspec.SealedRequest
+	spec    *runspec.Spec
+	pools   []byte
+	err     error
+}
+
+type matchingRunKey struct{ prefix, run string }
+
+func readMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, lock bool) *matchingRun {
+	key := matchingRunKey{prefix, runID}
+	memo := !lock && tx.snapshotRead
+	if memo {
+		if cached, ok := tx.matchingRuns[key]; ok {
+			return cached
+		}
 	}
+	run := loadMatchingRunTx(ctx, tx, prefix, runID, lock)
+	if memo {
+		if tx.matchingRuns == nil {
+			tx.matchingRuns = map[matchingRunKey]*matchingRun{}
+		}
+		tx.matchingRuns[key] = run
+	}
+	return run
+}
+
+func loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, lock bool) *matchingRun {
+	run := &matchingRun{}
+	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, lock)
+	if err != nil {
+		run.err = err
+		return run
+	}
+	run.chain = chain
 	p := chain[0].principal
-	here := false
 	for _, ancestor := range chain {
-		if ancestor.principal.Capability.Purpose == capability.PurposeHere && ancestor.principal.Capability.Binding.RunID == unit.RunID {
-			here = true
+		if ancestor.principal.Capability.Purpose == capability.PurposeHere && ancestor.principal.Capability.Binding.RunID == runID {
+			run.here = true
 		}
 	}
-	var profile match.Profile
 	if tx.store.claimProfiles != nil {
-		profile, _, err = tx.store.claimProfiles.ResolveClaimProfile(ctx, p)
+		run.profile, _, err = tx.store.claimProfiles.ResolveClaimProfile(ctx, p)
 		if err != nil {
-			return profile, match.Demand{}, err
+			run.err = err
+			return run
 		}
 	}
-	profile = authenticatedClaimProfile(p.Capability, profile, here)
-	profile.Labels, profile.OS, profile.Arch = slices.Clone(request.Labels), request.OS, request.Arch
-	if tx.store.claimProfiles == nil || here {
-		profile.Capacity = request.Capacity
-	}
-	var team, repo, display string
-	var requestBody, specBody, pools []byte
-	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json,allowed_pools FROM runs WHERE id=?`, unit.RunID).Scan(&team, &repo, &display, &requestBody, &specBody, &pools)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !launcherClaimant(p.Capability) && p.Capability.Team != team {
-		return profile, match.Demand{}, bindingRefusal()
+	run.profile = authenticatedClaimProfile(p.Capability, run.profile, run.here)
+	var repo, display string
+	var requestBody, specBody []byte
+	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json,allowed_pools FROM runs WHERE id=?`, runID).Scan(&run.team, &repo, &display, &requestBody, &specBody, &run.pools)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !launcherClaimant(p.Capability) && p.Capability.Team != run.team {
+		run.err = bindingRefusal()
+		return run
 	}
 	if err != nil {
-		return profile, match.Demand{}, err
+		run.err = err
+		return run
 	}
-	var requestSeal runspec.SealedRequest
-	if err = json.Unmarshal(requestBody, &requestSeal); err != nil {
-		return profile, match.Demand{}, err
+	if run.err = json.Unmarshal(requestBody, &run.request); run.err != nil {
+		return run
 	}
 	if display == "" {
-		display = requestSeal.Request.Git.Repository.Display
+		display = run.request.Request.Git.Repository.Display
 	}
-	if err := checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: repo, Display: display}); err != nil {
-		return profile, match.Demand{}, err
+	run.display = display
+	if run.err = checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: repo, Display: display}); run.err != nil {
+		return run
 	}
-	git := requestSeal.Request.Git
-	if err := checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); err != nil {
-		return profile, match.Demand{}, err
+	git := run.request.Request.Git
+	if run.err = checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); run.err != nil {
+		return run
 	}
-	if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
-		return profile, match.Demand{}, err
+	if run.err = checkPersonalMachineTx(ctx, tx, chain, runID); run.err != nil {
+		return run
 	}
+	if len(specBody) > 0 {
+		run.spec = &runspec.Spec{}
+		run.err = json.Unmarshal(specBody, run.spec)
+	}
+	return run
+}
+
+func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef, lock bool) (match.Profile, match.Demand, error) {
+	run := readMatchingRunTx(ctx, tx, request.CapabilityPrefix, unit.RunID, lock)
+	profile := run.profile
+	profile.Labels, profile.OS, profile.Arch = slices.Clone(request.Labels), request.OS, request.Arch
+	if tx.store.claimProfiles == nil || run.here {
+		profile.Capacity = request.Capacity
+	}
+	if run.err != nil {
+		return profile, match.Demand{}, run.err
+	}
+	chain, here, team, display, requestSeal, pools := run.chain, run.here, run.team, run.display, run.request, run.pools
+	var err error
 	if requestSeal.Request.Burst != nil {
 		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {
 			return profile, match.Demand{}, err
@@ -78,12 +132,8 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if options.Runner.Value.Kind == runspec.RunnerHere && !here && (requestSeal.Request.Burst == nil || unit.Kind != capability.UnitNode) {
 		return profile, match.Demand{}, authorityError(apierr.Forbidden, "work is reserved for its here claimant")
 	}
-	if len(specBody) > 0 {
-		var sealed runspec.Spec
-		if err = json.Unmarshal(specBody, &sealed); err != nil {
-			return profile, match.Demand{}, err
-		}
-		if (unit.Kind == capability.UnitNode || unit.Kind == capability.UnitEval) && runGuardRefusal(RunRow{Spec: &sealed}) != "" {
+	if sealed := run.spec; sealed != nil {
+		if (unit.Kind == capability.UnitNode || unit.Kind == capability.UnitEval) && runGuardRefusal(RunRow{Spec: sealed}) != "" {
 			return profile, match.Demand{}, authorityError(apierr.Forbidden, "run guard refused execution")
 		}
 		options = sealed.Resolved.Settings.Options
