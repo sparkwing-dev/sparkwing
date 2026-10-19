@@ -803,3 +803,9 @@ Assigned to an Opus implementer (env 1087).
 - An approved machine is treated as a self-hosted claimant for those runs (admin-trusted, the GitHub self-hosted-runner model). OIDC distinguishes it: `runner_kind=personal` vs `runner`.
 - The owner of an automated App run, for routing to a personal machine, is the commit/PR author's linked identity, never the webhook sender; retries keep the author. Schedules use the account that armed them.
 - Customer-visible and approved.
+
+## 2026-10-18 Korey decision 16: personal machines run only repositories their owner can access
+
+- Decision 6(c) stands for every personal machine, approved or not: no team git credentials and no App installation tokens. A personal machine fetches with its owner's own git access.
+- A personal machine is eligible for an automated run only if its owner can read the run's repository and every extra repository the run needs. The controller checks this server-side via the App installation (the owner's linked GitHub login's collaborator permission on each repository), cached briefly, never from the machine's claim. An ineligible machine is skipped by ranking; it does not claim and fail.
+- Korey's words: "people should still only be able to run the repositories that they have access to".
