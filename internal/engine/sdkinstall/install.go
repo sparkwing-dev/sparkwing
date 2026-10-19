@@ -80,6 +80,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		}
 	}
 	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
+	environment = append(environment, qaModuleEnvironment(environment)...)
 	var buildDiagnostics bytes.Buffer
 	options := bincache.CompileOptions{Environment: environment, Diagnostics: &buildDiagnostics, HashAllFiles: request.HashAllFiles}
 	name := "pipeline"

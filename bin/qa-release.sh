@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publishes a QA pre-release to https://qa-releases.sparkwing.dev, signed with
-# the QA key. Only builds made with the qatrust tag trust it, so production
-# clients never see these releases.
+# the QA key, plus the Go SDK at that version under /goproxy. Only builds made
+# with the qatrust tag trust it, so production clients never see these releases.
 #
 # usage: bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>
 #
@@ -48,6 +48,13 @@ dist=$src/dist
 cp "$src/install/install.sh" "$dist/install.sh"
 env -C "$dist" bash -c 'sha256sum sparkwing-* > SHA256SUMS'
 
+# Pipelines fetch the Go SDK at this version from the QA proxy; see internal/engine/sdkinstall.
+goproxy=$work/goproxy
+module_dir=github.com/sparkwing-dev/sparkwing/@v
+GOWORK=off go -C "$src" run ./bin/qagoproxy --repo "$src" --revision "$sha" --version "$version" --out "$goproxy"
+aws s3 cp --region "$region" "s3://$bucket/goproxy/$module_dir/list" "$goproxy/$module_dir/list" --only-show-errors 2>/dev/null || true
+echo "$version" >>"$goproxy/$module_dir/list"
+
 if aws s3 cp --region "$region" "s3://$bucket/versions.json" "$work/previous/versions.json" --only-show-errors 2>/dev/null; then
   aws s3 cp --region "$region" "s3://$bucket/versions.json.sig" "$work/previous/versions.json.sig" --only-show-errors
   previous=$work/previous
@@ -62,6 +69,7 @@ unset seed
 GOWORK=off go -C "$src" run ./cmd/verify-release --dist "$dist" --verify
 
 aws s3 cp --region "$region" "$dist/" "s3://$bucket/releases/download/$version/" --recursive --only-show-errors
+aws s3 cp --region "$region" "$goproxy/" "s3://$bucket/goproxy/" --recursive --only-show-errors
 aws s3 cp --region "$region" "$work/versions.json.sig" "s3://$bucket/versions.json.sig" --only-show-errors
 aws s3 cp --region "$region" "$work/versions.json" "s3://$bucket/versions.json" --content-type application/json --only-show-errors
 echo "==> published $version ($sha)"

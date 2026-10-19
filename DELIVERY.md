@@ -85,8 +85,14 @@ Production builds never carry the tag, and the GitHub release workflow never set
 `bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>` archives the commit, builds the
 dashboard and the full release matrix with the tag, signs the assets with the QA
 seed from SSM `/kikd-prod/sparkwing/qa-release-signing-key`, appends the version to
-the signed QA `versions.json`, and uploads both. A published QA version is
-immutable; use the next `-qa.N`.
+the signed QA `versions.json`, and uploads both. It also publishes the Go SDK at
+that version in GOPROXY layout under `/goproxy`; a qatrust engine puts that proxy
+ahead of the caller's and exempts only the sparkwing module from the public
+checksum database, so a QA pipeline's `go.sum` must be generated the same way
+(`GOPROXY='https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct'
+GONOSUMDB=github.com/sparkwing-dev/sparkwing go mod tidy`). The TypeScript SDK has
+no QA package: packing it requires the Windows native bridges. A published QA
+version is immutable; use the next `-qa.N`.
 
 QA images: `sparkwing run build-images --qatrust --tag vX.Y.Z-qa.N --registry <ecr> --push`
 builds the controller and runner from source with the tag. To package the published QA
