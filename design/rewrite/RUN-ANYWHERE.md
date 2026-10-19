@@ -111,8 +111,10 @@ Each plan, eval and job unit has its own window `W = limits.RankingWindow`
   claimant, rank, time) under the unit's claim lock, in the claim
   transaction itself, whether that transaction awards another unit or none.
 - From `ready+W` to `ready+W+A` (`A = limits.RankingAward`, 2 s, the lead
-  amendment to decision 2), a claim waits only while a better-ranked claimant
-  recorded an ask inside the window. The best asker has `A` to come back.
+  amendment to decision 2), the window's winner is the best-ranked asker
+  recorded inside the window, and only that winner may take the unit. A
+  claimant that first asks after the window waits, whatever its rank. With no
+  ask inside the window, the first eligible asker wins.
 - After that, the first eligible asker wins. An award clears the unit's asks.
 
 Claimants keep their normal poll cadence. A ranking check evaluates at most

@@ -155,6 +155,9 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
 		return UnitClaim{}, err
 	}
+	if err = lockRankedUnitTx(ctx, tx, team, unit); err != nil {
+		return UnitClaim{}, err
+	}
 	if err = lockClaimOwnerTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}

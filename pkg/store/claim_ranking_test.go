@@ -388,3 +388,13 @@ func TestRankingPersonalMachinesTakeOnlyTheirOwnersManualRuns(t *testing.T) {
 		})
 	}
 }
+
+func TestRankingAwardDeadlineAdmitsOnlyTheWindowWinner(t *testing.T) {
+	f := rankingFixture(t, true)
+	livePolls(t, f, f.Personal)
+	f.At(4900 * time.Millisecond)
+	wantNone(t, f, f.Actions, capability.UnitPlan)
+	f.At(5100 * time.Millisecond)
+	wantNone(t, f, f.Personal, capability.UnitPlan)
+	wantAward(t, f, f.Actions, capability.UnitPlan, "")
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -154,9 +155,9 @@ func unitReadyTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) (tim
 	return time.Unix(0, at.Int64).UTC(), at.Valid, err
 }
 
-// safety: every ranking decision for a unit, an ask or an award, holds the unit's ranking lock from before it reads
-// readiness until its transaction ends, so asks and awards serialize. Scans take these locks in one global unit
-// order, so two scans cannot deadlock.
+// safety: every claim decision for a unit, an ask or an award, holds the unit's ranking lock from before it reads
+// readiness until its transaction ends, so asks and awards serialize. It is always taken before the unit's rows,
+// and scans take it in one global unit order, so claims cannot deadlock.
 func lockRankedUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
 	if tx.dialect != DialectPostgres {
 		return nil
@@ -165,17 +166,18 @@ func lockRankedUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef)
 }
 
 // safety: a held claimant's ask is written in the claim transaction, whether that transaction awards another unit
-// or nothing, so later polls cannot erase it.
+// or nothing, so later polls cannot erase it. For RankingAward after the window, only the window's winner, the
+// best-ranked asker recorded inside it, may take the unit; a newcomer of any rank waits for the deadline.
 func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request, claimant string, liveness time.Duration) (bool, error) {
+	if err := lockRankedUnitTx(ctx, tx, team, unit); err != nil {
+		return false, err
+	}
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant}, false)
 	if err != nil {
 		return false, err
 	}
 	rank, err := claimRankTx(ctx, tx, team, chain, request)
-	if err != nil || rank <= 0 {
-		return false, err
-	}
-	if err := lockRankedUnitTx(ctx, tx, team, unit); err != nil {
+	if err != nil || rank < 0 {
 		return false, err
 	}
 	since, ready, err := unitReadyTx(ctx, tx, team, unit)
@@ -187,9 +189,15 @@ func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, re
 		if !now.Before(end.Add(limits.RankingAward)) {
 			return false, nil
 		}
-		var best sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT MIN(claim_rank) FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=? AND claimant<>? AND asked_at>=? AND asked_at<?`, team, unit.RunID, unit.Kind, unit.NodeID, claimant, since.UnixNano(), end.UnixNano()).Scan(&best)
-		return best.Valid && best.Int64 < int64(rank), err
+		var winner string
+		err := tx.QueryRowContext(ctx, `SELECT claimant FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=? AND asked_at>=? AND asked_at<? ORDER BY claim_rank,asked_at,claimant LIMIT 1`, team, unit.RunID, unit.Kind, unit.NodeID, since.UnixNano(), end.UnixNano()).Scan(&winner)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return winner != claimant, err
+	}
+	if rank == 0 {
+		return false, nil
 	}
 	polls, err := placementRunnersTx(ctx, tx, team, liveness, true)
 	if err != nil {
