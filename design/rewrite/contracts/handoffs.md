@@ -777,3 +777,12 @@ Assigned to an Opus implementer (env 1087).
 - The billing page (console) and the CLI offer a "contact us to unlock higher tiers" request. It creates an operator task in the operator console queue, which the operator approves with the existing grant of standing.
 - docs/billing.md documents the cap, 3DS and the request.
 - A chargeback still puts the team on Held (no new admissions).
+
+## 2026-10-18 Korey decision 12: Cloud jobs do not get node root
+
+- Source: Opus launcher security review C1 (review/areas/launcher-security-opus.md). Job pods reached node root through the privileged Docker sidecar, and from it the shared node role `kikd-prod-karpenter-node` (AmazonEKS_CNI_Policy, SSM) and the aws-node token.
+- The Docker sidecar runs rootless (no privileged container in job pods; prefer user-namespaced pods). Customers keep docker build/run/compose; `docker run --privileged` and host-level Docker features are not available on Cloud. Customer-visible and approved. GitHub Actions and CircleCI give root only inside a per-job VM.
+- Job and team nodes use their own instance role with only ECR read-only and EKS worker permissions (no CNI, no SSM). aws-node gets CNI permissions through Pod Identity/IRSA, not the node role.
+- The admission policy forbids privileged containers in job pods, including the Docker sidecar. Any remaining privileged probe needs a stated reason.
+- A per-job VM option with privileged Docker may come later as a paid feature, only if customers ask.
+- With node root gone, per-team node reuse (review M2) stays as is.
