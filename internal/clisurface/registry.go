@@ -701,7 +701,7 @@ func Registry() []Command {
 			{Name: "version", Argument: "TAG"},
 			{Name: "dry-run"},
 		}},
-		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action."}, Flags: []Flag{
+		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. A CLI update reports that installed runner services update themselves from their controller; it does not restart them. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action."}, Flags: []Flag{
 			{Name: "dry-run"},
 			{Name: "force"},
 			{Name: "override-hold"},

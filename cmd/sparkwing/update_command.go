@@ -13,6 +13,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
+// update replaces only the CLI; sparkwing-runner drains and replaces itself when its controller says so.
+const updateRunnerServicesNote = "Installed runner services update themselves from their controller."
+
 type updateCommand struct {
 	out      io.Writer
 	terminal bool
@@ -66,6 +69,9 @@ func (c updateCommand) run(ctx context.Context, inv clisurface.Invocation) error
 		return fmt.Errorf("CLI %s is installed at %s, but managed-unit refresh failed: %w; run sparkwing doctor, then sparkwing update --version %s to retry", result.After.Version, result.After.Path, err, result.After.Version)
 	}
 	result.ManagedUnits = "refreshed"
+	if result.Status == "updated" {
+		result.RunnerServices = updateRunnerServicesNote
+	}
 	return writeUpdateReceipt(c.out, result, mode)
 }
 

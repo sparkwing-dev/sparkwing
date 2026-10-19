@@ -68,7 +68,7 @@ func Install(ctx context.Context, h Host) (State, error) {
 	if exists && !managed {
 		return foreignState(path), foreignError(path)
 	}
-	loaded, _, err := h.registration(ctx, path)
+	loaded, err := h.registration(ctx, path)
 	if err != nil {
 		return State{}, err
 	}
@@ -111,7 +111,7 @@ func Uninstall(ctx context.Context, h Host) (State, error) {
 	if !state.Installed {
 		return state, nil
 	}
-	loaded, _, err := h.registration(ctx, state.Path)
+	loaded, err := h.registration(ctx, state.Path)
 	if err != nil {
 		return State{}, err
 	}
@@ -177,9 +177,9 @@ func PlistPath(h Host) string {
 	return filepath.Join(h.Home, "Library", "LaunchAgents", PlistName)
 }
 
-func (h Host) registration(ctx context.Context, path string) (bool, string, error) {
+func (h Host) registration(ctx context.Context, path string) (bool, error) {
 	if h.GOOS == "linux" {
-		return true, "", unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, path)
+		return true, unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, path)
 	}
 	return agentRegistration(ctx, h)
 }

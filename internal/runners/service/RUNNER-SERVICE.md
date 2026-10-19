@@ -57,30 +57,19 @@ repeated flags and values that resemble flags.
 Systemd inspection requires one complete `ExecStart` command. Leading empty
 reset directives remain valid. A malformed nonempty command cannot be hidden
 by a later valid command.
-Refresh preserves empty reset directives when replacing the executable.
 Plist inspection decodes one dictionary and a string-only `ProgramArguments`
 array. Duplicate commands, incomplete XML and extra documents are refused.
 `FuzzPlistArguments` covers literal argument recovery and those refusals.
-`Refresh` replaces the executable in the installed command. It preserves all
-arguments, including repository overrides and repeated config flags, and keeps
-the unit's environment, log paths and native policy. Inspection, refresh and
-uninstall share one registration reader and config check.
-An absent registration stays absent. Linux reloads systemd and uses
-`try-restart`, which leaves stopped services stopped. macOS reloads only an
-agent whose launchd state is running. An inactive agent's updated file takes
-effect when launchd next loads it. Errors preserve the managed file for a
-retry and reach the caller. All service-manager commands receive its context.
-
-Refresh must run outside the target service because launchd stops that process
-before loading the replacement. A runner self-updater must hand native service
-work to an external owner through its installation hooks. Refresh alone does
-not complete that process handoff, refresh controller services or migrate
-schedule timers.
+Inspection, registration refresh and uninstall share one registration reader
+and config check. `RefreshRegistration` reloads a matching registration without
+restarting its process, so a runner replacing itself keeps running. Nothing
+outside the runner's own update restarts the service: `sparkwing update`
+replaces only the CLI, and the runner updates itself from its controller.
 
 `RunnerInstallation.Apply` serializes the complete update. Its stages are private,
 so replacement, refresh and restart cannot run out of order.
 `NativeInstallationConfig` keeps the registration's configuration and credential
-paths in its callbacks. Drain stops claims and joins renewing hosts. Refresh
+paths in its callbacks. Drain stops claims and joins renewing hosts. The refresh hook
 receives the installed runner version and also calls the controller/timer refresh
 boundary with the CLI's own executable and version. Restart uses the same runner
 registration. Replacement preserves symlinks and executable permissions. Windows

@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **cli:** `sparkwing update` says after a new CLI install that installed runner services update themselves from their controller (JSON `runner_services`); it never restarts them. The unused runner-service `Refresh` is removed
 - **controller (Breaking):** Rotation through a bearer token never moves a credential's expiry later and caps it at the caller's own expiry; only an account or console session can extend it. Console writes need a sign-in from the last 10 minutes. `--insecure-cookies` is refused on multi-team and hosted controllers. Login throttling is per client only, keyed by IPv4 address or IPv6 /64; the listener-wide budget is removed
 - **cli:** Add `sparkwing operator secrets rotate` and `POST /api/v1/operator/secrets/rotate`, which reseal every team's secrets, git credentials, submitted run environments and the session signing key under the current key; `--verify` counts the rows that still need the previous key. See [rotating the secrets key](docs/security.md#rotating-the-secrets-key)
 - **store (Breaking):** Implement account identity linking on the store. Schedules are keyed by team and id, so another team's schedule id never blocks an arm. Runner claims answer foreign and missing runs alike. Sealed envelopes authenticate their purpose and environment snapshots carry a per-snapshot salt; stores created before this change must be recreated

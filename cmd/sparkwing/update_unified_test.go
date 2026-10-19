@@ -422,6 +422,9 @@ func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 	if receipt.Before.Version != pseudo || receipt.After.Version != "v0.52.8" {
 		t.Fatalf("update receipt identities = before %q after %q", receipt.Before.Version, receipt.After.Version)
 	}
+	if receipt.RunnerServices != updateRunnerServicesNote {
+		t.Fatalf("updated receipt runner services = %q", receipt.RunnerServices)
+	}
 
 	mismatchedPath, _ := buildUpdateArtifact(t, "v9.8.7")
 	updateReadInstalled = func() updateIdentity {
@@ -456,10 +459,11 @@ func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 	if commandError != nil {
 		t.Fatal(commandError)
 	}
+	receipt = updateReceipt{}
 	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
 		t.Fatalf("current receipt: %v %q", err, out)
 	}
-	if receipt.Status != "current" || receipt.After.Version != "v0.52.8" {
+	if receipt.Status != "current" || receipt.After.Version != "v0.52.8" || receipt.RunnerServices != "" {
 		t.Fatalf("current receipt = %+v", receipt)
 	}
 }
