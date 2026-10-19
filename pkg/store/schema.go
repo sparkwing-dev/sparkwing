@@ -203,6 +203,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "signup_gate", Owner: SchemaOperator},
 	{Name: "sparkwing_schema_version", Owner: SchemaOperator},
 	{Name: "source_uploads", Owner: SchemaTenant},
+	{Name: "standing_requests", Owner: SchemaTenant},
 	{Name: "storage_month_usage", Owner: SchemaTenant},
 	{Name: "storage_quotas", Owner: SchemaTenant},
 	{Name: "storage_run_usage", Owner: SchemaTenant},

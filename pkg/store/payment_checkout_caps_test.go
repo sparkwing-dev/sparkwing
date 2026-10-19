@@ -15,7 +15,7 @@ func checkoutCapFixture(t *testing.T, trusted bool) (*Store, *Tenant, *Tenant, *
 	a, b := &Tenant{s: s, team: "a"}, &Tenant{s: s, team: "b"}
 	if trusted {
 		for _, tenant := range []*Tenant{a, b} {
-			if _, _, err := tenant.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "ops", Reason: "reviewed"}, now); err != nil {
+			if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "ops", Reason: "reviewed"}, now); err != nil {
 				t.Fatal(err)
 			}
 		}

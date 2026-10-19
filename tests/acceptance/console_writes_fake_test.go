@@ -23,12 +23,23 @@ func (f consoleStoreFake) ConsoleGrantCredit(ctx context.Context, a capability.A
 }
 
 func (f consoleStoreFake) ConsoleSetBillingTrust(ctx context.Context, a capability.Authorized, req store.BillingTrustChange) (store.BillingStanding, error) {
+	actor := a.Principal.Capability.Subject.ID
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE teams SET billing_trust=?,billing_trust_by=?,billing_trust_at=?,billing_trust_reason=? WHERE name=?`, []any{req.Trust, actor, time.Now().UnixNano(), req.Reason, a.Target.Team}},
+		{`INSERT INTO business_events(id,ts,team,kind,actor,attrs) VALUES (?,?,?,?,?,?)`, []any{"fixture-trust-" + a.Target.Team, time.Now().UnixNano(), a.Target.Team, store.BusinessEventBillingTrustChanged, actor, `{"reason":"` + req.Reason + `"}`}},
+	} {
+		if _, err := f.store.DB().ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
+			return store.BillingStanding{}, err
+		}
+	}
 	tenant, err := f.store.ForTeam(ctx, store.Team(a.Target.Team))
 	if err != nil {
 		return store.BillingStanding{}, err
 	}
-	_, after, err := tenant.SetBillingTrust(ctx, req, time.Now())
-	return after, err
+	return tenant.BillingStanding(ctx, time.Now())
 }
 
 func (f consoleStoreFake) ConsoleFreeze(ctx context.Context, a capability.Authorized, reason string) (store.TeamCreditFreeze, error) {
@@ -42,7 +53,7 @@ func (f consoleStoreFake) ConsoleFreeze(ctx context.Context, a capability.Author
 	return tenant.CreditFreeze(ctx)
 }
 
-func (f consoleStoreFake) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, hold, reason string) (store.TeamCreditFreeze, error) {
+func (f consoleStoreFake) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, hold, reason string, _ bool) (store.TeamCreditFreeze, error) {
 	tenant, err := f.store.ForTeam(ctx, store.Team(a.Target.Team))
 	if err != nil {
 		return store.TeamCreditFreeze{}, err

@@ -424,3 +424,34 @@ func TestProviderPaymentSuccessAfterFailureUsesItsVerifiedAmount(t *testing.T) {
 		t.Fatalf("late success lost its refund obligation: %d: %v", queued, err)
 	}
 }
+
+func TestProviderSameAmountRetryAfterDeclineSettlesOnceAndClearsTheHold(t *testing.T) {
+	s, tenant, now := providerPaymentFixture(t)
+	e := providerCollectionEvent(t, s, now, capability.PaymentCardFailed)
+	if _, err := s.settlePaymentFacts(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	if freeze, err := tenant.CreditFreeze(t.Context()); err != nil || !freeze.Frozen {
+		t.Fatalf("decline did not hold: %+v %v", freeze, err)
+	}
+	e.Kind, e.EventID, e.Status = capability.PaymentCardPaid, "paid-after-retry", "succeeded"
+	e.MethodID, e.Fingerprint, e.ChargeID = "replacement-method", "replacement-fingerprint", "replacement-charge"
+	for range 2 {
+		if _, err := s.settlePaymentFacts(t.Context(), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var refunds, paid, grants int
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM card_refunds),(SELECT COUNT(*) FROM card_charges WHERE state=?),(SELECT COUNT(*) FROM credit_grants WHERE reference LIKE '%payment%' OR kind='paid')`, CardChargePaid).Scan(&refunds, &paid, &grants); err != nil {
+		t.Fatal(err)
+	}
+	if refunds != 0 || paid != 1 {
+		t.Fatalf("retried success: refunds=%d paid charges=%d grants=%d", refunds, paid, grants)
+	}
+	if freeze, err := tenant.CreditFreeze(t.Context()); err != nil || freeze.Frozen {
+		t.Fatalf("retried success left the hold: %+v %v", freeze, err)
+	}
+	if b, err := tenant.BillingStanding(t.Context(), now); err != nil || b.Tier == "Held" || !b.History.LastIncidentAt.IsZero() {
+		t.Fatalf("standing after retry: %+v %v", b, err)
+	}
+}

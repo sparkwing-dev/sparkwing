@@ -51,3 +51,9 @@ func (t *Tenant) TestOnlyStartRecoveryAttempt(ctx context.Context, now time.Time
 	})
 	return w, err
 }
+
+// TestOnlySetBillingTrust commits a standing decision for fixtures without an operator session.
+func (t *Tenant) TestOnlySetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
+	err = t.s.inTx(ctx, func(tx *storeTx) error { before, after, err = t.setBillingTrustTx(ctx, tx, c, now); return err })
+	return before, after, err
+}

@@ -105,8 +105,9 @@ current team ownership. The final bind also rechecks the linked GitHub identity.
 
 Console mutations pass their verified authority to `WithConsoleWriter`.
 The transaction derives the audit actor and rechecks the direct operator session.
-This covers credit grants, billing trust, holds, account/team deletion, waitlist
-approval, credit settings and installation unbinding. Waitlist approval requires
+This covers credit grants, billing trust, standing-request declines, holds,
+account/team deletion, waitlist approval, credit settings and installation
+unbinding. Waitlist approval requires
 an `Idempotency-Key` header. A missing transaction adapter returns `policy_missing`.
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
@@ -656,7 +657,9 @@ deployment profile. Console sessions retain their separate account gate.
 ## Operator console
 
 Operator-console sessions own trust changes, credit grants, freezes, refunds
-and account deletion. Deployment tokens manage operational limits, object-store
+and account deletion. They also read the standing queue, where team owners'
+requests for High standing wait. A grant naming the reviewed request approves
+it, and a decline names the request and records the reason its owners see. Deployment tokens manage operational limits, object-store
 settings, deployment service credentials and new-team onboarding through their separate routes.
 They cannot exchange themselves for console powers.
 

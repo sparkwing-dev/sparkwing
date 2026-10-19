@@ -97,6 +97,7 @@ type PaymentEvent struct {
 	Fingerprint string
 	Brand       string
 	Last4       string
+	ThreeDS     string
 	Created     int64
 	Actionable  bool
 }
@@ -201,7 +202,7 @@ func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentat
 	for _, policy := range PaymentEventPolicies {
 		if policy.ProviderType == event.Type {
 			if strings.HasPrefix(policy.ProviderType, "checkout.session.") {
-				return a.checkoutEvent(event.ID, event.Data.Object, policy)
+				return a.checkoutEvent(ctx, event.ID, event.Data.Object, policy)
 			}
 			return a.providerEvent(ctx, event.ID, event.Created, event.Data.Object, policy)
 		}
@@ -257,7 +258,7 @@ func (a *paymentAuthenticator) validSignature(p PaymentPresentation) bool {
 	return false
 }
 
-func (a *paymentAuthenticator) checkoutEvent(id string, body []byte, policy PaymentEventPolicy) (*VerifiedPaymentEvent, error) {
+func (a *paymentAuthenticator) checkoutEvent(ctx context.Context, id string, body []byte, policy PaymentEventPolicy) (*VerifiedPaymentEvent, error) {
 	var session struct {
 		ID            string           `json:"id"`
 		Object        string           `json:"object"`
@@ -282,10 +283,39 @@ func (a *paymentAuthenticator) checkoutEvent(id string, body []byte, policy Paym
 	if policy.Kind == PaymentCheckoutPaid && (paymentID == "" || *session.Amount == 0) {
 		return nil, invalidPaymentEvent()
 	}
-	return &VerifiedPaymentEvent{event: PaymentEvent{
+	event := PaymentEvent{
 		EventID: id, CheckoutID: session.ID, PaymentID: paymentID,
 		Currency: session.Currency, AmountMinor: *session.Amount, Mode: a.mode, Kind: policy.Kind,
-	}}, nil
+	}
+	if policy.Kind == PaymentCheckoutPaid {
+		result, err := a.threeDSecure(ctx, paymentID)
+		if err != nil {
+			return nil, err
+		}
+		event.ThreeDS = result
+	}
+	return &VerifiedPaymentEvent{event: event}, nil
+}
+
+func (a *paymentAuthenticator) threeDSecure(ctx context.Context, paymentID string) (string, error) {
+	intent, err := a.provider.read(ctx, "payment_intents", paymentID, "payment_intent", a.mode)
+	if err != nil {
+		return "", err
+	}
+	if intent.LatestCharge == "" {
+		return "", invalidPaymentEvent()
+	}
+	charge, err := a.provider.read(ctx, "charges", string(intent.LatestCharge), "charge", a.mode)
+	if err != nil {
+		return "", err
+	}
+	if string(charge.PaymentIntent) != paymentID {
+		return "", invalidPaymentEvent()
+	}
+	if secure := charge.PaymentMethodDetails.Card.ThreeDSecure; secure != nil {
+		return secure.Result, nil
+	}
+	return "", nil
 }
 
 func invalidPaymentEvent() *apierr.Error {

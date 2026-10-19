@@ -85,18 +85,27 @@ type InsufficientCreditsError struct {
 	// RunID and NodeID name the node the claim was refused for, which is in the claimant's own team; a record of the refusal belongs on that node and on no other team's.
 	RunID  string
 	NodeID string
-	// Frozen is set when the team's cloud usage is held while a payment dispute is open, whatever the balance reads.
+	// Frozen is set when a hold only support can lift refuses the claim, whatever the balance reads.
 	Frozen bool
 	// Limit names the spend limit that refused the claim, one of the SpendLimit values; empty is the balance.
 	Limit string
+	// Hold names the cause of the hold that refused the claim, from PrimaryHoldCause; empty when none did.
+	Hold string
 }
 
 func (e *InsufficientCreditsError) Error() string {
-	if e.Limit == SpendLimitChargeFailed {
-		return "spend limit: the charge to this team's card failed; an owner can pay it or update the card on the billing page"
+	switch e.Hold {
+	case HoldCauseDispute:
+		return "credits held: a payment dispute on this team is open; new Cloud work waits until it is resolved; contact support"
+	case FreezeCauseWarning:
+		return "credits held: the card issuer reported possible fraud on a payment; new Cloud work waits; contact support"
+	case HoldCauseOperator:
+		return "credits held by Sparkwing support; new Cloud work waits; contact support"
+	case HoldCauseRevoked:
+		return "Cloud standing revoked by Sparkwing support; new Cloud work waits; contact support"
 	}
-	if e.Frozen {
-		return "credits frozen: this team's cloud usage is held while a payment dispute is open; contact support"
+	if e.Limit == SpendLimitChargeFailed || e.Hold == FreezeCauseDecline {
+		return "card declined: new Cloud work waits until an owner updates the card or pays the charge on the billing page; running jobs finish and the team's own runners keep working"
 	}
 	switch e.Limit {
 	case SpendLimitChargePending:
@@ -281,7 +290,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 		req.CreatedBy, now.UnixNano()); err != nil {
 		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
 	}
-	if err := recordGrantEventTx(tx, grant, "", req.Reason); err != nil {
+	if err := recordGrantEventTx(tx, grant, map[string]any{"reason": req.Reason}); err != nil {
 		return CreditGrantResult{}, err
 	}
 	room, err := headroomTx(ctx, tx, team, tx.now())
@@ -298,7 +307,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 
 // safety: a paid grant is the checkout's payment arriving, so it is recorded
 // as the checkout paid rather than as a grant.
-func recordGrantEventTx(tx *storeTx, g CreditGrant, checkout, reason string) error {
+func recordGrantEventTx(tx *storeTx, g CreditGrant, extra map[string]any) error {
 	kind := BusinessEventCreditGranted
 	switch g.Kind {
 	case CreditGrantPaid:
@@ -310,11 +319,10 @@ func recordGrantEventTx(tx *storeTx, g CreditGrant, checkout, reason string) err
 	if g.Reverses != "" {
 		attrs["reverses"] = g.Reverses
 	}
-	if checkout != "" {
-		attrs["session_id"] = checkout
-	}
-	if reason != "" {
-		attrs["reason"] = reason
+	for k, v := range extra {
+		if v != "" {
+			attrs[k] = v
+		}
 	}
 	return RecordBusinessEvent(tx, BusinessEvent{
 		At: g.CreatedAt, Team: g.Team, Kind: kind, SubjectID: g.ID, Actor: g.CreatedBy, Attrs: attrs,
@@ -743,15 +751,19 @@ func refuseFrozenTeamTx(
 	if err != nil || !freeze.Frozen {
 		return err
 	}
-	out := &InsufficientCreditsError{
-		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID, Frozen: true,
-	}
-	// safety: a declined charge's hold is the owner's to lift by paying, so
-	// its refusal says so instead of pointing them at support.
-	if blocking, err := rowPresentTx(ctx, tx, blockingHoldSQL, string(team), FreezeCauseDecline); err != nil {
-		return err
-	} else if !blocking {
+	return holdRefusal(PrimaryHoldCause(freeze.Causes), &InsufficientCreditsError{
+		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID,
+	})
+}
+
+// safety: a declined charge's hold is the owner's to lift by paying, so only
+// that cause carries the charge-failed remedy; every other hold names support.
+func holdRefusal(cause string, out *InsufficientCreditsError) *InsufficientCreditsError {
+	out.Hold = cause
+	if cause == FreezeCauseDecline || cause == "" {
 		out.Limit = SpendLimitChargeFailed
+	} else {
+		out.Frozen = true
 	}
 	return out
 }

@@ -1,5 +1,10 @@
 import { authFetch } from "./api";
-import { fmtCents, parseDollars } from "./billing";
+import {
+  type StandingHistory,
+  type StandingRequest,
+  fmtCents,
+  parseDollars,
+} from "./billing";
 
 // The operator console's reads and writes. The controller answers them only
 // for a listed operator's own session, so nothing here decides access.
@@ -36,7 +41,23 @@ export interface OperatorTeam {
   };
   frozen: boolean;
   holds: string[];
+  // hold_causes[i] names why holds[i] was placed.
+  hold_causes: HoldCause[];
   events: OperatorEvent[];
+}
+
+export type HoldCause = "operator" | "dispute" | "decline" | "early_fraud_warning" | string;
+
+const holdCauseLabels: Record<string, string> = {
+  dispute: "payment dispute",
+  decline: "declined card charge",
+  early_fraud_warning: "early fraud warning",
+};
+
+// holdLabel names a payment hold by the cause the controller recorded.
+export function holdLabel(team: OperatorTeam, hold: string): string {
+  const cause = team.hold_causes[team.holds.indexOf(hold)] ?? "";
+  return `${holdCauseLabels[cause] ?? "payment hold"} ${hold}`;
 }
 
 export type ActionKind =
@@ -55,11 +76,12 @@ export const actionLabels: Record<ActionKind, string> = {
   "grant-credits": "Grant credits",
   freeze: "Freeze",
   unfreeze: "Unfreeze",
-  "release-hold": "Release a dispute hold",
+  "release-hold": "Release a payment hold",
 };
 
 export interface ActionExtra {
   hold?: string;
+  noFault?: boolean;
 }
 
 
@@ -73,6 +95,9 @@ export function balanceCents(micro: number): number {
 export function needsAmount(kind: ActionKind): boolean {
   return kind === "grant-credits";
 }
+
+// operatorReasonLimit counts Unicode code points, as the controller does.
+export const operatorReasonLimit = 500;
 
 // actionProblem says why the action cannot be reviewed yet, or "" when it can.
 export function actionProblem(
@@ -89,7 +114,8 @@ export function actionProblem(
   }
   if (reason.trim() === "")
     return "Give a reason; it is recorded with the action.";
-  if (reason.trim().length > 500) return "Keep the reason to 500 characters.";
+  if ([...reason.trim()].length > operatorReasonLimit)
+    return `Keep the reason to ${operatorReasonLimit} characters.`;
   if (kind === "release-hold" && !extra.hold) return "Choose the hold to release.";
   return "";
 }
@@ -115,26 +141,25 @@ export function actionEffect(
     case "freeze":
       return `${name}'s cloud runs stop starting until it is unfrozen, and running work finishes.`;
     case "unfreeze": {
-      const disputes = team.holds.length - operatorHolds(team).length;
-      return `The ${operatorHolds(team).length} operator hold(s) on ${name} are released.${disputes ? ` ${disputes} dispute hold(s) stay, so it stays frozen.` : " Its cloud runs start again."}`;
+      const payment = paymentHolds(team).length;
+      const fault = extra.noFault ? " as no fault found, so they do not restart the clean-day count" : "";
+      return `The ${operatorHolds(team).length} operator hold(s) on ${name} are released${fault}.${payment ? ` ${payment} payment hold(s) stay, so it stays frozen.` : " Its cloud runs start again."}`;
     }
     case "release-hold": {
       const left = team.holds.filter((h) => h !== extra.hold).length;
-      return `The dispute hold ${extra.hold} on ${name} is released.${left ? ` ${left} other hold(s) stay, so it stays frozen.` : " Its cloud runs start again."}`;
+      return `The ${holdLabel(team, extra.hold ?? "")} on ${name} is released.${left ? ` ${left} other hold(s) stay, so it stays frozen.` : " Its cloud runs start again."}`;
     }
   }
 }
 
-// disputeHolds are the holds a payment dispute placed, which the console
-// releases one at a time once the dispute is settled.
-export function disputeHolds(team: OperatorTeam): string[] {
-  return team.holds.filter((h) => !h.startsWith("operator-"));
+// paymentHolds are the holds a dispute, declined charge or fraud warning placed.
+export function paymentHolds(team: OperatorTeam): string[] {
+  return team.holds.filter((h, i) => team.hold_causes[i] !== "operator");
 }
 
-// operatorHolds are the holds the console placed; a payment dispute's hold is
-// released only outside it.
+// operatorHolds are the holds the console placed.
 export function operatorHolds(team: OperatorTeam): string[] {
-  return team.holds.filter((h) => h.startsWith("operator-"));
+  return team.holds.filter((h, i) => team.hold_causes[i] === "operator");
 }
 
 export function availableActions(team: OperatorTeam): ActionKind[] {
@@ -144,7 +169,7 @@ export function availableActions(team: OperatorTeam): ActionKind[] {
   if (b.trust !== "revoked") out.push("revoke-trust");
   if (b.trust !== "automatic") out.push("reset-trust");
   out.push("grant-credits", operatorHolds(team).length ? "unfreeze" : "freeze");
-  if (disputeHolds(team).length) out.push("release-hold");
+  if (paymentHolds(team).length) out.push("release-hold");
   return out;
 }
 
@@ -175,7 +200,7 @@ export function actionRequest(
     case "freeze":
       return { path: `${base}/freeze`, body: { reason } };
     case "unfreeze":
-      return { path: `${base}/unfreeze`, body: { reason } };
+      return { path: `${base}/unfreeze`, body: extra.noFault ? { reason, no_fault: true } : { reason } };
     case "release-hold":
       return { path: `${base}/unfreeze`, body: { reason, hold: extra.hold } };
   }
@@ -272,4 +297,53 @@ export async function approveWaitlisted(ids: string[]): Promise<string[]> {
   );
   const body = await readJSON<{ approved: { email: string }[] }>(res);
   return body.approved.map((a) => a.email);
+}
+
+export interface OperatorStandingRequest {
+  request: StandingRequest;
+  display_name: string;
+  standing: string;
+  prepay_ceiling: string;
+  balance_micro: number;
+  history: StandingHistory;
+}
+
+export async function getStandingRequests(): Promise<OperatorStandingRequest[]> {
+  const res = await authFetch("/api/v1/operator/standing-requests", {}, quiet);
+  return (await readJSON<{ requests: OperatorStandingRequest[] }>(res)).requests;
+}
+
+// approveStandingRequest grants standing and approves the reviewed request,
+// which the controller refuses once that request is no longer open.
+export async function approveStandingRequest(team: string, request: string, reason: string): Promise<void> {
+  const grant = actionRequest(team, "grant-trust", reason, "", "");
+  await performAction({ path: grant.path, body: { ...grant.body, standing_request: request } });
+}
+
+export async function declineStandingRequest(team: string, request: string, reason: string): Promise<void> {
+  const res = await authFetch(
+    `/api/v1/operator/teams/${encodeURIComponent(team)}/standing-request/decline`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request, reason: reason.trim() }),
+    },
+    quiet,
+  );
+  await readJSON<unknown>(res);
+}
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+// historyFacts summarizes the payment record a team's history tier comes from.
+export function historyFacts(h: StandingHistory, now = Date.now()): string {
+  const parts = [`${h.tier} history`, `${fmtCents(balanceCents(h.paid_micro))} paid`];
+  if (h.successful_charges > 0) parts.push(`${h.successful_charges} card charge(s)`);
+  if (h.first_paid_at) {
+    const since = Math.max(h.first_paid_at, h.last_incident_at ?? 0) * 1000;
+    parts.push(`${Math.max(Math.floor((now - since) / dayMs), 0)} clean days`);
+  } else {
+    parts.push("no payments");
+  }
+  return parts.join(" · ");
 }

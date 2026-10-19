@@ -27,11 +27,16 @@ import {
   fmtUSD,
   getBilling,
   grantLabel,
+  holdNotice,
   limitReason,
   openHostedPage,
   setBudget,
   parseDollars,
+  prepayNote,
   priceRows,
+  requestHighStanding,
+  standingOutcome,
+  standingRequestProblem,
   purchaseProblem,
   startCheckout,
   storagePrice,
@@ -110,13 +115,12 @@ function BillingRoute() {
         </Panel>
       ) : (
         <>
-          {billing.frozen ? (
+          {billing.frozen || billing.hold_cause ? (
             <div
               role="alert"
               className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300"
             >
-              Cloud runs for this team are paused while a payment dispute is
-              open. Contact support to resolve it.
+              {holdNotice(billing.hold_cause)}
             </div>
           ) : null}
           {cardReturn === "added" ? (
@@ -125,6 +129,7 @@ function BillingRoute() {
           <BalancePanel billing={billing} />
           <CardPanel billing={billing} />
           <LimitsPanel billing={billing} reload={load} />
+          <StandingPanel billing={billing} reload={load} />
           {billing.checkout_enabled ? (
             <BuyPanel billing={billing} />
           ) : null}
@@ -529,7 +534,8 @@ function LimitsPanel({
   const [budget, setBudgetText] = useState(() => String(l.budget_cents / 100));
   const [error, setError] = useState("");
   const owner = billing.can_purchase || billing.can_add_card;
-  const waiting = l.headroom_cents <= 0;
+  const heldAbove = !!billing.hold_cause && (l.binding === "charge_failed" || l.binding === "held");
+  const waiting = l.headroom_cents <= 0 && !heldAbove;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -583,6 +589,81 @@ function LimitsPanel({
         <p className="text-xs text-[var(--muted)]">
           Owners are emailed at 50, 80 and 100% of the budget. Zero removes the owner budget.
         </p>
+        {error ? (
+          <p role="alert" className="text-red-300">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
+function StandingPanel({
+  billing,
+  reload,
+}: {
+  billing: Billing;
+  reload: () => Promise<void>;
+}) {
+  const s = billing.standing;
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const note = prepayNote(s);
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    const problem = standingRequestProblem(message);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setBusy(true);
+    try {
+      await requestHighStanding(message);
+      setMessage("");
+      setError("");
+      await reload();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel
+      title="Standing"
+      hint="Payment history and prepaid funds set standing. Operators can grant higher tiers."
+    >
+      <div className="p-4 space-y-2 text-sm">
+        <p>
+          {s.tier} standing. {note}
+        </p>
+        {s.request ? (
+          <p role="status" className="text-[var(--muted)]">
+            {standingOutcome(s.request)}
+          </p>
+        ) : null}
+        {s.can_request ? (
+          <form onSubmit={send} className="space-y-2">
+            <label htmlFor="standing-message" className={labelClass}>
+              Contact us to unlock higher tiers
+            </label>
+            <textarea
+              id="standing-message"
+              className={`${inputClass} w-full`}
+              rows={3}
+              placeholder="What the team runs and the capacity it needs"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+            />
+            <button type="submit" className={buttonClass} disabled={busy}>
+              Request High standing
+            </button>
+          </form>
+        ) : null}
         {error ? (
           <p role="alert" className="text-red-300">
             {error}

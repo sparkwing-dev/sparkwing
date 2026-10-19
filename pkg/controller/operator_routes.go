@@ -42,6 +42,8 @@ func (s *Server) operatorEndpoints() []Endpoint {
 		{Method: "POST", Pattern: "/api/v1/operator/teams/{team}/unfreeze", Handle: s.handleOperatorUnfreeze},
 		{Method: "DELETE", Pattern: "/api/v1/operator/accounts/{account}", Handle: s.handleOperatorDeleteAccount},
 		{Method: "GET", Pattern: "/api/v1/operator/waitlist", Handle: s.handleOperatorWaitlist},
+		{Method: "GET", Pattern: "/api/v1/operator/standing-requests", Handle: s.handleOperatorStandingRequests},
+		{Method: "POST", Pattern: "/api/v1/operator/teams/{team}/standing-request/decline", Handle: s.handleOperatorDeclineStanding},
 		{Method: "POST", Pattern: "/api/v1/operator/waitlist/approve", Handle: s.handleApproveWaitlist},
 		{Method: "DELETE", Pattern: "/api/v1/operator/github-app/installations/{installation}", Handle: s.handleOperatorGitHubAppUnbind},
 		{Method: "PUT", Pattern: "/api/v1/operator/credits/settings", Handle: s.handleCreditsSettingsSet},

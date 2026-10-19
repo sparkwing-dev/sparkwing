@@ -329,3 +329,63 @@ it("prepay accepts the provider minimum and refuses smaller amounts", () => {
  assert.equal(lib.purchaseProblem(50,billing),null);
  assert.equal(lib.purchaseProblem(49,billing),"Minimum purchase $0.50.");
 });
+
+describe("standing requests", () => {
+  const standing = {
+    tier: "Trusted",
+    history: { tier: "Established", paid_micro: 0, successful_charges: 0 },
+    prepay_ceiling: "Trusted",
+    can_request: true,
+  };
+
+  it("explains the one-tier prepay ceiling", () => {
+    assert.match(lib.prepayNote(standing), /raise standing to Trusted\. High needs \$500 paid/);
+    assert.match(
+      lib.prepayNote({ ...standing, history: { ...standing.history, tier: "Trusted" }, prepay_ceiling: "Trusted" }),
+      /cannot raise it further\. High needs \$500 paid and 30 clean days, or an operator grant/,
+    );
+    assert.equal(lib.prepayNote({ ...standing, tier: "High" }), "");
+  });
+
+  it("needs a message within the limit", () => {
+    assert.match(lib.standingRequestProblem("  "), /Tell us/);
+    assert.match(lib.standingRequestProblem("x".repeat(1001)), /1000 characters/);
+    assert.equal(lib.standingRequestProblem("é".repeat(1000)), "");
+    assert.equal(lib.standingRequestProblem("🚀".repeat(1000)), "");
+    assert.match(lib.standingRequestProblem("🚀".repeat(1001)), /1000 characters/);
+    assert.equal(lib.standingRequestProblem("Release builds need 256 vCPU."), "");
+  });
+
+  it("describes each outcome", () => {
+    const r = { id: "standing-1", team: "acme", tier: "High", message: "m", requested_at: 1, state: "open" };
+    assert.match(lib.standingOutcome(r), /waiting for an operator/);
+    assert.match(lib.standingOutcome({ ...r, state: "approved" }), /granted High standing/);
+    assert.equal(
+      lib.standingOutcome({ ...r, state: "declined", decision_reason: "Pay for 30 days first." }),
+      "An operator declined the request for High standing: Pay for 30 days first.",
+    );
+  });
+
+  it("posts a High request with the session's CSRF token and surfaces a refusal", async () => {
+    respond = () => Response.json({ id: "standing-1", team: "acme", tier: "High", message: "m", requested_at: 1, state: "open" }, { status: 201 });
+    const made = await lib.requestHighStanding("  m  ");
+    assert.equal(made.state, "open");
+    assert.equal(calls[0].url, "/api/v1/team/billing/standing-request");
+    assert.equal(calls[0].method, "POST");
+    assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
+    assert.deepEqual(JSON.parse(calls[0].body), { tier: "high", message: "m" });
+    respond = () => Response.json({ error: { code: "conflict", message: "the team already has an open standing request" } }, { status: 409 });
+    await assert.rejects(lib.requestHighStanding("m"), /already has an open standing request/);
+  });
+});
+
+describe("hold notices", () => {
+  it("names each blocker and its remedy", () => {
+    assert.match(lib.holdNotice("decline"), /card was declined\. Update the card/);
+    assert.match(lib.holdNotice("dispute"), /payment dispute is open\. Contact support/);
+    assert.match(lib.holdNotice("early_fraud_warning"), /possible fraud/);
+    assert.match(lib.holdNotice("operator"), /support placed a hold/);
+    assert.doesNotMatch(lib.holdNotice("decline"), /dispute|support/);
+    assert.match(lib.limitReason("held"), /hold is on the team/);
+  });
+});
