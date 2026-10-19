@@ -855,3 +855,7 @@ Assigned to an Opus implementer (env 1087).
 ## 2026-10-19 Korey decision 24: staging amd64 pool
 
 - Staging keeps the tainted amd64 `staging-infra` NodePool (2 vCPU cap, empties when staging is down) for amd64-only QA images; kikd app nodes stay arm64.
+
+## 2026-10-19 Korey decision 25: staging shares the Stripe test sandbox
+
+- Staging and production share one Stripe test-mode sandbox. Each controller stamps its Checkout sessions and setups with a deployment identity in metadata and acknowledges (2xx) but never settles events carrying another deployment's identity or events it does not handle.
