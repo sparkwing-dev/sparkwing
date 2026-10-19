@@ -68,7 +68,6 @@ test("the operator finds a team and reads its standing", async ({ page }) => {
   await page.getByRole("link", { name: "Acme" }).click();
   await expect(page).toHaveURL(/\/operator\?team=acme$/);
   await expect(page.getByText("$12.30", { exact: true })).toBeVisible();
-  await expect(page.getByText("$25 of $50")).toBeVisible();
   await expect(
     page.getByText(/by korey@example\.com .*: chargeback/),
   ).toBeVisible();

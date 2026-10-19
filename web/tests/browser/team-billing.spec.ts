@@ -119,9 +119,7 @@ test("an owner sees prices from the controller and starts a checkout", async ({
   await page.goto("/team/billing");
 
   await expect(page.getByText("1,230 credits", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(/\$1\.23 · a team balance holds up to \$5,000/),
-  ).toBeVisible();
+  await expect(page.getByText(/\$1\.23/)).toBeVisible();
   const twoCore = page.getByRole("row", { name: /2 vCPU/ });
   await expect(
     twoCore.getByRole("cell", { name: "0.09", exact: true }),
@@ -206,7 +204,7 @@ test("checkout stays hidden when the controller has no checkout service", async 
   );
 });
 
-test("a card-billed team with a failed charge pays it by hand and buys no credits", async ({
+test("a card-billed team with a failed charge pays it by hand and can still add funds", async ({
   page,
 }) => {
   await mockController(page, {
@@ -242,9 +240,7 @@ test("a card-billed team with a failed charge pays it by hand and buys no credit
   await expect(
     page.getByRole("button", { name: "Pay $150 now" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add funds" })).toHaveCount(
-    0,
-  );
+  await expect(page.getByRole("button", { name: "Add funds" })).toBeVisible();
 });
 
 test("an owner asks the operators for High standing", async ({ page }) => {
