@@ -55,6 +55,8 @@ launcher:
     name: ""
     key: token
   jobImage: {}
+  # docker:<version>-dind-rootless, digest-pinned. Job Pods run it rootless in
+  # their own user namespace; a rootful dind image cannot start there.
   dockerImage: {}
   cpuCeiling: ""
   memoryCeiling: ""

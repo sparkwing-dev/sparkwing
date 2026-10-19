@@ -198,10 +198,13 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 	return corev1.PodSpec{
 		Tolerations: teamTolerations(a.Binding.Team),
 		NodeName:    r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
-		SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr(int64(0)), RunAsGroup: ptr(int64(0)), RunAsNonRoot: ptr(false)},
+		// safety: a user-namespaced Pod's IDs map to unprivileged host IDs, so
+		// nothing in it, including rootless Docker, holds node root.
+		HostUsers:       ptr(false),
+		SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr(rootlessUser), RunAsGroup: ptr(rootlessUser), FSGroup: ptr(rootlessUser), RunAsNonRoot: ptr(true), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.
 		Resources:      &corev1.ResourceRequirements{Requests: budget, Limits: budget.DeepCopy()},
-		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0o400))}}}},
+		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0o440))}}}, {Name: "tun", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: tunDevice, Type: ptr(corev1.HostPathCharDev)}}}},
 		InitContainers: []corev1.Container{dockerContainer(cfg), hostContainer(cfg, a, "fetch-source")}, Containers: []corev1.Container{main},
 	}
 }
@@ -212,17 +215,35 @@ func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb string) corev1.Cont
 	if b.NodeID != "" {
 		args = append(args, "--job", b.NodeID)
 	}
-	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0))}}
+	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}}
 }
 
+// rootlessUser is the docker:dind-rootless image's user. Every container runs
+// as it, so files the Job writes stay writable to the containers it starts.
+const (
+	rootlessUser = int64(1000)
+	tunDevice    = "/dev/net/tun"
+)
+
 var (
-	dockerCommand = []string{"dockerd"}
-	dockerArgs    = []string{"--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
+	// safety: the image's entrypoint starts dockerd under rootlesskit when it
+	// runs as a non-root user, and adds no TCP listener when given dockerd.
+	dockerCommand = []string{"dockerd-entrypoint.sh"}
+	dockerArgs    = []string{"dockerd", "--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
 	dockerProbe   = []string{"docker", "--host=unix:///tmp/docker.sock", "info"}
 )
 
 func dockerContainer(cfg CloudJobConfig) corev1.Container {
-	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: slices.Clone(dockerCommand), Args: slices.Clone(dockerArgs), SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0)), Privileged: ptr(true)}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}}, StartupProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: slices.Clone(dockerProbe)}}, PeriodSeconds: 1, FailureThreshold: math.MaxInt32}}
+	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: slices.Clone(dockerCommand), Args: slices.Clone(dockerArgs), Env: []corev1.EnvVar{{Name: "HOME", Value: "/home/rootless"}}, SecurityContext: dockerSecurity(), VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "tun", MountPath: tunDevice}}, StartupProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: slices.Clone(dockerProbe)}}, PeriodSeconds: 1, FailureThreshold: math.MaxInt32}}
+}
+
+// dockerSecurity is what rootlesskit needs to build its own user, mount and
+// network namespaces: no seccomp or AppArmor filter on unshare and mount, an
+// unmasked /proc to mount inside them, the setuid newuidmap, and the tun
+// device for its network driver. The Pod's user namespace keeps all of it
+// unprivileged on the node.
+func dockerSecurity() *corev1.SecurityContext {
+	return &corev1.SecurityContext{RunAsUser: ptr(rootlessUser), RunAsGroup: ptr(rootlessUser), RunAsNonRoot: ptr(true), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}, AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}, ProcMount: ptr(corev1.UnmaskedProcMount)}
 }
 
 func jobName(b CloudJobBinding) string {

@@ -42,7 +42,7 @@ to `false` for a pool that should claim only jobs.
 
 Set `launcher.enabled=true` to run a Cloud launcher Deployment. Supply its
 `image.repository` and `image.tag`, `tokenSecret`, `jobImage` and `dockerImage`
-(each with repository, tag and digest), plus `cpuCeiling` and `memoryCeiling`.
+(each with repository, tag and digest; `dockerImage` is a `dind-rootless` image), plus `cpuCeiling` and `memoryCeiling`.
 `controller.url` selects its controller. The launcher token mounts as `agent-token`
 in its credentials directory and needs the deployment `claims.launch` grant.
 `launcher.serviceAccountName` selects its separate Kubernetes identity. An empty
@@ -112,7 +112,7 @@ made by another RoleBinding, so audit existing namespace and cluster bindings.
 The chart labels infrastructure Pods `app: sparkwing-controller`,
 `app: sparkwing-launcher` and `app: sparkwing-runner`. Customer Pods use
 `app: sparkwing-job`. Exclude these values from any baseline allow-all policies
-that would union away the corresponding chart fences. Node escape probes must
+that would union away the corresponding chart fences. Boundary probes must
 pass before a Job is published.
 
 `values.yaml` lists the supported chart values.

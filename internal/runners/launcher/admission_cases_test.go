@@ -70,7 +70,14 @@ func (f *admissionFixture) capacity(t *testing.T) *corev1.Pod {
 }
 
 func (f *admissionFixture) measure() *corev1.Pod {
-	return f.probes.measure(f.probeCtx, f.resources.Reservation, []probeTarget{{"node", "10.0.0.1:443"}, {"peer", "10.0.0.2:18888"}}, "10.0.0.9:18888")
+	return f.probes.measure(f.probeCtx, f.resources.Reservation, []string{"10.0.0.1:443", "10.0.0.2:18888"}, "10.0.0.9:18888")
+}
+
+// hostUsers puts a Job Pod in the host user namespace, dropping the /proc
+// unmasking the API server allows only inside a Pod's own.
+func hostUsers(p *corev1.Pod) {
+	p.Spec.HostUsers = nil
+	p.Spec.InitContainers[0].SecurityContext.ProcMount = nil
 }
 
 func jobPod(job *batchv1.Job) *corev1.Pod {
@@ -141,11 +148,29 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		}), reason: "never AWS credentials"},
 		{name: "service_account_token", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = ptr(true) }), reason: "without an API token"},
 		{name: "other_service_account", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.ServiceAccountName = "default" }), reason: "customer job service account"},
-		{name: "host_network", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.HostNetwork = true }), reason: "host namespaces"},
-		{name: "host_pid", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
-		{name: "privileged_workload", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Containers[0].SecurityContext.Privileged = ptr(true) }), reason: "run privileged"},
+		{name: "host_network", user: testJobController, object: pod(func(p *corev1.Pod) { hostUsers(p); p.Spec.HostNetwork = true }), reason: "host namespaces"},
+		{name: "host_pid", user: testJobController, object: pod(func(p *corev1.Pod) { hostUsers(p); p.Spec.HostPID = true }), reason: "host namespaces"},
+		{name: "privileged_workload", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr(true)}
+		}), reason: "runs privileged"},
+		{name: "privileged_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.Privileged = ptr(true) }), reason: "runs privileged"},
+		{name: "host_users", user: testJobController, object: pod(hostUsers), reason: "own user namespace"},
+		{name: "root_pod", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SecurityContext.RunAsUser = ptr(int64(0)) }), reason: "own user namespace"},
+		{name: "root_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.RunAsUser = ptr(int64(0)) }), reason: "only the Docker sidecar relaxes"},
+		{name: "masked_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.ProcMount = nil }), reason: "only the Docker sidecar relaxes"},
+		{name: "unconfined_workload", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}}
+		}), reason: "only the Docker sidecar relaxes"},
+		{name: "workload_tun", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: "tun", MountPath: tunDevice})
+		}), reason: "tun device"},
+		{name: "other_char_device", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Volumes[2].HostPath.Path = "/dev/kmsg" }), reason: "scratch emptyDir"},
+		{name: "probe_privileged", user: testLauncher, object: measure(func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr(true)}
+		}), reason: "runs privileged"},
+		{name: "probe_host_pid", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
 		{name: "added_capability", user: testJobController, object: pod(func(p *corev1.Pod) {
-			p.Spec.Containers[0].SecurityContext.Capabilities = &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}}
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}}}
 		}), reason: "add capabilities"},
 		{name: "missing_node_selector", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.NodeSelector = nil }), reason: "own team's nodes"},
 		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "own team's nodes"},
@@ -190,7 +215,7 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "capacity_privileged", user: testLauncher, object: capacity(func(p *corev1.Pod) {
 			p.Spec.Containers[0].SecurityContext.Privileged = ptr(true)
 			p.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation = nil
-		}), reason: "run privileged"},
+		}), reason: "runs privileged"},
 		{name: "probe_host_network", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.HostNetwork = true }), reason: "host namespaces"},
 		{name: "probe_command", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.Containers[0].Command = []string{"/bin/true"} }), reason: "measurement commands"},
 		{name: "probe_renamed", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.Containers[0].Name = "other" }), reason: "measurement commands"},

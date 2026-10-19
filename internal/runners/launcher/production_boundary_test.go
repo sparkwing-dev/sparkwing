@@ -333,7 +333,7 @@ func TestProductionBoundaryMeasuresPeersAndAPIEndpoints(t *testing.T) {
 			t.Fatal(err)
 		}
 		measured := " " + strings.Join(args, " ") + " "
-		for _, want := range []string{" pod kubernetes.default 443 ", " pod 172.16.0.10 443 ", " peer 10.9.9.9 18888 "} {
+		for _, want := range []string{" kubernetes.default 443 ", " 172.16.0.10 443 ", " 10.9.9.9 18888 "} {
 			if !strings.Contains(measured, want) {
 				t.Errorf("measurement %q lacks %q", measured, want)
 			}

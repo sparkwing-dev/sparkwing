@@ -74,10 +74,11 @@ sparkwing-runner-bundle:
       repository: ghcr.io/sparkwing-dev/sparkwing-runner
       tag: rewrite-cloud
       digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    # The rootless variant: Job Pods admit no privileged container.
     dockerImage:
       repository: docker.io/library/docker
-      tag: "28-dind"
-      digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      tag: "28-dind-rootless"
+      digest: sha256:7c3e797187e43738220462658f4586572cbd3bf009f728b21e34d9c5c06ce431
     cpuCeiling: "2"
     memoryCeiling: 8Gi
     # Keep launcher/controller on infrastructure nodes. Customer nodes are

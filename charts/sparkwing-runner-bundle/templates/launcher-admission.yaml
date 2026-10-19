@@ -64,21 +64,14 @@ spec:
       == ''control'' && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash",
       "-ceu", "exec nc -lk 18888"] || variables.spec.containers[0].name == ''measure''
       && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash", "-ceu",
-      "command -v nc >/dev/null\ncommand -v nsenter >/dev/null\ncommand -v timeout
-      >/dev/null\ncontrol_host=\"$1\"; control_port=\"$2\"; shift 2\nrequired_host=\"$1\";
-      required_port=\"$2\"; shift 2\nnc -z -w 3 \"$required_host\" \"$required_port\"\nnsenter
-      -t 1 -n -- nc -z -w 3 \"$required_host\" \"$required_port\"\nif nc -z -w 3 \"$control_host\"
-      \"$control_port\"; then echo \"Cloud default-deny egress is not enforced\" >&2;
-      exit 1; fi\nwhile (( $# )); do\n scope=\"$1\"; host=\"$2\"; port=\"$3\"; shift
-      3\n if nc -z -w 3 \"$host\" \"$port\"; then echo \"Cloud pod egress escaped
-      to $host:$port\" >&2; exit 1; fi\n case \"$scope\" in\n node) if nsenter -t
-      1 -n -- nc -z -w 3 \"$host\" \"$port\"; then echo \"Cloud node egress escaped
-      to $host:$port\" >&2; exit 1; fi ;;\n peer) if nsenter -t 1 -n -- timeout 3
-      bash -c ''exec 3<>\"/dev/tcp/$0/$1\"'' \"$host\" \"$port\" 2>/dev/null || [
-      $? -ne 124 ]; then echo \"Cloud node reached another team''s Pod $host:$port\"
-      >&2; exit 1; fi ;;\n esac\ndone", "boundary-probe"] || variables.spec.containers[0].name
-      == ''witness'' && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash",
-      "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"])'
+      "command -v nc >/dev/null\ncontrol_host=\"$1\"; control_port=\"$2\"; shift 2\nrequired_host=\"$1\";
+      required_port=\"$2\"; shift 2\nnc -z -w 3 \"$required_host\" \"$required_port\"\nif
+      nc -z -w 3 \"$control_host\" \"$control_port\"; then echo \"Cloud default-deny
+      egress is not enforced\" >&2; exit 1; fi\nwhile (( $# )); do\n host=\"$1\";
+      port=\"$2\"; shift 2\n if nc -z -w 3 \"$host\" \"$port\"; then echo \"Cloud
+      pod egress escaped to $host:$port\" >&2; exit 1; fi\ndone", "boundary-probe"]
+      || variables.spec.containers[0].name == ''witness'' && variables.spec.containers[0].?command.orValue([])
+      == ["/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"])'
     message: boundary probes run only the launcher's measurement commands
   - expression: '!variables.create || variables.shape != ''other'''
     message: only Cloud Job, capacity and boundary probe Pods run in the Sparkwing
@@ -87,15 +80,21 @@ spec:
       == ''sparkwing-customer-job'' && !variables.spec.?automountServiceAccountToken.orValue(true)'
     message: Pods use the customer job service account without an API token
   - expression: '!variables.create || !variables.spec.?hostNetwork.orValue(false)
-      && !variables.spec.?hostIPC.orValue(false) && (!variables.spec.?hostPID.orValue(false)
-      || variables.shape == ''probe'' && variables.spec.containers[0].name == ''measure'')
+      && !variables.spec.?hostIPC.orValue(false) && !variables.spec.?hostPID.orValue(false)
       && variables.containers.all(c, c.?ports.orValue([]).all(p, p.?hostPort.orValue(0)
       == 0))'
     message: Pods cannot share host namespaces or ports
   - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
       == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
-      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')))'
-    message: Pods mount only their scratch emptyDir and own bootstrap Secret
+      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')
+      || v.name == ''tun'' && has(v.hostPath) && v.hostPath.path == ''/dev/net/tun''
+      && v.hostPath.?type.orValue('''') == ''CharDevice''))'
+    message: Pods mount only their scratch emptyDir, own bootstrap Secret and the
+      tun device
+  - expression: '!variables.create || variables.containers.all(c, c.?volumeMounts.orValue([]).all(m,
+      m.name != ''tun'' || variables.shape == ''job'' && c.name == ''docker'' && m.mountPath
+      == ''/dev/net/tun''))'
+    message: only the Docker sidecar mounts the tun device
   - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
       == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
       == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
@@ -104,10 +103,27 @@ spec:
       == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
       == 0)'
     message: Pods run only the launcher's container set and pinned images
-  - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false)
-      || variables.shape == ''job'' && c.name == ''docker'' || variables.shape ==
-      ''probe'' && c.name == ''measure'')'
-    message: only the DinD sidecar and the boundary measurement run privileged
+  - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))'
+    message: no container runs privileged
+  - expression: '!variables.create || variables.shape != ''job'' || !variables.spec.?hostUsers.orValue(true)
+      && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0)
+      == 1000 && variables.spec.?securityContext.?seccompProfile.?type.orValue('''')
+      == ''RuntimeDefault'''
+    message: Job Pods run in their own user namespace as the rootless user with the
+      runtime seccomp profile
+  - expression: '!variables.create || variables.containers.all(c, variables.shape
+      == ''job'' && c.name == ''docker'' ? c.?securityContext.?runAsUser.orValue(0)
+      == 1000 && c.?securityContext.?runAsNonRoot.orValue(false) && c.?securityContext.?seccompProfile.?type.orValue('''')
+      == ''Unconfined'' && c.?securityContext.?appArmorProfile.?type.orValue('''')
+      == ''Unconfined'' && c.?securityContext.?procMount.orValue('''') == ''Unmasked''
+      : c.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'') == ''RuntimeDefault''
+      && c.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'') ==
+      ''RuntimeDefault'' && c.?securityContext.?procMount.orValue(''Default'') ==
+      ''Default'' && c.?securityContext.?runAsUser.orValue(1000) != 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
+      == ''RuntimeDefault'' && (variables.shape == ''job'' || variables.spec.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
+      == ''RuntimeDefault'')'
+    message: only the Docker sidecar relaxes seccomp, AppArmor and /proc, and only
+      as the rootless user
   - expression: '!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([]))
       == 0)'
     message: containers cannot add capabilities
@@ -119,9 +135,10 @@ spec:
     message: containers run no lifecycle hooks or exec probes beyond the Docker sidecar's
       readiness check
   - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
-      == 0 || variables.inits[0].?command.orValue([]) == ["dockerd"] && variables.inits[0].?args.orValue([])
-      == ["--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec",
-      "--pidfile=/tmp/docker.pid", "--tls=false"]'
+      == 0 || variables.inits[0].?command.orValue([]) == ["dockerd-entrypoint.sh"]
+      && variables.inits[0].?args.orValue([]) == ["dockerd", "--host=unix:///tmp/docker.sock",
+      "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid",
+      "--tls=false"]'
     message: the Docker sidecar runs only the launcher's dockerd command
   - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
       == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && e.name in [''HOME'',
@@ -246,15 +263,21 @@ spec:
       == ''sparkwing-customer-job'' && !variables.spec.?automountServiceAccountToken.orValue(true)'
     message: Pods use the customer job service account without an API token
   - expression: '!variables.create || !variables.spec.?hostNetwork.orValue(false)
-      && !variables.spec.?hostIPC.orValue(false) && (!variables.spec.?hostPID.orValue(false)
-      || variables.shape == ''probe'' && variables.spec.containers[0].name == ''measure'')
+      && !variables.spec.?hostIPC.orValue(false) && !variables.spec.?hostPID.orValue(false)
       && variables.containers.all(c, c.?ports.orValue([]).all(p, p.?hostPort.orValue(0)
       == 0))'
     message: Pods cannot share host namespaces or ports
   - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
       == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
-      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')))'
-    message: Pods mount only their scratch emptyDir and own bootstrap Secret
+      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')
+      || v.name == ''tun'' && has(v.hostPath) && v.hostPath.path == ''/dev/net/tun''
+      && v.hostPath.?type.orValue('''') == ''CharDevice''))'
+    message: Pods mount only their scratch emptyDir, own bootstrap Secret and the
+      tun device
+  - expression: '!variables.create || variables.containers.all(c, c.?volumeMounts.orValue([]).all(m,
+      m.name != ''tun'' || variables.shape == ''job'' && c.name == ''docker'' && m.mountPath
+      == ''/dev/net/tun''))'
+    message: only the Docker sidecar mounts the tun device
   - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
       == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
       == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
@@ -263,10 +286,27 @@ spec:
       == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
       == 0)'
     message: Pods run only the launcher's container set and pinned images
-  - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false)
-      || variables.shape == ''job'' && c.name == ''docker'' || variables.shape ==
-      ''probe'' && c.name == ''measure'')'
-    message: only the DinD sidecar and the boundary measurement run privileged
+  - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))'
+    message: no container runs privileged
+  - expression: '!variables.create || variables.shape != ''job'' || !variables.spec.?hostUsers.orValue(true)
+      && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0)
+      == 1000 && variables.spec.?securityContext.?seccompProfile.?type.orValue('''')
+      == ''RuntimeDefault'''
+    message: Job Pods run in their own user namespace as the rootless user with the
+      runtime seccomp profile
+  - expression: '!variables.create || variables.containers.all(c, variables.shape
+      == ''job'' && c.name == ''docker'' ? c.?securityContext.?runAsUser.orValue(0)
+      == 1000 && c.?securityContext.?runAsNonRoot.orValue(false) && c.?securityContext.?seccompProfile.?type.orValue('''')
+      == ''Unconfined'' && c.?securityContext.?appArmorProfile.?type.orValue('''')
+      == ''Unconfined'' && c.?securityContext.?procMount.orValue('''') == ''Unmasked''
+      : c.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'') == ''RuntimeDefault''
+      && c.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'') ==
+      ''RuntimeDefault'' && c.?securityContext.?procMount.orValue(''Default'') ==
+      ''Default'' && c.?securityContext.?runAsUser.orValue(1000) != 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
+      == ''RuntimeDefault'' && (variables.shape == ''job'' || variables.spec.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
+      == ''RuntimeDefault'')'
+    message: only the Docker sidecar relaxes seccomp, AppArmor and /proc, and only
+      as the rootless user
   - expression: '!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([]))
       == 0)'
     message: containers cannot add capabilities
@@ -278,9 +318,10 @@ spec:
     message: containers run no lifecycle hooks or exec probes beyond the Docker sidecar's
       readiness check
   - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
-      == 0 || variables.inits[0].?command.orValue([]) == ["dockerd"] && variables.inits[0].?args.orValue([])
-      == ["--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec",
-      "--pidfile=/tmp/docker.pid", "--tls=false"]'
+      == 0 || variables.inits[0].?command.orValue([]) == ["dockerd-entrypoint.sh"]
+      && variables.inits[0].?args.orValue([]) == ["dockerd", "--host=unix:///tmp/docker.sock",
+      "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid",
+      "--tls=false"]'
     message: the Docker sidecar runs only the launcher's dockerd command
   - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
       == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && e.name in [''HOME'',

@@ -142,7 +142,8 @@ The example references an existing `sparkwing-tls` certificate Secret.
 ## Cloud node and network prerequisites
 
 The launcher runs on infrastructure nodes with its own Kubernetes identity. Job
-code runs as root with a privileged DinD sidecar under `sparkwing-customer-job`,
+code runs as UID 1000 in a user-namespaced Pod with a rootless DinD sidecar
+under `sparkwing-customer-job`,
 which has no API token or cloud annotations. Do not attach an IRSA role or create
 a Pod Identity association for this account. Customer Pods with AWS credential
 injections are rejected. Each Job and its boundary probes
@@ -178,6 +179,16 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars, `PodLevelResources` and
   `admissionregistration.k8s.io/v1` ValidatingAdmissionPolicy (Kubernetes 1.30+).
+- Team nodes must run user-namespaced Pods (`hostUsers: false`): containerd 2.0
+  or later and Linux 6.3 or later, which adds idmapped tmpfs mounts for Secret
+  volumes (AL2023 with the 6.12 kernel). Allow unprivileged user namespaces
+  (`user.max_user_namespaces` above 0) and provide `/dev/net/tun`.
+- The `docker:<version>-dind-rootless` user maps subordinate IDs 100000-165535,
+  so the kubelet must give each Pod at least 196608 IDs (a multiple of 65536,
+  set in the KubeletConfiguration user namespace settings). The default 65536
+  leaves rootlesskit unable to start.
+- `launcher.dockerImage` must be a digest-pinned `dind-rootless` image. Job
+  Pods admit no privileged container, so rootful DinD cannot start.
 - Jobs run in `<release namespace>-cloud-jobs` (`launcher.jobNamespace`), which
   the chart owns and creates with privileged Pod Security
   (`launcher.createNamespace`). Keep other NetworkPolicies and Pod Security
@@ -188,20 +199,16 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   controller ENI edits and load-balancer readiness gates pass; AWS credential
   injection does not. Grant no other identity Pod or Job rights there. See
   [runner-bundle](../sparkwing-runner-bundle/README.md).
-- Enforce default-deny egress from both Pod and escaped node contexts. Allow DNS,
+- Enforce default-deny egress from Job Pods. Allow DNS,
   the API origin, S3/CloudFront, GitHub source/releases and required dependency
   registries. Block metadata, internal networks and DaemonSet ports, and the
   Kubernetes API from Pods. The kubelet needs the API from the node, so node
   credentials and authorization guard it there. The example allows public HTTPS
-  and cluster DNS at the Pod layer. Supply node/firewall enforcement and adapt
-  destinations for your network.
+  and cluster DNS at the Pod layer. Adapt destinations for your network.
 - The CNI must enforce NetworkPolicy ingress as well as egress. On EKS, enable
   VPC CNI network policy (`enableNetworkPolicy: "true"` in the `vpc-cni` add-on
-  configuration). It enforces each Pod's ingress at that Pod, so it drops
-  connections from other nodes, including escaped node network namespaces, to
-  Job Pods. A Pod's egress policy does not bind code that escaped to its node.
-  The boundary probe requires a sampled connection from the node to another
-  team's Job Pod to be dropped, not refused.
+  configuration). Job ingress denial is defense in depth: Job code holds no
+  node root, and the boundary probe measures egress from the Pod only.
 
 The Cloud example enables `volumePermissions` so the controller owns `/data`
 and can set its private mode to `0700`. `fsGroup: 65534` grants group access but
@@ -216,9 +223,9 @@ policies out of the job namespace. Chart RBAC
 cannot remove privileges granted by other bindings.
 
 The chart's policies select customer Jobs and enforcement probes. The controller
-and launcher keep their infrastructure networking. Standard NetworkPolicy alone
-does not constrain privileged code in the node network namespace. The launcher
-runs actual probes before publishing each Job and refuses incomplete evidence.
+and launcher keep their infrastructure networking. Job code cannot reach the node network
+namespace, so Pod NetworkPolicy bounds its traffic. The launcher runs actual
+probes before publishing each Job and refuses incomplete evidence.
 Rendering this chart proves neither EKS feature availability nor network isolation.
 
 ## Self-hosted runner pools

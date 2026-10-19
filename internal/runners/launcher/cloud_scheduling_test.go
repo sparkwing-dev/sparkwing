@@ -35,8 +35,8 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		if pod.Annotations[doNotDisrupt] != "true" || pod.Spec.NodeName != r.Reservation.NodeName || pod.Spec.NodeSelector[TeamNodeLabel] != TeamNodeValue(team) {
 			t.Fatalf("placement protection missing: %+v", pod)
 		}
-		if pod.Spec.SecurityContext.RunAsUser == nil || *pod.Spec.SecurityContext.RunAsUser != 0 || !*pod.Spec.InitContainers[0].SecurityContext.Privileged {
-			t.Fatal("root/DinD missing")
+		if pod.Spec.HostUsers == nil || *pod.Spec.HostUsers || *pod.Spec.SecurityContext.RunAsUser != rootlessUser || pod.Spec.InitContainers[0].SecurityContext.Privileged != nil || *pod.Spec.InitContainers[0].SecurityContext.ProcMount != corev1.UnmaskedProcMount {
+			t.Fatal("user-namespaced rootless DinD missing")
 		}
 		teamTaint := false
 		found := false
