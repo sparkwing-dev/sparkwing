@@ -83,7 +83,7 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := engine.GitHubReleaseBase + "/" + version + "/"
+	base := engine.ReleaseBase + "/" + version + "/"
 	responses := map[string][]byte{
 		engine.VersionIndexURL: policy, engine.VersionIndexSignatureURL: ed25519.Sign(key, policy),
 		base + "SHA256SUMS": []byte(manifest.String()), base + "SHA256SUMS.sig": ed25519.Sign(key, []byte(manifest.String())),

@@ -80,7 +80,7 @@ func (r *Resolver) fetchRelease(ctx context.Context, version string, target rele
 	if err != nil {
 		return VerifiedRelease{}, err
 	}
-	base := GitHubReleaseBase + "/" + version + "/"
+	base := ReleaseBase + "/" + version + "/"
 	var bundle ReleaseBundle
 	for _, item := range []struct {
 		name string
@@ -140,14 +140,7 @@ func allowedURL(u *url.URL, release bool) bool {
 		return false
 	}
 	if !release {
-		return u.Host == "sparkwing.dev" && (u.Path == "/versions.json" || u.Path == "/versions.json.sig")
+		return u.Host == indexHost && (u.Path == "/versions.json" || u.Path == "/versions.json.sig")
 	}
-	switch u.Host {
-	case "github.com":
-		return strings.HasPrefix(u.Path, "/sparkwing-dev/sparkwing/releases/download/")
-	case "release-assets.githubusercontent.com", "objects.githubusercontent.com":
-		return true
-	default:
-		return false
-	}
+	return releaseAssetURL(u)
 }

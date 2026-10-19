@@ -17,6 +17,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -62,6 +63,9 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 
 func updateBinary(version string, force, overrideHold bool) (updateReceipt, error) {
 	result := updateReceipt{Kind: "update", Tool: "sparkwing", Target: "cli", Strategy: "release"}
+	if engine.QATrust {
+		return result, errors.New("update: a QA build updates only by installing the next QA pre-release from https://qa-releases.sparkwing.dev")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
 	defer cancel()
 	resolved, err := resolveUpdateVersion(ctx, version, false)
