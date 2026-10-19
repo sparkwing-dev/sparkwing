@@ -1,7 +1,6 @@
 package controller_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -152,14 +151,10 @@ type teamBilling struct {
 
 func (f *identityFixture) trust(team string) {
 	f.t.Helper()
-	t, err := f.store.ForTeam(context.Background(), store.Team(team))
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	if _, _, err := t.SetBillingTrust(context.Background(), store.BillingTrustChange{
-		Trust: store.BillingTrustGranted, Actor: "test", Reason: "test",
-	}, time.Now()); err != nil {
-		f.t.Fatalf("trust %s: %v", team, err)
+	op := f.user("trust-op", "trust-operator@example.com")
+	f.srv.WithOperatorAccounts([]string{op.id})
+	if code := f.call("POST", "/api/v1/operator/teams/"+team+"/trust", op.auth, map[string]any{"trust": "granted", "reason": "test"}, nil); code != http.StatusOK {
+		f.t.Fatalf("trust %s = %d", team, code)
 	}
 }
 
@@ -346,7 +341,9 @@ func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
 		TrustBy     string `json:"trust_by"`
 		Standing    string `json:"standing"`
 	}
-	f.trust(owner.team)
+	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "granted", "reason": "known customer"}, nil); code != http.StatusOK {
+		t.Fatalf("grant = %d", code)
+	}
 	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "revoked", "reason": "chargeback"}, &got); code != http.StatusOK {
 		t.Fatalf("revoke = %d", code)
 	}

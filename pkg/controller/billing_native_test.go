@@ -234,6 +234,9 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 	if err != nil || spend.OpenCharge != nil || spend.BalanceMicro != 0 || spend.Billing.Tier != "Established" {
 		t.Fatalf("recovered=%+v: %v", spend, err)
 	}
+	if !spend.Billing.History.LastIncidentAt.IsZero() {
+		t.Fatalf("a successful charge restarted clean days: %+v", spend.Billing.History)
+	}
 	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/charge-checkout"] != 1 {
 		t.Fatalf("duplicate provider calls: %v", counts)
 	}

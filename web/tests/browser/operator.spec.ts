@@ -17,6 +17,7 @@ const acme = {
   },
   frozen: false,
   holds: [],
+  hold_causes: [],
   events: [
     {
       at: 1_790_000_000,
@@ -122,19 +123,20 @@ test("the operator releases a dispute hold", async ({
     billing: { ...acme.billing, trust: "granted", trusted: false },
     frozen: true,
     holds: ["dp_1"],
+    hold_causes: ["dispute"],
   };
   const seen = await mockOperator(page, held);
   await page.goto("/operator?team=acme");
   await expect(page.getByText("Held: 0 Cloud vCPU, 0 hours per job")).toBeVisible();
 
-  await page.getByLabel("Action").selectOption({ label: "Release a dispute hold" });
+  await page.getByLabel("Action").selectOption({ label: "Release a payment hold" });
   await page.getByLabel("Reason").fill("dispute won");
   const review = page.getByRole("button", { name: "Review" });
   await expect(review).toBeDisabled();
-  await page.getByLabel("Dispute hold to release").selectOption("dp_1");
+  await page.getByLabel("Payment hold to release").selectOption("dp_1");
   await review.click();
   const dialog = page.getByRole("alertdialog", { name: "Confirm action" });
-  await expect(dialog).toContainText("The dispute hold dp_1 on Acme is released.");
+  await expect(dialog).toContainText("The payment dispute dp_1 on Acme is released.");
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect(dialog).toBeHidden();
   expect(seen.posts[0]).toEqual({
@@ -143,6 +145,25 @@ test("the operator releases a dispute hold", async ({
   });
 
 
+});
+
+test("the operator releases its own hold as no fault found", async ({ page }) => {
+  const held = { ...acme, frozen: true, holds: ["operator-x", "decline-a1"], hold_causes: ["operator", "decline"] };
+  const seen = await mockOperator(page, held);
+  await page.goto("/operator?team=acme");
+  await page.getByLabel("Action").selectOption({ label: "Unfreeze" });
+  await page.getByLabel("No fault found (the hold does not restart the clean-day count)").check();
+  await page.getByLabel("Reason").fill("report was mistaken");
+  await page.getByRole("button", { name: "Review" }).click();
+  const dialog = page.getByRole("alertdialog", { name: "Confirm action" });
+  await expect(dialog).toContainText("as no fault found");
+  await expect(dialog).toContainText("1 payment hold(s) stay");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect(dialog).toBeHidden();
+  expect(seen.posts[0]).toEqual({
+    path: "/api/v1/operator/teams/acme/unfreeze",
+    body: { reason: "report was mistaken", no_fault: true },
+  });
 });
 
 function waiting(n: number) {

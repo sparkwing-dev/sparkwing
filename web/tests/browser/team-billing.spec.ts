@@ -234,7 +234,7 @@ test("a card-billed team with a failed charge pays it by hand and can still add 
   ).toBeVisible();
   await expect(
     page.getByText(
-      "The last card charge failed. Pay it now or update the card.",
+      "The card was declined. Update the card or pay the charge now; new Cloud work waits until then.",
     ),
   ).toBeVisible();
   await expect(

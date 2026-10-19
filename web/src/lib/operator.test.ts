@@ -59,6 +59,7 @@ const team = {
   },
   frozen: true,
   holds: ["dp_1", "operator-x"],
+  hold_causes: ["dispute", "operator"],
   events: [],
 };
 
@@ -86,7 +87,7 @@ describe("review", () => {
     );
     assert.match(
       lib.actionEffect(team, "unfreeze", ""),
-      /The 1 operator hold\(s\) on Acme are released\. 1 dispute hold\(s\) stay/,
+      /The 1 operator hold\(s\) on Acme are released\. 1 payment hold\(s\) stay/,
     );
     assert.match(lib.actionEffect(team, "freeze", ""), /running work finishes/);
   });
@@ -101,12 +102,12 @@ describe("review", () => {
       "release-hold",
     ]);
     assert.ok(!Object.keys(lib.actionLabels).includes("set-limit"));
-    const disputed = { ...team, holds: ["dp_1"] };
+    const disputed = { ...team, holds: ["dp_1"], hold_causes: ["dispute"] };
     assert.deepEqual(lib.availableActions(disputed).slice(-2), [
       "freeze",
       "release-hold",
     ]);
-    const clear = { ...team, holds: [] };
+    const clear = { ...team, holds: [], hold_causes: [] };
     assert.ok(!lib.availableActions(clear).includes("release-hold"));
   });
 
@@ -118,7 +119,7 @@ describe("review", () => {
     assert.equal(lib.actionProblem("release-hold", "won", "", { hold: "dp_1" }), "");
     assert.match(
       lib.actionEffect(team, "release-hold", "", { hold: "dp_1" }),
-      /The dispute hold dp_1 on Acme is released\. 1 other hold\(s\) stay/,
+      /The payment dispute dp_1 on Acme is released\. 1 other hold\(s\) stay/,
     );
     assert.deepEqual(
       lib.actionRequest("acme", "release-hold", "won", "", "", { hold: "dp_1" }),
@@ -228,5 +229,28 @@ describe("standing requests", () => {
       "Established history · $500 paid · 2 card charge(s) · 10 clean days",
     );
     assert.equal(lib.historyFacts({ tier: "New", paid_micro: 0, successful_charges: 0 }, now), "New history · $0 paid · no payments");
+  });
+});
+
+describe("hold causes and no-fault releases", () => {
+  it("labels each payment hold by its recorded cause", () => {
+    const held = { ...team, holds: ["decline-a1", "early_fraud_warning:ch_1", "dp_1", "operator-x"], hold_causes: ["decline", "early_fraud_warning", "dispute", "operator"] };
+    assert.deepEqual(lib.paymentHolds(held), ["decline-a1", "early_fraud_warning:ch_1", "dp_1"]);
+    assert.deepEqual(lib.operatorHolds(held), ["operator-x"]);
+    assert.equal(lib.holdLabel(held, "decline-a1"), "declined card charge decline-a1");
+    assert.equal(lib.holdLabel(held, "early_fraud_warning:ch_1"), "early fraud warning early_fraud_warning:ch_1");
+    assert.equal(lib.holdLabel(held, "dp_1"), "payment dispute dp_1");
+  });
+
+  it("sends no_fault only when the operator marks it", () => {
+    assert.deepEqual(lib.actionRequest("acme", "unfreeze", "ok", "", "", { noFault: true }).body, { reason: "ok", no_fault: true });
+    assert.deepEqual(lib.actionRequest("acme", "unfreeze", "ok", "", "").body, { reason: "ok" });
+    assert.match(lib.actionEffect(team, "unfreeze", "", { noFault: true }), /as no fault found, so they do not restart the clean-day count/);
+  });
+
+  it("counts the reason in code points", () => {
+    assert.equal(lib.actionProblem("freeze", "é".repeat(500), ""), "");
+    assert.equal(lib.actionProblem("freeze", "🚀".repeat(500), ""), "");
+    assert.match(lib.actionProblem("freeze", "é".repeat(501), ""), /500 characters/);
   });
 });

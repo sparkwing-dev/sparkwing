@@ -16,7 +16,7 @@ import (
 func trustWithCard(t *testing.T, tenant *store.Tenant, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	if _, _, err := tenant.SetBillingTrust(ctx, store.BillingTrustChange{
+	if _, _, err := tenant.TestOnlySetBillingTrust(ctx, store.BillingTrustChange{
 		Trust: store.BillingTrustGranted, Actor: "korey", Reason: "known customer",
 	}, now); err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestHoldsAndRevocation(t *testing.T) {
 	if work, _, err := s.AsOperator().DueCardCharges(ctx, now); err != nil || len(work) != 0 {
 		t.Fatalf("a $2 debt while trusted = %+v, %v; want none", work, err)
 	}
-	if _, _, err := acme.SetBillingTrust(ctx, store.BillingTrustChange{
+	if _, _, err := acme.TestOnlySetBillingTrust(ctx, store.BillingTrustChange{
 		Trust: store.BillingTrustRevoked, Actor: "korey", Reason: "revoked",
 	}, now); err != nil {
 		t.Fatal(err)
@@ -404,7 +404,7 @@ func TestBillingWritersShareOneLockOrder(t *testing.T) {
 			note(acme.TestOnlySaveCard(ctx, store.Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1"}, "billing", now))
 		},
 		func(i int) {
-			_, _, err := acme.SetBillingTrust(ctx, store.BillingTrustChange{
+			_, _, err := acme.TestOnlySetBillingTrust(ctx, store.BillingTrustChange{
 				Trust: store.BillingTrustGranted, Actor: "korey", Reason: "race",
 			}, now)
 			note(err)

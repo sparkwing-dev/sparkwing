@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -55,8 +56,8 @@ func (f *consoleWritesFake) ConsoleFreeze(_ context.Context, a capability.Author
 	return store.TeamCreditFreeze{Frozen: true}, f.record(a, value)
 }
 
-func (f *consoleWritesFake) ConsoleUnfreeze(_ context.Context, a capability.Authorized, hold, reason string) (store.TeamCreditFreeze, error) {
-	return store.TeamCreditFreeze{}, f.record(a, []string{hold, reason})
+func (f *consoleWritesFake) ConsoleUnfreeze(_ context.Context, a capability.Authorized, hold, reason string, noFault bool) (store.TeamCreditFreeze, error) {
+	return store.TeamCreditFreeze{}, f.record(a, []string{hold, reason, fmt.Sprint(noFault)})
 }
 
 func (f *consoleWritesFake) ConsoleDeleteAccount(_ context.Context, a capability.Authorized) (store.AccountDeletion, error) {

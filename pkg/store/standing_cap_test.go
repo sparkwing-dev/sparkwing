@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -79,11 +80,11 @@ func TestStandingCapIncidentRestartsHighCleanAge(t *testing.T) {
 
 func TestStandingCapGrantAndHoldOverrideTheCap(t *testing.T) {
 	_, tenant, now := standingCapFixture(t)
-	if _, _, err := tenant.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "reviewed"}, *now); err != nil {
+	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "reviewed"}, *now); err != nil {
 		t.Fatal(err)
 	}
 	standingCapWant(t, tenant, *now, "High", "New", "Established")
-	if _, _, err := tenant.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustRevoked, Actor: "operator", Reason: "fraud"}, *now); err != nil {
+	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustRevoked, Actor: "operator", Reason: "fraud"}, *now); err != nil {
 		t.Fatal(err)
 	}
 	standingCapWant(t, tenant, *now, "Held", "New", "Established")
@@ -155,5 +156,45 @@ func TestStandingCapPaidCheckoutRecordsThreeDSecure(t *testing.T) {
 	}
 	if recorded != "authenticated" || !strings.Contains(attrs, `"three_d_secure":"authenticated"`) {
 		t.Fatalf("3-D Secure outcome column=%q event=%s", recorded, attrs)
+	}
+}
+
+func standingCapOperatorHold(t *testing.T, s *Store, id string, placed, released time.Time, noFault bool) {
+	t.Helper()
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,created_at) VALUES (?,'a','review',?)`, id, placed.UnixNano())
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", id, false, noFault, "operator", "checked", released)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStandingCapNoFaultOperatorReleaseKeepsCleanDays(t *testing.T) {
+	_, tenant, now := standingCapFixture(t)
+	standingCapPay(t, tenant, "pi_nofault", 50000)
+	s := tenant.s
+	standingCapOperatorHold(t, s, OperatorHoldPrefix+"nofault", now.Add(10*24*time.Hour), now.Add(12*24*time.Hour), true)
+	standingCapWant(t, tenant, now.Add(30*24*time.Hour-time.Nanosecond), "Trusted", "Established", "Trusted")
+	standingCapWant(t, tenant, now.Add(30*24*time.Hour), "High", "High", "High")
+	standingCapOperatorHold(t, s, OperatorHoldPrefix+"fault", now.Add(10*24*time.Hour), now.Add(12*24*time.Hour), false)
+	standingCapWant(t, tenant, now.Add(42*24*time.Hour-time.Nanosecond), "Trusted", "Established", "Trusted")
+	standingCapWant(t, tenant, now.Add(42*24*time.Hour), "High", "High", "High")
+	var noFault int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE team='a' AND kind=? AND attrs LIKE '%"no_fault":true%'`, BusinessEventTeamUnfrozen).Scan(&noFault); err != nil || noFault != 1 {
+		t.Fatalf("no-fault audit events=%d: %v", noFault, err)
+	}
+}
+
+func TestStandingCapNoFaultReleaseOnlyForOperatorHolds(t *testing.T) {
+	s, _, now := standingCapFixture(t)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,created_at) VALUES ('dp_1','a','dispute',?)`, now.UnixNano())
+	err := s.inTx(t.Context(), func(tx *storeTx) error {
+		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", "dp_1", false, true, "operator", "checked", *now)
+		return err
+	})
+	var open int
+	if qerr := s.db.QueryRow(`SELECT COUNT(*) FROM credit_freezes WHERE dispute_id='dp_1' AND released_at IS NULL`).Scan(&open); !errors.Is(err, ErrInvalidInput) || qerr != nil || open != 1 {
+		t.Fatalf("no-fault dispute release: %v open=%d %v", err, open, qerr)
 	}
 }

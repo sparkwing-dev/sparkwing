@@ -85,7 +85,7 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
  (SELECT MIN(g.created_at) FROM credit_grants g WHERE g.team=? AND g.kind=? AND
  g.amount_micro+COALESCE((SELECT SUM(r.amount_micro) FROM credit_grants r WHERE r.team=g.team AND r.kind='reversal' AND r.reverses=g.reference AND g.reference<>''),0)>0),
  (SELECT COUNT(*) FROM card_charges WHERE team=? AND state=?),
- (SELECT MAX(COALESCE(released_at,created_at)) FROM credit_freezes WHERE team=?)`, team, CreditGrantPaid, CreditGrantReversal, team, CreditGrantPaid, team, CardChargePaid, team).Scan(&paid, &first, &p.history.SuccessfulCharges, &incident)
+ (SELECT MAX(COALESCE(released_at,created_at)) FROM credit_freezes WHERE team=? AND no_fault=0)`, team, CreditGrantPaid, CreditGrantReversal, team, CreditGrantPaid, team, CardChargePaid, team).Scan(&paid, &first, &p.history.SuccessfulCharges, &incident)
 	if err != nil {
 		return p, err
 	}

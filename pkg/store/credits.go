@@ -93,7 +93,7 @@ type InsufficientCreditsError struct {
 
 func (e *InsufficientCreditsError) Error() string {
 	if e.Limit == SpendLimitChargeFailed {
-		return "spend limit: the charge to this team's card failed; an owner can pay it or update the card on the billing page"
+		return "card declined: new Cloud work waits until an owner updates the card or pays the charge on the billing page; running jobs finish and the team's own runners keep working"
 	}
 	if e.Frozen {
 		return "credits frozen: this team's cloud usage is held while a payment dispute is open; contact support"

@@ -71,12 +71,6 @@ type BillingTrustChange struct {
 	Request string
 }
 
-// SetBillingTrust commits a standing decision with its audit event.
-func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
-	err = t.s.inTx(ctx, func(tx *storeTx) error { before, after, err = t.setBillingTrustTx(ctx, tx, c, now); return err })
-	return before, after, err
-}
-
 func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
 	if c.Trust != BillingTrustGranted && c.Trust != BillingTrustRevoked && c.Trust != BillingTrustAutomatic {
 		return before, after, fmt.Errorf("%w: trust must be granted, revoked or automatic", ErrInvalidInput)

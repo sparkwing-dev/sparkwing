@@ -167,7 +167,7 @@ export function limitReason(binding: string): string {
     case "charge_pending":
       return "New Cloud work waits while the pending card charge completes. Running work finishes.";
     case "charge_failed":
-      return "The last card charge failed. Pay it now or update the card.";
+      return "The card was declined. Update the card or pay the charge now; new Cloud work waits until then.";
     default:
       return "The balance is spent.";
   }

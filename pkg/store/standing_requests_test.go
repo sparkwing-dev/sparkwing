@@ -175,3 +175,14 @@ func standingRequestEvents(t *testing.T, s *Store, want map[string]int) {
 		}
 	}
 }
+
+func TestOperatorReasonCountsCodePoints(t *testing.T) {
+	f := standingRequestFixture(t)
+	req := f.request(t, "pending")
+	if _, err := f.console.ConsoleDeclineStandingRequest(t.Context(), f.op, req.ID, strings.Repeat("é", OperatorReasonLimit+1)); err == nil || f.state(t, req.ID) != StandingRequestOpen {
+		t.Fatalf("over-long reason: %v", err)
+	}
+	if _, err := f.console.ConsoleDeclineStandingRequest(t.Context(), f.op, req.ID, strings.Repeat("é", OperatorReasonLimit)); err != nil {
+		t.Fatalf("500 two-byte characters refused: %v", err)
+	}
+}

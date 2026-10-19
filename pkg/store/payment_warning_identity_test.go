@@ -182,7 +182,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 		t.Run(order, func(t *testing.T) {
 			s, first, now := cardCollectionFixture(t)
 			second := &Tenant{s: s, team: "b"}
-			if _, _, err := second.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
+			if _, _, err := second.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
 				t.Fatal(err)
 			}
 			if err := second.TestOnlySaveCard(t.Context(), Card{Customer: "customer-b", PaymentMethod: "method-b", Fingerprint: "fp_1"}, "billing", now); err != nil {

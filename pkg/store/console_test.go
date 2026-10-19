@@ -9,6 +9,7 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -45,10 +46,14 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 		func(a capability.Authorized) error { _, err := c.ConsoleFreeze(t.Context(), a, "test"); return err },
 		func(a capability.Authorized) error {
 			_, err := c.ConsoleDeclineStandingRequest(t.Context(), a, "standing-x", "test")
+			var refusal *apierr.Error
+			if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden && refusal.Code != apierr.Unauthenticated {
+				return nil
+			}
 			return err
 		},
 		func(a capability.Authorized) error {
-			_, err := c.ConsoleUnfreeze(t.Context(), a, "", "test")
+			_, err := c.ConsoleUnfreeze(t.Context(), a, "", "test", false)
 			return err
 		},
 		func(a capability.Authorized) error { _, err := c.ConsoleDeleteTeam(t.Context(), a); return err },
@@ -70,6 +75,7 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 			return err
 		},
 	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES ('standing-x','b','High','m','owner',1,'open')`)
 	property := func(phase uint8, input []byte) bool {
 		a := base
 		c.allowed = func(string) bool { return true }
@@ -98,11 +104,16 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 			}
 		}
 		var count int
-		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM credit_grants)+(SELECT COUNT(*) FROM credit_freezes)+(SELECT COUNT(*) FROM team_deletions)+(SELECT COUNT(*) FROM business_events)`).Scan(&count)
+		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM credit_grants)+(SELECT COUNT(*) FROM credit_freezes)+(SELECT COUNT(*) FROM team_deletions)+(SELECT COUNT(*) FROM business_events)+(SELECT COUNT(*) FROM standing_requests WHERE state<>'open')`).Scan(&count)
 		return err == nil && count == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
 		t.Fatal(err)
+	}
+	c.allowed = func(id string) bool { return id == "operator" }
+	rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=NULL,expires_at=? WHERE hash='operator'`, time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
+	if declined, err := c.ConsoleDeclineStandingRequest(t.Context(), base, "standing-x", "valid"); err != nil || declined.State != StandingRequestDeclined {
+		t.Fatalf("valid operator decline: %+v %v", declined, err)
 	}
 }
 
@@ -146,14 +157,14 @@ func TestConsoleNativeFinanceAndStableWaitlistBatch(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	freeze, err = c.ConsoleUnfreeze(ctx, a, "", "resolved")
+	freeze, err = c.ConsoleUnfreeze(ctx, a, "", "resolved", false)
 	if err != nil || len(freeze.Disputes) != 1 || freeze.Disputes[0] != "dispute" {
 		t.Fatalf("operator unfreeze: %+v %v", freeze, err)
 	}
-	if _, err := c.ConsoleUnfreeze(ctx, a, "absent", "resolved"); !errors.Is(err, ErrNotFound) {
+	if _, err := c.ConsoleUnfreeze(ctx, a, "absent", "resolved", false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("absent hold: %v", err)
 	}
-	freeze, err = c.ConsoleUnfreeze(ctx, a, "dispute", "resolved")
+	freeze, err = c.ConsoleUnfreeze(ctx, a, "dispute", "resolved", false)
 	if err != nil || freeze.Frozen {
 		t.Fatalf("explicit unfreeze: %+v %v", freeze, err)
 	}

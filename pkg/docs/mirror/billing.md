@@ -25,8 +25,12 @@ Standing is the higher of the history tier and the tier backed by the current
 prepaid balance. Prepaid funds raise standing at most one tier above the
 history tier and never above Trusted. A first payment earns Established
 history, so prepaying alone reaches Trusted at most. High needs $500 paid and 30
-clean days, or an operator grant of standing, whatever the balance. A hold of any kind restarts the clean days when it is placed
-and again when it is released.
+clean days, or an operator grant of standing, whatever the balance. A hold
+restarts the clean days when it is placed and again when it is released. Two
+holds count as if they never happened: an operator hold the operator releases
+as "no fault found", and a declined-charge hold that a later successful charge
+clears. Dispute, fraud-warning and other automatic holds always restart the
+count.
 Adding funds raises standing in the settlement transaction.
 Using prepaid funds can lower its balance-backed tier. Successful collections
 and payment history remain available after the balance is spent. Holds prevent
@@ -36,6 +40,12 @@ operator releases its hold. A won or closed warning dispute releases its hold.
 Each declined collection attempt creates a separate hold. Releasing an earlier
 hold does not exempt a later declined retry. Replaying the earlier decline
 leaves its released hold unchanged. Successful collection clears decline holds.
+
+A failed charge on the saved card, whether a decline, an expired card or a
+failed collection reported by Stripe, holds new Cloud admissions at once.
+Running jobs finish and work on the team's own runners continues. The billing
+page and the run's notice say the card was declined and to update it. The next
+successful charge releases the hold.
 
 While a collection is pending, new Cloud work waits and running work finishes.
 Admissions include resources already awarded and reserved for jobs that have

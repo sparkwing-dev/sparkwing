@@ -29,7 +29,8 @@ import {
   availableActions,
   balanceCents,
   declineStandingRequest,
-  disputeHolds,
+  holdLabel,
+  paymentHolds,
   getOperatorTeam,
   getStandingRequests,
   getWaitlist,
@@ -167,7 +168,6 @@ function StandingQueue() {
                 <input
                   id={`reason-${item.request.id}`}
                   className={`${inputClass} flex-1 min-w-48`}
-                  maxLength={500}
                   placeholder="Reason"
                   value={reasons[item.request.id] ?? ""}
                   onChange={(e) => setReasons((cur) => ({ ...cur, [item.request.id]: e.target.value }))}
@@ -554,19 +554,30 @@ function ActionForm({
             <label className="flex-1">
               <span className={labelClass}>Hold</span>
               <select
-                aria-label="Dispute hold to release"
+                aria-label="Payment hold to release"
                 className={`${inputClass} w-full`}
                 value={extra.hold ?? ""}
                 disabled={key !== ""}
                 onChange={(e) => setField("hold")(e.target.value)}
               >
                 <option value="">Choose a hold</option>
-                {disputeHolds(team).map((h) => (
+                {paymentHolds(team).map((h) => (
                   <option key={h} value={h}>
-                    {h}
+                    {holdLabel(team, h)}
                   </option>
                 ))}
               </select>
+            </label>
+          ) : null}
+          {current === "unfreeze" ? (
+            <label className="flex items-center gap-2 self-end">
+              <input
+                type="checkbox"
+                checked={extra.noFault ?? false}
+                disabled={key !== ""}
+                onChange={(e) => setExtra((cur) => ({ ...cur, noFault: e.target.checked }))}
+              />
+              No fault found (the hold does not restart the clean-day count)
             </label>
           ) : null}
         </div>

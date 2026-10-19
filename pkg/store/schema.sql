@@ -764,7 +764,8 @@ CREATE TABLE credit_freezes (
     reason TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
     released_at BIGINT,
-    cause TEXT NOT NULL DEFAULT ''
+    cause TEXT NOT NULL DEFAULT '',
+    no_fault BIGINT NOT NULL DEFAULT 0 CHECK(no_fault IN (0,1))
 );
 
 CREATE TABLE standing_requests (

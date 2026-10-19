@@ -15,7 +15,7 @@ type ConsoleWriter interface {
 	ConsoleSetBillingTrust(context.Context, capability.Authorized, store.BillingTrustChange) (store.BillingStanding, error)
 	ConsoleDeclineStandingRequest(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)
 	ConsoleFreeze(context.Context, capability.Authorized, string) (store.TeamCreditFreeze, error)
-	ConsoleUnfreeze(context.Context, capability.Authorized, string, string) (store.TeamCreditFreeze, error)
+	ConsoleUnfreeze(context.Context, capability.Authorized, string, string, bool) (store.TeamCreditFreeze, error)
 	ConsoleDeleteAccount(context.Context, capability.Authorized) (store.AccountDeletion, error)
 	ConsoleDeleteTeam(context.Context, capability.Authorized) (store.TeamDeletion, error)
 	ConsoleApproveWaitlist(context.Context, capability.Authorized, []string, int, string) ([]store.Account, error)

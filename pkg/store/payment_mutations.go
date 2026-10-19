@@ -125,12 +125,18 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	return true, nil
 }
 
-func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, disputeID string, operatorOnly bool, actor, reason string, now time.Time) (int64, error) {
+func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, disputeID string, operatorOnly, noFault bool, actor, reason string, now time.Time) (int64, error) {
 	if team == "" {
 		return 0, errors.New("credits: a release names the team")
 	}
-	query := `UPDATE credit_freezes SET released_at = ? WHERE team = ? AND released_at IS NULL`
-	args := []any{now.UnixNano(), string(team)}
+	if noFault {
+		if disputeID != "" && !strings.HasPrefix(disputeID, OperatorHoldPrefix) {
+			return 0, fmt.Errorf("%w: only an operator hold can be released as no fault found", ErrInvalidInput)
+		}
+		operatorOnly = true
+	}
+	query := `UPDATE credit_freezes SET released_at = ?, no_fault = ? WHERE team = ? AND released_at IS NULL`
+	args := []any{now.UnixNano(), boolInt(noFault), string(team)}
 	if disputeID = strings.TrimSpace(disputeID); disputeID != "" {
 		query, args = query+` AND dispute_id = ?`, append(args, disputeID)
 	}
@@ -147,6 +153,9 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	var releaseAttrs map[string]any
 	if actor != "" {
 		releaseAttrs = map[string]any{"reason": reason}
+		if noFault {
+			releaseAttrs["no_fault"] = true
+		}
 	}
 	for _, id := range released {
 		if err := RecordBusinessEvent(tx, BusinessEvent{
@@ -289,7 +298,7 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 	if err := requireOneRow(result, "card charge settlement"); err != nil {
 		return false, nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE credit_freezes SET released_at = ?
+	if _, err := tx.ExecContext(ctx, `UPDATE credit_freezes SET released_at = ?, no_fault = 1
 	    WHERE team = ? AND cause = ? AND released_at IS NULL`, nowNS, string(team), FreezeCauseDecline); err != nil {
 		return false, nil, err
 	}
