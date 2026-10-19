@@ -248,7 +248,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		workers.Go(func() {
 			defer ln.Close()
 			serve("dashboard", func() error {
-				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, guardDashboard(controller.HTTP().Dashboard, ln.Addr().String(), logins), nil, d.dashboardConnection)
+				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, guardDashboard(controller.HTTP(), ln.Addr().String(), logins), nil, d.dashboardConnection)
 			})
 		})
 		return nil
@@ -495,9 +495,9 @@ func (r *localRuntime) Drain(ctx context.Context) error {
 // safety: TCP carries no peer identity, so only the dashboard's own loopback
 // origin may reach it, and only with a session from a link api.sock minted; a
 // rebound DNS name or another site's page is refused before the session check.
-func guardDashboard(next http.Handler, addr string, logins *dashboardLogins) http.Handler {
-	if next == nil {
+func guardDashboard(local LocalHTTP, addr string, logins *dashboardLogins) http.Handler {
+	if local.Dashboard == nil {
 		return nil
 	}
-	return originguard.Guard(logins.gate(next), originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), nil))
+	return originguard.Guard(logins.gate(local.Dashboard, local.Shell), originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), nil))
 }

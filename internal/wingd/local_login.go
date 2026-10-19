@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,9 +19,9 @@ import (
 const DashboardLoginPath = "/api/v1/local/dashboard/login"
 
 const (
-	dashboardLoginLifetime = 60 * time.Second
-	dashboardSessionIdle   = 12 * time.Hour
-	dashboardSessionCookie = "sw_local_session"
+	dashboardLoginLifetime   = 60 * time.Second
+	dashboardSessionIdle     = 12 * time.Hour
+	dashboardSessionLifetime = 24 * time.Hour
 )
 
 // DashboardLogin is the one-time sign-in link api.sock returns.
@@ -35,8 +36,12 @@ type pendingLogin struct {
 }
 
 type dashboardSession struct {
-	peer     LocalPeerIdentity
-	lastSeen time.Time
+	peer              LocalPeerIdentity
+	lastSeen, expires time.Time
+}
+
+func (s dashboardSession) live(now time.Time) bool {
+	return now.Before(s.lastSeen.Add(dashboardSessionIdle)) && now.Before(s.expires)
 }
 
 type dashboardLogins struct {
@@ -128,25 +133,32 @@ func (l *dashboardLogins) redeem(token string) (string, bool) {
 		return "", false
 	}
 	for key, current := range l.sessions {
-		if !now.Before(current.lastSeen.Add(dashboardSessionIdle)) {
+		if !current.live(now) {
 			delete(l.sessions, key)
 		}
 	}
-	l.sessions[sha256.Sum256([]byte(session))] = dashboardSession{peer: login.peer, lastSeen: now}
+	l.sessions[sha256.Sum256([]byte(session))] = dashboardSession{peer: login.peer, lastSeen: now, expires: now.Add(dashboardSessionLifetime)}
 	return session, true
 }
 
+func sessionKey(r *http.Request) ([sha256.Size]byte, bool) {
+	session, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || session == "" {
+		return [sha256.Size]byte{}, false
+	}
+	return sha256.Sum256([]byte(session)), true
+}
+
 func (l *dashboardLogins) session(r *http.Request) (LocalPeerIdentity, bool) {
-	cookie, err := r.Cookie(dashboardSessionCookie)
-	if err != nil {
+	key, ok := sessionKey(r)
+	if !ok {
 		return LocalPeerIdentity{}, false
 	}
-	key := sha256.Sum256([]byte(cookie.Value))
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	current, ok := l.sessions[key]
 	now := l.now()
-	if !ok || !now.Before(current.lastSeen.Add(dashboardSessionIdle)) {
+	if !ok || !current.live(now) {
 		delete(l.sessions, key)
 		return LocalPeerIdentity{}, false
 	}
@@ -155,21 +167,29 @@ func (l *dashboardLogins) session(r *http.Request) (LocalPeerIdentity, bool) {
 	return copyPeerIdentity(current.peer), true
 }
 
-// safety: TCP carries no peer identity, so a browser acts as the api.sock
-// peer that minted its link, and only while it holds that session.
-func (l *dashboardLogins) gate(next http.Handler) http.Handler {
+// safety: a browser acts as the api.sock peer that minted its link only while it sends that session as a
+// bearer. Cookies reach every port on a loopback host, so none is read. The static shell carries no run data and
+// loads signed out, because a navigation cannot send the header.
+func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/login" {
+		switch r.URL.Path {
+		case "/login":
 			l.login(w, r)
 			return
-		}
-		peer, ok := l.session(r)
-		if !ok {
-			w.Header().Set("Cache-Control", "no-store")
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "the local dashboard needs a signed-in browser", Hint: "run sparkwing dashboard open and visit the link it prints"})
+		case "/logout":
+			l.logout(w, r)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), localPeerKey{}, peer)))
+		if peer, ok := l.session(r); ok {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), localPeerKey{}, peer)))
+			return
+		}
+		if shell != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) && !strings.HasPrefix(r.URL.Path, "/api/") {
+			shell.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "the local dashboard needs a signed-in browser", Hint: "run sparkwing dashboard open and visit the link it prints"})
 	})
 }
 
@@ -186,8 +206,27 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired or already used", Hint: "run sparkwing dashboard open for a new link"})
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: dashboardSessionCookie, Value: session, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/#s="+session, http.StatusSeeOther)
+}
+
+func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "sign out with POST"})
+		return
+	}
+	key, ok := sessionKey(r)
+	l.mu.Lock()
+	current, found := l.sessions[key]
+	delete(l.sessions, key)
+	live := ok && found && current.live(l.now())
+	l.mu.Unlock()
+	if !live {
+		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this browser is not signed in"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeLoginFailure(w http.ResponseWriter, failure *apierr.Error) {

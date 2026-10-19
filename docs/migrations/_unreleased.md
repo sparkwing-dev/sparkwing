@@ -2,11 +2,14 @@
 
 ## Local dashboard sign-in link
 
-The local dashboard's TCP listener now answers 401 to every request without a
-session cookie. Run `sparkwing dashboard open` after `sparkwing dashboard start`
-and visit the link it prints. The link works once and expires after 60 seconds.
-The session ends after 12 hours without a request, or when the local controller restarts. Tools that call the local
-API should use the private socket, which still needs no cookie.
+The local dashboard's TCP listener now answers 401 to every API request without
+an `Authorization: Bearer` session; no cookie is set or accepted. Run
+`sparkwing dashboard open` after `sparkwing dashboard start` and visit the link
+it prints. The link works once and expires after 60 seconds, and the session
+lives in that browser tab's `sessionStorage`, so a separately opened tab needs a new
+link. The session ends after 12 hours without a request, 24 hours after sign-in,
+on Log out, or when the local controller restarts. Tools that call the local API
+should use the private socket, which needs no session.
 
 ## Cloud runs without a runner selector use the launcher
 

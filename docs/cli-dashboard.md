@@ -62,7 +62,7 @@ Read a bounded dashboard log tail
 
 Print a one-time sign-in link for the local dashboard
 
-Print a one-time sign-in link for the running local dashboard. It is minted over the local socket, works once and expires after 60 seconds; visiting it sets an HttpOnly, SameSite=Strict session cookie for the dashboard's TCP address. Every TCP request needs that cookie; the local socket needs none.
+Print a one-time sign-in link for the running local dashboard. It is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none.
 
 ### Flags
 

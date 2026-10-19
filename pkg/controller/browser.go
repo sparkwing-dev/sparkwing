@@ -76,6 +76,14 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	return web.SecurityHeaders(d.HSTS, top)
 }
 
+func (s *Server) localShell() http.Handler {
+	d := s.dashboard
+	shell := http.NewServeMux()
+	shell.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, false))
+	shell.Handle("GET /", web.Pages(d.Bundle))
+	return web.SecurityHeaders(d.HSTS, shell)
+}
+
 func (s *Server) signInRoutes(mux *registeredMux) {
 	s.registerPolicyEndpoints(mux, s.loginEndpoints())
 	s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())
