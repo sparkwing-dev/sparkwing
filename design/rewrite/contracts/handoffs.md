@@ -786,3 +786,8 @@ Assigned to an Opus implementer (env 1087).
 - The admission policy forbids privileged containers in job pods, including the Docker sidecar. Any remaining privileged probe needs a stated reason.
 - A per-job VM option with privileged Docker may come later as a paid feature, only if customers ask.
 - With node root gone, per-team node reuse (review M2) stays as is.
+
+## 2026-10-18 Korey decision 13: run anywhere on self-hosted controllers
+
+- Self-hosted controllers use run anywhere for unselected runs the same way Cloud does, without the Cloud tier. CLI triggers no longer run directly on the controller's host by host dispatch; the controller's host takes part as a self-hosted claimant, so a team with no runners online is still served.
+- The "here" tier is the authenticated machine that submitted the run (its machine credential identity sealed at intake), never a label. Lead ruling, recorded for ratification.
