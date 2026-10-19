@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type initialTriggerController struct {
@@ -51,6 +52,7 @@ func initialTriggerRequest(here bool) controllerwire.CreateRunRequest {
 
 func initialTriggerResponse(t testing.TB, request controllerwire.CreateRunRequest) controllerwire.CreateRunResponse {
 	t.Helper()
+	request.Request.Dispatch = store.SelectDispatch(request.Request)
 	seal, err := runspec.SealRequest(request.Request, runspec.IntakeFacts{RunID: "initial-run", AdmittedAt: time.Unix(1, 0)})
 	if err != nil {
 		t.Fatal(err)

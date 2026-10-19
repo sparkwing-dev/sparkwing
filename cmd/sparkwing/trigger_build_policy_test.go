@@ -96,7 +96,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Ma
 			if req.Request.RequestedArgs["region"] != "west" || len(req.Request.SecretArgs.Value) != 1 || req.Request.SecretArgs.Value[0] != "password" {
 				t.Fatal("inspection lost arguments or secret classification")
 			}
-			req.Request.Team = "default"
+			req.Request.Team, req.Request.Dispatch = "default", runspec.DispatchController
 			seal, err := runspec.SealRequest(req.Request, runspec.IntakeFacts{RunID: "policy"})
 			if err != nil {
 				t.Fatal(err)
