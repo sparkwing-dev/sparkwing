@@ -216,7 +216,7 @@ func TestPrepareCheckoutOwnerHelperFailureDoesNotFallBackToAnonymous(t *testing.
 	log := sourcetest.Remote(t, map[string]string{remote: dir})
 	ownerHome := t.TempDir()
 	sourcetest.Write(t, filepath.Join(ownerHome, ".gitconfig"), "[credential]\n\thelper = !exit 1\n")
-	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha}, source.Options{Base: procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + ownerHome}}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
+	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha}, source.Options{GitAccess: source.GitAccessOwner, Base: procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + ownerHome}}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
 	if err == nil || !strings.Contains(err.Error(), "helper failed") {
 		t.Fatalf("helper failure = %v", err)
 	}
@@ -300,7 +300,7 @@ func uncredentialedSSHCommands(t *testing.T, remote string, base procenv.Base) [
 	dir, sha := sourcetest.Repository(t)
 	log := sourcetest.Remote(t, map[string]string{remote: dir})
 	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk"},
-		source.Options{Base: base, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
+		source.Options{Base: base, GitAccess: gitAccessFor(base), BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,5 +390,31 @@ func TestTenantRemoteGitConnectsByTheNormalisedHost(t *testing.T) {
 				t.Fatal("no pinned connection to the normalised host")
 			}
 		})
+	}
+}
+
+func gitAccessFor(base procenv.Base) source.GitAccess {
+	if base.Local {
+		return source.GitAccessOwner
+	}
+	return source.GitAccessTeam
+}
+
+func TestLocalEnvironmentAloneNeverSelectsOwnerGitAccess(t *testing.T) {
+	dir, sha := sourcetest.Repository(t)
+	remote := "https://8.8.8.8/team/repo"
+	sourcetest.Remote(t, map[string]string{remote: dir})
+	ownerHome := t.TempDir()
+	helperLog := filepath.Join(t.TempDir(), "helper.log")
+	sourcetest.Write(t, filepath.Join(ownerHome, ".gitconfig"), "[credential]\n\thelper = \"!f() { echo called >> "+helperLog+"; echo username=owner; echo password=owner-secret; }; f\"\n")
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha}, source.Options{Base: procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + ownerHome}}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
+	if entry != nil {
+		t.Cleanup(func() { _ = entry.Close() })
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(helperLog); err == nil {
+		t.Fatal("a local environment without owner Git access read the host's credential helper")
 	}
 }

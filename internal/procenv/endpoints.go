@@ -34,6 +34,7 @@ func proxyCredentials(name, value string) ([]string, error) {
 		credentials = append(credentials, parts...)
 		if goEndpoint && pathOrQueryEndpoint(endpoint) {
 			credentials = append(credentials, endpoint)
+			credentials = append(credentials, queryCredentials(endpoint)...)
 		}
 	}
 	return credentials, nil
@@ -96,3 +97,29 @@ func endpointCredentials(endpoint string) ([]string, error) {
 	}
 	return append(parts, rawUser, rawUsername, rawPassword), nil
 }
+
+// safety: Go inserts the module path before a proxy's query when it reports a URL, so the configured endpoint never
+// appears whole; the raw query and each long value are masked on their own.
+func queryCredentials(endpoint string) []string {
+	_, query, ok := strings.Cut(endpoint, "?")
+	if !ok {
+		return nil
+	}
+	query, _, _ = strings.Cut(query, "#")
+	if query == "" {
+		return nil
+	}
+	out := []string{query}
+	for _, pair := range strings.FieldsFunc(query, func(r rune) bool { return r == '&' || r == ';' }) {
+		_, value, _ := strings.Cut(pair, "=")
+		if len(value) >= goQueryValueMaskMinLength {
+			out = append(out, value)
+		}
+		if decoded, err := url.QueryUnescape(value); err == nil && decoded != value && len(decoded) >= goQueryValueMaskMinLength {
+			out = append(out, decoded)
+		}
+	}
+	return out
+}
+
+const goQueryValueMaskMinLength = 8
