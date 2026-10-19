@@ -283,7 +283,7 @@ func (l *Launcher) deleteBootstrap(ctx context.Context, bootstrap bootstrapRefer
 }
 
 func podStopped(pod corev1.Pod) bool {
-	// safety: an absent status on a live pod is not evidence that its privileged sidecar stopped.
+	// safety: an absent status on a live pod is not evidence that its Docker sidecar stopped.
 	if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
 		return false
 	}

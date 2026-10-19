@@ -51,7 +51,7 @@ func FuzzProductionBoundaryRejectsMetadataInjection(f *testing.F) {
 			created++
 			pod.UID = types.UID(pod.Name)
 			pod.Status = corev1.PodStatus{PodIP: "10.1.2.3", HostIP: "10.0.0.1", Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
-			if pod.Spec.Containers[0].Name != "control" {
+			if name := pod.Spec.Containers[0].Name; name != "control" && name != "peer" {
 				pod.Status.Phase = corev1.PodSucceeded
 			}
 			if annotation {

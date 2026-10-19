@@ -2,12 +2,18 @@ package launcher
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
@@ -27,23 +33,70 @@ func (f *nodeFault) Error() string {
 }
 
 // safety: a kubelet can rewrite its own Node's annotations, so a fault read
-// from them is charged to that node alone. The node is cordoned and records
-// the cause, and claiming continues for every other node.
+// from them is charged to that node alone. The node is cordoned and given a
+// taint, which NodeRestriction stops a kubelet from removing. Placement
+// already skips it while it records a reservation that is not the one being
+// placed, so repeated conflicts back off into a node fault and claiming
+// continues; any other failed write stays blocking until the quarantine
+// persists.
 func quarantineNode(ctx context.Context, kube kubernetes.Interface, node *corev1.Node, cause string) error {
 	fault := &nodeFault{node: node.Name, cause: "quarantined: " + cause}
-	if node.Labels[TeamNodeLabel] == "" || node.Spec.Unschedulable && node.Annotations[quarantineAnnotation] == cause {
+	if node.Labels[TeamNodeLabel] == "" {
 		return fault
 	}
-	node = node.DeepCopy()
+	current := node
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if current == nil {
+			fresh, err := kube.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			current = fresh
+		}
+		patch, err := quarantinePatch(current, cause)
+		current = nil
+		if err != nil || patch == nil {
+			return err
+		}
+		_, err = kube.CoreV1().Nodes().Patch(ctx, node.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+		return err
+	})
+	switch {
+	case err == nil:
+		return fault
+	case apierrors.IsConflict(err):
+		fault.cause += "; quarantine still conflicting, retrying next pass"
+		return fault
+	}
+	return fmt.Errorf("quarantine Cloud node %s (%s): %w", node.Name, cause, err)
+}
+
+// quarantinePatch fences the write to the node's UID and adds only what is
+// missing, so the kubelet's own concurrent writes cannot undo it.
+func quarantinePatch(node *corev1.Node, cause string) ([]byte, error) {
+	tainted := slices.ContainsFunc(node.Spec.Taints, func(t corev1.Taint) bool { return t.Key == quarantineAnnotation })
+	if node.Spec.Unschedulable && tainted && node.Annotations[quarantineAnnotation] == cause {
+		return nil, nil
+	}
+	ops := []map[string]any{{"op": "test", "path": "/metadata/uid", "value": node.UID}, {"op": "add", "path": "/spec/unschedulable", "value": true}}
 	if node.Annotations == nil {
-		node.Annotations = map[string]string{}
+		ops = append(ops, map[string]any{"op": "add", "path": "/metadata/annotations", "value": map[string]string{quarantineAnnotation: cause}})
+	} else {
+		ops = append(ops, map[string]any{"op": "add", "path": "/metadata/annotations/" + strings.ReplaceAll(quarantineAnnotation, "/", "~1"), "value": cause})
 	}
-	node.Annotations[quarantineAnnotation] = cause
-	node.Spec.Unschedulable = true
-	if _, err := kube.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{}); err != nil {
-		fault.cause += "; cordon failed: " + err.Error()
+	taint := corev1.Taint{Key: quarantineAnnotation, Effect: corev1.TaintEffectNoSchedule}
+	switch {
+	case tainted:
+	case node.Spec.Taints == nil:
+		ops = append(ops, map[string]any{"op": "add", "path": "/spec/taints", "value": []corev1.Taint{taint}})
+	default:
+		ops = append(ops, map[string]any{"op": "add", "path": "/spec/taints/-", "value": taint})
 	}
-	return fault
+	return json.Marshal(ops)
+}
+
+func quarantined(node corev1.Node) bool {
+	return node.Annotations[quarantineAnnotation] != "" || slices.ContainsFunc(node.Spec.Taints, func(t corev1.Taint) bool { return t.Key == quarantineAnnotation })
 }
 
 // blocking removes node faults from err, keeping the faults that must stop claims.

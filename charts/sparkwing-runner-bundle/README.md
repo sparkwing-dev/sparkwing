@@ -93,10 +93,10 @@ taint from their nodes. The launcher logs every node still reserved under
 another namespace and never reuses it.
 
 A node whose reservation annotations are malformed, mismatched or refused by
-the controller is quarantined: cordoned and annotated
-`sparkwing.dev/quarantined` with the cause. The launcher logs it and keeps
-claiming for other nodes. Inspect the node, then delete it or remove the
-annotation. The launcher can update every Node; RBAC cannot narrow that,
+the controller is quarantined: cordoned, tainted `sparkwing.dev/quarantined`
+and annotated with the cause. The launcher logs it and keeps claiming for
+other nodes once that persists. Inspect the node, then delete it or remove the
+taint and annotation. The launcher can update every Node; RBAC cannot narrow that,
 because Karpenter names nodes at launch and RBAC has no label or field
 restrictions.
 

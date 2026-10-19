@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/cel"
 	"k8s.io/apiserver/pkg/admission/plugin/policy/validating"
@@ -114,7 +115,7 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 	r := f.resources.Reservation
 	cases := []admissionCase{
 		{name: "listener", user: testLauncher, object: f.probes.canary(f.probeCtx, r, "nonce")},
-		{name: "witness", user: testLauncher, object: f.probes.witness(f.probeCtx, r, "nonce", "10.0.0.9")},
+		{name: "witness", user: testLauncher, object: f.probes.witness(f.probeCtx, r, "nonce", "10.0.0.9", "10.0.0.8")}, {name: "peer", user: testLauncher, object: f.probes.peer(f.probeCtx, r, "nonce")},
 		{name: "measure", user: testLauncher, object: f.measure()},
 		{name: "capacity", user: testLauncher, object: f.capacity(t)},
 		{name: "job_pod", user: testJobController, object: jobPod(job)},
@@ -155,18 +156,49 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		}), reason: "runs privileged"},
 		{name: "privileged_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.Privileged = ptr(true) }), reason: "runs privileged"},
 		{name: "host_users", user: testJobController, object: pod(hostUsers), reason: "own user namespace"},
-		{name: "root_pod", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SecurityContext.RunAsUser = ptr(int64(0)) }), reason: "own user namespace"},
-		{name: "non_root_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.RunAsUser = ptr(int64(1000)) }), reason: "only the Docker sidecar runs as root"},
+		{name: "non_root_pod", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SecurityContext.RunAsUser = ptr(int64(1000)) }), reason: "exactly its shape's security context"},
+		{name: "non_root_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.RunAsUser = ptr(int64(1000)) }), reason: "exactly its shape's security context"},
 		{name: "docker_extra_capability", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.InitContainers[0].SecurityContext.Capabilities.Add = append(p.Spec.InitContainers[0].SecurityContext.Capabilities.Add, "SYS_MODULE")
-		}), reason: "only the Docker sidecar runs as root"},
-		{name: "masked_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.ProcMount = nil }), reason: "only the Docker sidecar runs as root"},
+		}), reason: "exactly its shape's security context"},
+		{name: "masked_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.ProcMount = nil }), reason: "exactly its shape's security context"},
+		{name: "unconfined_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.InitContainers[0].SecurityContext.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}
+		}), reason: "exactly its shape's security context"},
 		{name: "unconfined_workload", user: testJobController, object: pod(func(p *corev1.Pod) {
-			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}}
-		}), reason: "only the Docker sidecar runs as root"},
-		{name: "root_workload", user: testJobController, object: pod(func(p *corev1.Pod) {
-			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{RunAsUser: ptr(int64(0)), RunAsNonRoot: ptr(false)}
-		}), reason: "only the Docker sidecar runs as root"},
+			p.Spec.Containers[0].SecurityContext.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}
+		}), reason: "exactly its shape's security context"},
+		{name: "escalating_workload", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation = ptr(true) }), reason: "exactly its shape's security context"},
+		{name: "added_capability", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext.Capabilities = &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}}
+		}), reason: "exactly its shape's security context"},
+		{name: "pod_super_t", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SecurityContext.SELinuxOptions = &corev1.SELinuxOptions{Type: "super_t"} }), reason: "exactly its shape's security context"},
+		{name: "docker_super_t", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.InitContainers[0].SecurityContext.SELinuxOptions = &corev1.SELinuxOptions{Type: "super_t"}
+		}), reason: "exactly its shape's security context"},
+		{name: "workload_selinux_level", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext.SELinuxOptions = &corev1.SELinuxOptions{Level: "s0:c1,c2"}
+		}), reason: "exactly its shape's security context"},
+		{name: "pod_sysctl", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.SecurityContext.Sysctls = []corev1.Sysctl{{Name: "net.ipv4.ip_unprivileged_port_start", Value: "0"}}
+		}), reason: "exactly its shape's security context"},
+		{name: "pod_fs_group", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SecurityContext.FSGroup = ptr(int64(1000)) }), reason: "exactly its shape's security context"},
+		{name: "probe_super_t", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.SecurityContext.SELinuxOptions = &corev1.SELinuxOptions{Type: "super_t"} }), reason: "exactly its shape's security context"},
+		{name: "probe_root", user: testLauncher, object: measure(func(p *corev1.Pod) {
+			p.Spec.SecurityContext.RunAsUser = ptr(int64(0))
+			p.Spec.SecurityContext.RunAsNonRoot = nil
+		}), reason: "exactly its shape's security context"},
+		{name: "capacity_capability", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.Containers[0].SecurityContext.Capabilities = nil }), reason: "exactly its shape's security context"},
+		{name: "runtime_class", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.RuntimeClassName = ptr("unsafe") }), reason: "default runtime class"},
+		{name: "shared_process_namespace", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.ShareProcessNamespace = ptr(true) }), reason: "default runtime class"},
+		{name: "probe_host", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Host: "169.254.169.254", Port: intstr.FromInt32(80)}}}
+		}), reason: "default runtime class"},
+		{name: "tcp_probe_host", user: testLauncher, object: func() *corev1.Pod {
+			p := f.probes.canary(f.probeCtx, r, "nonce")
+			p.Spec.Containers[0].ReadinessProbe.TCPSocket.Host = "10.0.0.1"
+			return p
+		}(), reason: "default runtime class"},
 		{name: "host_path", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "tun", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun"}}})
 		}), reason: "scratch emptyDir"},
@@ -174,9 +206,6 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr(true)}
 		}), reason: "runs privileged"},
 		{name: "probe_host_pid", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
-		{name: "added_capability", user: testJobController, object: pod(func(p *corev1.Pod) {
-			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}}}
-		}), reason: "add no capabilities"},
 		{name: "missing_node_selector", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.NodeSelector = nil }), reason: "own team's nodes"},
 		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "own team's nodes"},
 		{name: "wrong_team_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels[TeamLabel] = labelHash("other-team") }), reason: "own team's nodes"},
@@ -196,7 +225,14 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "docker_args", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.InitContainers[0].Args = append(p.Spec.InitContainers[0].Args, "--host=tcp://0.0.0.0:2375")
 		}), reason: "Docker sidecar"},
-		{name: "docker_probe", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].StartupProbe.Exec.Command = []string{"sh", "-c", "id"} }), reason: "hooks or exec probes"},
+		{name: "docker_exec_probe", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.InitContainers[0].StartupProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"docker", "info"}}}}
+		}), reason: "hooks or exec probes"},
+		{name: "peer_readiness_changed", user: testLauncher, object: func() *corev1.Pod {
+			p := f.probes.peer(f.probeCtx, r, "nonce")
+			p.Spec.Containers[0].ReadinessProbe.Exec.Command = []string{"true"}
+			return p
+		}(), reason: "hooks or exec probes"},
 		{name: "capacity_hook", user: testLauncher, object: capacity(func(p *corev1.Pod) {
 			p.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: []string{"sh"}}}}
 		}), reason: "hooks or exec probes"},

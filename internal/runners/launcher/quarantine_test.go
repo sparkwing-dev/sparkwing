@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ktesting "k8s.io/client-go/testing"
 
@@ -93,7 +96,7 @@ func TestRunQuarantinesTamperedNodeAndKeepsClaiming(t *testing.T) {
 				if !reached {
 					t.Fatal("one node's reservation stopped claims for every team")
 				}
-				if !node.Spec.Unschedulable || node.Annotations[quarantineAnnotation] == "" {
+				if !node.Spec.Unschedulable || node.Annotations[quarantineAnnotation] == "" || !slices.ContainsFunc(node.Spec.Taints, func(t corev1.Taint) bool { return t.Key == quarantineAnnotation }) {
 					t.Fatalf("tampered node was not quarantined: unschedulable=%v annotations=%v", node.Spec.Unschedulable, node.Annotations)
 				}
 				if boundary.releases != 1 {
@@ -130,5 +133,68 @@ func TestBlockingKeepsOnlyClusterFaults(t *testing.T) {
 	}
 	if err := blocking(errors.Join(errors.New("wrapped"), errAwardMismatch)); err == nil {
 		t.Fatal("an unattributed mismatch was dropped")
+	}
+}
+
+// A quarantine that has not persisted must not let claims continue, except
+// under conflicts, which a node causes by rewriting itself and which leave
+// its recorded reservation keeping placement away.
+func TestQuarantineWriteFailures(t *testing.T) {
+	for name, test := range map[string]struct {
+		failures int
+		failure  error
+		claims   bool
+		persist  bool
+	}{
+		"unavailable":         {failures: 1 << 20, failure: apierrors.NewServiceUnavailable("etcd leader change")},
+		"one conflict":        {failures: 1, failure: apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, "tampered", errors.New("changed")), claims: true, persist: true},
+		"persistent conflict": {failures: 1 << 20, failure: apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, "tampered", errors.New("changed")), claims: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				l, kube, _, control := fixture()
+				tampered := boundaryBinding("hostile")
+				if _, err := kube.CoreV1().Nodes().Create(t.Context(), reservedNode(t, "tampered", tampered, "garbage"), metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				failures := test.failures
+				kube.PrependReactor("patch", "nodes", func(ktesting.Action) (bool, runtime.Object, error) {
+					if failures == 0 {
+						return false, nil, nil
+					}
+					failures--
+					return true, nil, test.failure
+				})
+				claimed := make(chan struct{})
+				l.Poll = time.Second
+				l.Control = claimSignalControl{CloudControl: control, claimed: claimed}
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan error, 1)
+				go func() { done <- l.Run(ctx) }()
+				// safety: conflict retries back off in virtual time before the pass claims.
+				time.Sleep(10 * time.Second)
+				synctest.Wait()
+				reached := false
+				select {
+				case <-claimed:
+					reached = true
+				default:
+				}
+				cancel()
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if reached != test.claims {
+					t.Fatalf("claimed=%v, want %v", reached, test.claims)
+				}
+				node, err := kube.CoreV1().Nodes().Get(t.Context(), "tampered", metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if persisted := quarantined(*node) && node.Spec.Unschedulable && slices.ContainsFunc(node.Spec.Taints, func(t corev1.Taint) bool { return t.Key == quarantineAnnotation }); persisted != test.persist {
+					t.Fatalf("quarantine persisted=%v, want %v: %+v", persisted, test.persist, node.Spec)
+				}
+			})
+		})
 	}
 }

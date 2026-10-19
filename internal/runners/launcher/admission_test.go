@@ -34,7 +34,10 @@ func TestLauncherRefusesAdmissionChangesBeforeBootstrap(t *testing.T) {
 		{"extra_container", func(j *batchv1.Job) {
 			j.Spec.Template.Spec.Containers = append(j.Spec.Template.Spec.Containers, corev1.Container{Name: "injected", Image: "other"})
 		}},
-		{"docker_readiness", func(j *batchv1.Job) { j.Spec.Template.Spec.InitContainers[0].StartupProbe = nil }},
+		{"docker_security", func(j *batchv1.Job) {
+			j.Spec.Template.Spec.InitContainers[0].SecurityContext.SELinuxOptions = &corev1.SELinuxOptions{Type: "super_t"}
+		}},
+		{"pod_security", func(j *batchv1.Job) { j.Spec.Template.Spec.SecurityContext.RunAsUser = ptr(int64(1000)) }},
 		{"docker_sidecar", func(j *batchv1.Job) { j.Spec.Template.Spec.InitContainers[0].RestartPolicy = nil }},
 		{"source", func(j *batchv1.Job) { j.Spec.Template.Spec.InitContainers = j.Spec.Template.Spec.InitContainers[:1] }},
 		{"host_command", func(j *batchv1.Job) { j.Spec.Template.Spec.Containers[0].Command = []string{"other"} }},

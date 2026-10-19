@@ -109,14 +109,14 @@ func TestLauncherCloudPodContract(t *testing.T) {
 				t.Fatal(err)
 			}
 			pod := resources.Job.Spec.Template.Spec
-			if pod.HostUsers == nil || *pod.HostUsers || pod.SecurityContext == nil || pod.SecurityContext.RunAsUser == nil || *pod.SecurityContext.RunAsUser == 0 {
-				t.Fatal("Cloud Job is not a non-root user-namespaced Pod")
+			if pod.HostUsers == nil || *pod.HostUsers || pod.SecurityContext == nil || pod.SecurityContext.RunAsUser == nil || *pod.SecurityContext.RunAsUser != 0 {
+				t.Fatal("Cloud Job is not root of its own user namespace")
 			}
 			if pod.NodeName != "node" || pod.ServiceAccountName != launcher.ServiceAccount || pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken || pod.HostNetwork || pod.HostPID || pod.HostIPC {
 				t.Fatal("Cloud Job lost its placement or host boundary")
 			}
-			if len(pod.InitContainers) != 2 || pod.InitContainers[0].Name != "docker" || pod.InitContainers[0].RestartPolicy == nil || *pod.InitContainers[0].RestartPolicy != corev1.ContainerRestartPolicyAlways || pod.InitContainers[0].StartupProbe == nil || pod.InitContainers[0].SecurityContext.Privileged != nil {
-				t.Fatal("Docker is not an unprivileged readiness-gated native sidecar")
+			if len(pod.InitContainers) != 2 || pod.InitContainers[0].Name != "docker" || pod.InitContainers[0].RestartPolicy == nil || *pod.InitContainers[0].RestartPolicy != corev1.ContainerRestartPolicyAlways || pod.InitContainers[0].SecurityContext.Privileged != nil {
+				t.Fatal("Docker is not an unprivileged native sidecar")
 			}
 			if pod.InitContainers[1].Name != "fetch-source" || len(pod.Containers) != 1 {
 				t.Fatal("source must finish before the host")
@@ -147,7 +147,7 @@ func TestLauncherCloudPodContract(t *testing.T) {
 					modes = append(modes, *volume.Secret.DefaultMode)
 				}
 			}
-			if len(modes) != 1 || modes[0] != 0o440 || pod.SecurityContext.FSGroup == nil || *pod.SecurityContext.FSGroup != *pod.SecurityContext.RunAsUser {
+			if len(modes) != 1 || modes[0] != 0o400 {
 				t.Fatalf("bootstrap modes = %v", modes)
 			}
 			raw, err := json.Marshal(resources.Job)

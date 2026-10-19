@@ -70,8 +70,11 @@ spec:
       egress is not enforced\" >&2; exit 1; fi\nwhile (( $# )); do\n host=\"$1\";
       port=\"$2\"; shift 2\n if nc -z -w 3 \"$host\" \"$port\"; then echo \"Cloud
       pod egress escaped to $host:$port\" >&2; exit 1; fi\ndone", "boundary-probe"]
-      || variables.spec.containers[0].name == ''witness'' && variables.spec.containers[0].?command.orValue([])
-      == ["/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"])'
+      || variables.spec.containers[0].name == ''peer'' && variables.spec.containers[0].?command.orValue([])
+      == ["/bin/bash", "-ceu", "exec nc -lk 18888"] || variables.spec.containers[0].name
+      == ''witness'' && variables.spec.containers[0].?command.orValue([]) == ["/bin/bash",
+      "-ceu", "nc -z -w 3 \"$1\" 18888\nif nc -z -w 3 \"$2\" 18888; then echo \"Cloud
+      Job ingress is not denied\" >&2; exit 1; fi", "boundary-control"])'
     message: boundary probes run only the launcher's measurement commands
   - expression: '!variables.create || variables.shape != ''other'''
     message: only Cloud Job, capacity and boundary probe Pods run in the Sparkwing
@@ -98,34 +101,95 @@ spec:
     message: Pods run only the launcher's container set and pinned images
   - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))'
     message: no container runs privileged
-  - expression: '!variables.create || variables.shape != ''job'' || !variables.spec.?hostUsers.orValue(true)
-      && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0)
-      == 1000 && variables.spec.?securityContext.?seccompProfile.?type.orValue('''')
-      == ''RuntimeDefault'''
-    message: Job Pods run in their own user namespace as a non-root user with the
-      runtime seccomp profile
-  - expression: '!variables.create || variables.containers.all(c, variables.shape
-      == ''job'' && c.name == ''docker'' ? c.?securityContext.?runAsUser.orValue(-1)
-      == 0 && c.?securityContext.?capabilities.?add.orValue([]) == ["SYS_ADMIN", "NET_ADMIN",
-      "SYS_PTRACE"] && c.?securityContext.?seccompProfile.?type.orValue('''') == ''Unconfined''
-      && c.?securityContext.?appArmorProfile.?type.orValue('''') == ''Unconfined''
-      && c.?securityContext.?procMount.orValue('''') == ''Unmasked'' : c.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
-      == ''RuntimeDefault'' && c.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
-      == ''RuntimeDefault'' && c.?securityContext.?procMount.orValue(''Default'')
-      == ''Default'' && c.?securityContext.?runAsUser.orValue(1000) != 0 && c.?securityContext.?runAsNonRoot.orValue(true)
-      && size(c.?securityContext.?capabilities.?add.orValue([])) == 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
-      == ''RuntimeDefault'' && (variables.shape == ''job'' || variables.spec.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
-      == ''RuntimeDefault'')'
-    message: only the Docker sidecar runs as root, with exactly SYS_ADMIN, NET_ADMIN
-      and SYS_PTRACE and relaxed seccomp, AppArmor and /proc; other containers add
-      no capabilities
+  - expression: '!variables.create || variables.shape != ''job'' || !variables.spec.?hostUsers.orValue(true)'
+    message: Job Pods run in their own user namespace
+  - expression: '!variables.create || !has(variables.spec.runtimeClassName) && !variables.spec.?shareProcessNamespace.orValue(false)
+      && size(variables.spec.?resourceClaims.orValue([])) == 0 && variables.containers.all(c,
+      size(c.?resources.?claims.orValue([])) == 0 && [c.?livenessProbe, c.?readinessProbe,
+      c.?startupProbe].all(p, !p.hasValue() || (!has(p.value().httpGet) || !has(p.value().httpGet.host))
+      && (!has(p.value().tcpSocket) || !has(p.value().tcpSocket.host))))'
+    message: Pods use the default runtime class, private process namespaces, no resource
+      claims and probes against their own address
+  - expression: '!variables.create || variables.shape == ''job'' ? has(variables.spec.securityContext)
+      && (!has(variables.spec.securityContext.seLinuxOptions) && !has(variables.spec.securityContext.windowsOptions)
+      && has(variables.spec.securityContext.runAsUser) && variables.spec.securityContext.runAsUser
+      == 0 && has(variables.spec.securityContext.runAsGroup) && variables.spec.securityContext.runAsGroup
+      == 0 && has(variables.spec.securityContext.runAsNonRoot) && variables.spec.securityContext.runAsNonRoot
+      == false && !has(variables.spec.securityContext.supplementalGroups) && !has(variables.spec.securityContext.supplementalGroupsPolicy)
+      && !has(variables.spec.securityContext.fsGroup) && !has(variables.spec.securityContext.sysctls)
+      && !has(variables.spec.securityContext.fsGroupChangePolicy) && has(variables.spec.securityContext.seccompProfile)
+      && (has(variables.spec.securityContext.seccompProfile.type) && variables.spec.securityContext.seccompProfile.type
+      == "RuntimeDefault" && !has(variables.spec.securityContext.seccompProfile.localhostProfile))
+      && !has(variables.spec.securityContext.appArmorProfile) && !has(variables.spec.securityContext.seLinuxChangePolicy))
+      && variables.containers.all(c, c.name == ''docker'' ? has(c.securityContext)
+      && (has(c.securityContext.capabilities) && (has(c.securityContext.capabilities.add)
+      && c.securityContext.capabilities.add == ["SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"]
+      && !has(c.securityContext.capabilities.drop)) && !has(c.securityContext.privileged)
+      && !has(c.securityContext.seLinuxOptions) && !has(c.securityContext.windowsOptions)
+      && !has(c.securityContext.runAsUser) && !has(c.securityContext.runAsGroup) &&
+      !has(c.securityContext.runAsNonRoot) && !has(c.securityContext.readOnlyRootFilesystem)
+      && !has(c.securityContext.allowPrivilegeEscalation) && has(c.securityContext.procMount)
+      && c.securityContext.procMount == "Unmasked" && has(c.securityContext.seccompProfile)
+      && (has(c.securityContext.seccompProfile.type) && c.securityContext.seccompProfile.type
+      == "Localhost" && has(c.securityContext.seccompProfile.localhostProfile) &&
+      c.securityContext.seccompProfile.localhostProfile == "profiles/sparkwing-dind.json")
+      && has(c.securityContext.appArmorProfile) && (has(c.securityContext.appArmorProfile.type)
+      && c.securityContext.appArmorProfile.type == "Unconfined" && !has(c.securityContext.appArmorProfile.localhostProfile)))
+      : has(c.securityContext) && (!has(c.securityContext.capabilities) && !has(c.securityContext.privileged)
+      && !has(c.securityContext.seLinuxOptions) && !has(c.securityContext.windowsOptions)
+      && !has(c.securityContext.runAsUser) && !has(c.securityContext.runAsGroup) &&
+      !has(c.securityContext.runAsNonRoot) && !has(c.securityContext.readOnlyRootFilesystem)
+      && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
+      == false && !has(c.securityContext.procMount) && !has(c.securityContext.seccompProfile)
+      && !has(c.securityContext.appArmorProfile))) : variables.shape == ''capacity''
+      ? has(variables.spec.securityContext) && (!has(variables.spec.securityContext.seLinuxOptions)
+      && !has(variables.spec.securityContext.windowsOptions) && has(variables.spec.securityContext.runAsUser)
+      && variables.spec.securityContext.runAsUser == 65534 && has(variables.spec.securityContext.runAsGroup)
+      && variables.spec.securityContext.runAsGroup == 65534 && has(variables.spec.securityContext.runAsNonRoot)
+      && variables.spec.securityContext.runAsNonRoot == true && !has(variables.spec.securityContext.supplementalGroups)
+      && !has(variables.spec.securityContext.supplementalGroupsPolicy) && !has(variables.spec.securityContext.fsGroup)
+      && !has(variables.spec.securityContext.sysctls) && !has(variables.spec.securityContext.fsGroupChangePolicy)
+      && has(variables.spec.securityContext.seccompProfile) && (has(variables.spec.securityContext.seccompProfile.type)
+      && variables.spec.securityContext.seccompProfile.type == "RuntimeDefault" &&
+      !has(variables.spec.securityContext.seccompProfile.localhostProfile)) && !has(variables.spec.securityContext.appArmorProfile)
+      && !has(variables.spec.securityContext.seLinuxChangePolicy)) && variables.containers.all(c,
+      has(c.securityContext) && (has(c.securityContext.capabilities) && (!has(c.securityContext.capabilities.add)
+      && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop
+      == ["ALL"]) && !has(c.securityContext.privileged) && !has(c.securityContext.seLinuxOptions)
+      && !has(c.securityContext.windowsOptions) && !has(c.securityContext.runAsUser)
+      && !has(c.securityContext.runAsGroup) && !has(c.securityContext.runAsNonRoot)
+      && has(c.securityContext.readOnlyRootFilesystem) && c.securityContext.readOnlyRootFilesystem
+      == true && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
+      == false && !has(c.securityContext.procMount) && !has(c.securityContext.seccompProfile)
+      && !has(c.securityContext.appArmorProfile))) : has(variables.spec.securityContext)
+      && (!has(variables.spec.securityContext.seLinuxOptions) && !has(variables.spec.securityContext.windowsOptions)
+      && has(variables.spec.securityContext.runAsUser) && variables.spec.securityContext.runAsUser
+      == 65534 && has(variables.spec.securityContext.runAsGroup) && variables.spec.securityContext.runAsGroup
+      == 65534 && has(variables.spec.securityContext.runAsNonRoot) && variables.spec.securityContext.runAsNonRoot
+      == true && !has(variables.spec.securityContext.supplementalGroups) && !has(variables.spec.securityContext.supplementalGroupsPolicy)
+      && !has(variables.spec.securityContext.fsGroup) && !has(variables.spec.securityContext.sysctls)
+      && !has(variables.spec.securityContext.fsGroupChangePolicy) && has(variables.spec.securityContext.seccompProfile)
+      && (has(variables.spec.securityContext.seccompProfile.type) && variables.spec.securityContext.seccompProfile.type
+      == "RuntimeDefault" && !has(variables.spec.securityContext.seccompProfile.localhostProfile))
+      && !has(variables.spec.securityContext.appArmorProfile) && !has(variables.spec.securityContext.seLinuxChangePolicy))
+      && variables.containers.all(c, has(c.securityContext) && (has(c.securityContext.capabilities)
+      && (!has(c.securityContext.capabilities.add) && has(c.securityContext.capabilities.drop)
+      && c.securityContext.capabilities.drop == ["ALL"]) && !has(c.securityContext.privileged)
+      && !has(c.securityContext.seLinuxOptions) && !has(c.securityContext.windowsOptions)
+      && !has(c.securityContext.runAsUser) && !has(c.securityContext.runAsGroup) &&
+      !has(c.securityContext.runAsNonRoot) && !has(c.securityContext.readOnlyRootFilesystem)
+      && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
+      == false && !has(c.securityContext.procMount) && !has(c.securityContext.seccompProfile)
+      && !has(c.securityContext.appArmorProfile)))'
+    message: each container runs exactly its shape's security context, with no SELinux,
+      Windows or other override
   - expression: '!variables.create || variables.containers.all(c, !has(c.lifecycle)
       && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue()
-      || !has(p.value().exec) || variables.shape == ''job'' && c.name == ''docker''
-      && p == c.?startupProbe && p.value().exec.?command.orValue([]) == ["docker",
-      "--host=unix:///tmp/docker.sock", "info"]))'
-    message: containers run no lifecycle hooks or exec probes beyond the Docker sidecar's
-      readiness check
+      || !has(p.value().exec) || variables.shape == ''probe'' && c.name == ''peer''
+      && p == c.?readinessProbe && p.value().exec.?command.orValue([]) == ["nc", "-z",
+      "127.0.0.1", "18888"]))'
+    message: containers run no lifecycle hooks or exec probes beyond the peer listener's
+      loopback readiness check
   - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
       == 0 || variables.inits[0].?command.orValue([]) == ["dockerd-entrypoint.sh"]
       && variables.inits[0].?args.orValue([]) == ["dockerd", "--host=unix:///tmp/docker.sock",
@@ -273,34 +337,95 @@ spec:
     message: Pods run only the launcher's container set and pinned images
   - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))'
     message: no container runs privileged
-  - expression: '!variables.create || variables.shape != ''job'' || !variables.spec.?hostUsers.orValue(true)
-      && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0)
-      == 1000 && variables.spec.?securityContext.?seccompProfile.?type.orValue('''')
-      == ''RuntimeDefault'''
-    message: Job Pods run in their own user namespace as a non-root user with the
-      runtime seccomp profile
-  - expression: '!variables.create || variables.containers.all(c, variables.shape
-      == ''job'' && c.name == ''docker'' ? c.?securityContext.?runAsUser.orValue(-1)
-      == 0 && c.?securityContext.?capabilities.?add.orValue([]) == ["SYS_ADMIN", "NET_ADMIN",
-      "SYS_PTRACE"] && c.?securityContext.?seccompProfile.?type.orValue('''') == ''Unconfined''
-      && c.?securityContext.?appArmorProfile.?type.orValue('''') == ''Unconfined''
-      && c.?securityContext.?procMount.orValue('''') == ''Unmasked'' : c.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
-      == ''RuntimeDefault'' && c.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
-      == ''RuntimeDefault'' && c.?securityContext.?procMount.orValue(''Default'')
-      == ''Default'' && c.?securityContext.?runAsUser.orValue(1000) != 0 && c.?securityContext.?runAsNonRoot.orValue(true)
-      && size(c.?securityContext.?capabilities.?add.orValue([])) == 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
-      == ''RuntimeDefault'' && (variables.shape == ''job'' || variables.spec.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
-      == ''RuntimeDefault'')'
-    message: only the Docker sidecar runs as root, with exactly SYS_ADMIN, NET_ADMIN
-      and SYS_PTRACE and relaxed seccomp, AppArmor and /proc; other containers add
-      no capabilities
+  - expression: '!variables.create || variables.shape != ''job'' || !variables.spec.?hostUsers.orValue(true)'
+    message: Job Pods run in their own user namespace
+  - expression: '!variables.create || !has(variables.spec.runtimeClassName) && !variables.spec.?shareProcessNamespace.orValue(false)
+      && size(variables.spec.?resourceClaims.orValue([])) == 0 && variables.containers.all(c,
+      size(c.?resources.?claims.orValue([])) == 0 && [c.?livenessProbe, c.?readinessProbe,
+      c.?startupProbe].all(p, !p.hasValue() || (!has(p.value().httpGet) || !has(p.value().httpGet.host))
+      && (!has(p.value().tcpSocket) || !has(p.value().tcpSocket.host))))'
+    message: Pods use the default runtime class, private process namespaces, no resource
+      claims and probes against their own address
+  - expression: '!variables.create || variables.shape == ''job'' ? has(variables.spec.securityContext)
+      && (!has(variables.spec.securityContext.seLinuxOptions) && !has(variables.spec.securityContext.windowsOptions)
+      && has(variables.spec.securityContext.runAsUser) && variables.spec.securityContext.runAsUser
+      == 0 && has(variables.spec.securityContext.runAsGroup) && variables.spec.securityContext.runAsGroup
+      == 0 && has(variables.spec.securityContext.runAsNonRoot) && variables.spec.securityContext.runAsNonRoot
+      == false && !has(variables.spec.securityContext.supplementalGroups) && !has(variables.spec.securityContext.supplementalGroupsPolicy)
+      && !has(variables.spec.securityContext.fsGroup) && !has(variables.spec.securityContext.sysctls)
+      && !has(variables.spec.securityContext.fsGroupChangePolicy) && has(variables.spec.securityContext.seccompProfile)
+      && (has(variables.spec.securityContext.seccompProfile.type) && variables.spec.securityContext.seccompProfile.type
+      == "RuntimeDefault" && !has(variables.spec.securityContext.seccompProfile.localhostProfile))
+      && !has(variables.spec.securityContext.appArmorProfile) && !has(variables.spec.securityContext.seLinuxChangePolicy))
+      && variables.containers.all(c, c.name == ''docker'' ? has(c.securityContext)
+      && (has(c.securityContext.capabilities) && (has(c.securityContext.capabilities.add)
+      && c.securityContext.capabilities.add == ["SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"]
+      && !has(c.securityContext.capabilities.drop)) && !has(c.securityContext.privileged)
+      && !has(c.securityContext.seLinuxOptions) && !has(c.securityContext.windowsOptions)
+      && !has(c.securityContext.runAsUser) && !has(c.securityContext.runAsGroup) &&
+      !has(c.securityContext.runAsNonRoot) && !has(c.securityContext.readOnlyRootFilesystem)
+      && !has(c.securityContext.allowPrivilegeEscalation) && has(c.securityContext.procMount)
+      && c.securityContext.procMount == "Unmasked" && has(c.securityContext.seccompProfile)
+      && (has(c.securityContext.seccompProfile.type) && c.securityContext.seccompProfile.type
+      == "Localhost" && has(c.securityContext.seccompProfile.localhostProfile) &&
+      c.securityContext.seccompProfile.localhostProfile == "profiles/sparkwing-dind.json")
+      && has(c.securityContext.appArmorProfile) && (has(c.securityContext.appArmorProfile.type)
+      && c.securityContext.appArmorProfile.type == "Unconfined" && !has(c.securityContext.appArmorProfile.localhostProfile)))
+      : has(c.securityContext) && (!has(c.securityContext.capabilities) && !has(c.securityContext.privileged)
+      && !has(c.securityContext.seLinuxOptions) && !has(c.securityContext.windowsOptions)
+      && !has(c.securityContext.runAsUser) && !has(c.securityContext.runAsGroup) &&
+      !has(c.securityContext.runAsNonRoot) && !has(c.securityContext.readOnlyRootFilesystem)
+      && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
+      == false && !has(c.securityContext.procMount) && !has(c.securityContext.seccompProfile)
+      && !has(c.securityContext.appArmorProfile))) : variables.shape == ''capacity''
+      ? has(variables.spec.securityContext) && (!has(variables.spec.securityContext.seLinuxOptions)
+      && !has(variables.spec.securityContext.windowsOptions) && has(variables.spec.securityContext.runAsUser)
+      && variables.spec.securityContext.runAsUser == 65534 && has(variables.spec.securityContext.runAsGroup)
+      && variables.spec.securityContext.runAsGroup == 65534 && has(variables.spec.securityContext.runAsNonRoot)
+      && variables.spec.securityContext.runAsNonRoot == true && !has(variables.spec.securityContext.supplementalGroups)
+      && !has(variables.spec.securityContext.supplementalGroupsPolicy) && !has(variables.spec.securityContext.fsGroup)
+      && !has(variables.spec.securityContext.sysctls) && !has(variables.spec.securityContext.fsGroupChangePolicy)
+      && has(variables.spec.securityContext.seccompProfile) && (has(variables.spec.securityContext.seccompProfile.type)
+      && variables.spec.securityContext.seccompProfile.type == "RuntimeDefault" &&
+      !has(variables.spec.securityContext.seccompProfile.localhostProfile)) && !has(variables.spec.securityContext.appArmorProfile)
+      && !has(variables.spec.securityContext.seLinuxChangePolicy)) && variables.containers.all(c,
+      has(c.securityContext) && (has(c.securityContext.capabilities) && (!has(c.securityContext.capabilities.add)
+      && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop
+      == ["ALL"]) && !has(c.securityContext.privileged) && !has(c.securityContext.seLinuxOptions)
+      && !has(c.securityContext.windowsOptions) && !has(c.securityContext.runAsUser)
+      && !has(c.securityContext.runAsGroup) && !has(c.securityContext.runAsNonRoot)
+      && has(c.securityContext.readOnlyRootFilesystem) && c.securityContext.readOnlyRootFilesystem
+      == true && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
+      == false && !has(c.securityContext.procMount) && !has(c.securityContext.seccompProfile)
+      && !has(c.securityContext.appArmorProfile))) : has(variables.spec.securityContext)
+      && (!has(variables.spec.securityContext.seLinuxOptions) && !has(variables.spec.securityContext.windowsOptions)
+      && has(variables.spec.securityContext.runAsUser) && variables.spec.securityContext.runAsUser
+      == 65534 && has(variables.spec.securityContext.runAsGroup) && variables.spec.securityContext.runAsGroup
+      == 65534 && has(variables.spec.securityContext.runAsNonRoot) && variables.spec.securityContext.runAsNonRoot
+      == true && !has(variables.spec.securityContext.supplementalGroups) && !has(variables.spec.securityContext.supplementalGroupsPolicy)
+      && !has(variables.spec.securityContext.fsGroup) && !has(variables.spec.securityContext.sysctls)
+      && !has(variables.spec.securityContext.fsGroupChangePolicy) && has(variables.spec.securityContext.seccompProfile)
+      && (has(variables.spec.securityContext.seccompProfile.type) && variables.spec.securityContext.seccompProfile.type
+      == "RuntimeDefault" && !has(variables.spec.securityContext.seccompProfile.localhostProfile))
+      && !has(variables.spec.securityContext.appArmorProfile) && !has(variables.spec.securityContext.seLinuxChangePolicy))
+      && variables.containers.all(c, has(c.securityContext) && (has(c.securityContext.capabilities)
+      && (!has(c.securityContext.capabilities.add) && has(c.securityContext.capabilities.drop)
+      && c.securityContext.capabilities.drop == ["ALL"]) && !has(c.securityContext.privileged)
+      && !has(c.securityContext.seLinuxOptions) && !has(c.securityContext.windowsOptions)
+      && !has(c.securityContext.runAsUser) && !has(c.securityContext.runAsGroup) &&
+      !has(c.securityContext.runAsNonRoot) && !has(c.securityContext.readOnlyRootFilesystem)
+      && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
+      == false && !has(c.securityContext.procMount) && !has(c.securityContext.seccompProfile)
+      && !has(c.securityContext.appArmorProfile)))'
+    message: each container runs exactly its shape's security context, with no SELinux,
+      Windows or other override
   - expression: '!variables.create || variables.containers.all(c, !has(c.lifecycle)
       && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue()
-      || !has(p.value().exec) || variables.shape == ''job'' && c.name == ''docker''
-      && p == c.?startupProbe && p.value().exec.?command.orValue([]) == ["docker",
-      "--host=unix:///tmp/docker.sock", "info"]))'
-    message: containers run no lifecycle hooks or exec probes beyond the Docker sidecar's
-      readiness check
+      || !has(p.value().exec) || variables.shape == ''probe'' && c.name == ''peer''
+      && p == c.?readinessProbe && p.value().exec.?command.orValue([]) == ["nc", "-z",
+      "127.0.0.1", "18888"]))'
+    message: containers run no lifecycle hooks or exec probes beyond the peer listener's
+      loopback readiness check
   - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
       == 0 || variables.inits[0].?command.orValue([]) == ["dockerd-entrypoint.sh"]
       && variables.inits[0].?args.orValue([]) == ["dockerd", "--host=unix:///tmp/docker.sock",

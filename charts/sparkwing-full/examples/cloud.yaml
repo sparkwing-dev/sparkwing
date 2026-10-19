@@ -59,7 +59,8 @@ ingress:
 sparkwing-runner-bundle:
   enabled: true
   controller:
-    # Use the public origin so escaped-node probes have the same required target.
+    # Job Pods reach the controller through its public origin, the one
+    # destination the boundary probe requires.
     url: https://api.sparkwing.dev
   runner:
     enabled: false

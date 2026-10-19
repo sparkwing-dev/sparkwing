@@ -11,6 +11,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ktesting "k8s.io/client-go/testing"
@@ -50,7 +51,7 @@ func TestProductionBoundaryRequiresMeasuredCanaries(t *testing.T) {
 				nodeTopology(pod)
 				pod.UID = types.UID(pod.Name)
 				pod.Status = corev1.PodStatus{PodIP: "10.1.2.3", HostIP: "10.0.0.1", Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
-				if pod.Spec.Containers[0].Name != "control" {
+				if name := pod.Spec.Containers[0].Name; name != "control" && name != "peer" {
 					pod.Status.Phase = corev1.PodSucceeded
 					if failed && pod.Spec.Containers[0].Name == "measure" {
 						pod.Status.Phase = corev1.PodFailed
@@ -282,7 +283,7 @@ func FuzzProductionBoundaryRefusesConflictingDestinations(f *testing.F) {
 	})
 }
 
-func TestProductionBoundaryMeasuresPeersAndAPIEndpoints(t *testing.T) {
+func TestProductionBoundaryMeasuresIngressAndDeniedEndpoints(t *testing.T) {
 	for _, ingress := range []bool{true, false} {
 		_, kube := boundaryFixture()
 		directions := []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}
@@ -292,29 +293,34 @@ func TestProductionBoundaryMeasuresPeersAndAPIEndpoints(t *testing.T) {
 		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PolicyTypes: directions}}
 		port := int32(443)
 		slice := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default", Labels: map[string]string{discoveryv1.LabelServiceName: "kubernetes"}}, AddressType: discoveryv1.AddressTypeIPv4, Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"172.16.0.10"}}}, Ports: []discoveryv1.EndpointPort{{Port: &port}}}
-		peer := func(name, team, ip string) *corev1.Pod {
-			return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "cloud", Labels: map[string]string{"app": "sparkwing-job", JobLabel: name, TeamLabel: labelHash(team)}}, Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: ip}}
-		}
-		for _, object := range []runtime.Object{policy, slice, peer("other", "other-team", "10.9.9.9"), peer("own", "team", "10.8.8.8")} {
+		for _, object := range []runtime.Object{policy, slice} {
 			if err := kube.Tracker().Add(object); err != nil {
 				t.Fatal(err)
 			}
 		}
+		var control *networkingv1.NetworkPolicy
 		kube.PrependReactor("create", "networkpolicies", func(action ktesting.Action) (bool, runtime.Object, error) {
-			policy := action.(ktesting.CreateAction).GetObject().(*networkingv1.NetworkPolicy)
-			policy.UID = types.UID(policy.Name)
+			control = action.(ktesting.CreateAction).GetObject().(*networkingv1.NetworkPolicy)
+			control.UID = types.UID(control.Name)
 			return false, nil, nil
 		})
-		var args []string
+		var measured, witnessed []string
+		var peer *corev1.Pod
 		kube.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
 			pod := action.(ktesting.CreateAction).GetObject().(*corev1.Pod)
 			pod.UID = types.UID(pod.Name)
 			pod.Status = corev1.PodStatus{PodIP: "10.1.2.3", Phase: corev1.PodSucceeded}
 			switch pod.Spec.Containers[0].Name {
+			case "peer":
+				peer = pod
+				pod.Status.PodIP = "10.1.2.4"
+				fallthrough
 			case "control":
 				pod.Status.Phase, pod.Status.Conditions = corev1.PodRunning, []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+			case "witness":
+				witnessed = pod.Spec.Containers[0].Args
 			case "measure":
-				args = pod.Spec.Containers[0].Args
+				measured = pod.Spec.Containers[0].Args
 			}
 			return false, nil, nil
 		})
@@ -332,14 +338,29 @@ func TestProductionBoundaryMeasuresPeersAndAPIEndpoints(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		measured := " " + strings.Join(args, " ") + " "
-		for _, want := range []string{" kubernetes.default 443 ", " 172.16.0.10 443 ", " 10.9.9.9 18888 "} {
-			if !strings.Contains(measured, want) {
-				t.Errorf("measurement %q lacks %q", measured, want)
-			}
+		if strings.Join(witnessed, " ") != "10.1.2.3 10.1.2.4" {
+			t.Fatalf("witness must reach the control and be refused by the peer: %v", witnessed)
 		}
-		if strings.Contains(measured, "10.8.8.8") {
-			t.Errorf("measurement targets the team's own Pod: %q", measured)
+		if peer == nil || peer.Spec.Containers[0].ReadinessProbe == nil || peer.Spec.Containers[0].ReadinessProbe.Exec == nil {
+			t.Fatal("peer listener is not readiness-confirmed")
+		}
+		peerLabels := labels.Set(peer.Labels)
+		if allow, _ := metav1.LabelSelectorAsSelector(&control.Spec.PodSelector); allow.Matches(peerLabels) || peer.Labels["app.kubernetes.io/managed-by"] != managedByLauncher {
+			t.Fatalf("peer is not governed by Job ingress policy alone: %v", peer.Labels)
+		}
+		reachesPeer := false
+		for _, to := range control.Spec.Egress[0].To {
+			selector, _ := metav1.LabelSelectorAsSelector(to.PodSelector)
+			reachesPeer = reachesPeer || selector.Matches(peerLabels)
+		}
+		if !reachesPeer {
+			t.Fatal("the witness's egress to the peer is not allowed, so a refusal would not isolate ingress")
+		}
+		joined := " " + strings.Join(measured, " ") + " "
+		for _, want := range []string{" kubernetes.default 443 ", " 172.16.0.10 443 ", " 169.254.169.254 80 ", " fd00:ec2::254 80 ", " 169.254.170.23 80 "} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("measurement %q lacks %q", joined, want)
+			}
 		}
 	}
 }

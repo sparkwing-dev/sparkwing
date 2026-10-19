@@ -35,8 +35,6 @@ const (
 	podOwners     = `['system:serviceaccount:kube-system:job-controller', 'system:serviceaccount:kube-system:generic-garbage-collector']`
 )
 
-var jobUID = strconv.FormatInt(jobUser, 10)
-
 // safety: the API server's PodTopologyLabels admission copies these from the Node
 // onto any Pod created with spec.nodeName.
 var nodeTopologyLabels = []string{corev1.LabelTopologyRegion, corev1.LabelTopologyZone}
@@ -49,9 +47,10 @@ func podValidations() []admissionv1.Validation {
 		{Expression: `!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape == 'job' && (v.name == 'scratch' && has(v.emptyDir) || v.name == 'bootstrap' && has(v.secret) && v.secret.?secretName.orValue('') == variables.labels[?'sparkwing.dev/job'].orValue('')))`, Message: "Pods mount only their scratch emptyDir and own bootstrap Secret"},
 		{Expression: `!variables.create || (variables.shape == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name == 'run-node' && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name == 'docker' && variables.inits[0].image == variables.dockerImage && variables.inits[1].name == 'fetch-source' && variables.inits[1].image == variables.runnerImage : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits) == 0)`, Message: "Pods run only the launcher's container set and pinned images"},
 		{Expression: `!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))`, Message: "no container runs privileged"},
-		{Expression: `!variables.create || variables.shape != 'job' || !variables.spec.?hostUsers.orValue(true) && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0) == ` + jobUID + ` && variables.spec.?securityContext.?seccompProfile.?type.orValue('') == 'RuntimeDefault'`, Message: "Job Pods run in their own user namespace as a non-root user with the runtime seccomp profile"},
-		{Expression: `!variables.create || variables.containers.all(c, variables.shape == 'job' && c.name == 'docker' ? c.?securityContext.?runAsUser.orValue(-1) == 0 && c.?securityContext.?capabilities.?add.orValue([]) == ` + celList(capabilityNames(dockerCapabilities)) + ` && c.?securityContext.?seccompProfile.?type.orValue('') == 'Unconfined' && c.?securityContext.?appArmorProfile.?type.orValue('') == 'Unconfined' && c.?securityContext.?procMount.orValue('') == 'Unmasked' : c.?securityContext.?seccompProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && c.?securityContext.?appArmorProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && c.?securityContext.?procMount.orValue('Default') == 'Default' && c.?securityContext.?runAsUser.orValue(` + jobUID + `) != 0 && c.?securityContext.?runAsNonRoot.orValue(true) && size(c.?securityContext.?capabilities.?add.orValue([])) == 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && (variables.shape == 'job' || variables.spec.?securityContext.?seccompProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault')`, Message: "only the Docker sidecar runs as root, with exactly SYS_ADMIN, NET_ADMIN and SYS_PTRACE and relaxed seccomp, AppArmor and /proc; other containers add no capabilities"},
-		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec) || variables.shape == 'job' && c.name == 'docker' && p == c.?startupProbe && p.value().exec.?command.orValue([]) == ` + celList(dockerProbe) + `))`, Message: "containers run no lifecycle hooks or exec probes beyond the Docker sidecar's readiness check"},
+		{Expression: `!variables.create || variables.shape != 'job' || !variables.spec.?hostUsers.orValue(true)`, Message: "Job Pods run in their own user namespace"},
+		{Expression: `!variables.create || !has(variables.spec.runtimeClassName) && !variables.spec.?shareProcessNamespace.orValue(false) && size(variables.spec.?resourceClaims.orValue([])) == 0 && variables.containers.all(c, size(c.?resources.?claims.orValue([])) == 0 && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || (!has(p.value().httpGet) || !has(p.value().httpGet.host)) && (!has(p.value().tcpSocket) || !has(p.value().tcpSocket.host))))`, Message: "Pods use the default runtime class, private process namespaces, no resource claims and probes against their own address"},
+		{Expression: `!variables.create || ` + securityShapes(), Message: "each container runs exactly its shape's security context, with no SELinux, Windows or other override"},
+		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec) || variables.shape == 'probe' && c.name == 'peer' && p == c.?readinessProbe && p.value().exec.?command.orValue([]) == ` + celList(peerReadiness) + `))`, Message: "containers run no lifecycle hooks or exec probes beyond the peer listener's loopback readiness check"},
 		{Expression: `!variables.create || variables.shape != 'job' || size(variables.inits) == 0 || variables.inits[0].?command.orValue([]) == ` + celList(dockerCommand) + ` && variables.inits[0].?args.orValue([]) == ` + celList(dockerArgs), Message: "the Docker sidecar runs only the launcher's dockerd command"},
 		{Expression: `!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([])) == 0 && c.?env.orValue([]).all(e, variables.shape == 'job' && e.name in ` + workloadEnv + ` && !has(e.valueFrom)))`, Message: "containers carry only the launcher's environment and EKS region values, never AWS credentials"},
 		{Expression: `!variables.create || variables.team != '' && variables.spec.?nodeSelector.orValue({})[?'` + TeamNodeLabel + `'].orValue('') == variables.team && variables.spec.?tolerations.orValue([]).exists(t, t.?key.orValue('') == '` + TeamNodeLabel + `' && t.?operator.orValue('Equal') == 'Equal' && t.?value.orValue('') == variables.team && t.?effect.orValue('') == 'NoSchedule')`, Message: "Pods select and tolerate only their own team's nodes"},
@@ -88,14 +87,6 @@ func admissionMatch(namespace string, rules ...admissionv1.NamedRuleWithOperatio
 	}
 }
 
-func capabilityNames(caps []corev1.Capability) []string {
-	names := make([]string, len(caps))
-	for i, c := range caps {
-		names[i] = string(c)
-	}
-	return names
-}
-
 func celList(values []string) string {
 	quoted := make([]string, len(values))
 	for i, v := range values {
@@ -106,7 +97,7 @@ func celList(values []string) string {
 
 func probeCommands() string {
 	var shapes []string
-	for name, command := range map[string][]string{"control": listenerCommand, "witness": witnessCommand, "measure": measureCommand} {
+	for name, command := range map[string][]string{"control": listenerCommand, "peer": listenerCommand, "witness": witnessCommand, "measure": measureCommand} {
 		shapes = append(shapes, fmt.Sprintf("variables.spec.containers[0].name == '%s' && variables.spec.containers[0].?command.orValue([]) == %s", name, celList(command)))
 	}
 	slices.Sort(shapes)

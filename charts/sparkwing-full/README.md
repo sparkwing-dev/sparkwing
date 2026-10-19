@@ -185,6 +185,22 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   kubelet has no subuid entry. Without writable cgroups dockerd cannot create
   container cgroups. Bottlerocket exposes no `cgroup_writable` setting, so it
   cannot run Cloud Jobs.
+- Install the chart's `files/seccomp/sparkwing-dind.json` on every job and team
+  node at `/var/lib/kubelet/seccomp/profiles/sparkwing-dind.json`. The Docker
+  sidecar names it as a Localhost profile, so a node without it cannot start
+  Job Pods. It is Docker's default profile with the `CAP_SYS_ADMIN` and
+  `CAP_SYS_PTRACE` syscalls and `pivot_root` allowed, and io_uring, keyrings and
+  `clone3` (ENOSYS) and bpf, perf, userfaultfd, kexec, modules,
+  `open_by_handle_at` and `fanotify_init` refused.
+- Set kubelet `podPidsLimit`, so a fork bomb in one Job cannot exhaust the
+  node's PIDs, and reserve node disk with `kubeReserved`/`systemReserved`
+  ephemeral storage and `evictionHard` on `nodefs`. Each Job's scratch,
+  including Docker's data root, is a 20 GiB emptyDir enforced by eviction, so
+  the root volume must hold it plus images and the reserves.
+- Set `kernel.io_uring_disabled=2`, `kernel.unprivileged_bpf_disabled=1`,
+  `vm.unprivileged_userfaultfd=0`, `kernel.kptr_restrict=2`,
+  `kernel.dmesg_restrict=1` and `kernel.perf_event_paranoid=3` on those nodes,
+  and bound node age (`expireAfter`, AMI drift) so kernel fixes reach them.
 - `launcher.dockerImage` is a digest-pinned `docker:<version>-dind` image. The
   sidecar runs as root of the Pod's user namespace with namespaced `SYS_ADMIN`,
   `NET_ADMIN` and `SYS_PTRACE`, never privileged.

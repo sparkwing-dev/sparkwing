@@ -72,11 +72,11 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 			Tolerations: teamTolerations(b.Team), NodeSelector: map[string]string{TeamNodeLabel: labelHash(b.Team)},
 			ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: ptr(int64(1)),
-			SecurityContext:               &corev1.PodSecurityContext{RunAsNonRoot: ptr(true), RunAsUser: ptr(int64(65534)), RunAsGroup: ptr(int64(65534)), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
+			SecurityContext:               probePodSecurity(),
 			Containers: []corev1.Container{{
 				Name: "capacity", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: []string{"version"},
 				Resources:       corev1.ResourceRequirements{Requests: requests, Limits: requests.DeepCopy()},
-				SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), ReadOnlyRootFilesystem: ptr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
+				SecurityContext: capacitySecurity(),
 			}},
 		},
 	}, nil
@@ -250,4 +250,11 @@ func (l *Launcher) releaseCapacity(ctx context.Context, b CloudJobBinding) error
 		return err
 	}
 	return l.deleteCapacityPod(ctx, pod)
+}
+
+// capacitySecurity is the probe profile with a read-only root filesystem.
+func capacitySecurity() *corev1.SecurityContext {
+	sc := probeSecurity()
+	sc.ReadOnlyRootFilesystem = ptr(true)
+	return sc
 }
