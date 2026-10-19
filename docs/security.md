@@ -266,19 +266,20 @@ Windows uses the authenticated account SID. An unauthenticated or foreign peer
 is refused. A filesystem path alone is not peer authentication.
 
 Same-account processes and root remain inside this trust boundary. Use distinct
-accounts and homes where separate users must be isolated. A perpetual
-localStorage session and second store opener are not part of that contract.
+accounts and homes where separate users must be isolated. A second store
+opener is not part of that contract.
 The local dashboard's TCP listener answers only loopback Host names and its own
 loopback origin, so a rebound DNS name or another site's page is refused.
 
 TCP carries no peer identity, so the listener also needs a browser session.
- mints a sign-in link over the private socket. The
+`sparkwing dashboard open` mints a sign-in link over the private socket. The
 link carries a random 32-byte token, works once and expires after 60 seconds.
 Visiting it sets the `sw_local_session` cookie: HttpOnly, SameSite=Strict,
 host-only and path `/`. Every other TCP request without a live session gets
 401, including dashboard pages. The browser then acts as the socket peer that
-minted its link. The controller holds tokens and sessions in memory, so a
-restart signs every browser out; run `sparkwing dashboard open` again. The
+minted its link. A session ends after 12 hours without a request. The
+controller holds tokens and sessions in memory, so a restart also signs every
+browser out; run `sparkwing dashboard open` again. The
 socket itself needs no cookie.
 See [local execution](local-execution.md#the-laptop-boundary).
 

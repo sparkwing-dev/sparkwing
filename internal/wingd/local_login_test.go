@@ -219,6 +219,19 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 		}
 	}
 
+	clock.advance(12*time.Hour - time.Second)
+	if resp := loginRequest(t, browser, http.MethodGet, base+"/api/v1/runs", withCookie(cookie)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("session used inside its idle window: HTTP %d", resp.StatusCode)
+	}
+	clock.advance(12*time.Hour - time.Second)
+	if resp := loginRequest(t, browser, http.MethodGet, base+"/api/v1/runs", withCookie(cookie)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("use did not renew the idle window: HTTP %d", resp.StatusCode)
+	}
+	clock.advance(12 * time.Hour)
+	if resp := loginRequest(t, browser, http.MethodGet, base+"/api/v1/runs", withCookie(cookie)); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("session idle for 12 hours: HTTP %d", resp.StatusCode)
+	}
+
 	stale := mint()
 	clock.advance(60 * time.Second)
 	if resp := loginRequest(t, browser, http.MethodGet, stale.URL, nil); resp.StatusCode != http.StatusUnauthorized || len(resp.Cookies()) != 0 {

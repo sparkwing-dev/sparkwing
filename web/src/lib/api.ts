@@ -1,5 +1,4 @@
 import { readCSRFCookie } from "./csrfCookie";
-import { localAuthHeaders, signedIn } from "./localSession";
 import type { LogCompleteness } from "./logCompleteness";
 import type { TriggerGit } from "./triggerSource";
 
@@ -103,18 +102,14 @@ export function authFetch(
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
-  return signedIn()
-    .then(() =>
-      fetch(url, {
-        ...opts,
-        headers: {
-          ...opts.headers,
-          ...getSessionCSRFHeaders(opts.method),
-          ...localAuthHeaders(),
-        },
-        signal: controller.signal,
-      }),
-    )
+  return fetch(url, {
+    ...opts,
+    headers: {
+      ...opts.headers,
+      ...getSessionCSRFHeaders(opts.method),
+    },
+    signal: controller.signal,
+  })
     .then((res) => {
       if (res.status === 429) {
         _backoffUntil = Date.now() + 10_000;

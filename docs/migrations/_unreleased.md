@@ -5,7 +5,7 @@
 The local dashboard's TCP listener now answers 401 to every request without a
 session cookie. Run `sparkwing dashboard open` after `sparkwing dashboard start`
 and visit the link it prints. The link works once and expires after 60 seconds.
-The session lasts until the local controller restarts. Tools that call the local
+The session ends after 12 hours without a request, or when the local controller restarts. Tools that call the local
 API should use the private socket, which still needs no cookie.
 
 ## Cloud runs without a runner selector use the launcher

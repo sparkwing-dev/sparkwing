@@ -19,6 +19,7 @@ const DashboardLoginPath = "/api/v1/local/dashboard/login"
 
 const (
 	dashboardLoginLifetime = 60 * time.Second
+	dashboardSessionIdle   = 12 * time.Hour
 	dashboardSessionCookie = "sw_local_session"
 )
 
@@ -33,19 +34,24 @@ type pendingLogin struct {
 	expires time.Time
 }
 
+type dashboardSession struct {
+	peer     LocalPeerIdentity
+	lastSeen time.Time
+}
+
 type dashboardLogins struct {
 	now      func() time.Time
 	mu       sync.Mutex
 	origin   string
 	pending  map[[sha256.Size]byte]pendingLogin
-	sessions map[[sha256.Size]byte]LocalPeerIdentity
+	sessions map[[sha256.Size]byte]dashboardSession
 }
 
 func newDashboardLogins(now func() time.Time) *dashboardLogins {
 	if now == nil {
 		now = time.Now
 	}
-	return &dashboardLogins{now: now, pending: map[[sha256.Size]byte]pendingLogin{}, sessions: map[[sha256.Size]byte]LocalPeerIdentity{}}
+	return &dashboardLogins{now: now, pending: map[[sha256.Size]byte]pendingLogin{}, sessions: map[[sha256.Size]byte]dashboardSession{}}
 }
 
 func (l *dashboardLogins) serving(origin string) {
@@ -117,10 +123,16 @@ func (l *dashboardLogins) redeem(token string) (string, bool) {
 	defer l.mu.Unlock()
 	login, ok := l.pending[key]
 	delete(l.pending, key)
-	if !ok || !l.now().Before(login.expires) {
+	now := l.now()
+	if !ok || !now.Before(login.expires) {
 		return "", false
 	}
-	l.sessions[sha256.Sum256([]byte(session))] = login.peer
+	for key, current := range l.sessions {
+		if !now.Before(current.lastSeen.Add(dashboardSessionIdle)) {
+			delete(l.sessions, key)
+		}
+	}
+	l.sessions[sha256.Sum256([]byte(session))] = dashboardSession{peer: login.peer, lastSeen: now}
 	return session, true
 }
 
@@ -132,8 +144,15 @@ func (l *dashboardLogins) session(r *http.Request) (LocalPeerIdentity, bool) {
 	key := sha256.Sum256([]byte(cookie.Value))
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	peer, ok := l.sessions[key]
-	return copyPeerIdentity(peer), ok
+	current, ok := l.sessions[key]
+	now := l.now()
+	if !ok || !now.Before(current.lastSeen.Add(dashboardSessionIdle)) {
+		delete(l.sessions, key)
+		return LocalPeerIdentity{}, false
+	}
+	current.lastSeen = now
+	l.sessions[key] = current
+	return copyPeerIdentity(current.peer), true
 }
 
 // safety: TCP carries no peer identity, so a browser acts as the api.sock

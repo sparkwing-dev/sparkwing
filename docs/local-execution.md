@@ -361,7 +361,8 @@ ownership and kernel peer credentials. Windows uses the account SID. An
 unauthenticated or foreign peer is refused. The dashboard's TCP listener needs
 a session cookie from a one-time link that `sparkwing dashboard open` mints over
 the socket. The link works once within 60 seconds, and the browser then acts as
-the socket peer that minted it. There is no separate dashboard store. Root and
+the socket peer that minted it until 12 hours pass without a request or the
+controller restarts. There is no separate dashboard store. Root and
 same-account code remain inside the machine trust boundary. See
 [security](security.md#local-daemon-socket).
 

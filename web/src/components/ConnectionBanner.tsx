@@ -24,7 +24,7 @@ export default function ConnectionBanner() {
     },
     unauthorized: {
       text: "Authentication failed",
-      hint: "The API token is missing or invalid. Check that SPARKWING_API_TOKEN is set in the web deployment.",
+      hint: "This browser is not signed in. Run `sparkwing dashboard open` and visit the one-time link it prints.",
     },
     "session-expired": {
       text: "Your session ended",
