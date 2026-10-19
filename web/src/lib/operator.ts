@@ -136,8 +136,7 @@ export function disputeHolds(team: OperatorTeam): string[] {
   return team.holds.filter((h) => !h.startsWith("operator-"));
 }
 
-// operatorHolds are the holds the console placed; a payment dispute's hold is
-// released only outside it.
+// operatorHolds are the holds the console placed.
 export function operatorHolds(team: OperatorTeam): string[] {
   return team.holds.filter((h) => h.startsWith("operator-"));
 }
@@ -293,18 +292,20 @@ export async function getStandingRequests(): Promise<OperatorStandingRequest[]> 
   return (await readJSON<{ requests: OperatorStandingRequest[] }>(res)).requests;
 }
 
-// approveStandingRequest grants standing, which closes the team's open request.
-export function approveStandingRequest(team: string, reason: string): Promise<void> {
-  return performAction(actionRequest(team, "grant-trust", reason, "", ""));
+// approveStandingRequest grants standing and approves the reviewed request,
+// which the controller refuses once that request is no longer open.
+export async function approveStandingRequest(team: string, request: string, reason: string): Promise<void> {
+  const grant = actionRequest(team, "grant-trust", reason, "", "");
+  await performAction({ path: grant.path, body: { ...grant.body, standing_request: request } });
 }
 
-export async function declineStandingRequest(team: string, reason: string): Promise<void> {
+export async function declineStandingRequest(team: string, request: string, reason: string): Promise<void> {
   const res = await authFetch(
     `/api/v1/operator/teams/${encodeURIComponent(team)}/standing-request/decline`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: reason.trim() }),
+      body: JSON.stringify({ request, reason: reason.trim() }),
     },
     quiet,
   );

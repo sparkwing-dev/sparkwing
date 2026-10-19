@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -31,12 +32,8 @@ const StandingRequestMessageLimit = 1000
 // ErrStandingRequestOpen refuses a second request while the team's earlier one is open.
 var ErrStandingRequestOpen = errors.New("the team already has an open standing request")
 
-// StandingRequestInput is a team administrator's request for a higher standing tier.
-type StandingRequestInput struct {
-	Tier    string
-	Message string
-	Actor   string
-}
+// ErrStandingRequestClosed refuses a decision naming a request that is not the team's open one.
+var ErrStandingRequestClosed = errors.New("the standing request is no longer open")
 
 // StandingRequest is a request for operator-granted standing and its outcome.
 type StandingRequest struct {
@@ -68,17 +65,15 @@ func scanStandingRequest(row rowScanner) (StandingRequest, error) {
 	return r, nil
 }
 
-// RequestStanding records an open request for operator-granted standing.
-func (t *Tenant) RequestStanding(ctx context.Context, in StandingRequestInput) (StandingRequest, error) {
-	in.Message = strings.TrimSpace(in.Message)
-	if in.Tier != "High" || in.Message == "" || len(in.Message) > StandingRequestMessageLimit || in.Actor == "" {
-		return StandingRequest{}, fmt.Errorf("%w: a standing request names the High tier, its requester and a message of up to %d characters", ErrInvalidInput, StandingRequestMessageLimit)
+// RequestAuthorizedStanding records an open High standing request under current team administration.
+func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Authorized, tier, message string) (StandingRequest, error) {
+	message = strings.TrimSpace(message)
+	if tier != "High" || message == "" || utf8.RuneCountInString(message) > StandingRequestMessageLimit {
+		return StandingRequest{}, fmt.Errorf("%w: a standing request names the High tier and a message of up to %d characters", ErrInvalidInput, StandingRequestMessageLimit)
 	}
 	var out StandingRequest
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := t.lockTeamTx(ctx, tx); err != nil {
-			return err
-		}
+	err := t.billingMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+		actor := p.Capability.Subject.ID
 		standing, err := trustStandingTx(ctx, tx, t.team, tx.now())
 		if err != nil {
 			return err
@@ -98,10 +93,10 @@ func (t *Tenant) RequestStanding(ctx context.Context, in StandingRequestInput) (
 			return err
 		}
 		now := tx.now()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES (?,?,?,?,?,?,?)`, id, t.team, in.Tier, in.Message, in.Actor, now.UnixNano(), StandingRequestOpen); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES (?,?,?,?,?,?,?)`, id, t.team, tier, message, actor, now.UnixNano(), StandingRequestOpen); err != nil {
 			return err
 		}
-		if err := RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequested, Team: t.team, SubjectID: id, Actor: in.Actor, At: now, Attrs: map[string]any{"tier": in.Tier, "message": in.Message, "standing": standing.Tier, "history_tier": standing.History.Tier}}); err != nil {
+		if err := RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequested, Team: t.team, SubjectID: id, Actor: actor, At: now, Attrs: map[string]any{"tier": tier, "message": message, "standing": standing.Tier, "history_tier": standing.History.Tier}}); err != nil {
 			return err
 		}
 		out, err = scanStandingRequest(tx.QueryRowContext(ctx, `SELECT `+standingRequestColumns+` WHERE r.team=? AND r.id=?`, t.team, id))
@@ -137,25 +132,24 @@ func (s *Store) OpenStandingRequests(ctx context.Context, limit int) (_ []Standi
 	return out, rows.Err()
 }
 
-func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, state, actor, reason string) (StandingRequest, bool, error) {
-	r, err := scanStandingRequest(tx.QueryRowContext(ctx, `SELECT `+standingRequestColumns+` WHERE r.team=? AND r.state=?`, team, StandingRequestOpen))
-	if errors.Is(err, sql.ErrNoRows) {
-		return r, false, nil
+func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, id, state, actor, reason string) (StandingRequest, error) {
+	r, err := scanStandingRequest(tx.QueryRowContext(ctx, `SELECT `+standingRequestColumns+` WHERE r.team=? AND r.id=?`, team, id))
+	if errors.Is(err, sql.ErrNoRows) || err == nil && r.State != StandingRequestOpen {
+		return r, ErrStandingRequestClosed
 	}
 	if err != nil {
-		return r, false, err
+		return r, err
 	}
 	now := tx.now()
-	if _, err := tx.ExecContext(ctx, `UPDATE standing_requests SET state=?,decided_by=?,decided_at=?,decision_reason=? WHERE team=? AND id=?`, state, actor, now.UnixNano(), reason, team, r.ID); err != nil {
-		return r, false, err
+	if _, err := tx.ExecContext(ctx, `UPDATE standing_requests SET state=?,decided_by=?,decided_at=?,decision_reason=? WHERE team=? AND id=? AND state=?`, state, actor, now.UnixNano(), reason, team, id, StandingRequestOpen); err != nil {
+		return r, err
 	}
 	r.State, r.DecidedBy, r.DecidedAt, r.DecisionReason = state, actor, now, reason
-	err = RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequestDecided, Team: team, SubjectID: r.ID, Actor: actor, At: now, Attrs: map[string]any{"tier": r.Tier, "state": state, "reason": reason}})
-	return r, true, err
+	return r, RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequestDecided, Team: team, SubjectID: id, Actor: actor, At: now, Attrs: map[string]any{"tier": r.Tier, "state": state, "reason": reason}})
 }
 
-// ConsoleDeclineStandingRequest declines the team's open standing request under current operator authority.
-func (c *Console) ConsoleDeclineStandingRequest(ctx context.Context, a capability.Authorized, reason string) (StandingRequest, error) {
+// ConsoleDeclineStandingRequest declines the named open standing request under current operator authority.
+func (c *Console) ConsoleDeclineStandingRequest(ctx context.Context, a capability.Authorized, id, reason string) (StandingRequest, error) {
 	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (StandingRequest, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
@@ -164,10 +158,6 @@ func (c *Console) ConsoleDeclineStandingRequest(ctx context.Context, a capabilit
 		if reason, err = consoleReason(reason); err != nil {
 			return StandingRequest{}, err
 		}
-		r, found, err := decideStandingRequestTx(ctx, tx, t.team, StandingRequestDeclined, actor, reason)
-		if err == nil && !found {
-			err = authorityError(apierr.NotFound, "the team has no open standing request")
-		}
-		return r, err
+		return decideStandingRequestTx(ctx, tx, t.team, id, StandingRequestDeclined, actor, reason)
 	})
 }

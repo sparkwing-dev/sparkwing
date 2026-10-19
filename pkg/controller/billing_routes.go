@@ -11,13 +11,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// BillingWriter commits hosted-page reservations and budgets under current team authority.
+// BillingWriter commits hosted-page reservations, budgets and standing requests under current team authority.
 type BillingWriter interface {
 	Team() store.Team
 	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
 	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
 	RecordAuthorizedBillingPageFailure(context.Context, capability.Authorized, capability.BillingPage) error
 	SetAuthorizedSpendBudget(context.Context, capability.Authorized, int64) error
+	RequestAuthorizedStanding(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)
 }
 
 var _ BillingWriter = (*store.Tenant)(nil)

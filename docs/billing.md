@@ -13,7 +13,7 @@ Standing and collection follow this policy table.
 | New | 8 | 4 hours | Saved card, no successful charge | $5 |
 | Established | 32 | 4 hours | First successful charge | $20 |
 | Trusted | 128 | 6 hours | At least $50 paid and 30 clean days | $100 |
-| High | 512 | 6 hours | At least $500 paid and 30 clean days, or operator grant of standing. More capacity is available by request. | $500 |
+| High | 512 | 6 hours | At least $500 paid and 30 clean days, or operator grant of standing. More capacity is available by request. | None; prepaid funds never back High |
 | Held | 0 new admissions | Running work finishes within its awarded deadline | Decline, dispute or chargeback | An active hold takes precedence over prepaid funds |
 | Collection ladder | $5 → $20 → $50 → $100 → $250 → $500 → $1,000, then each $1,000 | | | |
 | First collection | $5 owed or day 7 of outstanding debt, whichever comes first | | | |
@@ -22,10 +22,10 @@ Standing and collection follow this policy table.
 | Launch admission | Automatic admission stops at 100 admitted accounts. Further signups join the waitlist until an operator admits them. | | | |
 
 Standing is the higher of the history tier and the tier backed by the current
-prepaid balance, and prepaid funds raise standing at most one tier above the
-history tier. A first payment earns Established history, so prepaying alone
-reaches Trusted at most. High needs $500 paid and 30 clean days, or an operator
-grant of standing. A hold of any kind restarts the clean days when it is placed
+prepaid balance. Prepaid funds raise standing at most one tier above the
+history tier and never above Trusted. A first payment earns Established
+history, so prepaying alone reaches Trusted at most. High needs $500 paid and 30
+clean days, or an operator grant of standing, whatever the balance. A hold of any kind restarts the clean days when it is placed
 and again when it is released.
 Adding funds raises standing in the settlement transaction.
 Using prepaid funds can lower its balance-backed tier. Successful collections
@@ -49,16 +49,20 @@ Owners may set a rolling spend budget. No team or shared-card dollar ceiling or
 daily spend cap applies. Local and self-hosted placement does not consume Cloud
 standing capacity or receive a standing deadline.
 
-Every Add funds checkout asks Stripe to request 3-D Secure, so the card's
-issuer authenticates the payer whenever the card supports it. The controller
-records the authentication result Stripe reports on the settled charge with the
-paid checkout and its audit event.
+Every Add funds checkout asks Stripe to request 3-D Secure. Stripe can still
+complete a payment without authentication, for example when the card or issuer
+does not support it or authentication fails to run. The controller records the
+result Stripe reports on the settled charge, or none, with the paid checkout
+and its audit event; it does not refuse a payment by its result.
 
 A team owner can ask for High standing from the billing page or with
-`sparkwing billing request-tier --tier high --message <text>`. A team has at
-most one open request. The request reaches the operator console's standing
+`sparkwing billing request-tier --tier high --message <text>`, with a message of
+up to 1,000 characters (Unicode code points). A team has at most one open
+request. The request reaches the operator console's standing
 queue with the team's standing, payment history and message. The operator
-approves it by granting standing or declines it with a reason. Both decisions
+approves it by granting standing or declines it with a reason. Each decision
+names the request it reviewed and is refused once that request is no longer
+open, so a stale or retried decision never resolves a later request. Both decisions
 are audited, and the billing page and `sparkwing billing standing` show the
 outcome. A chargeback still holds the team, and no new Cloud work is admitted
 while it is held.

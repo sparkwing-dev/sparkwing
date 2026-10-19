@@ -116,8 +116,8 @@ function StandingQueue() {
     setBusy(true);
     setError("");
     try {
-      if (approve) await approveStandingRequest(team, reason);
-      else await declineStandingRequest(team, reason);
+      if (approve) await approveStandingRequest(team, item.request.id, reason);
+      else await declineStandingRequest(team, item.request.id, reason);
       toast(approve ? `Granted ${team} High standing.` : `Declined ${team}'s request.`);
       load();
     } catch (err) {

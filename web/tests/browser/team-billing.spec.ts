@@ -247,7 +247,7 @@ test("an owner asks the operators for High standing", async ({ page }) => {
   const seen = await mockController(page);
   await page.goto("/team/billing");
   await expect(
-    page.getByText(/Prepaid funds can raise standing to Trusted, one tier above history/),
+    page.getByText(/Prepaid funds can raise standing to Trusted\. High needs \$500 paid/),
   ).toBeVisible();
   const message = page.getByLabel("Contact us to unlock higher tiers");
   await page.getByRole("button", { name: "Request High standing" }).click();

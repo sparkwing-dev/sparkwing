@@ -3868,7 +3868,10 @@ components:
       properties:
         reason:
           type: string
+        request:
+          type: string
       required:
+        - request
         - reason
       type: object
       x-sparkwing-go-type: controllerwire.StandingDecline

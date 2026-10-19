@@ -65,9 +65,10 @@ const BusinessEventBillingTrustChanged = "billing.trust_changed"
 
 // BillingTrustChange is an operator's standing decision.
 type BillingTrustChange struct {
-	Trust  string
-	Actor  string
-	Reason string
+	Trust   string
+	Actor   string
+	Reason  string
+	Request string
 }
 
 // SetBillingTrust commits a standing decision with its audit event.
@@ -79,6 +80,9 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
 	if c.Trust != BillingTrustGranted && c.Trust != BillingTrustRevoked && c.Trust != BillingTrustAutomatic {
 		return before, after, fmt.Errorf("%w: trust must be granted, revoked or automatic", ErrInvalidInput)
+	}
+	if c.Request != "" && c.Trust != BillingTrustGranted {
+		return before, after, fmt.Errorf("%w: only a standing grant approves a standing request", ErrInvalidInput)
 	}
 	if c.Actor == "" || c.Reason == "" {
 		return before, after, fmt.Errorf("%w: a standing decision names its actor and reason", ErrInvalidInput)
@@ -92,16 +96,16 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 	if before, err = trustStandingTx(ctx, tx, t.team, now); err != nil {
 		return before, after, err
 	}
+	if c.Request != "" {
+		if _, err = decideStandingRequestTx(ctx, tx, t.team, c.Request, StandingRequestApproved, c.Actor, c.Reason); err != nil {
+			return before, after, err
+		}
+	}
 	if _, err = tx.ExecContext(ctx, `UPDATE teams SET billing_trust=?,billing_trust_by=?,billing_trust_at=?,billing_trust_reason=? WHERE name=?`, c.Trust, c.Actor, now.UnixNano(), c.Reason, t.team); err != nil {
 		return before, after, err
 	}
 	if after, err = trustStandingTx(ctx, tx, t.team, now); err != nil {
 		return before, after, err
-	}
-	if c.Trust == BillingTrustGranted {
-		if _, _, err = decideStandingRequestTx(ctx, tx, t.team, StandingRequestApproved, c.Actor, c.Reason); err != nil {
-			return before, after, err
-		}
 	}
 	subject, err := newCreditID("trust")
 	if err != nil {

@@ -203,17 +203,17 @@ describe("standing requests", () => {
     const queue = await lib.getStandingRequests();
     assert.equal(queue[0].request.id, "standing-1");
     assert.equal(calls[0].url, "/api/v1/operator/standing-requests");
-    await lib.declineStandingRequest("a b", "  Pay for 30 days first.  ");
+    await lib.declineStandingRequest("a b", "standing-1", "  Pay for 30 days first.  ");
     assert.equal(calls[1].url, "/api/v1/operator/teams/a%20b/standing-request/decline");
     assert.equal(calls[1].method, "POST");
     assert.equal(calls[1].headers.get("X-CSRF-Token"), "session-csrf");
-    assert.deepEqual(JSON.parse(calls[1].body), { reason: "Pay for 30 days first." });
+    assert.deepEqual(JSON.parse(calls[1].body), { request: "standing-1", reason: "Pay for 30 days first." });
   });
 
   it("approves through the standing grant", async () => {
-    await lib.approveStandingRequest("acme", "Known customer");
+    await lib.approveStandingRequest("acme", "standing-1", "Known customer");
     assert.equal(calls[0].url, "/api/v1/operator/teams/acme/trust");
-    assert.deepEqual(JSON.parse(calls[0].body), { trust: "granted", reason: "Known customer" });
+    assert.deepEqual(JSON.parse(calls[0].body), { trust: "granted", reason: "Known customer", standing_request: "standing-1" });
   });
 
   it("summarizes payment history and clean days", () => {

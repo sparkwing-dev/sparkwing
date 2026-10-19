@@ -47,8 +47,8 @@ func (f *consoleWritesFake) ConsoleSetBillingTrust(_ context.Context, a capabili
 	return store.BillingStanding{}, f.record(a, value)
 }
 
-func (f *consoleWritesFake) ConsoleDeclineStandingRequest(_ context.Context, a capability.Authorized, reason string) (store.StandingRequest, error) {
-	return store.StandingRequest{Team: store.Team(a.Target.Team), State: store.StandingRequestDeclined}, f.record(a, reason)
+func (f *consoleWritesFake) ConsoleDeclineStandingRequest(_ context.Context, a capability.Authorized, id, reason string) (store.StandingRequest, error) {
+	return store.StandingRequest{ID: id, Team: store.Team(a.Target.Team), State: store.StandingRequestDeclined}, f.record(a, []string{id, reason})
 }
 
 func (f *consoleWritesFake) ConsoleFreeze(_ context.Context, a capability.Authorized, value string) (store.TeamCreditFreeze, error) {
@@ -110,7 +110,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 		{"POST", "/api/v1/operator/teams/customer/grants", `{"amount_cents":100,"reason":"promotion","key":"once"}`, 201},
 		{"POST", "/api/v1/operator/teams/customer/trust", `{"trust":"granted","reason":"review"}`, 200},
 		{"POST", "/api/v1/operator/teams/customer/freeze", `{"reason":"review"}`, 200},
-		{"POST", "/api/v1/operator/teams/customer/standing-request/decline", `{"reason":"review"}`, 200},
+		{"POST", "/api/v1/operator/teams/customer/standing-request/decline", `{"request":"standing-1","reason":"review"}`, 200},
 		{"POST", "/api/v1/operator/teams/customer/unfreeze", `{"reason":"resolved","hold":"dispute"}`, 200},
 		{"DELETE", "/api/v1/operator/teams/customer", ``, 202},
 		{"DELETE", "/api/v1/operator/accounts/target@example.test", ``, 200},

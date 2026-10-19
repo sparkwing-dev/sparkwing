@@ -656,8 +656,8 @@ deployment profile. Console sessions retain their separate account gate.
 
 Operator-console sessions own trust changes, credit grants, freezes, refunds
 and account deletion. They also read the standing queue, where team owners'
-requests for High standing wait. Granting standing approves a team's open
-request, and a decline records the reason its owners see. Deployment tokens manage operational limits, object-store
+requests for High standing wait. A grant naming the reviewed request approves
+it, and a decline names the request and records the reason its owners see. Deployment tokens manage operational limits, object-store
 settings, deployment service credentials and new-team onboarding through their separate routes.
 They cannot exchange themselves for console powers.
 

@@ -93,11 +93,16 @@ export interface TeamStanding {
 
 export const standingMessageLimit = 1000;
 
+// standingRequestLength counts Unicode code points, the unit the controller limits.
+export function standingRequestLength(message: string): number {
+  return [...message.trim()].length;
+}
+
 // standingRequestProblem says why a tier request cannot be sent yet, or "".
 export function standingRequestProblem(message: string): string {
   const text = message.trim();
   if (text === "") return "Tell us what the team runs and why it needs more capacity.";
-  if (text.length > standingMessageLimit)
+  if (standingRequestLength(text) > standingMessageLimit)
     return `Keep the message to ${standingMessageLimit} characters.`;
   return "";
 }
@@ -119,9 +124,10 @@ export function standingOutcome(r: StandingRequest): string {
 // prepayNote explains how far prepaid funds can raise the team's standing.
 export function prepayNote(s: TeamStanding): string {
   if (s.tier === "High") return "";
+  const high = "High needs $500 paid and 30 clean days, or an operator grant.";
   if (s.prepay_ceiling === s.history.tier)
-    return `Payment history earns ${s.history.tier}. Higher standing needs an operator grant.`;
-  return `Payment history earns ${s.history.tier}. Prepaid funds can raise standing to ${s.prepay_ceiling}, one tier above history. High needs $500 paid and 30 clean days, or an operator grant.`;
+    return `Payment history earns ${s.history.tier}. Prepaid funds cannot raise it further. ${high}`;
+  return `Payment history earns ${s.history.tier}. Prepaid funds can raise standing to ${s.prepay_ceiling}. ${high}`;
 }
 
 export async function requestHighStanding(message: string): Promise<StandingRequest> {

@@ -339,10 +339,10 @@ describe("standing requests", () => {
   };
 
   it("explains the one-tier prepay ceiling", () => {
-    assert.match(lib.prepayNote(standing), /raise standing to Trusted, one tier above history/);
+    assert.match(lib.prepayNote(standing), /raise standing to Trusted\. High needs \$500 paid/);
     assert.match(
-      lib.prepayNote({ ...standing, history: { ...standing.history, tier: "High" }, prepay_ceiling: "High" }),
-      /needs an operator grant/,
+      lib.prepayNote({ ...standing, history: { ...standing.history, tier: "Trusted" }, prepay_ceiling: "Trusted" }),
+      /cannot raise it further\. High needs \$500 paid and 30 clean days, or an operator grant/,
     );
     assert.equal(lib.prepayNote({ ...standing, tier: "High" }), "");
   });
@@ -350,6 +350,9 @@ describe("standing requests", () => {
   it("needs a message within the limit", () => {
     assert.match(lib.standingRequestProblem("  "), /Tell us/);
     assert.match(lib.standingRequestProblem("x".repeat(1001)), /1000 characters/);
+    assert.equal(lib.standingRequestProblem("é".repeat(1000)), "");
+    assert.equal(lib.standingRequestProblem("🚀".repeat(1000)), "");
+    assert.match(lib.standingRequestProblem("🚀".repeat(1001)), /1000 characters/);
     assert.equal(lib.standingRequestProblem("Release builds need 256 vCPU."), "");
   });
 

@@ -61,18 +61,18 @@ func (s *Server) handleTeamStandingRequest(w http.ResponseWriter, r *http.Reques
 	if !strings.EqualFold(strings.TrimSpace(req.Tier), "high") {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "tier must be high; Trusted is reachable with payment history or prepaid funds"}
 	}
-	t, err := s.reportingTenant(r, a)
+	writer, err := s.billingWriter(r, a)
 	if err != nil {
-		return engineLookupError(err)
+		return err
 	}
-	made, err := t.RequestStanding(r.Context(), store.StandingRequestInput{Tier: "High", Message: req.Message, Actor: a.Principal.Capability.Subject.ID})
+	made, err := writer.RequestAuthorizedStanding(r.Context(), a, "High", req.Message)
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	case errors.Is(err, store.ErrStandingRequestOpen):
 		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	case err != nil:
-		return engineLookupError(err)
+		return billingMutationError(err)
 	}
 	writeJSON(w, http.StatusCreated, standingRequestBody(made))
 	return nil
@@ -106,15 +106,25 @@ func (s *Server) handleOperatorStandingRequests(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) handleOperatorDeclineStanding(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	req, err := decodeOperatorAction(r)
+	var req controllerwire.StandingDecline
+	if err := decodeJSON(r, &req); err != nil {
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
+	}
+	reason, err := OperatorReason(req.Reason)
 	if err != nil {
-		return err
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
+	}
+	if req.Request = strings.TrimSpace(req.Request); req.Request == "" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "request names the reviewed standing request"}
 	}
 	writer, err := s.consoleWriter()
 	if err != nil {
 		return err
 	}
-	declined, err := writer.ConsoleDeclineStandingRequest(r.Context(), a, req.Reason)
+	declined, err := writer.ConsoleDeclineStandingRequest(r.Context(), a, req.Request, reason)
+	if errors.Is(err, store.ErrStandingRequestClosed) {
+		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
+	}
 	if err != nil {
 		return engineLookupError(err)
 	}

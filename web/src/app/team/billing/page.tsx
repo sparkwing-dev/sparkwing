@@ -34,7 +34,6 @@ import {
   prepayNote,
   priceRows,
   requestHighStanding,
-  standingMessageLimit,
   standingOutcome,
   standingRequestProblem,
   purchaseProblem,
@@ -655,7 +654,6 @@ function StandingPanel({
               id="standing-message"
               className={`${inputClass} w-full`}
               rows={3}
-              maxLength={standingMessageLimit}
               placeholder="What the team runs and the capacity it needs"
               value={message}
               onChange={(e) => setMessage(e.target.value)}

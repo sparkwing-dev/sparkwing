@@ -269,7 +269,7 @@ test("the operator grants or declines standing requests with a reason", async ({
   await page.getByRole("button", { name: "Decline" }).click();
   await expect(page.getByText("No open requests.")).toBeVisible();
   expect(posts).toEqual([
-    { path: "/api/v1/operator/teams/acme/trust", body: { trust: "granted", reason: "Known customer" } },
-    { path: "/api/v1/operator/teams/beta/standing-request/decline", body: { reason: "Pay for 30 days first." } },
+    { path: "/api/v1/operator/teams/acme/trust", body: { trust: "granted", reason: "Known customer", standing_request: "standing-acme" } },
+    { path: "/api/v1/operator/teams/beta/standing-request/decline", body: { request: "standing-beta", reason: "Pay for 30 days first." } },
   ]);
 });

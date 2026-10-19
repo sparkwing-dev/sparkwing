@@ -53,7 +53,7 @@ func TestStandingRequestFromBillingToOperatorDecision(t *testing.T) {
 		if code := f.call("GET", queue, auth, nil, nil); code != http.StatusForbidden {
 			t.Errorf("queue read by a non-operator = %d want 403", code)
 		}
-		if code := f.call("POST", decline, auth, map[string]any{"reason": "no"}, nil); code != http.StatusForbidden {
+		if code := f.call("POST", decline, auth, map[string]any{"request": made.ID, "reason": "no"}, nil); code != http.StatusForbidden {
 			t.Errorf("decline by a non-operator = %d want 403", code)
 		}
 	}
@@ -66,24 +66,32 @@ func TestStandingRequestFromBillingToOperatorDecision(t *testing.T) {
 		t.Errorf("queue item = %+v", item)
 	}
 
-	if code := f.call("POST", decline, operator.auth, map[string]any{"reason": " "}, nil); code != http.StatusBadRequest {
+	if code := f.call("POST", decline, operator.auth, map[string]any{"request": made.ID, "reason": " "}, nil); code != http.StatusBadRequest {
 		t.Errorf("decline without a reason = %d want 400", code)
 	}
-	if code := f.call("POST", decline, operator.auth, map[string]any{"reason": "Pay for 30 days first."}, nil); code != http.StatusOK {
+	if code := f.call("POST", decline, operator.auth, map[string]any{"reason": "no request"}, nil); code != http.StatusBadRequest {
+		t.Errorf("decline naming no request = %d want 400", code)
+	}
+	if code := f.call("POST", decline, operator.auth, map[string]any{"request": made.ID, "reason": "Pay for 30 days first."}, nil); code != http.StatusOK {
 		t.Fatalf("decline = %d", code)
 	}
-	if code := f.call("POST", decline, operator.auth, map[string]any{"reason": "again"}, nil); code != http.StatusNotFound {
-		t.Errorf("decline with nothing open = %d want 404", code)
+	if code := f.call("POST", decline, operator.auth, map[string]any{"request": made.ID, "reason": "again"}, nil); code != http.StatusConflict {
+		t.Errorf("retried decline = %d want 409", code)
 	}
 	var declined teamStanding
 	if code := f.call("GET", "/api/v1/team/billing", editor.auth, nil, &declined); code != http.StatusOK || declined.Standing.Request == nil || declined.Standing.Request.State != "declined" || declined.Standing.Request.DecisionReason != "Pay for 30 days first." || declined.Standing.Request.DecidedAt == 0 || declined.Standing.CanRequest {
 		t.Fatalf("requester view after decline = %d %+v", code, declined.Standing)
 	}
 
+	declinedID := made.ID
 	if code := f.call("POST", controller, owner.auth, ask, &made); code != http.StatusCreated {
 		t.Fatalf("request after decline = %d", code)
 	}
-	if code := f.call("POST", "/api/v1/operator/teams/"+owner.team+"/trust", operator.auth, map[string]any{"trust": "granted", "reason": "Known customer"}, nil); code != http.StatusOK {
+	trust := "/api/v1/operator/teams/" + owner.team + "/trust"
+	if code := f.call("POST", trust, operator.auth, map[string]any{"trust": "granted", "reason": "stale", "standing_request": declinedID}, nil); code != http.StatusConflict {
+		t.Fatalf("grant naming a decided request = %d want 409", code)
+	}
+	if code := f.call("POST", trust, operator.auth, map[string]any{"trust": "granted", "reason": "Known customer", "standing_request": made.ID}, nil); code != http.StatusOK {
 		t.Fatalf("grant = %d", code)
 	}
 	var approved teamStanding

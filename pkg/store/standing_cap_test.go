@@ -57,13 +57,15 @@ func TestStandingCapPrepaySettlementReachesTrustedNotHigh(t *testing.T) {
 	standingCapWant(t, tenant, now.Add(30*24*time.Hour), "High", "High", "High")
 }
 
-func TestStandingCapTrustedHistoryLetsPrepayReachHigh(t *testing.T) {
+func TestStandingCapPrepayNeverReachesHigh(t *testing.T) {
 	s, tenant, now := standingCapFixture(t)
 	standingCapPay(t, tenant, "pi_trusted", 49999)
 	*now = now.Add(30 * 24 * time.Hour)
-	standingCapWant(t, tenant, *now, "Trusted", "Trusted", "High")
-	standingCapFree(t, s, "free-cent", 1)
-	standingCapWant(t, tenant, *now, "High", "Trusted", "High")
+	standingCapWant(t, tenant, *now, "Trusted", "Trusted", "Trusted")
+	standingCapFree(t, s, "free-high", 100000)
+	standingCapWant(t, tenant, *now, "Trusted", "Trusted", "Trusted")
+	standingCapPay(t, tenant, "pi_history", 1)
+	standingCapWant(t, tenant, *now, "High", "High", "High")
 }
 
 func TestStandingCapIncidentRestartsHighCleanAge(t *testing.T) {
@@ -99,7 +101,7 @@ func TestStandingCapAdmissionUsesTheCappedTier(t *testing.T) {
 	}
 }
 
-func TestStandingCapPrepayNeverExceedsOneTierAboveHistoryProperty(t *testing.T) {
+func TestStandingCapPrepayStaysWithinOneTierAndBelowHighProperty(t *testing.T) {
 	names := map[string]int{}
 	for _, row := range billingPolicy {
 		if row.tier != "" {
@@ -120,7 +122,11 @@ func TestStandingCapPrepayNeverExceedsOneTierAboveHistoryProperty(t *testing.T) 
 			t.Fatal(err)
 		}
 		standing, history := names[b.Tier], names[b.History.Tier]
-		return standing >= history && standing <= history+1 && names[b.PrepayCeiling] == min(history+1, names["High"])
+		ceiling := history
+		if history < names["Trusted"] {
+			ceiling = history + 1
+		}
+		return standing >= history && standing <= ceiling && names[b.PrepayCeiling] == ceiling
 	}
 	if err := quick.Check(check, &quick.Config{MaxCount: 200}); err != nil {
 		t.Fatal(err)

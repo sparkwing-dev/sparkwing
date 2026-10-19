@@ -8,9 +8,10 @@ type StandingRequestWrite struct {
 	Message string `json:"message"`
 }
 
-// StandingDecline declines a team's open standing request with the reason its requester sees.
+// StandingDecline declines the reviewed open standing request with the reason its requester sees.
 type StandingDecline struct {
-	Reason string `json:"reason"`
+	Request string `json:"request"`
+	Reason  string `json:"reason"`
 }
 
 // StandingRequest reports a standing request and its outcome; times are Unix seconds.

@@ -18,16 +18,17 @@ type billingPolicyRow struct {
 	duration  time.Duration
 	paidCents int64
 	cleanAge  time.Duration
+	prepay    bool
 }
 
 var billingPolicy = [...]billingPolicyRow{
-	{500, "New", 8, 4 * time.Hour, 0, 0},
-	{2000, "Established", 32, 4 * time.Hour, 0, 0},
-	{5000, "", 0, 0, 0, 0},
-	{10000, "Trusted", 128, 6 * time.Hour, 5000, 30 * 24 * time.Hour},
-	{25000, "", 0, 0, 0, 0},
-	{50000, "High", 512, 6 * time.Hour, 50000, 30 * 24 * time.Hour},
-	{100000, "", 0, 0, 0, 0},
+	{500, "New", 8, 4 * time.Hour, 0, 0, true},
+	{2000, "Established", 32, 4 * time.Hour, 0, 0, true},
+	{5000, "", 0, 0, 0, 0, false},
+	{10000, "Trusted", 128, 6 * time.Hour, 5000, 30 * 24 * time.Hour, true},
+	{25000, "", 0, 0, 0, 0, false},
+	{50000, "High", 512, 6 * time.Hour, 50000, 30 * 24 * time.Hour, false},
+	{100000, "", 0, 0, 0, 0, false},
 }
 
 // StandingHistory is the payment record a team's history tier is earned from.
@@ -56,13 +57,16 @@ func (h StandingHistory) earns(row billingPolicyRow, now time.Time) bool {
 	return earned
 }
 
-func nextStandingTier(i int) int {
-	for j := i + 1; j < len(billingPolicy); j++ {
+func prepayCeiling(earned int) int {
+	for j := earned + 1; j < len(billingPolicy); j++ {
 		if billingPolicy[j].tier != "" {
-			return j
+			if billingPolicy[j].prepay {
+				return j
+			}
+			break
 		}
 	}
-	return i
+	return earned
 }
 
 func topStandingTier() int {
@@ -108,7 +112,7 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
 			backed = i
 		}
 	}
-	ceiling := nextStandingTier(earned)
+	ceiling := prepayCeiling(earned)
 	p.history.Tier, p.prepayCeiling = billingPolicy[earned].tier, billingPolicy[ceiling].tier
 	p.row = billingPolicy[max(earned, min(backed, ceiling))]
 	switch {
