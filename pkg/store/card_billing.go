@@ -131,6 +131,11 @@ func (s SpendStanding) CardBilled() bool { return s.Card.PaymentMethod != "" }
 // ChargeFailed reports an open collection with a failed attempt.
 func (s SpendStanding) ChargeFailed() bool { return s.OpenCharge != nil && s.OpenCharge.Failures > 0 }
 
+// RunningWorkContinues reports whether awarded Cloud work finishes while new admissions wait: any hold or collection in progress.
+func (s SpendStanding) RunningWorkContinues() bool {
+	return s.Billing.Tier == "Held" || s.OpenCharge != nil || s.CardBilled() && -s.BalanceMicro >= s.RungMicro
+}
+
 // Headroom reports admission room under standing, collection and the owner's budget.
 func (s SpendStanding) Headroom() (int64, string) {
 	if s.Billing.Tier == "Held" && s.Billing.HoldCause != FreezeCauseDecline && s.Billing.HoldCause != "" {
@@ -228,9 +233,13 @@ func refuseAboveHeadroomTx(
 	if room >= required {
 		return nil
 	}
-	return &InsufficientCreditsError{
+	out := &InsufficientCreditsError{
 		BalanceMicro: s.BalanceMicro, RequiredMicro: required, RunID: runID, NodeID: nodeID, Limit: limit,
 	}
+	if s.Billing.Tier == "Held" {
+		return holdRefusal(s.Billing.HoldCause, out)
+	}
+	return out
 }
 
 func headroomTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (int64, error) {
