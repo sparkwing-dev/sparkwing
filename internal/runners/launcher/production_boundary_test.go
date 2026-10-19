@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ktesting "k8s.io/client-go/testing"
@@ -19,7 +21,7 @@ func TestProductionBoundaryRequiresMeasuredCanaries(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "enforced", true: "escape"}[failed], func(t *testing.T) {
 			_, kube := boundaryFixture()
-			_, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy", ResourceVersion: "1"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}}}, metav1.CreateOptions{})
+			_, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy", ResourceVersion: "1"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}, metav1.CreateOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -49,7 +51,7 @@ func TestProductionBoundaryRequiresMeasuredCanaries(t *testing.T) {
 				nodeTopology(pod)
 				pod.UID = types.UID(pod.Name)
 				pod.Status = corev1.PodStatus{PodIP: "10.1.2.3", HostIP: "10.0.0.1", Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
-				if pod.Spec.Containers[0].Name != "control" {
+				if name := pod.Spec.Containers[0].Name; name != "control" && name != "peer" {
 					pod.Status.Phase = corev1.PodSucceeded
 					if failed && pod.Spec.Containers[0].Name == "measure" {
 						pod.Status.Phase = corev1.PodFailed
@@ -180,7 +182,7 @@ func FuzzProductionBoundaryRefusesChangedCanary(f *testing.F) {
 			t.Skip()
 		}
 		_, kube := boundaryFixture()
-		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}}}
+		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}
 		if _, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), policy, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
@@ -207,7 +209,7 @@ func FuzzProductionBoundaryRefusesChangedCanary(f *testing.F) {
 
 func TestProductionBoundaryRequiresLiveIngressControl(t *testing.T) {
 	_, kube := boundaryFixture()
-	policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}}}
+	policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}
 	if _, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), policy, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +268,7 @@ func FuzzProductionBoundaryRefusesConflictingDestinations(f *testing.F) {
 				t.Fatal(err)
 			}
 		}
-		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}}}
+		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}
 		if _, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), policy, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
@@ -279,4 +281,86 @@ func FuzzProductionBoundaryRefusesConflictingDestinations(f *testing.F) {
 			t.Fatalf("contradictory endpoint class %d accepted or obscured: %v", source%3, err)
 		}
 	})
+}
+
+func TestProductionBoundaryMeasuresIngressAndDeniedEndpoints(t *testing.T) {
+	for _, ingress := range []bool{true, false} {
+		_, kube := boundaryFixture()
+		directions := []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}
+		if ingress {
+			directions = append(directions, networkingv1.PolicyTypeIngress)
+		}
+		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PolicyTypes: directions}}
+		port := int32(443)
+		slice := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default", Labels: map[string]string{discoveryv1.LabelServiceName: "kubernetes"}}, AddressType: discoveryv1.AddressTypeIPv4, Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"172.16.0.10"}}}, Ports: []discoveryv1.EndpointPort{{Port: &port}}}
+		for _, object := range []runtime.Object{policy, slice} {
+			if err := kube.Tracker().Add(object); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var control *networkingv1.NetworkPolicy
+		kube.PrependReactor("create", "networkpolicies", func(action ktesting.Action) (bool, runtime.Object, error) {
+			control = action.(ktesting.CreateAction).GetObject().(*networkingv1.NetworkPolicy)
+			control.UID = types.UID(control.Name)
+			return false, nil, nil
+		})
+		var measured, witnessed []string
+		var peer *corev1.Pod
+		kube.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+			pod := action.(ktesting.CreateAction).GetObject().(*corev1.Pod)
+			pod.UID = types.UID(pod.Name)
+			pod.Status = corev1.PodStatus{PodIP: "10.1.2.3", Phase: corev1.PodSucceeded}
+			switch pod.Spec.Containers[0].Name {
+			case "peer":
+				peer = pod
+				pod.Status.PodIP = "10.1.2.4"
+				fallthrough
+			case "control":
+				pod.Status.Phase, pod.Status.Conditions = corev1.PodRunning, []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+			case "witness":
+				witnessed = pod.Spec.Containers[0].Args
+			case "measure":
+				measured = pod.Spec.Containers[0].Args
+			}
+			return false, nil, nil
+		})
+		boundary, err := NewProductionBoundary(kube, karpenterFixture(), productionBoundaryConfig(), "https://kubernetes.default:443")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = boundary.Reserve(t.Context(), boundaryBinding("team"), "job")
+		if !ingress {
+			if err == nil || !strings.Contains(err.Error(), "ingress") {
+				t.Fatalf("Jobs without default-deny ingress authorized work: %v", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(witnessed, " ") != "10.1.2.3 10.1.2.4" {
+			t.Fatalf("witness must reach the control and be refused by the peer: %v", witnessed)
+		}
+		if peer == nil || peer.Spec.Containers[0].ReadinessProbe == nil || peer.Spec.Containers[0].ReadinessProbe.Exec == nil {
+			t.Fatal("peer listener is not readiness-confirmed")
+		}
+		peerLabels := labels.Set(peer.Labels)
+		if allow, _ := metav1.LabelSelectorAsSelector(&control.Spec.PodSelector); allow.Matches(peerLabels) || peer.Labels["app.kubernetes.io/managed-by"] != managedByLauncher {
+			t.Fatalf("peer is not governed by Job ingress policy alone: %v", peer.Labels)
+		}
+		reachesPeer := false
+		for _, to := range control.Spec.Egress[0].To {
+			selector, _ := metav1.LabelSelectorAsSelector(to.PodSelector)
+			reachesPeer = reachesPeer || selector.Matches(peerLabels)
+		}
+		if !reachesPeer {
+			t.Fatal("the witness's egress to the peer is not allowed, so a refusal would not isolate ingress")
+		}
+		joined := " " + strings.Join(measured, " ") + " "
+		for _, want := range []string{" kubernetes.default 443 ", " 172.16.0.10 443 ", " 169.254.169.254 80 ", " fd00:ec2::254 80 ", " 169.254.170.23 80 "} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("measurement %q lacks %q", joined, want)
+			}
+		}
+	}
 }

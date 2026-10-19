@@ -59,7 +59,8 @@ ingress:
 sparkwing-runner-bundle:
   enabled: true
   controller:
-    # Use the public origin so escaped-node probes have the same required target.
+    # Job Pods reach the controller through its public origin, the one
+    # destination the boundary probe requires.
     url: https://api.sparkwing.dev
   runner:
     enabled: false
@@ -74,10 +75,11 @@ sparkwing-runner-bundle:
       repository: ghcr.io/sparkwing-dev/sparkwing-runner
       tag: rewrite-cloud
       digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    # Runs as root of the Job Pod's user namespace, never privileged.
     dockerImage:
       repository: docker.io/library/docker
       tag: "28-dind"
-      digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      digest: sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac
     cpuCeiling: "2"
     memoryCeiling: 8Gi
     # Keep launcher/controller on infrastructure nodes. Customer nodes are

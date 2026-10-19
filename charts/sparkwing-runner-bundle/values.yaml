@@ -55,6 +55,8 @@ launcher:
     name: ""
     key: token
   jobImage: {}
+  # docker:<version>-dind, digest-pinned. It runs as root of the Job Pod's user
+  # namespace with namespaced capabilities, never privileged.
   dockerImage: {}
   cpuCeiling: ""
   memoryCeiling: ""

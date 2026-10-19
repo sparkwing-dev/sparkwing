@@ -60,9 +60,37 @@ and the probe commands are CEL literals.
   web-identity and container-credential variables are refused, as is any
   projected token volume.
 - Volumes are only the Job's `scratch` emptyDir and its own bootstrap Secret.
-  No hostPath, hostNetwork, hostIPC, hostPort or added capability. Only the
-  `docker` sidecar and the `measure` probe run privileged, and only `measure`
-  uses hostPID.
+  No hostPath, hostNetwork, hostPID, hostIPC or hostPort. No container in the
+  namespace runs privileged.
+- Job Pods set `hostUsers: false` and run every container as UID 0 of the
+  Pod's user namespace, which maps to a high, unprivileged host UID. That keeps
+  the contracted root for Cloud Jobs (`apt-get install`, the Docker socket)
+  without node root. The Pod uses the RuntimeDefault seccomp profile, and the
+  workload containers add no capability and set `allowPrivilegeEscalation:
+  false`. Only the `docker` sidecar differs: it adds exactly the namespaced
+  capabilities `SYS_ADMIN`, `NET_ADMIN` and `SYS_PTRACE`, uses the Localhost
+  seccomp profile `profiles/sparkwing-dind.json`, Unconfined AppArmor and an
+  Unmasked `/proc`.
+- Admission compares each shape's Pod and container security contexts field
+  by field with the launcher's canonical values (`exactly` in
+  `admission_security.go`): any other field, including `seLinuxOptions` (no
+  `super_t` or any type), `windowsOptions`, sysctls, `fsGroup` or a field a
+  later API adds, is refused. Capacity requests and probes run as UID 65534
+  with every capability dropped. `runtimeClassName`, `shareProcessNamespace`,
+  resource claims and probe `host` fields must stay unset, as must
+  `dnsConfig` and `hostAliases`; the scheduler is the default one, service
+  links are off and no `system-` priority class may be named. The fields come
+  from the vendored k8s.io/api, so a field a newer API server adds stays
+  unpinned until that dependency moves.
+- `fetch-source` and `run-node` run `sparkwing-runner` with the launcher's
+  flags and fixed paths in fixed positions; only the controller, run,
+  generation and job values vary, and `fetch-source` cannot become a sidecar.
+- The sidecar's profile allows `unshare`, `clone` and `setns` without an
+  argument filter, so a nested container can create its own user namespace,
+  as Docker's default profile allows with `CAP_SYS_ADMIN`. Blocking
+  `CLONE_NEWUSER` would need a real-node check that BuildKit and nested runc
+  work without it; until then it stays allowed, and the nested namespace
+  holds no more than the Job's own.
 - The service account is `sparkwing-customer-job` with
   `automountServiceAccountToken: false`.
 - Every Pod selects `node-restriction.kubernetes.io/sparkwing-team-node` equal
@@ -96,8 +124,8 @@ reconciling existing Jobs and claims no work until the policies match again.
 The launcher can read only those four objects.
 
 The job namespace must hold no other NetworkPolicies, since an additive policy
-would widen Job egress, and no Pod Security labels besides the chart's
-privileged level.
+would widen Job egress or ingress, and no Pod Security labels besides the
+chart's privileged level.
 
 ## Award backstop
 
@@ -140,6 +168,49 @@ workload Pods only Job Pods, that team's capacity requests and boundary probes
 tolerate it, but cluster DaemonSets such as `aws-node`, `ebs-csi-node` and
 `kube-proxy` tolerate every taint and run privileged on team nodes. They and
 Kubernetes administrators remain trusted.
+
+## Node faults
+
+A kubelet can rewrite its own Node's annotations, so a fault read from them is
+charged to that node alone. Sync quarantines a node whose reservation in this
+job namespace is malformed, disagrees with its binding, names a team other than
+the node's protected team label, or carries an award the controller refuses
+outright: a binding refusal, a bad request or a changed binding. Each orphaned
+reservation goes to the controller in its own call, so a refusal names one
+node. Quarantine cordons a team node, adds the NoSchedule taint
+`sparkwing.dev/quarantined`, which NodeRestriction stops a kubelet from
+removing, and records the cause in the annotation of the same name. One
+UID-fenced JSON patch writes all three. Reservation skips a node with the
+taint or the annotation, even after it is uncordoned. No NodeClaim is deleted:
+an operator inspects the node, then deletes it or removes the taint and
+annotation.
+
+One pass quarantines or keeps quarantined at most three faulted nodes. A
+fourth means the controller, not a node, is likely at fault, so sync stops
+claims with an error naming the node and asking an operator to check the
+controller and the quarantined nodes.
+
+A quarantine that has not persisted stops claims, so a 503 or any other failed
+write blocks until a later pass writes it. A conflict is retried with backoff;
+repeated conflicts, which a kubelet rewriting its own Node causes, become a
+node fault and claiming continues, because placement already skips a node that
+records a reservation other than the one being placed. Release retries
+conflicts the same way and charges persistent ones to the node, which stays
+reserved.
+
+Release and Retire leave a node untouched when it was replaced or no longer
+holds the expected reservation, because it may hold another award. The Job keeps
+its cleanup finalizer and sync retries it. Rejection still fails the award.
+These node faults are logged at error level on every pass while claiming
+continues. Admission mismatch, Kubernetes and controller API failures and every
+other reconciliation error still stop claims.
+
+The launcher's ClusterRole grants `update` and `patch` on every Node, and RBAC cannot
+narrow it. `resourceNames` needs names known at install, while Karpenter names
+nodes at launch, and RBAC has no label selectors or field restrictions. A
+ValidatingAdmissionPolicy on Node UPDATE by the launcher identity could confine
+it to team nodes and the reservation keys, taint, used-team label and cordon.
+That policy is not built.
 
 Sync skips nodes reserved under another job namespace and logs each one. When
 moving an install to a new job namespace, first let Jobs and reservations
@@ -199,8 +270,18 @@ another launcher may still be publishing its bootstrap. Suspension alone never
 authorizes teardown. Cancelled or expired awards still retire suspended Jobs.
 Controller errors preserve ownership and reach the caller.
 
-The builder uses a readiness-gated native DinD sidecar, fixed aggregate 20 GiB
-scratch, a separate customer service account and no API-token automount. Its
+The builder uses a native DinD sidecar, fixed aggregate 20 GiB scratch, a
+separate customer service account and no API-token automount. The sidecar runs
+the `docker:<version>-dind` entrypoint with `dockerd`, which adds no TCP
+listener. dockerd owns the Pod's network namespace and, on nodes whose runc
+mounts cgroups writable for user-namespaced Pods, the Pod's cgroup, so
+container networks and `docker run --memory` work. `SYS_PTRACE` lets dockerd
+join the network namespace of a container that runs as a non-root user. The
+sidecar has no probe: `run-node`, as the workload's own identity, waits until
+`/_ping` on `DOCKER_HOST` answers before it constructs the host, for at most
+three minutes, so a socket
+the workload cannot open never counts as ready. The bootstrap Secret is mode
+0400. Node requirements are in the chart README. Its
 bootstrap mount is absent from Docker. Pipeline execution starts after source
 acquisition. Plan resolves the exact SDK pin. Eval and work use the accepted
 engine identity.
@@ -365,18 +446,34 @@ exchange tests do not establish a working pod entrypoint.
 The installed launcher loads the standard Kubernetes client configuration and
 composes its award transport with `NewProductionBoundary`. The launcher account
 can create, read and delete probe Pods, and list, create and delete NetworkPolicies
-in the jobs namespace. It retains create/delete-only Secret access.
+in the jobs namespace. It retains create/delete-only Secret access. It can list
+EndpointSlices in `default` to find the API server's addresses.
 
-Before work starts, the boundary requires a default-deny egress policy selecting
-the exact Job labels. It inventories declared DaemonSet ports and observed
-kubelet endpoints. A temporary listener Pod has an explicit ingress allow rule. A separate witness
-Pod must connect through a rule allowing only that listener before a denied
-connection can establish egress enforcement. A separate root,
-privileged canary uses the workload's labels. It checks controller connectivity,
-then denies the listener and observed cluster API, DaemonSet TCP and kubelet
-endpoints. It repeats the cluster endpoint checks from the node network namespace
-with `nsenter`. DNS ports remain available. Declared UDP ports are inventoried,
-while UDP denial needs protocol-specific native checks.
+Before work starts, the boundary requires default-deny egress and ingress
+policies selecting the exact Job labels. It inventories declared DaemonSet ports
+and observed kubelet endpoints. Two listener Pods run on the reserved node, each readiness-confirmed
+before any connection is judged. The control listener has an explicit ingress
+allow rule. The peer listener carries a Job's labels, so only the Job ingress
+policy governs it; its readiness check runs on loopback, which no policy
+filters. A witness Pod whose temporary policy allows egress to both must reach
+the control, which proves its egress and the policy engine, and must fail to
+reach the peer. Because the peer is listening and the witness may send to it,
+that failure measures Job ingress denial apart from source egress.
+
+A separate canary uses the workload's labels and runs as UID 65534 with every
+capability dropped. It must reach the controller, and must be refused by the
+control listener, the in-cluster API address, every address in the
+`default/kubernetes` EndpointSlices, the instance metadata service
+(169.254.169.254 and fd00:ec2::254), the Pod Identity agent (169.254.170.23),
+DaemonSet TCP ports and kubelet endpoints. That proves Job egress denial,
+including against an operator egress rule that drops the metadata exception.
+
+All of it runs in the Pod network namespace. Job Pods hold no node root, so
+Job code cannot reach the node network namespace, and the canaries need no
+privilege or hostPID to measure what Job code can reach. The kubelet still
+reaches the API from the node; node credentials and authorization protect it
+there. DNS ports remain available. Declared UDP ports are inventoried, while
+UDP denial needs protocol-specific native checks. The runner image needs `nc`.
 
 Probe Pods carry the team label, node selector and team toleration admission
 requires. Canary results require unchanged admitted commands, images, labels apart
@@ -389,17 +486,19 @@ credential or service-account token enters a canary.
 
 The known required destination is the controller. Source, blob and provider
 origins depend on deployment and still need native verification. The checks do
-not exhaust every network destination or every node escape. Pod-level policy
-alone cannot authorize a deployment where the escaped node network still reaches
-control-plane services. Native enforcement, UDP services, image execution,
+not exhaust every network destination. A kernel escape from the user namespace
+is outside them. The sidecar's seccomp profile stacks over every container the
+customer starts, so it, not the customer's own `--security-opt`, bounds the
+syscalls reachable as namespace root; nf_tables through `NET_ADMIN` remains
+reachable, so kernel patch latency is the control there. Native enforcement, UDP services, image execution,
 DinD shutdown and kubelet reclamation remain cluster acceptance requirements.
 
 All authored workload state uses container writable layers and emptyDir storage.
 Release waits for all non-DaemonSet Pods to disappear, then removes
 reservation-owned probe state before permitting reuse. Kubernetes owns the
-associated ephemeral-state reclamation. Privileged pipeline code can change
-arbitrary host state under the accepted threat model. That state requires node
-reprovisioning and is outside reservation-scoped Kubernetes cleanup.
+associated ephemeral-state reclamation. Job code holds no node root, so it cannot
+change host state outside its Pod; node reuse within a team keeps that
+assumption.
 
 ## Preparation leases
 

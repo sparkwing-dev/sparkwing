@@ -59,7 +59,10 @@ func ProductionRuntime(version string) Runtime {
 					return source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: secrets.NewMasker()}}, nil, err
 				}}, nil
 			},
-			Host: func(_ context.Context, options BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
+			Host: func(ctx context.Context, options BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
+				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup); err != nil {
+					return launcher.BootstrapHost{}, nil, err
+				}
 				home, err := wingd.HomeDir("")
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err

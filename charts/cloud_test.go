@@ -93,7 +93,7 @@ func TestImagesRequireRepositoryAndTagTogether(t *testing.T) {
 func checkCloudBindings(t *testing.T, manifest []byte) {
 	t.Helper()
 	decoder := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(string(manifest)), 4096)
-	ingressFound, controllerFound, launcherFound := false, false, false
+	ingressFound, controllerFound, launcherFound, denyFound := false, false, false, false
 	for {
 		var raw runtime.RawExtension
 		err := decoder.Decode(&raw)
@@ -191,6 +191,17 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 					t.Errorf("launcher credential = %v", paths)
 				}
 			}
+		case "NetworkPolicy":
+			var policy networkingv1.NetworkPolicy
+			if err := json.Unmarshal(raw.Raw, &policy); err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasSuffix(policy.Name, "-cloud-deny") {
+				denyFound = true
+				if !slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeIngress) || !slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress) || len(policy.Spec.Ingress)+len(policy.Spec.Egress) != 0 {
+					t.Errorf("Cloud Job policy does not deny all ingress and egress: %+v", policy.Spec)
+				}
+			}
 		case "Ingress":
 			ingressFound = true
 			var ingress networkingv1.Ingress
@@ -216,6 +227,9 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 				t.Errorf("Cloud ingress hosts/TLS = %+v", ingress.Spec)
 			}
 		}
+	}
+	if !denyFound {
+		t.Error("Cloud Job deny policy not rendered")
 	}
 	if !ingressFound || !controllerFound || !launcherFound {
 		t.Fatal("Cloud bindings were not exercised")

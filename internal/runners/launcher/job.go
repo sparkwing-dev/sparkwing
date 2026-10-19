@@ -198,7 +198,10 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 	return corev1.PodSpec{
 		Tolerations: teamTolerations(a.Binding.Team),
 		NodeName:    r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
-		SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr(int64(0)), RunAsGroup: ptr(int64(0)), RunAsNonRoot: ptr(false)},
+		// safety: a user-namespaced Pod's IDs map to unprivileged host IDs, so
+		// nothing in it, including the Docker sidecar's root, holds node root.
+		HostUsers:       ptr(false),
+		SecurityContext: jobPodSecurity(),
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.
 		Resources:      &corev1.ResourceRequirements{Requests: budget, Limits: budget.DeepCopy()},
 		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0o400))}}}},
@@ -212,17 +215,50 @@ func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb string) corev1.Cont
 	if b.NodeID != "" {
 		args = append(args, "--job", b.NodeID)
 	}
-	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0))}}
+	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: workloadSecurity()}
 }
 
+// dockerCapabilities are namespaced to the Pod's user namespace. PTRACE lets
+// dockerd join the network namespace of a container that runs as non-root.
+var dockerCapabilities = []corev1.Capability{"SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"}
+
+// DockerSeccompProfile is the Localhost profile, relative to the kubelet's
+// seccomp root, that node bootstrap installs from the chart's
+// files/seccomp/sparkwing-dind.json. A node without it cannot start Job Pods.
+const DockerSeccompProfile = "profiles/sparkwing-dind.json"
+
 var (
-	dockerCommand = []string{"dockerd"}
-	dockerArgs    = []string{"--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
-	dockerProbe   = []string{"docker", "--host=unix:///tmp/docker.sock", "info"}
+	// safety: given dockerd, the image's entrypoint adds no TCP listener.
+	dockerCommand = []string{"dockerd-entrypoint.sh"}
+	dockerArgs    = []string{"dockerd", "--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
 )
 
 func dockerContainer(cfg CloudJobConfig) corev1.Container {
-	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: slices.Clone(dockerCommand), Args: slices.Clone(dockerArgs), SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0)), Privileged: ptr(true)}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}}, StartupProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: slices.Clone(dockerProbe)}}, PeriodSeconds: 1, FailureThreshold: math.MaxInt32}}
+	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: slices.Clone(dockerCommand), Args: slices.Clone(dockerArgs), SecurityContext: dockerSecurity(), VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}}}
+}
+
+// jobPodSecurity runs every Job container as root of the Pod's user
+// namespace, which maps to an unprivileged host UID, so customer code keeps
+// root (apt-get, the Docker socket) without holding node root.
+func jobPodSecurity() *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{RunAsUser: ptr(int64(0)), RunAsGroup: ptr(int64(0)), RunAsNonRoot: ptr(false), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}
+}
+
+// workloadSecurity keeps namespace root's default capabilities and nothing more.
+func workloadSecurity() *corev1.SecurityContext {
+	return &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false)}
+}
+
+// dockerSecurity is dockerd's addition to namespace root, never privileged:
+// its capabilities, the unmasked /proc it mounts for containers and the
+// Unconfined AppArmor (AL2023 has no AppArmor LSM) stay inside the Pod's user
+// namespace. Its seccomp profile is Docker's default with the CAP_SYS_ADMIN
+// and CAP_SYS_PTRACE syscalls dind needs, plus pivot_root for nested runc,
+// with io_uring, keyrings, clone3, bpf, perf, userfaultfd, kexec, modules,
+// open_by_handle_at and fanotify refused. The filter covers every container
+// the customer starts, because seccomp filters stack.
+func dockerSecurity() *corev1.SecurityContext {
+	return &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: slices.Clone(dockerCapabilities)}, SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: ptr(DockerSeccompProfile)}, AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}, ProcMount: ptr(corev1.UnmaskedProcMount)}
 }
 
 func jobName(b CloudJobBinding) string {

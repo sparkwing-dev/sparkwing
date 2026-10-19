@@ -17,6 +17,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,24 +32,28 @@ import (
 const boundaryControlLabel = "sparkwing.dev/boundary-control"
 
 // safety: admission pins these commands, so an admission mutation cannot change what a probe runs.
+// Job Pods hold no node root, so every target is measured from the Pod
+// network namespace, the only one Job code can reach. The witness may send to
+// both listeners: reaching the control proves its egress, so failing to reach
+// the readiness-confirmed peer, which carries Job labels, proves Job ingress
+// is denied rather than absent.
 var (
 	listenerCommand = []string{"/bin/bash", "-ceu", "exec nc -lk 18888"}
-	witnessCommand  = []string{"/bin/bash", "-ceu", "exec nc -z -w 3 \"$1\" 18888", "boundary-control"}
-	measureCommand  = []string{"/bin/bash", "-ceu", `command -v nc >/dev/null
-command -v nsenter >/dev/null
+	peerReadiness   = []string{"nc", "-z", "127.0.0.1", "18888"}
+	witnessCommand  = []string{"/bin/bash", "-ceu", `nc -z -w 3 "$1" 18888
+if nc -z -w 3 "$2" 18888; then echo "Cloud Job ingress is not denied" >&2; exit 1; fi`, "boundary-control"}
+	measureCommand = []string{"/bin/bash", "-ceu", `command -v nc >/dev/null
 control_host="$1"; control_port="$2"; shift 2
 required_host="$1"; required_port="$2"; shift 2
 nc -z -w 3 "$required_host" "$required_port"
-nsenter -t 1 -n -- nc -z -w 3 "$required_host" "$required_port"
 if nc -z -w 3 "$control_host" "$control_port"; then echo "Cloud default-deny egress is not enforced" >&2; exit 1; fi
 while (( $# )); do
  host="$1"; port="$2"; shift 2
  if nc -z -w 3 "$host" "$port"; then echo "Cloud pod egress escaped to $host:$port" >&2; exit 1; fi
- if nsenter -t 1 -n -- nc -z -w 3 "$host" "$port"; then echo "Cloud node egress escaped to $host:$port" >&2; exit 1; fi
 done`, "boundary-probe"}
 )
 
-// NewProductionBoundary measures networking from root and escaped node contexts before authorizing Cloud execution.
+// NewProductionBoundary measures Job networking with live canaries before authorizing Cloud execution.
 func NewProductionBoundary(kube kubernetes.Interface, karpenter dynamic.Interface, cfg CloudJobConfig, apiServer string) (*KubernetesBoundary, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -106,24 +111,44 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 		return "", nil, err
 	}
 	workloadLabels := labels.Set(map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)})
-	deny := false
+	denyEgress, denyIngress := false, false
 	for _, policy := range policies.Items {
 		selector, err := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
 		if err != nil {
 			return "", nil, err
 		}
-		if selector.Matches(workloadLabels) && slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress) && len(policy.Spec.Egress) == 0 {
-			deny = true
+		if selector.Matches(workloadLabels) {
+			denyEgress = denyEgress || slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress) && len(policy.Spec.Egress) == 0
+			denyIngress = denyIngress || slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeIngress) && len(policy.Spec.Ingress) == 0
 		}
 	}
-	if !deny {
-		return "", nil, errors.New("Cloud namespace requires a selecting default-deny egress policy")
+	if !denyEgress || !denyIngress {
+		return "", nil, errors.New("Cloud namespace requires selecting default-deny egress and ingress policies")
 	}
 	pods, err := p.kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return "", nil, err
 	}
-	targets := []string{p.api}
+	// safety: the instance metadata service and the Pod Identity agent hand out
+	// node and workload credentials; operator egress rules must still refuse them.
+	targets := []string{p.api, "169.254.169.254:80", "[fd00:ec2::254]:80", "169.254.170.23:80"}
+	// safety: the in-cluster API address is a Service; the kubelet dials the
+	// addresses behind it, which pod egress must refuse as well.
+	api, err := p.kube.DiscoveryV1().EndpointSlices(metav1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: discoveryv1.LabelServiceName + "=kubernetes"})
+	if err != nil {
+		return "", nil, err
+	}
+	for _, slice := range api.Items {
+		for _, port := range slice.Ports {
+			for _, endpoint := range slice.Endpoints {
+				for _, address := range endpoint.Addresses {
+					if port.Port != nil {
+						targets = append(targets, net.JoinHostPort(address, strconv.Itoa(int(*port.Port))))
+					}
+				}
+			}
+		}
+	}
 	var inventory []string
 	for _, pod := range pods.Items {
 		daemon := slices.ContainsFunc(pod.OwnerReferences, func(o metav1.OwnerReference) bool {
@@ -231,7 +256,7 @@ func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) 
 	}
 	policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: control.Name, Namespace: p.cfg.Namespace, Annotations: control.Annotations}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{boundaryControlLabel: nonce}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}, Ingress: []networkingv1.NetworkPolicyIngressRule{{}}}}
 	policy.Spec.PolicyTypes = append(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress)
-	policy.Spec.Egress = []networkingv1.NetworkPolicyEgressRule{{To: []networkingv1.NetworkPolicyPeer{{PodSelector: &policy.Spec.PodSelector}}, Ports: []networkingv1.NetworkPolicyPort{{Protocol: ptr(corev1.ProtocolTCP), Port: ptr(intstr.FromInt32(18888))}}}}
+	policy.Spec.Egress = []networkingv1.NetworkPolicyEgressRule{{To: []networkingv1.NetworkPolicyPeer{{PodSelector: &policy.Spec.PodSelector}, {PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{boundaryControlLabel: nonce + "-peer"}}}}, Ports: []networkingv1.NetworkPolicyPort{{Protocol: ptr(corev1.ProtocolTCP), Port: ptr(intstr.FromInt32(18888))}}}}
 	ingress, err = p.kube.NetworkingV1().NetworkPolicies(p.cfg.Namespace).Create(ctx, policy, metav1.CreateOptions{})
 	if err != nil {
 		return evidence, err
@@ -246,7 +271,23 @@ func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) 
 	if net.ParseIP(ready.Status.PodIP) == nil {
 		return evidence, errors.New("Cloud canary has no observed IP address")
 	}
-	witness := p.witness(ctx, r, nonce, ready.Status.PodIP)
+	peer := p.peer(ctx, r, nonce)
+	admitted, err = p.kube.CoreV1().Pods(p.cfg.Namespace).Create(ctx, peer, metav1.CreateOptions{})
+	if err != nil {
+		return evidence, err
+	}
+	pods = append(pods, admitted)
+	if err = p.validateCanary(peer, admitted); err != nil {
+		return evidence, err
+	}
+	peerReady, err := p.waitPod(ctx, admitted, true)
+	if err != nil {
+		return evidence, err
+	}
+	if net.ParseIP(peerReady.Status.PodIP) == nil {
+		return evidence, errors.New("Cloud peer canary has no observed IP address")
+	}
+	witness := p.witness(ctx, r, nonce, ready.Status.PodIP, peerReady.Status.PodIP)
 	admitted, err = p.kube.CoreV1().Pods(p.cfg.Namespace).Create(ctx, witness, metav1.CreateOptions{})
 	if err != nil {
 		return evidence, err
@@ -270,43 +311,61 @@ func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) 
 	if _, err = p.waitPod(ctx, admitted, false); err != nil {
 		return evidence, err
 	}
-	for _, pod := range pods[:1] {
+	for _, pod := range pods[:2] {
 		live, check := p.kube.CoreV1().Pods(p.cfg.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 		if check != nil {
 			return evidence, check
 		}
 		if live.UID != pod.UID || !podReady(live) {
-			return evidence, errors.New("Cloud control listener changed during enforcement probes")
+			return evidence, errors.New("Cloud listener changed during enforcement probes")
 		}
 	}
 	return CloudNetworkEvidence{Namespace: p.cfg.Namespace, NodeUID: r.NodeUID, PolicyRevision: revision, DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
+}
+
+// probePodSecurity and probeSecurity run every probe container unprivileged,
+// with no capabilities and the runtime seccomp profile.
+func probePodSecurity() *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{RunAsUser: ptr(int64(65534)), RunAsGroup: ptr(int64(65534)), RunAsNonRoot: ptr(true), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}
+}
+
+func probeSecurity() *corev1.SecurityContext {
+	return &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}
 }
 
 func (p *productionBoundary) canary(ctx context.Context, r CloudNodeReservation, nonce string) *corev1.Pod {
 	raw, _ := json.Marshal(r)
 	deadline, _ := ctx.Deadline()
 	seconds := max(int64(time.Until(deadline).Seconds()), 1)
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "sw-boundary-" + strings.ToLower(rand.Text()), Namespace: p.cfg.Namespace, Labels: map[string]string{boundaryControlLabel: nonce, TeamLabel: labelHash(r.Team)}, Annotations: map[string]string{reservationAnnotation: string(raw), doNotDisrupt: "true"}}, Spec: corev1.PodSpec{NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(r.Team)}, Tolerations: teamTolerations(r.Team), ActiveDeadlineSeconds: &seconds, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever, Containers: []corev1.Container{{Name: "control", Image: p.cfg.RunnerImage, Command: listenerCommand, ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(18888)}}, TimeoutSeconds: 1, PeriodSeconds: 10, SuccessThreshold: 1, FailureThreshold: 3}}}}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "sw-boundary-" + strings.ToLower(rand.Text()), Namespace: p.cfg.Namespace, Labels: map[string]string{boundaryControlLabel: nonce, TeamLabel: labelHash(r.Team)}, Annotations: map[string]string{reservationAnnotation: string(raw), doNotDisrupt: "true"}}, Spec: corev1.PodSpec{NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(r.Team)}, Tolerations: teamTolerations(r.Team), ActiveDeadlineSeconds: &seconds, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever, SecurityContext: probePodSecurity(), Containers: []corev1.Container{{Name: "control", Image: p.cfg.RunnerImage, Command: listenerCommand, SecurityContext: probeSecurity(), ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(18888)}}, TimeoutSeconds: 1, PeriodSeconds: 10, SuccessThreshold: 1, FailureThreshold: 3}}}}}
 }
 
-func (p *productionBoundary) witness(ctx context.Context, r CloudNodeReservation, nonce, listener string) *corev1.Pod {
+func (p *productionBoundary) witness(ctx context.Context, r CloudNodeReservation, nonce, listener, peer string) *corev1.Pod {
 	pod := p.canary(ctx, r, nonce)
 	container := &pod.Spec.Containers[0]
 	container.Name, container.ReadinessProbe = "witness", nil
 	container.Command = witnessCommand
-	container.Args = []string{listener}
+	container.Args = []string{listener, peer}
+	return pod
+}
+
+// peer is a listener with a Job's labels, so only Job ingress policy governs
+// it. Its readiness check runs on loopback, which no policy filters.
+func (p *productionBoundary) peer(ctx context.Context, r CloudNodeReservation, nonce string) *corev1.Pod {
+	pod := p.canary(ctx, r, nonce+"-peer")
+	pod.Labels = map[string]string{boundaryControlLabel: nonce + "-peer", "app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName + "-peer", TeamLabel: labelHash(r.Team)}
+	container := &pod.Spec.Containers[0]
+	container.Name = "peer"
+	container.ReadinessProbe.ProbeHandler = corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: slices.Clone(peerReadiness)}}
 	return pod
 }
 
 func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation, denied []string, control string) *corev1.Pod {
 	pod := p.canary(ctx, r, "")
 	pod.Labels = map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)}
-	pod.Spec.HostPID = true
 	container := &pod.Spec.Containers[0]
 	container.Name = "measure"
 	container.ReadinessProbe = nil
-	container.SecurityContext = &corev1.SecurityContext{RunAsUser: ptr(int64(0)), Privileged: ptr(true)}
-
 	container.Command = measureCommand
 	for _, endpoint := range append([]string{control, p.required}, denied...) {
 		host, port, _ := net.SplitHostPort(endpoint)
@@ -326,7 +385,7 @@ func (p *productionBoundary) validateCanary(expected, admitted *corev1.Pod) erro
 	for _, k := range nodeTopologyLabels {
 		delete(labels, k)
 	}
-	if !maps.Equal(labels, expected.Labels) || !maps.Equal(annotations, expected.Annotations) || admitted.Spec.NodeName != expected.Spec.NodeName || admitted.Spec.HostPID != expected.Spec.HostPID || len(admitted.Spec.Containers) != len(expected.Spec.Containers) {
+	if !maps.Equal(labels, expected.Labels) || !maps.Equal(annotations, expected.Annotations) || admitted.Spec.NodeName != expected.Spec.NodeName || len(admitted.Spec.Containers) != len(expected.Spec.Containers) {
 		return errors.New("Kubernetes changed Cloud canary metadata or placement")
 	}
 	for i, want := range expected.Spec.Containers {

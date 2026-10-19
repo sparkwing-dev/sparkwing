@@ -10,6 +10,7 @@ import (
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
@@ -42,9 +43,33 @@ func TestCloudLauncherSecretPermissions(t *testing.T) {
 	}
 }
 
+// The Job controller cannot create a Job Pod until its service account exists
+// in the job namespace, so every install that renders the admission policies
+// also renders that account there, without a token.
+func TestCustomerJobServiceAccountInJobNamespace(t *testing.T) {
+	for chart, prefix := range map[string]string{"./sparkwing-runner-bundle": "", "./sparkwing-full": "sparkwing-runner-bundle."} {
+		for jobs, extra := range map[string][]string{"cloud-cloud-jobs": nil, "customer-jobs": {prefix + "launcher.jobNamespace=customer-jobs"}} {
+			settings := append(append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher"), extra...)
+			found := 0
+			for _, r := range renderedResources(t, helmRenderAll(t, chart, "sparkwing", "cloud", settings...)) {
+				if r.Kind != "ServiceAccount" || r.Metadata.Name != launcher.ServiceAccount {
+					continue
+				}
+				found++
+				if r.Metadata.Namespace != jobs || r.AutomountServiceAccountToken == nil || *r.AutomountServiceAccountToken {
+					t.Errorf("%s: %s must live in %s without a token: namespace=%q automount=%v", chart, launcher.ServiceAccount, jobs, r.Metadata.Namespace, r.AutomountServiceAccountToken)
+				}
+			}
+			if found != 1 {
+				t.Errorf("%s renders %d %s accounts for job namespace %s, want 1", chart, found, launcher.ServiceAccount, jobs)
+			}
+		}
+	}
+}
+
 func TestCloudLauncherProvisioningPermissions(t *testing.T) {
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher")...))
-	wants := map[string][]string{"nodeclaims": {"get", "delete"}, "nodepools": {"get"}}
+	wants := map[string][]string{"nodeclaims": {"get", "delete"}, "nodepools": {"get"}, "nodes": {"get", "list", "update", "patch"}}
 	for _, r := range resources {
 		for _, rule := range r.Rules {
 			for _, resource := range rule.Resources {

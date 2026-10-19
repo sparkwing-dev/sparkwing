@@ -9,7 +9,8 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/managed-by: sparkwing-launcher
-  policyTypes: [Egress]
+  policyTypes: [Ingress, Egress]
+  ingress: []
   egress: []
 {{- with .Values.launcher.networkPolicy.egress }}
 ---

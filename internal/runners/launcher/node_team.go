@@ -86,14 +86,13 @@ func (b *KubernetesBoundary) Retire(ctx context.Context, r CloudNodeReservation)
 		return err
 	}
 	if string(node.UID) != r.NodeUID {
-		return errors.New("Cloud node was replaced before retirement")
+		return &nodeFault{node: r.NodeName, cause: "replaced before retirement"}
 	}
+	// safety: the node may now hold another award, so it is left untouched; sync
+	// quarantines it if what it records is not a valid reservation.
 	var held CloudNodeReservation
-	if err = json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held); err != nil {
-		return err
-	}
-	if held != r || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
-		return errors.New("Cloud reservation changed before retirement")
+	if json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held) != nil || held != r || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
+		return &nodeFault{node: r.NodeName, cause: "reservation changed before retirement"}
 	}
 	claim, claimErr := b.nodeClaim(ctx, node)
 	node.Spec.Unschedulable = true

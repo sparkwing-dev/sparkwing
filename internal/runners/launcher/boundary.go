@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 )
 
 // ErrNoDedicatedNode leaves the award unstarted when no exclusive placement is available.
@@ -56,7 +57,7 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 		return CloudNodeReservation{}, CloudNetworkEvidence{}, err
 	}
 	for _, node := range nodes.Items {
-		if !nodeReady(node) {
+		if !nodeReady(node) || quarantined(node) {
 			continue
 		}
 		reservation, err := b.reserveNode(ctx, node, binding, job)
@@ -90,7 +91,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	if raw := node.Annotations[reservationAnnotation]; raw != "" {
 		var held CloudNodeReservation
 		if err := json.Unmarshal([]byte(raw), &held); err != nil {
-			return held, fmt.Errorf("node %s has a malformed Cloud reservation", node.Name)
+			return CloudNodeReservation{}, ErrNoDedicatedNode
 		}
 		if held.Team == team && held.JobName == job && held.NodeUID == string(node.UID) && held.NodeName == node.Name && held.ReservationID != "" && held.Award == binding.LeaseRef() && node.Annotations[reservationNamespaceAnnotation] == b.Namespace {
 			return held, nil
@@ -126,10 +127,21 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	return r, nil
 }
 
+// Release frees the node. A kubelet rewriting its own annotations can make
+// every update conflict; that is charged to the node, which stays reserved and
+// therefore out of placement, and sync retries it.
 func (b *KubernetesBoundary) Release(ctx context.Context, reservation CloudNodeReservation) error {
 	if b.Kube == nil || b.Clear == nil {
 		return errors.New("Cloud boundary requires Kubernetes and node cleanup")
 	}
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error { return b.release(ctx, reservation) })
+	if apierrors.IsConflict(err) {
+		return &nodeFault{node: reservation.NodeName, cause: "release still conflicting, retrying next pass"}
+	}
+	return err
+}
+
+func (b *KubernetesBoundary) release(ctx context.Context, reservation CloudNodeReservation) error {
 	node, err := b.Kube.CoreV1().Nodes().Get(ctx, reservation.NodeName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -138,18 +150,17 @@ func (b *KubernetesBoundary) Release(ctx context.Context, reservation CloudNodeR
 		return err
 	}
 	if string(node.UID) != reservation.NodeUID {
-		return errors.New("Cloud node was replaced before teardown")
+		return &nodeFault{node: reservation.NodeName, cause: "replaced before teardown"}
 	}
 	raw := node.Annotations[reservationAnnotation]
 	if raw == "" {
 		return nil
 	}
+	// safety: the node may now hold another award, so it is left untouched; sync
+	// quarantines it if what it records is not a valid reservation.
 	var held CloudNodeReservation
-	if err = json.Unmarshal([]byte(raw), &held); err != nil {
-		return err
-	}
-	if held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
-		return errors.New("Cloud reservation changed before teardown")
+	if json.Unmarshal([]byte(raw), &held) != nil || held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
+		return &nodeFault{node: reservation.NodeName, cause: "reservation changed before teardown"}
 	}
 	if b.StopProbes != nil {
 		if err = b.StopProbes(ctx, reservation); err != nil {

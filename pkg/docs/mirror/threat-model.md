@@ -82,8 +82,9 @@ available cgroup enforcement are separate controls. See
 
 ## Cloud boundary
 
-Every Cloud plan, eval and work Job runs as root with privileged DinD. One Job
-per team-dedicated node is mandatory. Neither another team nor another Job of
+Every Cloud plan, eval and work Job runs as root of its own user namespace,
+with a DinD daemon that is root only there, so Job code holds no node root. One Job per
+team-dedicated node is mandatory. Neither another team nor another Job of
 the same team shares that node while it is reserved.
 
 The launcher stays outside pipeline execution. A Job receives a single-use

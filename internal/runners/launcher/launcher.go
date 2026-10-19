@@ -100,10 +100,16 @@ func (l *Launcher) Run(ctx context.Context) error {
 			if admitted != nil {
 				logger.Error("Cloud admission policies do not match this launcher; reconciling without claiming work", failureAttrs(admitted)...)
 			}
-			if err := l.sync(ctx); err != nil {
-				logger.Warn("launcher reconciliation failed", failureAttrs(err)...)
-				cooldown = time.Now().Add(retryWait(err, 0))
-			} else if admitted == nil {
+			// safety: a faulty node is excluded from placement, so only
+			// cluster-wide faults stop claims for every team.
+			synced := l.sync(ctx)
+			if blocking(synced) != nil {
+				logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
+				cooldown = time.Now().Add(retryWait(synced, 0))
+			} else if synced != nil {
+				logger.Error("Cloud node faults contained; quarantined nodes are cordoned and annotated "+quarantineAnnotation+"; claiming continues", "error", synced)
+			}
+			if blocking(synced) == nil && admitted == nil {
 				if _, err := l.LaunchOne(ctx); err != nil {
 					logger.Warn("launcher claim failed", failureAttrs(err)...)
 					cooldown = time.Now().Add(retryWait(err, 0))
