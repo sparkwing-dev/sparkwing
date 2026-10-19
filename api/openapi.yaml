@@ -2028,6 +2028,18 @@ components:
         - truncated
       type: object
       x-sparkwing-go-type: controllerwire.LogSearchPage
+    internal.controllerwire.MachineAutomation:
+      additionalProperties: true
+      properties:
+        automated_runs:
+          type: boolean
+        runner:
+          type: string
+      required:
+        - runner
+        - automated_runs
+      type: object
+      x-sparkwing-go-type: controllerwire.MachineAutomation
     internal.controllerwire.MaterializedResultSource:
       additionalProperties: true
       properties:
@@ -3906,12 +3918,36 @@ components:
     internal.controllerwire.TeamSettings:
       additionalProperties: true
       properties:
+        claim_ranking:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         members_can_add_machines:
           type: boolean
       required:
         - members_can_add_machines
+        - claim_ranking
       type: object
       x-sparkwing-go-type: controllerwire.TeamSettings
+    internal.controllerwire.TeamSettingsUpdate:
+      additionalProperties: true
+      properties:
+        claim_ranking:
+          anyOf:
+            - anyOf:
+                - items:
+                    type: string
+                  type: array
+                - type: "null"
+            - type: "null"
+        members_can_add_machines:
+          anyOf:
+            - type: boolean
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: controllerwire.TeamSettingsUpdate
     internal.controllerwire.TickView:
       additionalProperties: true
       properties:
@@ -4532,6 +4568,8 @@ components:
         ref:
           type: string
         repository_id:
+          type: integer
+        sender_id:
           type: integer
         sha:
           type: string
@@ -9997,6 +10035,47 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/runners/{runner}/automation:
+    put:
+      parameters:
+        - in: path
+          name: runner
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.MachineAutomation'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.MachineAutomation'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Opt the caller's personal machine in to the caller's automated runs
+      x-sparkwing-policy:
+        method: PUT
+        path: /api/v1/runners/{runner}/automation
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.write
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/runners/claim:
     post:
       requestBody:
@@ -15257,7 +15336,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Read team machine enrollment settings
+      summary: Read team machine enrollment settings and claim ranking
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/settings
@@ -15276,7 +15355,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.controllerwire.TeamSettings'
+              $ref: '#/components/schemas/internal.controllerwire.TeamSettingsUpdate'
         required: true
       responses:
         2XX:
@@ -15291,7 +15370,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Change and audit team machine enrollment settings
+      summary: Change and audit team machine enrollment settings and claim ranking
       x-sparkwing-policy:
         method: PUT
         path: /api/v1/team/settings

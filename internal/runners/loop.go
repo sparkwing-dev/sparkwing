@@ -85,15 +85,16 @@ func (l *Loop) start() (<-chan struct{}, error) {
 	if l.Config.Kinds == nil {
 		l.Config.Kinds = []capability.UnitKind{capability.UnitTrigger}
 		if l.Config.RunID == "" {
-			l.Config.Kinds = append(l.Config.Kinds, capability.UnitNode)
+			l.Config.Kinds = append(l.Config.Kinds, capability.UnitPlan, capability.UnitEval, capability.UnitNode)
 		}
 	}
 	if len(l.Config.Kinds) == 0 {
-		return nil, errors.New("runner must claim triggers or jobs")
+		return nil, errors.New("runner must claim triggers, plans, evaluations or jobs")
 	}
 	for i, kind := range l.Config.Kinds {
-		if (kind != capability.UnitTrigger && kind != capability.UnitNode) || slices.Contains(l.Config.Kinds[:i], kind) {
-			return nil, errors.New("runner claim kinds must be distinct triggers or jobs")
+		named := l.Config.RunID != "" && kind != capability.UnitTrigger && kind != capability.UnitNode
+		if named || !slices.Contains([]capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}, kind) || slices.Contains(l.Config.Kinds[:i], kind) {
+			return nil, errors.New("runner claim kinds must be distinct triggers, plans, evaluations or jobs")
 		}
 	}
 	if l.Config.PollInterval == 0 {

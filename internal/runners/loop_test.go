@@ -31,8 +31,8 @@ func (f hostFunc) Host(ctx context.Context, unit controllerwire.ClaimedUnit) err
 	return f(ctx, unit)
 }
 
-func TestLoopUsesOneQueueForTriggerAndNode(t *testing.T) {
-	want := []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
+func TestLoopUsesOneQueueForEveryUnitKind(t *testing.T) {
+	want := []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}
 	var requests []controllerwire.ClaimRequest
 	var hosted []capability.UnitKind
 	var loop *Loop
@@ -44,7 +44,7 @@ func TestLoopUsesOneQueueForTriggerAndNode(t *testing.T) {
 		}),
 		Host: hostFunc(func(_ context.Context, unit controllerwire.ClaimedUnit) error {
 			hosted = append(hosted, unit.Unit)
-			if len(hosted) == 2 {
+			if len(hosted) == len(want) {
 				loop.Drain()
 			}
 			return nil

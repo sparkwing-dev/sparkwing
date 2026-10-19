@@ -310,10 +310,16 @@ session. The team setting `members_can_add_machines` defaults to true. When it
 is false, personal enrollment requires administration too. Existing machines
 keep their owner-only claim scope until explicitly revoked.
 
-`GET /api/v1/team/settings` returns `members_can_add_machines` under `runs.read`.
-`PUT /api/v1/team/settings` requires `team.admin` and an explicit boolean with
-that name. Changes and their actor, store time and old/new values commit with
-an audit event. Audit failure rolls back the setting. Administrators can use
+`GET /api/v1/team/settings` returns `members_can_add_machines` and
+`claim_ranking` under `runs.read`. `PUT /api/v1/team/settings` requires
+`team.admin` and names at least one of them. `claim_ranking` takes distinct
+tiers from `here`, `personal`, `github-actions`, `self-hosted` and `cloud`, and
+an empty list means first come. Changes and their actor, store time and old/new
+values commit with an audit event.
+
+`PUT /api/v1/runners/{runner}/automation {"automated_runs": true}` opts a
+personal machine in to its owner's automated runs. Only the machine's owner can
+change it, and machines start opted out. Audit failure rolls back the setting. Administrators can use
 the console's team settings or `sparkwing team settings set --profile work
 --members-can-add-machines false`. Members can read it with `team settings show`.
 

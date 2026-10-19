@@ -252,6 +252,8 @@ func runSparkwing(args []string) (result error) {
 	switch inv.Command.Path {
 	case "sparkwing team settings show", "sparkwing team settings set":
 		return runTeamSettings(context.Background(), inv)
+	case "sparkwing runners automation":
+		return runMachineAutomation(context.Background(), inv)
 	case "sparkwing run":
 		return dispatchRunWithEngine(inv, switchToolchain)
 	case "sparkwing pipeline list":

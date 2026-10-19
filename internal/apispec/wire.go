@@ -134,8 +134,9 @@ func wireOperations() map[string]wireOperation {
 		}{}, client.RotatedToken{})
 	}
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", client.EnrollRunnerRequest{}, client.CreatedToken{})
-	result["GET /api/v1/team/settings"] = operation("Read team machine enrollment settings", nil, wire.TeamSettings{})
-	result["PUT /api/v1/team/settings"] = operation("Change and audit team machine enrollment settings", wire.TeamSettings{}, wire.TeamSettings{})
+	result["GET /api/v1/team/settings"] = operation("Read team machine enrollment settings and claim ranking", nil, wire.TeamSettings{})
+	result["PUT /api/v1/runners/{runner}/automation"] = operation("Opt the caller's personal machine in to the caller's automated runs", wire.MachineAutomation{}, wire.MachineAutomation{})
+	result["PUT /api/v1/team/settings"] = operation("Change and audit team machine enrollment settings and claim ranking", wire.TeamSettingsUpdate{}, wire.TeamSettings{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
 	result["POST /api/v1/data/records"] = operation("Commit a record", wire.DataRecordWriteRequest{}, wire.DataRecord{})
 	for _, path := range []string{"/api/v1/data/upload", "/api/v1/data/commit", "/api/v1/data/records"} {

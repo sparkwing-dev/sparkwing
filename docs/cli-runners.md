@@ -11,6 +11,7 @@ Manage runners
 ### Subcommands
 
 - `add` -- Register a runner
+- `automation` -- Opt a personal machine in to your automated runs
 - `list` -- List runners and their capacity
 - `remove` -- Remove a runner
 
@@ -49,6 +50,24 @@ Shared runner registration requires team administration. --personal registers ca
 | `--no-service` | no service |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 | `--reserved-for POOL` | reserved for Repeatable; comma-separated values are accepted. |
+
+## `sparkwing runners automation`
+
+Opt a personal machine in to your automated runs
+
+Opt your personal machine in to your own automated runs (push, pull request, release and schedule), or out again. Machines start opted out. Only the machine's owner changes it. JSON and plain report the resulting setting.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
+| `--runner RUNNER` | Runner name or selection. (required) |
+| `--automated-runs BOOL` | automated runs Values: true, false. (required) |
 
 ## `sparkwing runners list`
 

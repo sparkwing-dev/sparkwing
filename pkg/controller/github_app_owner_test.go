@@ -190,3 +190,41 @@ func TestGitHubRepositoryDisplayComesFromTheAppInstallation(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubAppRunsAnywhereUnlessTheRepositoryPinsCloud(t *testing.T) {
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server { return s.WithCloudDeployment(true) })
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for pipeline, runner := range map[string]string{"any-build": "", "cloud-build": "cloud"} {
+		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"runner": runner}); code != http.StatusOK {
+			t.Fatalf("subscribe %s runner=%q: %d", pipeline, runner, code)
+		}
+	}
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	payload["sender"] = map[string]any{"id": 501, "login": "olga"}
+	code, out := f.deliver("push", payload, "")
+	ids := startedRunIDs(t, out)
+	if code != http.StatusAccepted || len(ids) != 2 {
+		t.Fatalf("push = %d %v, want two runs", code, out)
+	}
+	anywhere := ""
+	for _, id := range ids {
+		sealed := f.sealedRequest(id)
+		pinned := strings.Contains(strings.Join(sealed.Options.Requires.Value, ","), "class=cloud")
+		if sealed.Dispatch != runspec.DispatchController || pinned != (sealed.Pipeline == "cloud-build") || sealed.Git.App.Value.SenderID != 501 {
+			t.Fatalf("%s sealed dispatch=%s requires=%v sender=%d", sealed.Pipeline, sealed.Dispatch, sealed.Options.Requires.Value, sealed.Git.App.Value.SenderID)
+		}
+		if !pinned {
+			anywhere = id
+		}
+	}
+	machine, _ := f.teamRunner(olga, "team-box")
+	var claimed controllerwire.ClaimResponse
+	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != anywhere || claimed.Claim.Unit != capability.UnitPlan {
+		t.Fatalf("team runner plan claim = %d %+v, want %s", code, claimed.Claim, anywhere)
+	}
+	claimed = controllerwire.ClaimResponse{}
+	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || claimed.Claim != nil {
+		t.Fatalf("team runner took the Cloud-pinned plan: %d %+v", code, claimed.Claim)
+	}
+}

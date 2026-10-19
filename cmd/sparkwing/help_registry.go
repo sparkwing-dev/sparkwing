@@ -247,6 +247,7 @@ var commandSynopses = map[string]string{
 	"sparkwing run":                                 "Invoke a pipeline",
 	"sparkwing runners":                             "Manage runners",
 	"sparkwing runners add":                         "Register a runner",
+	"sparkwing runners automation":                  "Opt a personal machine in to your automated runs",
 	"sparkwing runners list":                        "List runners and their capacity",
 	"sparkwing runners remove":                      "Remove a runner",
 	"sparkwing runs":                                "Inspect and control pipeline runs",

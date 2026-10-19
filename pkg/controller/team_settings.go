@@ -13,16 +13,14 @@ func (s *Server) handleTeamSettings(w http.ResponseWriter, r *http.Request, a ca
 		return engineLookupError(err)
 	}
 	if r.Method == http.MethodPut {
-		var request struct {
-			MembersCanAddMachines *bool `json:"members_can_add_machines"`
-		}
+		var request controllerwire.TeamSettingsUpdate
 		if err := decodeEngineRequest(r, &request); err != nil {
 			return err
 		}
-		if request.MembersCanAddMachines == nil {
-			return invalidEngineBody("members_can_add_machines must be a boolean")
+		if request.MembersCanAddMachines == nil && request.ClaimRanking == nil {
+			return invalidEngineBody("set members_can_add_machines or claim_ranking")
 		}
-		if err := tenant.SetAuthorizedTeamSettings(r.Context(), a, controllerwire.TeamSettings{MembersCanAddMachines: *request.MembersCanAddMachines}); err != nil {
+		if err := tenant.SetAuthorizedTeamSettings(r.Context(), a, request); err != nil {
 			return accountMutationError(err)
 		}
 	}

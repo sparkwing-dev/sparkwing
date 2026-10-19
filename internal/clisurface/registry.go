@@ -281,12 +281,13 @@ func Registry() []Command {
 		{Path: "sparkwing overflow", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
-		{Path: "sparkwing team settings show", Authority: TeamCredential, Rules: []string{"Show the team's members_can_add_machines setting. It defaults to true and allows members to enroll only their own personal machines."}, Flags: []Flag{
+		{Path: "sparkwing team settings show", Authority: TeamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. Plain prints the boolean and the comma-separated ranking."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
-		{Path: "sparkwing team settings set", Authority: TeamCredential, Rules: []string{"Only team administrators change members_can_add_machines. Changes are audited. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration."}, Flags: []Flag{
+		{Path: "sparkwing team settings set", Authority: TeamCredential, Rules: []string{"Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or both. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.", "--claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores here,personal,github-actions,self-hosted,cloud. Cloud takes part only while the team has credits or a saved card."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
-			{Name: "members-can-add-machines", Argument: "BOOL", Values: []string{"true", "false"}, Required: true},
+			{Name: "members-can-add-machines", Argument: "BOOL", Values: []string{"true", "false"}},
+			{Name: "claim-ranking", Argument: "TIERS"},
 		}},
 		{Path: "sparkwing overflow show", Authority: TeamCredential, Rules: []string{"Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
@@ -412,6 +413,11 @@ func Registry() []Command {
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
+		}},
+		{Path: "sparkwing runners automation", Authority: TeamCredential, Rules: []string{"Opt your personal machine in to your own automated runs (push, pull request, release and schedule), or out again. Machines start opted out. Only the machine's owner changes it. JSON and plain report the resulting setting."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "runner", Argument: "RUNNER", Required: true},
+			{Name: "automated-runs", Argument: "BOOL", Values: []string{"true", "false"}, Required: true},
 		}},
 		{Path: "sparkwing runners list", Authority: TeamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},

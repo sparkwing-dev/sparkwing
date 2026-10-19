@@ -196,7 +196,7 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 		return nil
 	}
 	slug := r.URL.Query().Get("repository")
-	runner := store.GitHubAppRunnerCloud
+	runner := store.GitHubAppRunnerAnywhere
 	if r.Method == http.MethodPut {
 		var req struct {
 			Repository string `json:"repository"`

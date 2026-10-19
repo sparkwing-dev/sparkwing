@@ -211,8 +211,8 @@ func claimPath(input controllerwire.ClaimRequest, launcher bool) (string, string
 		switch kind {
 		case capability.UnitTrigger, capability.UnitNode:
 		case capability.UnitPlan, capability.UnitEval:
-			if !launcher {
-				return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "plan and eval claims require a launcher client"}
+			if !launcher && input.RunID != "" {
+				return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "named plan and eval claims require a launcher client"}
 			}
 		default:
 			return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "unknown claim unit kind"}

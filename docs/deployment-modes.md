@@ -49,19 +49,41 @@ Add `--working-tree` to submit an immutable snapshot of tracked and unignored
 untracked files. The controller stores the bundle and seals its digest. Awarded
 workers acquire that exact source through their claim authority.
 
-A trigger, webhook run or schedule that names no self-hosted runner runs on
-Cloud: the launcher takes its plan, evaluation and job units. App runs and
-App-armed schedules take their owner from the repository's App configuration
-(`runner: cloud | github-actions | pool=<name>`). `--runner NAME`
-or `--runner label=LABEL` keeps the run on matching self-hosted runners, as
-does a pool route rule, and `--runner here` hosts it in the submitting CLI.
-Intake seals the choice in the run's request, so retries keep it. A run whose
-work no runner or launcher has claimed after 30 seconds shows a notice in
-`sparkwing runs status`. When only metered Cloud placement could take that work
-and the team has no credits or payment method left, the notice is
-`credit_hold` instead, naming the hold, and the launcher takes the work as soon
-as credits or a card arrive. Work an unmetered self-hosted runner of the team
-could take keeps the `unclaimed_work` notice.
+A trigger, webhook run or schedule that selects no runner runs anywhere: any
+eligible claimant can take its plan step and each job. The team's claim
+ranking orders the claimants, best first: `here` (the machine that started the
+run), `personal` (the requester's own machines), `github-actions`,
+`self-hosted` (the team's shared runners) and `cloud` (the launcher). Each unit
+waits up to 5 seconds from readiness for the best-ranked claimant that is
+online. The best-ranked claimant present takes it at once. Otherwise, when the
+window closes, the best-ranked claimant that asked during it has 5 more
+seconds to take the unit. After that, the first eligible asker wins. The
+launcher takes part only while the team has credits or a saved card. Runs
+started by a push, pull request, release or schedule skip `here` and
+`personal`. A machine's owner opts it in to their own automated runs:
+
+```bash
+sparkwing runners automation --profile work --runner laptop --automated-runs true
+```
+
+A team administrator reorders or drops tiers. A dropped tier takes no
+unselected work, and `none` means first come:
+
+```bash
+sparkwing team settings set --profile work --claim-ranking cloud,self-hosted
+```
+
+App runs and App-armed schedules take their owner from the repository's App
+configuration (`runner: anywhere | cloud | github-actions | pool=<name>`,
+default `anywhere`). `--runner NAME` or `--runner label=LABEL` keeps the run on
+matching self-hosted runners, as does a pool route rule, and `--runner here`
+hosts it in the submitting CLI. Intake seals the choice in the run's request,
+so retries keep it. A run whose work nobody has claimed after 30 seconds shows
+a notice in `sparkwing runs status`. When only metered Cloud placement could
+take that work and the team has no credits or payment method left, the notice
+is `credit_hold` instead, naming the hold, and the launcher takes the work as
+soon as credits or a card arrive. Work an unmetered runner of the team could
+take keeps the `unclaimed_work` notice.
 
 ## Self-hosted runners
 

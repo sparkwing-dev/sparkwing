@@ -43,7 +43,9 @@ Manage team settings
 
 Change the team's machine enrollment setting
 
-Only team administrators change members_can_add_machines. Changes are audited. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.
+Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or both. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.
+
+--claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores here,personal,github-actions,self-hosted,cloud. Cloud takes part only while the team has credits or a saved card.
 
 ### Flags
 
@@ -54,13 +56,14 @@ Only team administrators change members_can_add_machines. Changes are audited. F
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
-| `--members-can-add-machines BOOL` | members can add machines Values: true, false. (required) |
+| `--members-can-add-machines BOOL` | members can add machines Values: true, false. |
+| `--claim-ranking TIERS` | claim ranking |
 
 ## `sparkwing team settings show`
 
 Show the team's machine enrollment setting
 
-Show the team's members_can_add_machines setting. It defaults to true and allows members to enroll only their own personal machines.
+Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. Plain prints the boolean and the comma-separated ranking.
 
 ### Flags
 

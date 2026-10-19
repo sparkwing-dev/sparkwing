@@ -42,3 +42,26 @@ func (s *Server) handleSetOverflow(w http.ResponseWriter, r *http.Request, a cap
 	}
 	return s.handleReadOverflow(w, r, a)
 }
+
+func (s *Server) handleSetMachineAutomation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	var body controllerwire.MachineAutomation
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
+	}
+	name := r.PathValue("runner")
+	if body.Runner != "" && body.Runner != name {
+		return invalidEngineBody("runner must match the path")
+	}
+	if s.store == nil {
+		return missingEndpointPolicy()
+	}
+	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	if err != nil {
+		return engineLookupError(err)
+	}
+	if err := tenant.SetMachineAutomation(r.Context(), a.Principal.Authority, name, body.AutomatedRuns); err != nil {
+		return engineLookupError(err)
+	}
+	writeJSON(w, http.StatusOK, controllerwire.MachineAutomation{Runner: name, AutomatedRuns: body.AutomatedRuns})
+	return nil
+}
