@@ -96,8 +96,8 @@ reconciling existing Jobs and claims no work until the policies match again.
 The launcher can read only those four objects.
 
 The job namespace must hold no other NetworkPolicies, since an additive policy
-would widen Job egress, and no Pod Security labels besides the chart's
-privileged level.
+would widen Job egress or ingress, and no Pod Security labels besides the
+chart's privileged level.
 
 ## Award backstop
 
@@ -140,6 +140,33 @@ workload Pods only Job Pods, that team's capacity requests and boundary probes
 tolerate it, but cluster DaemonSets such as `aws-node`, `ebs-csi-node` and
 `kube-proxy` tolerate every taint and run privileged on team nodes. They and
 Kubernetes administrators remain trusted.
+
+## Node faults
+
+A kubelet can rewrite its own Node's annotations, so a fault read from them is
+charged to that node alone. Sync quarantines a node whose reservation in this
+job namespace is malformed, disagrees with its binding, names a team other than
+the node's protected team label, or carries an award the controller refuses
+outright: a binding refusal, a bad request or a changed binding. Each orphaned
+reservation goes to the controller in its own call, so a refusal names one
+node. Quarantine cordons a team node and records the cause in
+`sparkwing.dev/quarantined`. Reservation skips any node with that annotation,
+even after it is uncordoned. No NodeClaim is deleted: an operator inspects the
+node, then deletes it or removes the annotation.
+
+Release and Retire leave a node untouched when it was replaced or no longer
+holds the expected reservation, because it may hold another award. The Job keeps
+its cleanup finalizer and sync retries it. Rejection still fails the award.
+These node faults are logged at error level on every pass while claiming
+continues. Admission mismatch, Kubernetes and controller API failures and every
+other reconciliation error still stop claims.
+
+The launcher's ClusterRole grants `update` on every Node, and RBAC cannot
+narrow it. `resourceNames` needs names known at install, while Karpenter names
+nodes at launch, and RBAC has no label selectors or field restrictions. A
+ValidatingAdmissionPolicy on Node UPDATE by the launcher identity could confine
+it to team nodes and the reservation keys, taint, used-team label and cordon.
+That policy is not built.
 
 Sync skips nodes reserved under another job namespace and logs each one. When
 moving an install to a new job namespace, first let Jobs and reservations
@@ -365,18 +392,34 @@ exchange tests do not establish a working pod entrypoint.
 The installed launcher loads the standard Kubernetes client configuration and
 composes its award transport with `NewProductionBoundary`. The launcher account
 can create, read and delete probe Pods, and list, create and delete NetworkPolicies
-in the jobs namespace. It retains create/delete-only Secret access.
+in the jobs namespace. It retains create/delete-only Secret access. It can list
+EndpointSlices in `default` to find the API server's addresses.
 
-Before work starts, the boundary requires a default-deny egress policy selecting
-the exact Job labels. It inventories declared DaemonSet ports and observed
-kubelet endpoints. A temporary listener Pod has an explicit ingress allow rule. A separate witness
-Pod must connect through a rule allowing only that listener before a denied
-connection can establish egress enforcement. A separate root,
-privileged canary uses the workload's labels. It checks controller connectivity,
-then denies the listener and observed cluster API, DaemonSet TCP and kubelet
-endpoints. It repeats the cluster endpoint checks from the node network namespace
-with `nsenter`. DNS ports remain available. Declared UDP ports are inventoried,
-while UDP denial needs protocol-specific native checks.
+Before work starts, the boundary requires default-deny egress and ingress
+policies selecting the exact Job labels. It inventories declared DaemonSet ports
+and observed kubelet endpoints. A temporary listener Pod has an explicit ingress
+allow rule. A separate witness Pod must connect through a rule allowing only
+that listener before a denied connection can establish egress enforcement. A
+separate root, privileged canary uses the workload's labels. It checks
+controller connectivity from the Pod and, with `nsenter`, from the node network
+namespace, and requires the listener to be refused. Its other targets have
+three scopes:
+
+- Pod: the in-cluster API address and every address in the `default/kubernetes`
+  EndpointSlices must be refused from the Pod. The kubelet reaches the API from
+  the node, so node-context API refusal is not claimed. There, only node
+  credentials and authorization protect the API.
+- Node: DaemonSet TCP and kubelet endpoints must also be refused from the node
+  network namespace.
+- Peer: up to three Running Job Pods of other teams, sampled for each probe,
+  must be refused from the Pod and must time out from the node network
+  namespace on port 18888. A refused connection means the packet reached the
+  peer, so only a drop by the peer's ingress policy passes. Peers stay out of
+  the policy snapshot because they come and go.
+
+DNS ports remain available. Declared UDP ports are inventoried, while UDP denial
+needs protocol-specific native checks. The runner image needs `nc`, `nsenter`
+and `timeout`.
 
 Probe Pods carry the team label, node selector and team toleration admission
 requires. Canary results require unchanged admitted commands, images, labels apart
