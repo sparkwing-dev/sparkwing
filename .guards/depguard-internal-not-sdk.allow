@@ -1,0 +1,8 @@
+# depguard rule internal-not-sdk in .golangci-guards.yml. One line per package edge:
+# <importing package dir><TAB><imported package>.
+# Only delete lines: guardcheck fails a finding missing here and a line no
+# finding matches. See .guards/README.md.
+internal/logpretty	github.com/sparkwing-dev/sparkwing/sparkwing
+internal/secrets	github.com/sparkwing-dev/sparkwing/sparkwing
+internal/sparkwingruntime	github.com/sparkwing-dev/sparkwing/sparkwing
+internal/web	github.com/sparkwing-dev/sparkwing/sparkwing

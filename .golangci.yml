@@ -10,13 +10,14 @@ run:
   timeout: 20m
 
 linters:
+  # depguard and the F1 forbidigo rules live in .golangci-guards.yml, which
+  # judges the whole tree against .guards/ rather than only new code.
   default: none
   enable:
     - bidichk # CVE-2021-42574 Trojan Source defense
     - bodyclose # missing http response body Close()
     - contextcheck # work started on a context that ignores the caller's cancellation
     - copyloopvar # loop-variable capture bugs (Go 1.22+ semantics)
-    - depguard # banned imports (deprecated / wrong-version modules)
     - errcheck # unchecked error returns
     - errorlint # %w wrapping + errors.Is/As discipline
     - forbidigo # banned function calls (panic / os.Exit outside main)
@@ -79,89 +80,6 @@ linters:
       require-explanation: true
       require-specific: true
       allow-unused: false
-    depguard:
-      rules:
-        main:
-          deny:
-            - pkg: io/ioutil
-              desc: "io/ioutil is deprecated since Go 1.16; use io and os."
-            - pkg: github.com/pkg/errors
-              desc: "use stdlib errors with %w wrapping; errors.Is/As replaces pkg/errors.Cause/As."
-            - pkg: gopkg.in/yaml.v2
-              desc: "use gopkg.in/yaml.v3; v2 is unmaintained and has known issues with anchor handling."
-            - pkg: github.com/stretchr/testify/assert
-              desc: "use testify/require instead so a failed assertion stops the test (assert keeps going and produces follow-on noise)."
-
-        thin-binaries-no-dispatch:
-          list-mode: lax
-          files:
-            - "**/cmd/sparkwing-controller/**"
-            - "**/internal/backend/**"
-            - "**/internal/web/**"
-            - "!**/*_test.go"
-          deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/internal/orchestrator
-              desc: "Thin binaries and the dashboard support packages must not import internal/orchestrator (the dispatch engine). Use internal/paths for file-layout helpers and internal/logpretty for log rendering. If you genuinely need a new orchestrator symbol here, extract it to its own leaf package first."
-
-        sdk-no-internal:
-          list-mode: lax
-          files:
-            - "sparkwing/*.go"
-            - "!**/cmd/**"
-            - "!**/*_test.go"
-          deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/internal
-              desc: "The public sparkwing SDK package cannot import internal/* packages. Anything the SDK needs at the surface either belongs in the SDK itself or in pkg/."
-          allow:
-            - $gostd
-            - github.com/sparkwing-dev/sparkwing/internal/swtags
-
-        store-no-internal:
-          list-mode: lax
-          files:
-            - "**/pkg/store/**"
-            - "!**/*_test.go"
-          deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/internal
-              desc: "pkg/store is the data foundation; internal/* packages depend on it, not the reverse. If pkg/store needs a helper currently in internal/, lift it to pkg/ or inline it."
-
-        backends-no-impls:
-          list-mode: lax
-          files:
-            - "**/pkg/backends/**"
-            - "!**/*_test.go"
-          deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/storage
-              desc: "pkg/backends is config-type only; pkg/storage consumes the config, not the reverse. Factory wiring lives in pkg/storage/storeurl."
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/store
-              desc: "pkg/backends is config-type only. State-store implementations belong in pkg/store or pkg/storage/storeurl."
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/controller
-              desc: "pkg/backends declares the controller backend type; the controller implementation must not bleed in here."
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/logs
-              desc: "pkg/backends declares log backend types only; log-service implementation must not bleed in here."
-
-        cluster-runner-only:
-          list-mode: lax
-          files:
-            - "**"
-            - "!**/cmd/sparkwing-runner/**"
-            - "!**/internal/cluster/**"
-            - "!**/*_test.go"
-          deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/internal/cluster
-              desc: "internal/cluster is the warm-runner pool's implementation; only cmd/sparkwing-runner should import it. Other binaries that need a shared concept should consume it through a neutral package."
-
-        runners-dispatcher-only:
-          list-mode: lax
-          files:
-            - "**"
-            - "!**/internal/cluster/**"
-            - "!**/internal/orchestrator/**"
-            - "!**/internal/runners/**"
-            - "!**/*_test.go"
-          deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/internal/runners
-              desc: "internal/runners/* are the per-runtime execution backends. Only internal/cluster (the warm-runner pool) and internal/orchestrator (the dispatcher that selects one) should import them; everything else depends on the runner.Runner interface."
     forbidigo:
       exclude-godoc-examples: true
       analyze-types: false
