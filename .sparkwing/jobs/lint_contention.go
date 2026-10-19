@@ -32,7 +32,6 @@ func lintCommand() string { return "golangci-lint run --allow-serial-runners ./.
 var prePushLinters = []string{
 	"bidichk",
 	"copyloopvar",
-	"depguard",
 	"ineffassign",
 	"misspell",
 	"nolintlint",

@@ -44,7 +44,7 @@ func TestProtocol(t *testing.T) {
 					}
 					if scenario.ID == "protocol-memo-input-boundaries" && target.ID == "local-go-"+runtime.GOOS {
 						t.Run("sdk-input-contract", testGoSDKMemoInputBoundaries)
-						t.Skip("persisted memo reuse and write suppression require W1/W3 storage integration")
+						skipCell(t, scenario.ID, target.ID, "persisted memo reuse and write suppression require W1/W3 storage integration")
 					}
 					if scenario.ID == "protocol-version-and-hard-cut" && target.ID == "local-go-"+runtime.GOOS {
 						testGoSDKVersionAndHardCut(t)
@@ -56,7 +56,7 @@ func TestProtocol(t *testing.T) {
 					}
 					if scenario.ID == "protocol-mask-acknowledgement" && target.ID == "local-go-"+runtime.GOOS {
 						t.Run("sdk-service-contract", testGoSDKMaskAcknowledgement)
-						t.Skip("real HTTP registration and host sink installation require W2/W3 placement drivers")
+						skipCell(t, scenario.ID, target.ID, "real HTTP registration and host sink installation require W2/W3 placement drivers")
 					}
 					if scenario.ID == "protocol-go-sdk-fake-host-and-linkage" && target.ID == "local-go-"+runtime.GOOS {
 						t.Run("sdk-linkage", func(t *testing.T) {
@@ -100,7 +100,7 @@ func TestProtocol(t *testing.T) {
 						t.Run("real-process-host-routes", testGoSDKProcessRoutes)
 						return
 					}
-					t.Skipf("contract skeleton: %s on %s requires its placement driver", scenario.ID, target.ID)
+					skipCell(t, scenario.ID, target.ID, "contract skeleton: %s on %s requires its placement driver", scenario.ID, target.ID)
 				})
 			}
 		})
