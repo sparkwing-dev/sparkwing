@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, now time.Time) (Team, error) {
+// safety: an actionable warning blocks its card everywhere, and on a payment this deployment settled it holds the
+// team, takes back the credit the payment granted even when that leaves the balance negative, and queues a full
+// refund unless the charge was already refunded, so the payer is repaid before a dispute can open.
+func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, mode capability.PaymentMode, now time.Time) (Team, error) {
 	if w.WarningID == "" || w.PaymentIntent == "" {
 		return "", fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
 	}
@@ -35,12 +40,30 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 	if _, err := tx.ExecContext(ctx, "UPDATE payment_warnings SET actionable=1 WHERE warning_id=?", w.WarningID); err != nil {
 		return "", err
 	}
-	team, err := paymentWarningTeamTx(ctx, tx, payment, "")
+	if err := forgetCardTx(ctx, tx, fingerprint, "", CardRefusedWarning, now); err != nil {
+		return "", err
+	}
+	team, err := paymentWarningTeamTx(ctx, tx, payment, mode)
 	if err != nil || team == "" {
 		return "", err
 	}
 	if err := holdForWarningTx(ctx, tx, team, w.WarningID, payment, now); err != nil {
 		return "", err
+	}
+	grant, funded, err := paidGrantForPaymentTx(ctx, tx, payment)
+	if err != nil {
+		return "", err
+	}
+	if funded {
+		if _, err := reversePaymentTx(ctx, tx, payment, "fraud_warning:"+w.WarningID, "payment_provider", 0); err != nil {
+			return "", err
+		}
+	}
+	if !w.Refunded {
+		refund := CardPayment{PaymentIntent: payment, AmountCents: grant.AmountMicro / MicroCreditsPerCent}
+		if err := queueCardRefundTx(ctx, tx, team, refund, CardRefusedWarning, now); err != nil {
+			return "", err
+		}
 	}
 	return team, nil
 }

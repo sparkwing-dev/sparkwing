@@ -474,7 +474,8 @@ func TestANonActionableWarningStopsNoGrant(t *testing.T) {
 }
 
 // A warning on the card on file does not stop a pay-now payment made with
-// another card, and a warning on the card that paid does.
+// another card, and a warning on the card that paid does. The warned card is
+// forgotten and cannot be saved again, so collection never charges it.
 func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -504,6 +505,22 @@ func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 	if bal, err := acme.CreditBalanceMicro(ctx); err != nil || bal != 0 {
 		t.Fatalf("balance = %d, %v; want the debt paid", bal, err)
 	}
+	if work, _, err := s.AsOperator().DueCardCharges(ctx, now.Add(time.Hour)); err != nil || len(work) != 0 {
+		t.Fatalf("work = %+v, %v; want the warned card forgotten so collection never charges it", work, err)
+	}
+	if err := acme.TestOnlySaveCard(ctx, store.Card{
+		Customer: "cus_1", PaymentMethod: "pm_blocked", Fingerprint: "fp_1", Brand: "visa", Last4: "4242",
+	}, "billing", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := acme.SpendStanding(ctx, now); err != nil || st.Card.PaymentMethod != "" {
+		t.Fatalf("card = %+v, %v; want the warned card refused when saved again", st.Card, err)
+	}
+	if err := acme.TestOnlySaveCard(ctx, store.Card{
+		Customer: "cus_1", PaymentMethod: "pm_2", Fingerprint: "fp_2", Brand: "visa", Last4: "1111",
+	}, "billing", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	spend(t, s, "acme", "ch_2", 15_000)
 	next := dueCharge(t, s, now.Add(time.Hour))
 	if created, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
@@ -511,5 +528,52 @@ func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 		Fingerprint: "fp_1",
 	}, now); err != nil || created {
 		t.Fatalf("a payment by the warned card = %v, %v; want refused", created, err)
+	}
+}
+
+// A card pinned to the team it first paid for cannot be saved by another team,
+// and its payment of another team's charge is refused: the attempt fails, the
+// debt stays owed and the payment is queued for refund.
+func TestAPinnedCardIsRefusedForAnotherTeam(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	w := dueCharge(t, s, now)
+	if created, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_acme", AmountCents: 15_000, Fingerprint: "fp_1",
+	}, now); err != nil || !created {
+		t.Fatalf("first payment = %v, %v; want granted and pinned", created, err)
+	}
+	beta := teamHandle(t, s, "beta")
+	trustWithCard(t, beta, now)
+	if st, err := beta.SpendStanding(ctx, now); err != nil || st.Card.PaymentMethod != "" {
+		t.Fatalf("card = %+v, %v; want a card pinned elsewhere refused", st.Card, err)
+	}
+	if err := beta.TestOnlySaveCard(ctx, store.Card{
+		Customer: "cus_2", PaymentMethod: "pm_2", Fingerprint: "fp_2", Brand: "visa", Last4: "1111",
+	}, "billing", now); err != nil {
+		t.Fatal(err)
+	}
+	spend(t, s, "beta", "ch_2", 15_000)
+	next := dueCharge(t, s, now)
+	for range 2 {
+		if created, warned, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
+			ChargeID: next.ChargeID, AttemptID: next.AttemptID, PaymentIntent: "pi_beta", AmountCents: 15_000, Fingerprint: "fp_1",
+		}, now); err != nil || created || warned != nil {
+			t.Fatalf("pinned card's payment = %v, %+v, %v; want refused", created, warned, err)
+		}
+	}
+	if bal, err := beta.CreditBalanceMicro(ctx); err != nil || bal != -15_000*store.MicroCreditsPerCent {
+		t.Fatalf("balance = %d, %v; want the debt still owed", bal, err)
+	}
+	due, err := s.AsOperator().DueCardRefunds(ctx, now)
+	if err != nil || len(due) != 1 || due[0].Team != "beta" || due[0].PaymentIntent != "pi_beta" || due[0].Reason != store.CardRefusedPinned {
+		t.Fatalf("refunds = %+v, %v; want the refused payment queued once", due, err)
+	}
+	if st, err := beta.SpendStanding(ctx, now); err != nil || st.Card.Fingerprint != "fp_2" {
+		t.Fatalf("card = %+v, %v; want beta's own card kept", st.Card, err)
 	}
 }

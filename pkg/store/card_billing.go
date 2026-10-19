@@ -41,7 +41,7 @@ const (
 	CardAttemptLive   = "live"
 	CardAttemptPaid   = "succeeded"
 	CardAttemptFailed = "failed"
-	// CardAttemptWarned is an attempt whose payment drew an early fraud warning; it is refunded and grants nothing.
+	// CardAttemptWarned is an attempt whose payment drew an early fraud warning; it is queued for refund and grants nothing.
 	CardAttemptWarned = "warned"
 
 	CardAttemptOffSession = "off_session"
@@ -512,10 +512,15 @@ func insertCardGrantTx(ctx context.Context, tx *storeTx, team Team, amount int64
 	return nil
 }
 
+// safety: a payment is refunded once in full, so a later reason to refund it changes nothing.
 func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, p CardPayment, reason string, now time.Time) error {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO card_refunds (payment_intent, team, reason, created_at)
+	res, err := tx.ExecContext(ctx, `INSERT INTO card_refunds (payment_intent, team, reason, created_at)
 	    VALUES (?, ?, ?, ?) ON CONFLICT (team, payment_intent) DO NOTHING`,
-		p.PaymentIntent, string(team), reason, now.UnixNano()); err != nil {
+		p.PaymentIntent, string(team), reason, now.UnixNano())
+	if err != nil {
+		return err
+	}
+	if queued, err := res.RowsAffected(); err != nil || queued == 0 {
 		return err
 	}
 	return RecordBusinessEvent(tx, BusinessEvent{
@@ -639,21 +644,8 @@ type PaymentWarning struct {
 	Fingerprint   string
 	// Actionable is Stripe's word that the payment can still be refunded to head off a dispute; only such a warning stops a grant or holds a team.
 	Actionable bool
-}
-
-// ErrPaymentWarned refuses granting a payment that drew an early fraud warning; the warning's refund returns the money.
-var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")
-
-func refuseWarnedPaymentTx(ctx context.Context, tx *storeTx, paymentIntent string) error {
-	if paymentIntent == "" {
-		return nil
-	}
-	warned, err := rowPresentTx(ctx, tx, `SELECT 1 FROM payment_warnings WHERE actionable = 1 AND payment_intent = ?`,
-		paymentIntent)
-	if err != nil || !warned {
-		return err
-	}
-	return ErrPaymentWarned
+	// Refunded reports that the provider had already refunded the charge in full, so no refund is queued.
+	Refunded bool
 }
 
 const (

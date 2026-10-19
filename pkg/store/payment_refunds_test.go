@@ -173,20 +173,23 @@ func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
 			if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: actionable}, s.now()); err != nil {
 				t.Fatal(err)
 			}
-			_, err := s.settlePaymentFacts(t.Context(), event)
-			if actionable {
-				if !errors.Is(err, ErrPaymentWarned) {
-					t.Fatalf("warned checkout granted: %v", err)
-				}
-				rewriteSchemaCount(t, s.db, "credit_grants", 0)
-				rewriteSchemaCount(t, s.db, "payment_events", 0)
-				var unchanged int
-				if err := s.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM credit_checkouts WHERE payment_id='' AND paid_at IS NULL AND grant_id IS NULL").Scan(&unchanged); err != nil || unchanged != 1 {
-					t.Fatalf("warned checkout mutated: %d, %v", unchanged, err)
-				}
-			} else if err != nil {
+			if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 				t.Fatal(err)
 			}
+			if !actionable {
+				rewriteSchemaCount(t, s.db, "card_refunds", 0)
+				return
+			}
+			rewriteSchemaCount(t, s.db, "credit_grants", 0)
+			var refunded, reason string
+			if err := s.db.QueryRowContext(t.Context(), "SELECT payment_intent,reason FROM card_refunds WHERE team='a'").Scan(&refunded, &reason); err != nil || refunded != event.PaymentID || reason != CardRefusedWarning {
+				t.Fatalf("warned checkout refund=%q,%q: %v", refunded, reason, err)
+			}
+			var closed int
+			if err := s.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM credit_checkouts WHERE payment_id=? AND paid_at IS NULL AND grant_id IS NULL AND closed_at IS NOT NULL", event.PaymentID).Scan(&closed); err != nil || closed != 1 {
+				t.Fatalf("warned checkout left open: %d, %v", closed, err)
+			}
+			rewriteSchemaCount(t, s.db, "credit_freezes", 1)
 		})
 	}
 }

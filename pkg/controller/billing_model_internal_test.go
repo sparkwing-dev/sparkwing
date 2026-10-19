@@ -280,13 +280,18 @@ func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler
 
 func billingModelPaymentDelivery(t *testing.T, e *EngineController, configure func(*Server) *Server) (http.Handler, func(string, string, string) *httptest.ResponseRecorder) {
 	t.Helper()
+	provider := paymenttest.Provider{}.SettledCheckout("pi_fixture", false, "authenticated").SettledCheckout("payment", false, "authenticated")
+	return billingModelProviderDelivery(t, e, provider, configure)
+}
+
+func billingModelProviderDelivery(t *testing.T, e *EngineController, provider paymenttest.Provider, configure func(*Server) *Server) (http.Handler, func(string, string, string) *httptest.ResponseRecorder) {
+	t.Helper()
 	key, secret := filepath.Join(t.TempDir(), "api-key"), filepath.Join(t.TempDir(), "webhook-secret")
 	for path, value := range map[string]string{key: "sk_test_fixture", secret: "whsec_fixture"} {
 		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	provider := paymenttest.Provider{}.SettledCheckout("pi_fixture", false, "authenticated").SettledCheckout("payment", false, "authenticated")
 	verifier, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: capability.PaymentTest, APIKeyFile: key, WebhookSecretFile: secret, HTTPTransport: provider})
 	if err != nil {
 		t.Fatal(err)

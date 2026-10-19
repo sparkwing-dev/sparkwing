@@ -193,6 +193,16 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	if err := (&Tenant{s: tx.store, team: team}).lockTeamTx(ctx, tx); err != nil {
 		return err
 	}
+	refusal, err := refuseCardTx(ctx, tx, team, "", c.Fingerprint)
+	if err != nil {
+		return err
+	}
+	if refusal.reason != "" {
+		return RecordBusinessEvent(tx, BusinessEvent{
+			Team: team, Kind: BusinessEventCardRefused, SubjectID: c.PaymentMethod, Actor: actor, At: now,
+			Attrs: map[string]any{"reason": refusal.reason, "brand": c.Brand, "last4": c.Last4},
+		})
+	}
 	addedAt := now.UnixNano()
 	if !c.AddedAt.IsZero() {
 		addedAt = c.AddedAt.UnixNano()
@@ -262,24 +272,30 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 	correlated := a.paymentIntent == p.PaymentIntent && (a.status == CardAttemptLive || a.status == CardAttemptFailed) ||
 		a.paymentIntent == "" && a.status == CardAttemptLive
 	payable := state == CardChargeOpen && amount == frozenAmount && correlated
-	warning, err := paymentWarningTx(ctx, tx, p.PaymentIntent, p.Fingerprint)
+	refusal, err := refuseCardTx(ctx, tx, team, p.PaymentIntent, p.Fingerprint)
 	if err != nil {
 		return false, nil, err
 	}
-	if warning != "" {
+	if refusal.reason == CardRefusedPinned {
+		return false, nil, refusePinnedCardTx(ctx, tx, team, p, a.status, now)
+	}
+	if refusal.warning != "" {
 		repays, repaid, err := warnedCardRepaidTx(ctx, tx, team, a.kind, p.PaymentIntent, payable, amount)
 		if err != nil {
 			return false, nil, err
 		}
-		warned = &WarnedCardPayment{WarningID: warning, Repays: repays, RepaidMicro: repaid, UnappliedMicro: amount - repaid}
+		warned = &WarnedCardPayment{WarningID: refusal.warning, Repays: repays, RepaidMicro: repaid, UnappliedMicro: amount - repaid}
 		if err := settleWarnedTx(ctx, tx, team, p, *warned, now); err != nil {
 			return false, nil, err
 		}
 		if !repays {
-			return false, warned, nil
+			return false, warned, queueCardRefundTx(ctx, tx, team, p, CardRefusedWarning, now)
 		}
 	}
 	if err := insertCardGrantTx(ctx, tx, team, amount, p.PaymentIntent, nowNS); err != nil {
+		return false, nil, err
+	}
+	if err := pinCardTx(ctx, tx, team, p.PaymentIntent, p.Fingerprint, now); err != nil {
 		return false, nil, err
 	}
 	if warned != nil && warned.UnappliedMicro > 0 {

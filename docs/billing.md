@@ -122,3 +122,16 @@ Card setup and pay-now pages are correlated by their Checkout Session, which
 exists before payment. The completed session's verified setup or payment intent
 then binds to the page's team and collection attempt, and that intent's own
 events settle against it. Unsigned and badly signed requests are refused.
+
+The controller is the only consumer of Stripe events, so it also answers stolen
+cards. A card is pinned, by its Stripe fingerprint, to the team whose payment it
+first funds. A payment by that card for another team, through Add funds or a
+collection, grants nothing and is queued for a full refund; a refused
+collection counts as a declined charge, and the card cannot be saved on another
+team. An actionable early fraud warning on a payment this controller settled
+holds the team, takes back the credit the payment granted even when that leaves
+the balance negative, and queues a full refund unless Stripe has already
+refunded the charge. The warning also blocks the card on every team: it is
+removed wherever it is saved, cannot be saved again, and its later payments are
+refused and refunded. The controller's refund queue makes every such refund, and
+settling a refund never takes the same credit back twice.

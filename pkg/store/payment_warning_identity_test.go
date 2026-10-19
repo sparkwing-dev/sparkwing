@@ -246,9 +246,6 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 					t.Fatalf("%s standing: %+v, %v", tenant.team, standing, err)
 				}
 				want := int64(-10000 * MicroCreditsPerCent)
-				if order == "payment-first" && tenant == first {
-					want = 0
-				}
 				if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != want {
 					t.Fatalf("%s balance: %d, want %d, %v", tenant.team, balance, want, err)
 				}
@@ -285,8 +282,13 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				}
 			}
 			refunds, err := s.AsOperator().DueCardRefunds(t.Context(), now)
-			if err != nil || len(refunds) != 0 {
-				t.Fatalf("warning created refund work: %+v, %v", refunds, err)
+			if err != nil || len(refunds) != 2 {
+				t.Fatalf("warned payments queued %+v for refund, %v; want both", refunds, err)
+			}
+			for _, r := range refunds {
+				if r.Reason != CardRefusedWarning || r.PaymentIntent != payments[r.Team].PaymentIntent {
+					t.Fatalf("refund %+v; want each team's warned payment", r)
+				}
 			}
 		})
 	}

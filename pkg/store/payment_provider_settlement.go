@@ -213,7 +213,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 		if err != nil {
 			return result, err
 		}
-		team, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}, tx.now())
+		team, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable, Refunded: e.Refunded}, e.Mode, tx.now())
 		if err == nil && team != "" && team != owner {
 			return result, authorityError(apierr.Conflict, "warning changed its persisted payer")
 		}

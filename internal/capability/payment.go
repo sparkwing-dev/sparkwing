@@ -102,6 +102,8 @@ type PaymentEvent struct {
 	IntentID    string
 	Created     int64
 	Actionable  bool
+	// Refunded reports that a warned charge was already refunded in full when the warning was read.
+	Refunded bool
 }
 
 // VerifiedPaymentEvent can originate only from payment signature verification.
@@ -299,34 +301,34 @@ func (a *paymentAuthenticator) checkoutEvent(ctx context.Context, id string, bod
 		Currency: session.Currency, AmountMinor: *session.Amount, Mode: a.mode, Kind: policy.Kind,
 	}
 	if policy.Kind == PaymentCheckoutPaid {
-		result, err := a.threeDSecure(ctx, paymentID)
-		if err != nil {
+		if err := a.paidCard(ctx, &event); err != nil {
 			return nil, err
 		}
-		event.ThreeDS = result
 	}
 	return &VerifiedPaymentEvent{event: event}, nil
 }
 
-func (a *paymentAuthenticator) threeDSecure(ctx context.Context, paymentID string) (string, error) {
-	intent, err := a.provider.read(ctx, "payment_intents", paymentID, "payment_intent", a.mode)
+// safety: the fingerprint of the card that paid pins it to the team or refuses the payment.
+func (a *paymentAuthenticator) paidCard(ctx context.Context, event *PaymentEvent) error {
+	intent, err := a.provider.read(ctx, "payment_intents", event.PaymentID, "payment_intent", a.mode)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if intent.LatestCharge == "" {
-		return "", invalidPaymentEvent()
+		return invalidPaymentEvent()
 	}
 	charge, err := a.provider.read(ctx, "charges", string(intent.LatestCharge), "charge", a.mode)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if string(charge.PaymentIntent) != paymentID {
-		return "", invalidPaymentEvent()
+	if string(charge.PaymentIntent) != event.PaymentID {
+		return invalidPaymentEvent()
 	}
+	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint
 	if secure := charge.PaymentMethodDetails.Card.ThreeDSecure; secure != nil {
-		return secure.Result, nil
+		event.ThreeDS = secure.Result
 	}
-	return "", nil
+	return nil
 }
 
 func invalidPaymentEvent() *apierr.Error {

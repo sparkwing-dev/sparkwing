@@ -966,6 +966,13 @@ CREATE TABLE payment_warnings (
     created_at BIGINT NOT NULL
 );
 
+CREATE TABLE payment_cards (
+    fingerprint TEXT NOT NULL PRIMARY KEY,
+    first_team TEXT NOT NULL,
+    payment_intent TEXT NOT NULL,
+    pinned_at BIGINT NOT NULL
+);
+
 CREATE TABLE github_app_automation (
     team TEXT NOT NULL REFERENCES teams(name),
     repository_id BIGINT NOT NULL,

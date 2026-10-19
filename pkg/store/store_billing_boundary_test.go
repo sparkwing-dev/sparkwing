@@ -178,7 +178,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		t.Fatalf("collection work: %+v: %v", workItems, err)
 	}
 	work := workItems[0]
-	payment := CardPayment{Team: "a", ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "recovery", AmountCents: work.AmountCents}
+	payment := CardPayment{Team: "a", ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "recovery", AmountCents: work.AmountCents, Fingerprint: "fp_fixture"}
 	if _, _, err := op.SettleCardPayment(t.Context(), payment, *now); err != nil {
 		t.Fatal(err)
 	}

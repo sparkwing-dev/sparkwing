@@ -11,10 +11,11 @@ import (
 
 func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, provider string, cents int64) string {
 	t.Helper()
-	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('billing-owner','billing@example.test',1,1)`)
-	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'billing-owner','owner',1)`, tenant.Team())
-	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('billing-session','billing-owner','team.admin',1,?,?,'billing-owner')`, time.Now().Add(time.Hour).UnixNano(), tenant.Team())
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "billing-session"})
+	owner, session := "billing-owner-"+string(tenant.Team()), "billing-session-"+string(tenant.Team())
+	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1) ON CONFLICT DO NOTHING`, owner, owner+"@example.test")
+	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,'owner',1) ON CONFLICT DO NOTHING`, tenant.Team(), owner)
+	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,'team.admin',1,?,?,?) ON CONFLICT DO NOTHING`, session, owner, time.Now().Add(time.Hour).UnixNano(), tenant.Team(), owner)
+	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: session})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +27,7 @@ func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, pr
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, cents, "prepay")
+	page, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, cents, provider)
 	if err != nil {
 		t.Fatal(err)
 	}

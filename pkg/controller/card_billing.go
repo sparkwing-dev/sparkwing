@@ -101,7 +101,7 @@ func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error 
 				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,
 				"repaid_micro", warned.RepaidMicro, "unapplied_micro", warned.UnappliedMicro)
 		case warned != nil:
-			s.logger.Error("billing alert: a payment by a card with a fraud warning granted nothing; confirm it was refunded",
+			s.logger.Error("billing alert: a payment by a card with a fraud warning granted nothing and is queued for refund",
 				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
 				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,
 				"unapplied_micro", warned.UnappliedMicro)

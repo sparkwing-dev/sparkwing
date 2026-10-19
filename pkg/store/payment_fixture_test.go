@@ -53,7 +53,7 @@ func (t *Tenant) TestOnlySaveCard(ctx context.Context, c Card, actor string, now
 // TestOnlyRecordPaymentWarning exercises the transaction owner with trusted fixture facts.
 func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (team Team, err error) {
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		team, err = recordPaymentWarningTx(ctx, tx, w, now)
+		team, err = recordPaymentWarningTx(ctx, tx, w, "", now)
 		return err
 	})
 	if err != nil {

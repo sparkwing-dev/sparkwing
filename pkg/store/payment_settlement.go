@@ -195,8 +195,13 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		}
 		return RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: checkout.result.Team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID}})
 	}
-	if err := refuseWarnedPaymentTx(ctx, tx, event.PaymentID); err != nil {
+	team := checkout.result.Team
+	refusal, err := refuseCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint)
+	if err != nil {
 		return err
+	}
+	if refusal.reason != "" {
+		return refuseCheckoutTx(ctx, tx, event, checkout, refusal)
 	}
 	grant, err := newCreditID("paid")
 	if err != nil {
@@ -211,6 +216,9 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return err
 	}
 	checkout.result.GrantID = grant
+	if err := pinCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint, tx.now()); err != nil {
+		return err
+	}
 	if err := recordGrantEventTx(tx, CreditGrant{ID: grant, Team: checkout.result.Team, Kind: CreditGrantPaid, AmountMicro: checkout.result.AmountMicro, Reference: "payment:" + string(event.Mode) + ":" + checkout.result.CheckoutID, CreatedBy: "payment_provider", CreatedAt: tx.now()}, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS}); err != nil {
 		return err
 	}
@@ -222,6 +230,27 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return clearTeamCreditExhaustedTx(ctx, tx, checkout.result.Team, now)
 	}
 	return nil
+}
+
+// safety: a refused Add funds payment closes its checkout without a grant and is queued for a full refund, whose
+// settlement finds the team through the checkout's payment; a warned card also holds the team.
+func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
+	team, now := checkout.result.Team, tx.now()
+	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?) WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+		return err
+	}
+	if refusal.warning != "" {
+		if err := holdForWarningTx(ctx, tx, team, refusal.warning, event.PaymentID, now); err != nil {
+			return err
+		}
+	}
+	if err := RecordBusinessEvent(tx, BusinessEvent{
+		Team: team, Kind: BusinessEventCardRefused, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", At: now,
+		Attrs: map[string]any{"reason": refusal.reason, "payment_id": event.PaymentID, "warning_id": refusal.warning},
+	}); err != nil {
+		return err
+	}
+	return queueCardRefundTx(ctx, tx, team, CardPayment{PaymentIntent: event.PaymentID, AmountCents: event.AmountMinor}, refusal.reason, now)
 }
 
 // DeploymentID returns this store's payment deployment identity, created once at first use and never changed by
