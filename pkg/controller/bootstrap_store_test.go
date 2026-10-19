@@ -3,6 +3,7 @@ package controller
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"math/rand/v2"
 	"testing"
 
@@ -44,8 +45,8 @@ func TestBootstrapSeedStoreOnceProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, initial); err == nil || created {
-		t.Fatalf("revoked seed revived: %v, %v", created, err)
+	if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, initial); !errors.Is(err, store.ErrBootstrapSeedConsumed) || created {
+		t.Fatalf("revoked seed: created=%v err=%v, want ErrBootstrapSeedConsumed so a restart only warns", created, err)
 	}
 	if ready, err := e.Store.HasDeploymentAdministrator(t.Context()); err != nil || ready {
 		t.Fatalf("revoked administrator remains ready: %v, %v", ready, err)
