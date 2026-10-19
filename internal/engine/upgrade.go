@@ -228,7 +228,7 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind,
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), body, 0o600); err != nil {
 			return err
 		}
-		return r.nativeCommand(ctx, dir, "go", "mod", "tidy")
+		return r.nativeCommand(ctx, dir, Pin{SDK: GoSDK, Version: version}, "go", "mod", "tidy")
 	case TypeScriptSDK:
 		body, err := os.ReadFile(filepath.Join(dir, "package.json"))
 		if err != nil {
@@ -268,13 +268,13 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind,
 		if err := os.WriteFile(filepath.Join(dir, "package.json"), body, 0o600); err != nil {
 			return err
 		}
-		return r.nativeCommand(ctx, dir, "npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund")
+		return r.nativeCommand(ctx, dir, Pin{SDK: TypeScriptSDK, Version: version}, "npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund")
 	default:
 		return invalid("unknown SDK kind", "Select go or typescript.")
 	}
 }
 
-func (r *Resolver) nativeCommand(ctx context.Context, dir, name string, args ...string) error {
+func (r *Resolver) nativeCommand(ctx context.Context, dir string, pin Pin, name string, args ...string) error {
 	if r.command != nil {
 		return r.command(ctx, dir, name, args...)
 	}
@@ -292,7 +292,15 @@ func (r *Resolver) nativeCommand(ctx context.Context, dir, name string, args ...
 	if err != nil {
 		return err
 	}
-	command.Env = append(environment, "GOWORK=off")
+	environment = append(environment, "GOWORK=off")
+	if name == "go" {
+		qa, err := QAModuleEnvironment(ctx, dir, pin, environment)
+		if err != nil {
+			return err
+		}
+		environment = append(environment, qa...)
+	}
+	command.Env = environment
 	var output bytes.Buffer
 	command.Stdout, command.Stderr = &output, &output
 	if err := gotoolchain.Run(ctx, command); err != nil {
