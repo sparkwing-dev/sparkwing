@@ -10,6 +10,7 @@ import (
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -38,6 +39,9 @@ func newAdmissionEnv(t *testing.T) *admissionEnv {
 	e.admissionFixture = newAdmissionFixture(t)
 	admin, ctx := e.as(t, "admin"), t.Context()
 	if _, err := admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud"}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.NodeV1().RuntimeClasses().Create(ctx, &nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: "unsafe"}, Handler: "unsafe"}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, account := range []string{ServiceAccount, "default"} {

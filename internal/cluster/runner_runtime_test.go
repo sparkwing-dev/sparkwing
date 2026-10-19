@@ -91,7 +91,7 @@ func TestStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t *testing.T) {
 				},
 				Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
 					return cliRuntime(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-						if !reflect.DeepEqual(request.Kinds, kinds) || request.RunnerVersion != "v1.2.3" {
+						if !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}) || request.RunnerVersion != "v1.2.3" {
 							t.Errorf("claim: %#v", request)
 						}
 						unit := cliAward(kinds[claims])

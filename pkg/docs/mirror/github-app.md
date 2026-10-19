@@ -116,7 +116,8 @@ of the runs they start:
 
 | `runner` | Owner |
 | --- | --- |
-| `cloud` (default) | Sparkwing Cloud's launcher plans and runs the work |
+| `anywhere` (default) | Any eligible claimant, ordered by the team's claim ranking. Personal machines never take App runs |
+| `cloud` | Sparkwing Cloud's launcher plans and runs the work |
 | `github-actions` | Only a GitHub Actions runner bound to the delivery's push claims the run's trigger, as in [GitHub Actions runners](github-actions-runners.md) |
 | `pool=<name>` | A self-hosted runner reserved for that pool; a pool access rule must still allow the repository. App-armed schedules qualify for the rule through the repository's automation consent |
 

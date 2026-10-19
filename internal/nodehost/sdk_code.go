@@ -26,6 +26,13 @@ type sdkCode struct {
 
 func (h *sdkCode) readResult(ctx context.Context, row store.NodeRow, storage StorageBinding) (json.RawMessage, error) {
 	if storage.Bytes != nil || storage.Records != nil {
+		var job nodeproto.JobSpec
+		if err := json.Unmarshal(row.Spec, &job); err != nil {
+			return nil, executorError(apierr.PlanDrift, "generator source declaration is invalid")
+		}
+		if job.ResultStep == "" && row.OutputRecord == nil {
+			return json.RawMessage("null"), nil
+		}
 		return (OutputRecords{Blobs: storage.Bytes, Records: storage.Records}).ReadResult(ctx, row, storage.Authority)
 	}
 	if h.ReadOutput == nil {

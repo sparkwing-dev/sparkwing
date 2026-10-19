@@ -96,7 +96,7 @@ func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability
 	return ownerDemandEligibleTx(ctx, tx, owner, demand, ref)
 }
 
-// ownerExecutionDemandTx reports ok=false when the owner has no current host observation.
+// safety: ok=false means the owner has no current host observation, which is not an error.
 func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal, reserved *match.Resources) (UnitDemand, bool, error) {
 	demand, err := reservedOwnerDemandTx(ctx, tx, owner, reserved)
 	if err != nil {
@@ -125,6 +125,6 @@ func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Pr
 	if !match.Evaluate(profile, required).OK() || !match.Fits(profile.Capacity, demand.Available, required.Request).OK() {
 		return false, nil
 	}
-	placement, err := unitPlacementTx(ctx, tx, Team(owner.Capability.Team), unit, profile, required)
+	placement, err := unitPlacementTx(ctx, tx, Team(owner.Capability.Team), unit, demand.CapabilityPrefix, profile, required)
 	return !placement.hold, err
 }

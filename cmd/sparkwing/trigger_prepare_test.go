@@ -268,7 +268,7 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.IdempotencyKey == "" || request.Request.Pipeline != "deploy-prod" || request.Request.Source.Entrypoint != "Deploy" || request.Request.Git.SHA != sha || request.Request.Mode != runspec.IntakeExecute || request.Request.Origin != runspec.OriginTrigger || request.Request.Dispatch != runspec.DispatchHost {
+	if request.IdempotencyKey == "" || request.Request.Pipeline != "deploy-prod" || request.Request.Source.Entrypoint != "Deploy" || request.Request.Git.SHA != sha || request.Request.Mode != runspec.IntakeExecute || request.Request.Origin != runspec.OriginTrigger || request.Request.Dispatch != "" {
 		t.Fatalf("prepared intake changed: %+v", request)
 	}
 	if request.Request.Team != "" || request.Request.Actor.ID != "" || request.Request.Git.App.Set {

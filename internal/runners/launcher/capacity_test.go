@@ -41,7 +41,7 @@ func capacityMutations() map[string]func(*corev1.Pod) {
 		"sidecar": func(p *corev1.Pod) {
 			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar", Image: "other"})
 		},
-		"other_team":   func(p *corev1.Pod) { p.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("other") },
+		"other_team":   func(p *corev1.Pod) { p.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("cloud", "other") },
 		"other_demand": func(p *corev1.Pod) { p.Annotations[demandAnnotation] = `{"binding":{}}` },
 		"coordinated_size": func(p *corev1.Pod) {
 			var d capacityDemand
@@ -71,7 +71,7 @@ func TestLaunchWithoutATeamNodeHoldsTheAwardAndRequestsOneNodePerUnit(t *testing
 		t.Fatalf("capacity requests = %d, held awards = %d, want 1 and 1", len(pods), len(l.waitingAwards()))
 	}
 	spec := pods[0].Spec
-	if spec.NodeName != "" || !reflect.DeepEqual(spec.NodeSelector, map[string]string{TeamNodeLabel: TeamNodeValue("team")}) || !reflect.DeepEqual(spec.Tolerations, teamTolerations("team")) {
+	if spec.NodeName != "" || !reflect.DeepEqual(spec.NodeSelector, map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "team")}) || !reflect.DeepEqual(spec.Tolerations, teamTolerations("cloud", "team")) {
 		t.Fatalf("request is not confined to the team pool: %+v", spec)
 	}
 	if spec.ServiceAccountName != ServiceAccount || spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken || len(spec.Volumes) != 0 || len(spec.InitContainers) != 0 || len(spec.Containers) != 1 {
@@ -177,7 +177,7 @@ func TestCapacityRequestCarriesNoAwardCredentialProperty(t *testing.T) {
 			return false
 		}
 		raw, err := json.Marshal(pod)
-		return err == nil && !bytes.Contains(raw, award.Bootstrap) && pod.Spec.NodeSelector[TeamNodeLabel] == TeamNodeValue(team) && len(pod.Spec.Volumes) == 0
+		return err == nil && !bytes.Contains(raw, award.Bootstrap) && pod.Spec.NodeSelector[TeamNodeLabel] == TeamNodeValue("cloud", team) && len(pod.Spec.Volumes) == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestCapacityRequestLivesExactlyAsLongAsItsAward(t *testing.T) {
 	if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "ready", UID: "ready-uid", Labels: map[string]string{TeamNodeLabel: TeamNodeValue("team")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "ready", UID: "ready-uid", Labels: map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "team")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}

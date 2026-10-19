@@ -56,12 +56,31 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 				}
 				sources[source.Ref.NodeID] = *source.ManifestRecord
 			}
-			snapshot.Nodes = []store.NodeRow{node}
+			ancestors := generatorSources(snapshot.Expansions, node.Ref.NodeID)
+			snapshot.Nodes = slices.DeleteFunc(snapshot.Nodes, func(row store.NodeRow) bool { return row.Ref != node.Ref && !ancestors[row.Ref.NodeID] })
 			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: snapshot, ArtifactSources: sources})
 			return nil
 		}
 	}
 	return engineLookupError(store.ErrNotFound)
+}
+
+func generatorSources(expansions []store.AcceptedExpansionRow, id string) map[string]bool {
+	parents := map[string]string{}
+	for _, expansion := range expansions {
+		var plan nodeproto.PlanDoc
+		if json.Unmarshal(expansion.Body, &plan) != nil {
+			continue
+		}
+		for _, job := range plan.Jobs {
+			parents[job.ID] = expansion.Source.NodeID
+		}
+	}
+	sources := map[string]bool{}
+	for parent, ok := parents[id]; ok && !sources[parent]; parent, ok = parents[parent] {
+		sources[parent] = true
+	}
+	return sources
 }
 
 func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

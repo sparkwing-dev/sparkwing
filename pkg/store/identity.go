@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Role is an account's authority inside one team. The set is closed: there
@@ -298,9 +299,13 @@ func slugBase(email string) string {
 	return base
 }
 
+// safety: the cut lands on a rune boundary, so truncated text stays valid UTF-8 for PostgreSQL.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n]
 }

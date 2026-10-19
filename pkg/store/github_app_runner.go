@@ -10,43 +10,50 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // GitHubAppRunner is the owner a repository subscription or automation grant selects for its runs.
 type GitHubAppRunner string
 
-// GitHubAppRunnerCloud and GitHubAppRunnerActions are the fixed selections; any other is "pool=<name>".
+// GitHubAppRunnerAnywhere leaves App runs to the team's claim ranking; cloud, github-actions and "pool=<name>" pin them.
 const (
-	GitHubAppRunnerCloud   GitHubAppRunner = "cloud"
-	GitHubAppRunnerActions GitHubAppRunner = "github-actions"
+	GitHubAppRunnerAnywhere GitHubAppRunner = "anywhere"
+	GitHubAppRunnerCloud    GitHubAppRunner = "cloud"
+	GitHubAppRunnerActions  GitHubAppRunner = "github-actions"
 )
 
-// ParseGitHubAppRunner accepts cloud (the default), github-actions or pool=<name>.
+// ParseGitHubAppRunner accepts anywhere (the default), cloud, github-actions or pool=<name>.
 func ParseGitHubAppRunner(raw string) (GitHubAppRunner, error) {
 	switch raw {
-	case "", string(GitHubAppRunnerCloud):
-		return GitHubAppRunnerCloud, nil
-	case string(GitHubAppRunnerActions):
-		return GitHubAppRunnerActions, nil
+	case "", string(GitHubAppRunnerAnywhere):
+		return GitHubAppRunnerAnywhere, nil
+	case string(GitHubAppRunnerCloud), string(GitHubAppRunnerActions):
+		return GitHubAppRunner(raw), nil
 	}
 	if pool, ok := strings.CutPrefix(raw, "pool="); ok && ValidRunnerName(pool) {
 		return GitHubAppRunner(raw), nil
 	}
-	return "", fmt.Errorf("%w: runner must be cloud, github-actions or pool=<name>", ErrInvalidInput)
+	return "", fmt.Errorf("%w: runner must be anywhere, cloud, github-actions or pool=<name>", ErrInvalidInput)
 }
 
 func (r GitHubAppRunner) apply(options *runspec.Options) {
 	origin := runspec.SettingOrigin{Layer: runspec.LayerOperatorTeam, Key: "github_app.runner"}
-	switch {
-	case r == GitHubAppRunnerActions:
-		options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerActions}}, Origin: origin}
-	case strings.HasPrefix(string(r), "pool="):
-		if !slices.Contains(options.Requires.Value, string(r)) {
-			options.Requires.Value = append(slices.Clone(options.Requires.Value), string(r))
+	require := func(term string) {
+		if !slices.Contains(options.Requires.Value, term) {
+			options.Requires.Value = append(slices.Clone(options.Requires.Value), term)
 		}
 		if !options.Requires.Set {
 			options.Requires.Set, options.Requires.Origin = true, origin
 		}
+	}
+	switch {
+	case r == GitHubAppRunnerActions:
+		options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerActions}}, Origin: origin}
+	case r == GitHubAppRunnerCloud:
+		require("class=" + match.ClassCloud)
+	case strings.HasPrefix(string(r), "pool="):
+		require(string(r))
 	}
 }
 

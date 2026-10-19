@@ -49,14 +49,15 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 		if err != nil {
 			return err
 		}
-		if !registeredClaimant(principal.Capability) && !here {
-			return authorityError(apierr.Forbidden, "runner observations require an unbound machine claimant")
+		c := principal.Capability
+		if !rankedObservable(c) && !here {
+			return authorityError(apierr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 		}
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, raw, body, tx.now().UnixNano(), principal.Capability.Team, observation.CapabilityPrefix)
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, tx.now().UnixNano(), c.Team, observation.CapabilityPrefix)
 		return err
 	})
 }
@@ -170,6 +171,10 @@ func registeredAgentTx(ctx context.Context, tx *storeTx, team Team, observed Reg
 	return &observed, nil
 }
 
+func actionsClaimant(c capability.Capability) bool {
+	return c.Subject.Kind == capability.SubjectMachine && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingPush && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
+}
+
 func registeredClaimant(c capability.Capability) bool {
 	return c.Subject.Kind == capability.SubjectMachine && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
 }
@@ -187,8 +192,8 @@ type WaitingNode struct {
 
 // ListWaitingNodes lists up to limit ready nodes, ordered by run and node
 // after the key after, that first became ready before readyBefore and that no
-// agent has claimed. A controller-dispatched node is the launcher's, so no
-// agent's absence explains its wait and it is not listed.
+// agent has claimed. A controller-dispatched node's wait is explained by its
+// run's unclaimed-work notice, so it is not listed.
 func (o *Operator) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error) {
 	if limit <= 0 {
 		return nil, errors.New("waiting node limit must be positive")

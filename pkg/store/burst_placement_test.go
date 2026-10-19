@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,7 +56,7 @@ func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
-			if err := (&Tenant{s: s, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettings{}); err != nil {
+			if err := (&Tenant{s: s, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)}); err != nil {
 				t.Fatal(err)
 			}
 			if i%4 == 0 {
@@ -355,4 +356,38 @@ func FuzzBurstReservationKeepsCapacityAndClaimFences(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestBurstMachinesPreferenceFollowsTheMachineStartedRunsOwner(t *testing.T) {
+	s, _ := burstFixture(t, runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}}})
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	other := authorityMember(t, s, "other", RoleEditor)
+	burstPersonalClaimant(t, s, owner.Authority, "laptop")
+	burstPersonalClaimant(t, s, owner.Authority, "desktop")
+	burstPersonalClaimant(t, s, other.Authority, "foreign")
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET created_principal='laptop',created_subject_kind='machine'`)
+	var run string
+	if err := s.db.QueryRowContext(t.Context(), `SELECT id FROM runs LIMIT 1`).Scan(&run); err != nil {
+		t.Fatal(err)
+	}
+	var preferences []PlacementPreference
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		var err error
+		preferences, err = burstPreferencesTx(t.Context(), tx, "a", run, runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(preferences) != 1 {
+		t.Fatalf("preferences = %+v", preferences)
+	}
+	prefers := "," + preferences[0].Prefers[0] + ","
+	for _, name := range []string{"laptop", "desktop"} {
+		if !strings.Contains(prefers, ",name="+name+",") {
+			t.Errorf("machines preference %q omits the owner's %s", prefers, name)
+		}
+	}
+	if strings.Contains(prefers, "foreign") {
+		t.Errorf("machines preference %q names another member's machine", prefers)
+	}
 }

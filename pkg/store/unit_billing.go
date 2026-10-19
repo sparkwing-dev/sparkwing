@@ -208,8 +208,7 @@ func applyBillingCancellationTx(ctx context.Context, tx *storeTx, team Team, uni
 		if err != nil {
 			return err
 		}
-		_, limit := st.Headroom()
-		if limit == SpendLimitChargePending || limit == SpendLimitChargeFailed {
+		if st.RunningWorkContinues() {
 			return nil
 		}
 	}

@@ -2,13 +2,15 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // NoCreditsHold is the credit hold for a team with neither a balance nor a payment method covering Cloud work.
@@ -21,6 +23,8 @@ type UnclaimedUnit struct {
 	Since  time.Time
 	// CreditHold says why the team's credit standing keeps the launcher from claiming the unit; empty when it does not.
 	CreditHold string
+	// NoEligible says why no claimant can take a run-anywhere unit; empty when one can.
+	NoEligible string
 }
 
 func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow) (*UnclaimedUnit, error) {
@@ -55,54 +59,115 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 	}
 	if run.Dispatch == string(runspec.DispatchController) {
 		ref := UnitRef{Kind: unit.Kind, RunID: run.ID, NodeID: unit.NodeID}
-		unmetered, err := unmeteredClaimantEligibleTx(ctx, tx, team, ref)
-		if err != nil || unmetered {
+		standings, err := unitStandingsTx(ctx, tx, team, ref)
+		if err != nil || slices.ContainsFunc(standings, func(e eligibility) bool { return e.ok() && !e.unobserved }) {
 			return &unit, err
 		}
-		if unit.CreditHold, err = unitCreditHoldTx(ctx, tx, team, run, ref); err != nil {
-			return nil, err
+		if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepBilling }) {
+			if unit.CreditHold, err = unitCreditHoldTx(ctx, tx, team, run, ref); err != nil || unit.CreditHold != "" {
+				return &unit, err
+			}
 		}
+		if runAnywhere(run.Request.Request) {
+			unit.NoEligible, err = noEligibleCauseTx(ctx, tx, team, run, ref, standings)
+		}
+		return &unit, err
 	}
 	return &unit, nil
 }
 
-func unmeteredClaimantEligibleTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) (bool, error) {
-	agents, err := registeredAgentObservationsTx(ctx, tx, team)
+// safety: notices judge the live observations the ranking scans; an unpolled launcher only informs credit standing.
+func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) ([]eligibility, error) {
+	polls, err := placementRunnersTx(ctx, tx, team, time.Minute, true)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	for _, agent := range agents {
-		chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: agent.CapabilityPrefix}, false)
-		if unavailableRunner(err) {
-			continue
-		}
+	var standings []eligibility
+	observed := map[string]bool{}
+	for _, poll := range polls {
+		observed[poll.CapabilityPrefix] = true
+		standing, err := unitEligibilityTx(ctx, tx, team, unit, poll.UnitDemand, eligibilityChecks{fit: true, billing: true})
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		c := chain[0].principal.Capability
-		if c.Team != string(team) || !registeredClaimant(c) || meteredPlacement(c, chain[len(chain)-1].principal.Capability) {
-			continue
+		standings = append(standings, standing)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix LIMIT ?`, "", tx.now().UnixNano(), limits.RankingObservations)
+	if err != nil {
+		return nil, err
+	}
+	var launchers []string
+	for rows.Next() {
+		var prefix string
+		if err := rows.Scan(&prefix); err != nil {
+			return nil, errors.Join(err, rows.Close())
 		}
-		if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil {
-			continue
-		}
-		demand := UnitDemand{CapabilityPrefix: agent.CapabilityPrefix, Labels: agent.Profile.Labels}
-		if agent.poll != nil {
-			demand.OS, demand.Arch, demand.Capacity = agent.poll.OS, agent.poll.Arch, agent.poll.Capacity
-		}
-		profile, requirements, err := readMatchingInputsTx(ctx, tx, demand, unit, false)
-		var denied *apierr.Error
-		if errors.As(err, &denied) && denied.Code == apierr.Forbidden {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		if match.Evaluate(profile, requirements).OK() {
-			return true, nil
+		if !observed[prefix] {
+			launchers = append(launchers, prefix)
 		}
 	}
-	return false, nil
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	for _, prefix := range launchers {
+		standing, err := unitEligibilityTx(ctx, tx, team, unit, UnitDemand{CapabilityPrefix: prefix}, eligibilityChecks{billing: true})
+		if err != nil {
+			return nil, err
+		}
+		if standing.launcher {
+			standing.unobserved = true
+			standings = append(standings, standing)
+		}
+	}
+	return standings, nil
+}
+
+var tierNames = map[string]string{TierHere: "The submitting machine", TierPersonal: "Personal machines", TierActions: "GitHub Actions runners", TierSelfHosted: "Self-hosted runners", TierCloud: "Cloud"}
+
+func noEligibleCauseTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef, standings []eligibility) (string, error) {
+	var names []string
+	for _, tier := range DefaultClaimRanking {
+		if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepTier && e.tier == tier }) {
+			names = append(names, tierNames[tier])
+		}
+	}
+	if len(names) > 0 {
+		list, verb := names[len(names)-1], " is"
+		if len(names) > 1 {
+			list, verb = strings.Join(names[:len(names)-1], ", ")+" and "+list, " are"
+		} else if strings.HasSuffix(list, "s") {
+			verb = " are"
+		}
+		return list + verb + " off in this team's runner ranking", nil
+	}
+	terms := slices.Clone(run.Request.Request.Options.Requires.Value)
+	what := "this run"
+	if unit.Kind == capability.UnitNode {
+		var body []byte
+		if err := tx.QueryRowContext(ctx, `SELECT execution_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&body); err != nil {
+			return "", err
+		}
+		var execution runspec.JobExecutionSettings
+		if err := json.Unmarshal(body, &execution); err != nil {
+			return "", err
+		}
+		terms, what = execution.Requires.Value, "this job"
+	}
+	if pinned := slices.DeleteFunc(slices.Clone(terms), func(term string) bool { return !pinnedTerm(term) }); len(pinned) > 0 {
+		return what + " targets " + strings.Join(pinned, " ") + " only", nil
+	}
+	if slices.ContainsFunc(standings, func(e eligibility) bool { return !e.unobserved && e.failed == stepCapacity }) {
+		return "", nil
+	}
+	ranking, err := claimRankingTx(ctx, tx, team)
+	if err != nil {
+		return "", err
+	}
+	allowed := "any tier"
+	if len(ranking) > 0 {
+		allowed = strings.Join(ranking, ", ")
+	}
+	return "no runner of the allowed tiers (" + allowed + ") is online; start or register a runner", nil
 }
 
 func unitCreditHoldTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef) (string, error) {

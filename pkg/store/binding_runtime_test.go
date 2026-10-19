@@ -228,9 +228,9 @@ func TestBindingClaimKindsShareStoreGrantValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kinds := range [][]capability.UnitKind{{capability.UnitTrigger, capability.UnitNode}, nil, {capability.UnitNode, capability.UnitNode}, {"unknown"}, {capability.UnitNode, capability.UnitEval}} {
+	for _, kinds := range [][]capability.UnitKind{{capability.UnitTrigger, capability.UnitNode}, {capability.UnitPlan, capability.UnitEval}, nil, {capability.UnitNode, capability.UnitNode}, {"unknown"}} {
 		err := s.CheckBinding(t.Context(), p, capability.BindClaimSelection, capability.Target{Team: "a", ClaimKinds: kinds})
-		if len(kinds) == 2 && kinds[0] == capability.UnitTrigger {
+		if len(kinds) == 2 && kinds[0] != kinds[1] {
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -231,8 +231,8 @@ type Authenticated struct {
 // It owns lookups for team ownership, declarations, pools, ancestry, slots and data edges.
 // Implementations return typed apierr errors and perform no external side effects.
 // claimSelection refuses empty, duplicate, unknown or unauthorized ClaimKinds before selection.
-// nodes.claim authorizes node, triggers.claim authorizes trigger, and claims.launch
-// authorizes plan/eval/node only. The request cannot combine alternatives to widen authority.
+// nodes.claim authorizes node and eval, triggers.claim authorizes trigger and plan, and
+// claims.launch authorizes plan/eval/node only. The request cannot combine alternatives to widen authority.
 // The named trigger route also accepts a here Award's trigger.host for its exact
 // reserved run under LiveHereClaim. This exception never opens an ordered queue scan.
 type BindingChecker interface {
@@ -332,11 +332,14 @@ func claimSelection(p Principal, path string, kinds []UnitKind) error {
 			grant = ClaimsLaunch
 		case "/api/v1/runners/claim", "/api/v1/runs/{run}/claim":
 			switch kind {
-			case UnitNode:
+			case UnitNode, UnitEval, UnitPlan:
 				if path != "/api/v1/runners/claim" {
 					return forbidden(apierr.ReasonBinding)
 				}
 				grant = NodesClaim
+				if kind == UnitPlan {
+					grant = TriggersClaim
+				}
 			case UnitTrigger:
 				grant = TriggersClaim
 			default:

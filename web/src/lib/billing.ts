@@ -31,9 +31,9 @@ export interface GrantRow {
 export interface Billing {
   team: string;
   balance_micro: number;
-  // frozen is true while the team's cloud usage is held over a payment
-  // dispute; its cloud runs do not start until the operator releases it.
+  // frozen is true while any hold is open; hold_cause names the one whose remedy applies first.
   frozen: boolean;
+  hold_cause?: "decline" | "dispute" | "early_fraud_warning" | "operator" | "revoked" | string;
   micro_per_credit: number;
   credits_per_dollar: number;
   min_billable_seconds: number;
@@ -58,6 +58,93 @@ export interface Billing {
     next_attempt_at?: number;
   };
   limits: SpendLimits;
+  standing: TeamStanding;
+}
+
+export interface StandingRequest {
+  id: string;
+  team: string;
+  tier: string;
+  message: string;
+  requested_by?: string;
+  // Unix seconds.
+  requested_at: number;
+  state: "open" | "approved" | "declined" | string;
+  decided_at?: number;
+  decision_reason?: string;
+}
+
+export interface StandingHistory {
+  tier: string;
+  paid_micro: number;
+  successful_charges: number;
+  // Unix seconds.
+  first_paid_at?: number;
+  last_incident_at?: number;
+}
+
+export interface TeamStanding {
+  tier: string;
+  history: StandingHistory;
+  prepay_ceiling: string;
+  can_request: boolean;
+  request?: StandingRequest;
+}
+
+export const standingMessageLimit = 1000;
+
+// standingRequestLength counts Unicode code points, the unit the controller limits.
+export function standingRequestLength(message: string): number {
+  return [...message.trim()].length;
+}
+
+// standingRequestProblem says why a tier request cannot be sent yet, or "".
+export function standingRequestProblem(message: string): string {
+  const text = message.trim();
+  if (text === "") return "Tell us what the team runs and why it needs more capacity.";
+  if (standingRequestLength(text) > standingMessageLimit)
+    return `Keep the message to ${standingMessageLimit} characters.`;
+  return "";
+}
+
+// standingOutcome describes the team's latest tier request for its owners.
+export function standingOutcome(r: StandingRequest): string {
+  switch (r.state) {
+    case "open":
+      return `Your request for ${r.tier} standing is waiting for an operator.`;
+    case "approved":
+      return `An operator granted ${r.tier} standing.`;
+    case "declined":
+      return `An operator declined the request for ${r.tier} standing${r.decision_reason ? `: ${r.decision_reason}` : "."}`;
+    default:
+      return `Your request for ${r.tier} standing is ${r.state}.`;
+  }
+}
+
+// prepayNote explains how far prepaid funds can raise the team's standing.
+export function prepayNote(s: TeamStanding): string {
+  if (s.tier === "High") return "";
+  const high = "High needs $500 paid and 30 clean days, or an operator grant.";
+  if (s.prepay_ceiling === s.history.tier)
+    return `Payment history earns ${s.history.tier}. Prepaid funds cannot raise it further. ${high}`;
+  return `Payment history earns ${s.history.tier}. Prepaid funds can raise standing to ${s.prepay_ceiling}. ${high}`;
+}
+
+export async function requestHighStanding(message: string): Promise<StandingRequest> {
+  const res = await authFetch("/api/v1/team/billing/standing-request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tier: "high", message: message.trim() }),
+  });
+  if (!res.ok) {
+    const body = await readErrorBody(res);
+    throw new BillingApiError(
+      res.status,
+      body.error || `Request failed (${res.status}).`,
+      body.code,
+    );
+  }
+  return (await res.json()) as StandingRequest;
 }
 
 export interface SpendLimits {
@@ -72,6 +159,22 @@ export interface SpendLimits {
   binding: string;
 }
 
+// holdNotice says what blocks new Cloud work and how to lift it, by the hold's cause.
+export function holdNotice(cause: string | undefined): string {
+  switch (cause) {
+    case "decline":
+      return "The card was declined. Update the card or pay the charge to start new Cloud work; running jobs finish and your own runners keep working.";
+    case "dispute":
+      return "New Cloud work is paused while a payment dispute is open. Contact support to resolve it.";
+    case "early_fraud_warning":
+      return "New Cloud work is paused because the card issuer reported possible fraud. Contact support.";
+    case "revoked":
+      return "Sparkwing support revoked this team's Cloud standing. Contact support.";
+    default:
+      return "Sparkwing support placed a hold on this team's Cloud work. Contact support.";
+  }
+}
+
 // Why new Cloud work waits, by the limit the controller says binds first.
 export function limitReason(binding: string): string {
   switch (binding) {
@@ -79,8 +182,10 @@ export function limitReason(binding: string): string {
       return "The team reached its budget.";
     case "charge_pending":
       return "New Cloud work waits while the pending card charge completes. Running work finishes.";
+    case "held":
+      return "New Cloud work waits while a hold is on the team. Running work finishes.";
     case "charge_failed":
-      return "The last card charge failed. Pay it now or update the card.";
+      return "The card was declined. Update the card or pay the charge now; new Cloud work waits until then.";
     default:
       return "The balance is spent.";
   }

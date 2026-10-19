@@ -50,19 +50,49 @@ Add `--working-tree` to submit an immutable snapshot of tracked and unignored
 untracked files. The controller stores the bundle and seals its digest. Awarded
 workers acquire that exact source through their claim authority.
 
-A trigger, webhook run or schedule that names no self-hosted runner runs on
-Cloud: the launcher takes its plan, evaluation and job units. App runs and
-App-armed schedules take their owner from the repository's App configuration
-(`runner: cloud | github-actions | pool=<name>`). `--runner NAME`
-or `--runner label=LABEL` keeps the run on matching self-hosted runners, as
-does a pool route rule, and `--runner here` hosts it in the submitting CLI.
-Intake seals the choice in the run's request, so retries keep it. A run whose
-work no runner or launcher has claimed after 30 seconds shows a notice in
-`sparkwing runs status`. When only metered Cloud placement could take that work
-and the team has no credits or payment method left, the notice is
-`credit_hold` instead, naming the hold, and the launcher takes the work as soon
-as credits or a card arrive. Work an unmetered self-hosted runner of the team
-could take keeps the `unclaimed_work` notice.
+A trigger, webhook run or schedule that selects no runner runs anywhere, on
+Cloud and on self-hosted controllers alike: any eligible claimant can take its
+plan step, generator evaluations and each job. The team's claim ranking orders
+the claimants, best first: `here` (the personal runner on the machine whose
+CLI started the run), `personal` (the requester's own machines),
+`github-actions`, `self-hosted` (the team's shared runners and the local
+controller's own queue) and `cloud` (the launcher; a self-hosted controller
+has none and refuses `cloud` in a ranking). A self-hosted
+`sparkwing-controller` does not run pipelines itself: until a runner is
+registered and online, unselected work waits with a `no_eligible_runner`
+notice. Each unit waits up to 5 seconds from readiness for the
+best-ranked claimant that is online. The best-ranked claimant present takes it
+at once. A claimant that asks while a better one is online is recorded. When
+the window closes, the best-ranked recorded asker has 2 more seconds to come
+back. After that, the first eligible asker wins. The launcher takes part only
+while the team has credits or a saved card. A job that requires a `pool=`,
+`name=` or `class=` term skips the ranking and goes to the runners it names.
+
+Runs started by a push, pull request, release or schedule, and their retries
+and child runs, skip `here` and `personal`: a personal machine takes only its
+owner's manual runs.
+
+A team administrator reorders or drops tiers. A dropped tier takes no
+unselected work, and `none` means first come:
+
+```bash
+sparkwing team settings set --profile work --claim-ranking cloud,self-hosted
+```
+
+App runs and App-armed schedules take their owner from the repository's App
+configuration (`runner: anywhere | cloud | github-actions | pool=<name>`,
+default `anywhere`). `--runner NAME` or `--runner label=LABEL` keeps the run on
+matching self-hosted runners, as does a pool route rule, and `--runner here`
+hosts it in the submitting CLI. Intake seals the choice in the run's request,
+so retries keep it. A run whose work nobody has claimed after 30 seconds shows
+a notice in `sparkwing runs status`. When only metered Cloud placement could
+take that work and the team has no credits or payment method left, the notice
+is `credit_hold` instead, naming the hold, and the launcher takes the work as
+soon as credits or a card arrive. Work an unmetered runner of the team could
+take keeps the `unclaimed_work` notice. When no eligible runner is online at
+all, the notice is `no_eligible_runner` and names why: a tier the ranking drops
+("Cloud is off in this team's runner ranking"), a pin ("this job targets
+pool=gpu only"), or that no runner of the allowed tiers is online.
 
 ## Self-hosted runners
 
@@ -96,6 +126,9 @@ The repository's controller and Helm chart are Cloud operator infrastructure.
 The controller owns persistence and issues scoped object transfers through
 `/data`. Runners never write directly to its database. The SDK pin selects the
 verified matching engine, and controller APIs retain the engine's support window.
+Without a Cloud `--limits-profile` (`cloud` or `cloud-free`), unselected work
+runs on the team's registered runners; the controller never executes
+pipelines itself.
 
 Cloud operators can create a team and its first administrator without OAuth:
 

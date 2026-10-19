@@ -16,6 +16,7 @@ import (
 
 func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	var out UnitClaim
+	var waiting error
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
@@ -35,17 +36,27 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 		if !validMatchingResources(demand.Capacity) || !validMatchingResources(demand.Available) {
 			return authorityError(apierr.BadRequest, "invalid claim resources")
 		}
-		if demand.Target != nil {
-			out, err = claimUnitTx(ctx, tx, demand, *demand.Target)
-			return err
+		unit := demand.Target
+		if unit == nil {
+			queued, err := queuedUnitTx(ctx, tx, p.Capability, demand, kinds)
+			if errors.Is(err, ErrNotFound) {
+				waiting = err
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			unit = &queued
 		}
-		unit, err := queuedUnitTx(ctx, tx, p.Capability, demand, kinds)
-		if err != nil {
-			return err
+		out, err = claimUnitTx(ctx, tx, demand, *unit)
+		if err == errRankingHold {
+			waiting, err = err, nil
 		}
-		out, err = claimUnitTx(ctx, tx, demand, unit)
 		return err
 	})
+	if err == nil && waiting != nil {
+		return UnitClaim{}, waiting
+	}
 	if err != nil {
 		var unpriced *UnpricedCPUClassError
 		if errors.As(err, &unpriced) && unpriced.RunID != "" && unpriced.NodeID != "" {
@@ -55,6 +66,9 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 	}
 	return out, nil
 }
+
+// safety: a held claim commits its transaction, so the ask it recorded survives; nothing else was written by then.
+var errRankingHold = authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
 
 func lockClaimControllerTx(ctx context.Context, tx *storeTx) error {
 	var holder string
@@ -88,10 +102,11 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 	}
 	for _, kind := range kinds {
 		grant := capability.NodesClaim
-		if kind == capability.UnitTrigger {
+		if kind == capability.UnitTrigger || kind == capability.UnitPlan {
 			grant = capability.TriggersClaim
 		}
-		allowed := slices.Contains(c.Grants, grant) && (kind == capability.UnitNode || kind == capability.UnitTrigger)
+		unbound := c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush
+		allowed := slices.Contains(c.Grants, grant) && (kind == capability.UnitNode || kind == capability.UnitTrigger || unbound)
 		if launcherClaimant(c) {
 			allowed = kind == capability.UnitPlan || kind == capability.UnitEval || kind == capability.UnitNode
 		}
@@ -123,36 +138,24 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if _, err = claimKinds(p.Capability, UnitDemand{Target: &unit}); err != nil {
 		return UnitClaim{}, err
 	}
-	profile, requirements, err := matchingInputsTx(ctx, tx, demand, unit)
+	var team Team
+	if err = tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {
+		return UnitClaim{}, err
+	}
+	named := demand
+	named.Kinds = nil
+	standing, err := unitEligibilityTx(ctx, tx, team, unit, named, eligibilityChecks{lock: true, fit: true, claim: true})
 	if err != nil {
 		return UnitClaim{}, err
 	}
+	if !standing.ok() {
+		return UnitClaim{}, standing.refused
+	}
+	profile, requirements := standing.profile, standing.demand
 	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	if unit.Kind == capability.UnitNode {
-		root := p.Capability
-		if root.Parent != nil {
-			chain, err := authorityChainTx(ctx, tx, p.Authority, false)
-			if err != nil {
-				return UnitClaim{}, err
-			}
-			root = chain[len(chain)-1].principal.Capability
-		}
-		if meteredPlacement(p.Capability, root) {
-			if _, err := unitBillingPriceTx(ctx, tx, requirements.Request); err != nil {
-				return UnitClaim{}, err
-			}
-		}
-	}
-	if verdict := match.Evaluate(profile, requirements); !verdict.OK() {
-		return UnitClaim{}, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
-	}
-	if verdict := match.Fits(profile.Capacity, demand.Available, requirements.Request); !verdict.OK() {
-		return UnitClaim{}, authorityError(apierr.LockHeld, "claimant capacity is unavailable")
-	}
-	var team Team
-	if err = tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {
+	if err = lockRankedUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
 	if err = lockClaimOwnerTx(ctx, tx, team, unit); err != nil {
@@ -164,12 +167,15 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if err = checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	placement, err := unitPlacementTx(ctx, tx, team, unit, profile, requirements)
+	placement, err := unitPlacementTx(ctx, tx, team, unit, demand.CapabilityPrefix, profile, requirements)
 	if err != nil {
 		return UnitClaim{}, err
 	}
 	if placement.hold {
-		return UnitClaim{}, authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
+		return UnitClaim{}, errRankingHold
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=?`, team, unit.RunID, unit.Kind, unit.NodeID); err != nil {
+		return UnitClaim{}, err
 	}
 	unitID, err := encodeAwardUnit(unit)
 	if err != nil {

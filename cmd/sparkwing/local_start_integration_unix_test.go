@@ -79,7 +79,7 @@ func TestRunStartsLocalControllerBeforeSubmitting(t *testing.T) {
 	var readErr strings.Builder
 	read.Stderr = &readErr
 	output, err = read.Output()
-	// runs status exits 3 for a run that has not finished, so the observed identity is the evidence.
+	// safety: runs status exits 3 for an unfinished run, so the observed identity is the evidence.
 	var exit *exec.ExitError
 	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 3) {
 		t.Fatalf("started controller did not retain submitted run: %v\n%s\n%s", err, output, &readErr)

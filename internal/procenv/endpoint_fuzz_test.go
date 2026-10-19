@@ -169,6 +169,7 @@ func TestGoEndpointTokensInPathOrQueryAreMasked(t *testing.T) {
 	for _, tc := range []struct{ name, value, secret string }{
 		{"GOPROXY", "https://proxy.golang.org,https://artifacts.example/api/go/path-token-123|direct", "path-token-123"},
 		{"GOPROXY", "https://artifacts.example/?token=query-token-456,direct", "query-token-456"},
+		{"GOPROXY", "https://artifacts.example/go/?auth=a&key=query-key-0987", "query-key-0987"},
 		{"GOSUMDB", "sum.example+key https://sum.example/token/sum-token-789", "sum-token-789"},
 	} {
 		masker := secrets.NewMasker()
@@ -177,6 +178,10 @@ func TestGoEndpointTokensInPathOrQueryAreMasked(t *testing.T) {
 		}
 		if strings.Contains(masker.Mask(tc.value), tc.secret) {
 			t.Errorf("%s token %q visible in %q", tc.name, tc.secret, masker.Mask(tc.value))
+		}
+		reported := strings.Replace(tc.value, "/?", "/github.com/acme/widgets/@v/list?", 1)
+		if strings.Contains(masker.Mask(reported), tc.secret) {
+			t.Errorf("%s token %q visible in Go's reported URL %q", tc.name, tc.secret, masker.Mask(reported))
 		}
 		if got := masker.Mask("https://proxy.golang.org"); got != "https://proxy.golang.org" {
 			t.Errorf("root proxy endpoint masked: %q", got)

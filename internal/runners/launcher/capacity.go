@@ -40,8 +40,8 @@ func capacityName(b CloudJobBinding) string {
 	return capacityPrefix + strings.TrimPrefix(jobName(b), "sw-")
 }
 
-func teamTolerations(team string) []corev1.Toleration {
-	return []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: TeamNodeLabel, Value: labelHash(team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}}
+func teamTolerations(namespace, team string) []corev1.Toleration {
+	return []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: TeamNodeLabel, Value: TeamNodeValue(namespace, team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}}
 }
 
 // safety: the pod pends until Karpenter adds a node from the team's own pool,
@@ -65,18 +65,18 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: capacityName(b), Namespace: cfg.Namespace,
-			Labels:      map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, capacityLabel: "true", TeamLabel: labelHash(b.Team)},
+			Labels:      map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, capacityLabel: "true", TeamLabel: TeamNodeValue(cfg.Namespace, b.Team)},
 			Annotations: map[string]string{deadlineAnnotation: deadline.Format(time.RFC3339Nano), demandAnnotation: string(demand)},
 		},
 		Spec: corev1.PodSpec{
-			Tolerations: teamTolerations(b.Team), NodeSelector: map[string]string{TeamNodeLabel: labelHash(b.Team)},
+			Tolerations: teamTolerations(cfg.Namespace, b.Team), NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(cfg.Namespace, b.Team)},
 			ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: ptr(int64(1)),
-			SecurityContext:               &corev1.PodSecurityContext{RunAsNonRoot: ptr(true), RunAsUser: ptr(int64(65534)), RunAsGroup: ptr(int64(65534)), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
+			SecurityContext:               probePodSecurity(),
 			Containers: []corev1.Container{{
 				Name: "capacity", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: []string{"version"},
 				Resources:       corev1.ResourceRequirements{Requests: requests, Limits: requests.DeepCopy()},
-				SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), ReadOnlyRootFilesystem: ptr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
+				SecurityContext: capacitySecurity(),
 			}},
 		},
 	}, nil
@@ -205,11 +205,7 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 
 func capacityIdentityRefused(err error) bool {
 	var failure *apierr.Error
-	if !errors.As(err, &failure) {
-		return false
-	}
-	return failure.Code == apierr.LockHeld || failure.Code == apierr.Forbidden &&
-		(failure.Details["reason"] == apierr.ReasonBinding || failure.Details["reason"] == string(apierr.ReasonBinding))
+	return errors.As(err, &failure) && failure.Code == apierr.LockHeld || bindingRefused(err)
 }
 
 func (l *Launcher) wait(award *CloudJobAward) {
@@ -254,4 +250,11 @@ func (l *Launcher) releaseCapacity(ctx context.Context, b CloudJobBinding) error
 		return err
 	}
 	return l.deleteCapacityPod(ctx, pod)
+}
+
+// capacitySecurity is the probe profile with a read-only root filesystem.
+func capacitySecurity() *corev1.SecurityContext {
+	sc := probeSecurity()
+	sc.ReadOnlyRootFilesystem = ptr(true)
+	return sc
 }

@@ -544,7 +544,7 @@ func burstPublicHoldMachine(t *testing.T, ctx context.Context, endpoint string) 
 	}
 }
 
-func burstPublicPersonalRunner(t *testing.T, ctx context.Context, cli, repo string, state *store.Store) {
+func burstPublicPersonalRunner(t *testing.T, ctx context.Context, cli, repo string, state *store.Store) string {
 	t.Helper()
 	session, _, _, err := state.CreateAccountSession(ctx, store.Account{ID: "burst-user"}, "default", time.Hour)
 	if err != nil {
@@ -588,6 +588,7 @@ func burstPublicPersonalRunner(t *testing.T, ctx context.Context, cli, repo stri
 		}
 		t.Logf("registered runner output: %s", stream.String())
 	})
+	return config
 }
 
 type burstCLIOutput struct {

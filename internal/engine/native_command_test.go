@@ -54,7 +54,7 @@ func TestNativeDependencyCommandHonorsCancellation(t *testing.T) {
 	t.Setenv("PATH", dependencyTool(t))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	err := (&Resolver{}).nativeCommand(ctx, t.TempDir(), "npm", "install")
+	err := (&Resolver{}).nativeCommand(ctx, t.TempDir(), Pin{}, "npm", "install")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled native tool: %v", err)
 	}
@@ -77,7 +77,7 @@ func assertNativeDependencyMask(t *testing.T, password string) {
 	t.Helper()
 	proxy := "https://" + url.UserPassword("builder", password).String() + "@proxy.example"
 	t.Setenv("HTTPS_PROXY", proxy)
-	err := (&Resolver{}).nativeCommand(t.Context(), t.TempDir(), "npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund")
+	err := (&Resolver{}).nativeCommand(t.Context(), t.TempDir(), Pin{}, "npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund")
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 12 {
 		t.Fatalf("dependency tool did not run through native argv: %v", err)

@@ -7,15 +7,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// SelectDispatch is the one intake dispatch rule. Off Cloud the request's own
-// dispatch stands; on Cloud a runner selector or pool requirement keeps the run
-// host-dispatched and every other executable run goes to the launcher.
-func SelectDispatch(cloud bool, request runspec.Request) runspec.Dispatch {
-	if !cloud {
-		return request.Dispatch
-	}
+// SelectDispatch is the one intake dispatch rule on every controller. Publish runs, local runs, burst runs, a runner
+// selection other than any, and a pool= requirement keep host dispatch. Every other executing run seals controller
+// dispatch, including name= and class= requirements, whose units skip ranking for the claimants they name.
+func SelectDispatch(request runspec.Request) runspec.Dispatch {
 	runner := request.Options.Runner
-	if request.Mode != runspec.IntakeExecute || runner.Set && runner.Value.Kind != runspec.RunnerAny || slices.ContainsFunc(request.Options.Requires.Value, requiresPool) {
+	if request.Mode != runspec.IntakeExecute || request.Origin == runspec.OriginLocal || request.Burst != nil || runner.Set && runner.Value.Kind != runspec.RunnerAny || slices.ContainsFunc(request.Options.Requires.Value, requiresPool) {
 		return runspec.DispatchHost
 	}
 	return runspec.DispatchController

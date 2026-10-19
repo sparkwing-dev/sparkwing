@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -98,5 +99,13 @@ func TestChildIntakeInheritsTheActionsOwnerOnlyFromItsParent(t *testing.T) {
 		if parentActions != (err == nil) {
 			t.Fatalf("parent sealed with Actions=%t: child admission error %v", parentActions, err)
 		}
+	}
+}
+
+func TestIntakeRefusesAClientDeclaredScheduleOrigin(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	request.Request.Origin = runspec.OriginSchedule
+	if _, err := tenant.AdmitRun(t.Context(), request); err == nil || !strings.Contains(err.Error(), "schedule firing") {
+		t.Fatalf("a client started a schedule run: %v", err)
 	}
 }

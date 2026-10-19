@@ -24,6 +24,19 @@ type BillingStanding struct {
 	TrustAt        time.Time
 	TrustReason    string
 	Trusted        bool
+	History        StandingHistory
+	PrepayCeiling  string
+	HoldCause      string
+}
+
+func openHoldCauseTx(ctx context.Context, q rowQuerier, team Team) (string, error) {
+	var rank sql.NullInt64
+	err := q.QueryRowContext(ctx, `SELECT MAX(CASE WHEN dispute_id LIKE ? THEN 2 WHEN cause=? THEN 1 WHEN cause=? THEN 3 ELSE 4 END) FROM credit_freezes WHERE team=? AND released_at IS NULL`,
+		OperatorHoldPrefix+"%", FreezeCauseDecline, FreezeCauseWarning, team).Scan(&rank)
+	if err != nil || !rank.Valid {
+		return "", err
+	}
+	return [...]string{1: FreezeCauseDecline, 2: HoldCauseOperator, 3: FreezeCauseWarning, 4: HoldCauseDispute}[rank.Int64], nil
 }
 
 // BillingStanding reports the team's history and balance backed standing.
@@ -44,15 +57,20 @@ func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 	if at > 0 {
 		b.TrustAt = time.Unix(0, at)
 	}
-	held, err := rowPresentTx(ctx, q, `SELECT 1 FROM credit_freezes WHERE team=? AND released_at IS NULL`, team)
+	cause, err := openHoldCauseTx(ctx, q, team)
 	if err != nil {
 		return b, err
+	}
+	held := cause != ""
+	if b.HoldCause = cause; b.Trust == BillingTrustRevoked {
+		b.HoldCause = HoldCauseRevoked
 	}
 	policy, err := standingPolicyTx(ctx, q, team, now, b.Trust, held)
 	if err != nil {
 		return b, err
 	}
-	b.Tier, b.CloudVCPU, b.MaxJobDuration = policy.tier, policy.vCPU, policy.duration
+	b.Tier, b.CloudVCPU, b.MaxJobDuration = policy.row.tier, policy.row.vCPU, policy.row.duration
+	b.History, b.PrepayCeiling = policy.history, policy.prepayCeiling
 	b.Trusted = b.Tier == "Trusted" || b.Tier == "High"
 	return b, nil
 }
@@ -62,20 +80,18 @@ const BusinessEventBillingTrustChanged = "billing.trust_changed"
 
 // BillingTrustChange is an operator's standing decision.
 type BillingTrustChange struct {
-	Trust  string
-	Actor  string
-	Reason string
-}
-
-// SetBillingTrust commits a standing decision with its audit event.
-func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
-	err = t.s.inTx(ctx, func(tx *storeTx) error { before, after, err = t.setBillingTrustTx(ctx, tx, c, now); return err })
-	return before, after, err
+	Trust   string
+	Actor   string
+	Reason  string
+	Request string
 }
 
 func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
 	if c.Trust != BillingTrustGranted && c.Trust != BillingTrustRevoked && c.Trust != BillingTrustAutomatic {
 		return before, after, fmt.Errorf("%w: trust must be granted, revoked or automatic", ErrInvalidInput)
+	}
+	if c.Request != "" && c.Trust != BillingTrustGranted {
+		return before, after, fmt.Errorf("%w: only a standing grant approves a standing request", ErrInvalidInput)
 	}
 	if c.Actor == "" || c.Reason == "" {
 		return before, after, fmt.Errorf("%w: a standing decision names its actor and reason", ErrInvalidInput)
@@ -88,6 +104,11 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 	}
 	if before, err = trustStandingTx(ctx, tx, t.team, now); err != nil {
 		return before, after, err
+	}
+	if c.Request != "" {
+		if _, err = decideStandingRequestTx(ctx, tx, t.team, c.Request, StandingRequestApproved, c.Actor, c.Reason); err != nil {
+			return before, after, err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE teams SET billing_trust=?,billing_trust_by=?,billing_trust_at=?,billing_trust_reason=? WHERE name=?`, c.Trust, c.Actor, now.UnixNano(), c.Reason, t.team); err != nil {
 		return before, after, err

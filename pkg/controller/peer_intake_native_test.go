@@ -138,11 +138,14 @@ func TestPeerIntakeBudgetsFollowPlacement(t *testing.T) {
 		want     time.Duration
 	}{
 		{"host", runspec.DispatchHost, false, true, 0},
-		{"controller", runspec.DispatchController, false, false, limits.RunDeadline},
+		{"controller", "", false, false, limits.RunDeadline},
 		{"here", runspec.DispatchHost, true, false, limits.RunDeadline},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: tc.name, Mode: runspec.IntakeExecute, Dispatch: tc.dispatch, Origin: runspec.OriginLocal, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}}
+			if tc.dispatch == "" {
+				request.Origin = runspec.OriginTrigger
+			}
 			if tc.here {
 				request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "runner"}}
 			}

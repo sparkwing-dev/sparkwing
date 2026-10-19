@@ -906,6 +906,8 @@ components:
                 type: string
               type: object
             - type: "null"
+        origin_machine:
+          type: string
         request:
           $ref: '#/components/schemas/internal.runspec.Request'
         submitted_env:
@@ -2276,6 +2278,43 @@ components:
         - created
       type: object
       x-sparkwing-go-type: controllerwire.OperatorRefundRecorded
+    internal.controllerwire.OperatorStandingQueue:
+      additionalProperties: true
+      properties:
+        requests:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorStandingRequest'
+              type: array
+            - type: "null"
+      required:
+        - requests
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorStandingQueue
+    internal.controllerwire.OperatorStandingRequest:
+      additionalProperties: true
+      properties:
+        balance_micro:
+          type: integer
+        display_name:
+          type: string
+        history:
+          $ref: '#/components/schemas/internal.controllerwire.StandingHistory'
+        prepay_ceiling:
+          type: string
+        request:
+          $ref: '#/components/schemas/internal.controllerwire.StandingRequest'
+        standing:
+          type: string
+      required:
+        - request
+        - display_name
+        - standing
+        - prepay_ceiling
+        - balance_micro
+        - history
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorStandingRequest
     internal.controllerwire.OperatorTeamCreate:
       additionalProperties: true
       properties:
@@ -3825,6 +3864,79 @@ components:
         - size
       type: object
       x-sparkwing-go-type: controllerwire.SourceUploadRequest
+    internal.controllerwire.StandingDecline:
+      additionalProperties: true
+      properties:
+        reason:
+          type: string
+        request:
+          type: string
+      required:
+        - request
+        - reason
+      type: object
+      x-sparkwing-go-type: controllerwire.StandingDecline
+    internal.controllerwire.StandingHistory:
+      additionalProperties: true
+      properties:
+        first_paid_at:
+          type: integer
+        last_incident_at:
+          type: integer
+        paid_micro:
+          type: integer
+        successful_charges:
+          type: integer
+        tier:
+          type: string
+      required:
+        - tier
+        - paid_micro
+        - successful_charges
+      type: object
+      x-sparkwing-go-type: controllerwire.StandingHistory
+    internal.controllerwire.StandingRequest:
+      additionalProperties: true
+      properties:
+        decided_at:
+          type: integer
+        decision_reason:
+          type: string
+        id:
+          type: string
+        message:
+          type: string
+        requested_at:
+          type: integer
+        requested_by:
+          type: string
+        state:
+          type: string
+        team:
+          type: string
+        tier:
+          type: string
+      required:
+        - id
+        - team
+        - tier
+        - message
+        - requested_at
+        - state
+      type: object
+      x-sparkwing-go-type: controllerwire.StandingRequest
+    internal.controllerwire.StandingRequestWrite:
+      additionalProperties: true
+      properties:
+        message:
+          type: string
+        tier:
+          type: string
+      required:
+        - tier
+        - message
+      type: object
+      x-sparkwing-go-type: controllerwire.StandingRequestWrite
     internal.controllerwire.StepDetail:
       additionalProperties: true
       properties:
@@ -3905,12 +4017,36 @@ components:
     internal.controllerwire.TeamSettings:
       additionalProperties: true
       properties:
+        claim_ranking:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         members_can_add_machines:
           type: boolean
       required:
         - members_can_add_machines
+        - claim_ranking
       type: object
       x-sparkwing-go-type: controllerwire.TeamSettings
+    internal.controllerwire.TeamSettingsUpdate:
+      additionalProperties: true
+      properties:
+        claim_ranking:
+          anyOf:
+            - anyOf:
+                - items:
+                    type: string
+                  type: array
+                - type: "null"
+            - type: "null"
+        members_can_add_machines:
+          anyOf:
+            - type: boolean
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: controllerwire.TeamSettingsUpdate
     internal.controllerwire.TickView:
       additionalProperties: true
       properties:
@@ -5268,6 +5404,8 @@ components:
         options:
           $ref: '#/components/schemas/internal.runspec.Options'
         origin:
+          type: string
+        origin_machine:
           type: string
         pipeline:
           type: string
@@ -8531,6 +8669,35 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/operator/standing-requests:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorStandingQueue'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: List open standing requests
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/operator/standing-requests
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/operator/teams:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -8769,6 +8936,52 @@ paths:
       x-sparkwing-policy:
         method: POST
         path: /api/v1/operator/teams/{team}/refunds
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: idempotency_key
+  /api/v1/operator/teams/{team}/standing-request/decline:
+    post:
+      parameters:
+        - in: path
+          name: team
+          required: true
+          schema:
+            type: string
+        - description: Retain one key and the exact body when replaying a request.
+          in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.StandingDecline'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.StandingRequest'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Decline a team's open standing request
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/operator/teams/{team}/standing-request/decline
         audience: controller
         owner: deployment
         authentication: capability
@@ -14591,6 +14804,41 @@ paths:
             liveness: credential
         retry: idempotency_key
       x-sparkwing-wire: undocumented
+  /api/v1/team/billing/standing-request:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.StandingRequestWrite'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.StandingRequest'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Request operator-granted High standing
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/team/billing/standing-request
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: never
   /api/v1/team/build-trust:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -15256,7 +15504,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Read team machine enrollment settings
+      summary: Read team machine enrollment settings and claim ranking
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/settings
@@ -15275,7 +15523,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.controllerwire.TeamSettings'
+              $ref: '#/components/schemas/internal.controllerwire.TeamSettingsUpdate'
         required: true
       responses:
         2XX:
@@ -15290,7 +15538,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Change and audit team machine enrollment settings
+      summary: Change and audit team machine enrollment settings and claim ranking
       x-sparkwing-policy:
         method: PUT
         path: /api/v1/team/settings

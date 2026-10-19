@@ -110,7 +110,7 @@ func TestRunnerMixedClaimsKeepControllerBindingsSeparateW8(t *testing.T) {
 		}
 		claimed := 0
 		root := &runnerControllerW8{claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-			if !slices.Equal(request.Kinds, []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}) {
+			if !slices.Equal(request.Kinds, []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}) {
 				t.Error("runner split the unified queue selection")
 			}
 			award := awards[claimed]

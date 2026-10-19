@@ -11,18 +11,40 @@ link. The session ends after 12 hours without a request, 24 hours after sign-in,
 on Log out, or when the local controller restarts. Tools that call the local API
 should use the private socket, which needs no session.
 
-## Cloud runs without a runner selector use the launcher
+## Runs without a runner selector run anywhere
 
-Sparkwing Cloud now dispatches every trigger, App webhook run, schedule and
-child run that names no `--runner`, label, `here` or routed pool to the Cloud
-launcher. Before, CLI triggers and webhook runs waited for a self-hosted
-runner. To keep work on your own machines, pass `--runner NAME` or
-`--runner label=LABEL`, or route the repository to a pool. App automation and
-subscriptions take `runner: cloud | github-actions | pool=<name>`, default
-`cloud`; set `github-actions` on repositories whose App runs a GitHub Actions
-workflow should own. The schema baseline moves to version 10, so recreate the
-database. Unclaimed runs now carry an `unclaimed_work` notice, Cloud work held
-by the team's credits carries a `credit_hold` notice instead, and
+On every controller, Cloud and self-hosted, each trigger, App webhook run,
+schedule and child run that names no `--runner`, label, `here` or routed pool
+now runs anywhere. Intake picks dispatch itself and ignores a client-supplied
+`dispatch`. Any eligible claimant can take its plan step, generator evaluations
+and each job; a local controller's own queue counts as a self-hosted runner.
+Before, CLI triggers and webhook runs waited for a self-hosted runner, and
+self-hosted controllers hosted CLI triggers whole. The team's claim ranking
+orders claimants: `here` (the personal runner on the machine whose CLI started
+the run), `personal`, `github-actions`, `self-hosted`, then `cloud`. Each unit
+gives the best-ranked online claimant 5 seconds, then the best-ranked claimant
+that asked during that window 2 more seconds. A job that requires a `pool=`,
+`name=` or `class=` term skips the ranking. The Cloud launcher takes part only
+while the team has credits or a saved card. Runners now claim plan and
+evaluation units as well as triggers and jobs. Change the order with
+`sparkwing team settings set --profile work --claim-ranking cloud,self-hosted`;
+`none` means first come.
+
+Personal machines take only their owner's manual runs: App and schedule runs,
+and their retries and children, never reach them. Clients can no longer submit
+a run with the `schedule` origin. The trigger CLI proves its machine's runner
+credential with a short-lived signature instead of sending it. OIDC tokens
+minted on a personal machine carry `runner_kind=personal`.
+
+App automation and subscriptions take `runner: anywhere | cloud | github-actions
+| pool=<name>`, default `anywhere`. `cloud` now pins runs to the launcher. Set
+`github-actions` on repositories whose App runs a GitHub Actions workflow should
+own. `PUT /api/v1/team/settings` takes optional `members_can_add_machines` and
+`claim_ranking` fields, and the plain output of `sparkwing team settings show`
+adds the ranking. The schema baseline moves to version 12, so recreate the
+database. Unclaimed runs carry an `unclaimed_work` notice, Cloud work held by
+the team's credits carries a `credit_hold` notice instead, work no eligible
+runner can take carries a `no_eligible_runner` notice naming the cause, and
 `sparkwing_claim_empty_total` counts claim polls that matched nothing.
 
 ## Team git credentials never reach personal machines

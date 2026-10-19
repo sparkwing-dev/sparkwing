@@ -13,6 +13,12 @@ const (
 	PlacementHold time.Duration = 20 * time.Second
 	// PlacementLiveness bounds placement liveness horizon.
 	PlacementLiveness time.Duration = 30 * time.Second
+	// RankingWindow is how long a run-anywhere unit collects asks before its best-ranked asker wins.
+	RankingWindow time.Duration = 5 * time.Second
+	// RankingAward bounds how long the window's best asker keeps the unit before first come.
+	RankingAward time.Duration = 2 * time.Second
+	// RankingObservations caps the most recent live claimant observations one ranking check or notice evaluates.
+	RankingObservations int = 64
 	// ClaimWindow bounds here credential must first claim within this window.
 	ClaimWindow time.Duration = 10 * time.Minute
 	// HeartbeatTimeout bounds shared heartbeat RPC timeout.

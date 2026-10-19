@@ -13,8 +13,8 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// matrixSinceV068 is frozen for every release from v0.68.0-0 on, so published
-// manifests keep verifying when publishers change; a new matrix adds a new range.
+// safety: frozen so published v0.68+ manifests keep verifying when publishers change;
+// a new matrix adds a new range.
 const matrixSinceV068Start = "v0.68.0-0"
 
 var matrixSinceV068 = []string{

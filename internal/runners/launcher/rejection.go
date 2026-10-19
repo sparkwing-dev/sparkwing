@@ -26,10 +26,10 @@ func (l *Launcher) rejectJob(ctx context.Context, job *batchv1.Job, binding Clou
 	if err == nil && (len(states) != 1 || !sameBinding(states[0].Binding, binding) || !states[0].Delete) {
 		err = errors.New("controller did not retire rejected Cloud award")
 	}
-	if err := errors.Join(containErr, err); err != nil {
+	if err := errors.Join(containErr, err); blocking(err) != nil {
 		return err
 	}
-	return l.teardown(ctx, job, reservation)
+	return errors.Join(containErr, l.teardown(ctx, job, reservation))
 }
 
 func (l *Launcher) containJob(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation, reason string) (*batchv1.Job, error) {

@@ -37,8 +37,10 @@ not the bearer. The operation refuses an existing or retired team slug with
 response cannot recover the one-time credential.
 
 
-Use `sparkwing operator teams show --team support-test --profile deployment -o json`
-to read the team identity and its protected node label key and value. Apply that
+Use `sparkwing operator teams show --team support-test --job-namespace sparkwing-cloud-jobs --profile deployment -o json`
+to read the team identity and its protected node label key and value. The value
+hashes the launcher's Cloud Job namespace with the team slug, so each deployment
+on a shared cluster has its own team nodes. Apply that
 value to the team's NodePool template label and taint. The underlying
 `GET /api/v1/operator/teams/{team}` returns team ID and display name to deployment
 credentials. Financial and console details remain restricted to console sessions.
@@ -105,8 +107,9 @@ current team ownership. The final bind also rechecks the linked GitHub identity.
 
 Console mutations pass their verified authority to `WithConsoleWriter`.
 The transaction derives the audit actor and rechecks the direct operator session.
-This covers credit grants, billing trust, holds, account/team deletion, waitlist
-approval, credit settings and installation unbinding. Waitlist approval requires
+This covers credit grants, billing trust, standing-request declines, holds,
+account/team deletion, waitlist approval, credit settings and installation
+unbinding. Waitlist approval requires
 an `Idempotency-Key` header. A missing transaction adapter returns `policy_missing`.
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
@@ -310,10 +313,15 @@ session. The team setting `members_can_add_machines` defaults to true. When it
 is false, personal enrollment requires administration too. Existing machines
 keep their owner-only claim scope until explicitly revoked.
 
-`GET /api/v1/team/settings` returns `members_can_add_machines` under `runs.read`.
-`PUT /api/v1/team/settings` requires `team.admin` and an explicit boolean with
-that name. Changes and their actor, store time and old/new values commit with
-an audit event. Audit failure rolls back the setting. Administrators can use
+`GET /api/v1/team/settings` returns `members_can_add_machines` and
+`claim_ranking` under `runs.read`. `PUT /api/v1/team/settings` requires
+`team.admin` and names at least one of them. `claim_ranking` takes distinct
+tiers from `here`, `personal`, `github-actions`, `self-hosted` and `cloud`, and
+an empty list means first come. A self-hosted controller has no Cloud launcher
+and refuses `cloud` with 400. `["default"]` restores the default ranking. Changes and their actor, store time and old/new
+values commit with an audit event.
+
+Administrators can use
 the console's team settings or `sparkwing team settings set --profile work
 --members-can-add-machines false`. Members can read it with `team settings show`.
 
@@ -656,7 +664,9 @@ deployment profile. Console sessions retain their separate account gate.
 ## Operator console
 
 Operator-console sessions own trust changes, credit grants, freezes, refunds
-and account deletion. Deployment tokens manage operational limits, object-store
+and account deletion. They also read the standing queue, where team owners'
+requests for High standing wait. A grant naming the reviewed request approves
+it, and a decline names the request and records the reason its owners see. Deployment tokens manage operational limits, object-store
 settings, deployment service credentials and new-team onboarding through their separate routes.
 They cannot exchange themselves for console powers.
 

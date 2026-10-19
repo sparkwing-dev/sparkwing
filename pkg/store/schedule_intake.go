@@ -72,7 +72,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 		return AdmissionResult{}, err
 	}
 	input := runspec.Request{
-		Version: 1, Team: string(t.team), Pipeline: schedule.Pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginSchedule, Dispatch: runspec.DispatchHost,
+		Version: 1, Team: string(t.team), Pipeline: schedule.Pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginSchedule,
 		RequestedArgs: schedule.Effective().Args, Git: runspec.Git{Repository: runspec.Repository{Key: schedule.RepositoryKey, Display: display}, Ref: schedule.GitBranch, SHA: schedule.LockedRef},
 	}
 	if in.consent != "" {
@@ -80,6 +80,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			return AdmissionResult{}, bindingRefusal()
 		}
 		input = saved.Request
+		input.Dispatch = ""
 	} else {
 		remote, err := sourceurl.ValidateCloneURL(schedule.RepoPath)
 		if err != nil {

@@ -181,3 +181,40 @@ func putMeasurement(ctx context.Context, client *awss3.Client, key, body string)
 	_, err := client.PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String(testBucket), Key: aws.String(key), Body: strings.NewReader(body)})
 	return err
 }
+
+type prefixScopedBucket struct {
+	API
+	allowed string
+	seen    []string
+}
+
+func (b *prefixScopedBucket) ListObjectsV2(ctx context.Context, in *awss3.ListObjectsV2Input, opts ...func(*awss3.Options)) (*awss3.ListObjectsV2Output, error) {
+	prefix := aws.ToString(in.Prefix)
+	b.seen = append(b.seen, prefix)
+	if !strings.HasPrefix(prefix, b.allowed) {
+		return nil, &types.NoSuchKey{Message: aws.String("AccessDenied: s3:ListBucket is scoped to " + b.allowed)}
+	}
+	return b.API.ListObjectsV2(ctx, in, opts...)
+}
+
+func TestMeasurementStore_ListsOnlyUnderAPrefixScopedPolicy(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, configured := range []string{"artifacts", "artifacts/", "/artifacts/"} {
+		client := fakeS3(t)
+		if err := putMeasurement(ctx, client, "artifacts/k", "1234"); err != nil {
+			t.Fatal(err)
+		}
+		if err := putMeasurement(ctx, client, "artifacts-other/k", "123456789"); err != nil {
+			t.Fatal(err)
+		}
+		scoped := &prefixScopedBucket{API: client, allowed: "artifacts/"}
+		usage, err := NewMeasurementStore(testBucket, configured, scoped).Usage(ctx)
+		if err != nil {
+			t.Fatalf("prefix %q under an artifacts/-scoped policy: %v (listed %q)", configured, err, scoped.seen)
+		}
+		if usage.Objects != 1 || usage.Bytes != 4 {
+			t.Errorf("prefix %q measures %d bytes / %d objects, want 4/1", configured, usage.Bytes, usage.Objects)
+		}
+	}
+}

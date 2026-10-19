@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -74,7 +75,7 @@ func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
 						if err := json.NewDecoder(r.Body).Decode(&demand); err != nil {
 							return nil, err
 						}
-						if len(demand.Kinds) != 2 || demand.Kinds[0] != capability.UnitTrigger || demand.Kinds[1] != capability.UnitNode || demand.RunnerVersion != "dev" {
+						if !slices.Equal(demand.Kinds, []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}) || demand.RunnerVersion != "dev" {
 							t.Errorf("command lost its unified claim selection: %+v", demand)
 						}
 						response = controllerwire.ClaimResponse{Claim: &unit}
@@ -100,7 +101,7 @@ func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
 					args = []string{"--controller=" + hosting.ControllerURL, "--repos=github.com/acme/*", "--credentials-dir=" + credentials, "--max-concurrent=1", "--max-claims-before-restart=1"}
 				}
 				err := ProductionRuntime("dev").Runner.Run(ctx, command, args, "dev")
-				// The award must be renewed with its own bearer before source acquisition; how many beats that takes is the keeper's business.
+				// safety: the award renews with its own bearer before source acquisition; the beat count is the keeper's.
 				if claims == 0 || renewals == 0 || private == 0 {
 					t.Fatalf("command did not claim, renew and bind its award: claims=%d renewals=%d private=%d error=%v", claims, renewals, private, err)
 				}

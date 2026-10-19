@@ -27,7 +27,11 @@ type MeasurementStore struct {
 
 // NewMeasurementStore binds bucket measurement to one namespace.
 func NewMeasurementStore(bucket, prefix string, client API) *MeasurementStore {
-	return &MeasurementStore{Bucket: bucket, Prefix: strings.TrimSuffix(prefix, "/"), Client: client}
+	prefix = strings.Trim(prefix, "/")
+	if prefix != "" {
+		prefix += "/"
+	}
+	return &MeasurementStore{Bucket: bucket, Prefix: prefix, Client: client}
 }
 
 var _ storage.UsageReporter = (*MeasurementStore)(nil)

@@ -97,12 +97,12 @@ func cloudProvisionerW8(node *corev1.Node, team string) dynamic.Interface {
 	node.Spec.ProviderID = "aws:///zone/i-node"
 	claim := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodeClaim",
-		"metadata": map[string]any{"name": "claim", "uid": "claim-uid", "labels": map[string]any{launcher.TeamNodeLabel: launcher.TeamNodeValue(team), "karpenter.sh/nodepool": "pool"}, "ownerReferences": []any{map[string]any{"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "name": "pool", "uid": "pool-uid"}}},
+		"metadata": map[string]any{"name": "claim", "uid": "claim-uid", "labels": map[string]any{launcher.TeamNodeLabel: launcher.TeamNodeValue("cloud", team), "karpenter.sh/nodepool": "pool"}, "ownerReferences": []any{map[string]any{"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "name": "pool", "uid": "pool-uid"}}},
 		"status":   map[string]any{"nodeName": node.Name, "providerID": node.Spec.ProviderID},
 	}}
 	pool := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "pool", "uid": "pool-uid"},
-		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{launcher.TeamNodeLabel: launcher.TeamNodeValue(team)}}}},
+		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{launcher.TeamNodeLabel: launcher.TeamNodeValue("cloud", team)}}}},
 	}}
 	return dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), claim, pool)
 }

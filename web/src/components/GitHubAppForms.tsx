@@ -187,7 +187,7 @@ export function SubscriptionForm({
           Runs on
           <select
             className={`${inputClass} w-56`}
-            value={draft.runner ?? "cloud"}
+            value={draft.runner ?? "anywhere"}
             onChange={(e) => set({ runner: e.target.value as AppRunner })}
           >
             {appRunnerChoices.map((choice) => (

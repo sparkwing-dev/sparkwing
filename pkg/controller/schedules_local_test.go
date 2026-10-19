@@ -361,11 +361,10 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	if err != nil || row.NextDueAt == nil {
 		t.Fatalf("armed schedule: %+v %v", row, err)
 	}
-	// A consent saved before local schedules sealed host dispatch still fires a claimable run.
-	if result, err := st.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET consent_json=replace(consent_json,'"dispatch":"host"','"dispatch":"controller"') WHERE id=? AND consent_json LIKE '%"dispatch":"host"%'`, row.ID); err != nil {
+	if result, err := st.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET consent_json=replace(consent_json,'"dispatch":""','"dispatch":"host"') WHERE id=? AND consent_json LIKE '%"dispatch":""%'`, row.ID); err != nil {
 		t.Fatal(err)
 	} else if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-		t.Fatalf("saved consent carries no host dispatch to age: %d %v", changed, err)
+		t.Fatalf("saved consent leaves dispatch to intake: %d %v", changed, err)
 	}
 	due := *row.NextDueAt
 	now = due.Add(-time.Nanosecond)
@@ -394,9 +393,8 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	if sealed.Request.Hash == "" || !sealed.Request.AdmittedAt.Equal(due) || request.Origin != runspec.OriginSchedule || request.Source.Entrypoint != "CI" || request.Source.Ref != request.Git.SHA || request.Source.RequestedRef != "origin/main" || request.Source.Location.LocalCheckout != checkout || request.Env.Digest == "" || request.Actor.ID == "" || request.Git.App.Set || !strings.HasPrefix(request.Actor.ID, "local:") {
 		t.Fatalf("schedule lost sealed source or authority: %+v", sealed.Request)
 	}
-	// The local queue claims trigger and job units only, so a plan unit would never start.
-	if request.Dispatch != runspec.DispatchHost {
-		t.Fatalf("local schedule sealed %s dispatch; the local queue cannot claim it", request.Dispatch)
+	if request.Dispatch != runspec.DispatchController {
+		t.Fatalf("local schedule sealed %s dispatch; unselected schedules run anywhere", request.Dispatch)
 	}
 	fires, err := tenant.ListCronFires(t.Context(), row.ID, 10)
 	if err != nil || len(fires) != 1 || fires[0].RunID != sealed.ID || !fires[0].DueAt.Equal(due) {

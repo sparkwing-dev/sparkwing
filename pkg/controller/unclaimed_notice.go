@@ -17,6 +17,9 @@ func unclaimedNotice(view store.RunView) *engine.Notice {
 	if unit.CreditHold != "" {
 		return &engine.Notice{Kind: engine.NoticeCreditHold, Reason: unit.CreditHold}
 	}
+	if unit.NoEligible != "" {
+		return &engine.Notice{Kind: engine.NoticeNoEligibleRunner, Reason: unit.NoEligible}
+	}
 	switch store.RequestPlacement(run.Request.Request) {
 	case nodeproto.PlacementRunnerHosted, nodeproto.PlacementLauncher, nodeproto.PlacementGitHubActions:
 	default:

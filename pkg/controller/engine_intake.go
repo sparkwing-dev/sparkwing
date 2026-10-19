@@ -73,7 +73,7 @@ func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunReques
 		return store.IntakeRequest{}, apierr.Authorization(apierr.ReasonTeam, "intake team does not match authority")
 	}
 	request := body.Request
-	request.Team = a.Target.Team
+	request.Team, request.Dispatch = a.Target.Team, ""
 	request.Actor = runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}
 	// safety: only the verified webhook intake may attach App provenance.
 	request.Git.App = runspec.Optional[runspec.AppFacts]{}
@@ -81,7 +81,7 @@ func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunReques
 	if request.Lineage.RetryOf != "" {
 		request.Lineage.Retrier = runspec.Optional[runspec.Actor]{Set: true, Value: request.Actor}
 	}
-	return store.IntakeRequest{Authority: p.Authority, CapabilityPrefix: principalCapabilityPrefix(p), Request: request, IdempotencyKey: body.IdempotencyKey, LocalSecrets: body.LocalSecrets, SubmittedEnv: body.SubmittedEnv}, nil
+	return store.IntakeRequest{Authority: p.Authority, CapabilityPrefix: principalCapabilityPrefix(p), Request: request, IdempotencyKey: body.IdempotencyKey, LocalSecrets: body.LocalSecrets, SubmittedEnv: body.SubmittedEnv, OriginMachine: body.OriginMachine}, nil
 }
 
 func (s *EngineController) admitRun(ctx context.Context, team string, request store.IntakeRequest) (controllerwire.CreateRunResponse, error) {

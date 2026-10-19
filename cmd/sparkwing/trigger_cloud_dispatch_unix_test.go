@@ -121,7 +121,7 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	if err != nil {
 		t.Fatalf("working-tree trigger preparation: %v", err)
 	}
-	if !request.Request.Source.BundleDigest.Set || request.Request.Dispatch != runspec.DispatchHost {
+	if !request.Request.Source.BundleDigest.Set || request.Request.Dispatch != "" {
 		t.Fatalf("CLI request changed shape: bundle=%v dispatch=%s", request.Request.Source.BundleDigest.Set, request.Request.Dispatch)
 	}
 	return cloudDispatch{state: state, endpoint: endpoint, request: request, member: open(member, false), launcher: service.Token, open: open}
@@ -221,7 +221,11 @@ func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
 				t.Fatal(err)
 			}
 			detail, err = f.member.ReadRun(t.Context(), created.RunID)
-			if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeUnclaimed || !strings.Contains(detail.Notices[0].Reason, "no runner or launcher has claimed the run's") {
+			kind, reason := engine.NoticeUnclaimed, "no runner or launcher has claimed the run's"
+			if runner == "" {
+				kind, reason = engine.NoticeNoEligibleRunner, "no runner of the allowed tiers"
+			}
+			if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != kind || !strings.Contains(detail.Notices[0].Reason, reason) {
 				t.Fatalf("unclaimed run notice: %+v %v", detail.Notices, err)
 			}
 		})

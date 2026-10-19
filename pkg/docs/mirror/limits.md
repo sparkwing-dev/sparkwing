@@ -53,9 +53,37 @@ These grants do not confer operator-console powers.
 | Memo lifetime | Seven-day default, at most thirty days. |
 | Schedule catch-up | At most twenty-four hours. |
 | Cloud scratch | Fixed aggregate 20 GiB, including Docker-in-Docker. |
+| Cloud Docker | `docker build`, `docker run`, Compose and `--memory` work; privileged and host-level features do not. |
 
 Execution and inactivity deadlines remain distinct. Time spent waiting for
 customer approval or unstarted capacity is not execution time.
+
+## Docker on Cloud
+
+Cloud Jobs run as root inside their own Kubernetes user namespace, with a
+Docker daemon that is root there too, so `apt-get install` and the Docker
+socket work while job code never holds root on the node. `docker build`,
+`docker run`, `docker compose`, container-to-container networking, published
+ports and `docker run --memory` work.
+
+- `docker run --privileged` is refused: the daemon cannot mount sysfs for it.
+- `--cap-add` is accepted, but a container never gets more than the daemon
+  holds: `SYS_ADMIN`, `NET_ADMIN` and `SYS_PTRACE` plus the default set, all
+  confined to the Job's user namespace. Capabilities such as `SYS_MODULE`,
+  `SYS_TIME` or `SYS_RAWIO` have no effect on the node.
+- `--security-opt seccomp=unconfined` is accepted but cannot lift the Job's
+  own filter, which refuses io_uring, keyrings, bpf, perf events,
+  userfaultfd, kexec and module loading for every container.
+- Host namespaces are unavailable: `--network host`, `--pid host` and
+  `--ipc host` give the Docker daemon's namespaces, not the node's.
+- `--device` cannot reach node devices, and host paths, node sysctls and
+  kernel modules are out of reach.
+
+The Job's own CPU and memory budget bounds everything its containers use, and
+all its processes and threads together are limited to 32768 per Job.
+
+GitHub Actions and CircleCI give root only inside a per-job VM. Run work that
+needs those features on a self-hosted runner.
 
 ## Uploads and storage accounting
 

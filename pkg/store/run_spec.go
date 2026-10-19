@@ -30,6 +30,9 @@ type IntakeRequest struct {
 	LocalSecrets       map[string]string `json:"-"`
 	VerifiedDeliveryID string
 	RetryMode          string
+	// OriginMachine is a short-lived proof of the submitting machine's runner credential; intake verifies it and seals
+	// only the machine's name.
+	OriginMachine string `json:"-"`
 }
 
 // AdmissionResult includes the atomically allocated team number and the first sealed request.

@@ -100,60 +100,80 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var observations []CloudJobObservation
-	reservations := map[string]CloudNodeReservation{}
-	for _, node := range nodes.Items {
+	var errs []error
+	budget := maxQuarantinesPerSync
+	// safety: nodes still faulted from earlier passes spend the budget too, so
+	// a fault spreading across the fleet stops claims instead of tainting it.
+	quarantine := func(node *corev1.Node, cause string) error {
+		if budget == 0 {
+			return fmt.Errorf("Cloud node %s: %s; more than %d nodes faulted in one pass, so claims stop until an operator checks the controller and these nodes", node.Name, cause, maxQuarantinesPerSync)
+		}
+		budget--
+		return quarantineNode(ctx, l.Kube, node, cause)
+	}
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
 		if namespace := node.Annotations[reservationNamespaceAnnotation]; namespace != l.Config.Namespace {
 			if namespace != "" {
 				l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
 			}
 			continue
 		}
-		var held CloudNodeReservation
-		var binding CloudJobBinding
-		if err := json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held); err != nil {
-			return err
-		}
-		if err := json.Unmarshal([]byte(node.Annotations[bindingAnnotation]), &binding); err != nil {
-			return err
-		}
-		if held.NodeName != node.Name || held.NodeUID != string(node.UID) || held.Team != binding.Team || held.Award != binding.LeaseRef() || held.JobName != jobName(binding) || held.ReservationID == "" {
-			return errors.New("Cloud node reservation does not match its persisted award")
-		}
-		_, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, held.JobName, metav1.GetOptions{})
-		if err == nil {
+		held, binding, ok := nodeReservation(node)
+		if !ok {
+			errs = append(errs, quarantine(node, "reservation is malformed or does not match its award"))
 			continue
 		}
-		if !apierrors.IsNotFound(err) {
-			return err
+		refused, err := l.releaseOrphan(ctx, held, binding)
+		if refused {
+			err = quarantine(node, "controller refused the reservation's award")
 		}
-		observations = append(observations, CloudJobObservation{Binding: binding, JobName: held.JobName, NodeUID: held.NodeUID, ReservationID: held.ReservationID})
-		reservations[held.JobName] = held
-	}
-	if len(observations) == 0 {
-		return nil
-	}
-	retirements, err := l.retirements(ctx, observations)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for name, state := range retirements {
-		if !state.Delete {
-			continue
-		}
-		_, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, name, metav1.GetOptions{})
-		if err == nil {
-			continue
-		}
-		if apierrors.IsNotFound(err) {
-			err = l.Boundary.Release(ctx, reservations[name])
-		}
-		if err != nil && !errors.Is(err, ErrContainersRunning) {
-			errs = append(errs, err)
-		}
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+func nodeReservation(node *corev1.Node) (CloudNodeReservation, CloudJobBinding, bool) {
+	var held CloudNodeReservation
+	var binding CloudJobBinding
+	if json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held) != nil || json.Unmarshal([]byte(node.Annotations[bindingAnnotation]), &binding) != nil {
+		return held, binding, false
+	}
+	lease := binding.LeaseRef()
+	return held, binding, held.NodeName == node.Name && held.NodeUID == string(node.UID) && held.Team != "" && held.Team == binding.Team && node.Labels[TeamNodeLabel] == TeamNodeValue(node.Annotations[reservationNamespaceAnnotation], held.Team) &&
+		held.Award == lease && lease.Kind != "" && lease.ID != "" && lease.Holder != "" && lease.Generation > 0 && held.JobName == jobName(binding) && held.ReservationID != ""
+}
+
+// maxQuarantinesPerSync bounds how many faulted nodes one pass quarantines or
+// keeps quarantined. A controller fault that refuses every orphaned award at
+// once passes it, and sync then stops claims and asks an operator.
+const maxQuarantinesPerSync = 3
+
+// safety: each orphaned reservation gets its own controller call, so a refused
+// award names only the node that recorded it.
+func (l *Launcher) releaseOrphan(ctx context.Context, held CloudNodeReservation, binding CloudJobBinding) (refused bool, err error) {
+	jobs := l.Kube.BatchV1().Jobs(l.Config.Namespace)
+	_, err = jobs.Get(ctx, held.JobName, metav1.GetOptions{})
+	if err == nil || !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	states, err := l.retirements(ctx, []CloudJobObservation{{Binding: binding, JobName: held.JobName, NodeUID: held.NodeUID, ReservationID: held.ReservationID}})
+	if reservationRefused(err) {
+		return true, nil
+	}
+	if err != nil || !states[held.JobName].Delete {
+		return false, err
+	}
+	if _, err = jobs.Get(ctx, held.JobName, metav1.GetOptions{}); err == nil {
+		return false, nil
+	}
+	if apierrors.IsNotFound(err) {
+		err = l.Boundary.Release(ctx, held)
+	}
+	if errors.Is(err, ErrContainersRunning) {
+		return false, nil
+	}
+	return false, err
 }
 
 func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObservation) (map[string]CloudJobState, error) {
@@ -177,7 +197,7 @@ func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObser
 		binding, found := bindings[name]
 		_, duplicate := decisions[name]
 		if !found || duplicate || !sameBinding(state.Binding, binding) {
-			return nil, errors.New("controller sync returned a duplicate or mismatched binding")
+			return nil, errAwardMismatch
 		}
 		decisions[name] = state
 	}
@@ -282,7 +302,7 @@ func (l *Launcher) deleteBootstrap(ctx context.Context, bootstrap bootstrapRefer
 }
 
 func podStopped(pod corev1.Pod) bool {
-	// safety: an absent status on a live pod is not evidence that its privileged sidecar stopped.
+	// safety: an absent status on a live pod is not evidence that its Docker sidecar stopped.
 	if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
 		return false
 	}

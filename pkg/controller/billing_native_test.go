@@ -107,6 +107,10 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 			body = `{"id":"pm_native","object":"payment_method","livemode":false,"customer":"cus_native","type":"card","card":{"fingerprint":"fp_native","brand":"visa","last4":"4242"}}`
 		case "/v1/charges/ch_native":
 			body = `{"id":"ch_native","object":"charge","livemode":false,"payment_intent":"pi_recovery","payment_method_details":{"card":{"fingerprint":"fp_native"}}}`
+		case "/v1/payment_intents/pi_prepay":
+			body = `{"id":"pi_prepay","object":"payment_intent","livemode":false,"latest_charge":"ch_prepay"}`
+		case "/v1/charges/ch_prepay":
+			body = `{"id":"ch_prepay","object":"charge","livemode":false,"payment_intent":"pi_prepay","payment_method_details":{"card":{"fingerprint":"fp_native","three_d_secure":{"result":"authenticated"}}}}`
 		default:
 			t.Fatalf("provider lookup %s", r.URL)
 		}
@@ -229,6 +233,9 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 	spend, err = tenant.SpendStanding(t.Context(), time.Now())
 	if err != nil || spend.OpenCharge != nil || spend.BalanceMicro != 0 || spend.Billing.Tier != "Established" {
 		t.Fatalf("recovered=%+v: %v", spend, err)
+	}
+	if !spend.Billing.History.LastIncidentAt.IsZero() {
+		t.Fatalf("a successful charge restarted clean days: %+v", spend.Billing.History)
 	}
 	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/charge-checkout"] != 1 {
 		t.Fatalf("duplicate provider calls: %v", counts)

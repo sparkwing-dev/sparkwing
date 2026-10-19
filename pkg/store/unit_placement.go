@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -24,24 +25,29 @@ func placementRank(profile match.Profile, demand match.Demand, preferences []Pla
 	return len(preferences)
 }
 
-func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant match.Profile, demand match.Demand) (placementDecision, error) {
+func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, prefix string, claimant match.Profile, demand match.Demand) (placementDecision, error) {
 	decision := placementDecision{reason: PlacementNone}
-	if unit.Kind != capability.UnitNode {
-		return decision, nil
-	}
 	policy, _ := ClaimPlacementFromContext(ctx)
-	preferences := policy.preferencesFor(demand.Prefers)
-	burst, err := burstPlacementTx(ctx, tx, team, unit.RunID)
+	seal, err := sealedRequestTx(ctx, tx, team, unit.RunID)
 	if err != nil {
 		return decision, err
 	}
-	if burst != nil {
+	liveness := policy.Liveness
+	if liveness <= 0 && (seal.Request.Burst != nil || runAnywhere(seal.Request)) {
+		liveness = time.Minute
+	}
+	if rankedUnit(seal.Request, demand) {
+		decision.hold, err = rankingHoldTx(ctx, tx, team, unit, seal.Request, prefix, liveness)
+		return decision, err
+	}
+	if unit.Kind != capability.UnitNode {
+		return decision, nil
+	}
+	preferences := policy.preferencesFor(demand.Prefers)
+	if burst := seal.Request.Burst; burst != nil {
 		preferences, err = burstPreferencesTx(ctx, tx, team, unit.RunID, *burst)
 		if err != nil {
 			return decision, err
-		}
-		if policy.Liveness <= 0 {
-			policy.Liveness = time.Minute
 		}
 	}
 	if len(preferences) == 0 || len(preferences[0].Prefers) == 0 {
@@ -71,11 +77,12 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 	if !slices.Contains(held, true) {
 		return decision, nil
 	}
-	live, err := placementRunnersTx(ctx, tx, team, policy)
+	live, err := placementRunnersTx(ctx, tx, team, liveness, false)
 	if err != nil {
 		return decision, err
 	}
-	for _, runner := range live {
+	for _, poll := range live {
+		runner := poll.UnitDemand
 		profile, required, err := placementRunnerTx(ctx, tx, team, unit, runner)
 		if err != nil {
 			var denied *apierr.Error
@@ -102,7 +109,7 @@ func placementRunnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		return match.Profile{}, match.Demand{}, err
 	}
 	c := chain[0].principal.Capability
-	if c.Team != string(team) || (!registeredClaimant(c) && c.Binding.RunID != unit.RunID) {
+	if !launcherClaimant(c) && (c.Team != string(team) || !registeredClaimant(c) && !actionsClaimant(c) && c.Binding.RunID != unit.RunID) {
 		return match.Profile{}, match.Demand{}, bindingRefusal()
 	}
 	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil {
@@ -111,34 +118,36 @@ func placementRunnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 	return readMatchingInputsTx(ctx, tx, runner, unit, false)
 }
 
-func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, policy ClaimPlacement) ([]UnitDemand, error) {
-	var live []UnitDemand
-	if policy.Liveness > 0 {
-		now := tx.now()
-		cutoff := now.Add(-policy.Liveness)
-		rows, err := tx.QueryContext(ctx, `SELECT prefix,claim_observation_json FROM capabilities WHERE team=? AND last_used_at>=? AND claim_observation_json IS NOT NULL`, team, cutoff.UnixNano())
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var prefix string
-			var body []byte
-			var observation runnerPoll
-			if err := rows.Scan(&prefix, &body); err != nil {
-				return nil, errors.Join(err, rows.Close())
-			}
-			if err := json.Unmarshal(body, &observation); err != nil {
-				return nil, errors.Join(err, rows.Close())
-			}
-			if observation.ObservedAt.Before(cutoff) || observation.ObservedAt.After(now) {
-				continue
-			}
-			observation.CapabilityPrefix = prefix
-			live = append(live, observation.UnitDemand)
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return nil, err
-		}
+func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, liveness time.Duration, launchers bool) ([]runnerPoll, error) {
+	if liveness <= 0 {
+		return nil, nil
 	}
-	return live, nil
+	now := tx.now()
+	cutoff := now.Add(-liveness)
+	query := `SELECT prefix,claim_observation_json FROM capabilities WHERE team=? AND last_used_at>=? AND claim_observation_json IS NOT NULL`
+	if launchers {
+		query = `SELECT prefix,claim_observation_json FROM capabilities WHERE (team=? OR team IS NULL AND subject_kind='service') AND last_used_at>=? AND claim_observation_json IS NOT NULL`
+	}
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY last_used_at DESC,prefix LIMIT ?`, team, cutoff.UnixNano(), limits.RankingObservations)
+	if err != nil {
+		return nil, err
+	}
+	var live []runnerPoll
+	for rows.Next() {
+		var prefix string
+		var body []byte
+		var observation runnerPoll
+		if err := rows.Scan(&prefix, &body); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		if err := json.Unmarshal(body, &observation); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		if observation.ObservedAt.Before(cutoff) || observation.ObservedAt.After(now) {
+			continue
+		}
+		observation.CapabilityPrefix = prefix
+		live = append(live, observation)
+	}
+	return live, errors.Join(rows.Err(), rows.Close())
 }

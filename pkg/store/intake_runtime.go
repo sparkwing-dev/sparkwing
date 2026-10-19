@@ -124,6 +124,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err != nil {
 			return AdmissionResult{}, err
 		}
+		if input.OriginMachine, err = originMachineTx(ctx, tx, team, principal, request.OriginMachine, request.IdempotencyKey); err != nil {
+			return AdmissionResult{}, err
+		}
 		if replayKey := appReplayKey(input); input.Mode == runspec.IntakeExecute && replayKey != "" {
 			var previous string
 			err := tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND webhook_replay_key<>'' AND webhook_replay_key=?`, team, replayKey).Scan(&previous)
@@ -140,6 +143,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err := validateChildLineageTx(ctx, tx, team, &input); err != nil {
 			return AdmissionResult{}, err
 		}
+		if input.Origin == runspec.OriginSchedule && tx.scheduleAdmission == nil {
+			return AdmissionResult{}, authorityError(apierr.Forbidden, "only a schedule firing starts a schedule run")
+		}
 		if err := checkActionsOwnerTx(ctx, tx, team, input); err != nil {
 			return AdmissionResult{}, err
 		}
@@ -152,7 +158,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err != nil {
 			return AdmissionResult{}, err
 		}
-		input.Dispatch = SelectDispatch(policy.CloudDispatch, input)
+		if request.Request.Dispatch == "" {
+			input.Dispatch = SelectDispatch(input)
+		}
 		snapshot.request, err = tx.store.intakeServices().SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AllowedPools: pools, AuthorityRef: request.Authority, Ceilings: policy.Ceilings})
 		if err != nil {
 			return AdmissionResult{}, err
@@ -344,10 +352,10 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 			return input, authorityError(apierr.BadRequest, err.Error())
 		}
 	}
-	if input.Pipeline == "" || input.Mode != runspec.IntakeExecute && input.Mode != runspec.IntakePublish || input.Dispatch != runspec.DispatchHost && input.Dispatch != runspec.DispatchController {
+	if input.Pipeline == "" || input.Mode != runspec.IntakeExecute && input.Mode != runspec.IntakePublish || input.Dispatch != "" && input.Dispatch != runspec.DispatchHost && input.Dispatch != runspec.DispatchController {
 		return input, authorityError(apierr.BadRequest, "invalid intake mode, dispatch or pipeline")
 	}
-	input.Team = string(team)
+	input.Team, input.OriginMachine = string(team), ""
 	if policy.Options == nil {
 		return input, authorityError(apierr.Unavailable, "intake settings resolution is unavailable")
 	}
@@ -508,4 +516,34 @@ func intakeScope(principal capability.Principal, pipeline string) (string, error
 		Subject  capability.Subject
 		Pipeline string
 	}{subject, pipeline})
+}
+
+// safety: here trusts only a live personal machine credential the submitting account owns; other proofs seal nothing.
+func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.Principal, proof, idempotencyKey string) (string, error) {
+	prefix := capability.HereProofPrefix(proof)
+	if prefix == "" || p.Capability.Subject.Kind != capability.SubjectAccount {
+		return "", nil
+	}
+	var digest, owner string
+	err := tx.QueryRowContext(ctx, `SELECT digest,created_by FROM capabilities WHERE team=? AND prefix=?`, team, prefix).Scan(&digest, &owner)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, digest, idempotencyKey, tx.now()) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	machine, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	var denied *apierr.Error
+	if errors.As(err, &denied) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	c := machine.Capability
+	personal, err := personalRootTx(ctx, tx, []authorityNode{{principal: machine}})
+	if err != nil || !personal || c.Team != string(team) || c.Binding.Kind != capability.BindingNone || owner == "" || owner != p.Capability.Subject.ID {
+		return "", err
+	}
+	return c.Subject.ID, nil
 }

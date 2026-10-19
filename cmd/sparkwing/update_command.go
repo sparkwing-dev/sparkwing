@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-// update replaces only the CLI; sparkwing-runner drains and replaces itself when its controller says so.
 const updateRunnerServicesNote = "Installed runner services update themselves from their controller."
 
 type updateCommand struct {

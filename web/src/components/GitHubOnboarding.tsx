@@ -8,7 +8,7 @@ import { toast } from "./Toasts";
 export default function GitHubOnboarding({ repositories, canManage, teamSlug }: { repositories: string[]; canManage: boolean; teamSlug: string }) {
   const [repository, setRepository] = useState("");
   const [preview, setPreview] = useState<AutomationPreview | null>(null);
-  const [runner, setRunner] = useState<AppRunner>("cloud");
+  const [runner, setRunner] = useState<AppRunner>("anywhere");
   const [runners, setRunners] = useState<RunnerBindings | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,7 +28,7 @@ export default function GitHubOnboarding({ repositories, canManage, teamSlug }: 
       const [nextPreview, nextRunners] = await Promise.all([previewAutomation(selected), getRunnerBindings()]);
       if (request !== generation.current) return;
       setPreview(nextPreview);
-      setRunner(nextPreview.runner ?? "cloud");
+      setRunner(nextPreview.runner ?? "anywhere");
       setRunners(nextRunners);
     } catch (err) {
       if (request === generation.current) setError(errorText(err));

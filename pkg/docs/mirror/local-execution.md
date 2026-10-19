@@ -476,6 +476,10 @@ Administrators change this setting in the console's team settings or with
 Turning the setting off preserves registered machines and their owner-only
 claim scope. An administrator can revoke a machine explicitly.
 
+A personal machine takes your own runs that select no runner, ranked under the
+team's claim ranking. A run you trigger from this machine ranks it `here`. Runs
+started by a push, pull request, release or schedule never reach it.
+
 Cloud routing requires an attached terminal session. The default local route
 continues to support `--sw-detached`.
 

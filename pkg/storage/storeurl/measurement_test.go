@@ -50,7 +50,7 @@ func TestMeasurementStoreStaysOutsideTheListBudget(t *testing.T) {
 	hits := 0
 	transport := measurementHTTP(func(r *http.Request) (*http.Response, error) {
 		hits++
-		if r.Method != http.MethodGet || r.URL.Query().Get("list-type") != "2" || r.URL.Query().Get("prefix") != "prefix" {
+		if r.Method != http.MethodGet || r.URL.Query().Get("list-type") != "2" || r.URL.Query().Get("prefix") != "prefix/" {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL)
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/xml"}}, Body: io.NopCloser(strings.NewReader(`<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>prefix/object</Key><Size>7</Size></Contents></ListBucketResult>`)), Request: r}, nil

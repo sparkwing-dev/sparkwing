@@ -111,11 +111,8 @@ func openLocalController(ctx context.Context, home string) (wingd.LocalControlle
 	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
 }
 
-// bindStandaloneController holds the in-process queue until the foreground
-// CLI has claimed its own trigger. A standalone run cannot detach, so that
-// trigger belongs to the CLI, and the queue's first poll would otherwise take
-// it and refuse the CLI's here handoff. Child runs still need the queue's
-// trigger claims afterwards.
+// safety: a standalone run cannot detach, so its trigger belongs to the foreground CLI; the queue waits for that
+// claim, or its first poll would take the trigger and refuse the CLI's here handoff. Child runs need it afterwards.
 func bindStandaloneController(ctx context.Context, b localcontroller.Binding, claimed <-chan struct{}) (localcontroller.Services, error) {
 	services, err := bindLocalController(ctx, b)
 	bearer := services.Runner.Bearer

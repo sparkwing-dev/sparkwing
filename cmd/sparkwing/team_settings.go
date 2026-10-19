@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runTeamSettings(ctx context.Context, inv clisurface.Invocation) error {
@@ -25,20 +27,54 @@ func runTeamSettings(ctx context.Context, inv clisurface.Invocation) error {
 	}
 	var result controllerwire.TeamSettings
 	if inv.Command.Path == "sparkwing team settings set" {
-		result, err = manager.SetTeamSettings(ctx, controllerwire.TeamSettings{MembersCanAddMachines: inv.Value("members-can-add-machines") == "true"})
-	} else {
-		result, err = manager.ReadTeamSettings(ctx)
-	}
-	if err != nil {
+		update, err := teamSettingsUpdate(inv)
+		if err != nil {
+			return err
+		}
+		result, err = manager.SetTeamSettings(ctx, update)
+		if err != nil {
+			return err
+		}
+	} else if result, err = manager.ReadTeamSettings(ctx); err != nil {
 		return err
 	}
-	if output == "json" {
+	ranking := strings.Join(result.ClaimRanking, ",")
+	if ranking == "" {
+		ranking = "none"
+	}
+	switch output {
+	case "json":
 		return json.NewEncoder(os.Stdout).Encode(result)
+	case "plain":
+		fmt.Printf("%t %s\n", result.MembersCanAddMachines, ranking)
+	default:
+		fmt.Printf("members_can_add_machines: %t\nclaim_ranking: %s\n", result.MembersCanAddMachines, ranking)
 	}
-	if output == "plain" {
-		fmt.Println(result.MembersCanAddMachines)
-		return nil
-	}
-	fmt.Printf("members_can_add_machines: %t\n", result.MembersCanAddMachines)
 	return nil
+}
+
+func teamSettingsUpdate(inv clisurface.Invocation) (controllerwire.TeamSettingsUpdate, error) {
+	var update controllerwire.TeamSettingsUpdate
+	if raw := inv.Value("members-can-add-machines"); raw != "" {
+		enabled := raw == "true"
+		update.MembersCanAddMachines = &enabled
+	}
+	if inv.Has("claim-ranking") {
+		var tiers []string
+		switch value := strings.TrimSpace(inv.Value("claim-ranking")); value {
+		case "none":
+			tiers = []string{}
+		case store.ClaimRankingDefault:
+			tiers = []string{store.ClaimRankingDefault}
+		default:
+			for _, tier := range strings.Split(value, ",") {
+				tiers = append(tiers, strings.TrimSpace(tier))
+			}
+		}
+		update.ClaimRanking = &tiers
+	}
+	if update.MembersCanAddMachines == nil && update.ClaimRanking == nil {
+		return update, &clisurface.UsageError{Path: inv.Command.Path, Message: "pass --members-can-add-machines or --claim-ranking"}
+	}
+	return update, nil
 }

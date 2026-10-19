@@ -77,3 +77,23 @@ func TestMachineTeamSettingsHTTP(t *testing.T) {
 		call("PUT", "/api/v1/team/settings", body, 400)
 	}
 }
+
+func TestSelfHostedControllerRefusesTheCloudTier(t *testing.T) {
+	for _, cloud := range []bool{false, true} {
+		s, session := credentialSessionServer(t)
+		s.cloudDeployment = cloud
+		engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.write,team.admin'`)
+		engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE account_id='member'`)
+		r := httptest.NewRequest("PUT", "https://controller.test/api/v1/team/settings", strings.NewReader(`{"claim_ranking":["self-hosted","cloud"]}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", "https://controller.test")
+		r.Header.Set(csrfHeaderName, "session-csrf")
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "session-csrf"})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if cloud && w.Code != http.StatusOK || !cloud && (w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "no Cloud launcher")) {
+			t.Fatalf("cloud deployment=%t ranking with cloud: %d %s", cloud, w.Code, w.Body)
+		}
+	}
+}

@@ -1109,7 +1109,7 @@ func (s *Server) startGitHubAppRun(
 	key := runspec.RepoKey(fmt.Sprintf("gh:%d", repo.ID))
 	defaultBranch := in.env[EnvDefaultBranch]
 	request := runspec.Request{
-		Version: 1, Team: string(tenant.Team()), Pipeline: plan.pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,
+		Version: 1, Team: string(tenant.Team()), Pipeline: plan.pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginApp,
 		Actor: runspec.Actor{Kind: "github", ID: in.user, Display: in.user},
 		Git: runspec.Git{
 			Repository: runspec.Repository{Key: key, Display: repo.Slug()}, Ref: ref, SHA: in.sha,

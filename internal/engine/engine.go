@@ -145,6 +145,7 @@ const (
 	NoticePolicyUnavailable NoticeKind = "version_policy_unavailable"
 	NoticeUnclaimed         NoticeKind = "unclaimed_work"
 	NoticeCreditHold        NoticeKind = "credit_hold"
+	NoticeNoEligibleRunner  NoticeKind = "no_eligible_runner"
 )
 
 // Notice carries actionable policy text without turning a warning into an implicit revocation.

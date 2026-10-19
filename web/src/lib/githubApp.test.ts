@@ -98,7 +98,7 @@ describe("GitHub App calls", () => {
     respond = () => json({ enabled: true });
     await lib.enableAutomation("acme/widgets");
     assert.equal(calls[0].method, "PUT");
-    assert.deepEqual(JSON.parse(calls[0].body), { repository: "acme/widgets", runner: "cloud" });
+    assert.deepEqual(JSON.parse(calls[0].body), { repository: "acme/widgets", runner: "anywhere" });
     await lib.enableAutomation("acme/widgets", "github-actions");
     assert.deepEqual(JSON.parse(calls[1].body), { repository: "acme/widgets", runner: "github-actions" });
     await lib.disableAutomation(9);
@@ -175,7 +175,7 @@ describe("GitHub App calls", () => {
       pull_request: false,
       branches: ["main", "release/*"],
       base_branches: [],
-      runner: "cloud",
+      runner: "anywhere",
     });
   });
 
@@ -327,7 +327,8 @@ describe("subscription form rules", () => {
 
   it("keeps the subscription's run owner and refuses unknown owners", () => {
     const draft = { repository: "octo-org/api", pipeline: "ci", push: true, pull_request: false };
-    assert.equal(lib.subscriptionRequest(draft).runner, "cloud");
+    assert.equal(lib.subscriptionRequest(draft).runner, "anywhere");
+    assert.equal(lib.subscriptionProblem({ ...draft, runner: "cloud" }), null);
     assert.equal(lib.subscriptionProblem({ ...draft, runner: "github-actions" }), null);
     assert.equal(lib.subscriptionProblem({ ...draft, runner: "pool=prod" }), null);
     assert.match(lib.subscriptionProblem({ ...draft, runner: "laptop" as never }) ?? "", /pool=<name>/);

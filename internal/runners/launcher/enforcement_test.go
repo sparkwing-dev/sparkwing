@@ -30,7 +30,7 @@ func FuzzProductionBoundaryRejectsMetadataInjection(f *testing.F) {
 		}
 		key := "probe-x" + hex.EncodeToString([]byte(suffix))
 		_, kube := boundaryFixture()
-		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}}}
+		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}
 		if _, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), policy, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
@@ -51,7 +51,7 @@ func FuzzProductionBoundaryRejectsMetadataInjection(f *testing.F) {
 			created++
 			pod.UID = types.UID(pod.Name)
 			pod.Status = corev1.PodStatus{PodIP: "10.1.2.3", HostIP: "10.0.0.1", Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
-			if pod.Spec.Containers[0].Name != "control" {
+			if name := pod.Spec.Containers[0].Name; name != "control" && name != "peer" {
 				pod.Status.Phase = corev1.PodSucceeded
 			}
 			if annotation {

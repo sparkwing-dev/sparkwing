@@ -54,7 +54,10 @@ type paymentObject struct {
 	} `json:"card"`
 	PaymentMethodDetails struct {
 		Card struct {
-			Fingerprint string `json:"fingerprint"`
+			Fingerprint  string `json:"fingerprint"`
+			ThreeDSecure *struct {
+				Result string `json:"result"`
+			} `json:"three_d_secure"`
 		} `json:"card"`
 	} `json:"payment_method_details"`
 	LastPaymentError struct {
@@ -176,6 +179,9 @@ func (a *paymentAuthenticator) chargeFingerprint(ctx context.Context, event *Pay
 	return nil
 }
 
+// PaymentProviderAPIVersion is the Stripe API version the controller reads provider objects at.
+const PaymentProviderAPIVersion = "2026-08-26.dahlia"
+
 type paymentProvider struct {
 	key    string
 	client *http.Client
@@ -200,6 +206,7 @@ func (p *paymentProvider) read(ctx context.Context, collection, id, kind string,
 		return object, paymentProviderUnavailable()
 	}
 	request.Header.Set("Authorization", "Bearer "+p.key)
+	request.Header.Set("Stripe-Version", PaymentProviderAPIVersion)
 	response, err := p.client.Do(request)
 	if err != nil {
 		return object, paymentProviderUnavailable()

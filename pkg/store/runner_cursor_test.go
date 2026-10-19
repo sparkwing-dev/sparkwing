@@ -28,10 +28,10 @@ func TestRunnerObservationCursorAndLivenessProperty(t *testing.T) {
 		if _, err := s.exec(t.Context(), `UPDATE capabilities SET last_used_at=?,claim_observation_json=? WHERE prefix='runner'`, now.UnixNano(), body); err != nil {
 			t.Fatal(err)
 		}
-		var placed []UnitDemand
+		var placed []runnerPoll
 		err = s.inTx(t.Context(), func(tx *storeTx) error {
 			var err error
-			placed, err = placementRunnersTx(t.Context(), tx, "a", ClaimPlacement{Liveness: time.Hour})
+			placed, err = placementRunnersTx(t.Context(), tx, "a", time.Hour, false)
 			return err
 		})
 		want := 0

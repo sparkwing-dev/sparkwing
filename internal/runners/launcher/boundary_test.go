@@ -26,7 +26,7 @@ func boundaryBinding(team string) CloudJobBinding {
 }
 
 func boundaryFixture() (*KubernetesBoundary, *fake.Clientset) {
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: "uid", ResourceVersion: "1", OwnerReferences: []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim", UID: "claim-uid"}}, Labels: map[string]string{TeamNodeLabel: TeamNodeValue("team")}}, Spec: corev1.NodeSpec{ProviderID: "aws:///zone/i-node"}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: "uid", ResourceVersion: "1", OwnerReferences: []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim", UID: "claim-uid"}}, Labels: map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "team")}}, Spec: corev1.NodeSpec{ProviderID: "aws:///zone/i-node"}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	kube := fake.NewClientset(node)
 	var mu sync.Mutex
 	kube.PrependReactor("update", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
@@ -181,7 +181,7 @@ func TestBoundaryRefusesKubeletRelabeledNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node.Labels[TeamNodeLabel] = TeamNodeValue("other")
+	node.Labels[TeamNodeLabel] = TeamNodeValue("cloud", "other")
 	if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -203,15 +203,15 @@ func TestBoundaryNeverReassignsUsedNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if node.Labels[TeamNodeLabel] != TeamNodeValue("team") {
+	if node.Labels[TeamNodeLabel] != TeamNodeValue("cloud", "team") {
 		t.Fatal("Clear changed the team's label")
 	}
-	node.Labels[TeamNodeLabel] = TeamNodeValue("other")
+	node.Labels[TeamNodeLabel] = TeamNodeValue("cloud", "other")
 	claim, err := b.Karpenter.Resource(nodeClaims).Get(t.Context(), "claim", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim.SetLabels(map[string]string{TeamNodeLabel: TeamNodeValue("other"), "karpenter.sh/nodepool": "pool"})
+	claim.SetLabels(map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "other"), "karpenter.sh/nodepool": "pool"})
 	if _, err = b.Karpenter.Resource(nodeClaims).Update(t.Context(), claim, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestBoundaryNeverReassignsUsedNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = unstructured.SetNestedStringMap(pool.Object, map[string]string{TeamNodeLabel: TeamNodeValue("other")}, "spec", "template", "metadata", "labels"); err != nil {
+	if err = unstructured.SetNestedStringMap(pool.Object, map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "other")}, "spec", "template", "metadata", "labels"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = b.Karpenter.Resource(nodePools).Update(t.Context(), pool, metav1.UpdateOptions{}); err != nil {
@@ -254,7 +254,7 @@ func FuzzBoundaryNeverCrossesTeams(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		node.Labels[TeamNodeLabel] = TeamNodeValue(other)
+		node.Labels[TeamNodeLabel] = TeamNodeValue("cloud", other)
 		if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 			t.Fatal(err)
 		}
@@ -267,12 +267,12 @@ func FuzzBoundaryNeverCrossesTeams(f *testing.F) {
 func karpenterFixture() dynamic.Interface {
 	claim := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodeClaim",
-		"metadata": map[string]any{"name": "claim", "uid": "claim-uid", "labels": map[string]any{TeamNodeLabel: TeamNodeValue("team"), "karpenter.sh/nodepool": "pool"}, "ownerReferences": []any{map[string]any{"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "name": "pool", "uid": "pool-uid"}}},
+		"metadata": map[string]any{"name": "claim", "uid": "claim-uid", "labels": map[string]any{TeamNodeLabel: TeamNodeValue("cloud", "team"), "karpenter.sh/nodepool": "pool"}, "ownerReferences": []any{map[string]any{"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "name": "pool", "uid": "pool-uid"}}},
 		"status":   map[string]any{"nodeName": "node", "providerID": "aws:///zone/i-node"},
 	}}
 	pool := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "pool", "uid": "pool-uid"},
-		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{TeamNodeLabel: TeamNodeValue("team")}}}},
+		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{TeamNodeLabel: TeamNodeValue("cloud", "team")}}}},
 	}}
 	return dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), claim, pool)
 }
@@ -340,7 +340,7 @@ func FuzzBoundaryRequiresMatchingProvisioner(f *testing.F) {
 		}
 		switch mode % 8 {
 		case 0:
-			node.Labels[TeamNodeLabel] = TeamNodeValue(other)
+			node.Labels[TeamNodeLabel] = TeamNodeValue("cloud", other)
 		case 1:
 			node.OwnerReferences[0].UID = "replacement"
 		case 2:
@@ -352,13 +352,13 @@ func FuzzBoundaryRequiresMatchingProvisioner(f *testing.F) {
 		case 4:
 			pool.SetUID("replacement")
 		case 5:
-			if err = unstructured.SetNestedStringMap(pool.Object, map[string]string{TeamNodeLabel: TeamNodeValue(other)}, "spec", "template", "metadata", "labels"); err != nil {
+			if err = unstructured.SetNestedStringMap(pool.Object, map[string]string{TeamNodeLabel: TeamNodeValue("cloud", other)}, "spec", "template", "metadata", "labels"); err != nil {
 				t.Fatal(err)
 			}
 		case 6:
-			claim.SetLabels(map[string]string{TeamNodeLabel: TeamNodeValue(other), "karpenter.sh/nodepool": "pool"})
+			claim.SetLabels(map[string]string{TeamNodeLabel: TeamNodeValue("cloud", other), "karpenter.sh/nodepool": "pool"})
 		case 7:
-			node.Labels[usedTeamLabel] = TeamNodeValue(other)
+			node.Labels[usedTeamLabel] = TeamNodeValue("cloud", other)
 		}
 		if _, err = b.Karpenter.Resource(nodeClaims).Update(t.Context(), claim, metav1.UpdateOptions{}); err != nil {
 			t.Fatal(err)
@@ -419,4 +419,32 @@ func FuzzRetirementNeverTouchesReplacement(f *testing.F) {
 			t.Fatalf("replacement NodeClaim removed: %v", err)
 		}
 	})
+}
+
+func TestDeploymentsSharingATeamSlugNeverShareNodes(t *testing.T) {
+	if TeamNodeValue("prod-cloud-jobs", "team") == TeamNodeValue("staging-cloud-jobs", "team") {
+		t.Fatal("two deployments derive the same team node value")
+	}
+	b, _ := boundaryFixture()
+	b.Namespace = "staging-cloud-jobs"
+	if _, _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatalf("a second deployment reserved another deployment's team node: %v", err)
+	}
+	for _, namespace := range []string{"prod-cloud-jobs", "staging-cloud-jobs"} {
+		pod, err := capacityPod(CloudJobConfig{Namespace: namespace, CPUCeiling: 2, MemoryCeiling: 8 << 30}, capacityDemand{Binding: boundaryBinding("team"), CPUCores: 1, Memory: 1 << 30})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := TeamNodeValue(namespace, "team")
+		if pod.Spec.NodeSelector[TeamNodeLabel] != want || pod.Labels[TeamLabel] != want {
+			t.Fatalf("%s capacity pod selects %q, want %q", namespace, pod.Spec.NodeSelector[TeamNodeLabel], want)
+		}
+		tolerated := false
+		for _, toleration := range pod.Spec.Tolerations {
+			tolerated = tolerated || toleration.Key == TeamNodeLabel && toleration.Value == want
+		}
+		if !tolerated {
+			t.Fatalf("%s capacity pod does not tolerate its own team taint", namespace)
+		}
+	}
 }

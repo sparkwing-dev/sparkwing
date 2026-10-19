@@ -46,7 +46,11 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
-	facts := capability.OIDCFacts{Now: snapshot.Now, Team: string(t.team), RunID: run.ID, Pipeline: run.Request.Request.Pipeline, Ref: run.Request.Request.Git.Ref, SHA: run.Request.Request.Git.SHA, Repository: run.Request.Request.Git.Repository.Display, Trigger: "manual", RunnerKind: oidcRunnerKind(chain)}
+	personal, err := personalRootTx(ctx, tx, chain)
+	if err != nil {
+		return capability.OIDCFacts{}, err
+	}
+	facts := capability.OIDCFacts{Now: snapshot.Now, Team: string(t.team), RunID: run.ID, Pipeline: run.Request.Request.Pipeline, Ref: run.Request.Request.Git.Ref, SHA: run.Request.Request.Git.SHA, Repository: run.Request.Request.Git.Repository.Display, Trigger: "manual", RunnerKind: oidcRunnerKind(chain, personal)}
 	facts.NotAfter = state.LeaseExpiresAt
 	if state.Expansion != nil {
 		facts.NotAfter = state.Expansion.ExpiresAt
@@ -62,7 +66,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if !facts.NotAfter.After(facts.Now) {
 		return capability.OIDCFacts{}, authorityError(apierr.Unauthenticated, "claim issuance window has ended")
 	}
-	identity, err := oidcOriginalIdentityTx(ctx, tx, t.team, run.Request)
+	identity, err := originalRequestTx(ctx, tx, t.team, run.Request)
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
@@ -75,7 +79,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	return facts, nil
 }
 
-func oidcRunnerKind(chain []authorityNode) string {
+func oidcRunnerKind(chain []authorityNode, personal bool) string {
 	for _, node := range chain {
 		if node.principal.Capability.Binding.Kind == capability.BindingPush {
 			return "github-actions"
@@ -83,6 +87,9 @@ func oidcRunnerKind(chain []authorityNode) string {
 	}
 	switch chain[0].principal.Capability.Subject.Kind {
 	case capability.SubjectMachine:
+		if personal {
+			return "personal"
+		}
 		return "runner"
 	case capability.SubjectService, capability.SubjectOperator:
 		return "service"
@@ -91,7 +98,7 @@ func oidcRunnerKind(chain []authorityNode) string {
 	}
 }
 
-func oidcOriginalIdentityTx(ctx context.Context, tx *storeTx, team Team, request runspec.SealedRequest) (runspec.SealedRequest, error) {
+func originalRequestTx(ctx context.Context, tx *storeTx, team Team, request runspec.SealedRequest) (runspec.SealedRequest, error) {
 	seen := map[string]bool{request.RunID: true}
 	for {
 		origin, lineage := request.Request.Origin, request.Request.Lineage

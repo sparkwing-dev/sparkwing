@@ -80,7 +80,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		}
 	}
 	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
-	qa, err := qaModuleEnvironment(ctx, dir, pin, environment)
+	qa, err := engine.QAModuleEnvironment(ctx, dir, pin, environment)
 	if err != nil {
 		return nil, "", err
 	}
@@ -93,10 +93,17 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	}
 	path := filepath.Join(request.ExecutableDirectory, name)
 	var lease *bincache.Lease
-	if request.NoBincache {
+	uncached := request.NoBincache
+	if !uncached {
+		lease, _, err = bincache.MaterializePipeline(ctx, dir, options)
+		if errors.Is(err, bincache.ErrUnstableInputs) {
+			fmt.Fprintln(&buildDiagnostics, "pipeline build inputs kept changing; building without the binary cache")
+			uncached, err = true, nil
+		}
+	}
+	if uncached {
 		err = bincache.CompileUncachedPipeline(ctx, dir, path, options)
 	} else {
-		lease, _, err = bincache.MaterializePipeline(ctx, dir, options)
 		if lease != nil {
 			defer func() { result = errors.Join(result, lease.Release()) }()
 		}
@@ -130,7 +137,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	if module.Version != pin.Version || replacement != pin.Replacement {
 		return nil, "", &apierr.Error{Code: apierr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
 	}
-	if request.NoBincache {
+	if uncached {
 		return []string{path}, "", nil
 	}
 	source, err := os.Open(lease.Path())
@@ -200,7 +207,7 @@ func installTool(ctx context.Context, dir string, environment []string, name str
 	if err := gotoolchain.Run(ctx, command); err != nil {
 		return append(stdout.Bytes(), stderr.Bytes()...), fmt.Errorf("SDK dependency tool %s: %w", name, err)
 	}
-	if name == "go" && len(args) > 0 && (args[0] == "list" || args[0] == "env") {
+	if name == "go" && len(args) > 0 && args[0] == "list" {
 		return stdout.Bytes(), nil
 	}
 	return append(stdout.Bytes(), stderr.Bytes()...), nil

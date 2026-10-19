@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -14,15 +13,8 @@ import (
 )
 
 func burstPlacementTx(ctx context.Context, tx *storeTx, team Team, run string) (*runspec.BurstPlacement, error) {
-	var body []byte
-	if err := tx.QueryRowContext(ctx, `SELECT request_json FROM runs WHERE team=? AND id=?`, team, run).Scan(&body); err != nil {
-		return nil, err
-	}
-	var seal runspec.SealedRequest
-	if err := json.Unmarshal(body, &seal); err != nil {
-		return nil, err
-	}
-	return seal.Request.Burst, nil
+	seal, err := sealedRequestTx(ctx, tx, team, run)
+	return seal.Request.Burst, err
 }
 
 func burstPreferencesTx(ctx context.Context, tx *storeTx, team Team, run string, b runspec.BurstPlacement) ([]PlacementPreference, error) {
@@ -39,34 +31,50 @@ func burstPreferencesTx(ctx context.Context, tx *storeTx, team Team, run string,
 		}
 		prefers := []string{target}
 		if step.Target == "machines" {
-			rows, err := tx.QueryContext(ctx, `SELECT DISTINCT c.prefix,c.subject_id FROM capabilities c JOIN runs r ON r.team=c.team AND r.created_principal=c.created_by WHERE r.team=? AND r.id=? AND r.created_subject_kind='account' AND c.subject_kind='machine' AND c.bind_kind='none' AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at>?)`, team, run, tx.now().UnixNano())
+			names, err := requesterMachineNamesTx(ctx, tx, team, run)
 			if err != nil {
 				return nil, err
 			}
-			candidates := map[string]string{}
-			for rows.Next() {
-				var prefix, name string
-				if err := rows.Scan(&prefix, &name); err != nil {
-					return nil, errors.Join(err, rows.Close())
-				}
-				candidates[prefix] = name
-			}
-			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-				return nil, err
-			}
-			for prefix, name := range candidates {
-				record, err := loadCapabilityRecordTx(ctx, tx, prefix)
-				if err != nil {
-					return nil, err
-				}
-				if record.Origin != nil && record.Origin.Personal {
-					prefers = append(prefers, "name="+name)
-				}
+			for _, name := range names {
+				prefers = append(prefers, "name="+name)
 			}
 		}
 		out = append(out, PlacementPreference{Prefers: []string{strings.Join(prefers, ",")}, Hold: step.Hold})
 	}
 	return out, nil
+}
+
+func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run string) ([]string, error) {
+	account, err := runRequesterAccountTx(ctx, tx, team, run)
+	if err != nil || account == "" {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)`, team, account, tx.now().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	candidates := map[string]string{}
+	for rows.Next() {
+		var prefix, name string
+		if err := rows.Scan(&prefix, &name); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		candidates[prefix] = name
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	var names []string
+	for prefix, name := range candidates {
+		record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+		if err != nil {
+			return nil, err
+		}
+		if record.Origin != nil && record.Origin.Personal {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
 func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityNode, run string) error {
@@ -85,6 +93,9 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&owner); err != nil {
 		return err
 	}
+	if automated, err := automatedLineageTx(ctx, tx, Team(root.Team), run); err != nil || automated {
+		return errors.Join(err, authorityError(apierr.Forbidden, "personal machines take only their owner's manual runs"))
+	}
 	requester, err := runRequesterAccountTx(ctx, tx, Team(root.Team), run)
 	if err != nil {
 		return err
@@ -95,8 +106,21 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	return nil
 }
 
+// safety: an App or schedule run, or a retry or child of one, never reaches a personal machine.
+func automatedLineageTx(ctx context.Context, tx *storeTx, team Team, run string) (bool, error) {
+	seal, err := sealedRequestTx(ctx, tx, team, run)
+	if err != nil {
+		return false, err
+	}
+	seal.RunID = run
+	original, err := originalRequestTx(ctx, tx, team, seal)
+	origin := original.Request.Origin
+	return origin == runspec.OriginApp || origin == runspec.OriginSchedule, err
+}
+
 func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, unit UnitRef) error {
-	burst, err := burstPlacementTx(ctx, tx, team, unit.RunID)
+	seal, err := sealedRequestTx(ctx, tx, team, unit.RunID)
+	burst := seal.Request.Burst
 	if err != nil || burst == nil {
 		return err
 	}

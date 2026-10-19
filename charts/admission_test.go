@@ -160,3 +160,32 @@ func TestJobNamespaceCreationCanBeHandedOff(t *testing.T) {
 		}
 	}
 }
+
+func TestTwoReleasesWithTheSameTeamNeverShareTeamNodes(t *testing.T) {
+	settings := append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher")
+	clusterScoped := map[string]string{}
+	values := map[string]string{}
+	for _, release := range []string{"prod", "staging"} {
+		jobs := ""
+		for _, r := range renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", release, settings...)) {
+			if r.Kind == "Namespace" {
+				jobs = r.Metadata.Name
+			}
+			if r.Metadata.Namespace == "" && r.Kind != "Namespace" {
+				key := r.Kind + "/" + r.Metadata.Name
+				if other, taken := clusterScoped[key]; taken {
+					t.Errorf("%s and %s both render %s", other, release, key)
+				}
+				clusterScoped[key] = release
+			}
+		}
+		if jobs == "" {
+			t.Fatalf("%s rendered no job namespace", release)
+		}
+		value := launcher.TeamNodeValue(jobs, "shared-team")
+		if other, taken := values[value]; taken {
+			t.Fatalf("%s and %s derive the same team node value for one team slug", other, release)
+		}
+		values[value] = release
+	}
+}

@@ -378,7 +378,7 @@ func FuzzLocalDashboardRequiresBearer(f *testing.F) {
 			t.Fatalf("%s %s with Authorization %q Cookie %q answered 200", method, target, authorization, cookie)
 		}
 	})
-	if _, live := logins.session(&http.Request{Header: http.Header{"Authorization": {"Bearer " + session}}}); !live {
+	if _, _, live := logins.session(&http.Request{Header: http.Header{"Authorization": {"Bearer " + session}}}); !live {
 		f.Fatal("a request without the bearer ended the session")
 	}
 }
@@ -402,4 +402,74 @@ func signedInBearer(t *testing.T, r *localRuntime) string {
 		t.Fatal("fresh sign-in link was refused")
 	}
 	return "Bearer " + session
+}
+
+func TestLocalDashboardStreamsEndWithTheirSession(t *testing.T) {
+	for _, end := range []string{"logout", "lifetime"} {
+		t.Run(end, func(t *testing.T) {
+			clock := &loginClock{now: time.Unix(1_800_000_000, 0)}
+			logins := newDashboardLogins(clock.Now)
+			logins.serving("http://127.0.0.1:1")
+			login, failure := logins.mint(LocalPeerIdentity{GOOS: "linux"})
+			if failure != nil {
+				t.Fatal(failure)
+			}
+			link, err := url.Parse(login.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			session, ok := logins.redeem(link.Query().Get("token"))
+			if !ok {
+				t.Fatal("redeem failed")
+			}
+			entered := make(chan struct{})
+			stream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.(http.Flusher).Flush()
+				close(entered)
+				<-r.Context().Done()
+			})
+			server := httptest.NewServer(logins.gate(stream, nil))
+			t.Cleanup(server.Close)
+			if end == "lifetime" {
+				for range 2 {
+					clock.advance(11 * time.Hour)
+					if _, _, live := logins.session(&http.Request{Header: http.Header{"Authorization": {"Bearer " + session}}}); !live {
+						t.Fatal("session ended inside its idle window")
+					}
+				}
+				clock.advance(dashboardSessionLifetime - 22*time.Hour - 50*time.Millisecond)
+			}
+			done := make(chan error, 1)
+			go func() {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/runs/r/events/stream", nil)
+				if err != nil {
+					done <- err
+					return
+				}
+				bearer(session)(req)
+				resp, err := http.DefaultClient.Do(req)
+				if err == nil {
+					_, err = io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+				}
+				done <- err
+			}()
+			select {
+			case <-entered:
+			case err := <-done:
+				t.Fatalf("stream refused before it opened: %v", err)
+			}
+			if end == "logout" {
+				if resp := loginRequest(t, http.DefaultClient, http.MethodPost, server.URL+"/logout", bearer(session)); resp.StatusCode != http.StatusNoContent {
+					t.Fatalf("logout: HTTP %d", resp.StatusCode)
+				}
+			}
+			select {
+			case <-done:
+			case <-t.Context().Done():
+				t.Fatal("an open stream outlived its session")
+			}
+		})
+	}
 }

@@ -506,6 +506,31 @@ Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because leased expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
 
+## Run-anywhere claim ranking
+
+`SelectDispatch` seals controller dispatch for an executing run with no runner
+selection, `pool=` requirement or burst preferences, on every controller. A
+unit is ranked when its run is run anywhere and the unit's own requirements pin
+no `pool=`, `name=` or `class=` term. Tiers come from the authenticated chain:
+here (the personal machine sealed as `OriginMachine` from a verified proof),
+personal, github-actions, self-hosted (including local queues) or cloud. An
+empty ranking means first come, and an unset ranking means the default order.
+
+`unitEligibilityTx` is the single judgment of a claimant for a unit: kinds,
+authority and placement (including the ranking), matching, advertised
+capacity and billing for every metered claimant. Queue scans, named claims,
+ranking holds and notices all use it. `unitPlacementTx` applies only the
+ranking to a ranked unit. Inside `limits.RankingWindow` from readiness, a claim
+waits while a better-ranked eligible claimant is live, and it writes its ask to
+`unit_asks` under the unit's claim lock in the same transaction, which commits
+when the scan awards another unit or nothing. For `limits.RankingAward` after
+the window, a claim waits only for a better-ranked ask recorded inside the
+window. An award deletes the unit's asks.
+
+A personal machine takes only its owner's manual runs. `automatedLineageTx`
+follows a retry or child run back to its original request and refuses any whose
+origin is an App delivery or a schedule.
+
 ## Database observations
 
 Completion readers capture one database time before opening their result cursor.

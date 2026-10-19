@@ -90,10 +90,10 @@ func TestOperatorTeamsCreateCLIThroughStore(t *testing.T) {
 				t.Fatalf("duplicate: %v output=%q calls=%d closes=%d", err, out.String(), calls, closes)
 			}
 			out.Reset()
-			if err = runOperatorTeamsCommandArgs(t.Context(), []string{"show", "--team", "cloud-support", "--profile", "deployment", "-o", format}, &out, connect); err != nil {
+			if err = runOperatorTeamsCommandArgs(t.Context(), []string{"show", "--team", "cloud-support", "--job-namespace", "cloud", "--profile", "deployment", "-o", format}, &out, connect); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(out.String(), launcher.TeamNodeLabel) || !strings.Contains(out.String(), launcher.TeamNodeValue("cloud-support")) {
+			if !strings.Contains(out.String(), launcher.TeamNodeLabel) || !strings.Contains(out.String(), launcher.TeamNodeValue("cloud", "cloud-support")) {
 				t.Fatalf("show omits node assignment: %s", out.String())
 			}
 			if calls != 3 || closes != 3 {

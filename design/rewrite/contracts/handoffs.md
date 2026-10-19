@@ -826,3 +826,58 @@ Assigned to an Opus implementer (env 1087).
 - A successful charge clears that hold automatically and does not restart the clean-day count (like a no-fault release).
 - Customer-visible and approved; GitHub Actions blocks new paid minutes on payment failure while free usage continues.
 - Superseded the same day (Korey: "Do what you think is best"): `sparkwing update` replaces only the CLI, while runner services run `sparkwing-runner`, which updates itself from its controller (drain, replace, refresh units, restart). `service.Refresh` and its test are deleted; `sparkwing update` prints that runner services update themselves from their controller.
+
+## 2026-10-19 lead amendment to decision 2 (run anywhere award deadline)
+
+- "At the end of the window the highest-ranked claimant that asked during it wins" needs that claimant to come back and claim, since claimants poll. After a unit's 5 s window, the best-ranked asker recorded during the window holds the award for at most 2 s (`RankingAward`); if it doesn't claim by then, the first eligible asker wins. Worst-case wait for a unit is therefore 7 s. Lead ruling, reported to Korey for ratification.
+
+## 2026-10-19 Korey decision 20: defer personal-machine automation and the controller host
+
+- Decisions 15 and 16 (admin-approved personal machines on automated runs, owner repo-access checks) are deferred past v0.68. Personal machines take only their owner's manual runs; App and schedule runs go to Actions, self-hosted runners and Cloud. The code is deleted, not disabled; it returns later as its own reviewed work.
+- The in-process controller host claimant (decision 13's "controller's host takes part") is deferred and deleted. A self-hosted controller needs at least one runner; with none, the no_eligible_runner notice says to start or register one. wingd's single-user local queue is unchanged.
+- Run-anywhere ranking stays for manual, App and schedule runs on Cloud and self-hosted controllers.
+
+## 2026-10-19 Korey decision 21: Cloud Docker is rootful dind in a user-namespaced pod on AL2023 job nodes
+
+- Supersedes decision 12's rootless sidecar. Job and team nodes run AL2023 with kubelet `idsPerPod` 262144 and runc writable cgroups; other nodes stay Bottlerocket. The Docker sidecar runs `docker:dind` (digest-pinned) as root inside the pod's user namespace (`hostUsers: false`), never privileged, with namespaced SYS_ADMIN, NET_ADMIN and SYS_PTRACE only; no tun device, no `super_t`. `docker run --memory` is enforced. The minimal job-node IAM role and IMDS hop limit 1 stay.
+- Bottlerocket with rootless Docker would have needed SELinux `super_t` on the sidecar, which leaves customer containers unconfined anyway, and could not enforce memory limits.
+
+## 2026-10-19 Korey decision 22: staging on kikd
+
+- A staging Sparkwing in kikd, no separate AWS account: Argo app `sparkwing-staging` in namespace `sparkwing-staging`, Cloud jobs in `sparkwing-staging-cloud-jobs`, host `staging.sparkwing.dev` via the existing Traefik, its own SSM path `/kikd-prod/sparkwing-staging/*` (own admin token, OIDC key, Stripe test keys), its own GitHub App ("Sparkwing Staging"), and its own `sparkwing-staging-*` team NodePools covered by the budget breaker.
+- Database: Aurora Serverless v2 PostgreSQL with minimum 0 ACU (auto-pause), separate from production. `down` scales controller and launcher to zero, Karpenter removes idle nodes and the database pauses (storage billing only); `up` scales back to one.
+- QA of new builds happens on staging before production.
+
+## 2026-10-19 Korey decision 23: Cloud job PID limit
+
+- kubelet `podPidsLimit` on job and team nodes is 32768 per pod (GitHub-hosted runners have no published limit; each job owns a VM). Documented in docs/limits.md.
+
+## 2026-10-19 Korey decision 24: staging amd64 pool
+
+- Staging keeps the tainted amd64 `staging-infra` NodePool (2 vCPU cap, empties when staging is down) for amd64-only QA images; kikd app nodes stay arm64.
+
+## 2026-10-19 Korey decision 25: staging shares the Stripe test sandbox
+
+- Staging and production share one Stripe test-mode sandbox. Each controller stamps its Checkout sessions and setups with a deployment identity in metadata and acknowledges (2xx) but never settles events carrying another deployment's identity or events it does not handle.
+
+## 2026-10-19 Korey decision 26: Cloud billing is prepaid credits with automatic refill
+
+- Supersedes post-pay debt and collections (decisions 112, 19's charge-failure holds, and the card-charge/collection/recovery design). Cloud usage only ever draws on a balance already paid for; there is no debt.
+- Credits are bought through Stripe Checkout (3-D Secure) and may save the card. Optional automatic refill: when the balance falls below a threshold, the controller starts one off-session payment for the refill amount (one in flight per team, idempotent); it settles exactly like Add funds from the signed webhook. A failed refill (decline, 3DS required) is recorded and surfaced ("update your card"); credits then run down normally.
+- Metering is slice by slice at lease renewal: admission needs the first slice covered (the existing award hold); each renewal reserves the next slice from the balance first. If the next slice is not covered, the renewal is refused and the job is stopped with "out of credits" (hard stop, no grace), bounded by the drain deadline. Overage is at most one slice per running job.
+- Refunds, disputes and early fraud warnings stay (any card payment can be clawed back); a clawback can take the balance negative, which blocks new Cloud work. Card pinning and fraud-card blocking stay.
+- Open for Korey: auto-refill opt-in vs default, default threshold and refill size, and what standing tiers still cap (refill size and frequency as a stolen-card brake).
+
+## 2026-10-19 Korey decision 27: refill settings and customer spending limits
+
+- Auto-refill is opt-in.
+- The team sets its own refill threshold and refill amount (the console suggests values; no forced defaults). A minimum refill amount of $10 keeps card fees reasonable.
+- Teams can set their own spending limits on refills, per week and per month (for example "no more than $25 a week, $100 a month"). A refill that would exceed a limit is not made; credits then run down and Cloud work hard-stops at zero, with a notice naming the limit.
+- Larger, less frequent charges are preferred; smarter sizing for high-volume teams (for example suggesting about a week of recent usage) is a later improvement, not launch scope.
+- Standing tiers additionally cap refill size and frequency as a stolen-card brake. Korey agrees in principle; the lead proposes the specific per-tier values for ratification.
+- Ratified 2026-10-19 (decision 27 standing caps): New $50 per refill / 1 per day / $100 per week; Established $200 / 2 / $500; Trusted $1,000 / 3 / $3,000; High uses the team's own limits only. Plain constants; teams that outgrow them use the decision 11 tier request.
+
+## 2026-10-19 Korey decision 28: structural simplification plan approved
+
+- Korey approved every recommendation in /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/simplicity/PLAN.md §4 (decisions 1-6 and 9-21 as recommended; 7-9 amended by §7 for prepaid), including moving pkg/store and pkg/controller under internal/, Sol's six cuts, GitHub-model provenance and cache trust, withdrawing the pool-runner residual, declared deployment kind, the 5-minute cancel drain deadline, Cloud fair shares, child-run limits (depth 10, 50 per root), CLI token limits, team-owned shared runners, append-only audit, the durable webhook inbox and declared restore.
+- Feature freeze: no new ranking, launcher or billing features beyond the plan until its §5 stop rule is met. Work proceeds in the plan's waves; every workstream deletes the old path and lands with its guard.

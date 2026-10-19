@@ -34,9 +34,16 @@ func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Prin
 			if err != nil || account == "" {
 				return err
 			}
-			enrolledBy, err := personalMachineOwnerTx(ctx, tx, t.team, root.Subject.ID)
+			record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+			if err != nil || record.Origin == nil || !record.Origin.Personal {
+				return err
+			}
+			var enrolledBy string
+			if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, t.team, root.Prefix).Scan(&enrolledBy); err != nil {
+				return err
+			}
 			owner = enrolledBy != "" && enrolledBy == account
-			return err
+			return nil
 		}
 		return nil
 	})
@@ -58,7 +65,7 @@ func runRequesterAccountTx(ctx context.Context, tx *storeTx, team Team, run stri
 }
 
 func personalMachineOwnerTx(ctx context.Context, tx *storeTx, team Team, machine string) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,created_by FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none'`, team, machine)
+	rows, err := tx.QueryContext(ctx, `SELECT prefix,created_by FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL`, team, machine)
 	if err != nil {
 		return "", err
 	}

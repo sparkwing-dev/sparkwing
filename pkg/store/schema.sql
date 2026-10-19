@@ -10,6 +10,7 @@ CREATE TABLE teams (
     display_name TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',
     members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
+    claim_ranking TEXT NOT NULL DEFAULT '',
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',
     billing_trust TEXT NOT NULL DEFAULT '' CHECK(billing_trust IN ('','granted','revoked')),
@@ -632,7 +633,7 @@ CREATE TABLE github_app_triggers (
     on_release_prereleased BIGINT NOT NULL DEFAULT 0,
     on_branch_create BIGINT NOT NULL DEFAULT 0,
     on_branch_delete BIGINT NOT NULL DEFAULT 0,
-    runner TEXT NOT NULL DEFAULT 'cloud',
+    runner TEXT NOT NULL DEFAULT 'anywhere',
     repo_key TEXT NOT NULL,
     PRIMARY KEY (team, repository_id, pipeline)
 );
@@ -703,6 +704,7 @@ CREATE TABLE credit_checkouts (
     paid_at BIGINT,
     closed_at BIGINT,
     grant_id TEXT UNIQUE REFERENCES credit_grants(id),
+    three_d_secure TEXT NOT NULL DEFAULT '',
     UNIQUE(team,id,payment_mode),
     UNIQUE(payment_mode,session_id),
     CHECK((paid_at IS NULL) = (grant_id IS NULL))
@@ -763,7 +765,22 @@ CREATE TABLE credit_freezes (
     reason TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
     released_at BIGINT,
-    cause TEXT NOT NULL DEFAULT ''
+    cause TEXT NOT NULL DEFAULT '',
+    no_fault BIGINT NOT NULL DEFAULT 0 CHECK(no_fault IN (0,1)),
+    placed_by TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE standing_requests (
+    id TEXT NOT NULL PRIMARY KEY,
+    team TEXT NOT NULL REFERENCES teams(name),
+    tier TEXT NOT NULL CHECK(tier IN ('High')),
+    message TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    requested_at BIGINT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('open','approved','declined')),
+    decided_by TEXT NOT NULL DEFAULT '',
+    decided_at BIGINT NOT NULL DEFAULT 0,
+    decision_reason TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE team_storage (
@@ -956,7 +973,7 @@ CREATE TABLE github_app_automation (
     installation_id BIGINT NOT NULL,
     enabled_by TEXT NOT NULL,
     enabled_at BIGINT NOT NULL,
-    runner TEXT NOT NULL DEFAULT 'cloud',
+    runner TEXT NOT NULL DEFAULT 'anywhere',
     repo_key TEXT NOT NULL,
     PRIMARY KEY (team, repository_id),
     FOREIGN KEY (installation_id) REFERENCES github_app_installations(installation_id) ON DELETE CASCADE
@@ -1115,6 +1132,18 @@ CREATE TABLE capabilities (
     CHECK(issuance = 'delegate' OR team IS NOT NULL),
     CHECK(issuance = 'delegate' OR (payer_team IS NOT NULL AND executor_class IS NOT NULL AND reservation_id IS NOT NULL AND billing_start IS NOT NULL AND unit_kind IS NOT NULL AND billing_unit IS NOT NULL)),
     FOREIGN KEY(team,bind_run) REFERENCES runs(team,id) ON DELETE CASCADE
+);
+
+CREATE TABLE unit_asks (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    unit_kind TEXT NOT NULL CHECK(unit_kind IN ('plan','eval','node')),
+    node_id TEXT NOT NULL,
+    claimant TEXT NOT NULL,
+    claim_rank BIGINT NOT NULL CHECK(claim_rank >= 0),
+    asked_at BIGINT NOT NULL,
+    PRIMARY KEY (team,run_id,unit_kind,node_id,claimant),
+    FOREIGN KEY (team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
 CREATE TABLE blobs (
@@ -1443,6 +1472,10 @@ CREATE INDEX idx_credit_checkouts_team_expires ON credit_checkouts(team, expires
 CREATE INDEX idx_credit_checkouts_session ON credit_checkouts(team,session_id);
 
 CREATE INDEX idx_credit_freezes_team ON credit_freezes(team, released_at);
+
+CREATE UNIQUE INDEX idx_standing_requests_open ON standing_requests(team) WHERE state = 'open';
+
+CREATE INDEX idx_standing_requests_team ON standing_requests(team, requested_at);
 
 CREATE UNIQUE INDEX idx_git_credentials_team_host ON git_credentials(team, host);
 

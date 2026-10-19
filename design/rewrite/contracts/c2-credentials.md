@@ -728,7 +728,7 @@ grace short. A failure returns no Raw. No legacy token-table read or RotateToken
 fallback is permitted. The controller cannot implement this transaction or
 create a new persistence representation. Its fakes prove transport and
 projection only. Real rotation, revocation propagation, registration and
-source-consent transfer remain W1 integration work.
+source-consent transfer (superseded by decision 6c; no consent remains to transfer) remain W1 integration work.
 
 These are local C2 declarations. No C1 signature or implementation changes.
 The collection binding and rotation retry corrections follow the existing

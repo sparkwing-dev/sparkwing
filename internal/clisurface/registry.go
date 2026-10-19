@@ -153,8 +153,9 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing operator", Flags: []Flag{}},
 		{Path: "sparkwing operator teams", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator teams show", Authority: DeploymentAdmin, Rules: []string{"Show the team's protected node label and value for its NodePool template."}, Flags: []Flag{
+		{Path: "sparkwing operator teams show", Authority: DeploymentAdmin, Rules: []string{"Show the team's protected node label and value for its NodePool template.", "The value is derived from the deployment's Cloud Job namespace and the team, so two deployments on one cluster never share a team's nodes."}, Flags: []Flag{
 			{Name: "team", Argument: "SLUG", Required: true},
+			{Name: "job-namespace", Argument: "NAMESPACE", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing operator teams create", Authority: DeploymentAdmin, Rules: []string{"Create a new team and its first team-admin credential atomically under operator authority. Existing or retired team slugs are refused.", "JSON includes the one-time capability and account metadata. Plain and pretty print the capability once. This operation is never retried automatically."}, Flags: []Flag{
@@ -280,14 +281,16 @@ func Registry() []Command {
 			{Name: "pipeline-ref", Argument: "REF"},
 		}},
 		{Path: "sparkwing overflow", Flags: []Flag{}},
+		{Path: "sparkwing billing", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
-		{Path: "sparkwing team settings show", Authority: TeamCredential, Rules: []string{"Show the team's members_can_add_machines setting. It defaults to true and allows members to enroll only their own personal machines."}, Flags: []Flag{
+		{Path: "sparkwing team settings show", Authority: TeamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. Plain prints the boolean and the comma-separated ranking."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
-		{Path: "sparkwing team settings set", Authority: TeamCredential, Rules: []string{"Only team administrators change members_can_add_machines. Changes are audited. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration."}, Flags: []Flag{
+		{Path: "sparkwing team settings set", Authority: TeamCredential, Rules: []string{"Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or both. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.", "--claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
-			{Name: "members-can-add-machines", Argument: "BOOL", Values: []string{"true", "false"}, Required: true},
+			{Name: "members-can-add-machines", Argument: "BOOL", Values: []string{"true", "false"}},
+			{Name: "claim-ranking", Argument: "TIERS"},
 		}},
 		{Path: "sparkwing overflow show", Authority: TeamCredential, Rules: []string{"Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
@@ -296,6 +299,14 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "minutes", Argument: "N", HasMinimum: true, Minimum: 0, Conflicts: []string{"uncapped"}},
 			{Name: "uncapped", Conflicts: []string{"minutes"}},
+		}},
+		{Path: "sparkwing billing standing", Authority: TeamCredential, Rules: []string{"Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+		}},
+		{Path: "sparkwing billing request-tier", Authority: TeamCredential, Rules: []string{"Ask the Sparkwing operators to grant High standing. Only team owners request it, and a team has at most one open request. The message reaches the operator with the team's standing and payment history. The operator approves by granting standing or declines with a reason; see the outcome with sparkwing billing standing. JSON returns the stored request; plain prints its ID."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "tier", Argument: "TIER", Values: []string{"high"}, Required: true},
+			{Name: "message", Argument: "TEXT", Required: true},
 		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
 		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{

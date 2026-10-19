@@ -108,6 +108,9 @@ func wireOperations() map[string]wireOperation {
 	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared terminal artifact selectors", nil, localhostwire.LocalNodeSnapshot{})
 
 	result["POST /api/v1/operator/teams/{team}/refunds"] = operation("Record a completed provider refund", wire.OperatorRefund{}, wire.OperatorRefundRecorded{})
+	result["POST /api/v1/team/billing/standing-request"] = operation("Request operator-granted High standing", wire.StandingRequestWrite{}, wire.StandingRequest{})
+	result["GET /api/v1/operator/standing-requests"] = operation("List open standing requests", nil, wire.OperatorStandingQueue{})
+	result["POST /api/v1/operator/teams/{team}/standing-request/decline"] = operation("Decline a team's open standing request", wire.StandingDecline{}, wire.StandingRequest{})
 	result["GET /api/v1/runs/{run}/jobs/{job}/output"] = operation("Read an authorized committed job output", nil, wire.JobOutput{})
 	result["GET /api/v1/runs/{run}/children/{child}/jobs/{job}/output"] = operation("Read an authorized child output", nil, wire.JobOutput{})
 
@@ -134,8 +137,8 @@ func wireOperations() map[string]wireOperation {
 		}{}, client.RotatedToken{})
 	}
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", client.EnrollRunnerRequest{}, client.CreatedToken{})
-	result["GET /api/v1/team/settings"] = operation("Read team machine enrollment settings", nil, wire.TeamSettings{})
-	result["PUT /api/v1/team/settings"] = operation("Change and audit team machine enrollment settings", wire.TeamSettings{}, wire.TeamSettings{})
+	result["GET /api/v1/team/settings"] = operation("Read team machine enrollment settings and claim ranking", nil, wire.TeamSettings{})
+	result["PUT /api/v1/team/settings"] = operation("Change and audit team machine enrollment settings and claim ranking", wire.TeamSettingsUpdate{}, wire.TeamSettings{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
 	result["POST /api/v1/data/records"] = operation("Commit a record", wire.DataRecordWriteRequest{}, wire.DataRecord{})
 	for _, path := range []string{"/api/v1/data/upload", "/api/v1/data/commit", "/api/v1/data/records"} {

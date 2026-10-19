@@ -19,9 +19,8 @@ func resolveMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDeman
 	return readMatchingInputsTx(ctx, tx, request, unit, true)
 }
 
-// matchingRun holds the run-level matching reads, which a snapshot's per-node
-// placement decisions would otherwise repeat once per node. Only read-only
-// snapshot transactions reuse it, so no write in the same transaction can stale it.
+// perf: matchingRun memoizes run-level matching reads that a snapshot's per-node placement would repeat per node.
+// safety: only read-only snapshot transactions reuse it, so no write in the same transaction can stale it.
 type matchingRun struct {
 	chain   []authorityNode
 	here    bool
@@ -180,7 +179,10 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if !validMatchingResources(profile.Capacity) || !validMatchingResources(request.Available) || !validMatchingResources(demand.Request) {
 		return profile, demand, authorityError(apierr.BadRequest, "invalid claim resources")
 	}
-	return profile, demand, nil
+	if rankedUnit(requestSeal.Request, demand) {
+		_, err = claimRankTx(ctx, tx, Team(team), chain, requestSeal.Request)
+	}
+	return profile, demand, err
 }
 
 func matchingResources(v runspec.Resources) match.Resources {

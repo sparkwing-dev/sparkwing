@@ -85,7 +85,7 @@ const (
 	GitAccessOwner
 )
 
-func (o Options) ownerGit() bool { return o.Base.Local || o.GitAccess == GitAccessOwner }
+func (o Options) ownerGit() bool { return o.GitAccess == GitAccessOwner }
 
 // Entry contains the acquired checkout and SDK command without protocol arguments.
 type Entry struct {

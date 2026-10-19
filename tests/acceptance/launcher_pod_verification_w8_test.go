@@ -68,7 +68,7 @@ func TestLauncherPodRejectionCommitsFailedAwardW8(t *testing.T) {
 		},
 		"changed_image": func(p *corev1.Pod) { p.Spec.Containers[0].Image = "other" },
 		"changed_size":  func(p *corev1.Pod) { p.Spec.Resources.Limits[corev1.ResourceMemory] = resource.MustParse("1Mi") },
-		"other_team":    func(p *corev1.Pod) { p.Labels[launcher.TeamLabel] = launcher.TeamNodeValue("other-team") },
+		"other_team":    func(p *corev1.Pod) { p.Labels[launcher.TeamLabel] = launcher.TeamNodeValue("cloud", "other-team") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			runtime, kube, server, resources, _ := reservationFixtureW8(t)

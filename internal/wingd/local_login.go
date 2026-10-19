@@ -38,6 +38,7 @@ type pendingLogin struct {
 type dashboardSession struct {
 	peer              LocalPeerIdentity
 	lastSeen, expires time.Time
+	ended             chan struct{}
 }
 
 func (s dashboardSession) live(now time.Time) bool {
@@ -134,10 +135,10 @@ func (l *dashboardLogins) redeem(token string) (string, bool) {
 	}
 	for key, current := range l.sessions {
 		if !current.live(now) {
-			delete(l.sessions, key)
+			l.endLocked(key)
 		}
 	}
-	l.sessions[sha256.Sum256([]byte(session))] = dashboardSession{peer: login.peer, lastSeen: now, expires: now.Add(dashboardSessionLifetime)}
+	l.sessions[sha256.Sum256([]byte(session))] = dashboardSession{peer: login.peer, lastSeen: now, expires: now.Add(dashboardSessionLifetime), ended: make(chan struct{})}
 	return session, true
 }
 
@@ -149,22 +150,43 @@ func sessionKey(r *http.Request) ([sha256.Size]byte, bool) {
 	return sha256.Sum256([]byte(session)), true
 }
 
-func (l *dashboardLogins) session(r *http.Request) (LocalPeerIdentity, bool) {
+func (l *dashboardLogins) endLocked(key [sha256.Size]byte) {
+	if current, ok := l.sessions[key]; ok {
+		close(current.ended)
+		delete(l.sessions, key)
+	}
+}
+
+func (l *dashboardLogins) session(r *http.Request) (dashboardSession, time.Duration, bool) {
 	key, ok := sessionKey(r)
 	if !ok {
-		return LocalPeerIdentity{}, false
+		return dashboardSession{}, 0, false
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	current, ok := l.sessions[key]
 	now := l.now()
 	if !ok || !current.live(now) {
-		delete(l.sessions, key)
-		return LocalPeerIdentity{}, false
+		l.endLocked(key)
+		return dashboardSession{}, 0, false
 	}
 	current.lastSeen = now
 	l.sessions[key] = current
-	return copyPeerIdentity(current.peer), true
+	current.peer = copyPeerIdentity(current.peer)
+	return current, current.expires.Sub(now), true
+}
+
+func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, next http.Handler, current dashboardSession, remaining time.Duration) {
+	ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), localPeerKey{}, current.peer), remaining)
+	defer cancel()
+	go func() {
+		select {
+		case <-current.ended:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // safety: a browser acts as the api.sock peer that minted its link only while it sends that session as a
@@ -180,8 +202,8 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 			l.logout(w, r)
 			return
 		}
-		if peer, ok := l.session(r); ok {
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), localPeerKey{}, peer)))
+		if current, remaining, ok := l.session(r); ok {
+			l.serveSession(w, r, next, current, remaining)
 			return
 		}
 		if shell != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) && !strings.HasPrefix(r.URL.Path, "/api/") {
@@ -219,8 +241,8 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 	key, ok := sessionKey(r)
 	l.mu.Lock()
 	current, found := l.sessions[key]
-	delete(l.sessions, key)
 	live := ok && found && current.live(l.now())
+	l.endLocked(key)
 	l.mu.Unlock()
 	if !live {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this browser is not signed in"})

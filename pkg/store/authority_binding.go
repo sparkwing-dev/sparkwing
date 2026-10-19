@@ -184,6 +184,8 @@ func bindingSelectionTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 		kind := capability.UnitTrigger
 		if target.NodeID != "" {
 			kind = capability.UnitNode
+		} else if slices.Contains(target.ClaimKinds, capability.UnitPlan) && !slices.Contains(target.ClaimKinds, capability.UnitTrigger) {
+			kind = capability.UnitPlan
 		}
 		demand.Target = &UnitRef{Kind: kind, RunID: target.RunID, NodeID: target.NodeID}
 	}
