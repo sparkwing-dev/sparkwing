@@ -1996,7 +1996,6 @@ type ScheduleDecision struct {
 	Outcome string
 	Reason  string
 }
-func ScheduleDispatch(where string) runspec.Dispatch
 type ScheduleExpansion struct {
 	GeneratorID  string
 	SourceNodeID string
