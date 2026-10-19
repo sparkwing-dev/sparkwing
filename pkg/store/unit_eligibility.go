@@ -7,11 +7,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
 	stepKinds    = "kinds"
+	stepTrust    = "trust"
 	stepTier     = "tier"
 	stepAccess   = "access"
 	stepMatch    = "match"
@@ -56,6 +58,10 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil || len(claimant.Kinds) > 0 && !slices.Contains(claimant.Kinds, unit.Kind) {
 		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(apierr.Forbidden, "claimant does not take this kind of unit"))
 		return e, nil
+	}
+	if trusted, err := claimantTrustsRunTx(ctx, tx, team, unit.RunID, chain[len(chain)-1].principal.Capability, claimant.Trust); err != nil || !trusted {
+		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, "claimant takes only verified default-branch work")
+		return e, err
 	}
 	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, checks.lock)
 	switch {
@@ -119,4 +125,55 @@ func rankedObservable(c capability.Capability) bool {
 
 func localClaimant(c capability.Capability) bool {
 	return c.Subject.Kind == capability.SubjectLocal && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
+}
+
+// RunnerTrust is the runs a claimant accepts work from. The empty value takes the
+// server default: verified default-branch work only when the claimant holds a
+// pool that a secret is reserved to, and any run otherwise.
+type RunnerTrust string
+
+const (
+	TrustVerifiedDefault RunnerTrust = "verified-default"
+	TrustAny             RunnerTrust = "any"
+)
+
+// Valid reports whether t is the server default or a named class.
+func (t RunnerTrust) Valid() bool { return t == "" || t == TrustVerifiedDefault || t == TrustAny }
+
+// safety: a claimant that runs one job after another shares host state between them,
+// so work from a run anyone can push must not reach a host that later holds a pool's
+// reserved secrets.
+func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, trust RunnerTrust) (bool, error) {
+	if trust == TrustAny {
+		return true, nil
+	}
+	if trust == "" {
+		reserved, err := poolsHoldSecretsTx(ctx, tx, team, root.ReservedPools)
+		if err != nil || !reserved {
+			return true, err
+		}
+	}
+	seal, err := sealedRequestTx(ctx, tx, team, run)
+	if err != nil {
+		return false, err
+	}
+	return verifiedDefaultBranch(seal.Request.Git), nil
+}
+
+func poolsHoldSecretsTx(ctx context.Context, tx *storeTx, team Team, pools []string) (bool, error) {
+	for _, pool := range pools {
+		var held int
+		err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM secrets WHERE team=? AND only_on=?`, team, pool).Scan(&held)
+		if err != nil || held > 0 {
+			return held > 0, err
+		}
+	}
+	return false, nil
+}
+
+// verifiedDefaultBranch requires the webhook-verified push to the repository's default
+// branch to name exactly the ref and commit the run executes.
+func verifiedDefaultBranch(git runspec.Git) bool {
+	app := git.App.Value
+	return git.App.Set && app.DefaultBranchPush && app.DefaultBranch != "" && app.Ref == "refs/heads/"+app.DefaultBranch && app.Ref == git.Ref && app.SHA == git.SHA
 }

@@ -66,6 +66,10 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if len(body.Kinds) == 0 {
 		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires unit kinds")
 	}
+	trust := store.RunnerTrust(body.Trust)
+	if !trust.Valid() {
+		return controllerwire.ClaimResponse{}, invalidEngineBody("claim trust must be verified-default or any")
+	}
 	principal, err := s.CheckRunner(ctx, authorized.Principal.Authority, body.RunnerVersion)
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
@@ -88,11 +92,11 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	c := principal.Capability
 	machine := c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush)
 	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectLocal || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
-		if err := s.Store.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
+		if err := s.Store.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}, Trust: trust}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
-	claim, err := s.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
+	claim, err := s.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}, Trust: trust})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
 		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil

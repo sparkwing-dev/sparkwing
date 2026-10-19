@@ -37,6 +37,7 @@ type LoopConfig struct {
 	PollInterval  time.Duration
 	IdleExit      time.Duration
 	ClaimUntil    time.Time
+	Trust         string
 }
 
 // Loop claims triggers and jobs until stopped and joins held work before returning.
@@ -315,7 +316,7 @@ func (l *Loop) request(ctx context.Context) (controllerwire.ClaimRequest, error)
 	req := controllerwire.ClaimRequest{
 		RunnerVersion: l.Config.Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Kinds:  slices.Clone(l.Config.Kinds),
-		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID,
+		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID, Trust: l.Config.Trust,
 	}
 	if l.RequestCapacity != nil {
 		capacity, available, err := l.RequestCapacity(ctx)

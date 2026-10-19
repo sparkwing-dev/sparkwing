@@ -84,6 +84,8 @@ type ClaimRequest struct {
 	AvailableMemoryBytes int64                 `json:"available_memory_bytes"`
 	RunID                string                `json:"run_id,omitempty"`
 	JobID                string                `json:"job_id,omitempty"`
+	// Trust is "verified-default", "any", or empty for the controller's default.
+	Trust string `json:"trust,omitempty"`
 }
 
 // ClaimedUnit carries the one-time private execution award over authenticated transport.
