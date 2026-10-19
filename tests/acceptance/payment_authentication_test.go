@@ -342,11 +342,12 @@ func TestPaymentHTTPAcknowledgesEventsThisDeploymentDoesNotOwn(t *testing.T) {
 		status  int
 		settles int
 	}{
-		"another deployment":            {stamped("api.sparkwing.dev"), false, http.StatusNoContent, 0},
-		"unknown and unstamped":         {paymentBody(capability.PaymentTest, "checkout.session.completed", "evt_unstamped", "paid"), true, http.StatusNoContent, 0},
-		"unhandled event type":          {paymentBody(capability.PaymentTest, "customer.created", "evt_customer", "paid"), false, http.StatusNoContent, 0},
-		"this deployment's unknown one": {stamped("staging.sparkwing.dev"), true, http.StatusNotFound, 1},
-		"this deployment's known one":   {stamped("staging.sparkwing.dev"), false, http.StatusNoContent, 1},
+		"another deployment":               {stamped("api.sparkwing.dev"), true, http.StatusNoContent, 0},
+		"recorded here, stamped elsewhere": {stamped("api.sparkwing.dev"), false, http.StatusInternalServerError, 0},
+		"unknown and unstamped":            {paymentBody(capability.PaymentTest, "checkout.session.completed", "evt_unstamped", "paid"), true, http.StatusNoContent, 0},
+		"unhandled event type":             {paymentBody(capability.PaymentTest, "customer.created", "evt_customer", "paid"), false, http.StatusNoContent, 0},
+		"this deployment's unknown one":    {stamped("staging.sparkwing.dev"), true, http.StatusNotFound, 1},
+		"this deployment's known one":      {stamped("staging.sparkwing.dev"), false, http.StatusNoContent, 1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ledger := &paymentLedger{}

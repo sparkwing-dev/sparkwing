@@ -73,7 +73,7 @@ func run(args []string) error {
 	billingURL := fs.String("billing-url", "",
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with the "+
-			credBillingToken+" credential and names this deployment by the --external-url host. Empty sells no credits.")
+			credBillingToken+" credential. Empty sells no credits.")
 	paymentMode := fs.String("payment-mode", "", "Stripe callback mode: test or live. Requires stripe-api-key and stripe-webhook-secret in --credentials-dir. Empty disables settlement.")
 	operatorAccounts := fs.String("operator-accounts", "",
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
@@ -437,9 +437,9 @@ func run(args []string) error {
 		}
 	}
 
-	deployment, err := paymentDeployment(*externalURL, *billingURL, *paymentMode)
+	deployment, err := st.AsOperator().DeploymentID(context.Background())
 	if err != nil {
-		return err
+		return fmt.Errorf("payment deployment identity: %w", err)
 	}
 	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {
 		return errors.New("--billing-url is set but the " + credBillingToken + " credential is absent; " +

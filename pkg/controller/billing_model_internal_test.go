@@ -269,6 +269,17 @@ func TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish(t
 
 func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler, func(string, string, string)) {
 	t.Helper()
+	h, deliver := billingModelPaymentDelivery(t, e, func(s *Server) *Server { return s })
+	return h, func(id, kind, object string) {
+		t.Helper()
+		if w := deliver(id, kind, object); w.Code != http.StatusNoContent {
+			t.Fatalf("payment=%d %s", w.Code, w.Body)
+		}
+	}
+}
+
+func billingModelPaymentDelivery(t *testing.T, e *EngineController, configure func(*Server) *Server) (http.Handler, func(string, string, string) *httptest.ResponseRecorder) {
+	t.Helper()
 	key, secret := filepath.Join(t.TempDir(), "api-key"), filepath.Join(t.TempDir(), "webhook-secret")
 	for path, value := range map[string]string{key: "sk_test_fixture", secret: "whsec_fixture"} {
 		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
@@ -280,9 +291,9 @@ func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(e.Store, nil).WithEngineController(e).WithPayments(verifier, e.Store).Handler()
+	h := configure(New(e.Store, nil).WithEngineController(e).WithPayments(verifier, e.Store)).Handler()
 	now := time.Now().Unix()
-	webhook := func(id, kind, object string) {
+	deliver := func(id, kind, object string) *httptest.ResponseRecorder {
 		t.Helper()
 		body := fmt.Sprintf(`{"id":%q,"object":"event","type":%q,"created":%d,"livemode":false,"data":{"object":%s}}`, id, kind, now, object)
 		mac := hmac.New(sha256.New, []byte("whsec_fixture"))
@@ -293,11 +304,9 @@ func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler
 		r.Header.Set("Stripe-Signature", fmt.Sprintf("t=%d,v1=%x", now, mac.Sum(nil)))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		if w.Code != http.StatusNoContent {
-			t.Fatalf("payment=%d %s", w.Code, w.Body)
-		}
+		return w
 	}
-	return h, webhook
+	return h, deliver
 }
 
 type billingIdentityProvider struct{}
@@ -387,6 +396,38 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 	for _, retired := range []string{"ceiling_cents", "daily_cap_cents", "credit_limit_cents"} {
 		if _, exists := limits[retired]; exists {
 			t.Fatalf("retired billing field %s", retired)
+		}
+	}
+}
+
+func TestPaymentOwnershipFollowsTheStoredIdentityNotTheHost(t *testing.T) {
+	e, tenant := engineRuntimeStore(t)
+	engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
+	id, err := e.Store.AsOperator().DeploymentID(t.Context())
+	if err != nil || !strings.HasPrefix(id, "dep-") {
+		t.Fatalf("deployment id %q: %v", id, err)
+	}
+	if again, err := e.Store.AsOperator().DeploymentID(t.Context()); err != nil || again != id {
+		t.Fatalf("deployment id changed: %q then %q: %v", id, again, err)
+	}
+	billingModelCheckout(t, e.Store, tenant, "cs_owned", 2000)
+	session := func(stamp string) string {
+		return `{"id":"cs_owned","object":"checkout.session","mode":"payment","livemode":false,"payment_status":"paid","payment_intent":"pi_fixture","amount_total":2000,"currency":"usd","metadata":{"sparkwing_deployment":"` + stamp + `"}}`
+	}
+	grants := func() int {
+		var n int
+		if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM credit_grants WHERE kind='paid'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for i, host := range []string{"https://staging.sparkwing.dev", "https://renamed.example"} {
+		_, deliver := billingModelPaymentDelivery(t, e, func(s *Server) *Server { return s.WithExternalURL(host).WithPaymentDeployment(id) })
+		if w := deliver(fmt.Sprintf("evt_owned_%d", i), "checkout.session.completed", session(id)); w.Code != http.StatusNoContent || grants() != 1 {
+			t.Fatalf("%s: our own payment = %d %s, grants %d", host, w.Code, w.Body, grants())
+		}
+		if w := deliver(fmt.Sprintf("evt_conflict_%d", i), "checkout.session.completed", session("dep-another")); w.Code < 500 || grants() != 1 {
+			t.Fatalf("%s: recorded payment stamped elsewhere = %d, grants %d; want a retryable refusal and no settlement", host, w.Code, grants())
 		}
 	}
 }

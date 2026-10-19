@@ -69,6 +69,11 @@ func (s *Server) verifyPaymentRequest(r *http.Request) error {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "payment event could not be read"}
 	}
 	event, err := s.paymentVerifier.VerifyPaymentEvent(r.Context(), capability.PaymentPresentation{Body: body, Signature: signatures[0]}, capability.PaymentScope{Deployment: s.deployment, Records: s.paymentLedger})
+	var conflict *capability.PaymentOwnershipConflict
+	if errors.As(err, &conflict) {
+		s.logger.Error("stripe event names another deployment for an object recorded here; not settled, Stripe retries", "alert", "payment_ownership_conflict", "object", conflict.EventObject, "stamp", conflict.Stamp, "deployment", s.deployment)
+		return &apierr.Error{Code: apierr.Internal, Message: "payment event ownership conflicts with committed records"}
+	}
 	if err != nil {
 		return err
 	}

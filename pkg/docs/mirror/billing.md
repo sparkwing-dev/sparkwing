@@ -94,8 +94,9 @@ The controller's `--payment-mode` configures both provider verification and the
 ledger mode for new reservations. Test and live provider records retain separate
 mode tags. Empty mode disables settlement.
 
-`--billing-url` and `--payment-mode` need `--external-url`, whose host names the
-deployment. The checkout service stamps that name as
+Each controller store holds a random payment deployment id, created once at
+first start and never changed by configuration, so renaming the controller's
+host leaves its in-flight payments its own. The checkout service stamps that id as
 `metadata[sparkwing_deployment]` on every Checkout Session, setup intent,
 payment intent and customer it creates for the controller. Deployments that
 share one Stripe account each receive the other's events at `/webhooks/stripe`.
@@ -103,7 +104,10 @@ After checking the signature, and before any Stripe read or store write, the
 controller classifies each event once:
 
 - An object stamped with another deployment is foreign: acknowledged with 204,
-  never read or settled.
+  never read from Stripe or settled. If this controller recorded that object,
+  the mismatch is an integrity fault instead: it is logged at error level with
+  `alert=payment_ownership_conflict`, answered with a 500 so Stripe retries, and
+  never settled.
 - An object stamped with this deployment, or one that resolves to a checkout,
   page, intent or attempt this controller recorded, is local and settles. A
   local event whose parent is not recorded yet fails, so Stripe redelivers it;

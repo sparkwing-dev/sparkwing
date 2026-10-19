@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -213,7 +214,7 @@ func TestPaymentOwnershipIsClassifiedBeforeProviderReads(t *testing.T) {
 		provider http.RoundTripper
 		owned    bool
 	}{
-		"another deployment's checkout":    {stamp(paid, theirs), true, noProvider{t}, false},
+		"another deployment's checkout":    {stamp(paid, theirs), false, noProvider{t}, false},
 		"this deployment's checkout":       {stamp(paid, ours), false, paymenttest.Provider{}.SettledCheckout("pi_fixture", false, ""), true},
 		"recorded unstamped checkout":      {paid, true, paymenttest.Provider{}.SettledCheckout("pi_fixture", false, ""), true},
 		"unrecorded unstamped checkout":    {paid, false, paymenttest.Provider{"/v1/payment_intents/pi_fixture": `{"id":"pi_fixture","object":"payment_intent","livemode":false}`}, false},
@@ -250,5 +251,18 @@ func TestCompletedPagesBindTheirIntent(t *testing.T) {
 		if err != nil || proof == nil || proof.Event().Kind != PaymentPageCompleted || proof.Event().IntentID != tc.intent || proof.Event().CustomerID != "cus_1" {
 			t.Fatalf("page: %+v %v", proof, err)
 		}
+	}
+}
+
+func TestARecordedObjectStampedElsewhereIsAnIntegrityFault(t *testing.T) {
+	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	secret := "whsec_fixture_only"
+	v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }, provider: newPaymentProvider("sk_test_fixture")}
+	v.provider.client.Transport = noProvider{t}
+	body := []byte(strings.Replace(string(paymentBody("checkout.session.completed", "paid", false)), `"metadata":{`, `"metadata":{"sparkwing_deployment":"dep-another",`, 1))
+	proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)}, PaymentScope{Deployment: "dep-ours", Records: recordsAll(true)})
+	var conflict *PaymentOwnershipConflict
+	if proof != nil || !errors.As(err, &conflict) || conflict.Stamp != "dep-another" || conflict.EventObject != "cs_fixture" {
+		t.Fatalf("proof=%+v err=%v, want an ownership conflict", proof, err)
 	}
 }

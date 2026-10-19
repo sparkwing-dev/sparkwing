@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,17 +150,4 @@ func readSecretsKey(dir credentials.Dir, name string) ([]byte, error) {
 		return nil, fmt.Errorf("credential %s: %w", name, err)
 	}
 	return key, nil
-}
-
-// safety: the external host names this deployment on every Stripe object it creates;
-// a stamp naming another host is never settled.
-func paymentDeployment(externalURL, billingURL, paymentMode string) (string, error) {
-	if strings.TrimSpace(billingURL) == "" && strings.TrimSpace(paymentMode) == "" {
-		return "", nil
-	}
-	u, err := url.Parse(strings.TrimSpace(externalURL))
-	if err != nil || u.Hostname() == "" {
-		return "", errors.New("--billing-url and --payment-mode need --external-url, whose host names this deployment on Stripe objects")
-	}
-	return strings.ToLower(u.Hostname()), nil
 }

@@ -223,3 +223,28 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	}
 	return nil
 }
+
+// DeploymentID returns this store's payment deployment identity, created once at first use and never changed by
+// configuration, so renaming the controller's host cannot turn its own in-flight payments foreign.
+func (o *Operator) DeploymentID(ctx context.Context) (string, error) {
+	var id string
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		fresh, err := newCreditID("dep")
+		if err != nil {
+			return err
+		}
+		data, err := json.Marshal(fresh)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_deployment',?) ON CONFLICT(key) DO NOTHING`, data); err != nil {
+			return err
+		}
+		var encoded []byte
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_deployment'`).Scan(&encoded); err != nil {
+			return err
+		}
+		return json.Unmarshal(encoded, &id)
+	})
+	return id, err
+}

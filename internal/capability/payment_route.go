@@ -35,6 +35,16 @@ type PaymentScope struct {
 	Records    PaymentRecords
 }
 
+// PaymentOwnershipConflict is a recorded local object whose event names another deployment; it is retried and never settled.
+type PaymentOwnershipConflict struct {
+	EventObject string
+	Stamp       string
+}
+
+func (e *PaymentOwnershipConflict) Error() string {
+	return "payment object " + e.EventObject + " is recorded here but stamped for deployment " + e.Stamp
+}
+
 type paymentMetadata map[string]any
 
 func (m paymentMetadata) get(key string) string {
@@ -47,8 +57,8 @@ func moneyEvent(kind PaymentEventKind) bool {
 }
 
 // safety: ownership is decided once, before any provider read or store write. Another deployment's stamp
-// is foreign; this deployment's stamp or a committed parent is local, and a local money event whose
-// parent is unrecorded is retried; an unstamped child is local only when its intent carries our stamp.
+// is foreign unless we recorded the object, which is an integrity fault; our stamp or a committed parent is
+// local, retried while a money event's parent is unrecorded; an unstamped child needs our stamp on its intent.
 func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEventPolicy, body []byte, scope PaymentScope) (PaymentRoute, bool, error) {
 	var head struct {
 		ID            string           `json:"id"`
@@ -81,17 +91,18 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 		}
 		route.PaymentID = head.ID
 	}
-	stamp := head.Metadata.get(PaymentDeploymentMetadata)
-	if stamp != "" && stamp != scope.Deployment {
-		return route, false, nil
-	}
 	if scope.Records == nil {
 		return route, false, paymentProviderUnavailable()
 	}
+	stamp := head.Metadata.get(PaymentDeploymentMetadata)
 	recorded, err := scope.Records.RecordsPaymentParent(ctx, route)
 	switch {
 	case err != nil:
 		return route, false, err
+	case stamp != "" && stamp != scope.Deployment && recorded:
+		return route, false, &PaymentOwnershipConflict{EventObject: head.ID, Stamp: stamp}
+	case stamp != "" && stamp != scope.Deployment:
+		return route, false, nil
 	case recorded:
 		return route, true, nil
 	case !moneyEvent(route.Kind):
