@@ -311,8 +311,10 @@ runs may share that state:
   restriction to a runner without reserved secrets. `--trust=any` lifts it from
   a pool with reserved secrets.
 
-Before a cached pipeline binary runs, the runner re-hashes it against the digest
-recorded when it was compiled. Builds on a host the run's owner does not own set
+A cached pipeline binary runs only as a private copy whose bytes matched the
+digest recorded when it was compiled. Jobs on a shared runner run under the
+runner's account and can rewrite both the binary and its digest, so the check
+catches corruption, not tampering, until jobs run under a separate account. Builds on a host the run's owner does not own set
 `GOENV=off`. A run's submitted environment reaches the runner only under names
 the runner's own `run.submit_env_allow` lists; see
 [machine settings](machine-config.md).

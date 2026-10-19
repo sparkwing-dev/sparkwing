@@ -564,14 +564,26 @@ func TestLeaseRefusesAnExecutableChangedAfterPublication(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if binary, err := lease.Verify(); err != nil || binary.Path() != entry.binaryPath() {
+	out := t.TempDir()
+	binary, err := lease.Install(filepath.Join(out, "verified"))
+	if err != nil {
 		t.Fatalf("published executable not verified: %v", err)
+	}
+	if body, err := os.ReadFile(binary.Path()); err != nil || string(body) != "published" {
+		t.Fatalf("verified copy = %q, %v", body, err)
 	}
 	if err := os.WriteFile(entry.binaryPath(), []byte("planted"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lease.Verify(); err == nil {
+	if body, err := os.ReadFile(binary.Path()); err != nil || string(body) != "published" {
+		t.Fatalf("rewriting the cache changed the verified copy: %q, %v", body, err)
+	}
+	tampered := filepath.Join(out, "tampered")
+	if _, err := lease.Install(tampered); err == nil {
 		t.Fatal("a cached executable rewritten after publication was handed out")
+	}
+	if _, err := os.Stat(tampered); !os.IsNotExist(err) {
+		t.Fatalf("a refused copy was left behind: %v", err)
 	}
 }
 
@@ -597,7 +609,7 @@ func TestEntryWithoutPublicationRecordIsAMiss(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	binary, err := lease.Verify()
+	binary, err := lease.Install(filepath.Join(t.TempDir(), "verified"))
 	if err != nil {
 		t.Fatal(err)
 	}

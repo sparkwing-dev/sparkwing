@@ -88,7 +88,7 @@ func TestMaterializePipelineUsesTheCompilationWorkspace(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			binary, err := lease.Verify()
+			binary, err := lease.Install(filepath.Join(t.TempDir(), "verified"))
 			if err != nil {
 				t.Fatal(err)
 			}

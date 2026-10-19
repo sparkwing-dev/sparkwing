@@ -50,10 +50,11 @@ func DescribeRepo(absPath string) ([]nodeproto.PipelineDescription, error) {
 		return nil, fmt.Errorf("compile %s: %w", sparkwingDir, err)
 	}
 	defer func() { _ = lease.Release() }()
-	binary, err := lease.Verify()
+	binary, remove, err := installVerified(lease)
 	if err != nil {
 		return nil, err
 	}
+	defer remove()
 	return describePipelines(pipelineentry.Binary(binary.Path()), absPath)
 }
 
@@ -95,10 +96,11 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 		return nil, false
 	}
 	defer func() { _ = lease.Release() }()
-	binary, err := lease.Verify()
+	binary, remove, err := installVerified(lease)
 	if err != nil {
 		return nil, false
 	}
+	defer remove()
 	got, err := describePipelines(pipelineentry.Binary(binary.Path()), absPath)
 	if err != nil {
 		return nil, false
@@ -153,4 +155,18 @@ func ResolveRepoForPipelineCached(name string) (string, error) {
 		}
 	}
 	return "", ErrNotFound
+}
+
+func installVerified(lease *bincache.Lease) (bincache.VerifiedBinary, func(), error) {
+	dir, err := os.MkdirTemp("", "sparkwing-describe-")
+	if err != nil {
+		return bincache.VerifiedBinary{}, nil, err
+	}
+	remove := func() { _ = os.RemoveAll(dir) }
+	binary, err := lease.Install(filepath.Join(dir, "pipeline"))
+	if err != nil {
+		remove()
+		return bincache.VerifiedBinary{}, nil, err
+	}
+	return binary, remove, nil
 }

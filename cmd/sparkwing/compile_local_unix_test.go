@@ -54,7 +54,7 @@ exit 1
 		if err != nil {
 			t.Fatal(err)
 		}
-		binary, verifyErr := lease.Verify()
+		binary, verifyErr := lease.Install(filepath.Join(t.TempDir(), "verified"))
 		if verifyErr != nil {
 			t.Fatal(verifyErr)
 		}

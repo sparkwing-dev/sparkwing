@@ -88,28 +88,42 @@ func pipelineEntryAt(root, key string) (Entry, error) {
 	return Entry{root: root, key: key}, nil
 }
 
-// VerifiedBinary is the only handle to a cached executable. Its bytes matched the digest
-// recorded when the entry was published, at the moment the handle was made.
+// VerifiedBinary is the only handle to a cached executable: a private copy whose
+// bytes, hashed as they were written, matched the digest recorded at publication.
 type VerifiedBinary struct{ path string }
 
-// Path names the verified executable.
+// CachedPath names the cache entry's executable for display; run only a VerifiedBinary.
+func (l *Lease) CachedPath() string { return l.entry.binaryPath() }
+
+// Path names the verified copy.
 func (b VerifiedBinary) Path() string { return b.path }
 
-// Verify re-hashes the leased executable against its publication record. A job that can
-// write the cache could otherwise leave an executable for a later, more trusted run.
-func (l *Lease) Verify() (VerifiedBinary, error) {
+// Install copies the leased executable to dest, a new file, and hashes exactly the bytes
+// it writes, so a later rewrite of the cache cannot change what runs. A mismatch with the
+// publication record removes dest.
+func (l *Lease) Install(dest string) (_ VerifiedBinary, err error) {
 	recorded, err := os.ReadFile(l.entry.recordPath())
 	if err != nil {
 		return VerifiedBinary{}, fmt.Errorf("pipeline cache record: %w", err)
 	}
-	actual, err := fileDigest(l.entry.binaryPath())
+	source, err := os.Open(l.entry.binaryPath())
 	if err != nil {
 		return VerifiedBinary{}, err
 	}
-	if !bytes.Equal(bytes.TrimSpace(recorded), []byte(actual)) {
-		return VerifiedBinary{}, errors.New("cached pipeline binary differs from its publication record")
+	defer func() { err = errors.Join(err, source.Close()) }()
+	destination, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		return VerifiedBinary{}, err
 	}
-	return VerifiedBinary{path: l.entry.binaryPath()}, nil
+	hash := sha256.New()
+	_, copyErr := io.Copy(io.MultiWriter(destination, hash), source)
+	if err := errors.Join(copyErr, destination.Close()); err != nil {
+		return VerifiedBinary{}, errors.Join(err, os.Remove(dest))
+	}
+	if !bytes.Equal(bytes.TrimSpace(recorded), []byte(hex.EncodeToString(hash.Sum(nil)))) {
+		return VerifiedBinary{}, errors.Join(errors.New("cached pipeline binary differs from its publication record"), os.Remove(dest))
+	}
+	return VerifiedBinary{path: dest}, nil
 }
 
 func fileDigest(path string) (string, error) {
