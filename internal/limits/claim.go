@@ -13,6 +13,8 @@ const (
 	PlacementHold time.Duration = 20 * time.Second
 	// PlacementLiveness bounds placement liveness horizon.
 	PlacementLiveness time.Duration = 30 * time.Second
+	// RankingWindow bounds how long a run-anywhere unit waits for its best-ranked claimant.
+	RankingWindow time.Duration = 5 * time.Second
 	// ClaimWindow bounds here credential must first claim within this window.
 	ClaimWindow time.Duration = 10 * time.Minute
 	// HeartbeatTimeout bounds shared heartbeat RPC timeout.

@@ -24,8 +24,11 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 		switch mode % 8 {
 		case 0:
 			want = ""
-		case 1:
+		case 1, 2:
 			kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
+			if mode%8 == 2 {
+				kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitEval}
+			}
 			principal, err := server.Store.LookupCapability(t.Context(), root.Capability.Digest)
 			if err != nil {
 				t.Fatal(err)
@@ -37,8 +40,6 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 				t.Fatal(err)
 			}
 			raw = issued.Raw
-		case 2:
-			kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan}
 		case 3:
 			kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitTrigger}
 		case 4:

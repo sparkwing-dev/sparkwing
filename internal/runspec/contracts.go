@@ -139,6 +139,7 @@ type AppFacts struct {
 	SHA               string    `json:"sha"`
 	DefaultBranch     string    `json:"default_branch"`
 	DefaultBranchPush bool      `json:"default_branch_push"`
+	SenderID          int64     `json:"sender_id,omitempty"`
 	VerifiedAt        time.Time `json:"verified_at"`
 }
 

@@ -97,6 +97,7 @@ func Table() []Limit {
 		{Name: "ClaimPoll", Value: ClaimPoll, Class: Operator, Doc: "Idle claim-loop poll.", Refusal: "Validate renewal configuration; never silently default invalid values."},
 		{Name: "PlacementHold", Value: PlacementHold, Class: Operator, Doc: "Preferred placement hold.", Refusal: "Validate renewal configuration; never silently default invalid values."},
 		{Name: "PlacementLiveness", Value: PlacementLiveness, Class: Operator, Doc: "Placement liveness horizon.", Refusal: "Validate renewal configuration; never silently default invalid values."},
+		{Name: "RankingWindow", Value: RankingWindow, Class: Internal, Doc: "Run-anywhere unit wait for its best-ranked claimant.", Refusal: "Award the best claimant that asked; then first come."},
 		{Name: "ClaimWindow", Value: ClaimWindow, Class: Internal, Doc: "Here credential must first claim within this window.", Refusal: "Bound by parent where applicable."},
 		{Name: "HeartbeatTimeout", Value: HeartbeatTimeout, Class: Internal, Doc: "Shared heartbeat RPC timeout.", Refusal: "Bound by parent where applicable."},
 		{Name: "HeartbeatMaxSilence", Value: HeartbeatMaxSilence, Class: Internal, Doc: "Shared heartbeat outage budget.", Refusal: "Bound by parent where applicable."},

@@ -203,7 +203,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		if !verdict.OK() || !match.Fits(profile.Capacity, demand.Available, requirements.Request).OK() {
 			continue
 		}
-		placement, err := unitPlacementTx(ctx, tx, candidate.team, candidate.unit, profile, requirements)
+		placement, err := unitPlacementTx(ctx, tx, candidate.team, candidate.unit, demand.CapabilityPrefix, profile, requirements)
 		if err != nil {
 			return UnitRef{}, err
 		}

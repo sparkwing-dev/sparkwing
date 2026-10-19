@@ -22,6 +22,9 @@ func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
 			case "unknown":
 				demand.Kinds = []capability.UnitKind{"job"}
 			case "mixed_unauthorized", "named_unauthorized":
+				nodesOnly := authorityRoot("nodes-only", "a")
+				authorityPersist(t, s, nodesOnly)
+				demand.CapabilityPrefix = nodesOnly.Prefix
 				demand.Kinds = []capability.UnitKind{capability.UnitNode, capability.UnitPlan}
 				want = apierr.Forbidden
 				if problem == "named_unauthorized" {

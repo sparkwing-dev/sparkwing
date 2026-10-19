@@ -34,9 +34,9 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 			s, demand := executingRunFixture(t)
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
+			meteredRunnerOnly(t, s)
 			if kind == capability.UnitNode {
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done'`)
-				meteredRunnerOnly(t, s)
 			} else {
 				rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 			}
@@ -65,33 +65,44 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 	}
 }
 
-func TestUnmeteredRunnerJobCarriesNoCreditHold(t *testing.T) {
-	for _, runner := range []string{"unmetered", "metered", "revoked"} {
-		t.Run(runner, func(t *testing.T) {
-			s, demand := executingRunFixture(t)
-			rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
-			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan', status='done'`)
-			switch runner {
-			case "metered":
-				meteredRunnerOnly(t, s)
-			case "revoked":
-				rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='runner'`)
-			}
-			view, err := (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
-			if err != nil || view.Waiting == nil || view.Waiting.Kind != capability.UnitNode {
-				t.Fatalf("waiting unit = %+v, %v", view.Waiting, err)
-			}
-			if want := map[string]string{"unmetered": "", "metered": NoCreditsHold, "revoked": NoCreditsHold}[runner]; view.Waiting.CreditHold != want {
-				t.Fatalf("%s runner: credit hold = %q, want %q", runner, view.Waiting.CreditHold, want)
-			}
-			if runner != "unmetered" {
-				return
-			}
-			demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
-			if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
-				t.Fatalf("the unmetered runner the notice relied on could not claim the job: %v", err)
-			}
-		})
+func TestUnmeteredRunnerWorkCarriesNoCreditHold(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
+		for _, runner := range []string{"unmetered", "metered", "revoked"} {
+			t.Run(string(kind)+"/"+runner, func(t *testing.T) {
+				unmeteredRunnerCase(t, kind, runner)
+			})
+		}
+	}
+}
+
+func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) {
+	t.Helper()
+	s, demand := executingRunFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
+	rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan', status='done'`)
+	if kind == capability.UnitPlan {
+		rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='pending'`)
+		rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
+	}
+	switch runner {
+	case "metered":
+		meteredRunnerOnly(t, s)
+	case "revoked":
+		rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='runner'`)
+	}
+	view, err := (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
+	if err != nil || view.Waiting == nil || view.Waiting.Kind != kind {
+		t.Fatalf("waiting unit = %+v, %v", view.Waiting, err)
+	}
+	if want := map[string]string{"unmetered": "", "metered": NoCreditsHold, "revoked": NoCreditsHold}[runner]; view.Waiting.CreditHold != want {
+		t.Fatalf("%s runner: credit hold = %q, want %q", runner, view.Waiting.CreditHold, want)
+	}
+	if runner != "unmetered" {
+		return
+	}
+	demand.Target, demand.Kinds = nil, []capability.UnitKind{kind}
+	if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+		t.Fatalf("the unmetered runner the notice relied on could not claim the %s: %v", kind, err)
 	}
 }
 

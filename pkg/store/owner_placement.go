@@ -112,6 +112,6 @@ func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability
 	if !match.Evaluate(profile, required).OK() || !match.Fits(profile.Capacity, demand.Available, required.Request).OK() {
 		return false, nil
 	}
-	placement, err := unitPlacementTx(ctx, tx, Team(owner.Capability.Team), unit, profile, required)
+	placement, err := unitPlacementTx(ctx, tx, Team(owner.Capability.Team), unit, demand.CapabilityPrefix, profile, required)
 	return !placement.hold, err
 }

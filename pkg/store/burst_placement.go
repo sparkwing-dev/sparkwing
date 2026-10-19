@@ -2,9 +2,10 @@ package store
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -14,15 +15,8 @@ import (
 )
 
 func burstPlacementTx(ctx context.Context, tx *storeTx, team Team, run string) (*runspec.BurstPlacement, error) {
-	var body []byte
-	if err := tx.QueryRowContext(ctx, `SELECT request_json FROM runs WHERE team=? AND id=?`, team, run).Scan(&body); err != nil {
-		return nil, err
-	}
-	var seal runspec.SealedRequest
-	if err := json.Unmarshal(body, &seal); err != nil {
-		return nil, err
-	}
-	return seal.Request.Burst, nil
+	seal, err := sealedRequestTx(ctx, tx, team, run)
+	return seal.Request.Burst, err
 }
 
 func burstPreferencesTx(ctx context.Context, tx *storeTx, team Team, run string, b runspec.BurstPlacement) ([]PlacementPreference, error) {
@@ -69,7 +63,7 @@ func burstPreferencesTx(ctx context.Context, tx *storeTx, team Team, run string,
 	return out, nil
 }
 
-func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityNode, run string) error {
+func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityNode, run string, request runspec.Request) error {
 	root := chain[len(chain)-1].principal.Capability
 	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
 		return nil
@@ -81,21 +75,56 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if record.Origin == nil || !record.Origin.Personal {
 		return nil
 	}
-	var owner, requester, kind string
+	var owner string
 	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&owner); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, root.Team, run).Scan(&requester, &kind); err != nil {
+	requester, err := runAccountTx(ctx, tx, Team(root.Team), run, request)
+	if err != nil {
 		return err
 	}
-	if owner == "" || owner != requester || kind != string(capability.SubjectAccount) {
+	if owner == "" || owner != requester {
 		return authorityError(apierr.Forbidden, "personal machine is reserved for its owner's runs")
 	}
-	return nil
+	if !automatedRun(request) {
+		return nil
+	}
+	var opted string
+	err = tx.QueryRowContext(ctx, `SELECT owner FROM machine_automation WHERE team=? AND machine=?`, root.Team, root.Subject.ID).Scan(&opted)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && opted != owner {
+		return authorityError(apierr.Forbidden, "personal machine takes automated runs only when its owner opts it in")
+	}
+	return err
+}
+
+// safety: an App run belongs only to the member whose linked GitHub identity sent the verified delivery.
+func runAccountTx(ctx context.Context, tx *storeTx, team Team, run string, request runspec.Request) (string, error) {
+	var principal, kind string
+	if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, team, run).Scan(&principal, &kind); err != nil {
+		return "", err
+	}
+	switch {
+	case request.Origin == runspec.OriginSchedule:
+		return principal, nil
+	case request.Origin == runspec.OriginApp:
+		if !request.Git.App.Set || request.Git.App.Value.SenderID <= 0 {
+			return "", nil
+		}
+		var account string
+		err := tx.QueryRowContext(ctx, `SELECT i.account_id FROM identities i JOIN memberships m ON m.account_id=i.account_id AND m.team=? WHERE i.provider=? AND i.subject=?`, team, ProviderGitHub, strconv.FormatInt(request.Git.App.Value.SenderID, 10)).Scan(&account)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return account, err
+	case kind == string(capability.SubjectAccount):
+		return principal, nil
+	}
+	return "", nil
 }
 
 func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, unit UnitRef) error {
-	burst, err := burstPlacementTx(ctx, tx, team, unit.RunID)
+	seal, err := sealedRequestTx(ctx, tx, team, unit.RunID)
+	burst := seal.Request.Burst
 	if err != nil || burst == nil {
 		return err
 	}
@@ -114,7 +143,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 		}
 		eligible = record.Origin != nil && record.Origin.Personal
 		if eligible {
-			if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
+			if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID, seal.Request); err != nil {
 				return err
 			}
 		}

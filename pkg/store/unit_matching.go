@@ -66,8 +66,13 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if err := checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); err != nil {
 		return profile, match.Demand{}, err
 	}
-	if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
+	if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID, requestSeal.Request); err != nil {
 		return profile, match.Demand{}, err
+	}
+	if runAnywhere(requestSeal.Request) {
+		if _, err := claimRankTx(ctx, tx, Team(team), chain, unit.RunID); err != nil {
+			return profile, match.Demand{}, err
+		}
 	}
 	if requestSeal.Request.Burst != nil {
 		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {

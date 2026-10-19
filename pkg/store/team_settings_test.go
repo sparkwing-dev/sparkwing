@@ -19,7 +19,7 @@ func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
 		tenant := &Tenant{s: s, team: "a"}
 		owner := Actor{Authority: *spec.Authority}
 		a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
-		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettings{MembersCanAddMachines: enabled}); err != nil {
+		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: &enabled}); err != nil {
 			t.Fatal(err)
 		}
 		spec.Authority, spec.Personal, spec.ReservedPools = &member.Authority, personal, nil
@@ -75,7 +75,7 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 	owner := Actor{Authority: *spec.Authority}
 	a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
 	for _, enabled := range []bool{false, false, true} {
-		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettings{MembersCanAddMachines: enabled}); err != nil {
+		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: &enabled}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -89,7 +89,7 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 		}
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_setting_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
-	if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettings{}); err == nil {
+	if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)}); err == nil {
 		t.Fatal("committed setting without its audit")
 	}
 	current, err := tenant.TeamSettings(t.Context())
@@ -113,7 +113,7 @@ func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
 			a.Principal.Authority.ID = fmt.Sprintf("absent-%d", suffix)
 		}
 		tenant := &Tenant{s: s, team: "a"}
-		err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettings{})
+		err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)})
 		current, readErr := tenant.TeamSettings(t.Context())
 		events, auditErr := tenant.BusinessEvents(t.Context(), "team.settings_changed")
 		return err != nil && readErr == nil && current.MembersCanAddMachines && auditErr == nil && len(events) == 0

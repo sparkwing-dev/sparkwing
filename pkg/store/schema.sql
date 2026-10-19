@@ -10,6 +10,7 @@ CREATE TABLE teams (
     display_name TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',
     members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
+    claim_ranking TEXT NOT NULL DEFAULT '',
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',
     billing_trust TEXT NOT NULL DEFAULT '' CHECK(billing_trust IN ('','granted','revoked')),
@@ -564,6 +565,14 @@ CREATE TABLE overflow_controls (
     PRIMARY KEY (team,account_id)
 );
 
+CREATE TABLE machine_automation (
+    team TEXT NOT NULL REFERENCES teams(name),
+    machine TEXT NOT NULL,
+    owner TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (team,machine)
+);
+
 CREATE TABLE memberships (
     team TEXT NOT NULL REFERENCES teams(name),
     account_id TEXT NOT NULL,
@@ -632,7 +641,7 @@ CREATE TABLE github_app_triggers (
     on_release_prereleased BIGINT NOT NULL DEFAULT 0,
     on_branch_create BIGINT NOT NULL DEFAULT 0,
     on_branch_delete BIGINT NOT NULL DEFAULT 0,
-    runner TEXT NOT NULL DEFAULT 'cloud',
+    runner TEXT NOT NULL DEFAULT 'anywhere',
     repo_key TEXT NOT NULL,
     PRIMARY KEY (team, repository_id, pipeline)
 );
@@ -964,7 +973,7 @@ CREATE TABLE github_app_automation (
     installation_id BIGINT NOT NULL,
     enabled_by TEXT NOT NULL,
     enabled_at BIGINT NOT NULL,
-    runner TEXT NOT NULL DEFAULT 'cloud',
+    runner TEXT NOT NULL DEFAULT 'anywhere',
     repo_key TEXT NOT NULL,
     PRIMARY KEY (team, repository_id),
     FOREIGN KEY (installation_id) REFERENCES github_app_installations(installation_id) ON DELETE CASCADE

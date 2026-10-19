@@ -55,7 +55,7 @@ func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
-			if err := (&Tenant{s: s, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettings{}); err != nil {
+			if err := (&Tenant{s: s, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)}); err != nil {
 				t.Fatal(err)
 			}
 			if i%4 == 0 {

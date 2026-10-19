@@ -120,6 +120,25 @@ func TestWaitingNodesExcludeWithdrawnAndUnclaimableWork(t *testing.T) {
 	}
 }
 
+func TestWaitingNodesListRunAnywhereWork(t *testing.T) {
+	for _, pinned := range []bool{false, true} {
+		s, _ := unitClaimFixture(t)
+		request := runspec.Request{Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}
+		if pinned {
+			request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"class=cloud"}}}
+		}
+		body, err := json.Marshal(runspec.SealedRequest{Request: request})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller',request_json=?`, body)
+		waiting, err := s.AsOperator().ListWaitingNodes(t.Context(), time.Unix(0, 2), [2]string{}, 10)
+		if err != nil || len(waiting) != map[bool]int{false: 1, true: 0}[pinned] {
+			t.Fatalf("pinned=%v waiting work: %+v, %v", pinned, waiting, err)
+		}
+	}
+}
+
 func TestWaitingNodesRejectCorruptDemand(t *testing.T) {
 	for _, body := range []string{`{`, `{"requires":{"value":true}}`, `{"resources":{"value":{"cores":{"value":-1}}}}`} {
 		t.Run(body, func(t *testing.T) {

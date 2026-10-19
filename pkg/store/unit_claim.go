@@ -88,10 +88,11 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 	}
 	for _, kind := range kinds {
 		grant := capability.NodesClaim
-		if kind == capability.UnitTrigger {
+		if kind == capability.UnitTrigger || kind == capability.UnitPlan {
 			grant = capability.TriggersClaim
 		}
-		allowed := slices.Contains(c.Grants, grant) && (kind == capability.UnitNode || kind == capability.UnitTrigger)
+		unbound := c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush
+		allowed := slices.Contains(c.Grants, grant) && (kind == capability.UnitNode || kind == capability.UnitTrigger || unbound)
 		if launcherClaimant(c) {
 			allowed = kind == capability.UnitPlan || kind == capability.UnitEval || kind == capability.UnitNode
 		}
@@ -164,7 +165,7 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if err = checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	placement, err := unitPlacementTx(ctx, tx, team, unit, profile, requirements)
+	placement, err := unitPlacementTx(ctx, tx, team, unit, demand.CapabilityPrefix, profile, requirements)
 	if err != nil {
 		return UnitClaim{}, err
 	}

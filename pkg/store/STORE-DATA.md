@@ -506,6 +506,30 @@ Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because leased expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
 
+## Run-anywhere claim ranking
+
+A run is run anywhere when its sealed request executes with controller dispatch
+and no runner selection, `pool=` or `class=cloud` requirement, or burst
+preferences. `readMatchingInputsTx` refuses a claimant whose tier is outside the
+team's `claim_ranking`. Tiers come from the authenticated chain: here, personal,
+github-actions, self-hosted or cloud. An empty ranking means first come, and an
+unset ranking means the default order.
+
+`unitPlacementTx` holds a plan, eval or job claim for `limits.RankingWindow`
+from the unit's readiness. A claim waits while a better-ranked eligible
+claimant is live and wants the unit's kind. For one more window, it waits only
+for a better-ranked claimant whose last poll fell inside the first window. The
+scan reuses the burst placement observations. Launcher and Actions polls are
+recorded with their kinds, so every tier can be observed. A launcher counts only
+while `eligibleUnitBillingTx` admits the unit. Claims lock the owner, run and
+node rows before evaluating holds, so concurrent claims serialize and one award
+wins.
+
+A personal machine takes a run only for its owner. For a schedule, the owner is
+the arming account. For an App run, it is the member whose GitHub identity
+matches the sealed sender ID. Automated runs also need the owner's
+`machine_automation` opt-in for that machine.
+
 ## Database observations
 
 Completion readers capture one database time before opening their result cursor.
