@@ -3,6 +3,7 @@ package credentials_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
@@ -45,5 +46,27 @@ func TestOpenRefusesAPathThatIsNoDirectory(t *testing.T) {
 		if _, err := credentials.Open(path); err == nil {
 			t.Errorf("Open(%s) = nil, want an error rather than every credential reading as off", path)
 		}
+	}
+}
+
+func TestOpenNamedRefusesAFileOutsideTheSet(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"pg_url", "..data", "..2026_10_19_00_00_00.000000000"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := credentials.OpenNamed(dir, []string{"pg-url", "license"})
+	if err == nil || !strings.Contains(err.Error(), "pg_url") || strings.Contains(err.Error(), "..data") {
+		t.Fatalf("OpenNamed with a misnamed pg-url = %v, want a refusal naming pg_url only", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "pg_url")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := credentials.OpenNamed(dir, []string{"pg-url", "license"}); err != nil {
+		t.Fatalf("projected-volume entries refused: %v", err)
+	}
+	if _, err := credentials.OpenNamed("", []string{"pg-url"}); err != nil {
+		t.Fatal(err)
 	}
 }
