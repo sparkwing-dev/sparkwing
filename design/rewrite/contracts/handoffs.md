@@ -851,3 +851,7 @@ Assigned to an Opus implementer (env 1087).
 ## 2026-10-19 Korey decision 23: Cloud job PID limit
 
 - kubelet `podPidsLimit` on job and team nodes is 32768 per pod (GitHub-hosted runners have no published limit; each job owns a VM). Documented in docs/limits.md.
+
+## 2026-10-19 Korey decision 24: staging amd64 pool
+
+- Staging keeps the tainted amd64 `staging-infra` NodePool (2 vCPU cap, empties when staging is down) for amd64-only QA images; kikd app nodes stay arm64.
