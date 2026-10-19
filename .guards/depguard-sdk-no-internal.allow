@@ -1,0 +1,22 @@
+# depguard rule sdk-no-internal in .golangci-guards.yml. One line per package edge:
+# <importing package dir><TAB><imported package>.
+# Only delete lines: guardcheck fails a finding missing here and a line no
+# finding matches. See .guards/README.md.
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/apierr
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/depcachekey
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/execdiag
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/limits
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/nodeproto
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/paths
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/procgroup
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/protofd
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/sdkserve
+sparkwing	github.com/sparkwing-dev/sparkwing/internal/sessionledger
+sparkwing/cleanup	github.com/sparkwing-dev/sparkwing/internal/paths
+sparkwing/cleanup	github.com/sparkwing-dev/sparkwing/internal/procgroup
+sparkwing/cleanup	github.com/sparkwing-dev/sparkwing/internal/sdkserve
+sparkwing/cleanup	github.com/sparkwing-dev/sparkwing/internal/sessionledger
+sparkwing/docker	github.com/sparkwing-dev/sparkwing/internal/sdkserve
+sparkwing/git	github.com/sparkwing-dev/sparkwing/internal/sdkserve
+sparkwing/git	github.com/sparkwing-dev/sparkwing/internal/source/gitcmd
+sparkwing/services	github.com/sparkwing-dev/sparkwing/internal/sdkserve
