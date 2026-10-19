@@ -50,6 +50,7 @@ const (
 	PaymentWarningEvent    PaymentEventKind = "warning"
 	PaymentDisputeOpened   PaymentEventKind = "dispute_opened"
 	PaymentDisputeClosed   PaymentEventKind = "dispute_closed"
+	PaymentPageCompleted   PaymentEventKind = "page_completed"
 )
 
 // PaymentEventPolicy maps provider types to verified settlement outcomes.
@@ -98,7 +99,7 @@ type PaymentEvent struct {
 	Brand       string
 	Last4       string
 	ThreeDS     string
-	Deployment  string
+	IntentID    string
 	Created     int64
 	Actionable  bool
 }
@@ -120,11 +121,12 @@ type PaymentPresentation struct {
 	Signature string
 }
 
-// PaymentAuthenticator verifies the signature, timestamp, configured mode and supported event type.
-// It never trusts browser return parameters or provider metadata for team, credits or settlement.
-// An authenticated but pending/unsupported event returns no settlement event.
+// PaymentAuthenticator verifies the signature, timestamp, configured mode and supported event type,
+// then classifies ownership before any provider read. Provider metadata only routes an event: it names
+// the deployment and purpose of an object. Team, amount and payer always come from committed records.
+// An authenticated event that is pending, unhandled, another deployment's or unowned returns no event.
 type PaymentAuthenticator interface {
-	VerifyPaymentEvent(context.Context, PaymentPresentation) (*VerifiedPaymentEvent, error)
+	VerifyPaymentEvent(context.Context, PaymentPresentation, PaymentScope) (*VerifiedPaymentEvent, error)
 }
 
 // NewPaymentAuthenticator binds one verifier to the configured private credential files.
@@ -177,7 +179,7 @@ type paymentAuthenticator struct {
 	provider *paymentProvider
 }
 
-func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentation PaymentPresentation) (*VerifiedPaymentEvent, error) {
+func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentation PaymentPresentation, scope PaymentScope) (*VerifiedPaymentEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -201,12 +203,20 @@ func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentat
 		return nil, forbidden(apierr.ReasonBinding)
 	}
 	for _, policy := range PaymentEventPolicies {
-		if policy.ProviderType == event.Type {
-			if strings.HasPrefix(policy.ProviderType, "checkout.session.") {
-				return a.checkoutEvent(ctx, event.ID, event.Data.Object, policy)
-			}
-			return a.providerEvent(ctx, event.ID, event.Created, event.Data.Object, policy)
+		if policy.ProviderType != event.Type {
+			continue
 		}
+		route, owned, err := a.classify(ctx, policy, event.Data.Object, scope)
+		if err != nil || !owned {
+			return nil, err
+		}
+		switch route.Kind {
+		case PaymentPageCompleted:
+			return a.pageEvent(event.ID, event.Created, event.Data.Object)
+		case PaymentCheckoutPaid, PaymentCheckoutExpired, PaymentCheckoutFailed:
+			return a.checkoutEvent(ctx, event.ID, event.Data.Object, policy)
+		}
+		return a.providerEvent(ctx, event.ID, event.Created, event.Data.Object, policy)
 	}
 	return nil, nil
 }
@@ -269,15 +279,8 @@ func (a *paymentAuthenticator) checkoutEvent(ctx context.Context, id string, bod
 		PaymentIntent paymentReference `json:"payment_intent"`
 		Currency      string           `json:"currency"`
 		Amount        *int64           `json:"amount_total"`
-		Metadata      paymentMetadata  `json:"metadata"`
 	}
-	if err := json.Unmarshal(body, &session); err != nil {
-		return nil, invalidPaymentEvent()
-	}
-	if session.Mode != "payment" || session.Metadata.get(paymentPurposeMetadata) != "" {
-		return nil, nil
-	}
-	if session.ID == "" || session.Object != "checkout.session" ||
+	if err := json.Unmarshal(body, &session); err != nil || session.ID == "" || session.Object != "checkout.session" || session.Mode != "payment" ||
 		session.LiveMode == nil || *session.LiveMode != (a.mode == PaymentLive) || session.Amount == nil || *session.Amount < 0 || !validCurrency(session.Currency) {
 		return nil, invalidPaymentEvent()
 	}
@@ -294,7 +297,6 @@ func (a *paymentAuthenticator) checkoutEvent(ctx context.Context, id string, bod
 	event := PaymentEvent{
 		EventID: id, CheckoutID: session.ID, PaymentID: paymentID,
 		Currency: session.Currency, AmountMinor: *session.Amount, Mode: a.mode, Kind: policy.Kind,
-		Deployment: session.Metadata.get(PaymentDeploymentMetadata),
 	}
 	if policy.Kind == PaymentCheckoutPaid {
 		result, err := a.threeDSecure(ctx, paymentID)
@@ -325,24 +327,6 @@ func (a *paymentAuthenticator) threeDSecure(ctx context.Context, paymentID strin
 		return secure.Result, nil
 	}
 	return "", nil
-}
-
-// PaymentDeploymentMetadata is the provider metadata key naming the deployment that created a page or payment.
-const PaymentDeploymentMetadata = "sparkwing_deployment"
-
-// safety: Add funds settles from its Checkout Session and saved cards and collections from their intents,
-// so each object kind is handled only for the purpose that settles through it; the others are acknowledged.
-const (
-	paymentPurposeMetadata = "purpose"
-	paymentPurposeSetup    = "card_setup"
-	paymentPurposeCharge   = "card_charge"
-)
-
-type paymentMetadata map[string]any
-
-func (m paymentMetadata) get(key string) string {
-	v, _ := m[key].(string)
-	return v
 }
 
 func invalidPaymentEvent() *apierr.Error {

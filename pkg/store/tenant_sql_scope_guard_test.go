@@ -29,6 +29,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"readPaymentCorrelationTx":      "verified provider mode and object resolve the payer from the persisted correlation before its tenant is known",
 	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
 	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
+	"bindCompletedPageTx":           "a verified page completion resolves its team from the session correlation committed before payment",
+	"(*Store).RecordsPaymentParent": "a verified provider event names provider identities before its tenant is known",
 	"(*Store).OpenStandingRequests": "the operator console queue lists every team's open standing requests",
 	"loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
 	"(*Operator).SetRunnerMetered":  "a console-authorized deployment mutation resolves one enrolled root by its globally unique public prefix, validates its complete ancestry, and updates only that root's tenant row",

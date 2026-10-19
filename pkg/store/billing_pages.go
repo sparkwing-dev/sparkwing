@@ -129,7 +129,7 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 			return err
 		}
 		expected := prior
-		expected.URL, expected.ProviderID, expected.IntentID, expected.ExpiresAt = page.URL, page.ProviderID, page.IntentID, page.ExpiresAt
+		expected.URL, expected.ProviderID, expected.ExpiresAt = page.URL, page.ProviderID, page.ExpiresAt
 		if prior.Kind == capability.BillingPageCard && prior.Customer == "" {
 			expected.Customer = page.Customer
 		}
@@ -145,7 +145,7 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 		}
 		switch page.Kind {
 		case capability.BillingPageCredits:
-			if page.ProviderID == page.ReservationID || page.IntentID != "" {
+			if page.ProviderID == page.ReservationID {
 				return ErrInvalidInput
 			}
 			var result sql.Result
@@ -154,15 +154,15 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 				err = requireOneRow(result, "checkout page binding")
 			}
 		case capability.BillingPageCard:
-			if page.Customer == "" || page.IntentID == "" {
+			if page.Customer == "" {
 				return ErrInvalidInput
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES (?,?,'setup',?,?)`, mode, page.IntentID, t.team, page.Customer)
+			_, err = tx.ExecContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES (?,?,'setup_session',?,?)`, mode, page.ProviderID, t.team, page.Customer)
 		case capability.BillingPageRecovery:
-			if page.Customer == "" || page.IntentID == "" {
+			if page.Customer == "" {
 				return ErrInvalidInput
 			}
-			err = recordAttemptIntentTx(ctx, tx, page.AttemptID, page.IntentID, page.Customer, tx.now())
+			_, err = tx.ExecContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id,currency,attempt_id,charge_id) VALUES (?,?,'collection_session',?,?,'usd',?,?)`, mode, page.ProviderID, t.team, page.Customer, page.AttemptID, page.ChargeID)
 		default:
 			return ErrInvalidInput
 		}

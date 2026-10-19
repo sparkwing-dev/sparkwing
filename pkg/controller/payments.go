@@ -12,8 +12,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// PaymentSettler commits verified provider outcomes against stored billing records.
+// PaymentSettler commits verified provider outcomes against stored billing records and resolves event ownership.
 type PaymentSettler interface {
+	capability.PaymentRecords
 	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
 }
 
@@ -67,7 +68,7 @@ func (s *Server) verifyPaymentRequest(r *http.Request) error {
 		}
 		return &apierr.Error{Code: apierr.BadRequest, Message: "payment event could not be read"}
 	}
-	event, err := s.paymentVerifier.VerifyPaymentEvent(r.Context(), capability.PaymentPresentation{Body: body, Signature: signatures[0]})
+	event, err := s.paymentVerifier.VerifyPaymentEvent(r.Context(), capability.PaymentPresentation{Body: body, Signature: signatures[0]}, capability.PaymentScope{Deployment: s.deployment, Records: s.paymentLedger})
 	if err != nil {
 		return err
 	}
@@ -82,23 +83,11 @@ func (s *Server) settlePaymentRequest(w http.ResponseWriter, r *http.Request, _ 
 		return missingEndpointPolicy()
 	}
 	if proof.event == nil {
-		s.logger.Debug("stripe event acknowledged without settlement", "reason", "unhandled")
-		w.WriteHeader(http.StatusNoContent)
-		return nil
-	}
-	event := proof.event.Event()
-	if event.Deployment != "" && event.Deployment != s.deployment {
-		s.logger.Debug("stripe event acknowledged without settlement", "reason", "another deployment", "event", event.EventID, "deployment", event.Deployment)
+		s.logger.Debug("stripe event acknowledged without settlement")
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}
 	if _, err := s.paymentLedger.SettlePayment(r.Context(), *proof.event); err != nil {
-		var unknown *apierr.Error
-		if event.Deployment == "" && errors.As(err, &unknown) && unknown.Code == apierr.NotFound {
-			s.logger.Debug("stripe event acknowledged without settlement", "reason", "not this deployment's object", "event", event.EventID, "kind", event.Kind)
-			w.WriteHeader(http.StatusNoContent)
-			return nil
-		}
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

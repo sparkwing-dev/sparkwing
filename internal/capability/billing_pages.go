@@ -22,7 +22,6 @@ type BillingPage struct {
 	ChargeID      string
 	AttemptID     string
 	ProviderID    string
-	IntentID      string
 	URL           string
 	ExpiresAt     time.Time
 }

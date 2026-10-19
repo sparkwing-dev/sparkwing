@@ -99,10 +99,22 @@ deployment. The checkout service stamps that name as
 `metadata[sparkwing_deployment]` on every Checkout Session, setup intent,
 payment intent and customer it creates for the controller. Deployments that
 share one Stripe account each receive the other's events at `/webhooks/stripe`.
-A correctly signed event is acknowledged with 204 and settles nothing when it
-names another deployment, when it is a type or object the controller settles
-elsewhere (a card setup or pay-now page, or an Add funds payment intent), or
-when it names no deployment and refers to nothing this controller recorded. An
-event naming this deployment for an object it does not know still fails, so
-Stripe retries it. Unsigned and badly signed requests are refused.
+After checking the signature, and before any Stripe read or store write, the
+controller classifies each event once:
 
+- An object stamped with another deployment is foreign: acknowledged with 204,
+  never read or settled.
+- An object stamped with this deployment, or one that resolves to a checkout,
+  page, intent or attempt this controller recorded, is local and settles. A
+  local event whose parent is not recorded yet fails, so Stripe redelivers it;
+  a refund, dispute or fraud warning that arrives before its paid event waits
+  this way, and an unstamped one is local only when its payment intent carries
+  this deployment's stamp.
+- An unstamped event that resolves to nothing is acknowledged. Card setup and
+  pay-now pages and Add funds payment intents settle through another object, so
+  their other events are acknowledged too.
+
+Card setup and pay-now pages are correlated by their Checkout Session, which
+exists before payment. The completed session's verified setup or payment intent
+then binds to the page's team and collection attempt, and that intent's own
+events settle against it. Unsigned and badly signed requests are refused.

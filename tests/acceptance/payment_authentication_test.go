@@ -29,9 +29,14 @@ import (
 
 // safety: these cells verify the deployed HTTP boundary; ledger atomicity remains a store test.
 type paymentLedger struct {
-	mu     sync.Mutex
-	events []capability.PaymentEvent
-	err    error
+	mu       sync.Mutex
+	events   []capability.PaymentEvent
+	err      error
+	unrecord bool
+}
+
+func (l *paymentLedger) RecordsPaymentParent(context.Context, capability.PaymentRoute) (bool, error) {
+	return !l.unrecord, nil
 }
 
 func (l *paymentLedger) SettlePayment(_ context.Context, proof capability.VerifiedPaymentEvent) (store.PaymentSettlement, error) {
@@ -338,7 +343,7 @@ func TestPaymentHTTPAcknowledgesEventsThisDeploymentDoesNotOwn(t *testing.T) {
 		settles int
 	}{
 		"another deployment":            {stamped("api.sparkwing.dev"), false, http.StatusNoContent, 0},
-		"unknown and unstamped":         {paymentBody(capability.PaymentTest, "checkout.session.completed", "evt_unstamped", "paid"), true, http.StatusNoContent, 1},
+		"unknown and unstamped":         {paymentBody(capability.PaymentTest, "checkout.session.completed", "evt_unstamped", "paid"), true, http.StatusNoContent, 0},
 		"unhandled event type":          {paymentBody(capability.PaymentTest, "customer.created", "evt_customer", "paid"), false, http.StatusNoContent, 0},
 		"this deployment's unknown one": {stamped("staging.sparkwing.dev"), true, http.StatusNotFound, 1},
 		"this deployment's known one":   {stamped("staging.sparkwing.dev"), false, http.StatusNoContent, 1},
@@ -346,7 +351,7 @@ func TestPaymentHTTPAcknowledgesEventsThisDeploymentDoesNotOwn(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ledger := &paymentLedger{}
 			if tc.missing {
-				ledger.err = &apierr.Error{Code: apierr.NotFound, Message: "committed checkout is unavailable"}
+				ledger.err, ledger.unrecord = &apierr.Error{Code: apierr.NotFound, Message: "committed checkout is unavailable"}, true
 			}
 			server := paymentServer(verifier, ledger).WithPaymentDeployment("staging.sparkwing.dev")
 			r := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", strings.NewReader(tc.body))

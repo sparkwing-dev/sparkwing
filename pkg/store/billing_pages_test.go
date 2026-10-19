@@ -174,7 +174,7 @@ func TestBillingPagesAccountRemovalAndTenantPurge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page.ProviderID, page.IntentID, page.Customer, page.URL = "cs_setup", "seti_native", "cus_native", "https://checkout.test/page"
+	page.ProviderID, page.Customer, page.URL = "cs_setup", "cus_native", "https://checkout.test/page"
 	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, page); err != nil {
 		t.Fatal(err)
 	}

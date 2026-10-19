@@ -153,7 +153,8 @@ func readSecretsKey(dir credentials.Dir, name string) ([]byte, error) {
 	return key, nil
 }
 
-// safety: deployments sharing one Stripe account settle only events stamped with their own external host.
+// safety: the external host names this deployment on every Stripe object it creates;
+// a stamp naming another host is never settled.
 func paymentDeployment(externalURL, billingURL, paymentMode string) (string, error) {
 	if strings.TrimSpace(billingURL) == "" && strings.TrimSpace(paymentMode) == "" {
 		return "", nil

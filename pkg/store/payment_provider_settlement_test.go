@@ -391,7 +391,7 @@ func TestProviderRefundUsesOpaqueVerifiedEvent(t *testing.T) {
 		if _, err := fmt.Fprintf(mac, "%d.%s", now, body); err != nil {
 			t.Fatal(err)
 		}
-		proof, err := verifier.VerifyPaymentEvent(t.Context(), capability.PaymentPresentation{Body: []byte(body), Signature: fmt.Sprintf("t=%d,v1=%s", now, hex.EncodeToString(mac.Sum(nil)))})
+		proof, err := verifier.VerifyPaymentEvent(t.Context(), capability.PaymentPresentation{Body: []byte(body), Signature: fmt.Sprintf("t=%d,v1=%s", now, hex.EncodeToString(mac.Sum(nil)))}, capability.PaymentScope{Records: s})
 		if err != nil || proof == nil {
 			t.Fatalf("verified refund: %+v: %v", proof, err)
 		}
@@ -453,5 +453,30 @@ func TestProviderSameAmountRetryAfterDeclineSettlesOnceAndClearsTheHold(t *testi
 	}
 	if b, err := tenant.BillingStanding(t.Context(), now); err != nil || b.Tier == "Held" || !b.History.LastIncidentAt.IsZero() {
 		t.Fatalf("standing after retry: %+v %v", b, err)
+	}
+}
+
+func TestRecordsPaymentParentResolvesOnlyCommittedObjects(t *testing.T) {
+	s, _, _ := providerPaymentFixture(t)
+	providerCheckoutPaid(t, s)
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES ('test','cs_setup_page','setup_session','a','cus_1')`)
+	var session string
+	if err := s.db.QueryRow(`SELECT session_id FROM credit_checkouts WHERE team='a' AND session_id<>id LIMIT 1`).Scan(&session); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		route capability.PaymentRoute
+		want  bool
+	}{
+		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: session}, true},
+		{capability.PaymentRoute{Mode: capability.PaymentTest, PaymentID: "payment"}, true},
+		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: "cs_setup_page"}, true},
+		{capability.PaymentRoute{Mode: capability.PaymentLive, PaymentID: "payment"}, false},
+		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: "cs_foreign", PaymentID: "pi_foreign", ObjectID: "re_foreign"}, false},
+	} {
+		got, err := s.RecordsPaymentParent(t.Context(), tc.route)
+		if err != nil || got != tc.want {
+			t.Fatalf("%+v: %v %v", tc.route, got, err)
+		}
 	}
 }

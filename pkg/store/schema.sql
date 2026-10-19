@@ -717,7 +717,7 @@ CREATE TABLE payment_events (
     event_id TEXT NOT NULL,
     checkout_id TEXT,
     payment_id TEXT NOT NULL DEFAULT '',
-    event_kind TEXT NOT NULL CHECK(event_kind IN ('checkout_paid','checkout_expired','checkout_failed','card_setup','card_paid','card_failed','refund','warning','dispute_opened','dispute_closed')),
+    event_kind TEXT NOT NULL CHECK(event_kind IN ('checkout_paid','checkout_expired','checkout_failed','card_setup','card_paid','card_failed','refund','warning','dispute_opened','dispute_closed','page_completed')),
     event_digest TEXT NOT NULL,
     grant_id TEXT REFERENCES credit_grants(id),
     processed_at BIGINT NOT NULL,
@@ -747,15 +747,15 @@ CREATE TABLE billing_pages (
 CREATE TABLE payment_correlations (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     provider_id TEXT NOT NULL CHECK(provider_id <> ''),
-    kind TEXT NOT NULL CHECK(kind IN ('setup','collection')),
+    kind TEXT NOT NULL CHECK(kind IN ('setup','collection','setup_session','collection_session')),
     team TEXT NOT NULL REFERENCES teams(name),
     customer_id TEXT NOT NULL CHECK(customer_id <> ''),
     currency TEXT NOT NULL DEFAULT '',
     attempt_id TEXT NOT NULL DEFAULT '',
     charge_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(payment_mode,provider_id),
-    CHECK((kind = 'setup' AND currency = '' AND attempt_id = '' AND charge_id = '')
-       OR (kind = 'collection' AND currency <> '' AND attempt_id <> '' AND charge_id <> ''))
+    CHECK((kind IN ('setup','setup_session') AND currency = '' AND attempt_id = '' AND charge_id = '')
+       OR (kind IN ('collection','collection_session') AND currency <> '' AND attempt_id <> '' AND charge_id <> ''))
 );
 
 CREATE TABLE credit_freezes (

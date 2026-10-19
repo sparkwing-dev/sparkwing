@@ -74,6 +74,10 @@ func validateProviderPayment(e capability.PaymentEvent) error {
 	switch e.Kind {
 	case capability.PaymentCardSetup:
 		return nil
+	case capability.PaymentPageCompleted:
+		if e.IntentID != "" && e.CustomerID != "" {
+			return nil
+		}
 	case capability.PaymentWarningEvent:
 		if e.PaymentID != "" {
 			return nil
@@ -119,7 +123,7 @@ func samePaymentObject(a, b capability.PaymentEvent) bool {
 			return kind
 		}
 	}
-	if family(a.Kind) != family(b.Kind) || a.PaymentID != b.PaymentID || a.CustomerID != "" && b.CustomerID != "" && a.CustomerID != b.CustomerID {
+	if family(a.Kind) != family(b.Kind) || a.PaymentID != b.PaymentID || a.IntentID != b.IntentID || a.CustomerID != "" && b.CustomerID != "" && a.CustomerID != b.CustomerID {
 		return false
 	}
 	if family(a.Kind) == capability.PaymentCardPaid && (a.Kind == capability.PaymentCardFailed || b.Kind == capability.PaymentCardFailed) {
@@ -162,6 +166,8 @@ func readPaymentCorrelationTx(ctx context.Context, tx *storeTx, event capability
 func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
 	var result PaymentSettlement
 	switch e.Kind {
+	case capability.PaymentPageCompleted:
+		return bindCompletedPageTx(ctx, tx, e)
 	case capability.PaymentCardSetup:
 		c, err := readPaymentCorrelationTx(ctx, tx, e, "setup")
 		if err != nil {
@@ -313,4 +319,45 @@ func recordedRefundOutcomeTx(ctx context.Context, tx *storeTx, team Team, paymen
 		return "", err
 	}
 	return outcome, nil
+}
+
+func bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
+	var kind, team, customer, attempt string
+	err := tx.QueryRowContext(ctx, `SELECT kind,team,customer_id,attempt_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind IN ('setup_session','collection_session')`+tx.forShare(), e.Mode, e.ObjectID).Scan(&kind, &team, &customer, &attempt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PaymentSettlement{}, authorityError(apierr.NotFound, "committed payment page is unavailable")
+	}
+	if err != nil {
+		return PaymentSettlement{}, err
+	}
+	if customer != e.CustomerID {
+		return PaymentSettlement{}, authorityError(apierr.Conflict, "completed page names another customer")
+	}
+	result := PaymentSettlement{Team: Team(team)}
+	if kind == "collection_session" {
+		return result, recordAttemptIntentTx(ctx, tx, attempt, e.IntentID, customer, tx.now())
+	}
+	var bound string
+	err = tx.QueryRowContext(ctx, `SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup' AND customer_id=?`, e.Mode, e.IntentID, customer).Scan(&bound)
+	switch {
+	case err == nil && bound == team:
+		return result, nil
+	case err == nil:
+		return PaymentSettlement{}, authorityError(apierr.Conflict, "setup intent belongs to another team")
+	case !errors.Is(err, sql.ErrNoRows):
+		return PaymentSettlement{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES (?,?,'setup',?,?)`, e.Mode, e.IntentID, team, customer)
+	return result, err
+}
+
+// RecordsPaymentParent reports whether this deployment committed the checkout, page, intent or attempt an event concerns.
+func (s *Store) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (bool, error) {
+	var found int
+	err := s.queryRow(ctx, `SELECT CASE WHEN
+ EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode=? AND (session_id=? OR payment_id<>'' AND payment_id=?))
+ OR EXISTS(SELECT 1 FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?))
+ OR EXISTS(SELECT 1 FROM card_attempts WHERE payment_intent<>'' AND payment_intent=?)
+ THEN 1 ELSE 0 END`, r.Mode, r.CheckoutID, r.PaymentID, r.Mode, r.CheckoutID, r.PaymentID, r.ObjectID, r.PaymentID).Scan(&found)
+	return found == 1, err
 }

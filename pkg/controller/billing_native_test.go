@@ -136,7 +136,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 			if in["setup_id"] != in["key"] || in["email"] != "owner@example.test" {
 				t.Fatalf("setup=%v", in)
 			}
-			body = `{"id":"cs_setup","setup_intent":"seti_native","customer":"cus_native","url":"https://checkout.test/setup"}`
+			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.test/setup"}`
 		case "/internal/checkout":
 			body = `{"id":"cs_prepay","url":"https://checkout.test/prepay"}`
 		case "/internal/charge":
@@ -152,7 +152,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 			if in["amount_cents"] != float64(600) || in["customer"] != "cus_native" || in["attempt_id"] != in["key"] {
 				t.Fatalf("recovery=%v", in)
 			}
-			body = `{"id":"cs_recovery","payment_intent":"pi_recovery","customer":"cus_native","url":"https://checkout.test/recovery"}`
+			body = `{"id":"cs_recovery","customer":"cus_native","url":"https://checkout.test/recovery"}`
 		default:
 			t.Fatalf("payment page %s", r.URL.Path)
 		}
@@ -175,7 +175,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 		}
 	}
 	created := time.Now().Unix()
-	webhook := func(id, kind, object string) {
+	deliver := func(id, kind, object string) *httptest.ResponseRecorder {
 		t.Helper()
 		now := time.Now().Unix()
 		body := fmt.Sprintf(`{"id":%q,"object":"event","type":%q,"created":%d,"livemode":false,"data":{"object":%s}}`, id, kind, created, object)
@@ -187,15 +187,26 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 		r.Header.Set("Stripe-Signature", fmt.Sprintf("t=%d,v1=%x", now, mac.Sum(nil)))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		if w.Code != 204 {
+		return w
+	}
+	webhook := func(id, kind, object string) {
+		t.Helper()
+		if w := deliver(id, kind, object); w.Code != 204 {
 			t.Fatalf("webhook %s: %d %s", kind, w.Code, w.Body)
 		}
 	}
+	const stamp = `"sparkwing_deployment":"staging.sparkwing.dev"`
+	setupIntent := `{"id":"seti_native","object":"setup_intent","livemode":false,"metadata":{"purpose":"card_setup",` + stamp + `},"status":"succeeded","customer":"cus_native","payment_method":"pm_native"}`
+	recovered := `{"id":"pi_recovery","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge",` + stamp + `},"status":"succeeded","amount":600,"amount_received":600,"currency":"usd","customer":"cus_native","latest_charge":"ch_native"}`
 	for range 2 {
 		call("card", "", 200)
 	}
+	if w := deliver("evt_setup", "setup_intent.succeeded", setupIntent); w.Code == 204 {
+		t.Fatal("a setup intent of this deployment was acknowledged before its page bound it")
+	}
 	for range 2 {
-		webhook("evt_setup", "setup_intent.succeeded", `{"id":"seti_native","object":"setup_intent","livemode":false,"metadata":{"purpose":"card_setup"},"status":"succeeded","customer":"cus_native","payment_method":"pm_native"}`)
+		webhook("evt_setup_page", "checkout.session.completed", `{"id":"cs_setup","object":"checkout.session","mode":"setup","status":"complete","livemode":false,"customer":"cus_native","setup_intent":"seti_native","metadata":{"purpose":"card_setup",` + stamp + `}}`)
+		webhook("evt_setup", "setup_intent.succeeded", setupIntent)
 	}
 	tenant, err := s.store.ForTeam(t.Context(), "a")
 	if err != nil {
@@ -227,8 +238,12 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 	for range 2 {
 		call("pay", "", 200)
 	}
+	if w := deliver("evt_recovery", "payment_intent.succeeded", recovered); w.Code == 204 {
+		t.Fatal("a pay-now payment was acknowledged before its page bound it")
+	}
 	for range 2 {
-		webhook("evt_recovery", "payment_intent.succeeded", `{"id":"pi_recovery","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"status":"succeeded","amount":600,"amount_received":600,"currency":"usd","customer":"cus_native","latest_charge":"ch_native"}`)
+		webhook("evt_recovery_page", "checkout.session.completed", `{"id":"cs_recovery","object":"checkout.session","mode":"payment","status":"complete","payment_status":"paid","livemode":false,"customer":"cus_native","payment_intent":"pi_recovery","metadata":{"purpose":"card_charge",` + stamp + `}}`)
+		webhook("evt_recovery", "payment_intent.succeeded", recovered)
 	}
 	spend, err = tenant.SpendStanding(t.Context(), time.Now())
 	if err != nil || spend.OpenCharge != nil || spend.BalanceMicro != 0 || spend.Billing.Tier != "Established" {

@@ -65,7 +65,7 @@ func TestPaymentProviderOutcomes(t *testing.T) {
 			t.Run(string(mode)+"/"+kind, func(t *testing.T) {
 				v, calls := providerVerifier(t, mode)
 				body := verifiedProviderBody(mode, kind, object)
-				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
+				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 				if err != nil || proof == nil {
 					t.Fatalf("proof=%v err=%v", proof, err)
 				}
@@ -82,7 +82,7 @@ func TestPaymentProviderOutcomes(t *testing.T) {
 				if strings.HasPrefix(kind, "refund.") && (e.AmountMinor != 600 || e.PaymentID != "pi_paid" || e.ChargeID != "ch_paid" || *calls != 0) {
 					t.Fatalf("refund %+v", e)
 				}
-				if kind == "payment_intent.succeeded" && (e.AmountMinor != 1200 || e.Fingerprint != "card-fingerprint" || *calls != 1 || e.Deployment != "staging.sparkwing.dev") {
+				if kind == "payment_intent.succeeded" && (e.AmountMinor != 1200 || e.Fingerprint != "card-fingerprint" || *calls != 1) {
 					t.Fatalf("paid %+v", e)
 				}
 			})
@@ -103,7 +103,7 @@ func TestPaymentProviderProofProperty(t *testing.T) {
 				raw["metadata"] = map[string]any{"team": metadata, "credits": metadata, "charge": metadata, "attempt": metadata, "fingerprint": metadata, "purpose": purpose["purpose"]}
 				encoded, _ := json.Marshal(raw)
 				body := verifiedProviderBody(PaymentTest, kind, string(encoded))
-				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
+				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 				if err != nil || proof == nil {
 					return false
 				}
@@ -122,12 +122,12 @@ func TestPaymentProviderProofProperty(t *testing.T) {
 					encoded, _ = json.Marshal(raw)
 					unsigned := verifiedProviderBody(PaymentTest, kind, string(encoded))
 					unsigned = append(unsigned, ' ')
-					p, e := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: unsigned, Signature: paymentSignature(body, string(v.secret), v.now())})
+					p, e := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: unsigned, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 					return e != nil && p == nil && *calls == 0
 				}
 				encoded, _ = json.Marshal(raw)
 				body = verifiedProviderBody(PaymentTest, kind, string(encoded))
-				p, e := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
+				p, e := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 				if mutation%5 == 3 && strings.HasPrefix(kind, "payment_intent.") {
 					return e == nil && p != nil && p.Event() == original
 				}
@@ -168,7 +168,7 @@ func TestPaymentProviderRefusals(t *testing.T) {
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Location": []string{"https://attacker.invalid"}}}, nil
 			})
 			body := verifiedProviderBody(PaymentTest, "setup_intent.succeeded", financialObjects(PaymentTest)["setup_intent.succeeded"])
-			p, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
+			p, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 			if err == nil || p != nil || strings.Contains(err.Error(), "private-provider") {
 				t.Fatalf("proof=%+v err=%v", p, err)
 			}
@@ -218,7 +218,7 @@ func TestPaymentProviderRequiresFinancialEvidenceProperty(t *testing.T) {
 					t.Fatal(err)
 				}
 				body := verifiedProviderBody(PaymentTest, kind, string(encoded))
-				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
+				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 				return err != nil && proof == nil
 			}
 			if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
@@ -237,7 +237,7 @@ func TestPaymentProviderAcknowledgesIntentsSettledElsewhere(t *testing.T) {
 	} {
 		v, calls := providerVerifier(t, PaymentTest)
 		body := verifiedProviderBody(PaymentTest, kind, strings.Replace(objects[kind], replace[0], replace[1], 1))
-		proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
+		proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 		if err != nil || proof != nil || *calls != 0 {
 			t.Fatalf("%s without its purpose: proof=%v err=%v calls=%d", kind, proof, err, *calls)
 		}
