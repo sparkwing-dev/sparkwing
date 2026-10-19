@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -157,7 +158,7 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 }
 
 func TestDashboardHelpDoesNotResolveRuntime(t *testing.T) {
-	for _, args := range [][]string{nil, {"start", "--help"}, {"install", "--help"}} {
+	for _, args := range [][]string{nil, {"start", "--help"}, {"install", "--help"}, {"open", "--help"}} {
 		var output bytes.Buffer
 		err := runDashboardCommandArgs(t.Context(), args, &output, "windows", func(context.Context) (dashboardServices, error) {
 			t.Fatal("help resolved services")
@@ -208,5 +209,39 @@ func TestDashboardRefusesAnUndrainedStop(t *testing.T) {
 	})
 	if err == nil || out.Len() != 0 {
 		t.Fatalf("undrained stop: %v %s", err, &out)
+	}
+}
+
+func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
+	login := wingd.DashboardLogin{URL: "http://127.0.0.1:4343/login?token=abc", ExpiresAt: time.Unix(1_800_000_060, 0).UTC()}
+	for _, mode := range []string{"json", "plain", "pretty"} {
+		t.Run(mode, func(t *testing.T) {
+			minted := 0
+			services := dashboardServices{lifecycle: &dashboardLifecycleFake{}, mintLogin: func(context.Context) (wingd.DashboardLogin, error) { minted++; return login, nil }}
+			var output bytes.Buffer
+			if err := runDashboardCommandArgs(t.Context(), []string{"open", "-o", mode}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil }); err != nil {
+				t.Fatal(err)
+			}
+			if minted != 1 || !strings.Contains(output.String(), login.URL) {
+				t.Fatalf("minted=%d output=%q", minted, &output)
+			}
+			if mode == "json" {
+				var got dashboardLoginResult
+				if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Action != "open" || got.URL != login.URL || !got.ExpiresAt.Equal(login.ExpiresAt) {
+					t.Fatalf("json receipt %+v: %v", got, err)
+				}
+			}
+			if mode == "plain" && output.String() != login.URL+"\n" {
+				t.Fatalf("plain output %q", &output)
+			}
+		})
+	}
+	failure := &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard start"}
+	var output bytes.Buffer
+	err := runDashboardCommandArgs(t.Context(), []string{"open"}, &output, "linux", func(context.Context) (dashboardServices, error) {
+		return dashboardServices{mintLogin: func(context.Context) (wingd.DashboardLogin, error) { return wingd.DashboardLogin{}, failure }}, nil
+	})
+	if !errors.Is(err, failure) || output.Len() != 0 {
+		t.Fatalf("error=%v output=%q", err, &output)
 	}
 }

@@ -115,6 +115,7 @@ The local controller is wingd. These commands inspect or hold its lifecycle:
 ```bash
 sparkwing daemon status -o json
 sparkwing dashboard start --stay
+sparkwing dashboard open
 sparkwing dashboard status
 sparkwing doctor -o json
 ```
@@ -357,10 +358,12 @@ selectors.
 
 The local controller authenticates its OS account. Unix sockets require private
 ownership and kernel peer credentials. Windows uses the account SID. An
-unauthenticated or foreign peer is refused. Browser sessions and CSRF checks
-belong to the controller's authentication policy. There is no separate dashboard
-store or dashboard-only credential model. Root and same-account code remain
-inside the machine trust boundary. See [security](security.md#local-daemon-socket).
+unauthenticated or foreign peer is refused. The dashboard's TCP listener needs
+a session cookie from a one-time link that `sparkwing dashboard open` mints over
+the socket. The link works once within 60 seconds, and the browser then acts as
+the socket peer that minted it. There is no separate dashboard store. Root and
+same-account code remain inside the machine trust boundary. See
+[security](security.md#local-daemon-socket).
 
 ## Per-host concurrency
 

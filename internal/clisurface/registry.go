@@ -75,6 +75,7 @@ func Registry() []Command {
 			{Name: "tail", Argument: "N"},
 			{Name: "follow", Short: "f"},
 		}},
+		{Path: "sparkwing dashboard open", Rules: []string{"Print a one-time sign-in link for the running local dashboard. It is minted over the local socket, works once and expires after 60 seconds; visiting it sets an HttpOnly, SameSite=Strict session cookie for the dashboard's TCP address. Every TCP request needs that cookie; the local socket needs none."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard start", Rules: []string{"Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases and dashboard connections prevent idle exit."}, Flags: []Flag{
 			{Name: "addr", Argument: "HOST:PORT"},
 			{Name: "allow-remote"},

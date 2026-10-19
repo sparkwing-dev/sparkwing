@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
@@ -37,6 +38,7 @@ type localRuntime struct {
 	cfg    LocalRuntimeConfig
 	layout layout
 	listen func(network, address string) (net.Listener, error)
+	now    func() time.Time
 	mu     sync.Mutex
 	change chan struct{}
 	run    *localRuntimeSession
@@ -49,6 +51,7 @@ type localRuntimeSession struct {
 	ready     bool
 	err       error
 	dashboard chan localDashboardRequest
+	logins    *dashboardLogins
 }
 
 // NewLocalRuntime constructs the elected local process used by LocalLifecycle.
@@ -163,7 +166,7 @@ func (r *localRuntime) begin(d *Daemon, cancel context.CancelFunc) (*localRuntim
 			return nil, errors.New("wingd: local runtime is already starting or running")
 		}
 	}
-	r.run = &localRuntimeSession{daemon: d, cancel: cancel, done: make(chan struct{}), dashboard: make(chan localDashboardRequest)}
+	r.run = &localRuntimeSession{daemon: d, cancel: cancel, done: make(chan struct{}), dashboard: make(chan localDashboardRequest), logins: newDashboardLogins(r.now)}
 	r.changed()
 	return r.run, nil
 }
@@ -205,10 +208,13 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 			session.cancel()
 		}
 	}
+	logins := session.logins
 	apiReady := make(chan struct{})
 	d.cfg.ServeAPI = func(_ context.Context, ln net.Listener) {
 		serve("controller API", func() error {
-			return controller.HTTP().ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady})
+			local := controller.HTTP()
+			local.API = logins.socketRoutes(local.API)
+			return local.ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady})
 		})
 	}
 	var dashboardListener net.Listener
@@ -238,10 +244,11 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		}
 		dashboardListener, dashboardAddress = ln, address
 		dashboardReady = make(chan struct{})
+		logins.serving("http://" + ln.Addr().String())
 		workers.Go(func() {
 			defer ln.Close()
 			serve("dashboard", func() error {
-				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, guardDashboard(controller.HTTP().Dashboard, ln.Addr().String()), nil, d.dashboardConnection)
+				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, guardDashboard(controller.HTTP().Dashboard, ln.Addr().String(), logins), nil, d.dashboardConnection)
 			})
 		})
 		return nil
@@ -486,10 +493,11 @@ func (r *localRuntime) Drain(ctx context.Context) error {
 }
 
 // safety: TCP carries no peer identity, so only the dashboard's own loopback
-// origin may reach it; a rebound DNS name or another site's page is refused.
-func guardDashboard(next http.Handler, addr string) http.Handler {
+// origin may reach it, and only with a session from a link api.sock minted; a
+// rebound DNS name or another site's page is refused before the session check.
+func guardDashboard(next http.Handler, addr string, logins *dashboardLogins) http.Handler {
 	if next == nil {
 		return nil
 	}
-	return originguard.Guard(next, originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), nil))
+	return originguard.Guard(logins.gate(next), originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), nil))
 }

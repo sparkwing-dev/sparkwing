@@ -12,6 +12,7 @@ Manage the local dashboard
 
 - `install` -- Install a dashboard service that starts at login
 - `logs` -- Read a bounded dashboard log tail
+- `open` -- Print a one-time sign-in link for the local dashboard
 - `start` -- Start the local dashboard and controller on demand
 - `status` -- Report whether the dashboard is running
 - `stop` -- Stop a running dashboard server
@@ -56,6 +57,21 @@ Read a bounded dashboard log tail
 | `--help-all` | Include uncommon flags in command help. |
 | `--tail N` | tail |
 | `-f, --follow` | Stream until the observed work is done. |
+
+## `sparkwing dashboard open`
+
+Print a one-time sign-in link for the local dashboard
+
+Print a one-time sign-in link for the running local dashboard. It is minted over the local socket, works once and expires after 60 seconds; visiting it sets an HttpOnly, SameSite=Strict session cookie for the dashboard's TCP address. Every TCP request needs that cookie; the local socket needs none.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing dashboard start`
 

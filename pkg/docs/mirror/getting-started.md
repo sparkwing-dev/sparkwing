@@ -138,6 +138,7 @@ sparkwing run release
 
 # 3. (Optional) Watch runs in the browser
 sparkwing dashboard start    # detached local dashboard + API on :4343
+sparkwing dashboard open     # one-time sign-in link for the browser
 ```
 
 The scaffold adds `sparkwing-pipeline` to `.sparkwing/.gitignore` so Git
