@@ -202,7 +202,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 	if kind == capability.UnitEval {
 		unit.SourceGeneration = binding.Generation
 	}
-	connection := client.EngineOptions{URL: "http://controller.invalid", Bearer: fixedBearer(raw), HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
+	connection := client.EngineOptions{URL: "https://controller.invalid", Bearer: fixedBearer(raw), HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer "+raw {
 			return nil, errors.New("native binding lost the owner award")
 		}
@@ -314,7 +314,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			args := []string{"--controller=http://controller.invalid", "--run=run", fmt.Sprintf("--generation=%d", binding.Generation), "--bootstrap-file=" + filepath.Join(directory, "bootstrap"), "--source-dir=" + filepath.Join(directory, "source"), "--module-cache=" + filepath.Join(directory, "modules")}
+			args := []string{"--controller=https://controller.invalid", "--run=run", fmt.Sprintf("--generation=%d", binding.Generation), "--bootstrap-file=" + filepath.Join(directory, "bootstrap"), "--source-dir=" + filepath.Join(directory, "source"), "--module-cache=" + filepath.Join(directory, "modules")}
 			if unit.JobID != "" {
 				args = append(args, "--job="+unit.JobID)
 			}
