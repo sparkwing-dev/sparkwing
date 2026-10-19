@@ -53,9 +53,27 @@ These grants do not confer operator-console powers.
 | Memo lifetime | Seven-day default, at most thirty days. |
 | Schedule catch-up | At most twenty-four hours. |
 | Cloud scratch | Fixed aggregate 20 GiB, including Docker-in-Docker. |
+| Cloud Docker | Rootless. `docker build`, `docker run` and Compose work; privileged and host-level features do not. |
 
 Execution and inactivity deadlines remain distinct. Time spent waiting for
 customer approval or unstarted capacity is not execution time.
+
+## Docker on Cloud
+
+Cloud Jobs run Docker rootless inside their own Kubernetes user namespace,
+so job code never holds root on the node. `docker build`, `docker run`,
+`docker compose` and container-to-container networking work. These do not:
+
+- `docker run --privileged`, added capabilities and `--device`;
+- host namespaces: `--network host`, `--pid host` and `--ipc host` reach the
+  Docker daemon's own namespaces, not the node's;
+- loading kernel modules, changing node sysctls and mounting host paths;
+- Docker resource limits such as `--memory` and `--cpus`, which rootless Docker
+  cannot enforce without cgroup delegation; the Job's own CPU and memory
+  budget still applies.
+
+GitHub Actions and CircleCI give root only inside a per-job VM. Run work that
+needs those features on a self-hosted runner.
 
 ## Uploads and storage accounting
 

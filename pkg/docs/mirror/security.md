@@ -35,10 +35,10 @@ process memory. Use a dedicated account, container or VM and enroll only code
 that may use those permissions. Private files and filtered process environments
 reduce disclosure. They do not isolate hostile processes sharing an account.
 
-Cloud execution uses root and privileged Docker-in-Docker on exclusive
-team-dedicated nodes. A launcher credential stays outside the Job. Root plus
-DinD is an accepted deployment boundary. Non-root execution is required before
-shared node tenancy. See [Runner Job placement](#runner-job-placement).
+Cloud execution runs every Job container as UID 1000 in its own Kubernetes
+user namespace, with rootless Docker-in-Docker, on exclusive team-dedicated
+nodes. No Job container is privileged or holds node root. A launcher
+credential stays outside the Job. See [Runner Job placement](#runner-job-placement).
 
 An authorized pipeline can use and disclose its secrets. Masking covers values
 registered with the host and their supported encodings. Arbitrary transformations,
@@ -282,8 +282,10 @@ unit. No runner root or launcher credential enters a Job's argv or environment.
 
 ## Runner Job placement
 
-Every plan, eval and work Job uses the same builder, root user and privileged
-DinD sidecar. One Job per team-dedicated node is a hard prerequisite. Jobs from
+Every plan, eval and work Job uses the same builder, user-namespaced Pod and
+rootless DinD sidecar. The sidecar runs with Unconfined seccomp and AppArmor
+and an unmasked `/proc` inside that user namespace, which widens the kernel
+surface a container escape would use. One Job per team-dedicated node is a hard prerequisite. Jobs from
 the same team cannot share a node under this boundary. Aggregate scratch,
 including DinD, is fixed at 20 GiB.
 

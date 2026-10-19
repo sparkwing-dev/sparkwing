@@ -59,10 +59,16 @@ and the probe commands are CEL literals.
   `valueFrom` or `envFrom`. Capacity requests and probes carry none. AWS role,
   web-identity and container-credential variables are refused, as is any
   projected token volume.
-- Volumes are only the Job's `scratch` emptyDir and its own bootstrap Secret.
-  No hostPath, hostNetwork, hostIPC, hostPort or added capability. Only the
-  `docker` sidecar and the `measure` probe run privileged, and only `measure`
-  uses hostPID.
+- Volumes are only the Job's `scratch` emptyDir, its own bootstrap Secret and
+  the `/dev/net/tun` CharDevice hostPath, which only the `docker` sidecar
+  mounts. No other hostPath, no hostNetwork, hostPID, hostIPC, hostPort or
+  added capability. No container in the namespace runs privileged.
+- Job Pods set `hostUsers: false`, run as UID 1000 (`runAsNonRoot`) and use the
+  RuntimeDefault seccomp profile. Only the `docker` sidecar may relax that: it
+  runs as UID 1000 with Unconfined seccomp and AppArmor and an Unmasked
+  `/proc`, which rootlesskit needs to build its own user, mount and network
+  namespaces. Every other container keeps the runtime profiles and the default
+  `/proc` mask.
 - The service account is `sparkwing-customer-job` with
   `automountServiceAccountToken: false`.
 - Every Pod selects `node-restriction.kubernetes.io/sparkwing-team-node` equal
@@ -226,8 +232,15 @@ another launcher may still be publishing its bootstrap. Suspension alone never
 authorizes teardown. Cancelled or expired awards still retire suspended Jobs.
 Controller errors preserve ownership and reach the caller.
 
-The builder uses a readiness-gated native DinD sidecar, fixed aggregate 20 GiB
-scratch, a separate customer service account and no API-token automount. Its
+The builder uses a readiness-gated native rootless DinD sidecar, fixed
+aggregate 20 GiB scratch, a separate customer service account and no API-token
+automount. The sidecar runs the `docker:<version>-dind-rootless` entrypoint
+with `dockerd`, which starts dockerd under rootlesskit with the vpnkit network
+driver and no TCP listener. Every container runs as UID 1000, the image's
+`rootless` user, so the source and scratch files are writable to the
+containers Docker starts. The bootstrap Secret is mode 0440 with fsGroup 1000.
+Nodes need user-namespaced Pods with at least 196608 IDs each, because the
+image maps subordinate IDs 100000-165535; the chart README lists the rest. Its
 bootstrap mount is absent from Docker. Pipeline execution starts after source
 acquisition. Plan resolves the exact SDK pin. Eval and work use the accepted
 engine identity.
@@ -400,26 +413,20 @@ policies selecting the exact Job labels. It inventories declared DaemonSet ports
 and observed kubelet endpoints. A temporary listener Pod has an explicit ingress
 allow rule. A separate witness Pod must connect through a rule allowing only
 that listener before a denied connection can establish egress enforcement. A
-separate root, privileged canary uses the workload's labels. It checks
-controller connectivity from the Pod and, with `nsenter`, from the node network
-namespace, and requires the listener to be refused. Its other targets have
-three scopes:
+separate canary uses the workload's labels and runs as UID 1000 with every
+capability dropped. It must reach the controller, and must be refused by the
+listener, the in-cluster API address, every address in the `default/kubernetes`
+EndpointSlices, DaemonSet TCP ports, kubelet endpoints and up to three Running
+Job Pods of other teams, sampled for each probe on port 18888. Peers stay out
+of the policy snapshot because they come and go.
 
-- Pod: the in-cluster API address and every address in the `default/kubernetes`
-  EndpointSlices must be refused from the Pod. The kubelet reaches the API from
-  the node, so node-context API refusal is not claimed. There, only node
-  credentials and authorization protect the API.
-- Node: DaemonSet TCP and kubelet endpoints must also be refused from the node
-  network namespace.
-- Peer: up to three Running Job Pods of other teams, sampled for each probe,
-  must be refused from the Pod and must time out from the node network
-  namespace on port 18888. A refused connection means the packet reached the
-  peer, so only a drop by the peer's ingress policy passes. Peers stay out of
-  the policy snapshot because they come and go.
-
-DNS ports remain available. Declared UDP ports are inventoried, while UDP denial
-needs protocol-specific native checks. The runner image needs `nc`, `nsenter`
-and `timeout`.
+All of it runs in the Pod network namespace. Job Pods hold no node root, so
+Job code cannot reach the node network namespace, and the canary needs no
+privilege or hostPID to measure what Job code can reach. The kubelet still
+reaches the API from the node; node credentials and authorization protect it
+there. Ingress denial is defense in depth for a node compromised by other
+means. DNS ports remain available. Declared UDP ports are inventoried, while
+UDP denial needs protocol-specific native checks. The runner image needs `nc`.
 
 Probe Pods carry the team label, node selector and team toleration admission
 requires. Canary results require unchanged admitted commands, images, labels apart
@@ -432,17 +439,17 @@ credential or service-account token enters a canary.
 
 The known required destination is the controller. Source, blob and provider
 origins depend on deployment and still need native verification. The checks do
-not exhaust every network destination or every node escape. Pod-level policy
-alone cannot authorize a deployment where the escaped node network still reaches
-control-plane services. Native enforcement, UDP services, image execution,
-DinD shutdown and kubelet reclamation remain cluster acceptance requirements.
+not exhaust every network destination. A kernel escape from the user namespace
+is outside them; the sidecar's Unconfined seccomp widens that kernel surface.
+Native enforcement, UDP services, image execution, rootless DinD startup and
+shutdown and kubelet reclamation remain cluster acceptance requirements.
 
 All authored workload state uses container writable layers and emptyDir storage.
 Release waits for all non-DaemonSet Pods to disappear, then removes
 reservation-owned probe state before permitting reuse. Kubernetes owns the
-associated ephemeral-state reclamation. Privileged pipeline code can change
-arbitrary host state under the accepted threat model. That state requires node
-reprovisioning and is outside reservation-scoped Kubernetes cleanup.
+associated ephemeral-state reclamation. Job code holds no node root, so it cannot
+change host state outside its Pod; node reuse within a team keeps that
+assumption.
 
 ## Preparation leases
 
