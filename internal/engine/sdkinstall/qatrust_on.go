@@ -14,12 +14,9 @@ const qaModuleProxy = "https://qa-releases.sparkwing.dev/goproxy"
 
 var qaPin = regexp.MustCompile(`-qa\.[1-9][0-9]*$`)
 
-// qaModuleEnvironment lets a pipeline pinned to a QA SDK fetch it from the QA
-// host, which alone serves those versions. It reads the effective settings the
-// way go does, so go env -w, GOPROXY=off and GOPRIVATE keep their meaning.
-// The QA host answers 403 for modules it lacks, so "|" falls through on any
-// error. The public checksum database has never seen QA versions; go.sum
-// still pins them.
+// safety: only the QA host serves QA SDK versions and the public checksum database has never seen
+// them; go.sum still pins them. Settings come from go env so go env -w, GOPROXY=off and GOPRIVATE
+// hold. The host answers 403 for modules it lacks, so "|" falls through on any error.
 func qaModuleEnvironment(ctx context.Context, dir string, pin engine.Pin, environment []string) ([]string, error) {
 	if pin.Replacement != "" || !qaPin.MatchString(pin.Version) {
 		return nil, nil
