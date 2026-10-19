@@ -859,3 +859,11 @@ Assigned to an Opus implementer (env 1087).
 ## 2026-10-19 Korey decision 25: staging shares the Stripe test sandbox
 
 - Staging and production share one Stripe test-mode sandbox. Each controller stamps its Checkout sessions and setups with a deployment identity in metadata and acknowledges (2xx) but never settles events carrying another deployment's identity or events it does not handle.
+
+## 2026-10-19 Korey decision 26: Cloud billing is prepaid credits with automatic refill
+
+- Supersedes post-pay debt and collections (decisions 112, 19's charge-failure holds, and the card-charge/collection/recovery design). Cloud usage only ever draws on a balance already paid for; there is no debt.
+- Credits are bought through Stripe Checkout (3-D Secure) and may save the card. Optional automatic refill: when the balance falls below a threshold, the controller starts one off-session payment for the refill amount (one in flight per team, idempotent); it settles exactly like Add funds from the signed webhook. A failed refill (decline, 3DS required) is recorded and surfaced ("update your card"); credits then run down normally.
+- Metering is slice by slice at lease renewal: admission needs the first slice covered (the existing award hold); each renewal reserves the next slice from the balance first. If the next slice is not covered, the renewal is refused and the job is stopped with "out of credits" (hard stop, no grace), bounded by the drain deadline. Overage is at most one slice per running job.
+- Refunds, disputes and early fraud warnings stay (any card payment can be clawed back); a clawback can take the balance negative, which blocks new Cloud work. Card pinning and fraud-card blocking stay.
+- Open for Korey: auto-refill opt-in vs default, default threshold and refill size, and what standing tiers still cap (refill size and frequency as a stolen-card brake).
