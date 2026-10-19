@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
+	"slices"
 	"strings"
 	"testing"
 
@@ -441,13 +442,35 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 		if masked := masker.Mask(values["GOPATH"] + " " + values["GOFLAGS"]); masked != values["GOPATH"]+" "+values["GOFLAGS"] {
 			t.Errorf("kind %d masked public Go settings: %q", kind, masked)
 		}
+		hostMasker := secrets.NewMasker()
+		hosted, err := Build(kind, Base{OwnerMachine: true, Ambient: append(slices.Clone(entries), "BUILD_REGION=us-east-1"), Masker: hostMasker}, Runtime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		hostedEnv := envMap(hosted)
+		for name, value := range values {
+			if hostedEnv[name] != value {
+				t.Errorf("kind %d owner-machine host %s = %q, want %q", kind, name, hostedEnv[name], value)
+			}
+		}
+		if _, present := hostedEnv["BUILD_REGION"]; present {
+			t.Errorf("kind %d owner-machine host inherited a non-Go ambient variable", kind)
+		}
+		for _, credential := range []string{"proxy-password", "sumdb-password"} {
+			if strings.Contains(hostMasker.Mask(credential), credential) {
+				t.Errorf("kind %d owner-machine host left %q visible", kind, credential)
+			}
+		}
+		if masked := hostMasker.Mask(values["GOPATH"]); masked != values["GOPATH"] {
+			t.Errorf("kind %d owner-machine host masked a public Go setting: %q", kind, masked)
+		}
 		remote, err := Build(kind, Base{Ambient: entries, Masker: secrets.NewMasker()}, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for name := range values {
 			if _, present := envMap(remote)[name]; present {
-				t.Errorf("kind %d remote runner inherited %s", kind, name)
+				t.Errorf("kind %d shared runner inherited %s", kind, name)
 			}
 		}
 	}

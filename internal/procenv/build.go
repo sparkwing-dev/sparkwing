@@ -101,7 +101,7 @@ func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 		if !inherited(k, row, known, name, b) {
 			continue
 		}
-		if err := registerMasks(b.Masker, name, value, !b.Local && k != HostChild); err != nil {
+		if err := registerMasks(b.Masker, name, value, !b.Local && k != HostChild && !ownerTool(b, row)); err != nil {
 			return nil, err
 		}
 		env[envKey(name)] = name + "=" + value
@@ -184,7 +184,7 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 		if k == Install && row.Class == Diagnostic {
 			return false
 		}
-		if b.Local {
+		if b.Local || ownerTool(b, row) {
 			return true
 		}
 		if row.RemoteBase {
@@ -194,6 +194,8 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 	}
 	return false
 }
+
+func ownerTool(b Base, row Var) bool { return b.OwnerMachine && row.GoTool }
 
 func composeRuntime(env map[string]string, k Kind, rt Runtime) {
 	put := func(name, value string) {

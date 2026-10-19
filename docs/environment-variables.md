@@ -117,13 +117,16 @@ Sparkwing code. See [node protocol](node-protocol.md).
 
 The registry owns these classifications. A trailing `*` denotes a name family.
 Credential and removed-transport rows describe exclusions, not configuration.
-Process-specific delivery rules come from `procenv.Policies()`: local pipeline
+Process-specific delivery rules come from `procenv.Build`: local pipeline
 processes use captured values, remote pipelines use the configured allow list,
 and Git receives the credential-free base plus proxy and CA settings.
 
 Go toolchain settings (`GOPROXY`, `GOFLAGS`, `GOPATH`, `GOPRIVATE`,
 `GONOPROXY`, `GONOSUMDB`, `GOSUMDB`, `GOTOOLCHAIN`, `GOINSECURE`) reach pipeline
-processes on the requester's own machine as captured. Credentials embedded in a
+processes on the requester's own machine: from the captured environment for a
+local run, and from the hosting process's environment when the controller
+authenticates the claimant as the requester's own host or a personal machine
+the requester enrolled. Credentials embedded in a
 `GOPROXY` entry or the `GOSUMDB` URL are registered with the masker before any
 process starts, so logs show `***` in their place. Cloud and shared runners drop
 these settings unless the operator's allow list names them.

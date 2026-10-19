@@ -832,6 +832,8 @@ components:
             - format: date-time
               type: string
             - type: "null"
+        owner_machine:
+          type: boolean
         parent_capability_expiry:
           anyOf:
             - format: date-time

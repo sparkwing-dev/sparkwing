@@ -148,6 +148,9 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	}
 	unit := engineReconciledClaim(principal.Capability, store.ReconciledNode{Node: node, Claim: &claim.Award, Bearer: claim.Bearer}, run)
 	unit.RunID, unit.JobID, unit.SourceGeneration = claim.RunID, claim.NodeID, claim.SourceGeneration
+	if unit.OwnerMachine, err = tenant.OwnerMachineClaimant(ctx, principal, claim.RunID); err != nil {
+		return controllerwire.ClaimedUnit{}, err
+	}
 	switch claim.Kind {
 	case capability.UnitPlan, capability.UnitEval:
 		resources := run.Request.Request.Options.Resources

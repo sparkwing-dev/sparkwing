@@ -148,6 +148,9 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	if err != nil || claimed.Claim == nil {
 		t.Fatalf("local owner claim: %+v %v", claimed, err)
 	}
+	if !claimed.Claim.OwnerMachine {
+		t.Fatal("the requester's here award is not marked as the owner's machine")
+	}
 	owner := newClient(claimed.Claim.Capability, false)
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
 	if proof != nil {
