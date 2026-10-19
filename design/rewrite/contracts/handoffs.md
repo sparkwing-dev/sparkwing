@@ -841,3 +841,13 @@ Assigned to an Opus implementer (env 1087).
 
 - Supersedes decision 12's rootless sidecar. Job and team nodes run AL2023 with kubelet `idsPerPod` 262144 and runc writable cgroups; other nodes stay Bottlerocket. The Docker sidecar runs `docker:dind` (digest-pinned) as root inside the pod's user namespace (`hostUsers: false`), never privileged, with namespaced SYS_ADMIN, NET_ADMIN and SYS_PTRACE only; no tun device, no `super_t`. `docker run --memory` is enforced. The minimal job-node IAM role and IMDS hop limit 1 stay.
 - Bottlerocket with rootless Docker would have needed SELinux `super_t` on the sidecar, which leaves customer containers unconfined anyway, and could not enforce memory limits.
+
+## 2026-10-19 Korey decision 22: staging on kikd
+
+- A staging Sparkwing in kikd, no separate AWS account: Argo app `sparkwing-staging` in namespace `sparkwing-staging`, Cloud jobs in `sparkwing-staging-cloud-jobs`, host `staging.sparkwing.dev` via the existing Traefik, its own SSM path `/kikd-prod/sparkwing-staging/*` (own admin token, OIDC key, Stripe test keys), its own GitHub App ("Sparkwing Staging"), and its own `sparkwing-staging-*` team NodePools covered by the budget breaker.
+- Database: Aurora Serverless v2 PostgreSQL with minimum 0 ACU (auto-pause), separate from production. `down` scales controller and launcher to zero, Karpenter removes idle nodes and the database pauses (storage billing only); `up` scales back to one.
+- QA of new builds happens on staging before production.
+
+## 2026-10-19 Korey decision 23: Cloud job PID limit
+
+- kubelet `podPidsLimit` on job and team nodes is 32768 per pod (GitHub-hosted runners have no published limit; each job owns a VM). Documented in docs/limits.md.
