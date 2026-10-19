@@ -205,11 +205,7 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 
 func capacityIdentityRefused(err error) bool {
 	var failure *apierr.Error
-	if !errors.As(err, &failure) {
-		return false
-	}
-	return failure.Code == apierr.LockHeld || failure.Code == apierr.Forbidden &&
-		(failure.Details["reason"] == apierr.ReasonBinding || failure.Details["reason"] == string(apierr.ReasonBinding))
+	return errors.As(err, &failure) && failure.Code == apierr.LockHeld || bindingRefused(err)
 }
 
 func (l *Launcher) wait(award *CloudJobAward) {

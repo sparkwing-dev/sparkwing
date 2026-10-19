@@ -56,7 +56,7 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 		return CloudNodeReservation{}, CloudNetworkEvidence{}, err
 	}
 	for _, node := range nodes.Items {
-		if !nodeReady(node) {
+		if !nodeReady(node) || node.Annotations[quarantineAnnotation] != "" {
 			continue
 		}
 		reservation, err := b.reserveNode(ctx, node, binding, job)
@@ -90,7 +90,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	if raw := node.Annotations[reservationAnnotation]; raw != "" {
 		var held CloudNodeReservation
 		if err := json.Unmarshal([]byte(raw), &held); err != nil {
-			return held, fmt.Errorf("node %s has a malformed Cloud reservation", node.Name)
+			return CloudNodeReservation{}, ErrNoDedicatedNode
 		}
 		if held.Team == team && held.JobName == job && held.NodeUID == string(node.UID) && held.NodeName == node.Name && held.ReservationID != "" && held.Award == binding.LeaseRef() && node.Annotations[reservationNamespaceAnnotation] == b.Namespace {
 			return held, nil
@@ -138,18 +138,17 @@ func (b *KubernetesBoundary) Release(ctx context.Context, reservation CloudNodeR
 		return err
 	}
 	if string(node.UID) != reservation.NodeUID {
-		return errors.New("Cloud node was replaced before teardown")
+		return &nodeFault{node: reservation.NodeName, cause: "replaced before teardown"}
 	}
 	raw := node.Annotations[reservationAnnotation]
 	if raw == "" {
 		return nil
 	}
+	// safety: the node may now hold another award, so it is left untouched; sync
+	// quarantines it if what it records is not a valid reservation.
 	var held CloudNodeReservation
-	if err = json.Unmarshal([]byte(raw), &held); err != nil {
-		return err
-	}
-	if held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
-		return errors.New("Cloud reservation changed before teardown")
+	if json.Unmarshal([]byte(raw), &held) != nil || held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
+		return &nodeFault{node: reservation.NodeName, cause: "reservation changed before teardown"}
 	}
 	if b.StopProbes != nil {
 		if err = b.StopProbes(ctx, reservation); err != nil {

@@ -100,60 +100,61 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var observations []CloudJobObservation
-	reservations := map[string]CloudNodeReservation{}
-	for _, node := range nodes.Items {
+	var errs []error
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
 		if namespace := node.Annotations[reservationNamespaceAnnotation]; namespace != l.Config.Namespace {
 			if namespace != "" {
 				l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
 			}
 			continue
 		}
-		var held CloudNodeReservation
-		var binding CloudJobBinding
-		if err := json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held); err != nil {
-			return err
-		}
-		if err := json.Unmarshal([]byte(node.Annotations[bindingAnnotation]), &binding); err != nil {
-			return err
-		}
-		if held.NodeName != node.Name || held.NodeUID != string(node.UID) || held.Team != binding.Team || held.Award != binding.LeaseRef() || held.JobName != jobName(binding) || held.ReservationID == "" {
-			return errors.New("Cloud node reservation does not match its persisted award")
-		}
-		_, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, held.JobName, metav1.GetOptions{})
-		if err == nil {
+		held, binding, ok := nodeReservation(node)
+		if !ok {
+			errs = append(errs, quarantineNode(ctx, l.Kube, node, "reservation is malformed or does not match its award"))
 			continue
 		}
-		if !apierrors.IsNotFound(err) {
-			return err
-		}
-		observations = append(observations, CloudJobObservation{Binding: binding, JobName: held.JobName, NodeUID: held.NodeUID, ReservationID: held.ReservationID})
-		reservations[held.JobName] = held
-	}
-	if len(observations) == 0 {
-		return nil
-	}
-	retirements, err := l.retirements(ctx, observations)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for name, state := range retirements {
-		if !state.Delete {
-			continue
-		}
-		_, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, name, metav1.GetOptions{})
-		if err == nil {
-			continue
-		}
-		if apierrors.IsNotFound(err) {
-			err = l.Boundary.Release(ctx, reservations[name])
-		}
-		if err != nil && !errors.Is(err, ErrContainersRunning) {
-			errs = append(errs, err)
-		}
+		errs = append(errs, l.releaseOrphan(ctx, node, held, binding))
 	}
 	return errors.Join(errs...)
+}
+
+func nodeReservation(node *corev1.Node) (CloudNodeReservation, CloudJobBinding, bool) {
+	var held CloudNodeReservation
+	var binding CloudJobBinding
+	if json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held) != nil || json.Unmarshal([]byte(node.Annotations[bindingAnnotation]), &binding) != nil {
+		return held, binding, false
+	}
+	lease := binding.LeaseRef()
+	return held, binding, held.NodeName == node.Name && held.NodeUID == string(node.UID) && held.Team != "" && held.Team == binding.Team && node.Labels[TeamNodeLabel] == TeamNodeValue(held.Team) &&
+		held.Award == lease && lease.Kind != "" && lease.ID != "" && lease.Holder != "" && lease.Generation > 0 && held.JobName == jobName(binding) && held.ReservationID != ""
+}
+
+// safety: each orphaned reservation gets its own controller call, so a refused
+// award quarantines only the node that recorded it.
+func (l *Launcher) releaseOrphan(ctx context.Context, node *corev1.Node, held CloudNodeReservation, binding CloudJobBinding) error {
+	jobs := l.Kube.BatchV1().Jobs(l.Config.Namespace)
+	_, err := jobs.Get(ctx, held.JobName, metav1.GetOptions{})
+	if err == nil || !apierrors.IsNotFound(err) {
+		return err
+	}
+	states, err := l.retirements(ctx, []CloudJobObservation{{Binding: binding, JobName: held.JobName, NodeUID: held.NodeUID, ReservationID: held.ReservationID}})
+	if reservationRefused(err) {
+		return quarantineNode(ctx, l.Kube, node, "controller refused the reservation's award")
+	}
+	if err != nil || !states[held.JobName].Delete {
+		return err
+	}
+	if _, err = jobs.Get(ctx, held.JobName, metav1.GetOptions{}); err == nil {
+		return nil
+	}
+	if apierrors.IsNotFound(err) {
+		err = l.Boundary.Release(ctx, held)
+	}
+	if errors.Is(err, ErrContainersRunning) {
+		return nil
+	}
+	return err
 }
 
 func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObservation) (map[string]CloudJobState, error) {
@@ -177,7 +178,7 @@ func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObser
 		binding, found := bindings[name]
 		_, duplicate := decisions[name]
 		if !found || duplicate || !sameBinding(state.Binding, binding) {
-			return nil, errors.New("controller sync returned a duplicate or mismatched binding")
+			return nil, errAwardMismatch
 		}
 		decisions[name] = state
 	}

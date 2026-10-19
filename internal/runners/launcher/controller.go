@@ -204,7 +204,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		fence := binding.LeaseRef()
 		i, ok := byAward[fence]
 		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
-			return nil, errors.New("controller sync returned duplicate or changed Cloud bindings")
+			return nil, errAwardMismatch
 		}
 		states[i].Binding, states[i].Resources = observations[i].Binding, unit.CloudResources
 	}
