@@ -22,8 +22,6 @@ pkg/controller/card_billing.go	AsOperator
 pkg/controller/card_billing.go	AsOperator
 pkg/controller/card_billing.go	AsOperator
 pkg/controller/card_billing.go	AsOperator
-pkg/controller/card_billing.go	AsOperator
-pkg/controller/card_billing.go	AsOperator
 pkg/controller/card_billing.go	ForTeam
 pkg/controller/child_routes.go	ForTeam
 pkg/controller/child_source.go	ForTeam

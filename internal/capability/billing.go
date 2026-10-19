@@ -51,8 +51,7 @@ type BillingProvenance struct {
 	Unit          BillingUnit  `json:"unit"`
 }
 
-// BillingRule keeps plan-cache hits and customer-runner waits out of settlement.
-type BillingRule struct {
+type billingRule struct {
 	Unit                      BillingUnit
 	MinimumSeconds            int64
 	PerSecond                 bool
@@ -60,9 +59,9 @@ type BillingRule struct {
 	CacheHitFree              bool
 }
 
-// BillingRules retains the host minimum while separating plan/eval compute from it.
-// A minimum is charged only after billable compute starts; an unstarted award refunds in full.
-var BillingRules = []BillingRule{
+// safety: plan and eval compute bill per second apart from the host minimum, and a minimum is charged only after
+// billable compute starts, so an unstarted award refunds in full.
+var billingRules = []billingRule{
 	{BillingPlan, 0, true, true, true},
 	{BillingEval, 0, true, true, false},
 	{BillingJob, int64(limits.WorkBillingMinimum / time.Second), true, true, false},
@@ -92,10 +91,10 @@ func SettleBilling(provenance BillingProvenance, intervals []BillableInterval) (
 		(provenance.Start != BillingAtAward && provenance.Start != BillingAtStart) {
 		return result, fmt.Errorf("incomplete billing provenance")
 	}
-	var rule *BillingRule
-	for i := range BillingRules {
-		if BillingRules[i].Unit == provenance.Unit {
-			rule = &BillingRules[i]
+	var rule *billingRule
+	for i := range billingRules {
+		if billingRules[i].Unit == provenance.Unit {
+			rule = &billingRules[i]
 			break
 		}
 	}

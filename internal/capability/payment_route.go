@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
-// PaymentDeploymentMetadata is the provider metadata key naming the deployment that created a page or payment.
-const PaymentDeploymentMetadata = "sparkwing_deployment"
+const paymentDeploymentMetadata = "sparkwing_deployment"
 
 const (
 	paymentPurposeMetadata = "purpose"
@@ -35,15 +36,10 @@ type PaymentScope struct {
 	Records    PaymentRecords
 }
 
-// PaymentOwnershipConflict is a recorded local object whose event names another deployment; it is retried and never settled.
-type PaymentOwnershipConflict struct {
-	EventObject string
-	Stamp       string
-}
+// PaymentOwnershipReason marks a recorded local object whose event names another deployment; it is retried and never
+// settled.
+const PaymentOwnershipReason = "payment_ownership_conflict"
 
-func (e *PaymentOwnershipConflict) Error() string {
-	return "payment object " + e.EventObject + " is recorded here but stamped for deployment " + e.Stamp
-}
 
 type paymentMetadata map[string]any
 
@@ -82,13 +78,14 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 	if scope.Records == nil {
 		return route, false, paymentProviderUnavailable()
 	}
-	stamp := head.Metadata.get(PaymentDeploymentMetadata)
+	stamp := head.Metadata.get(paymentDeploymentMetadata)
 	recorded, err := scope.Records.RecordsPaymentParent(ctx, route)
 	switch {
 	case err != nil:
 		return route, false, err
 	case stamp != "" && stamp != scope.Deployment && recorded:
-		return route, false, &PaymentOwnershipConflict{EventObject: head.ID, Stamp: stamp}
+		return route, false, &apierr.Error{Code: apierr.IntegrityFailure, Message: "payment object " + head.ID + " is recorded here but stamped for deployment " + stamp,
+			Details: map[string]any{"reason": PaymentOwnershipReason, "object": head.ID, "stamp": stamp}}
 	case stamp != "" && stamp != scope.Deployment:
 		return route, false, nil
 	}
@@ -118,7 +115,7 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 	if err != nil {
 		return route, false, err
 	}
-	parent := intent.Metadata.get(PaymentDeploymentMetadata)
+	parent := intent.Metadata.get(paymentDeploymentMetadata)
 	return route, parent != "" && parent == scope.Deployment, nil
 }
 

@@ -1,7 +1,5 @@
 package controllerwire
 
-import "context"
-
 // StandingRequestWrite asks an operator to grant the team a standing tier.
 type StandingRequestWrite struct {
 	Tier    string `json:"tier"`
@@ -57,10 +55,4 @@ type OperatorStandingRequest struct {
 // OperatorStandingQueue lists open standing requests, oldest first.
 type OperatorStandingQueue struct {
 	Requests []OperatorStandingRequest `json:"requests"`
-}
-
-// StandingManager requests and reads the authenticated team's standing.
-type StandingManager interface {
-	ReadStanding(context.Context) (TeamStanding, error)
-	RequestStanding(context.Context, StandingRequestWrite) (StandingRequest, error)
 }

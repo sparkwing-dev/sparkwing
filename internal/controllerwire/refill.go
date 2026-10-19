@@ -40,7 +40,8 @@ type RefillWrite struct {
 
 // BillingManager reads and changes the authenticated team's standing and automatic refill.
 type BillingManager interface {
-	StandingManager
+	ReadStanding(context.Context) (TeamStanding, error)
+	RequestStanding(context.Context, StandingRequestWrite) (StandingRequest, error)
 	ReadRefill(context.Context) (TeamRefill, error)
 	SetRefill(context.Context, RefillWrite) error
 }

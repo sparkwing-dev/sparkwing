@@ -6,7 +6,7 @@ internal/acceptance	13
 internal/admission	10
 internal/agentconfig	1
 internal/api	11
-internal/apierr	5
+internal/apierr	4
 internal/apiroutes	7
 internal/artifacts	2
 internal/authwire	2

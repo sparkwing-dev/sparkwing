@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 )
 
@@ -266,8 +267,8 @@ func TestARecordedObjectStampedElsewhereIsAnIntegrityFault(t *testing.T) {
 		"failed charge of a page": {verifiedProviderBody(PaymentTest, "payment_intent.payment_failed", `{"id":"cs_fixture","object":"payment_intent","status":"requires_payment_method","livemode":false,"metadata":{`+stamp+`}}`)},
 	} {
 		proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: tc.body, Signature: paymentSignature(tc.body, secret, now)}, PaymentScope{Deployment: "dep-ours", Records: recordsAll(true)})
-		var conflict *PaymentOwnershipConflict
-		if proof != nil || !errors.As(err, &conflict) || conflict.Stamp != "dep-another" || conflict.EventObject != "cs_fixture" {
+		var conflict *apierr.Error
+		if proof != nil || !errors.As(err, &conflict) || conflict.Details["reason"] != PaymentOwnershipReason || conflict.Details["stamp"] != "dep-another" || conflict.Details["object"] != "cs_fixture" {
 			t.Fatalf("%s: proof=%+v err=%v, want an ownership conflict before purpose filtering", name, proof, err)
 		}
 	}
