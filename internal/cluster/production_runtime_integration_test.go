@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -73,7 +74,7 @@ func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
 						if err := json.NewDecoder(r.Body).Decode(&demand); err != nil {
 							return nil, err
 						}
-						if len(demand.Kinds) != 2 || demand.Kinds[0] != capability.UnitTrigger || demand.Kinds[1] != capability.UnitNode || demand.RunnerVersion != "dev" {
+						if !slices.Equal(demand.Kinds, []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}) || demand.RunnerVersion != "dev" {
 							t.Errorf("command lost its unified claim selection: %+v", demand)
 						}
 						response = controllerwire.ClaimResponse{Claim: &unit}

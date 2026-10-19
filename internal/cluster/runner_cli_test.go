@@ -126,7 +126,7 @@ func TestRunnerUnwiredCompositionReturnsErrorWithoutCallingStubs(t *testing.T) {
 func TestWarmMapsPollingKindsAndClaimBudgetToUnifiedLoop(t *testing.T) {
 	boundary := errors.New("runtime boundary")
 	cli := RunnerCLI{Factory: func(_ context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
-		if options.Loop.PollInterval != 2*time.Second || options.Loop.MaxClaims != 7 || !reflect.DeepEqual(options.Loop.Kinds, []capability.UnitKind{capability.UnitNode}) {
+		if options.Loop.PollInterval != 2*time.Second || options.Loop.MaxClaims != 7 || !reflect.DeepEqual(options.Loop.Kinds, []capability.UnitKind{capability.UnitEval, capability.UnitNode}) {
 			t.Errorf("loop: %#v", options.Loop)
 		}
 		if options.CPUCeiling == nil || *options.CPUCeiling != .5 || options.MemoryCeiling == nil || *options.MemoryCeiling != 1<<30 {
