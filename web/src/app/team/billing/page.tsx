@@ -27,6 +27,7 @@ import {
   fmtUSD,
   getBilling,
   grantLabel,
+  holdNotice,
   limitReason,
   openHostedPage,
   setBudget,
@@ -114,13 +115,12 @@ function BillingRoute() {
         </Panel>
       ) : (
         <>
-          {billing.frozen ? (
+          {billing.frozen || billing.hold_cause ? (
             <div
               role="alert"
               className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300"
             >
-              Cloud runs for this team are paused while a payment dispute is
-              open. Contact support to resolve it.
+              {holdNotice(billing.hold_cause)}
             </div>
           ) : null}
           {cardReturn === "added" ? (
@@ -534,7 +534,8 @@ function LimitsPanel({
   const [budget, setBudgetText] = useState(() => String(l.budget_cents / 100));
   const [error, setError] = useState("");
   const owner = billing.can_purchase || billing.can_add_card;
-  const waiting = l.headroom_cents <= 0;
+  const heldAbove = !!billing.hold_cause && (l.binding === "charge_failed" || l.binding === "held");
+  const waiting = l.headroom_cents <= 0 && !heldAbove;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();

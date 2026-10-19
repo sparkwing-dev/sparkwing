@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -52,8 +53,7 @@ func releaseUnappliedTx(
 	return release, nil
 }
 
-// TeamCreditFreeze is whether a team's cloud usage is held, and by which
-// disputes.
+// TeamCreditFreeze lists a team's open holds, named by id in Disputes, with each hold's cause in Causes.
 type TeamCreditFreeze struct {
 	Frozen   bool
 	Disputes []string
@@ -64,7 +64,21 @@ type TeamCreditFreeze struct {
 const (
 	HoldCauseOperator = "operator"
 	HoldCauseDispute  = "dispute"
+	HoldCauseRevoked  = "revoked"
 )
+
+// PrimaryHoldCause names the hold whose remedy applies first: holds only support can lift outrank a declined charge.
+func PrimaryHoldCause(causes []string) string {
+	for _, c := range []string{HoldCauseDispute, FreezeCauseWarning, HoldCauseOperator, FreezeCauseDecline} {
+		if slices.Contains(causes, c) {
+			return c
+		}
+	}
+	if len(causes) > 0 {
+		return causes[0]
+	}
+	return ""
+}
 
 // HoldCause names why a hold was placed: an operator, a payment dispute, a declined charge or an early fraud warning.
 func HoldCause(id, cause string) string {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"strings"
 	"time"
 )
@@ -107,9 +108,13 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if err != nil || bound {
 		return false, err
 	}
+	stored := reason
+	if actor == "" {
+		stored = truncate(reason, 500)
+	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, created_at) VALUES (?, ?, ?, ?, ?)`,
-		disputeID, string(team), paymentID, truncate(reason, 500), now.UnixNano()); err != nil {
+		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, placed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		disputeID, string(team), paymentID, stored, actor, now.UnixNano()); err != nil {
 		return false, err
 	}
 	attrs := map[string]any{"payment_id": paymentID}
@@ -129,6 +134,7 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	if team == "" {
 		return 0, errors.New("credits: a release names the team")
 	}
+	disputeID = strings.TrimSpace(disputeID)
 	if noFault {
 		if disputeID != "" && !strings.HasPrefix(disputeID, OperatorHoldPrefix) {
 			return 0, fmt.Errorf("%w: only an operator hold can be released as no fault found", ErrInvalidInput)
@@ -145,6 +151,16 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	}
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return 0, err
+	}
+	if noFault {
+		var others int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM credit_freezes WHERE team = ? AND released_at IS NULL AND dispute_id LIKE ? AND (? = '' OR dispute_id = ?) AND placed_by <> ?`,
+			string(team), OperatorHoldPrefix+"%", disputeID, disputeID, actor).Scan(&others); err != nil {
+			return 0, err
+		}
+		if actor == "" || others > 0 {
+			return 0, authorityError(apierr.Forbidden, "only the operator who placed a hold can release it as no fault found")
+		}
 	}
 	released, err := releasedDisputesTx(ctx, tx, query+` RETURNING dispute_id`, args...)
 	if err != nil {
@@ -242,8 +258,10 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 		return false, nil, err
 	}
 	nowNS := now.UnixNano()
-	payable := state == CardChargeOpen && a.status == CardAttemptLive && amount == frozenAmount &&
-		(a.paymentIntent == "" || a.paymentIntent == p.PaymentIntent)
+	// safety: a failure is an observation on its payment intent, so that intent's later success still pays the obligation.
+	correlated := a.paymentIntent == p.PaymentIntent && (a.status == CardAttemptLive || a.status == CardAttemptFailed) ||
+		a.paymentIntent == "" && a.status == CardAttemptLive
+	payable := state == CardChargeOpen && amount == frozenAmount && correlated
 	warning, err := paymentWarningTx(ctx, tx, p.PaymentIntent, p.Fingerprint)
 	if err != nil {
 		return false, nil, err
@@ -280,11 +298,15 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 		return true, nil, nil
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, updated_at = ?
-     WHERE team = ? AND id = ? AND charge_id = ? AND status = ?`, CardAttemptPaid, p.PaymentIntent, nowNS, team, p.AttemptID, p.ChargeID, CardAttemptLive)
+     WHERE team = ? AND id = ? AND charge_id = ? AND status IN (?,?)`, CardAttemptPaid, p.PaymentIntent, nowNS, team, p.AttemptID, p.ChargeID, CardAttemptLive, CardAttemptFailed)
 	if err != nil {
 		return false, nil, err
 	}
 	if err := requireOneRow(result, "card attempt settlement"); err != nil {
+		return false, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, decline_code = 'superseded', updated_at = ?
+     WHERE team = ? AND charge_id = ? AND status = ? AND id <> ?`, CardAttemptFailed, nowNS, team, p.ChargeID, CardAttemptLive, p.AttemptID); err != nil {
 		return false, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_rung_index=CASE WHEN billing_rung_index<? THEN billing_rung_index+1 ELSE billing_rung_index END WHERE name=?`, len(billingPolicy)-1, team); err != nil {

@@ -26,6 +26,17 @@ type BillingStanding struct {
 	Trusted        bool
 	History        StandingHistory
 	PrepayCeiling  string
+	HoldCause      string
+}
+
+func openHoldCauseTx(ctx context.Context, q rowQuerier, team Team) (string, error) {
+	var rank sql.NullInt64
+	err := q.QueryRowContext(ctx, `SELECT MAX(CASE WHEN dispute_id LIKE ? THEN 2 WHEN cause=? THEN 1 WHEN cause=? THEN 3 ELSE 4 END) FROM credit_freezes WHERE team=? AND released_at IS NULL`,
+		OperatorHoldPrefix+"%", FreezeCauseDecline, FreezeCauseWarning, team).Scan(&rank)
+	if err != nil || !rank.Valid {
+		return "", err
+	}
+	return [...]string{1: FreezeCauseDecline, 2: HoldCauseOperator, 3: FreezeCauseWarning, 4: HoldCauseDispute}[rank.Int64], nil
 }
 
 // BillingStanding reports the team's history and balance backed standing.
@@ -46,9 +57,13 @@ func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 	if at > 0 {
 		b.TrustAt = time.Unix(0, at)
 	}
-	held, err := rowPresentTx(ctx, q, `SELECT 1 FROM credit_freezes WHERE team=? AND released_at IS NULL`, team)
+	cause, err := openHoldCauseTx(ctx, q, team)
 	if err != nil {
 		return b, err
+	}
+	held := cause != ""
+	if b.HoldCause = cause; b.Trust == BillingTrustRevoked {
+		b.HoldCause = HoldCauseRevoked
 	}
 	policy, err := standingPolicyTx(ctx, q, team, now, b.Trust, held)
 	if err != nil {

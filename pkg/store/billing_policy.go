@@ -137,7 +137,7 @@ func checkCloudCapacityTx(ctx context.Context, tx *storeTx, team Team, cores int
 		return err
 	}
 	if standing.Tier == "Held" {
-		return &InsufficientCreditsError{Limit: SpendLimitChargeFailed}
+		return holdRefusal(standing.HoldCause, &InsufficientCreditsError{})
 	}
 	if cores > standing.CloudVCPU {
 		return authorityError(apierr.BadRequest, "job exceeds "+standing.Tier+" standing Cloud vCPU limit")

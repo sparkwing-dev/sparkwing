@@ -40,6 +40,7 @@ type teamBillingJSON struct {
 	StorageFreeAllowanceBytes int64                  `json:"storage_free_allowance_bytes"`
 	StorageChargedMicro       int64                  `json:"storage_charged_micro"`
 	Frozen                    bool                   `json:"frozen"`
+	HoldCause                 string                 `json:"hold_cause,omitempty"`
 	Trusted                   bool                   `json:"trusted"`
 	CheckoutEnabled           bool                   `json:"checkout_enabled"`
 	CanPurchase               bool                   `json:"can_purchase"`
@@ -143,6 +144,7 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		StorageFreeAllowanceBytes: state.StorageFreeAllowanceBytes,
 		StorageChargedMicro:       state.StorageChargedMicro,
 		Frozen:                    freeze.Frozen,
+		HoldCause:                 standing.HoldCause,
 		Trusted:                   standing.Trusted,
 		CheckoutEnabled:           s.checkout != nil,
 		CanPurchase:               s.checkout != nil && owner,

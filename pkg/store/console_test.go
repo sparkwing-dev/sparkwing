@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"testing/quick"
 	"time"
@@ -277,5 +278,48 @@ func TestConsoleGlobalAdmissionAuditDeduplicatesAndDeletes(t *testing.T) {
 	}
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE account='victim'`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("deleted audit: %d %v", count, err)
+	}
+}
+
+func TestConsoleNoFaultReleaseBelongsToTheOperatorWhoPlacedTheHold(t *testing.T) {
+	s, c, alice := consoleFixture(t)
+	bobActor := authorityMember(t, s, "bob", RoleReader)
+	bob := alice
+	bob.Principal.Authority = bobActor.Authority
+	bob.Principal.Capability.Subject.ID = "bob"
+	c.allowed = func(id string) bool { return id == "operator" || id == "bob" }
+	ctx := t.Context()
+	reason := strings.Repeat("€", 300)
+	held, err := c.ConsoleFreeze(ctx, alice, reason)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ConsoleFreeze(ctx, bob, "bob's review"); err != nil {
+		t.Fatal(err)
+	}
+	var stored, placer string
+	if err := s.db.QueryRow(`SELECT reason, placed_by FROM credit_freezes WHERE dispute_id=?`, held.Disputes[0]).Scan(&stored, &placer); err != nil || stored != reason || placer != "operator" {
+		t.Fatalf("stored reason intact=%v placer=%q: %v", stored == reason, placer, err)
+	}
+	for _, release := range []struct {
+		hold string
+		who  capability.Authorized
+	}{{held.Disputes[0], bob}, {"", alice}, {"", bob}} {
+		_, err := c.ConsoleUnfreeze(ctx, release.who, release.hold, "forgive", true)
+		var refusal *apierr.Error
+		if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+			t.Fatalf("no-fault release of another operator's hold %q: %v", release.hold, err)
+		}
+	}
+	var open int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM credit_freezes WHERE released_at IS NULL`).Scan(&open); err != nil || open != 2 {
+		t.Fatalf("refused releases changed holds: %d %v", open, err)
+	}
+	if _, err := c.ConsoleUnfreeze(ctx, alice, held.Disputes[0], "forgive", true); err != nil {
+		t.Fatalf("placing operator's no-fault release: %v", err)
+	}
+	var noFault int
+	if err := s.db.QueryRow(`SELECT no_fault FROM credit_freezes WHERE dispute_id=?`, held.Disputes[0]).Scan(&noFault); err != nil || noFault != 1 {
+		t.Fatalf("no_fault=%d %v", noFault, err)
 	}
 }

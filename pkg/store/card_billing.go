@@ -22,6 +22,7 @@ const (
 	SpendLimitBudget        = "budget"
 	SpendLimitChargeFailed  = "charge_failed"
 	SpendLimitChargePending = "charge_pending"
+	SpendLimitHeld          = "held"
 )
 
 const (
@@ -132,6 +133,9 @@ func (s SpendStanding) ChargeFailed() bool { return s.OpenCharge != nil && s.Ope
 
 // Headroom reports admission room under standing, collection and the owner's budget.
 func (s SpendStanding) Headroom() (int64, string) {
+	if s.Billing.Tier == "Held" && s.Billing.HoldCause != FreezeCauseDecline && s.Billing.HoldCause != "" {
+		return 0, SpendLimitHeld
+	}
 	if s.Billing.Tier == "Held" || s.ChargeFailed() {
 		return 0, SpendLimitChargeFailed
 	}

@@ -210,6 +210,8 @@ test("a card-billed team with a failed charge pays it by hand and can still add 
   await mockController(page, {
     billing: {
       balance_micro: -15_000_000_000,
+      frozen: true,
+      hold_cause: "decline",
       card_billed: true,
       can_add_card: true,
       card: { brand: "visa", last4: "4242", added_at: 1_790_000_000 },
@@ -228,6 +230,8 @@ test("a card-billed team with a failed charge pays it by hand and can still add 
   });
   await page.goto("/team/billing");
   await expect(page.getByText("$150.00 owed")).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "The card was declined. Update the card or pay the charge" })).toBeVisible();
+  await expect(page.getByText(/payment dispute/)).toHaveCount(0);
   await expect(page.getByText("visa ending 4242")).toBeVisible();
   await expect(
     page.getByText(/A charge of \$150 failed \(insufficient_funds\)/),
@@ -236,7 +240,7 @@ test("a card-billed team with a failed charge pays it by hand and can still add 
     page.getByText(
       "The card was declined. Update the card or pay the charge now; new Cloud work waits until then.",
     ),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Pay $150 now" }),
   ).toBeVisible();

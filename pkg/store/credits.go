@@ -85,18 +85,27 @@ type InsufficientCreditsError struct {
 	// RunID and NodeID name the node the claim was refused for, which is in the claimant's own team; a record of the refusal belongs on that node and on no other team's.
 	RunID  string
 	NodeID string
-	// Frozen is set when the team's cloud usage is held while a payment dispute is open, whatever the balance reads.
+	// Frozen is set when a hold only support can lift refuses the claim, whatever the balance reads.
 	Frozen bool
 	// Limit names the spend limit that refused the claim, one of the SpendLimit values; empty is the balance.
 	Limit string
+	// Hold names the cause of the hold that refused the claim, from PrimaryHoldCause; empty when none did.
+	Hold string
 }
 
 func (e *InsufficientCreditsError) Error() string {
-	if e.Limit == SpendLimitChargeFailed {
-		return "card declined: new Cloud work waits until an owner updates the card or pays the charge on the billing page; running jobs finish and the team's own runners keep working"
+	switch e.Hold {
+	case HoldCauseDispute:
+		return "credits held: a payment dispute on this team is open; new Cloud work waits until it is resolved; contact support"
+	case FreezeCauseWarning:
+		return "credits held: the card issuer reported possible fraud on a payment; new Cloud work waits; contact support"
+	case HoldCauseOperator:
+		return "credits held by Sparkwing support; new Cloud work waits; contact support"
+	case HoldCauseRevoked:
+		return "Cloud standing revoked by Sparkwing support; new Cloud work waits; contact support"
 	}
-	if e.Frozen {
-		return "credits frozen: this team's cloud usage is held while a payment dispute is open; contact support"
+	if e.Limit == SpendLimitChargeFailed || e.Hold == FreezeCauseDecline {
+		return "card declined: new Cloud work waits until an owner updates the card or pays the charge on the billing page; running jobs finish and the team's own runners keep working"
 	}
 	switch e.Limit {
 	case SpendLimitChargePending:
@@ -742,15 +751,19 @@ func refuseFrozenTeamTx(
 	if err != nil || !freeze.Frozen {
 		return err
 	}
-	out := &InsufficientCreditsError{
-		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID, Frozen: true,
-	}
-	// safety: a declined charge's hold is the owner's to lift by paying, so
-	// its refusal says so instead of pointing them at support.
-	if blocking, err := rowPresentTx(ctx, tx, blockingHoldSQL, string(team), FreezeCauseDecline); err != nil {
-		return err
-	} else if !blocking {
+	return holdRefusal(PrimaryHoldCause(freeze.Causes), &InsufficientCreditsError{
+		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID,
+	})
+}
+
+// safety: a declined charge's hold is the owner's to lift by paying, so only
+// that cause carries the charge-failed remedy; every other hold names support.
+func holdRefusal(cause string, out *InsufficientCreditsError) *InsufficientCreditsError {
+	out.Hold = cause
+	if cause == FreezeCauseDecline || cause == "" {
 		out.Limit = SpendLimitChargeFailed
+	} else {
+		out.Frozen = true
 	}
 	return out
 }

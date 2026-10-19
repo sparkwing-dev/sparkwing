@@ -161,7 +161,7 @@ func TestStandingCapPaidCheckoutRecordsThreeDSecure(t *testing.T) {
 
 func standingCapOperatorHold(t *testing.T, s *Store, id string, placed, released time.Time, noFault bool) {
 	t.Helper()
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,created_at) VALUES (?,'a','review',?)`, id, placed.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,placed_by,created_at) VALUES (?,'a','review','operator',?)`, id, placed.UnixNano())
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", id, false, noFault, "operator", "checked", released)
 		return err
@@ -196,5 +196,37 @@ func TestStandingCapNoFaultReleaseOnlyForOperatorHolds(t *testing.T) {
 	var open int
 	if qerr := s.db.QueryRow(`SELECT COUNT(*) FROM credit_freezes WHERE dispute_id='dp_1' AND released_at IS NULL`).Scan(&open); !errors.Is(err, ErrInvalidInput) || qerr != nil || open != 1 {
 		t.Fatalf("no-fault dispute release: %v open=%d %v", err, open, qerr)
+	}
+}
+
+func TestHeldAdmissionNamesTheBlockingHoldAndItsRemedy(t *testing.T) {
+	for _, tc := range []struct {
+		holds  [][2]string
+		cause  string
+		remedy string
+	}{
+		{[][2]string{{"decline-a1", FreezeCauseDecline}}, FreezeCauseDecline, "updates the card"},
+		{[][2]string{{"dp_1", ""}}, HoldCauseDispute, "payment dispute"},
+		{[][2]string{{"efw_1", FreezeCauseWarning}}, FreezeCauseWarning, "possible fraud"},
+		{[][2]string{{OperatorHoldPrefix + "x", ""}}, HoldCauseOperator, "Sparkwing support"},
+		{[][2]string{{"decline-a1", FreezeCauseDecline}, {"dp_1", ""}}, HoldCauseDispute, "payment dispute"},
+	} {
+		s, tenant, now := standingCapFixture(t)
+		for _, h := range tc.holds {
+			rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,created_at) VALUES (?,'a','r',?,1)`, h[0], h[1])
+		}
+		b := standingCapWant(t, tenant, *now, "Held", "New", "Established")
+		if b.HoldCause != tc.cause {
+			t.Fatalf("%v: cause=%s", tc.holds, b.HoldCause)
+		}
+		err := s.inTx(t.Context(), func(tx *storeTx) error { return checkCloudCapacityTx(t.Context(), tx, "a", 1) })
+		var refusal *InsufficientCreditsError
+		if !errors.As(err, &refusal) || refusal.Hold != tc.cause || !strings.Contains(err.Error(), tc.remedy) || tc.cause != FreezeCauseDecline && strings.Contains(err.Error(), "card declined") {
+			t.Fatalf("%v: refusal %v", tc.holds, err)
+		}
+		st, err := tenant.SpendStanding(t.Context(), *now)
+		if _, limit := st.Headroom(); err != nil || (tc.cause == FreezeCauseDecline) != (limit == SpendLimitChargeFailed) {
+			t.Fatalf("%v: binding %s %v", tc.holds, limit, err)
+		}
 	}
 }

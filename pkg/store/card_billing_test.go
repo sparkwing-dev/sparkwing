@@ -326,9 +326,9 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 	}
 }
 
-// Settlement pays a charge only through its own live attempt at the frozen
-// amount. Money that arrives any other way is granted and queued for a
-// refund, and an attempt of another charge is refused.
+// Settlement pays an open charge at its frozen amount through its live attempt or
+// the payment intent a failed attempt observed. Money that arrives any other way is
+// granted and queued for a refund, and an attempt of another charge is refused.
 func TestSettlementChecksTheAttemptAndTheFrozenAmount(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

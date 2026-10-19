@@ -31,9 +31,9 @@ export interface GrantRow {
 export interface Billing {
   team: string;
   balance_micro: number;
-  // frozen is true while the team's cloud usage is held over a payment
-  // dispute; its cloud runs do not start until the operator releases it.
+  // frozen is true while any hold is open; hold_cause names the one whose remedy applies first.
   frozen: boolean;
+  hold_cause?: "decline" | "dispute" | "early_fraud_warning" | "operator" | "revoked" | string;
   micro_per_credit: number;
   credits_per_dollar: number;
   min_billable_seconds: number;
@@ -159,6 +159,22 @@ export interface SpendLimits {
   binding: string;
 }
 
+// holdNotice says what blocks new Cloud work and how to lift it, by the hold's cause.
+export function holdNotice(cause: string | undefined): string {
+  switch (cause) {
+    case "decline":
+      return "The card was declined. Update the card or pay the charge to start new Cloud work; running jobs finish and your own runners keep working.";
+    case "dispute":
+      return "New Cloud work is paused while a payment dispute is open. Contact support to resolve it.";
+    case "early_fraud_warning":
+      return "New Cloud work is paused because the card issuer reported possible fraud. Contact support.";
+    case "revoked":
+      return "Sparkwing support revoked this team's Cloud standing. Contact support.";
+    default:
+      return "Sparkwing support placed a hold on this team's Cloud work. Contact support.";
+  }
+}
+
 // Why new Cloud work waits, by the limit the controller says binds first.
 export function limitReason(binding: string): string {
   switch (binding) {
@@ -166,6 +182,8 @@ export function limitReason(binding: string): string {
       return "The team reached its budget.";
     case "charge_pending":
       return "New Cloud work waits while the pending card charge completes. Running work finishes.";
+    case "held":
+      return "New Cloud work waits while a hold is on the team. Running work finishes.";
     case "charge_failed":
       return "The card was declined. Update the card or pay the charge now; new Cloud work waits until then.";
     default:

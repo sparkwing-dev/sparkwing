@@ -378,3 +378,14 @@ describe("standing requests", () => {
     await assert.rejects(lib.requestHighStanding("m"), /already has an open standing request/);
   });
 });
+
+describe("hold notices", () => {
+  it("names each blocker and its remedy", () => {
+    assert.match(lib.holdNotice("decline"), /card was declined\. Update the card/);
+    assert.match(lib.holdNotice("dispute"), /payment dispute is open\. Contact support/);
+    assert.match(lib.holdNotice("early_fraud_warning"), /possible fraud/);
+    assert.match(lib.holdNotice("operator"), /support placed a hold/);
+    assert.doesNotMatch(lib.holdNotice("decline"), /dispute|support/);
+    assert.match(lib.limitReason("held"), /hold is on the team/);
+  });
+});

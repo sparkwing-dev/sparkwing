@@ -27,9 +27,9 @@ history tier and never above Trusted. A first payment earns Established
 history, so prepaying alone reaches Trusted at most. High needs $500 paid and 30
 clean days, or an operator grant of standing, whatever the balance. A hold
 restarts the clean days when it is placed and again when it is released. Two
-holds count as if they never happened: an operator hold the operator releases
-as "no fault found", and a declined-charge hold that a later successful charge
-clears. Dispute, fraud-warning and other automatic holds always restart the
+holds count as if they never happened: an operator hold the operator who
+placed it releases as "no fault found", and a declined-charge hold that a later
+successful charge clears. Dispute, fraud-warning and other automatic holds always restart the
 count.
 Adding funds raises standing in the settlement transaction.
 Using prepaid funds can lower its balance-backed tier. Successful collections
@@ -45,7 +45,10 @@ A failed charge on the saved card, whether a decline, an expired card or a
 failed collection reported by Stripe, holds new Cloud admissions at once.
 Running jobs finish and work on the team's own runners continues. The billing
 page and the run's notice say the card was declined and to update it. The next
-successful charge releases the hold.
+successful charge releases the hold, including a retry of the declined payment
+in the same checkout. Each refusal and notice names the hold that blocks the
+team: a declined charge points the owner at the card, while a payment dispute,
+an early fraud warning, an operator hold or revoked standing points at support.
 
 While a collection is pending, new Cloud work waits and running work finishes.
 Admissions include resources already awarded and reserved for jobs that have
