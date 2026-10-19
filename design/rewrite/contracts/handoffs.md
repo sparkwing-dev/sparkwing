@@ -751,7 +751,7 @@ Assigned to an Opus implementer (env 1087).
 
 2. Run anywhere (supersedes "Cloud triggers use controller dispatch" for unselected runs). A run or unit with no placement selection can be claimed by any eligible claimant.
    - Default ranking: (1) the machine that started the run (here); (2) the requester's other personal machines; (3) GitHub Actions runners; (4) self-hosted team runners; (5) the Cloud launcher. The launcher is eligible only when the team has billing enabled (prepaid funds, a saved card, or operator-granted credits).
-   - Each unit (plan step and every job) has its own 5-second window from readiness. If a claimant from the highest-ranked tier present in the ranking asks, it is awarded immediately. Otherwise, at the end of the window, the highest-ranked claimant that asked during the window wins. After the window, first eligible asker wins. A team with no ranking set uses first-come.
+   - Each unit (plan step and every job) has its own 5-second window from readiness. If a claimant from the highest-ranked tier present in the ranking asks, it is awarded immediately. Otherwise, at the end of the window, the highest-ranked claimant that asked during the window wins. After the window, first eligible asker wins. A team that has never set a ranking uses the default ranking; a team that sets an empty ranking uses first-come, and a tier left out of a set ranking takes no unselected work. (Ratified by Korey 2026-10-18.)
    - Automatically started runs (push, PR, schedule) skip tiers 1-2 by default. A personal machine's owner may opt that machine in to the owner's automated runs (a per-machine setting, off by default).
    - The ranking is a per-team setting a team admin can change: reorder tiers or drop tiers. An explicit placement (`--runner`, pool requirement, App `runner:`) still pins the run and takes it out of run-anywhere.
    - Self-hosted runners, personal machines and Actions runners must be able to claim the plan unit too, not only jobs.
@@ -777,3 +777,35 @@ Assigned to an Opus implementer (env 1087).
 - The billing page (console) and the CLI offer a "contact us to unlock higher tiers" request. It creates an operator task in the operator console queue, which the operator approves with the existing grant of standing.
 - docs/billing.md documents the cap, 3DS and the request.
 - A chargeback still puts the team on Held (no new admissions).
+
+## 2026-10-18 Korey decision 12: Cloud jobs do not get node root
+
+- Source: Opus launcher security review C1 (review/areas/launcher-security-opus.md). Job pods reached node root through the privileged Docker sidecar, and from it the shared node role `kikd-prod-karpenter-node` (AmazonEKS_CNI_Policy, SSM) and the aws-node token.
+- The Docker sidecar runs rootless (no privileged container in job pods; prefer user-namespaced pods). Customers keep docker build/run/compose; `docker run --privileged` and host-level Docker features are not available on Cloud. Customer-visible and approved. GitHub Actions and CircleCI give root only inside a per-job VM.
+- Job and team nodes use their own instance role with only ECR read-only and EKS worker permissions (no CNI, no SSM). aws-node gets CNI permissions through Pod Identity/IRSA, not the node role.
+- The admission policy forbids privileged containers in job pods, including the Docker sidecar. Any remaining privileged probe needs a stated reason.
+- A per-job VM option with privileged Docker may come later as a paid feature, only if customers ask.
+- With node root gone, per-team node reuse (review M2) stays as is.
+
+## 2026-10-18 Korey decision 13: run anywhere on self-hosted controllers
+
+- Self-hosted controllers use run anywhere for unselected runs the same way Cloud does, without the Cloud tier. CLI triggers no longer run directly on the controller's host by host dispatch; the controller's host takes part as a self-hosted claimant, so a team with no runners online is still served.
+- The "here" tier is the authenticated machine that submitted the run (its machine credential identity sealed at intake), never a label. Lead ruling, recorded for ratification.
+
+## 2026-10-18 Korey decision 14: no-eligible-runner notice
+
+- A run-anywhere unit still waiting after its window with no eligible claimant shows a "no eligible runner" notice that names the cause: the team's ranking leaves a tier out (for example "Cloud is off in this team's runner ranking"), or the pipeline/job targets only a specific runner, pool or class ("this job targets pool=gpu only"), or no runner of the allowed tiers is online. Empty ranking = first come; never-set = default ranking; a dropped tier takes no unselected work. Ratified.
+
+## 2026-10-18 Korey decision 15: personal machines on automated runs need admin approval
+
+- Source: Opus run-anywhere security review C1/M1/M3 (review/areas/ranking-security-opus.md).
+- Opting a personal machine in to automated (App, schedule) runs requires a team admin's approval, recorded and audited; the owner requests it, an admin approves or revokes it, and it dies with the machine's revocation. Without approval the machine takes no automated runs.
+- An approved machine is treated as a self-hosted claimant for those runs (admin-trusted, the GitHub self-hosted-runner model). OIDC distinguishes it: `runner_kind=personal` vs `runner`.
+- The owner of an automated App run, for routing to a personal machine, is the commit/PR author's linked identity, never the webhook sender; retries keep the author. Schedules use the account that armed them.
+- Customer-visible and approved.
+
+## 2026-10-18 Korey decision 16: personal machines run only repositories their owner can access
+
+- Decision 6(c) stands for every personal machine, approved or not: no team git credentials and no App installation tokens. A personal machine fetches with its owner's own git access.
+- A personal machine is eligible for an automated run only if its owner can read the run's repository and every extra repository the run needs. The controller checks this server-side via the App installation (the owner's linked GitHub login's collaborator permission on each repository), cached briefly, never from the machine's claim. An ineligible machine is skipped by ranking; it does not claim and fail.
+- Korey's words: "people should still only be able to run the repositories that they have access to".

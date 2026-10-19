@@ -15,15 +15,12 @@ import (
 type SDKKind string
 
 const (
-	GoSDK                    SDKKind = "go"
-	TypeScriptSDK            SDKKind = "typescript"
-	GoModule                         = "github.com/sparkwing-dev/sparkwing"
-	TypeScriptPackage                = "@sparkwing/sdk"
-	GitHubReleaseBase                = "https://github.com/sparkwing-dev/sparkwing/releases/download"
-	VersionIndexURL                  = "https://sparkwing.dev/versions.json"
-	VersionIndexSignatureURL         = "https://sparkwing.dev/versions.json.sig"
-	UpgradeCommand                   = "sparkwing upgrade"
-	VersionIndexFormat               = 1
+	GoSDK              SDKKind = "go"
+	TypeScriptSDK      SDKKind = "typescript"
+	GoModule                   = "github.com/sparkwing-dev/sparkwing"
+	TypeScriptPackage          = "@sparkwing/sdk"
+	UpgradeCommand             = "sparkwing upgrade"
+	VersionIndexFormat         = 1
 )
 
 // Pin records the SDK requirement, applicable replacement and source files.
