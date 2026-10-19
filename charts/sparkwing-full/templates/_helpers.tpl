@@ -190,34 +190,11 @@ the value existed has no credentialsSecret map under --reuse-values.
 {{- end -}}
 
 {{/*
-"true" when the controller may receive a bootstrap admin token: through
-bootstrapAdminToken, or possibly through credentialsSecret, whose keys the
-chart cannot see. Empty otherwise.
-*/}}
-{{- define "sparkwing-full.controller.hasBootstrapAdminToken" -}}
-{{- if or .Values.controller.bootstrapAdminToken.name (include "sparkwing-full.controller.credentialsBundle" .) -}}
-true
-{{- end -}}
-{{- end -}}
-
-{{/*
 "true" when the controller may receive a current secrets key: through
 secretsKey, or possibly through credentialsSecret. Empty otherwise.
 */}}
 {{- define "sparkwing-full.controller.hasSecretsKey" -}}
 {{- if or .Values.controller.secretsKey.name (include "sparkwing-full.controller.credentialsBundle" .) -}}
-true
-{{- end -}}
-{{- end -}}
-
-{{/*
-"true" when the controller deployment passes --require-auth. An explicit
-allowOpenBootstrap without a separate bootstrapAdminToken drops it, even when
-a credentialsSecret is set, since that bundle may carry only OAuth credentials.
-The Ingress guard reads the same answer so the two cannot disagree.
-*/}}
-{{- define "sparkwing-full.controller.rendersRequireAuth" -}}
-{{- if and .Values.controller.requireAuth (or .Values.controller.bootstrapAdminToken.name (ne .Values.controller.allowOpenBootstrap true)) -}}
 true
 {{- end -}}
 {{- end -}}

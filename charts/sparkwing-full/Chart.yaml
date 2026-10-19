@@ -12,7 +12,7 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of appVersion. Bump on any user-facing values.yaml
 # change or template structural change.
-version: 0.2.4
+version: 0.3.0
 
 # appVersion is metadata only. Every enabled image requires repository and tag.
 appVersion: "0.1.0"

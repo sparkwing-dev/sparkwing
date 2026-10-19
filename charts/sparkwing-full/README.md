@@ -35,6 +35,31 @@ new tarball and lockfile. No Helm repository is required. ArgoCD can use this
 source chart path and the values file directly. Provision ExternalSecrets before
 the Deployments consume them, using sync waves or separate applications.
 
+## Deployment and store
+
+Two values declare what the controller is, and the chart passes them as flags:
+
+| Value | Choices | Flag |
+| --- | --- | --- |
+| `controller.deployment` | `local` (default), `team`, `cloud` | `--deployment` |
+| `controller.store` | `sqlite` (default), `postgres` | `--store` |
+
+`local` is a single-team self-hosted controller, `team` a licensed multi-team
+self-hosted one, and `cloud` the hosted service. The controller refuses a
+multi-team `license` outside `team` and `cloud`, refuses `team` and `cloud`
+without one, and refuses `controller.limitsProfile` `cloud` or `cloud-free`
+outside `cloud`. `sqlite` keeps `state.db` under `/data`; `postgres` reads the
+`pg-url` credential. The render refuses `controller.databaseSecret.name` without
+`store: postgres`, `store: postgres` with neither `databaseSecret.name` nor
+`credentialsSecret.name`, and `deployment: cloud` without `store: postgres`.
+
+`values.schema.json` closes every mode value to its choices:
+`controller.deployment`, `controller.store`, `controller.storage.type`,
+`controller.limitsProfile` and `controller.image.pullPolicy`. The ingress,
+listener, ServiceAccount and volume-permission switches must be booleans. A
+typo such as `storage.type: PVC` fails the render and names the field rather
+than falling back to an ephemeral `/data`.
+
 ## Credentials and bootstrap
 
 Secrets are mounted as files under `/etc/sparkwing/credentials`. They never become
@@ -63,9 +88,20 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
   --from-file=key=/tmp/sparkwing-secrets-key
 ```
 
-`--require-auth` seeds the gated bootstrap administrator before listening. Use the
-seed to provision the first real deployment administrator through operator
-credential management. That transaction revokes the seed and its descendants.
+The chart always passes `--require-auth`, so the controller refuses to start
+without a live administrator or a bootstrap seed. A fresh install needs
+`controller.bootstrapAdminToken` or `bootstrap-admin-token` in
+`credentialsSecret`. The controller seeds the gated bootstrap administrator
+from it before listening. Use the seed to provision the first real deployment
+administrator through operator credential management. That transaction revokes
+the seed and its descendants. After that handoff the seed Secret may be removed.
+A consumed seed left mounted whose digest still matches only logs a warning to
+remove the credential; it no longer stops the controller.
+
+`controller.requireAuth` and `controller.allowOpenBootstrap` were removed in
+chart 0.3.0. Setting either, including to its old default, fails the render.
+Delete them from values files, or pass `--set controller.requireAuth=null
+--set controller.allowOpenBootstrap=null` with `--reuse-values`.
 Create the launcher service credential under the real administrator, with
 `claims.launch`, and store its one-time output in `sparkwing-launcher-token`:
 
@@ -79,7 +115,8 @@ until it exists. A two-stage first install can set
 `sparkwing-runner-bundle.launcher.enabled=false`, provision the service credential,
 then enable the launcher. Restarts use the persisted administrator in RDS.
 
-`credentialsSecret` accepts these file-named keys:
+`credentialsSecret` accepts these file-named keys. The controller refuses to
+start on any other file name in its credentials directory:
 
 | Key | Purpose |
 | --- | --- |
@@ -116,6 +153,7 @@ upload and log key stays under `controller/`; record metadata lives in RDS.
 The example uses `controller.storage.type=emptyDir` for the process home at
 `/data`, because RDS and S3 hold durable state.
 `controller.storage.type=pvc` remains available for filesystem/SQLite installs.
+The example declares `deployment: cloud` and `store: postgres`.
 
 The controller ServiceAccount's IRSA role needs S3 read, write, delete and list
 access under `controller/`. Scope object permissions to

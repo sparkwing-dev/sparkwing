@@ -35,21 +35,22 @@
 {{- if and .Values.controller.bootstrapAdminToken.name (not .Values.controller.bootstrapAdminToken.key) -}}
 {{- fail "sparkwing-full: controller.bootstrapAdminToken.key is required when controller.bootstrapAdminToken.name is set" -}}
 {{- end -}}
-{{- if not (kindIs "bool" .Values.controller.allowOpenBootstrap) -}}
-{{- fail "sparkwing-full: controller.allowOpenBootstrap must be a bool. A quoted value such as 'false' reads as true to the template, which would silently omit --require-auth" -}}
+{{- /* Presence rather than truth: values files copied the old defaults, requireAuth: true and allowOpenBootstrap: false. A null left by --set ...=null counts as unset. */ -}}
+{{- range $value := list "requireAuth" "allowOpenBootstrap" -}}
+{{- if not (kindIs "invalid" (index $.Values.controller $value)) -}}
+{{- fail (printf "sparkwing-full: controller.%s was removed; the chart always passes --require-auth. A fresh install needs controller.bootstrapAdminToken.name or bootstrap-admin-token in controller.credentialsSecret, and the seed may be removed once the administrator exists. Delete it from the values file, or pass --set controller.%s=null with --reuse-values" $value $value) -}}
 {{- end -}}
-{{- $hasBootstrap := include "sparkwing-full.controller.hasBootstrapAdminToken" . -}}
-{{- if and .Values.controller.requireAuth (not $hasBootstrap) (ne .Values.controller.allowOpenBootstrap true) -}}
-{{- fail "sparkwing-full: controller.requireAuth=true needs controller.bootstrapAdminToken.name or bootstrap-admin-token in controller.credentialsSecret for a fresh install. controller.allowOpenBootstrap=true permits rendering without one and omits --require-auth; protected routes still require credentials, so provision the administrator out of band before use" -}}
 {{- end -}}
-{{- if not (kindIs "bool" .Values.ingress.allowInsecure) -}}
-{{- fail "sparkwing-full: ingress.allowInsecure must be a bool. A quoted value such as 'false' reads as true to the template, which would silently drop the published-controller guard" -}}
+{{- $c := .Values.controller -}}
+{{- if and $c.databaseSecret.name (ne $c.store "postgres") -}}
+{{- fail "sparkwing-full: controller.databaseSecret.name needs controller.store=postgres; a SQLite controller refuses a pg-url credential. Set controller.store=postgres, or unset controller.databaseSecret.name to keep SQLite" -}}
 {{- end -}}
-{{- if and .Values.ingress.enabled (ne .Values.ingress.allowInsecure true) -}}
-{{- if not .Values.ingress.tls -}}
+{{- if and (eq $c.store "postgres") (not $c.databaseSecret.name) (not (include "sparkwing-full.controller.credentialsBundle" .)) -}}
+{{- fail "sparkwing-full: controller.store=postgres needs a pg-url credential. Set controller.databaseSecret.name, or put pg-url in controller.credentialsSecret" -}}
+{{- end -}}
+{{- if and (eq $c.deployment "cloud") (ne $c.store "postgres") -}}
+{{- fail "sparkwing-full: controller.deployment=cloud needs controller.store=postgres" -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (not .Values.ingress.allowInsecure) (not .Values.ingress.tls) -}}
 {{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls publishes the controller API, its tokens and the dashboard's session cookies over plain HTTP, where anyone on the path can read them. Set ingress.tls, or set ingress.allowInsecure=true to publish it unencrypted anyway, which also passes --insecure-cookies so a browser keeps its session" -}}
-{{- end -}}
-{{- if not (include "sparkwing-full.controller.rendersRequireAuth" .) -}}
-{{- fail "sparkwing-full: ingress.enabled=true with controller.requireAuth=false, or with controller.allowOpenBootstrap=true and no controller.bootstrapAdminToken.name (a credentialsSecret does not count, since the chart cannot see whether it carries one), publishes a controller without the chart's startup credential requirement. Set controller.bootstrapAdminToken.name and keep controller.requireAuth=true, or set ingress.allowInsecure=true to waive this startup guard" -}}
-{{- end -}}
 {{- end -}}
