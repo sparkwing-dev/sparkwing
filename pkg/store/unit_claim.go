@@ -110,6 +110,7 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 		if launcherClaimant(c) {
 			allowed = kind == capability.UnitPlan || kind == capability.UnitEval || kind == capability.UnitNode
 		}
+		allowed = allowed && !(hostClaimant(c) && kind == capability.UnitTrigger)
 		if c.Purpose == capability.PurposeHere {
 			allowed = kind == capability.UnitTrigger && demand.Target != nil && demand.Target.RunID == c.Binding.RunID && slices.Contains(c.Grants, capability.TriggerHost)
 		}

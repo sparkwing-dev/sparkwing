@@ -109,7 +109,7 @@ func refusal(err error) bool {
 }
 
 func rankedObservable(c capability.Capability) bool {
-	return registeredClaimant(c) || actionsClaimant(c) || launcherClaimant(c) || localClaimant(c)
+	return registeredClaimant(c) || actionsClaimant(c) || launcherClaimant(c) || localClaimant(c) || hostClaimant(c)
 }
 
 func localClaimant(c capability.Capability) bool {

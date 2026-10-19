@@ -55,9 +55,14 @@ Cloud and on self-hosted controllers alike: any eligible claimant can take its
 plan step, generator evaluations and each job. The team's claim ranking orders
 the claimants, best first: `here` (the personal runner on the machine whose
 CLI started the run), `personal` (the requester's own machines),
-`github-actions`, `self-hosted` (the team's shared runners and a local
-controller's own queue) and `cloud` (the launcher; a self-hosted controller has
-none and refuses `cloud` in a ranking). Each unit waits up to 5 seconds from readiness for the
+`github-actions`, `self-hosted` (the team's shared runners and the controller
+host) and `cloud` (the launcher; a self-hosted controller has none and refuses
+`cloud` in a ranking). The controller host is the local controller's own queue,
+or on a self-hosted `sparkwing-controller` (any `--limits-profile` other than
+`cloud` or `cloud-free`) an in-process claimant that takes plan, evaluation and
+job units of every team on that controller, unmetered, so a controller with no
+registered runners still runs them. It executes pipelines on the controller's
+machine as the controller's OS account. Each unit waits up to 5 seconds from readiness for the
 best-ranked claimant that is online. The best-ranked claimant present takes it
 at once. A claimant that asks while a better one is online is recorded. When
 the window closes, the best-ranked recorded asker has 2 more seconds to come
@@ -142,6 +147,10 @@ The repository's controller and Helm chart are Cloud operator infrastructure.
 The controller owns persistence and issues scoped object transfers through
 `/data`. Runners never write directly to its database. The SDK pin selects the
 verified matching engine, and controller APIs retain the engine's support window.
+Without a Cloud `--limits-profile` (`cloud` or `cloud-free`), the controller
+also runs its controller host, which claims unselected work like a registered
+runner and executes it on the controller's machine. Run the controller where
+executing your teams' pipelines is acceptable.
 
 Cloud operators can create a team and its first administrator without OAuth:
 

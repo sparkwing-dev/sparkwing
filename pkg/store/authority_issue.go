@@ -275,7 +275,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		}
 		row.holder, row.generation, row.lease = prospective.holder, prospective.generation, prospective.lease
 	}
-	if !launcher && claimant.Capability.Team != row.team {
+	if !launcher && !hostClaimant(claimant.Capability) && claimant.Capability.Team != row.team {
 		return capability.Capability{}, authorityError(apierr.Forbidden, "claimant belongs to another team")
 	}
 	if claimant.Capability.Binding.Kind != capability.BindingNone && claimant.Capability.Binding.RunID != "" && claimant.Capability.Binding.RunID != row.run {
