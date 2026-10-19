@@ -867,3 +867,11 @@ Assigned to an Opus implementer (env 1087).
 - Metering is slice by slice at lease renewal: admission needs the first slice covered (the existing award hold); each renewal reserves the next slice from the balance first. If the next slice is not covered, the renewal is refused and the job is stopped with "out of credits" (hard stop, no grace), bounded by the drain deadline. Overage is at most one slice per running job.
 - Refunds, disputes and early fraud warnings stay (any card payment can be clawed back); a clawback can take the balance negative, which blocks new Cloud work. Card pinning and fraud-card blocking stay.
 - Open for Korey: auto-refill opt-in vs default, default threshold and refill size, and what standing tiers still cap (refill size and frequency as a stolen-card brake).
+
+## 2026-10-19 Korey decision 27: refill settings and customer spending limits
+
+- Auto-refill is opt-in.
+- The team sets its own refill threshold and refill amount (the console suggests values; no forced defaults). A minimum refill amount of $10 keeps card fees reasonable.
+- Teams can set their own spending limits on refills, per week and per month (for example "no more than $25 a week, $100 a month"). A refill that would exceed a limit is not made; credits then run down and Cloud work hard-stops at zero, with a notice naming the limit.
+- Larger, less frequent charges are preferred; smarter sizing for high-volume teams (for example suggesting about a week of recent usage) is a later improvement, not launch scope.
+- Standing tiers additionally cap refill size and frequency as a stolen-card brake. Korey agrees in principle; the lead proposes the specific per-tier values for ratification.
