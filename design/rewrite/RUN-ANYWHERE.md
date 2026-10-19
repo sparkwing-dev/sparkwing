@@ -4,6 +4,46 @@ Source: Korey's decisions 2 and 13-16 of 2026-10-18 (`contracts/handoffs.md`). I
 the launcher-only rule for unselected runs from the earlier lead ruling "Cloud
 triggers use controller dispatch". Frozen §2.3, §3.2 and §3.5 still hold.
 
+## Restructure plan (2026-10-19, Sol re-review and Opus re-review 2)
+
+Three shared boundaries replace the per-path patches.
+
+**A. Automation identity, sealed at intake.** `runspec.Request.Automation` is
+server-derived and client-cleared. It holds the delivery's `SenderID` and the
+code's `AuthorID` (linked GitHub IDs, App runs), or `ArmedBy` (the schedule
+armer account), plus the immutable `Repos` (`gh:<id>` for the primary and each
+extra repository). Its presence is the automated flag. Children copy the
+parent's, and retries keep it because they keep the sealed request. Release
+events take the commit author, never the publisher; branch create/delete stay
+unowned. Personal eligibility, the tier, repository access and the access
+cache all read it: an App run belongs to a member only when the sender equals
+the author on that member's linked account. Access rows are keyed by `gh:<id>`,
+names are resolved from the ID only for the collaborator call, entries live
+60 s, and the controller re-checks access live when it awards a unit to a
+personal machine, releasing the unit on a denial. Needs come from the units the
+machine could claim, not a scan of recent runs. Intake refuses a client
+`schedule` origin. Approval revocation deletes every live generation of the
+machine. `here` uses a short-lived proof the runner derives from its
+credential, never the credential.
+
+**B. One eligibility result per (unit, claimant).** `unitEligibilityTx`
+returns the claimant's matching inputs, tier rank, kind, liveness, capacity
+fit and billing (for every metered claimant) in one value. Queue scans, named
+claims, ranking holds and notices all derive from it. The notice survey is
+deleted: notices evaluate the same live observations the ranking scans
+(capped per claim), including the local queue and the controller host, and
+report the first failing step (tier dropped, pin, nobody online, capacity,
+credits).
+
+**C. Asks inside the ranking transaction.** A held claimant's ask is written,
+under the unit's claim lock, in the same transaction that scans the queue,
+whether that scan awards another unit or nothing. Awards read asks under the
+same lock. `RankingAward` (2 s after the window, worst case 7 s) is the lead
+amendment to decision 2.
+
+The non-Cloud `sparkwing-controller` composes the same host claimant runtime
+as wingd, so every self-hosted controller can host unselected runs.
+
 ## Which runs
 
 `SelectDispatch` is the one intake rule on every controller, Cloud and
