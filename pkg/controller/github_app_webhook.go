@@ -745,7 +745,7 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	if snapshot.RepositoryID != repo.ID || snapshot.DefaultBranch != intake.branch || snapshot.HeadSHA != intake.sha {
 		return 0, "the push no longer names this repository's default-branch head", nil
 	}
-	if _, err := s.store.AsOperator().WithdrawOtherGitHubCronBindings(r.Context(), in.Team, in.InstallationID, repo.ID, time.Now()); err != nil {
+	if _, err := tenant.WithdrawOtherGitHubCronInstallations(r.Context(), in.InstallationID, repo.ID, time.Now()); err != nil {
 		return http.StatusInternalServerError, "", fmt.Errorf("withdraw former GitHub App schedule bindings: %w", err)
 	}
 	var entries []crons.Declared
@@ -898,7 +898,7 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 		s.writeInternalError(w, r, "rename repository automation", err)
 		return
 	}
-	if _, err := s.store.AsOperator().WithdrawOtherGitHubCronBindings(r.Context(), tenant.Team(), env.Installation.ID, repo.ID, time.Now()); err != nil {
+	if _, err := tenant.WithdrawOtherGitHubCronInstallations(r.Context(), env.Installation.ID, repo.ID, time.Now()); err != nil {
 		s.writeInternalError(w, r, "withdraw former GitHub repository schedule", err)
 		return
 	}

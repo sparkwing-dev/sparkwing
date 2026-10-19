@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"net/http"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
@@ -54,15 +55,6 @@ func (f *credFixture) put(who signedIn, body map[string]any) (controller.GitCred
 	return out, code
 }
 
-func (f *credFixture) consentedRun(owner signedIn, runID, repoURL string) string {
-	f.t.Helper()
-	auth, prefix := f.nodeClaim(owner, runID, repoURL, 0)
-	if code := f.call("PUT", "/api/v1/tokens/"+prefix+"/git-credentials", owner.auth, map[string]any{"enabled": true}, nil); code != http.StatusOK {
-		f.t.Fatalf("source consent = %d", code)
-	}
-	return auth
-}
-
 type releaseRow struct {
 	Host        string `json:"host"`
 	RunID       string `json:"run_id"`
@@ -95,9 +87,46 @@ func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 	if rels := f.releases(f.olga); len(rels) != 1 || rels[0].RunID != "run-widgets" {
 		t.Fatalf("audit = %+v; want the App token's row alone", rels)
 	}
-	unsubscribed := f.consentedRun(f.olga, "run-else", "https://github.com/acme/plans.git")
+	unsubscribed, _ := f.nodeClaim(f.olga, "run-else", "https://github.com/acme/plans.git", 0)
 	got, code = f.sourceCredential(unsubscribed, "run-else")
 	if code != http.StatusOK || got.Kind != "https" || got.Secret != "github_pat_x" {
 		t.Fatalf("unsubscribed repository = %d %+v; want the stored credential", code, got)
+	}
+}
+
+func TestTeamGitCredentialsNeverReachAPersonalMachine(t *testing.T) {
+	f := newCredFixture(t)
+	f.connect(f.olga, 501, 7, acmeAdmin)
+	if _, code := f.put(f.olga, map[string]any{"host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {
+		t.Fatalf("put = %d", code)
+	}
+	for _, tc := range []struct {
+		run, repo string
+		id        int64
+	}{
+		{"run-app", "https://github.com/acme/widgets.git", 701},
+		{"run-stored", "https://github.com/acme/plans.git", 0},
+	} {
+		_, laptop, _ := f.claimRunNodeOn(f.olga, tc.run+"-laptop", tc.repo, tc.id, true)
+		var refused struct {
+			Error struct {
+				Details struct {
+					Reason string `json:"reason"`
+				} `json:"details"`
+			} `json:"error"`
+		}
+		code := f.call("POST", "/api/v1/runs/"+tc.run+"-laptop/source-credential", laptop, nil, &refused)
+		if code != http.StatusForbidden || refused.Error.Details.Reason != "personal_machine" {
+			t.Fatalf("%s on a personal machine = %d %v", tc.run, code, refused)
+		}
+		_, shared, _ := f.claimRunNodeOn(f.olga, tc.run+"-shared", tc.repo, tc.id, false)
+		if got, code := f.sourceCredential(shared, tc.run+"-shared"); code != http.StatusOK || got.Secret == "" {
+			t.Fatalf("%s on a shared runner = %d %+v", tc.run, code, got)
+		}
+	}
+	for _, row := range f.releases(f.olga) {
+		if strings.HasSuffix(row.RunID, "-laptop") {
+			t.Fatalf("personal machine release audited: %+v", row)
+		}
 	}
 }

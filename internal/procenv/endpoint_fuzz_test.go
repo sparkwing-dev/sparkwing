@@ -16,7 +16,7 @@ func FuzzConsumerCredentialsMasked(f *testing.F) {
 		if len(secret) == 0 || len(secret) > 128 || len(suffix) > 256 {
 			t.Skip()
 		}
-		for _, name := range []string{"HTTPS_PROXY", "GOPROXY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "npm_config_registry"} {
+		for _, name := range []string{"HTTPS_PROXY", "GOPROXY", "GOSUMDB", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "npm_config_registry"} {
 			password := "credential-" + hex.EncodeToString(secret) + "@inner:part,comma|pipe"
 			rawPassword := "%63" + password[1:]
 			if name == "GOPROXY" {
@@ -30,6 +30,8 @@ func FuzzConsumerCredentialsMasked(f *testing.F) {
 			value := endpoint
 			if name == "GOPROXY" {
 				value = " \thttps://public.example , \n" + value + " | direct "
+			} else if name == "GOSUMDB" {
+				value = "sum.example+key " + value
 			} else if name == "PIP_EXTRA_INDEX_URL" {
 				value = "https://public.example " + value
 			}
@@ -65,7 +67,11 @@ func FuzzConsumerCredentialsMasked(f *testing.F) {
 						t.Fatalf("%s/%s left credential visible", name, mode)
 					}
 				}
-				if mode != "ambient" && !strings.Contains(masker.Mask(endpoint), public) {
+				goEndpoint := name == "GOPROXY" || name == "GOSUMDB"
+				if goEndpoint && strings.Contains(masker.Mask(endpoint), public) {
+					t.Fatalf("%s/%s left a path-bearing Go endpoint visible", name, mode)
+				}
+				if !goEndpoint && mode != "ambient" && !strings.Contains(masker.Mask(endpoint), public) {
 					t.Fatalf("%s/%s masked public endpoint fields", name, mode)
 				}
 			}
@@ -81,7 +87,7 @@ func TestGoProxyDelimitersKeepPublicAuthorityVisible(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := masker.Mask(value), "***@private-tail"+separator+"***@next.example/@scope?other=@public"; got != want {
+		if got, want := masker.Mask(value), "***@private-tail"+separator+"***"; got != want {
 			t.Fatalf("masked Go proxy list = %q, want %q", got, want)
 		}
 	}
@@ -157,4 +163,23 @@ func FuzzCredentialTransportExcluded(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestGoEndpointTokensInPathOrQueryAreMasked(t *testing.T) {
+	for _, tc := range []struct{ name, value, secret string }{
+		{"GOPROXY", "https://proxy.golang.org,https://artifacts.example/api/go/path-token-123|direct", "path-token-123"},
+		{"GOPROXY", "https://artifacts.example/?token=query-token-456,direct", "query-token-456"},
+		{"GOSUMDB", "sum.example+key https://sum.example/token/sum-token-789", "sum-token-789"},
+	} {
+		masker := secrets.NewMasker()
+		if _, err := Build(Install, Base{Local: true, Captured: []string{tc.name + "=" + tc.value}, Masker: masker}, Runtime{}); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(masker.Mask(tc.value), tc.secret) {
+			t.Errorf("%s token %q visible in %q", tc.name, tc.secret, masker.Mask(tc.value))
+		}
+		if got := masker.Mask("https://proxy.golang.org"); got != "https://proxy.golang.org" {
+			t.Errorf("root proxy endpoint masked: %q", got)
+		}
+	}
 }

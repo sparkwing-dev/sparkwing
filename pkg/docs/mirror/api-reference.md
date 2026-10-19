@@ -148,7 +148,6 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/tokens/{token}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
 | `DELETE` | `/api/v1/tokens/{token}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
 | `POST` | `/api/v1/tokens/{token}/rotate` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
-| `PUT` | `/api/v1/tokens/{token}/git-credentials` | `controller` | `team` | `capability` | `safe` | `account_session` / `` / `machineOwner` / `credential` |
 | `GET` | `/api/v1/secrets` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/secrets` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `GET` | `/api/v1/secrets/{name}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `secrets.read` / `none` / `credential`<br>`unbound_member_or_local` / `team.admin` / `none` / `credential`<br>`awarded_or_delegated_claim` / `secrets.release` / `declaredSecret` / `sensitive` |

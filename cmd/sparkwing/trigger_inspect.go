@@ -31,7 +31,7 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 		}
 	}()
 	captured = slices.DeleteFunc(slices.Clone(captured), func(item string) bool { return strings.HasPrefix(item, "SPARKWING_GATE_INDEX=") })
-	options.Base = procenv.Base{Local: true, Captured: captured, Masker: masker}
+	options.Base, options.GitAccess = procenv.Base{Local: true, Captured: captured, Masker: masker}, source.GitAccessOwner
 	spec, err := source.ForRequest(runspec.SealedRequest{Request: runspec.Request{Git: selection.git, Source: selection.source}})
 	if err != nil {
 		return nil, err

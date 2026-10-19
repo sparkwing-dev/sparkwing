@@ -191,7 +191,6 @@ func fakeEngine(t *testing.T, f *engineTransactions) *controller.EngineControlle
 func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 	a := expansionAuthority()
 	f := &engineTransactions{
-		admitted: store.AdmissionResult{RunID: "admitted", Number: 17, HereBearer: []byte("one-time-here")},
 		run:      store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run", Hash: "persisted-first-seal"}},
 		accepted: store.AcceptedPlan{PlanHash: "second-seal", Plan: json.RawMessage(`{"jobs":[]}`), Replayed: true},
 		expanded: store.AcceptedExpansion{
@@ -200,16 +199,6 @@ func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 		},
 	}
 	e := fakeEngine(t, f)
-	created, err := e.CreateRun(t.Context(), a, controllerwire.CreateRunRequest{Request: runspec.Request{Pipeline: "build"}, IdempotencyKey: "once"})
-	if err != nil || created.RunID != "admitted" || created.Number != 17 || created.HereBearer != "one-time-here" || created.Replayed ||
-		f.intake.Authority != a.Principal.Authority || f.intake.IdempotencyKey != "once" {
-		t.Fatalf("intake = %+v, %+v, %v", created, f.intake, err)
-	}
-	f.admitted.HereBearer, f.admitted.Replayed = nil, true
-	replayed, err := e.CreateRun(t.Context(), a, controllerwire.CreateRunRequest{IdempotencyKey: "once"})
-	if err != nil || !replayed.Replayed || replayed.HereBearer != "" {
-		t.Fatalf("intake replay = %+v, %v", replayed, err)
-	}
 	body := controllerwire.PlanSubmission{Plan: json.RawMessage(`{"jobs":[]}`), Declarations: runspec.CheckoutDeclarations{
 		Version: 1, File: "sparkwing.yaml",
 		Pipeline: runspec.CheckoutLayer{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"linux"}}}},

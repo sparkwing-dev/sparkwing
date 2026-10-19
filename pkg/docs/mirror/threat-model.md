@@ -35,8 +35,8 @@ authorized branch can declare and use its permitted secrets, so everyone who
 can change and run that code must be trusted with those secrets.
 
 Source credentials require a live authorized claim. Naming a private repository
-grants no fetch access. Team Git credentials additionally require a cloud runner
-of that team or a machine whose owner opted in. Owner Git credentials stay
+grants no fetch access. Team Git credentials additionally require Cloud work or a
+shared runner of that team, never a personal machine. Owner Git credentials stay
 subject to the runner's repository allow-list. Releases are audited.
 
 ## Process environment and cleanup

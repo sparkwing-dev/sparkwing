@@ -108,8 +108,11 @@ The key fingerprints the inputs sparkwing controls: the Go major/minor
 version, `GOOS`/`GOARCH`, the `go build` flags sparkwing passes, the
 contents of `.sparkwing/`, the contents of every local `replace` target,
 the directives of a covering `go.work`, and the resolved module overlays.
-Captured Go build settings, including `GOFLAGS`, `GOEXPERIMENT` and
-`CGO_ENABLED`, also contribute to the key. Different build settings produce
+Captured Go build settings, including `GOFLAGS`, `GOTOOLCHAIN`, `GOEXPERIMENT`,
+`CGO_ENABLED` and the module verification settings `GOSUMDB`, `GONOSUMDB`,
+`GOINSECURE`, `GOPRIVATE` and `GONOPROXY`, also contribute to the key, so a
+binary built with checksum verification relaxed is never reused by a run with it
+on. Different build settings produce
 different cache entries.
 
 Contents are hashed, not timestamps -- editing a file back to its

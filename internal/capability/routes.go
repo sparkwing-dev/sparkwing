@@ -139,7 +139,6 @@ var Routes = []RoutePolicy{
 	route("GET", "/api/v1/tokens/{token}", OwnerTeam, RetrySafe, tokenOwner()),
 	route("DELETE", "/api/v1/tokens/{token}", OwnerTeam, RetrySafe, tokenOwner()),
 	route("POST", "/api/v1/tokens/{token}/rotate", OwnerTeam, RetryNever, tokenOwner()),
-	route("PUT", "/api/v1/tokens/{token}/git-credentials", OwnerTeam, RetrySafe, machineOwner()),
 	route("GET", "/api/v1/secrets", OwnerTeam, RetrySafe, member(RunsRead), member(TeamAdmin)),
 	route("POST", "/api/v1/secrets", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
 	route("GET", "/api/v1/secrets/{name}", OwnerTeam, RetrySafe, member(SecretsRead), member(TeamAdmin), claim(SecretsRelease, BindDeclaredSecret, LiveSensitive)),
@@ -330,10 +329,6 @@ func intake() AccessRule {
 
 func tokenOwner() AccessRule {
 	return AccessRule{CredentialMember, []Grant{RunsRead}, BindOwnToken, LiveCredential}
-}
-
-func machineOwner() AccessRule {
-	return AccessRule{CredentialAccount, nil, BindMachineOwner, LiveCredential}
 }
 
 func selfOrTeamAdmin() AccessRule {

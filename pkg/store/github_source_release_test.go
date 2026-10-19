@@ -65,7 +65,6 @@ func githubSourceFixture(t *testing.T, extra int64) (*Tenant, capability.Authori
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',70,'acme','Organization',1,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_extra_repos(team,repository_id,repository,extra_repo_id,extra_repo,created_at) VALUES ('a',1,'acme/repo',?,'acme/approved',1)`, extra)
-	rewriteSchemaExec(t, s.db, `DELETE FROM git_credential_machines`)
 	provider := &githubSourceFake{repositories: []githubapp.Repository{{ID: 1, FullName: "acme/renamed"}, {ID: extra, FullName: "acme/renamed-extra"}, {ID: extra + 1, FullName: "acme/approved"}}, token: githubapp.Token{Token: "private-source-token", ExpiresAt: s.clock().Add(time.Hour)}}
 	return tenant, auth, provider
 }
@@ -77,7 +76,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 		s := tenant.s
 		approved := fmt.Sprintf("acme/approved-%d", value)
 		rewriteSchemaExec(t, s.db, `UPDATE github_app_extra_repos SET extra_repo=?`, approved)
-		mode %= 15
+		mode %= 16
 		switch mode {
 		case 1:
 			auth.Target.Team = "b"
@@ -113,6 +112,8 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 			provider.before = func() {
 				rewriteSchemaExec(t, s.db, `UPDATE github_app_extra_repos SET extra_repo=?`, approved+"-changed")
 			}
+		case 15:
+			setMachineOrigin(t, s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 		}
 		token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
 		var count int

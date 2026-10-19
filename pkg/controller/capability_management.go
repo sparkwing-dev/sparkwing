@@ -179,7 +179,7 @@ func (s *Server) handleRotateCapability(w http.ResponseWriter, r *http.Request, 
 		New: capability.Metadata{
 			Prefix: c.Prefix, Team: c.Team, Subject: c.Subject, Audience: c.Audience,
 			Grants: append([]capability.Grant{}, c.Grants...), CreatedBy: rotation.Previous.CreatedBy, IssuedAt: c.IssuedAt,
-			ExpiresAt: c.ExpiresAt, GitCredentials: rotation.Previous.GitCredentials, Metered: c.RootMetered,
+			ExpiresAt: c.ExpiresAt, Metered: c.RootMetered,
 		},
 	})
 	return nil

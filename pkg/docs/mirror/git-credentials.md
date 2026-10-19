@@ -10,8 +10,8 @@ contains `kind`, `host`, `secret`, optional `username` and optional
 sealed execution input.
 
 The controller derives the credential's host from the sealed source location.
-The store checks live ancestry, the current claim fence, repository permission,
-executor enrollment and machine-owner consent in one transaction. It commits
+The store checks live ancestry, the current claim fence, repository permission
+and executor enrollment in one transaction. It commits
 the release audit before the controller opens the envelope. The envelope is
 bound to the team and host, so copying it to another row does not open it.
 
@@ -76,15 +76,17 @@ A team stores at most 50 credentials.
 
 ## Who receives it
 
-A live authorized claim receives a stored credential only when its executor
-is a team Cloud runner, or its machine owner has consented. Cloud identity
-comes from the award and current enrollment. Machine consent belongs to the
-account that registered the machine. Team administration cannot replace it.
-
-The machine owner changes consent with
-`PUT /api/v1/tokens/{token}/git-credentials` and `{"enabled":true}` or
-`{"enabled":false}`. This requires the owner's account session and CSRF proof.
-The store rechecks the account and machine under the same lock used by release.
+A live authorized claim receives a stored credential or an App token only when
+its executor is Cloud work or a shared runner of the team. A personal machine
+never receives one, and no setting changes that: the release answers 403 with
+reason `personal_machine`. Cloud identity comes from the award and current
+enrollment. Shared or personal comes from the machine's enrollment record, not
+from anything the runner reports. A personal machine fetches with its owner's
+own git access, under the owner's repository allow-list. The controller marks a
+claim as the owner's own machine from the claimant's enrollment, and the host
+then uses the owner's Git configuration and credential helper and never asks the
+controller for a team credential. Every other host asks the controller and never
+reads the host account's Git credential helper.
 
 Each release records the repository, host, run, job, generation, machine,
 owner, capability prefix and store timestamp. Audit failure returns no

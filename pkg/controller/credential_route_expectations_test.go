@@ -144,7 +144,6 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"GET", "/api/v1/tokens/{token}", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|ownToken|credential"}},
 		{"DELETE", "/api/v1/tokens/{token}", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|ownToken|credential"}},
 		{"POST", "/api/v1/tokens/{token}/rotate", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|ownToken|credential"}},
-		{"PUT", "/api/v1/tokens/{token}/git-credentials", "controller", "team", "capability", []string{"account_session||machineOwner|credential"}},
 		{"GET", "/api/v1/secrets", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential", "unbound_member_or_local|team.admin|none|credential"}},
 		{"POST", "/api/v1/secrets", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"GET", "/api/v1/secrets/{name}", "controller", "team", "capability", []string{"unbound_member_or_local|secrets.read|none|credential", "unbound_member_or_local|team.admin|none|credential", "awarded_or_delegated_claim|secrets.release|declaredSecret|sensitive"}},

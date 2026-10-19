@@ -84,16 +84,6 @@ func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunReques
 	return store.IntakeRequest{Authority: p.Authority, CapabilityPrefix: principalCapabilityPrefix(p), Request: request, IdempotencyKey: body.IdempotencyKey, LocalSecrets: body.LocalSecrets, SubmittedEnv: body.SubmittedEnv}, nil
 }
 
-// CreateRun calls the sole intake transaction and returns its committed replay
-// result and private one-time here bearer to the requesting host.
-func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-	request, err := IntakeForStore(authorized, body)
-	if err != nil {
-		return controllerwire.CreateRunResponse{}, err
-	}
-	return s.admitRun(ctx, authorized.Target.Team, request)
-}
-
 func (s *EngineController) admitRun(ctx context.Context, team string, request store.IntakeRequest) (controllerwire.CreateRunResponse, error) {
 	tenant, err := s.runTransactions(ctx, team)
 	if err != nil {

@@ -177,8 +177,7 @@ func capabilityMetadataTx(ctx context.Context, tx *storeTx, prefix string) (capa
 	}
 	row := capability.Metadata{Prefix: c.Prefix, Team: c.Team, Subject: c.Subject, Audience: c.Audience, Grants: slices.Clone(c.Grants), IssuedAt: c.IssuedAt, ExpiresAt: c.ExpiresAt, RevokedAt: c.RevokedAt, Metered: c.RootMetered}
 	var last sql.NullInt64
-	var consent int
-	err = tx.QueryRowContext(ctx, `SELECT created_by,last_used_at,(SELECT COUNT(*) FROM git_credential_machines m WHERE m.team=c.team AND m.capability_prefix=c.prefix AND m.enabled_by=c.created_by) FROM capabilities c WHERE prefix=? AND COALESCE(c.team,'')=?`, prefix, c.Team).Scan(&row.CreatedBy, &last, &consent)
+	err = tx.QueryRowContext(ctx, `SELECT created_by,last_used_at FROM capabilities WHERE prefix=? AND COALESCE(team,'')=?`, prefix, c.Team).Scan(&row.CreatedBy, &last)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -186,6 +185,5 @@ func capabilityMetadataTx(ctx context.Context, tx *storeTx, prefix string) (capa
 		return capability.Capability{}, capability.Metadata{}, err
 	}
 	row.LastUsedAt = stateTime(last)
-	row.GitCredentials = c.Subject.Kind == capability.SubjectMachine && consent == 1
 	return c, row, nil
 }
