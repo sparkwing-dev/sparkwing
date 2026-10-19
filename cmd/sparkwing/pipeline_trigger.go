@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -79,9 +81,11 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 	if err != nil {
 		return err
 	}
-	if request.OriginMachine, err = localRunnerCredential(options.URL); err != nil {
+	credential, err := localRunnerCredential(options.URL)
+	if err != nil {
 		return err
 	}
+	request.OriginMachine = capability.HereProof(credential, request.IdempotencyKey, time.Now())
 	return submitTriggeredRun(ctx, request, flags.detach, flags.output, out, triggerSubmission{
 		Controller: controller,
 		here: func(ctx context.Context, response controllerwire.CreateRunResponse) error {

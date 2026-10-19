@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -127,7 +128,7 @@ func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, liveness ti
 	if launchers {
 		query = `SELECT prefix,claim_observation_json FROM capabilities WHERE (team=? OR team IS NULL AND subject_kind='service') AND last_used_at>=? AND claim_observation_json IS NOT NULL`
 	}
-	rows, err := tx.QueryContext(ctx, query, team, cutoff.UnixNano())
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY last_used_at DESC,prefix LIMIT ?`, team, cutoff.UnixNano(), limits.RankingObservations)
 	if err != nil {
 		return nil, err
 	}

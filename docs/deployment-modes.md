@@ -76,12 +76,16 @@ sparkwing runners automation --profile work --runner laptop --approve true
 ```
 
 An approved machine ranks as `self-hosted` for automated runs and takes only
-its owner's: schedules the owner armed, and App runs whose commit or pull
-request author is the owner's linked GitHub account (the sender of the event
-does not count). The owner's GitHub login must also be able to read the run's
-repository and every extra repository. The controller checks that through the
-GitHub App before each claim and caches the answer for 10 minutes. Revoking
-the machine or running `--approve false` ends the approval. The console's
+its owner's: schedules the owner armed, and App runs whose author is also the
+event's sender, both the owner's linked GitHub account. A commit that merely
+carries the owner's email, a push by someone else to the owner's pull request,
+and release or branch events never reach the machine. Child runs and retries
+keep their run's owner. The owner's GitHub login must also be able to read the
+run's repository and every extra repository, checked by repository ID through
+the GitHub App, cached for 60 seconds, and checked again live when the machine
+is awarded a unit. Revoking the machine or running `--approve false` ends the
+approval for every live credential of the machine, including one still in its
+rotation grace. The console's
 Machines page shows the same request and approval controls.
 
 A team administrator reorders or drops tiers. A dropped tier takes no

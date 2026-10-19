@@ -104,7 +104,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 	f.Store.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch=?,trigger_source=?`, body, string(request.Dispatch), string(request.Origin))
 }
 
-// Poll records an ordered-queue ask from the claimant at the current clock.
+// Poll records the claimant's live observation at the current clock; only a held claim records an ask.
 func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.UnitKind) {
 	t.Helper()
 	if err := f.Store.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
@@ -177,4 +177,40 @@ func (f *RankingFixture) RequireOnJobs(t *testing.T, terms ...string) {
 		t.Fatal(err)
 	}
 	f.Store.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, body)
+}
+
+// ClaimKinds polls and then asks the ordered queue for any of the unit kinds.
+func (f *RankingFixture) ClaimKinds(t *testing.T, prefix string, kinds ...capability.UnitKind) (UnitClaim, error) {
+	t.Helper()
+	f.Poll(t, prefix, kinds...)
+	return f.Store.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+}
+
+// LocalQueue registers a local controller queue claimant of the team.
+func (f *RankingFixture) LocalQueue(t *testing.T) string {
+	t.Helper()
+	root := authorityRoot("local-queue", "a")
+	root.Subject = capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}
+	root.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
+	authorityPersist(t, f.Store, root)
+	return root.Prefix
+}
+
+// Rotate replaces the owner's personal machine credential and keeps the predecessor live through a day of grace.
+func (f *RankingFixture) Rotate(t *testing.T, prefix string) string {
+	t.Helper()
+	p, err := f.Store.ResolveAuthority(t.Context(), f.Owner.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, _ := capability.LookupRoute("POST", "/api/v1/tokens/{token}/rotate")
+	a, err := capability.Authorize(t.Context(), f.Store, route, capability.Authenticated{Principal: p, Method: "POST", Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: "a", TokenPrefix: prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotation, err := (&Tenant{s: f.Store, team: "a"}).RotateCapability(t.Context(), a, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rotation.Issued.Capability.Prefix
 }

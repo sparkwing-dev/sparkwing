@@ -121,7 +121,6 @@ type storeTx struct {
 	rotatingRoot         *capability.Capability
 	createdTeam          *TeamInfo
 	blobIO               *blobIO
-	rankingAsks          []unitAsk
 	matchingRuns         map[matchingRunKey]*matchingRun
 }
 

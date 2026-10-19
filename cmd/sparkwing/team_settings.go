@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -65,8 +64,8 @@ func teamSettingsUpdate(inv clisurface.Invocation) (controllerwire.TeamSettingsU
 		switch value := strings.TrimSpace(inv.Value("claim-ranking")); value {
 		case "none":
 			tiers = []string{}
-		case "default":
-			tiers = slices.Clone(store.DefaultClaimRanking)
+		case store.ClaimRankingDefault:
+			tiers = []string{store.ClaimRankingDefault}
 		default:
 			for _, tier := range strings.Split(value, ",") {
 				tiers = append(tiers, strings.TrimSpace(tier))

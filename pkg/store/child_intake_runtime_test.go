@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -98,5 +99,37 @@ func TestChildIntakeInheritsTheActionsOwnerOnlyFromItsParent(t *testing.T) {
 		if parentActions != (err == nil) {
 			t.Fatalf("parent sealed with Actions=%t: child admission error %v", parentActions, err)
 		}
+	}
+}
+
+func TestChildIntakeInheritsItsParentsAutomationIdentity(t *testing.T) {
+	tenant, request := childIntakeFixture(t)
+	parent := runspec.Automation{SenderID: 42, AuthorID: 42, Repos: []runspec.RepoKey{"gh:1", "gh:9"}}
+	body, err := json.Marshal(runspec.SealedRequest{RunID: "run", Request: runspec.Request{Version: 1, Team: "a", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Automation: runspec.Optional[runspec.Automation]{Set: true, Value: parent}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
+	request.Request.Automation = runspec.Optional[runspec.Automation]{Set: true, Value: runspec.Automation{SenderID: 7, AuthorID: 7, Repos: []runspec.RepoKey{"gh:1"}}}
+	child, err := tenant.AdmitRun(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := child.Request.Request.Automation; !got.Set || got.Value.AuthorID != 42 || got.Value.SenderID != 42 || len(got.Value.Repos) != 2 {
+		t.Fatalf("child automation = %+v, want the parent's", got)
+	}
+}
+
+func TestIntakeRefusesAClientDeclaredScheduleOrigin(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	request.Request.Origin = runspec.OriginSchedule
+	request.Request.Automation = runspec.Optional[runspec.Automation]{Set: true, Value: runspec.Automation{ArmedBy: "owner"}}
+	if _, err := tenant.AdmitRun(t.Context(), request); err == nil || !strings.Contains(err.Error(), "schedule firing") {
+		t.Fatalf("a client started a schedule run: %v", err)
+	}
+	request.Request.Origin = runspec.OriginTrigger
+	admitted, err := tenant.AdmitRun(t.Context(), request)
+	if err != nil || admitted.Request.Request.Automation.Set {
+		t.Fatalf("a client-declared automation identity survived intake: %+v %v", admitted.Request.Request.Automation, err)
 	}
 }

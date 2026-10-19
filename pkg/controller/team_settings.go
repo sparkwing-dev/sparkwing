@@ -33,6 +33,9 @@ func (s *Server) handleTeamSettings(w http.ResponseWriter, r *http.Request, a ca
 	if err != nil {
 		return engineLookupError(err)
 	}
+	if !s.cloudDeployment {
+		settings.ClaimRanking = slices.DeleteFunc(settings.ClaimRanking, func(tier string) bool { return tier == store.TierCloud })
+	}
 	writeJSON(w, http.StatusOK, settings)
 	return nil
 }

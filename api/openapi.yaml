@@ -4706,6 +4706,8 @@ components:
           type: string
         repository_id:
           type: integer
+        sender_id:
+          type: integer
         sha:
           type: string
         verified_at:
@@ -4743,6 +4745,25 @@ components:
         - generation
       type: object
       x-sparkwing-go-type: runspec.AttemptIdentity
+    internal.runspec.Automation:
+      additionalProperties: true
+      properties:
+        armed_by:
+          type: string
+        author_id:
+          type: integer
+        repos:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        sender_id:
+          type: integer
+      required:
+        - repos
+      type: object
+      x-sparkwing-go-type: runspec.Automation
     internal.runspec.BurstPlacement:
       additionalProperties: true
       properties:
@@ -5186,6 +5207,18 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/runspec.AttemptIdentity]
+    internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Automation.:
+      additionalProperties: true
+      properties:
+        set:
+          type: boolean
+        value:
+          $ref: '#/components/schemas/internal.runspec.Automation'
+      required:
+        - set
+        - value
+      type: object
+      x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/runspec.Automation]
     internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.:
       additionalProperties: true
       properties:
@@ -5415,6 +5448,8 @@ components:
       properties:
         actor:
           $ref: '#/components/schemas/internal.runspec.Actor'
+        automation:
+          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Automation.'
         burst:
           anyOf:
             - $ref: '#/components/schemas/internal.runspec.BurstPlacement'
@@ -5484,6 +5519,7 @@ components:
         - env
         - options
         - execution_location
+        - automation
       type: object
       x-sparkwing-go-type: runspec.Request
     internal.runspec.Resolved:

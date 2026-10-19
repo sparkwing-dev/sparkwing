@@ -7,9 +7,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func lockClaimOwnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
@@ -153,11 +151,6 @@ type queuedClaim struct {
 }
 
 func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, false)
-	if err != nil {
-		return UnitRef{}, err
-	}
-	metered := meteredPlacement(c, chain[len(chain)-1].principal.Capability)
 	var candidates []queuedClaim
 	for _, kind := range kinds {
 		query, args := queuedClaimQuery(c, kind, tx.now().UnixNano())
@@ -179,47 +172,21 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 	}
 	var eligible []queuedClaim
 	for _, candidate := range candidates {
-		profile, requirements, err := matchingInputsTx(ctx, tx, demand, candidate.unit)
+		standing, err := unitEligibilityTx(ctx, tx, candidate.team, candidate.unit, demand, eligibilityChecks{lock: true, fit: true, billing: true})
 		if err != nil {
-			var denied *apierr.Error
-			if errors.As(err, &denied) && denied.Code == apierr.Forbidden {
-				continue
-			}
 			return UnitRef{}, err
 		}
-		var price CreditRate
-		if metered {
-			var err error
-			price, err = unitBillingPriceTx(ctx, tx, requirements.Request)
-			if err != nil {
-				var unpriced *UnpricedCPUClassError
-				if errors.As(err, &unpriced) {
-					unpriced.RunID, unpriced.NodeID = candidate.unit.RunID, candidate.unit.NodeID
-				}
-				return UnitRef{}, err
-			}
-		}
-		verdict := match.Evaluate(profile, requirements)
-		if !verdict.OK() || !match.Fits(profile.Capacity, demand.Available, requirements.Request).OK() {
+		if !standing.ok() {
 			continue
 		}
-		placement, err := unitPlacementTx(ctx, tx, candidate.team, candidate.unit, demand.CapabilityPrefix, profile, requirements)
+		placement, err := unitPlacementTx(ctx, tx, candidate.team, candidate.unit, demand.CapabilityPrefix, standing.profile, standing.demand)
 		if err != nil {
 			return UnitRef{}, err
 		}
 		if placement.hold {
 			continue
 		}
-		if metered {
-			ok, err := eligibleUnitBillingTx(ctx, tx, candidate.team, candidate.unit, price, launcherClaimant(c))
-			if err != nil {
-				return UnitRef{}, err
-			}
-			if !ok {
-				continue
-			}
-		}
-		candidate.score = verdict.PreferenceScore
+		candidate.score = standing.score
 		eligible = append(eligible, candidate)
 	}
 	if len(eligible) == 0 {

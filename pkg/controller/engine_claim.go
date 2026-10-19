@@ -87,7 +87,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	}
 	c := principal.Capability
 	machine := c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush)
-	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
+	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectLocal || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
 		if err := s.Store.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
@@ -99,6 +99,21 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	}
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
+	}
+	if s.ConfirmAward != nil {
+		confirmed, err := s.ConfirmAward(ctx, claim, principal.Capability.Prefix)
+		if err == nil && !confirmed {
+			err = s.Store.ReleaseUnit(ctx, claim, claim.Award.CapabilityPrefix)
+			if err == nil && target == nil {
+				return controllerwire.ClaimResponse{}, nil
+			}
+			if err == nil {
+				err = &apierr.Error{Code: apierr.Forbidden, Message: "the machine's owner can no longer read this run's repositories"}
+			}
+		}
+		if err != nil {
+			return controllerwire.ClaimResponse{}, err
+		}
 	}
 	unit, err := s.claimedUnit(ctx, claim)
 	if err != nil {

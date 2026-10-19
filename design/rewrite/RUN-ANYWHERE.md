@@ -92,11 +92,12 @@ The claimant's tier comes from its authenticated chain, never from labels:
 | `self-hosted` | any other registered machine root, the local queue, and a personal machine approved for automated runs when it takes one |
 | `cloud` | the launcher service |
 
-`here` is sealed at intake. `pipeline trigger` sends the local runner's
-credential as a proof when that runner is enrolled with the same controller.
-Intake records the machine only when the proof is a live personal machine
-credential of this team owned by the submitting account. Any other proof seals
-nothing.
+`here` is sealed at intake. When the local runner is enrolled with the same
+controller, `pipeline trigger` sends a proof of its credential, never the
+credential: an HMAC keyed by the credential's stored digest over its prefix,
+the request's idempotency key and a 5-minute expiry. Intake records the
+machine only when the proof verifies against a live personal machine
+credential of this team owned by the submitting account.
 
 The ranking is the team setting `claim_ranking`, stored on `teams`. Unset
 means the default `here, personal, github-actions, self-hosted, cloud`. An
@@ -112,58 +113,68 @@ launcher, so the Cloud tier is never present there.
 Each plan, eval and job unit has its own window `W = limits.RankingWindow`
 (5 s) from its readiness.
 
-- Inside the window, a claim waits while a better-ranked claimant that is
-  eligible for the unit, wants its kind and fits is live. The best-ranked
-  claimant present wins immediately. A waiting claim records an **ask** for
-  the unit (`unit_asks`: claimant, rank, time), written after the refused
-  claim's transaction rolls back.
-- From `ready+W` to `ready+W+A` (`A = limits.RankingAward`, 2 s), a claim
-  waits only while a better-ranked claimant recorded an ask inside the window.
-  Later polls cannot erase that ask. The best asker has `A` to come back.
+- Inside the window, a claim waits while a better-ranked claimant is live and
+  fully eligible for the unit (the shared eligibility below, including its
+  advertised kinds, capacity and billing). The best-ranked claimant present
+  wins immediately. A waiting claim records an **ask** (`unit_asks`:
+  claimant, rank, time) under the unit's claim lock, in the claim
+  transaction itself, whether that transaction awards another unit or none.
+- From `ready+W` to `ready+W+A` (`A = limits.RankingAward`, 2 s, the lead
+  amendment to decision 2), a claim waits only while a better-ranked claimant
+  recorded an ask inside the window. The best asker has `A` to come back.
 - After that, the first eligible asker wins. An award clears the unit's asks.
 
-Claimants keep their normal poll cadence: they do not long-poll. Every claim
-transaction locks the unit's owner, run and node rows first, so simultaneous
-claims serialize and one award wins.
+Claimants keep their normal poll cadence. A ranking check evaluates at most
+`limits.RankingObservations` (64) of the most recent live observations.
 
-## Cloud and billing
+## Eligibility
 
-The launcher counts toward a unit only when the team can pay for it
-(`eligibleUnitBillingTx`). An unfunded launcher never holds a lower tier and
-cannot claim. Units taken by unmetered runners create no Cloud charge.
+`unitEligibilityTx` is the one judgment of a claimant for a unit: claim
+kinds and advertised kinds, authority and placement (repository, push and
+personal-machine scope, tier inside the ranking), matching, advertised
+capacity, and billing for every metered claimant. Queue scans, named claims,
+ranking holds and notices all call it. Named claims leave billing to award
+issuance, which reports the exact credit standing. The wingd queue and the
+controller host are observed claimants like any runner.
 
 ## Notices
 
-`unclaimed_work`, `credit_hold` and `no_eligible_runner` judge claimants with
-the same credentials, matching and ranking checks that claims use, Actions
-runners included. `credit_hold` appears only when no unmetered claimant is
-eligible. When a ranked unit has no eligible claimant online,
-`no_eligible_runner` names the cause: the dropped tiers ("Cloud is off in this
-team's runner ranking"), the pin ("this job targets pool=gpu only"), or "no
-runner of the allowed tiers (...) is online".
+Notices judge the live observations the ranking scans, plus each Cloud
+launcher for credit standing. Any live eligible claimant leaves only the
+generic `unclaimed_work` notice. Otherwise `credit_hold` appears when a
+claimant failed only on billing. A run-anywhere unit then gets
+`no_eligible_runner`, naming the first cause: dropped tiers ("Cloud is off in
+this team's runner ranking"), the pin ("this job targets pool=gpu only"), or
+"no runner of the allowed tiers (...) is online". A live claimant that is only
+short of capacity keeps the generic notice.
 
 ## Automated runs on personal machines
 
-Runs with origin `github_app` or `schedule` are automated. A personal machine
-takes one only when all of these hold (decisions 15 and 16):
+Intake seals `Automation` on runs from a verified App delivery, from a
+schedule firing, and on their children; retries keep it. Clients cannot set
+it, and intake refuses a client `schedule` origin. A personal machine takes
+an automated run only when all of these hold (decisions 15 and 16):
 
-- its owner requested automated runs for it, logged in directly
-  (`PUT /api/v1/runners/{runner}/automation`), and a team admin approved the
-  request (`PUT /api/v1/runners/{runner}/automation/approval`). Both steps are
-  audited. Admin revocation or machine revocation ends the approval, which is
-  keyed by the machine's root prefix.
-- the owner is the run's owner. For a schedule, that is the team account that
-  armed it. For an App run, it is the team member whose linked GitHub identity
-  is the commit or pull request author (`AppFacts.AuthorID`), never the
-  delivery's sender. Retries keep the sealed author.
-- the owner's linked GitHub login can read the run's repository and every
-  extra repository. The controller checks this through the App installation's
-  collaborator-permission API before the claim and caches the result for
-  `limits.PersonalRepoAccess` (10 min). The claimant never supplies it.
+- its owner requested automated runs for it on a direct sign-in, and a team
+  admin approved (`PUT /api/v1/runners/{runner}/automation` and
+  `.../automation/approval`). Both are audited and cover every live credential
+  generation of the machine, so revocation also ends a rotation predecessor's
+  approval. Machine revocation ends it too.
+- the sealed owner is the machine's owner: the arming member of a schedule, or
+  for an App run the member linked to the author when the author is also the
+  event's sender. A release or branch event is unowned. A commit whose email
+  matches a member never routes to that member's machine unless that member
+  pushed it.
+- the owner's linked GitHub login can read every sealed repository, by
+  immutable ID. The controller resolves each name from its ID under a token
+  restricted to those IDs, checks the collaborator permission, caches the
+  answer for `limits.PersonalRepoAccess` (60 s) for the units the machine
+  could claim, and rechecks live when it awards a unit, releasing it on a
+  denial. The claimant never supplies it.
 
 An approved machine ranks as `self-hosted` for automated runs. Its OIDC
 tokens carry `runner_kind=personal`. It never receives team git credentials
-or App installation tokens.
+or App installation tokens, and fetches with its owner's own git access.
 
 ## Explicit placements
 

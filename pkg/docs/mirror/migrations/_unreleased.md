@@ -35,8 +35,11 @@ requests it with `sparkwing runners automation --profile work --runner laptop
 --request true --session-stdin` and a team administrator approves it with
 `--approve true`. The approved machine then takes only its owner's automated
 runs, in repositories the owner's linked GitHub account can read, and ranks as
-`self-hosted` for them. An App run's owner is the commit or pull request author,
-no longer the event's sender. The former owner toggle (`--automated-runs`,
+`self-hosted` for them. An App run belongs to the owner only when the owner both
+wrote and sent it; release and branch events belong to nobody. Child runs and
+retries keep their run's owner. Clients can no longer submit a run with the
+`schedule` origin. The trigger CLI proves its machine's runner credential with
+a short-lived signature instead of sending it. The former owner toggle (`--automated-runs`,
 `{"automated_runs": ...}`) is removed with no alias. OIDC tokens minted on a
 personal machine carry `runner_kind=personal`.
 

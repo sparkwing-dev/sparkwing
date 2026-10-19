@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -126,7 +124,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err != nil {
 			return AdmissionResult{}, err
 		}
-		if input.OriginMachine, err = originMachineTx(ctx, tx, team, principal, request.OriginMachine); err != nil {
+		if input.OriginMachine, err = originMachineTx(ctx, tx, team, principal, request.OriginMachine, request.IdempotencyKey); err != nil {
 			return AdmissionResult{}, err
 		}
 		if replayKey := appReplayKey(input); input.Mode == runspec.IntakeExecute && replayKey != "" {
@@ -143,6 +141,12 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 			}
 		}
 		if err := validateChildLineageTx(ctx, tx, team, &input); err != nil {
+			return AdmissionResult{}, err
+		}
+		if input.Origin == runspec.OriginSchedule && tx.scheduleAdmission == nil {
+			return AdmissionResult{}, authorityError(apierr.Forbidden, "only a schedule firing starts a schedule run")
+		}
+		if input.Automation, err = automationTx(ctx, tx, team, input); err != nil {
 			return AdmissionResult{}, err
 		}
 		if err := checkActionsOwnerTx(ctx, tx, team, input); err != nil {
@@ -354,7 +358,7 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	if input.Pipeline == "" || input.Mode != runspec.IntakeExecute && input.Mode != runspec.IntakePublish || input.Dispatch != "" && input.Dispatch != runspec.DispatchHost && input.Dispatch != runspec.DispatchController {
 		return input, authorityError(apierr.BadRequest, "invalid intake mode, dispatch or pipeline")
 	}
-	input.Team, input.OriginMachine = string(team), ""
+	input.Team, input.OriginMachine, input.Automation = string(team), "", runspec.Optional[runspec.Automation]{}
 	if policy.Options == nil {
 		return input, authorityError(apierr.Unavailable, "intake settings resolution is unavailable")
 	}
@@ -518,14 +522,14 @@ func intakeScope(principal capability.Principal, pipeline string) (string, error
 }
 
 // safety: here trusts only a live personal machine credential the submitting account owns; other proofs seal nothing.
-func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.Principal, bearer string) (string, error) {
-	if bearer == "" || p.Capability.Subject.Kind != capability.SubjectAccount {
+func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.Principal, proof, idempotencyKey string) (string, error) {
+	prefix := capability.HereProofPrefix(proof)
+	if prefix == "" || p.Capability.Subject.Kind != capability.SubjectAccount {
 		return "", nil
 	}
-	digest := sha256.Sum256([]byte(bearer))
-	var prefix, owner string
-	err := tx.QueryRowContext(ctx, `SELECT prefix,created_by FROM capabilities WHERE team=? AND digest=?`, team, hex.EncodeToString(digest[:])).Scan(&prefix, &owner)
-	if errors.Is(err, sql.ErrNoRows) {
+	var digest, owner string
+	err := tx.QueryRowContext(ctx, `SELECT digest,created_by FROM capabilities WHERE team=? AND prefix=?`, team, prefix).Scan(&digest, &owner)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, digest, idempotencyKey, tx.now()) {
 		return "", nil
 	}
 	if err != nil {

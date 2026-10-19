@@ -3,10 +3,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +24,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 const runAnywherePipeline = `package main
@@ -80,10 +84,18 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	state, controller, bearer := burstIntakeController(t, endpoint)
 	var mu sync.Mutex
 	var hosted []capability.UnitKind
+	var intake []string
 	runnerReady := make(chan struct{})
 	var observed sync.Once
 	handler := controller.Handler()
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/runs" && r.Method == http.MethodPost {
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			mu.Lock()
+			intake = append(intake, string(body))
+			mu.Unlock()
+		}
 		if r.URL.Path != "/api/v1/runners/claim" {
 			handler.ServeHTTP(w, r)
 			return
@@ -122,7 +134,27 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	if _, err := state.AsOperator().AcquireSingletonLease(ctx, "controller.owner", "run-anywhere-test", time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	burstPublicPersonalRunner(t, ctx, cli, repo, state)
+	runnerConfig := burstPublicPersonalRunner(t, ctx, cli, repo, state)
+	section, err := userconfig.Node(runnerConfig, userconfig.Runner)
+	if err != nil || section == nil {
+		t.Fatalf("runner config: %v", err)
+	}
+	var runner userconfig.RunnerConfig
+	if err := section.Decode(&runner); err != nil {
+		t.Fatal(err)
+	}
+	token, err := os.ReadFile(filepath.Join(*runner.CredentialsDir, "agent-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cliConfig, err := os.OpenFile(config, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fmt.Fprintf(cliConfig, "runner:\n  controller: %q\n  credentials_dir: %q\n", *runner.Controller, *runner.CredentialsDir)
+	if err = errors.Join(err, cliConfig.Close()); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case <-runnerReady:
 	case <-ctx.Done():
@@ -138,6 +170,26 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	secret := strings.TrimSpace(string(token))
+	if len(intake) != 1 || strings.Contains(intake[0], secret) || !strings.Contains(intake[0], `"origin_machine":"`+secret[:16]+".") {
+		t.Fatalf("the trigger must prove the runner credential without sending it: %v", intake)
+	}
+	runs, err := state.DB().QueryContext(t.Context(), `SELECT request_json FROM runs`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var origins []string
+	for runs.Next() {
+		var body []byte
+		var sealed runspec.SealedRequest
+		if err := runs.Scan(&body); err != nil || json.Unmarshal(body, &sealed) != nil {
+			t.Fatal(err)
+		}
+		origins = append(origins, sealed.Request.OriginMachine)
+	}
+	if err := errors.Join(runs.Err(), runs.Close()); err != nil || len(origins) != 1 || origins[0] != "burst-desktop" {
+		t.Fatalf("sealed here machine = %v %v", origins, err)
+	}
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		if !slices.Contains(hosted, kind) {
 			t.Fatalf("the personal runner hosted %v, missing %s", hosted, kind)

@@ -350,6 +350,7 @@ const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
 type ClaimProfileResolver interface {
 	ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error)
 }
+const ClaimRankingDefault = "default"
 const ClaimTokenPrefix = "swc"
 const CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
@@ -1618,10 +1619,6 @@ type PaymentWarning struct {
 
 	Actionable bool
 }
-type PersonalRepoAccessNeed struct {
-	OwnerGitHubID int64
-	Repository    string
-}
 type PipelineProfile struct {
 	Pipeline        string
 	NodeID          string
@@ -2624,6 +2621,7 @@ func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID,
 func (t *Tenant) ApplyProfileFold(ctx context.Context, delivery EffectDelivery, observations map[string]ProfileObservation) (bool, error)
 func (t *Tenant) ApproveMachineAutomation(ctx context.Context, a capability.Authorized, machine string, approved bool) (string, error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
+func (t *Tenant) AwardedAutomation(ctx context.Context, claim UnitClaim, prefix string) (int64, []runspec.RepoKey, error)
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
 func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capability.Authorized, row GitHubAppInstallation) (GitHubAppInstallation, error)
 func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore
@@ -2728,7 +2726,7 @@ func (t *Tenant) NodeIsAncestor(ctx context.Context, runID, ancestor, node strin
 func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, body *controllerwire.ScheduleOverride) (string, error)
 func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Principal, run string) (bool, error)
 func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, paused bool) (string, error)
-func (t *Tenant) PersonalRepoAccessNeeds(ctx context.Context, prefix string) ([]PersonalRepoAccessNeed, error)
+func (t *Tenant) PersonalRepoAccessNeeds(ctx context.Context, prefix string) (int64, map[runspec.RepoKey]bool, error)
 func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.Authorized, kind capability.BillingPageKind, amount int64, key string) (capability.BillingPage, error)
 func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, actor Actor) (string, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
@@ -2767,7 +2765,7 @@ func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error)
 func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRun int64) (int64, error)
-func (t *Tenant) RecordPersonalRepoAccess(ctx context.Context, prefix string, access map[string]bool) error
+func (t *Tenant) RecordPersonalRepoAccess(ctx context.Context, prefix string, access map[runspec.RepoKey]bool) error
 func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error

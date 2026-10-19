@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -64,23 +65,107 @@ func TestRankingLowerTiersWaitOutTheWindowAndTheBestAskerWins(t *testing.T) {
 	wantAward(t, f, f.Self, capability.UnitPlan, "")
 }
 
-func TestRankingIsFirstComeAfterTheWindow(t *testing.T) {
+func TestRankingAwardDeadlineFollowsTheWindow(t *testing.T) {
 	t.Run("nobody better asked in the window", func(t *testing.T) {
 		f := rankingFixture(t, true)
 		livePolls(t, f, f.Personal, f.Actions)
-		f.At(6 * time.Second)
+		f.At(limits.RankingWindow + time.Second)
 		wantAward(t, f, f.Launcher, capability.UnitPlan, "")
 	})
-	t.Run("the window winner did not return", func(t *testing.T) {
+	t.Run("the window winner did not return by the award deadline", func(t *testing.T) {
 		f := rankingFixture(t, true)
 		livePolls(t, f, f.Actions)
 		f.At(time.Second)
 		wantNone(t, f, f.Self, capability.UnitPlan)
-		f.At(6900 * time.Millisecond)
+		f.At(limits.RankingWindow + limits.RankingAward - 100*time.Millisecond)
 		wantNone(t, f, f.Launcher, capability.UnitPlan)
-		f.At(7 * time.Second)
+		f.At(limits.RankingWindow + limits.RankingAward)
 		wantAward(t, f, f.Launcher, capability.UnitPlan, "")
 	})
+}
+
+func TestRankingAskSurvivesTheAwardOfAnotherUnit(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.At(-time.Second)
+	f.Poll(t, f.Actions, capability.UnitPlan)
+	f.At(time.Second)
+	claim, err := f.ClaimKinds(t, f.Self, capability.UnitPlan, capability.UnitNode)
+	if err != nil || claim.Kind != capability.UnitNode {
+		t.Fatalf("self-hosted scan: %+v %v", claim, err)
+	}
+	f.At(limits.RankingWindow + time.Second)
+	wantNone(t, f, f.Launcher, capability.UnitPlan)
+	wantAward(t, f, f.Self, capability.UnitPlan, "")
+}
+
+func TestRankingSeesTheLocalQueue(t *testing.T) {
+	f := rankingFixture(t, true)
+	local := f.LocalQueue(t)
+	if err := f.Rank(t, f.Admin, store.TierSelfHosted, store.TierActions); err != nil {
+		t.Fatal(err)
+	}
+	livePolls(t, f, local)
+	f.At(time.Second)
+	wantNone(t, f, f.Actions, capability.UnitPlan)
+	wantAward(t, f, local, capability.UnitPlan, "")
+}
+
+func TestRankingCreditHoldOnlyWhenCloudCouldTakeTheUnit(t *testing.T) {
+	for name, test := range map[string]struct {
+		setup func(*testing.T, *store.RankingFixture)
+		hold  bool
+		cause string
+	}{
+		"Cloud ranked out": {setup: func(t *testing.T, f *store.RankingFixture) {
+			if err := f.Rank(t, f.Admin, store.TierSelfHosted); err != nil {
+				t.Fatal(err)
+			}
+		}, cause: "Cloud is off in this team's runner ranking"},
+		"a pool pin":          {setup: func(t *testing.T, f *store.RankingFixture) { f.RequireOnJobs(t, "pool=gpu") }, cause: "this job targets pool=gpu only"},
+		"Cloud would take it": {setup: func(*testing.T, *store.RankingFixture) {}, hold: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := rankingFixture(t, false)
+			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET status='done'`); err != nil {
+				t.Fatal(err)
+			}
+			test.setup(t, f)
+			f.Poll(t, f.Launcher)
+			tenant, err := f.Store.ForTeam(t.Context(), "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := tenant.ReadRunView(t.Context(), "run")
+			if err != nil || view.Waiting == nil || (view.Waiting.CreditHold != "") != test.hold || !test.hold && view.Waiting.NoEligible != test.cause {
+				t.Fatalf("waiting unit: %+v %v", view.Waiting, err)
+			}
+		})
+	}
+}
+
+func TestRevokingAutomationCoversEveryLiveGeneration(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.Approve(t, "laptop")
+	next := f.Rotate(t, f.Personal)
+	f.Approve(t, "laptop")
+	var approved int
+	if err := f.Store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM machine_automation WHERE approved_at>0 AND prefix IN (?,?)`, f.Personal, next).Scan(&approved); err != nil || approved != 2 {
+		t.Fatalf("approved generations = %d %v", approved, err)
+	}
+	a, err := f.AdminAuthorization(t, f.Admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state, err := tenant.ApproveMachineAutomation(t.Context(), a, "laptop", false); err != nil || state != store.AutomationNone {
+		t.Fatalf("revoke: %s %v", state, err)
+	}
+	if err := f.Store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM machine_automation`).Scan(&approved); err != nil || approved != 0 {
+		t.Fatalf("approvals left after revocation = %d %v", approved, err)
+	}
 }
 
 func TestRankingALaterPollKeepsTheWindowAsk(t *testing.T) {
@@ -136,13 +221,14 @@ func TestRankingCloudTakesPartOnlyWithBilling(t *testing.T) {
 }
 
 func TestRankingAutomatedRunsUseOnlyApprovedPersonalMachinesOfTheAuthor(t *testing.T) {
-	app := func(author int64) func(*testing.T, *store.RankingFixture) {
+	seal := func(identity runspec.Automation) func(*testing.T, *store.RankingFixture) {
 		return func(t *testing.T, f *store.RankingFixture) {
 			f.LinkGitHub(t, "owner", 42)
 			f.LinkGitHub(t, "member", 43)
+			identity.Repos = []runspec.RepoKey{"gh:1"}
 			f.Request(t, func(r *runspec.Request) {
 				r.Origin = runspec.OriginApp
-				r.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "pull_request", AuthorID: author}}
+				r.Automation = runspec.Optional[runspec.Automation]{Set: true, Value: identity}
 			})
 		}
 	}
@@ -150,21 +236,14 @@ func TestRankingAutomatedRunsUseOnlyApprovedPersonalMachinesOfTheAuthor(t *testi
 		seal     func(*testing.T, *store.RankingFixture)
 		eligible bool
 	}{
-		"schedule armed by the owner": {seal: func(t *testing.T, f *store.RankingFixture) {
-			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginSchedule })
-			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE runs SET created_subject_kind='service'`); err != nil {
-				t.Fatal(err)
-			}
-		}, eligible: true},
-		"schedule armed by an App": {seal: func(t *testing.T, f *store.RankingFixture) {
-			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginSchedule })
-			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE runs SET created_subject_kind='service',created_principal='github-app:7'`); err != nil {
-				t.Fatal(err)
-			}
-		}},
-		"pull request authored by the owner":               {seal: app(42), eligible: true},
-		"pull request authored by another member":          {seal: app(43)},
-		"pull request whose author has no linked identity": {seal: app(44)},
+		"schedule armed by the owner":                         {seal: seal(runspec.Automation{ArmedBy: "owner"}), eligible: true},
+		"schedule armed by an App":                            {seal: seal(runspec.Automation{ArmedBy: "github-app:7"})},
+		"code the owner wrote and sent":                       {seal: seal(runspec.Automation{SenderID: 42, AuthorID: 42}), eligible: true},
+		"another member's code":                               {seal: seal(runspec.Automation{SenderID: 43, AuthorID: 43})},
+		"another member pushing a commit in the owner's name": {seal: seal(runspec.Automation{SenderID: 43, AuthorID: 42})},
+		"the owner sending another member's code":             {seal: seal(runspec.Automation{SenderID: 42, AuthorID: 43})},
+		"an author with no linked identity":                   {seal: seal(runspec.Automation{SenderID: 44, AuthorID: 44})},
+		"a release with no author":                            {seal: seal(runspec.Automation{SenderID: 42})},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := rankingFixture(t, true)
@@ -190,7 +269,7 @@ func TestRankingAutomatedRunsUseOnlyApprovedPersonalMachinesOfTheAuthor(t *testi
 			}
 			f.Approve(t, "laptop")
 			wantNone(t, f, f.Personal, capability.UnitPlan)
-			if err := tenant.RecordPersonalRepoAccess(t.Context(), f.Personal, map[string]bool{"acme/repo": true}); err != nil {
+			if err := tenant.RecordPersonalRepoAccess(t.Context(), f.Personal, map[runspec.RepoKey]bool{"gh:1": true}); err != nil {
 				t.Fatal(err)
 			}
 			if !test.eligible {
@@ -212,31 +291,31 @@ func TestRankingAutomatedRunsUseOnlyApprovedPersonalMachinesOfTheAuthor(t *testi
 
 func TestRankingPersonalMachinesNeedCheckedRepositoryAccess(t *testing.T) {
 	f := rankingFixture(t, true)
-	f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginSchedule })
-	if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE runs SET created_subject_kind='service'`); err != nil {
-		t.Fatal(err)
-	}
+	f.Request(t, func(r *runspec.Request) {
+		r.Origin = runspec.OriginSchedule
+		r.Automation = runspec.Optional[runspec.Automation]{Set: true, Value: runspec.Automation{ArmedBy: "owner", Repos: []runspec.RepoKey{"gh:1"}}}
+	})
 	f.LinkGitHub(t, "owner", 42)
 	f.Approve(t, "laptop")
 	tenant, err := f.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	needs, err := tenant.PersonalRepoAccessNeeds(t.Context(), f.Personal)
-	if err != nil || len(needs) != 1 || needs[0].Repository != "acme/repo" || needs[0].OwnerGitHubID != 42 {
-		t.Fatalf("access needs: %+v %v", needs, err)
+	github, needs, err := tenant.PersonalRepoAccessNeeds(t.Context(), f.Personal)
+	if err != nil || github != 42 || len(needs) != 1 || needs["gh:1"] {
+		t.Fatalf("access needs: %d %+v %v", github, needs, err)
 	}
-	if err := tenant.RecordPersonalRepoAccess(t.Context(), f.Personal, map[string]bool{"acme/repo": false}); err != nil {
+	if err := tenant.RecordPersonalRepoAccess(t.Context(), f.Personal, map[runspec.RepoKey]bool{"gh:1": false}); err != nil {
 		t.Fatal(err)
 	}
 	f.At(time.Second)
 	wantNone(t, f, f.Personal, capability.UnitPlan)
-	if err := tenant.RecordPersonalRepoAccess(t.Context(), f.Personal, map[string]bool{"acme/repo": true}); err != nil {
+	if err := tenant.RecordPersonalRepoAccess(t.Context(), f.Personal, map[runspec.RepoKey]bool{"gh:1": true}); err != nil {
 		t.Fatal(err)
 	}
-	f.At(11 * time.Minute)
+	f.At(time.Second + limits.PersonalRepoAccess)
 	wantNone(t, f, f.Personal, capability.UnitPlan)
-	if err := tenant.RecordPersonalRepoAccess(t.Context(), f.Personal, map[string]bool{"acme/repo": true}); err != nil {
+	if err := tenant.RecordPersonalRepoAccess(t.Context(), f.Personal, map[runspec.RepoKey]bool{"gh:1": true}); err != nil {
 		t.Fatal(err)
 	}
 	wantAward(t, f, f.Personal, capability.UnitPlan, "")
@@ -353,6 +432,8 @@ func TestRankingNoEligibleRunnerNamesTheCause(t *testing.T) {
 			if err := f.Rank(t, f.Admin, store.TierSelfHosted); err != nil {
 				t.Fatal(err)
 			}
+			f.Poll(t, f.Personal)
+			f.Poll(t, f.Actions)
 		}, want: "Personal machines, GitHub Actions runners and Cloud are off in this team's runner ranking"},
 		"a pinned job": {setup: func(t *testing.T, f *store.RankingFixture) {
 			f.RequireOnJobs(t, "pool=gpu")
@@ -384,6 +465,7 @@ func TestCreditNoticeCountsAnActionsRunner(t *testing.T) {
 	if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE capabilities SET revoked_at=1 WHERE subject_kind='machine' AND bind_kind='none'`); err != nil {
 		t.Fatal(err)
 	}
+	livePolls(t, f, f.Actions)
 	tenant, err := f.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)

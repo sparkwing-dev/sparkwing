@@ -7,7 +7,7 @@ type TeamSettings struct {
 	ClaimRanking          []string `json:"claim_ranking"`
 }
 
-// TeamSettingsUpdate changes only the settings it names.
+// TeamSettingsUpdate changes only the settings it names. A ClaimRanking of ["default"] restores the default ranking.
 type TeamSettingsUpdate struct {
 	MembersCanAddMachines *bool     `json:"members_can_add_machines,omitempty"`
 	ClaimRanking          *[]string `json:"claim_ranking,omitempty"`

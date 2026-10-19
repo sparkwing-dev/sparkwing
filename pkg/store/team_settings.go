@@ -32,7 +32,8 @@ func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (controllerwire
 
 // SetAuthorizedTeamSettings commits a policy change and its audit under current administration.
 func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update controllerwire.TeamSettingsUpdate) error {
-	if update.ClaimRanking != nil {
+	reset := update.ClaimRanking != nil && slices.Equal(*update.ClaimRanking, []string{ClaimRankingDefault})
+	if update.ClaimRanking != nil && !reset {
 		if err := ValidateClaimRanking(*update.ClaimRanking); err != nil {
 			return err
 		}
@@ -46,15 +47,25 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 		if update.MembersCanAddMachines != nil {
 			next.MembersCanAddMachines = *update.MembersCanAddMachines
 		}
-		if update.ClaimRanking != nil {
+		if update.ClaimRanking != nil && !reset {
 			next.ClaimRanking = append([]string{}, *update.ClaimRanking...)
 		}
-		if next.MembersCanAddMachines == previous.MembersCanAddMachines && slices.Equal(next.ClaimRanking, previous.ClaimRanking) {
-			return nil
+		var stored string
+		if err := tx.QueryRowContext(ctx, `SELECT claim_ranking FROM teams WHERE name=?`, t.team).Scan(&stored); err != nil {
+			return err
 		}
 		ranking, err := json.Marshal(next.ClaimRanking)
 		if err != nil {
 			return err
+		}
+		switch {
+		case update.ClaimRanking == nil:
+			ranking = []byte(stored)
+		case reset:
+			next.ClaimRanking, ranking = append([]string{}, DefaultClaimRanking...), nil
+		}
+		if next.MembersCanAddMachines == previous.MembersCanAddMachines && string(ranking) == stored {
+			return nil
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE teams SET members_can_add_machines=?,claim_ranking=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), string(ranking), tx.now().UnixNano(), t.team); err != nil {
 			return err

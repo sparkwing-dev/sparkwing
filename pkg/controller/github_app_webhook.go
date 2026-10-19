@@ -53,6 +53,9 @@ type githubAppDelivery struct {
 		AppID int64 `json:"app_id"`
 	} `json:"installation"`
 	Repository githubAppRepoRef `json:"repository"`
+	Sender     struct {
+		ID int64 `json:"id"`
+	} `json:"sender"`
 }
 
 type githubAppRun struct {
@@ -382,6 +385,7 @@ type githubAppPullRequestPayload struct {
 
 type githubAppIntake struct {
 	author int64
+	sender int64
 	user   string
 	branch string
 	tag    string
@@ -463,7 +467,6 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 				TagName     string `json:"tag_name"`
 				PublishedAt string `json:"published_at"`
 				Author      struct {
-					ID    int64  `json:"id"`
 					Login string `json:"login"`
 				} `json:"author"`
 			} `json:"release"`
@@ -484,7 +487,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		if parsed, err := time.Parse(time.RFC3339, p.Release.PublishedAt); err == nil {
 			at = parsed
 		}
-		return githubAppIntake{author: p.Release.Author.ID, user: p.Release.Author.Login, branch: p.Release.TagName, env: base, at: at}, "", nil
+		return githubAppIntake{user: p.Release.Author.Login, branch: p.Release.TagName, env: base, at: at}, "", nil
 	}
 	if event == "create" || event == "delete" {
 		var p struct {
@@ -636,6 +639,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	intake, skip, err := githubAppIntakeFor(event, env, body)
+	intake.sender = env.Sender.ID
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode %s payload: %w", event, err))
 		return
@@ -1117,7 +1121,7 @@ func (s *Server) startGitHubAppRun(
 		Git: runspec.Git{
 			Repository: runspec.Repository{Key: key, Display: repo.Slug()}, Ref: ref, SHA: in.sha,
 			DefaultBranch: runspec.Optional[string]{Set: defaultBranch != "", Value: defaultBranch},
-			App:           runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: in.env["GITHUB_EVENT_NAME"], Action: in.env["GITHUB_ACTION"], DeliveryKey: githubAppDeliveryDigest(body), InstallationID: installation.InstallationID, RepositoryID: repo.ID, Ref: ref, SHA: in.sha, DefaultBranch: defaultBranch, DefaultBranchPush: in.env["GITHUB_EVENT_NAME"] == "push" && ref == "refs/heads/"+defaultBranch, AuthorID: s.githubAppAuthor(r.Context(), installation.InstallationID, repo, in), VerifiedAt: now}},
+			App:           runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: in.env["GITHUB_EVENT_NAME"], Action: in.env["GITHUB_ACTION"], DeliveryKey: githubAppDeliveryDigest(body), InstallationID: installation.InstallationID, RepositoryID: repo.ID, Ref: ref, SHA: in.sha, DefaultBranch: defaultBranch, DefaultBranchPush: in.env["GITHUB_EVENT_NAME"] == "push" && ref == "refs/heads/"+defaultBranch, AuthorID: s.githubAppAuthor(r.Context(), installation.InstallationID, repo, in), SenderID: in.sender, VerifiedAt: now}},
 		},
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/" + repo.Slug() + ".git", PipelineDir: ".sparkwing"}},
 	}

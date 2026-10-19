@@ -155,7 +155,7 @@ func (f *scheduleWriterFake) admit(ctx context.Context, sched store.CronSchedule
 	}
 	admitted, err := f.Tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.authority[sched.ID], IdempotencyKey: key, Request: runspec.Request{
 		Version: 1, Team: string(f.Team()), Pipeline: sched.Pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
-		Origin: runspec.OriginSchedule, RequestedArgs: sched.Effective().Args,
+		Origin: runspec.OriginTrigger, RequestedArgs: sched.Effective().Args,
 		Git:    runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey("gh:" + strconv.FormatInt(sched.GitHubRepositoryID, 10))}, Ref: sched.GitBranch, SHA: sched.LockedRef},
 		Source: runspec.Source{Ref: sched.LockedRef, Location: runspec.SourceLocation{RemoteURL: sched.RepoPath}},
 	}})

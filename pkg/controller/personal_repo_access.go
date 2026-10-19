@@ -2,8 +2,11 @@ package controller
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -17,31 +20,73 @@ func (s *Server) refreshPersonalRepoAccess(ctx context.Context, c capability.Cap
 	if err != nil {
 		return
 	}
-	needs, err := tenant.PersonalRepoAccessNeeds(ctx, c.Prefix)
+	github, needs, err := tenant.PersonalRepoAccessNeeds(ctx, c.Prefix)
 	if err != nil {
 		s.logger.Warn("personal machine access check failed", "err", err)
 		return
 	}
-	access := map[string]bool{}
-	for _, need := range needs {
-		repo, ok := store.ParseGitHubRepo(need.Repository)
-		if !ok {
+	var stale []runspec.RepoKey
+	for repo, fresh := range needs {
+		if !fresh {
+			stale = append(stale, repo)
+		}
+	}
+	if github > 0 && len(stale) > 0 {
+		s.recordPersonalRepoAccess(ctx, tenant, c.Prefix, github, stale)
+	}
+}
+
+// safety: an automated award to a personal machine rechecks access live, so the cache never outlives a removal.
+func (s *Server) confirmPersonalAward(ctx context.Context, claim store.UnitClaim, prefix string) (bool, error) {
+	if s.store == nil {
+		return true, nil
+	}
+	tenant, err := s.store.ForTeam(ctx, claim.Team)
+	if err != nil {
+		return false, err
+	}
+	github, repos, err := tenant.AwardedAutomation(ctx, claim, prefix)
+	if err != nil || github == 0 {
+		return err == nil, err
+	}
+	return s.githubApp != nil && s.recordPersonalRepoAccess(ctx, tenant, prefix, github, repos), nil
+}
+
+func (s *Server) recordPersonalRepoAccess(ctx context.Context, tenant *store.Tenant, prefix string, github int64, repos []runspec.RepoKey) bool {
+	access := map[runspec.RepoKey]bool{}
+	var ids []int64
+	for _, repo := range repos {
+		access[repo] = false
+		raw, keyed := strings.CutPrefix(string(repo), "gh:")
+		if id, err := strconv.ParseInt(raw, 10, 64); keyed && err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	installations, err := tenant.GitHubAppInstallations(ctx)
+	for _, installation := range installations {
+		if err != nil || installation.Suspended || len(ids) != len(repos) {
+			break
+		}
+		readable, readErr := s.githubApp.client.CanRead(ctx, installation.InstallationID, github, ids)
+		if readErr != nil {
 			continue
 		}
-		access[need.Repository] = false
-		installation, covered, err := s.teamInstallationFor(ctx, tenant, repo)
-		if err == nil && covered {
-			var readable map[string]bool
-			readable, err = s.githubApp.client.CanRead(ctx, installation.InstallationID, need.OwnerGitHubID, []string{need.Repository})
-			access[need.Repository] = err == nil && readable[need.Repository]
+		for _, id := range ids {
+			access[runspec.RepoKey("gh:"+strconv.FormatInt(id, 10))] = readable[id]
 		}
-		if err != nil {
-			s.logger.Warn("personal machine access check failed", "repo", need.Repository, "err", err)
+		break
+	}
+	if err != nil {
+		s.logger.Warn("personal machine access check failed", "err", err)
+	}
+	if err := tenant.RecordPersonalRepoAccess(ctx, prefix, access); err != nil {
+		s.logger.Warn("personal machine access record failed", "err", err)
+		return false
+	}
+	for _, allowed := range access {
+		if !allowed {
+			return false
 		}
 	}
-	if len(access) > 0 {
-		if err := tenant.RecordPersonalRepoAccess(ctx, c.Prefix, access); err != nil {
-			s.logger.Warn("personal machine access record failed", "err", err)
-		}
-	}
+	return len(access) > 0
 }

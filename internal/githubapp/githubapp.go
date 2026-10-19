@@ -533,14 +533,10 @@ func (c *Client) CommitAuthor(ctx context.Context, installation int64, owner, re
 	return commit.Author.ID, nil
 }
 
-// CanRead reports whether the GitHub user id can read every repository, checked with the installation's token.
-func (c *Client) CanRead(ctx context.Context, installation, user int64, repos []string) (map[string]bool, error) {
-	names := make([]string, 0, len(repos))
-	for _, repo := range repos {
-		_, name, _ := strings.Cut(repo, "/")
-		names = append(names, name)
-	}
-	tok, err := c.InstallationToken(ctx, installation, names, map[string]string{"metadata": "read"})
+// CanRead reports whether the GitHub user id can read each repository, named by its GitHub ID. The installation
+// token is restricted to those IDs, and each current name is resolved from its ID only for the collaborator call.
+func (c *Client) CanRead(ctx context.Context, installation, user int64, ids []int64) (map[int64]bool, error) {
+	tok, err := c.InstallationTokenByIDs(ctx, installation, ids, map[string]string{"metadata": "read"})
 	if err != nil {
 		return nil, err
 	}
@@ -550,16 +546,24 @@ func (c *Client) CanRead(ctx context.Context, installation, user int64, repos []
 	if err := c.getJSON(ctx, "/user/"+strconv.FormatInt(user, 10), "Bearer "+tok.Token, &who); err != nil {
 		return nil, err
 	}
-	out := map[string]bool{}
-	for _, repo := range repos {
-		owner, name, _ := strings.Cut(repo, "/")
+	out := map[int64]bool{}
+	for _, id := range ids {
+		repo, err := c.RepositoryByID(ctx, tok.Token, id)
+		if err != nil {
+			return nil, err
+		}
+		owner, name, ok := strings.Cut(repo.FullName, "/")
+		if repo.ID != id || !ok {
+			out[id] = false
+			continue
+		}
 		var permission struct {
 			Permission string `json:"permission"`
 		}
 		if err := c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name)+"/collaborators/"+url.PathEscape(who.Login)+"/permission", "Bearer "+tok.Token, &permission); err != nil {
 			return nil, err
 		}
-		out[repo] = who.Login != "" && permission.Permission != "" && permission.Permission != "none"
+		out[id] = who.Login != "" && permission.Permission != "" && permission.Permission != "none"
 	}
 	return out, nil
 }

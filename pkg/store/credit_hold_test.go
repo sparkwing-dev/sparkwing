@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func meteredRunnerOnly(t *testing.T, s *Store) {
@@ -87,6 +88,9 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 	switch runner {
 	case "metered":
 		meteredRunnerOnly(t, s)
+		if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "paid-runner", Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8, MemoryBytes: 8 << 30}, Available: match.Resources{Cores: 8, MemoryBytes: 8 << 30}}); err != nil {
+			t.Fatal(err)
+		}
 	case "revoked":
 		rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='runner'`)
 	}
@@ -94,7 +98,7 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 	if err != nil || view.Waiting == nil || view.Waiting.Kind != kind {
 		t.Fatalf("waiting unit = %+v, %v", view.Waiting, err)
 	}
-	if want := map[string]string{"unmetered": "", "metered": NoCreditsHold, "revoked": NoCreditsHold}[runner]; view.Waiting.CreditHold != want {
+	if want := map[string]string{"unmetered": "", "metered": NoCreditsHold, "revoked": ""}[runner]; view.Waiting.CreditHold != want {
 		t.Fatalf("%s runner: credit hold = %q, want %q", runner, view.Waiting.CreditHold, want)
 	}
 	if runner != "unmetered" {

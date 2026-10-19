@@ -42,7 +42,8 @@ type CreateRunRequest struct {
 	Request        runspec.Request   `json:"request"`
 	IdempotencyKey string            `json:"idempotency_key"`
 	LocalSecrets   map[string]string `json:"local_secrets,omitempty"`
-	// OriginMachine is the submitting machine's own runner credential, presented once so intake can seal that machine.
+	// OriginMachine is a short-lived proof that the submitter holds this machine's runner credential, bound to the
+	// request's idempotency key; it never carries the credential itself.
 	OriginMachine string `json:"origin_machine,omitempty"`
 }
 

@@ -259,36 +259,53 @@ func TestGitHubAppRunsReachAnApprovedPersonalMachineOnlyForItsAuthorWithAccess(t
 				t.Fatalf("approve = %d %+v", code, state)
 			}
 			f.app.SetCollaborator("acme/widgets", 501, "olga", permission)
+			laptopTakes := func(payload map[string]any, event string, want bool) []string {
+				t.Helper()
+				code, out := f.deliver(event, payload, "")
+				ids := startedRunIDs(t, out)
+				if code != http.StatusAccepted || len(ids) != 1 {
+					t.Fatalf("%s = %d %v", event, code, out)
+				}
+				var claimed controllerwire.ClaimResponse
+				if code := f.call("POST", "/api/v1/runners/claim", laptop, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || (claimed.Claim != nil) != want {
+					t.Fatalf("%s: laptop claim = %d %+v, want claimed=%t", event, code, claimed.Claim, want)
+				}
+				return ids
+			}
 			pr := prPayload(7, 701, "acme/widgets", 701)
 			pr["pull_request"].(map[string]any)["user"] = map[string]any{"id": 601, "login": "contributor"}
 			pr["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]any{"id": 701, "full_name": "acme/widgets"}
 			pr["sender"] = map[string]any{"id": 501, "login": "olga"}
-			code, out := f.deliver("pull_request", pr, "")
-			ids := startedRunIDs(t, out)
-			if code != http.StatusAccepted || len(ids) != 1 || f.sealedRequest(ids[0]).Git.App.Value.AuthorID != 601 {
-				t.Fatalf("pull request = %d %v", code, out)
+			if ids := laptopTakes(pr, "pull_request", false); f.sealedRequest(ids[0]).Automation.Value.AuthorID != 601 {
+				t.Fatal("the pull request's author was not sealed")
 			}
-			var claimed controllerwire.ClaimResponse
-			if code := f.call("POST", "/api/v1/runners/claim", laptop, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || claimed.Claim != nil {
-				t.Fatalf("the sender's laptop took another author's pull request: %d %+v", code, claimed.Claim)
-			}
+			own := prPayload(7, 701, "acme/widgets", 701)
+			own["pull_request"].(map[string]any)["user"] = map[string]any{"id": 501, "login": "olga"}
+			own["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]any{"id": 701, "full_name": "acme/widgets"}
+			own["pull_request"].(map[string]any)["head"].(map[string]any)["sha"] = strings.Repeat("b", 40)
+			own["sender"] = map[string]any{"id": 601, "login": "contributor"}
+			laptopTakes(own, "pull_request", false)
 			f.app.SetCommitAuthor("acme/widgets", headSHA, 501)
-			code, out = f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
-			pushed := startedRunIDs(t, out)
-			if code != http.StatusAccepted || len(pushed) != 1 || f.sealedRequest(pushed[0]).Git.App.Value.AuthorID != 501 {
-				t.Fatalf("push = %d %v", code, out)
+			spoofed := pushPayload(7, 701, "acme/widgets", headSHA)
+			spoofed["sender"] = map[string]any{"id": 601, "login": "contributor"}
+			laptopTakes(spoofed, "push", false)
+			pushed := pushPayload(7, 701, "acme/widgets", headSHA)
+			pushed["after"], pushed["sender"] = headSHA, map[string]any{"id": 501, "login": "olga"}
+			pushed["head_commit"] = map[string]any{"id": headSHA, "timestamp": "2026-01-02T00:00:00Z"}
+			ids := laptopTakes(pushed, "push", permission != "none")
+			if sealed := f.sealedRequest(ids[0]).Automation.Value; sealed.SenderID != 501 || sealed.AuthorID != 501 || len(sealed.Repos) != 1 || sealed.Repos[0] != "gh:701" {
+				t.Fatalf("push automation identity: %+v", sealed)
 			}
-			claimed = controllerwire.ClaimResponse{}
-			code = f.call("POST", "/api/v1/runners/claim", laptop, githubClaimBody(capability.UnitPlan, "", ""), &claimed)
 			if permission == "none" {
-				if code != http.StatusOK || claimed.Claim != nil {
-					t.Fatalf("a machine whose owner cannot read the repository claimed: %d %+v", code, claimed.Claim)
-				}
 				return
 			}
-			if code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != pushed[0] || !claimed.Claim.OwnerMachine {
-				t.Fatalf("approved laptop claim of the author's push = %d %+v", code, claimed.Claim)
-			}
+			f.app.SetCollaborator("acme/widgets", 501, "olga", "none")
+			next := strings.Repeat("c", 40)
+			f.app.SetCommitAuthor("acme/widgets", next, 501)
+			again := pushPayload(7, 701, "acme/widgets", next)
+			again["after"], again["sender"] = next, map[string]any{"id": 501, "login": "olga"}
+			again["head_commit"] = map[string]any{"id": next, "timestamp": "2026-01-02T00:01:00Z"}
+			laptopTakes(again, "push", false)
 		})
 	}
 }

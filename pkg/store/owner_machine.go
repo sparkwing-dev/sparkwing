@@ -45,7 +45,7 @@ func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Prin
 				return err
 			}
 			if automatedRun(seal.Request) {
-				err := personalAutomatedRunTx(ctx, tx, t.team, root.Prefix, enrolledBy, requester, seal.Request)
+				err := personalAutomatedRunTx(ctx, tx, t.team, root.Prefix, enrolledBy, seal.Request.Automation.Value)
 				owner = err == nil
 				var refusal *apierr.Error
 				if errors.As(err, &refusal) && refusal.Code == apierr.Forbidden {

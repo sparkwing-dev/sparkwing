@@ -316,7 +316,7 @@ keep their owner-only claim scope until explicitly revoked.
 `team.admin` and names at least one of them. `claim_ranking` takes distinct
 tiers from `here`, `personal`, `github-actions`, `self-hosted` and `cloud`, and
 an empty list means first come. A self-hosted controller has no Cloud launcher
-and refuses `cloud` with 400. Changes and their actor, store time and old/new
+and refuses `cloud` with 400. `["default"]` restores the default ranking. Changes and their actor, store time and old/new
 values commit with an audit event.
 
 `PUT /api/v1/runners/{runner}/automation {"requested": true}` asks for a

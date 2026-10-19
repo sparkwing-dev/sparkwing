@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +23,9 @@ const (
 	TierSelfHosted = "self-hosted"
 	TierCloud      = "cloud"
 )
+
+// ClaimRankingDefault, as a team's whole ranking update, restores the default ranking.
+const ClaimRankingDefault = "default"
 
 // DefaultClaimRanking is the ranking of a team that has not set one.
 var DefaultClaimRanking = []string{TierHere, TierPersonal, TierActions, TierSelfHosted, TierCloud}
@@ -73,10 +75,6 @@ func pinnedTerm(term string) bool {
 		}
 	}
 	return false
-}
-
-func automatedRun(r runspec.Request) bool {
-	return r.Origin == runspec.OriginApp || r.Origin == runspec.OriginSchedule
 }
 
 func sealedRequestTx(ctx context.Context, tx *storeTx, team Team, run string) (runspec.SealedRequest, error) {
@@ -157,16 +155,8 @@ func unitReadyTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) (tim
 	return time.Unix(0, at.Int64).UTC(), at.Valid, err
 }
 
-type unitAsk struct {
-	team     Team
-	unit     UnitRef
-	claimant string
-	rank     int
-	since    time.Time
-	at       time.Time
-}
-
-// safety: a held ask is written after the claim transaction rolls back, so a later poll cannot erase it.
+// safety: a held claimant's ask is written under the unit's claim lock in the claim transaction, whether that
+// transaction awards another unit or nothing, so asks and awards serialize and later polls cannot erase it.
 func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request, claimant string, liveness time.Duration) (bool, error) {
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant}, false)
 	if err != nil {
@@ -194,65 +184,25 @@ func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, re
 		return false, err
 	}
 	for _, poll := range polls {
-		if poll.CapabilityPrefix == claimant || len(poll.Kinds) > 0 && !slices.Contains(poll.Kinds, unit.Kind) {
+		if poll.CapabilityPrefix == claimant {
 			continue
 		}
-		better, err := betterRankedTx(ctx, tx, team, unit, request, poll, rank)
+		theirs, err := unitEligibilityTx(ctx, tx, team, unit, poll.UnitDemand, eligibilityChecks{fit: true, billing: true})
 		if err != nil {
 			return false, err
 		}
-		if better {
-			tx.rankingAsks = append(tx.rankingAsks, unitAsk{team: team, unit: unit, claimant: claimant, rank: rank, since: since, at: now})
-			return true, nil
+		if !theirs.ok() {
+			continue
 		}
+		better, err := claimRankTx(ctx, tx, team, theirs.chain, request)
+		if err != nil || better < 0 || better >= rank {
+			continue
+		}
+		if err := lockClaimOwnerTx(ctx, tx, team, unit); err != nil {
+			return false, err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO unit_asks(team,run_id,unit_kind,node_id,claimant,claim_rank,asked_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(team,run_id,unit_kind,node_id,claimant) DO UPDATE SET claim_rank=excluded.claim_rank,asked_at=excluded.asked_at WHERE unit_asks.asked_at<?`, team, unit.RunID, unit.Kind, unit.NodeID, claimant, rank, now.UnixNano(), since.UnixNano())
+		return true, err
 	}
 	return false, nil
-}
-
-func betterRankedTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request, poll runnerPoll, rank int) (bool, error) {
-	profile, required, err := placementRunnerTx(ctx, tx, team, unit, poll.UnitDemand)
-	var denied *apierr.Error
-	if errors.As(err, &denied) && (denied.Code == apierr.Unauthenticated || denied.Code == apierr.Forbidden) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if !match.Evaluate(profile, required).OK() || !match.Fits(profile.Capacity, poll.Available, required.Request).OK() {
-		return false, nil
-	}
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: poll.CapabilityPrefix}, false)
-	if err != nil {
-		return false, err
-	}
-	theirs, err := claimRankTx(ctx, tx, team, chain, request)
-	if err != nil || theirs >= rank {
-		return false, err
-	}
-	if !launcherClaimant(chain[0].principal.Capability) {
-		return true, nil
-	}
-	price, err := unitBillingPriceTx(ctx, tx, required.Request)
-	var unpriced *UnpricedCPUClassError
-	if errors.As(err, &unpriced) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return eligibleUnitBillingTx(ctx, tx, team, unit, price, true)
-}
-
-func recordUnitAsks(ctx context.Context, s *Store, asks []unitAsk) error {
-	if len(asks) == 0 {
-		return nil
-	}
-	return s.inTx(ctx, func(tx *storeTx) error {
-		for _, ask := range asks {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO unit_asks(team,run_id,unit_kind,node_id,claimant,claim_rank,asked_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(team,run_id,unit_kind,node_id,claimant) DO UPDATE SET claim_rank=excluded.claim_rank,asked_at=excluded.asked_at WHERE unit_asks.asked_at<?`, ask.team, ask.unit.RunID, ask.unit.Kind, ask.unit.NodeID, ask.claimant, ask.rank, ask.at.UnixNano(), ask.since.UnixNano()); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }
