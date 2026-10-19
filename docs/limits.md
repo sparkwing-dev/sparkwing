@@ -60,15 +60,24 @@ customer approval or unstarted capacity is not execution time.
 
 ## Docker on Cloud
 
-Cloud Jobs run Docker inside their own Kubernetes user namespace, where the
-Docker daemon is root but job code never holds root on the node. `docker
-build`, `docker run`, `docker compose`, container-to-container networking,
-published ports and `docker run --memory` work. These do not:
+Cloud Jobs run as root inside their own Kubernetes user namespace, with a
+Docker daemon that is root there too, so `apt-get install` and the Docker
+socket work while job code never holds root on the node. `docker build`,
+`docker run`, `docker compose`, container-to-container networking, published
+ports and `docker run --memory` work.
 
-- `docker run --privileged`, added capabilities and `--device`;
-- host namespaces: `--network host`, `--pid host` and `--ipc host` reach the
-  Docker daemon's own namespaces, not the node's;
-- loading kernel modules, changing node sysctls and mounting host paths.
+- `docker run --privileged` is refused: the daemon cannot mount sysfs for it.
+- `--cap-add` is accepted, but a container never gets more than the daemon
+  holds: `SYS_ADMIN`, `NET_ADMIN` and `SYS_PTRACE` plus the default set, all
+  confined to the Job's user namespace. Capabilities such as `SYS_MODULE`,
+  `SYS_TIME` or `SYS_RAWIO` have no effect on the node.
+- `--security-opt seccomp=unconfined` is accepted but cannot lift the Job's
+  own filter, which refuses io_uring, keyrings, bpf, perf events,
+  userfaultfd, kexec and module loading for every container.
+- Host namespaces are unavailable: `--network host`, `--pid host` and
+  `--ipc host` give the Docker daemon's namespaces, not the node's.
+- `--device` cannot reach node devices, and host paths, node sysctls and
+  kernel modules are out of reach.
 
 The Job's own CPU and memory budget bounds everything its containers use.
 
