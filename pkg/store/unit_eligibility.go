@@ -171,8 +171,7 @@ func poolsHoldSecretsTx(ctx context.Context, tx *storeTx, team Team, pools []str
 	return false, nil
 }
 
-// verifiedDefaultBranch requires the webhook-verified push to the repository's default
-// branch to name exactly the ref and commit the run executes.
+// safety: facts a child or retry carried from another push must not vouch for a different ref or commit.
 func verifiedDefaultBranch(git runspec.Git) bool {
 	app := git.App.Value
 	return git.App.Set && app.DefaultBranchPush && app.DefaultBranch != "" && app.Ref == "refs/heads/"+app.DefaultBranch && app.Ref == git.Ref && app.SHA == git.SHA

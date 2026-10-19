@@ -20,7 +20,6 @@ func TestCacheDiscoveryRejectsEffectivelyUnboundedCallerLimits(t *testing.T) {
 	}
 }
 
-// seededRecordBytes is the hex SHA-256 publication record seedEntry writes beside each executable.
 const seededRecordBytes = 64
 
 func seedEntry(t *testing.T, entry Entry, body string, modTime time.Time) {

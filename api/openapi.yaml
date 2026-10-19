@@ -775,6 +775,8 @@ components:
           type: string
         runner_version:
           type: string
+        trust:
+          type: string
       required:
         - runner_version
         - kinds

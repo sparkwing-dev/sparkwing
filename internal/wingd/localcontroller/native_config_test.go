@@ -118,6 +118,9 @@ func TestNativeServicesBindsSubmittedValuesBeforeProcessStartup(t *testing.T) {
 			cfg.Source.Base = procenv.Base{Ambient: []string{"BUILD_NOTE=ambient-value", "UNLISTED=ambient-private"}}
 			cfg.SubmittedEnv = map[string][]byte{"BUILD_NOTE": []byte(value), "BUILD_EMPTY": {}}
 			var err error
+			if cfg.SubmitAccept, err = procenv.OperatorSubmitAccept([]string{"BUILD_*"}); err != nil {
+				t.Fatal(err)
+			}
 			state.snapshot.Run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": value, "BUILD_EMPTY": ""}, strings.Repeat("5", 64))
 			if err != nil {
 				t.Fatal(err)

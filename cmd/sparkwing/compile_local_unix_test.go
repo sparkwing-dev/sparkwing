@@ -54,7 +54,11 @@ exit 1
 		if err != nil {
 			t.Fatal(err)
 		}
-		data, readErr := os.ReadFile(lease.Path())
+		binary, verifyErr := lease.Verify()
+		if verifyErr != nil {
+			t.Fatal(verifyErr)
+		}
+		data, readErr := os.ReadFile(binary.Path())
 		releaseErr := lease.Release()
 		if readErr != nil || releaseErr != nil || published != (wantSource == "compiled") || string(data) != "#!/bin/sh\nexit 0\n" {
 			t.Fatalf("local materialization: published=%t data=%q errors=%v,%v", published, data, readErr, releaseErr)

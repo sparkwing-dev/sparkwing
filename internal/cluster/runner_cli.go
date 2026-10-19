@@ -121,7 +121,6 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	return runRunner(ctx, runner, options.MetricsAddress)
 }
 
-// config also returns the operator's run.submit_env_allow, the submitted names this host accepts.
 func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (cfg userconfig.RunnerConfig, accepted []string, err error) {
 	if command == "start" {
 		read := cli.ReadConfig

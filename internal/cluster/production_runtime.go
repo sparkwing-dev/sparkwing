@@ -77,8 +77,7 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) { return raw, context.Cause(ctx) }
 }
 
-// accept is the operator's policy for requester-submitted names; a Cloud Job serves one
-// claim and is discarded, so it accepts every submittable name.
+// safety: a Cloud Job serves one claim and is then discarded, so its hosting accepts every submittable name.
 func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool, accept procenv.SubmitAccept) runners.Hosting {
 	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services runners.NativeServices, principal capability.Principal, err error) {
 		options := connection
