@@ -86,15 +86,8 @@ spec:
     message: Pods cannot share host namespaces or ports
   - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
       == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
-      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')
-      || v.name == ''tun'' && has(v.hostPath) && v.hostPath.path == ''/dev/net/tun''
-      && v.hostPath.?type.orValue('''') == ''CharDevice''))'
-    message: Pods mount only their scratch emptyDir, own bootstrap Secret and the
-      tun device
-  - expression: '!variables.create || variables.containers.all(c, c.?volumeMounts.orValue([]).all(m,
-      m.name != ''tun'' || variables.shape == ''job'' && c.name == ''docker'' && m.mountPath
-      == ''/dev/net/tun''))'
-    message: only the Docker sidecar mounts the tun device
+      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')))'
+    message: Pods mount only their scratch emptyDir and own bootstrap Secret
   - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
       == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
       == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
@@ -109,24 +102,23 @@ spec:
       && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0)
       == 1000 && variables.spec.?securityContext.?seccompProfile.?type.orValue('''')
       == ''RuntimeDefault'''
-    message: Job Pods run in their own user namespace as the rootless user with the
+    message: Job Pods run in their own user namespace as a non-root user with the
       runtime seccomp profile
   - expression: '!variables.create || variables.containers.all(c, variables.shape
-      == ''job'' && c.name == ''docker'' ? c.?securityContext.?runAsUser.orValue(0)
-      == 1000 && c.?securityContext.?runAsNonRoot.orValue(false) && c.?securityContext.?seccompProfile.?type.orValue('''')
-      == ''Unconfined'' && c.?securityContext.?appArmorProfile.?type.orValue('''')
-      == ''Unconfined'' && c.?securityContext.?procMount.orValue('''') == ''Unmasked''
-      : c.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'') == ''RuntimeDefault''
-      && c.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'') ==
-      ''RuntimeDefault'' && c.?securityContext.?procMount.orValue(''Default'') ==
-      ''Default'' && c.?securityContext.?runAsUser.orValue(1000) != 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
+      == ''job'' && c.name == ''docker'' ? c.?securityContext.?runAsUser.orValue(-1)
+      == 0 && c.?securityContext.?capabilities.?add.orValue([]) == ["SYS_ADMIN", "NET_ADMIN",
+      "SYS_PTRACE"] && c.?securityContext.?seccompProfile.?type.orValue('''') == ''Unconfined''
+      && c.?securityContext.?appArmorProfile.?type.orValue('''') == ''Unconfined''
+      && c.?securityContext.?procMount.orValue('''') == ''Unmasked'' : c.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
+      == ''RuntimeDefault'' && c.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
+      == ''RuntimeDefault'' && c.?securityContext.?procMount.orValue(''Default'')
+      == ''Default'' && c.?securityContext.?runAsUser.orValue(1000) != 0 && c.?securityContext.?runAsNonRoot.orValue(true)
+      && size(c.?securityContext.?capabilities.?add.orValue([])) == 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
       == ''RuntimeDefault'' && (variables.shape == ''job'' || variables.spec.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
       == ''RuntimeDefault'')'
-    message: only the Docker sidecar relaxes seccomp, AppArmor and /proc, and only
-      as the rootless user
-  - expression: '!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([]))
-      == 0)'
-    message: containers cannot add capabilities
+    message: only the Docker sidecar runs as root, with exactly SYS_ADMIN, NET_ADMIN
+      and SYS_PTRACE and relaxed seccomp, AppArmor and /proc; other containers add
+      no capabilities
   - expression: '!variables.create || variables.containers.all(c, !has(c.lifecycle)
       && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue()
       || !has(p.value().exec) || variables.shape == ''job'' && c.name == ''docker''
@@ -269,15 +261,8 @@ spec:
     message: Pods cannot share host namespaces or ports
   - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
       == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
-      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')
-      || v.name == ''tun'' && has(v.hostPath) && v.hostPath.path == ''/dev/net/tun''
-      && v.hostPath.?type.orValue('''') == ''CharDevice''))'
-    message: Pods mount only their scratch emptyDir, own bootstrap Secret and the
-      tun device
-  - expression: '!variables.create || variables.containers.all(c, c.?volumeMounts.orValue([]).all(m,
-      m.name != ''tun'' || variables.shape == ''job'' && c.name == ''docker'' && m.mountPath
-      == ''/dev/net/tun''))'
-    message: only the Docker sidecar mounts the tun device
+      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')))'
+    message: Pods mount only their scratch emptyDir and own bootstrap Secret
   - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
       == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
       == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
@@ -292,24 +277,23 @@ spec:
       && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0)
       == 1000 && variables.spec.?securityContext.?seccompProfile.?type.orValue('''')
       == ''RuntimeDefault'''
-    message: Job Pods run in their own user namespace as the rootless user with the
+    message: Job Pods run in their own user namespace as a non-root user with the
       runtime seccomp profile
   - expression: '!variables.create || variables.containers.all(c, variables.shape
-      == ''job'' && c.name == ''docker'' ? c.?securityContext.?runAsUser.orValue(0)
-      == 1000 && c.?securityContext.?runAsNonRoot.orValue(false) && c.?securityContext.?seccompProfile.?type.orValue('''')
-      == ''Unconfined'' && c.?securityContext.?appArmorProfile.?type.orValue('''')
-      == ''Unconfined'' && c.?securityContext.?procMount.orValue('''') == ''Unmasked''
-      : c.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'') == ''RuntimeDefault''
-      && c.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'') ==
-      ''RuntimeDefault'' && c.?securityContext.?procMount.orValue(''Default'') ==
-      ''Default'' && c.?securityContext.?runAsUser.orValue(1000) != 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
+      == ''job'' && c.name == ''docker'' ? c.?securityContext.?runAsUser.orValue(-1)
+      == 0 && c.?securityContext.?capabilities.?add.orValue([]) == ["SYS_ADMIN", "NET_ADMIN",
+      "SYS_PTRACE"] && c.?securityContext.?seccompProfile.?type.orValue('''') == ''Unconfined''
+      && c.?securityContext.?appArmorProfile.?type.orValue('''') == ''Unconfined''
+      && c.?securityContext.?procMount.orValue('''') == ''Unmasked'' : c.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
+      == ''RuntimeDefault'' && c.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
+      == ''RuntimeDefault'' && c.?securityContext.?procMount.orValue(''Default'')
+      == ''Default'' && c.?securityContext.?runAsUser.orValue(1000) != 0 && c.?securityContext.?runAsNonRoot.orValue(true)
+      && size(c.?securityContext.?capabilities.?add.orValue([])) == 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue(''RuntimeDefault'')
       == ''RuntimeDefault'' && (variables.shape == ''job'' || variables.spec.?securityContext.?seccompProfile.?type.orValue(''RuntimeDefault'')
       == ''RuntimeDefault'')'
-    message: only the Docker sidecar relaxes seccomp, AppArmor and /proc, and only
-      as the rootless user
-  - expression: '!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([]))
-      == 0)'
-    message: containers cannot add capabilities
+    message: only the Docker sidecar runs as root, with exactly SYS_ADMIN, NET_ADMIN
+      and SYS_PTRACE and relaxed seccomp, AppArmor and /proc; other containers add
+      no capabilities
   - expression: '!variables.create || variables.containers.all(c, !has(c.lifecycle)
       && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue()
       || !has(p.value().exec) || variables.shape == ''job'' && c.name == ''docker''

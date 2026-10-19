@@ -156,22 +156,27 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "privileged_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.Privileged = ptr(true) }), reason: "runs privileged"},
 		{name: "host_users", user: testJobController, object: pod(hostUsers), reason: "own user namespace"},
 		{name: "root_pod", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SecurityContext.RunAsUser = ptr(int64(0)) }), reason: "own user namespace"},
-		{name: "root_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.RunAsUser = ptr(int64(0)) }), reason: "only the Docker sidecar relaxes"},
-		{name: "masked_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.ProcMount = nil }), reason: "only the Docker sidecar relaxes"},
+		{name: "non_root_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.RunAsUser = ptr(int64(1000)) }), reason: "only the Docker sidecar runs as root"},
+		{name: "docker_extra_capability", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.InitContainers[0].SecurityContext.Capabilities.Add = append(p.Spec.InitContainers[0].SecurityContext.Capabilities.Add, "SYS_MODULE")
+		}), reason: "only the Docker sidecar runs as root"},
+		{name: "masked_docker_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.ProcMount = nil }), reason: "only the Docker sidecar runs as root"},
 		{name: "unconfined_workload", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}}
-		}), reason: "only the Docker sidecar relaxes"},
-		{name: "workload_tun", user: testJobController, object: pod(func(p *corev1.Pod) {
-			p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: "tun", MountPath: tunDevice})
-		}), reason: "tun device"},
-		{name: "other_char_device", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Volumes[2].HostPath.Path = "/dev/kmsg" }), reason: "scratch emptyDir"},
+		}), reason: "only the Docker sidecar runs as root"},
+		{name: "root_workload", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{RunAsUser: ptr(int64(0)), RunAsNonRoot: ptr(false)}
+		}), reason: "only the Docker sidecar runs as root"},
+		{name: "host_path", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "tun", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun"}}})
+		}), reason: "scratch emptyDir"},
 		{name: "probe_privileged", user: testLauncher, object: measure(func(p *corev1.Pod) {
 			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr(true)}
 		}), reason: "runs privileged"},
 		{name: "probe_host_pid", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
 		{name: "added_capability", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}}}
-		}), reason: "add capabilities"},
+		}), reason: "add no capabilities"},
 		{name: "missing_node_selector", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.NodeSelector = nil }), reason: "own team's nodes"},
 		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "own team's nodes"},
 		{name: "wrong_team_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels[TeamLabel] = labelHash("other-team") }), reason: "own team's nodes"},

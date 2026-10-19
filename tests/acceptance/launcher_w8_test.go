@@ -123,8 +123,8 @@ func TestLauncherCloudPodContract(t *testing.T) {
 			}
 			var scratch int64
 			for _, volume := range pod.Volumes {
-				if volume.HostPath != nil && (volume.HostPath.Path != "/dev/net/tun" || volume.HostPath.Type == nil || *volume.HostPath.Type != corev1.HostPathCharDev) {
-					t.Fatal("hostPath beyond the tun device exposed")
+				if volume.HostPath != nil {
+					t.Fatal("hostPath exposed")
 				}
 				if volume.EmptyDir != nil {
 					if volume.EmptyDir.SizeLimit == nil {

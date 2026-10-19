@@ -12,8 +12,8 @@ Components:
   Cloud launcher -> {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "launcher") }}
   Jobs require team-dedicated nodes and enforced pod/node egress. See README.md.
   The CNI must enforce NetworkPolicy ingress and egress. On EKS, set
-  enableNetworkPolicy: "true" in the vpc-cni add-on. Team nodes must run
-  user-namespaced Pods with at least 196608 IDs each for rootless Docker.
+  enableNetworkPolicy: "true" in the vpc-cni add-on. Team nodes must be AL2023
+  with kubelet idsPerPod 262144 and runc cgroup_writable for Docker.
   Quarantined nodes are cordoned with the sparkwing.dev/quarantined annotation.
 {{- end }}
 

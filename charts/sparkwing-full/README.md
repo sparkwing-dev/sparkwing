@@ -142,8 +142,8 @@ The example references an existing `sparkwing-tls` certificate Secret.
 ## Cloud node and network prerequisites
 
 The launcher runs on infrastructure nodes with its own Kubernetes identity. Job
-code runs as UID 1000 in a user-namespaced Pod with a rootless DinD sidecar
-under `sparkwing-customer-job`,
+code runs as UID 1000 in a user-namespaced Pod whose DinD sidecar is root only
+inside that namespace, under `sparkwing-customer-job`,
 which has no API token or cloud annotations. Do not attach an IRSA role or create
 a Pod Identity association for this account. Customer Pods with AWS credential
 injections are rejected. Each Job and its boundary probes
@@ -179,16 +179,15 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars, `PodLevelResources` and
   `admissionregistration.k8s.io/v1` ValidatingAdmissionPolicy (Kubernetes 1.30+).
-- Team nodes must run user-namespaced Pods (`hostUsers: false`): containerd 2.0
-  or later and Linux 6.3 or later, which adds idmapped tmpfs mounts for Secret
-  volumes (AL2023 with the 6.12 kernel). Allow unprivileged user namespaces
-  (`user.max_user_namespaces` above 0) and provide `/dev/net/tun`.
-- The `docker:<version>-dind-rootless` user maps subordinate IDs 100000-165535,
-  so the kubelet must give each Pod at least 196608 IDs (a multiple of 65536,
-  set in the KubeletConfiguration user namespace settings). The default 65536
-  leaves rootlesskit unable to start.
-- `launcher.dockerImage` must be a digest-pinned `dind-rootless` image. Job
-  Pods admit no privileged container, so rootful DinD cannot start.
+- Job and team nodes run AL2023 (containerd 2.1 or later) with the kubelet's
+  `userNamespaces.idsPerPod` at 262144 and runc's `cgroup_writable = true`,
+  set through a nodeadm NodeConfig. idsPerPod must be a power of two when the
+  kubelet has no subuid entry. Without writable cgroups dockerd cannot create
+  container cgroups. Bottlerocket exposes no `cgroup_writable` setting, so it
+  cannot run Cloud Jobs.
+- `launcher.dockerImage` is a digest-pinned `docker:<version>-dind` image. The
+  sidecar runs as root of the Pod's user namespace with namespaced `SYS_ADMIN`,
+  `NET_ADMIN` and `SYS_PTRACE`, never privileged.
 - Jobs run in `<release namespace>-cloud-jobs` (`launcher.jobNamespace`), which
   the chart owns and creates with privileged Pod Security
   (`launcher.createNamespace`). Keep other NetworkPolicies and Pod Security

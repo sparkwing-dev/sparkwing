@@ -347,7 +347,7 @@ func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation
 	container := &pod.Spec.Containers[0]
 	container.Name = "measure"
 	container.ReadinessProbe = nil
-	container.SecurityContext = &corev1.SecurityContext{RunAsUser: ptr(rootlessUser), RunAsNonRoot: ptr(true), AllowPrivilegeEscalation: ptr(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}
+	container.SecurityContext = &corev1.SecurityContext{RunAsUser: ptr(jobUser), RunAsNonRoot: ptr(true), AllowPrivilegeEscalation: ptr(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}
 
 	container.Command = measureCommand
 	for _, endpoint := range append([]string{control, p.required}, denied...) {

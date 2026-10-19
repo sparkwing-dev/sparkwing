@@ -35,7 +35,7 @@ const (
 	podOwners     = `['system:serviceaccount:kube-system:job-controller', 'system:serviceaccount:kube-system:generic-garbage-collector']`
 )
 
-var rootless = strconv.FormatInt(rootlessUser, 10)
+var jobUID = strconv.FormatInt(jobUser, 10)
 
 // safety: the API server's PodTopologyLabels admission copies these from the Node
 // onto any Pod created with spec.nodeName.
@@ -46,13 +46,11 @@ func podValidations() []admissionv1.Validation {
 		{Expression: `!variables.create || variables.shape != 'other'`, Message: "only Cloud Job, capacity and boundary probe Pods run in the Sparkwing job namespace"},
 		{Expression: `!variables.create || variables.spec.?serviceAccountName.orValue('') == '` + ServiceAccount + `' && !variables.spec.?automountServiceAccountToken.orValue(true)`, Message: "Pods use the customer job service account without an API token"},
 		{Expression: `!variables.create || !variables.spec.?hostNetwork.orValue(false) && !variables.spec.?hostIPC.orValue(false) && !variables.spec.?hostPID.orValue(false) && variables.containers.all(c, c.?ports.orValue([]).all(p, p.?hostPort.orValue(0) == 0))`, Message: "Pods cannot share host namespaces or ports"},
-		{Expression: `!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape == 'job' && (v.name == 'scratch' && has(v.emptyDir) || v.name == 'bootstrap' && has(v.secret) && v.secret.?secretName.orValue('') == variables.labels[?'sparkwing.dev/job'].orValue('') || v.name == 'tun' && has(v.hostPath) && v.hostPath.path == '` + tunDevice + `' && v.hostPath.?type.orValue('') == 'CharDevice'))`, Message: "Pods mount only their scratch emptyDir, own bootstrap Secret and the tun device"},
-		{Expression: `!variables.create || variables.containers.all(c, c.?volumeMounts.orValue([]).all(m, m.name != 'tun' || variables.shape == 'job' && c.name == 'docker' && m.mountPath == '` + tunDevice + `'))`, Message: "only the Docker sidecar mounts the tun device"},
+		{Expression: `!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape == 'job' && (v.name == 'scratch' && has(v.emptyDir) || v.name == 'bootstrap' && has(v.secret) && v.secret.?secretName.orValue('') == variables.labels[?'sparkwing.dev/job'].orValue('')))`, Message: "Pods mount only their scratch emptyDir and own bootstrap Secret"},
 		{Expression: `!variables.create || (variables.shape == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name == 'run-node' && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name == 'docker' && variables.inits[0].image == variables.dockerImage && variables.inits[1].name == 'fetch-source' && variables.inits[1].image == variables.runnerImage : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits) == 0)`, Message: "Pods run only the launcher's container set and pinned images"},
 		{Expression: `!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))`, Message: "no container runs privileged"},
-		{Expression: `!variables.create || variables.shape != 'job' || !variables.spec.?hostUsers.orValue(true) && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0) == ` + rootless + ` && variables.spec.?securityContext.?seccompProfile.?type.orValue('') == 'RuntimeDefault'`, Message: "Job Pods run in their own user namespace as the rootless user with the runtime seccomp profile"},
-		{Expression: `!variables.create || variables.containers.all(c, variables.shape == 'job' && c.name == 'docker' ? c.?securityContext.?runAsUser.orValue(0) == ` + rootless + ` && c.?securityContext.?runAsNonRoot.orValue(false) && c.?securityContext.?seccompProfile.?type.orValue('') == 'Unconfined' && c.?securityContext.?appArmorProfile.?type.orValue('') == 'Unconfined' && c.?securityContext.?procMount.orValue('') == 'Unmasked' : c.?securityContext.?seccompProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && c.?securityContext.?appArmorProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && c.?securityContext.?procMount.orValue('Default') == 'Default' && c.?securityContext.?runAsUser.orValue(` + rootless + `) != 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && (variables.shape == 'job' || variables.spec.?securityContext.?seccompProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault')`, Message: "only the Docker sidecar relaxes seccomp, AppArmor and /proc, and only as the rootless user"},
-		{Expression: `!variables.create || variables.containers.all(c, size(c.?securityContext.?capabilities.?add.orValue([])) == 0)`, Message: "containers cannot add capabilities"},
+		{Expression: `!variables.create || variables.shape != 'job' || !variables.spec.?hostUsers.orValue(true) && variables.spec.?securityContext.?runAsNonRoot.orValue(false) && variables.spec.?securityContext.?runAsUser.orValue(0) == ` + jobUID + ` && variables.spec.?securityContext.?seccompProfile.?type.orValue('') == 'RuntimeDefault'`, Message: "Job Pods run in their own user namespace as a non-root user with the runtime seccomp profile"},
+		{Expression: `!variables.create || variables.containers.all(c, variables.shape == 'job' && c.name == 'docker' ? c.?securityContext.?runAsUser.orValue(-1) == 0 && c.?securityContext.?capabilities.?add.orValue([]) == ` + celList(capabilityNames(dockerCapabilities)) + ` && c.?securityContext.?seccompProfile.?type.orValue('') == 'Unconfined' && c.?securityContext.?appArmorProfile.?type.orValue('') == 'Unconfined' && c.?securityContext.?procMount.orValue('') == 'Unmasked' : c.?securityContext.?seccompProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && c.?securityContext.?appArmorProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && c.?securityContext.?procMount.orValue('Default') == 'Default' && c.?securityContext.?runAsUser.orValue(` + jobUID + `) != 0 && c.?securityContext.?runAsNonRoot.orValue(true) && size(c.?securityContext.?capabilities.?add.orValue([])) == 0) && variables.spec.?securityContext.?appArmorProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault' && (variables.shape == 'job' || variables.spec.?securityContext.?seccompProfile.?type.orValue('RuntimeDefault') == 'RuntimeDefault')`, Message: "only the Docker sidecar runs as root, with exactly SYS_ADMIN, NET_ADMIN and SYS_PTRACE and relaxed seccomp, AppArmor and /proc; other containers add no capabilities"},
 		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec) || variables.shape == 'job' && c.name == 'docker' && p == c.?startupProbe && p.value().exec.?command.orValue([]) == ` + celList(dockerProbe) + `))`, Message: "containers run no lifecycle hooks or exec probes beyond the Docker sidecar's readiness check"},
 		{Expression: `!variables.create || variables.shape != 'job' || size(variables.inits) == 0 || variables.inits[0].?command.orValue([]) == ` + celList(dockerCommand) + ` && variables.inits[0].?args.orValue([]) == ` + celList(dockerArgs), Message: "the Docker sidecar runs only the launcher's dockerd command"},
 		{Expression: `!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([])) == 0 && c.?env.orValue([]).all(e, variables.shape == 'job' && e.name in ` + workloadEnv + ` && !has(e.valueFrom)))`, Message: "containers carry only the launcher's environment and EKS region values, never AWS credentials"},
@@ -88,6 +86,14 @@ func admissionMatch(namespace string, rules ...admissionv1.NamedRuleWithOperatio
 		MatchPolicy:       ptr(admissionv1.Equivalent),
 		ResourceRules:     rules,
 	}
+}
+
+func capabilityNames(caps []corev1.Capability) []string {
+	names := make([]string, len(caps))
+	for i, c := range caps {
+		names[i] = string(c)
+	}
+	return names
 }
 
 func celList(values []string) string {
