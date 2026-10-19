@@ -88,3 +88,46 @@ func TestCancelledUnstartedLauncherAwardEndsMetering(t *testing.T) {
 		})
 	}
 }
+
+// A launcher award whose Job never starts, because its boundary check keeps
+// failing, holds the work minimum as a reservation and must refund it in full
+// whether its lease lapses, the run is cancelled, or both.
+func TestUnstartedLauncherAwardRefundsItsReservation(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		for _, path := range []string{"lapse", "renewed_lapse", "lapse_then_cancel"} {
+			t.Run(string(kind)+"/"+path, func(t *testing.T) {
+				s, demand, claim, now := launcherSnapshotFixture(t, kind)
+				root, fence := launcherFence(t, s, demand, claim, kind)
+				if chargedMicro(t, s) == 0 {
+					t.Fatal("award reserved nothing")
+				}
+				lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", 10*time.Hour)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if path == "renewed_lapse" {
+					for range 3 {
+						*now = now.Add(limits.DefaultLease / 2)
+						if _, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				*now = now.Add(limits.DefaultLease * 2)
+				if _, err := s.ReapUnits(t.Context(), lease, 10); err != nil {
+					t.Fatal(err)
+				}
+				if path == "lapse_then_cancel" {
+					operator := authorityMember(t, s, "operator", RoleOwner)
+					operator.Kind = ActorOperator
+					*now = now.Add(time.Second)
+					if _, err := (&Tenant{s: s, team: "a"}).TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunCancelled, Cause: RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				unitBillingTotal(t, s, 0, true)
+				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
+			})
+		}
+	}
+}

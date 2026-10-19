@@ -451,7 +451,14 @@ EndpointSlices in `default` to find the API server's addresses.
 
 Before work starts, the boundary requires default-deny egress and ingress
 policies selecting the exact Job labels. It inventories declared DaemonSet ports
-and observed kubelet endpoints. Two listener Pods run on the reserved node, each readiness-confirmed
+and observed kubelet endpoints. Each probe role has its own name prefix, `sw-boundary-<role>-<random>`. The
+EKS VPC CNI network-policy agent shares one policy map among Pods in a
+namespace whose names match up to the last `-`, so probes named only
+`sw-boundary-<random>` gave the peer the control's allow-all ingress and every
+probe failed. Customer Pods in one namespace named `<prefix>-<suffix>` share
+policy the same way; Job Pods are named after their Job, so no two share.
+
+Two listener Pods run on the reserved node, each readiness-confirmed
 before any connection is judged. The control listener has an explicit ingress
 allow rule. The peer listener carries a Job's labels, so only the Job ingress
 policy governs it; its readiness check runs on loopback, which no policy
