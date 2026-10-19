@@ -60,3 +60,25 @@ func TestPostgresSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testin
 		})
 	}
 }
+
+func TestPostgresAnAskInFlightHoldsTheLaterAward(t *testing.T) {
+	st := storetest.NewPostgres(t).Open(t)
+	f := st.TestOnlyRankingFixture(t, true)
+	commit := f.OpenAsk(t, f.Self, 3, f.ReadyAt.Add(4900*time.Millisecond))
+	f.At(5100 * time.Millisecond)
+	f.Poll(t, f.Launcher, capability.UnitNode)
+	claimed := make(chan error, 1)
+	go func() {
+		_, err := st.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+		claimed <- err
+	}()
+	select {
+	case err := <-claimed:
+		t.Fatalf("the launcher decided while a better ask was in flight: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	commit()
+	if err := <-claimed; !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the launcher took the job a better claimant asked for: %v", err)
+	}
+}

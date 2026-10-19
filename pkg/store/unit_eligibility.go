@@ -19,8 +19,9 @@ const (
 	stepBilling  = "billing"
 )
 
-// safety: a named claim leaves billing to award issuance, which reports the exact credit standing.
-type eligibilityChecks struct{ lock, fit, billing bool }
+// safety: a named claim leaves billing to award issuance, which reports the exact credit standing. Only the
+// claimant's own claim turns an unpriced unit into an error; judging another claimant marks it ineligible.
+type eligibilityChecks struct{ lock, fit, billing, claim bool }
 
 type eligibility struct {
 	profile    match.Profile
@@ -75,6 +76,10 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 	if e.metered {
 		if e.price, err = unitBillingPriceTx(ctx, tx, e.demand.Request); err != nil {
 			var unpriced *UnpricedCPUClassError
+			if errors.As(err, &unpriced) && !checks.claim {
+				e.failed, e.refused = stepBilling, err
+				return e, nil
+			}
 			if errors.As(err, &unpriced) {
 				unpriced.RunID, unpriced.NodeID = unit.RunID, unit.NodeID
 			}

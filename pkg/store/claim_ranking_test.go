@@ -476,3 +476,25 @@ func TestCreditNoticeCountsAnActionsRunner(t *testing.T) {
 		t.Fatalf("an eligible Actions runner did not lift the credit hold: %+v %v", view.Waiting, err)
 	}
 }
+
+func TestRankingAnUnpricedCloudClassDoesNotBlockAnotherClaimant(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.JobCores(t, 4)
+	table := store.CreditRateTable{{Cores: 1, MicroPerSecond: 1}}
+	if _, err := f.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &table}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Rank(t, f.Admin, store.TierCloud, store.TierSelfHosted); err != nil {
+		t.Fatal(err)
+	}
+	livePolls(t, f, f.Launcher)
+	f.At(time.Second)
+	tenant, err := f.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.ReadRunView(t.Context(), "run"); err != nil {
+		t.Fatalf("an unpriced Cloud class broke the run view: %v", err)
+	}
+	wantAward(t, f, f.Self, capability.UnitNode, "job")
+}

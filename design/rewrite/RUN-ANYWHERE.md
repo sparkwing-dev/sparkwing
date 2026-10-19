@@ -50,10 +50,11 @@ self-hosted controller without runners shows `no_eligible_runner`.
 ## Which runs
 
 `SelectDispatch` is the one intake rule on every controller, Cloud and
-self-hosted alike (decision 13). An executing run that selects no runner, no
-`pool=` requirement and no burst preferences seals `dispatch=controller`.
-Local `sparkwing run` (origin `local`), burst, publish and explicitly placed
-runs keep host dispatch. Intake chooses only when the request leaves dispatch
+self-hosted alike (decision 13). Publish runs, local `sparkwing run` (origin
+`local`), burst runs, a runner selection other than `any`, and a `pool=`
+requirement keep host dispatch. Every other executing run seals
+`dispatch=controller`, including `name=` and `class=` requirements, whose
+units skip ranking for the claimants they name. Intake chooses only when the request leaves dispatch
 empty, and the public API clears client-supplied dispatch. CLI triggers,
 webhooks and schedules, including local schedules, all send it empty.
 

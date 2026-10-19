@@ -145,7 +145,7 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	}
 	named := demand
 	named.Kinds = nil
-	standing, err := unitEligibilityTx(ctx, tx, team, unit, named, eligibilityChecks{lock: true, fit: true})
+	standing, err := unitEligibilityTx(ctx, tx, team, unit, named, eligibilityChecks{lock: true, fit: true, claim: true})
 	if err != nil {
 		return UnitClaim{}, err
 	}

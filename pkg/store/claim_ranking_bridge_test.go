@@ -214,3 +214,35 @@ func (f *RankingFixture) Rotate(t *testing.T, prefix string) string {
 	}
 	return rotation.Issued.Capability.Prefix
 }
+
+// OpenAsk holds the job's ranking lock in an open transaction, as a scan does, and records the claimant's ask at
+// askedAt; the returned function commits it.
+func (f *RankingFixture) OpenAsk(t *testing.T, prefix string, rank int, askedAt time.Time) func() {
+	t.Helper()
+	tx, err := f.Store.beginTx(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
+	if err := lockRankedUnitTx(t.Context(), tx, "a", unit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(t.Context(), `INSERT INTO unit_asks(team,run_id,unit_kind,node_id,claimant,claim_rank,asked_at) VALUES ('a','run','node','job',?,?,?)`, prefix, rank, askedAt.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if err := tx.Commit(); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// JobCores sets every node's resolved core request.
+func (f *RankingFixture) JobCores(t *testing.T, cores float64) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"resources": map[string]any{"set": true, "value": map[string]any{"cores": map[string]any{"set": true, "value": cores}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Store.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, body)
+}

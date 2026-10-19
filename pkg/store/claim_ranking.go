@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -158,8 +159,18 @@ func unitReadyTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) (tim
 	return time.Unix(0, at.Int64).UTC(), at.Valid, err
 }
 
-// safety: a held claimant's ask is written under the unit's claim lock in the claim transaction, whether that
-// transaction awards another unit or nothing, so asks and awards serialize and later polls cannot erase it.
+// safety: every ranking decision for a unit, an ask or an award, holds the unit's ranking lock from before it reads
+// readiness until its transaction ends, so asks and awards serialize. Scans take these locks in one global unit
+// order, so two scans cannot deadlock.
+func lockRankedUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
+	if tx.dialect != DialectPostgres {
+		return nil
+	}
+	return advisoryLockTx(ctx, tx, "ranking:"+string(team)+"/"+unit.RunID+"/"+string(unit.Kind)+"/"+unit.NodeID+"/"+strconv.FormatInt(unit.SourceGeneration, 10))
+}
+
+// safety: a held claimant's ask is written in the claim transaction, whether that transaction awards another unit
+// or nothing, so later polls cannot erase it.
 func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request, claimant string, liveness time.Duration) (bool, error) {
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant}, false)
 	if err != nil {
@@ -167,6 +178,9 @@ func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, re
 	}
 	rank, err := claimRankTx(ctx, tx, team, chain, request)
 	if err != nil || rank <= 0 {
+		return false, err
+	}
+	if err := lockRankedUnitTx(ctx, tx, team, unit); err != nil {
 		return false, err
 	}
 	since, ready, err := unitReadyTx(ctx, tx, team, unit)
@@ -200,9 +214,6 @@ func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, re
 		better, err := claimRankTx(ctx, tx, team, theirs.chain, request)
 		if err != nil || better < 0 || better >= rank {
 			continue
-		}
-		if err := lockClaimOwnerTx(ctx, tx, team, unit); err != nil {
-			return false, err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO unit_asks(team,run_id,unit_kind,node_id,claimant,claim_rank,asked_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(team,run_id,unit_kind,node_id,claimant) DO UPDATE SET claim_rank=excluded.claim_rank,asked_at=excluded.asked_at WHERE unit_asks.asked_at<?`, team, unit.RunID, unit.Kind, unit.NodeID, claimant, rank, now.UnixNano(), since.UnixNano())
 		return true, err

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -170,9 +171,12 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 			return UnitRef{}, err
 		}
 	}
+	slices.SortFunc(candidates, func(a, b queuedClaim) int {
+		return strings.Compare(string(a.team)+"\x00"+a.unit.RunID+"\x00"+string(a.unit.Kind)+"\x00"+a.unit.NodeID, string(b.team)+"\x00"+b.unit.RunID+"\x00"+string(b.unit.Kind)+"\x00"+b.unit.NodeID)
+	})
 	var eligible []queuedClaim
 	for _, candidate := range candidates {
-		standing, err := unitEligibilityTx(ctx, tx, candidate.team, candidate.unit, demand, eligibilityChecks{lock: true, fit: true, billing: true})
+		standing, err := unitEligibilityTx(ctx, tx, candidate.team, candidate.unit, demand, eligibilityChecks{lock: true, fit: true, billing: true, claim: true})
 		if err != nil {
 			return UnitRef{}, err
 		}
