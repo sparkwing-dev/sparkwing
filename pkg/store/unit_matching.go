@@ -19,9 +19,8 @@ func resolveMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDeman
 	return readMatchingInputsTx(ctx, tx, request, unit, true)
 }
 
-// matchingRun holds the run-level matching reads, which a snapshot's per-node
-// placement decisions would otherwise repeat once per node. Only read-only
-// snapshot transactions reuse it, so no write in the same transaction can stale it.
+// perf: matchingRun memoizes run-level matching reads that a snapshot's per-node placement would repeat per node.
+// safety: only read-only snapshot transactions reuse it, so no write in the same transaction can stale it.
 type matchingRun struct {
 	chain   []authorityNode
 	here    bool

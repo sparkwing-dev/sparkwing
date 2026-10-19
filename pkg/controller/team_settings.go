@@ -2,9 +2,11 @@ package controller
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func (s *Server) handleTeamSettings(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -19,6 +21,9 @@ func (s *Server) handleTeamSettings(w http.ResponseWriter, r *http.Request, a ca
 		}
 		if request.MembersCanAddMachines == nil && request.ClaimRanking == nil {
 			return invalidEngineBody("set members_can_add_machines or claim_ranking")
+		}
+		if !s.cloudDeployment && request.ClaimRanking != nil && slices.Contains(*request.ClaimRanking, store.TierCloud) {
+			return invalidEngineBody("cloud is not a runner tier on a self-hosted controller, which has no Cloud launcher")
 		}
 		if err := tenant.SetAuthorizedTeamSettings(r.Context(), a, request); err != nil {
 			return accountMutationError(err)

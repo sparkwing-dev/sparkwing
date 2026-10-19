@@ -49,6 +49,10 @@ func (pipeline) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunConte
         sw.Job(plan, name.Get(ctx), func(ctx context.Context) error { sw.Info(ctx, "anywhere-generated-ran"); return nil })
         return nil
     })
+    sw.Job(p, "untyped", func(ctx context.Context) error { return nil }).Generate(func(_ context.Context, plan *sw.Plan) error {
+        sw.Job(plan, "untyped-generated", func(ctx context.Context) error { sw.Info(ctx, "anywhere-untyped-generated-ran"); return nil })
+        return nil
+    })
     return nil
 }
 
@@ -71,21 +75,7 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	repo := initSnapshotRepo(t)
-	directory := filepath.Join(repo, ".sparkwing")
-	if err := os.Mkdir(directory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	writeSDKFixture(t, directory, runAnywherePipeline)
-	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: anywhere\n    entrypoint: anywhere\n", 0o600)
-	runSnapshotGit(t, repo, "add", ".")
-	runSnapshotGit(t, repo, "commit", "--quiet", "-m", "anywhere source")
-	runSnapshotGit(t, repo, "remote", "add", "origin", "https://example.test/acme/anywhere.git")
+	repo := runAnywhereRepo(t)
 	endpoint := "http://" + listener.Addr().String()
 	state, controller, bearer := burstIntakeController(t, endpoint)
 	var mu sync.Mutex
@@ -143,7 +133,7 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	command := exec.CommandContext(triggerCtx, cli, "pipeline", "trigger", "anywhere", "--profile", "cloud", "--working-tree", "-o=json")
 	command.Dir = repo
 	output, err := command.CombinedOutput()
-	if err != nil || !strings.Contains(string(output), "anywhere-source-ran") || !strings.Contains(string(output), "anywhere-generated-ran") {
+	if err != nil || !strings.Contains(string(output), "anywhere-source-ran") || !strings.Contains(string(output), "anywhere-generated-ran") || !strings.Contains(string(output), "anywhere-untyped-generated-ran") {
 		t.Fatalf("run-anywhere trigger: %v\n%s", err, output)
 	}
 	mu.Lock()
@@ -152,5 +142,43 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 		if !slices.Contains(hosted, kind) {
 			t.Fatalf("the personal runner hosted %v, missing %s", hosted, kind)
 		}
+	}
+}
+
+func runAnywhereRepo(t *testing.T) string {
+	t.Helper()
+	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	repo := initSnapshotRepo(t)
+	directory := filepath.Join(repo, ".sparkwing")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSDKFixture(t, directory, runAnywherePipeline)
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: anywhere\n    entrypoint: anywhere\n", 0o600)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "--quiet", "-m", "anywhere source")
+	runSnapshotGit(t, repo, "remote", "add", "origin", "https://example.test/acme/anywhere.git")
+	return repo
+}
+
+func TestLocalRunEvaluatesTheSameGeneratorsAsARunnerHost(t *testing.T) {
+	cli, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := runAnywhereRepo(t)
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	offlineStopDaemon(t, os.Getenv("SPARKWING_HOME"))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, cli, "run", "anywhere", "-o=json")
+	command.Dir = repo
+	output, err := command.CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "anywhere-generated-ran") || !strings.Contains(string(output), "anywhere-untyped-generated-ran") {
+		t.Fatalf("local run: %v\n%s", err, output)
 	}
 }

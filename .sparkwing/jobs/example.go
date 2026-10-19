@@ -88,7 +88,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 
 	deploy := sparkwing.Job(plan, "deploy", &ExampleDeploy{Build: buildRef}).
 		Needs(approveDeploy).
-		// Its steps sleep 8.7s; the rest is headroom for a loaded machine.
+		// safety: the steps sleep 8.7s; the rest of the timeout is headroom for a loaded machine.
 		Timeout(30 * time.Second)
 	deploy.OnFailure("deploy-rollback", rollbackFn)
 

@@ -315,7 +315,8 @@ keep their owner-only claim scope until explicitly revoked.
 `claim_ranking` under `runs.read`. `PUT /api/v1/team/settings` requires
 `team.admin` and names at least one of them. `claim_ranking` takes distinct
 tiers from `here`, `personal`, `github-actions`, `self-hosted` and `cloud`, and
-an empty list means first come. Changes and their actor, store time and old/new
+an empty list means first come. A self-hosted controller has no Cloud launcher
+and refuses `cloud` with 400. Changes and their actor, store time and old/new
 values commit with an audit event.
 
 `PUT /api/v1/runners/{runner}/automation {"requested": true}` asks for a

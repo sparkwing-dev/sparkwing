@@ -56,8 +56,8 @@ plan step, generator evaluations and each job. The team's claim ranking orders
 the claimants, best first: `here` (the personal runner on the machine whose
 CLI started the run), `personal` (the requester's own machines),
 `github-actions`, `self-hosted` (the team's shared runners and a local
-controller's own queue) and `cloud` (the launcher, absent on self-hosted
-controllers). Each unit waits up to 5 seconds from readiness for the
+controller's own queue) and `cloud` (the launcher; a self-hosted controller has
+none and refuses `cloud` in a ranking). Each unit waits up to 5 seconds from readiness for the
 best-ranked claimant that is online. The best-ranked claimant present takes it
 at once. A claimant that asks while a better one is online is recorded. When
 the window closes, the best-ranked recorded asker has 2 more seconds to come

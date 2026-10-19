@@ -132,9 +132,14 @@ preferences and App `runner: cloud|github-actions|pool=<name>` take a run out
 of run anywhere. App `runner:` defaults to `anywhere`. `cloud` is an explicit
 pin that requires `class=cloud`, so only the launcher matches.
 
-## Open questions
+## Settled follow-ups
 
-1. A self-hosted controller still accepts `cloud` in a team ranking, which
-   has no effect there. Should validation refuse it?
-2. A generator on a job with no typed output fails remote evaluation with
-   "blob not found". Should a no-output source evaluate with a `null` result?
+1. A self-hosted controller refuses `cloud` in a team ranking with 400,
+   because it has no Cloud launcher.
+2. A generator on a job without a typed result evaluates with no result
+   (`null`) on every host. Both local and remote evaluation failed with "blob
+   not found" before.
+3. A runner's job claims are bounded by its measured headroom. Plans and
+   evaluations carry no core demand, so a runner on a busy machine can take a
+   plan and then not fit its one-core jobs until the machine has headroom
+   again. Ranking records no ask for a claimant that does not fit.

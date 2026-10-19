@@ -36,6 +36,14 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 			state.row.OutputRecord = &key
 			if missing {
 				state.row.OutputRecord = nil
+				var job nodeproto.JobSpec
+				if err := json.Unmarshal(state.row.Spec, &job); err != nil {
+					t.Fatal(err)
+				}
+				job.ResultStep = "result"
+				state.row.Spec, _ = json.Marshal(job)
+				hash, _ := executorHash(job)
+				state.row.SpecHash, input.SpecHash = string(hash), string(hash)
 			}
 			records := &selectedOutputRecords{t: t, key: key, authority: blob.Authority{CapabilityRef: "owner"}}
 			data := &scriptedStorage{onGet: func(context.Context, blob.GetRequest) (blob.VerifiedReader, error) {
@@ -61,5 +69,28 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 				t.Fatalf("body=%s failure=%+v reads=%d: %v", body, failure, records.reads, err)
 			}
 		})
+	}
+}
+
+func TestOwnerEvaluationGivesAnUntypedSourceANullResult(t *testing.T) {
+	input, state, deps, process := evaluationFixture(t)
+	state.row.OutputRecord = nil
+	input.Storage = StorageBinding{Bytes: &scriptedStorage{}, Records: &selectedOutputRecords{t: t}, Authority: blob.Authority{CapabilityRef: "owner"}}
+	deps.ReadOutput = nil
+	process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
+		if request.Op == nodeproto.OpEval {
+			if string(request.Input) != `null` {
+				t.Fatalf("untyped source evaluated with %s", request.Input)
+			}
+			return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+		}
+		return nil, nil
+	}
+	host, err := NewOwnerEvaluator(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body, failure, err := host.Expand(t.Context(), input); err != nil || failure != nil || string(body) != `{"jobs":[]}` {
+		t.Fatalf("untyped source expansion: %s %+v %v", body, failure, err)
 	}
 }

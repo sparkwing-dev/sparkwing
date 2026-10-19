@@ -42,7 +42,7 @@ type localRunRuntime struct {
 	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
 	publish          func(context.Context, string, string) error
 	follow           func(context.Context, string, string, io.Writer) error
-	// ownerClaimed releases a standalone queue held for the CLI's own trigger claim.
+	// safety: ownerClaimed releases a standalone queue held for the CLI's own trigger claim.
 	ownerClaimed func()
 }
 

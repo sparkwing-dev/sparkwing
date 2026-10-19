@@ -182,7 +182,9 @@ An explicit JSON `null` remains a valid output.
 ## Generated jobs
 
 `job.Generate` registers a callback that declares jobs after a successful or
-memoized source result. Read that result through a typed reference. The returned
+memoized source result. Read that result through a typed reference. A source
+without a typed result gives its generators no result, locally and on any
+runner. The returned
 `*sw.Generator` is a dependency target for `NeedsGenerated`.
 
 ```go

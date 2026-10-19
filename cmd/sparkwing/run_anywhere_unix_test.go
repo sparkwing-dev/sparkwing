@@ -209,3 +209,39 @@ func TestRunnersAutomationSeparatesTheOwnerRequestFromTheAdminApproval(t *testin
 		t.Fatalf("automation rows=%d %v", rows, err)
 	}
 }
+
+func TestRunAnywhereJobWaitsForTheRunnerHeadroomItsPlanDidNotNeed(t *testing.T) {
+	f := cloudDispatchTrigger(t)
+	builder := cloudDispatchMachine(t, f, "builder")
+	created, err := f.member.CreateRun(t.Context(), f.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.state.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "run-anywhere-test", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	poll := func(cores float64) *controllerwire.ClaimedUnit {
+		response, err := f.open(builder, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: runAnywhereKinds, OS: "linux", Arch: "amd64", AvailableCores: cores, AvailableMemoryBytes: 4 << 30})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Claim
+	}
+	plan := poll(0.25)
+	if plan == nil || plan.Unit != capability.UnitPlan {
+		t.Fatalf("a busy runner did not take the plan: %+v", plan)
+	}
+	runAnywherePlan(t, f, created, plan.Capability)
+	for range 3 {
+		if job := poll(0.25); job != nil {
+			t.Fatalf("a job needing one core went to a runner offering a quarter: %+v", job)
+		}
+	}
+	var asks int
+	if err := f.state.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM unit_asks`).Scan(&asks); err != nil || asks != 0 {
+		t.Fatalf("a claimant that does not fit recorded %d asks: %v", asks, err)
+	}
+	if job := poll(2); job == nil || job.Unit != capability.UnitNode || job.JobID != "verify" {
+		t.Fatalf("the job did not go to the runner once it had headroom: %+v", job)
+	}
+}
