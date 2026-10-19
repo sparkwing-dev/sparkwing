@@ -3,19 +3,57 @@
 package sdkinstall
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 )
 
-func TestQATrustBuildPutsTheQAProxyAheadOfTheCallers(t *testing.T) {
-	for _, tc := range []struct {
-		environment, want []string
-	}{
-		{nil, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=github.com/sparkwing-dev/sparkwing"}},
-		{[]string{"GOPROXY=file:///proxy", "GONOSUMDB=example.com/private"}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|file:///proxy", "GONOSUMDB=example.com/private,github.com/sparkwing-dev/sparkwing"}},
-	} {
-		if got := qaModuleEnvironment(tc.environment); !slices.Equal(got, tc.want) {
-			t.Errorf("qaModuleEnvironment(%v) = %v, want %v", tc.environment, got, tc.want)
-		}
+func TestQATrustBuildRoutesOnlyQAPinsThroughTheQAProxy(t *testing.T) {
+	dir := t.TempDir()
+	written := filepath.Join(dir, "written.env")
+	if err := os.WriteFile(written, []byte("GOPROXY=https://corp.example/proxy\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
+	qa := engine.Pin{SDK: engine.GoSDK, Version: "v0.68.0-qa.3"}
+	for _, tc := range []struct {
+		name     string
+		pin      engine.Pin
+		settings []string
+		want     []string
+	}{
+		{"release pin", engine.Pin{SDK: engine.GoSDK, Version: "v0.68.0"}, nil, nil},
+		{"replacement", engine.Pin{SDK: engine.GoSDK, Version: "v0.68.0-qa.3", Replacement: "../sdk"}, nil, nil},
+		{"defaults", qa, nil, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=github.com/sparkwing-dev/sparkwing"}},
+		{"go env -w", qa, []string{"GOENV=" + written}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://corp.example/proxy", "GONOSUMDB=github.com/sparkwing-dev/sparkwing"}},
+		{"GOPRIVATE seeds the exemption", qa, []string{"GOPRIVATE=example.com/private"}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=example.com/private,github.com/sparkwing-dev/sparkwing"}},
+		{"explicit GONOSUMDB", qa, []string{"GOPRIVATE=example.com/private", "GONOSUMDB=example.com/other"}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=example.com/other,github.com/sparkwing-dev/sparkwing"}},
+		{"offline", qa, []string{"GOPROXY=off"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := qaModuleEnvironment(t.Context(), dir, tc.pin, append(goEnvironment(dir), tc.settings...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func goEnvironment(dir string) []string {
+	var environment []string
+	for _, setting := range os.Environ() {
+		name, _, _ := strings.Cut(setting, "=")
+		switch name {
+		case "GOPROXY", "GONOSUMDB", "GOPRIVATE", "GONOPROXY", "GOFLAGS", "GOENV":
+			continue
+		}
+		environment = append(environment, setting)
+	}
+	return append(environment, "GOENV="+filepath.Join(dir, "missing.env"))
 }

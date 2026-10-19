@@ -2,4 +2,12 @@
 
 package sdkinstall
 
-func qaModuleEnvironment([]string) []string { return nil }
+import (
+	"context"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+)
+
+func qaModuleEnvironment(context.Context, string, engine.Pin, []string) ([]string, error) {
+	return nil, nil
+}

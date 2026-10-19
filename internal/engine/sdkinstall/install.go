@@ -80,7 +80,11 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		}
 	}
 	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
-	environment = append(environment, qaModuleEnvironment(environment)...)
+	qa, err := qaModuleEnvironment(ctx, dir, pin, environment)
+	if err != nil {
+		return nil, "", err
+	}
+	environment = append(environment, qa...)
 	var buildDiagnostics bytes.Buffer
 	options := bincache.CompileOptions{Environment: environment, Diagnostics: &buildDiagnostics, HashAllFiles: request.HashAllFiles}
 	name := "pipeline"
@@ -89,7 +93,6 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	}
 	path := filepath.Join(request.ExecutableDirectory, name)
 	var lease *bincache.Lease
-	var err error
 	if request.NoBincache {
 		err = bincache.CompileUncachedPipeline(ctx, dir, path, options)
 	} else {
@@ -197,7 +200,7 @@ func installTool(ctx context.Context, dir string, environment []string, name str
 	if err := gotoolchain.Run(ctx, command); err != nil {
 		return append(stdout.Bytes(), stderr.Bytes()...), fmt.Errorf("SDK dependency tool %s: %w", name, err)
 	}
-	if name == "go" && len(args) > 0 && args[0] == "list" {
+	if name == "go" && len(args) > 0 && (args[0] == "list" || args[0] == "env") {
 		return stdout.Bytes(), nil
 	}
 	return append(stdout.Bytes(), stderr.Bytes()...), nil
