@@ -809,3 +809,7 @@ Assigned to an Opus implementer (env 1087).
 - Decision 6(c) stands for every personal machine, approved or not: no team git credentials and no App installation tokens. A personal machine fetches with its owner's own git access.
 - A personal machine is eligible for an automated run only if its owner can read the run's repository and every extra repository the run needs. The controller checks this server-side via the App installation (the owner's linked GitHub login's collaborator permission on each repository), cached briefly, never from the machine's claim. An ineligible machine is skipped by ranking; it does not claim and fail.
 - Korey's words: "people should still only be able to run the repositories that they have access to".
+
+## 2026-10-18 Korey decision 17: `sparkwing update` refreshes runner services
+
+- `sparkwing update` calls `service.Refresh` after installing a new binary, restarting installed runner services (launchd, systemd, Windows service) onto it and saying which it restarted. No installed service means no change.
