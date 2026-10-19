@@ -825,3 +825,4 @@ Assigned to an Opus implementer (env 1087).
 - The billing page and run notices say the card was declined and to update it.
 - A successful charge clears that hold automatically and does not restart the clean-day count (like a no-fault release).
 - Customer-visible and approved; GitHub Actions blocks new paid minutes on payment failure while free usage continues.
+- Superseded the same day (Korey: "Do what you think is best"): `sparkwing update` replaces only the CLI, while runner services run `sparkwing-runner`, which updates itself from its controller (drain, replace, refresh units, restart). `service.Refresh` and its test are deleted; `sparkwing update` prints that runner services update themselves from their controller.
