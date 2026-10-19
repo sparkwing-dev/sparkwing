@@ -114,17 +114,12 @@ func (s *Server) localHostNode(w http.ResponseWriter, r *http.Request, a capabil
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger {
 		ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
-		snapshot, err := tenant.ReadOwnerSnapshot(ctx, a.Principal.Authority, a.Target.RunID)
+		node, err := tenant.ReadOwnerNode(ctx, a.Principal.Authority, store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID})
 		if err != nil {
 			return engineLookupError(err)
 		}
-		for _, node := range snapshot.Nodes {
-			if node.Ref.NodeID == a.Target.NodeID {
-				writeJSON(w, http.StatusOK, node)
-				return nil
-			}
-		}
-		return engineLookupError(store.ErrNotFound)
+		writeJSON(w, http.StatusOK, node)
+		return nil
 	}
 	node, err := tenant.ReadNode(r.Context(), store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID})
 	if err != nil {
@@ -284,11 +279,11 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 	if err != nil {
 		return capability.Principal{}, err
 	}
-	snapshot, err := tenant.ReadOwnerSnapshot(ctx, owner.Authority, a.Target.RunID)
+	nodes, err := tenant.ReadOwnerNodes(ctx, owner.Authority, a.Target.RunID)
 	if err != nil {
 		return capability.Principal{}, engineLookupError(err)
 	}
-	for _, node := range snapshot.Nodes {
+	for _, node := range nodes {
 		if node.OwnerCapabilityPrefix != owner.Capability.Prefix || node.CapabilityPrefix == "" || ref.ID != "" && ref.ID != node.CapabilityPrefix {
 			continue
 		}

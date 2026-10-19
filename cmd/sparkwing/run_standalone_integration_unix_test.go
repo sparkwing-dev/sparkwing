@@ -99,3 +99,62 @@ func main(){sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 		t.Fatal("standalone left its controller running", err)
 	}
 }
+
+func TestStandaloneParentAwaitsItsChildRun(t *testing.T) {
+	probe, err := net.Listen("unix", filepath.Join(t.TempDir(), "probe.sock"))
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		t.Skipf("sandbox refuses local sockets: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+	home, repo := t.TempDir(), initSnapshotRepo(t)
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: ci\n    entrypoint: ci\n  - name: child\n    entrypoint: child\n", 0o600)
+	writeSDKFixture(t, filepath.Join(repo, ".sparkwing"), `package main
+import (
+ "context"
+ "os"
+ "time"
+ sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+type out struct{Value string `+"`json:\"value\"`"+`}
+type stamp struct{sw.Base; sw.Produces[out]}
+func (j *stamp) Work(w *sw.Work)(*sw.WorkStep,error){return sw.Step(w,"run",func(context.Context)(out,error){return out{Value:"from-child"},nil}),nil}
+type child struct{sw.Base}
+func (child) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{sw.Job(p,"stamp",&stamp{});return nil}
+type parent struct{sw.Base}
+func (parent) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{
+ sw.Job(p,"await",func(ctx context.Context)error{
+  got,err:=sw.RunAndAwait[out,sw.NoInputs](ctx,"child","stamp",sw.WithFreshTimeout(90*time.Second))
+  if err!=nil{return err}
+  return os.WriteFile("child-result",[]byte(got.Value),0600)
+ });return nil
+}
+func main(){
+ sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return parent{}})
+ sw.Register("child",func()sw.Pipeline[sw.NoInputs]{return child{}})
+ sw.Main()
+}
+`)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-qm", "standalone parent and child")
+	t.Chdir(repo)
+	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--sw-allow-unadmitted", "--sw-no-update", "-o=json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags, args := runFlagsFromInvocation(inv)
+	var output bytes.Buffer
+	if err := runLocalCommand(t.Context(), "ci", flags, args, &output, localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()}); err != nil {
+		t.Fatalf("standalone parent: %v\n%s", err, &output)
+	}
+	if value, err := os.ReadFile(filepath.Join(repo, "child-result")); err != nil || string(value) != "from-child" {
+		t.Fatalf("standalone parent did not receive its child's output: %q %v\n%s", value, err, &output)
+	}
+}

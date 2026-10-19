@@ -122,6 +122,7 @@ type storeTx struct {
 	createdTeam          *TeamInfo
 	blobIO               *blobIO
 	rankingAsks          []unitAsk
+	matchingRuns         map[matchingRunKey]*matchingRun
 }
 
 // SetTestClock overrides the SQLite store clock until the test ends.

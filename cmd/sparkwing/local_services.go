@@ -37,6 +37,18 @@ func resolveLocalServices(ctx context.Context) (dashboardServices, error) {
 }
 
 func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices, error) {
+	return resolveLocalServicesWith(ctx, home, openLocalController)
+}
+
+func resolveStandaloneServicesAt(ctx context.Context, home string, claimed <-chan struct{}) (dashboardServices, error) {
+	return resolveLocalServicesWith(ctx, home, func(ctx context.Context, home string) (wingd.LocalController, error) {
+		return (localcontroller.Config{Bind: func(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
+			return bindStandaloneController(ctx, b, claimed)
+		}}).Open(ctx, home)
+	})
+}
+
+func resolveLocalServicesWith(ctx context.Context, home string, open func(context.Context, string) (wingd.LocalController, error)) (dashboardServices, error) {
 	if err := ctx.Err(); err != nil {
 		return dashboardServices{}, err
 	}
@@ -52,6 +64,7 @@ func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices
 	if err != nil {
 		return dashboardServices{}, err
 	}
+	config.Open = open
 	return composeLocalServices(ctx, config, host)
 }
 
@@ -96,6 +109,27 @@ func resolveLocalRuntimeConfig(home string) (wingd.LocalRuntimeConfig, error) {
 
 func openLocalController(ctx context.Context, home string) (wingd.LocalController, error) {
 	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
+}
+
+// bindStandaloneController holds the in-process queue until the foreground
+// CLI has claimed its own trigger. A standalone run cannot detach, so that
+// trigger belongs to the CLI, and the queue's first poll would otherwise take
+// it and refuse the CLI's here handoff. Child runs still need the queue's
+// trigger claims afterwards.
+func bindStandaloneController(ctx context.Context, b localcontroller.Binding, claimed <-chan struct{}) (localcontroller.Services, error) {
+	services, err := bindLocalController(ctx, b)
+	bearer := services.Runner.Bearer
+	if bearer != nil {
+		services.Runner.Bearer = func(ctx context.Context) (string, error) {
+			select {
+			case <-claimed:
+			case <-ctx.Done():
+				return "", context.Cause(ctx)
+			}
+			return bearer(ctx)
+		}
+	}
+	return services, err
 }
 
 func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ localcontroller.Services, err error) {

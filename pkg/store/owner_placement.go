@@ -89,14 +89,27 @@ func reservedOwnerDemandTx(ctx context.Context, tx *storeTx, owner capability.Pr
 }
 
 func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, ref NodeRef, reserved *match.Resources) (bool, error) {
+	demand, ok, err := ownerExecutionDemandTx(ctx, tx, owner, reserved)
+	if !ok || err != nil {
+		return false, err
+	}
+	return ownerDemandEligibleTx(ctx, tx, owner, demand, ref)
+}
+
+// ownerExecutionDemandTx reports ok=false when the owner has no current host observation.
+func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal, reserved *match.Resources) (UnitDemand, bool, error) {
 	demand, err := reservedOwnerDemandTx(ctx, tx, owner, reserved)
 	if err != nil {
 		var denied *apierr.Error
 		if errors.As(err, &denied) && denied.Code == apierr.Unavailable {
-			return false, nil
+			return UnitDemand{}, false, nil
 		}
-		return false, err
+		return UnitDemand{}, false, err
 	}
+	return demand, true, nil
+}
+
+func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, demand UnitDemand, ref NodeRef) (bool, error) {
 	unit := UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}
 	if _, err := claimKinds(owner.Capability, UnitDemand{Target: &unit}); err != nil {
 		return false, nil
