@@ -143,7 +143,7 @@ func TestOwnJobInputAndSlotHaveNoAdminBypass(t *testing.T) {
 			target.NodeID, target.SlotNodeID = "sibling", "sibling"
 			_, err := capability.Authorize(context.Background(), bindingCheck(allowBinding), route, auth, target)
 			requireCode(t, err, apierr.Forbidden)
-			auth.Principal.Capability.Grants = capability.Grants
+			auth.Principal.Capability.Grants = capability.Grants()
 			auth.Principal.Capability.Subject.Kind = capability.SubjectOperator
 			auth.Principal.Capability.Unit = ""
 			_, err = capability.Authorize(context.Background(), bindingCheck(allowBinding), route, auth, target)

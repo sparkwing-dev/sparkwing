@@ -1,4 +1,4 @@
-<!-- GENERATED from internal/capability.Routes by internal/apiref. Do not edit by hand; regenerate with go run ./internal/apiref > docs/api-reference.md. -->
+<!-- GENERATED from internal/capability.Routes() by internal/apiref. Do not edit by hand; regenerate with go run ./internal/apiref > docs/api-reference.md. -->
 # HTTP API reference
 
 <!-- design:begin -->

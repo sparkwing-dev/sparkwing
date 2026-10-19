@@ -61,7 +61,7 @@ func CanonicalRepository(in RepoInput) (Repository, error) {
 	if host == "" || path == "" || strings.ContainsAny(host+path, "\x00\r\n") {
 		return Repository{}, errors.New("repository remote requires host and path")
 	}
-	for _, provider := range CaseInsensitiveProviders {
+	for _, provider := range caseInsensitiveProviders {
 		if strings.EqualFold(u.Hostname(), provider) {
 			path = strings.ToLower(path)
 		}

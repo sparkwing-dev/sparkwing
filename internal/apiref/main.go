@@ -14,7 +14,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: apiref")
 		os.Exit(2)
 	}
-	if err := writeReference(os.Stdout, capability.Routes); err != nil {
+	if err := writeReference(os.Stdout, capability.Routes()); err != nil {
 		fmt.Fprintln(os.Stderr, "apiref:", err)
 		os.Exit(1)
 	}
@@ -22,7 +22,7 @@ func main() {
 
 func writeReference(out io.Writer, routes []capability.RoutePolicy) error {
 	var b strings.Builder
-	b.WriteString("<!-- GENERATED from internal/capability.Routes by internal/apiref. Do not edit by hand; regenerate with go run ./internal/apiref > docs/api-reference.md. -->\n")
+	b.WriteString("<!-- GENERATED from internal/capability.Routes() by internal/apiref. Do not edit by hand; regenerate with go run ./internal/apiref > docs/api-reference.md. -->\n")
 	b.WriteString("# HTTP API reference\n\n<!-- design:begin -->\n\n")
 	b.WriteString("The shared capability policy defines the controller HTTP and local API socket contract. Each row retains its audience, ownership lookup, authentication, retry policy and complete access alternatives. See [Controller HTTP API](api.md) for request and response contracts and [Authentication](auth.md) for credential issuance. Native controller bindings require separate integration evidence.\n\n")
 	b.WriteString("An access alternative is `credential / grants / binding / liveness`. Every grant joined with `+` is required. Alternatives separated by a line break stand alone. Grants, bindings and liveness exceptions cannot be combined across alternatives. External authentication has no capability alternative.\n\n")

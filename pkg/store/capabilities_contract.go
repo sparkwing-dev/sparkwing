@@ -47,7 +47,7 @@ func (r CapabilityRecord) Validate() error {
 	}
 	seen := map[capability.Grant]bool{}
 	for _, g := range c.Grants {
-		if !slices.Contains(capability.Grants, g) || seen[g] {
+		if !slices.Contains(capability.Grants(), g) || seen[g] {
 			return authorityError(apierr.IntegrityFailure, "invalid capability grants")
 		}
 		seen[g] = true
@@ -95,7 +95,7 @@ func (r CapabilityRecord) Validate() error {
 		if c.Delivery != capability.DeliveryDirect && c.Delivery != capability.DeliveryBootstrap {
 			return authorityError(apierr.IntegrityFailure, "invalid award delivery")
 		}
-		if c.Delivery == capability.DeliveryBootstrap && !slices.Contains(capability.BootstrapUnits, c.Unit) {
+		if c.Delivery == capability.DeliveryBootstrap && !slices.Contains(capability.BootstrapUnits(), c.Unit) {
 			return authorityError(apierr.IntegrityFailure, "invalid bootstrap unit")
 		}
 		b := c.Billing
@@ -125,7 +125,7 @@ func validAuthorityRef(ref capability.AuthorityRef) bool {
 }
 
 func awardPolicy(purpose capability.AwardPurpose) (capability.AwardPolicy, bool) {
-	for _, p := range capability.AwardPolicies {
+	for _, p := range capability.AwardPolicies() {
 		if p.Purpose == purpose {
 			return p, true
 		}

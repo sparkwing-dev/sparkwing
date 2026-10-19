@@ -132,7 +132,7 @@ func managementAuthorityTx(ctx context.Context, tx *storeTx, team Team, a capabi
 		path += "/rotate"
 	}
 	var policy capability.RoutePolicy
-	for _, route := range capability.Routes {
+	for _, route := range capability.Routes() {
 		if route.Method == method && route.Path == path {
 			policy = route
 			break

@@ -80,7 +80,7 @@ type LivenessPolicy struct {
 // LivenessPolicies requires a current binding unless the named exception applies.
 // Result replay checks the recorded actor, generation and digest; log tail checks its grace
 // deadline (persisted attempt finish plus limits.LogSealGrace), final attempt and absence of a newer claim. Neither exception reopens execution.
-var LivenessPolicies = []LivenessPolicy{
+var livenessPolicies = []LivenessPolicy{
 	{Class: LiveCredential},
 	{Class: LiveSensitive, RefuseCancel: true},
 	{Class: LiveReporting},
@@ -525,7 +525,7 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 
 // LookupRoute accepts the router's registered pattern, never a prefix match on untrusted paths.
 func LookupRoute(method, pattern string) (RoutePolicy, bool) {
-	for _, route := range Routes {
+	for _, route := range routes {
 		if route.Method == method && route.Path == pattern {
 			return route, true
 		}
@@ -536,8 +536,8 @@ func LookupRoute(method, pattern string) (RoutePolicy, bool) {
 // ValidateRoutes rejects missing, extra or duplicate registrations and malformed policy rows.
 // Registration keys are METHOD followed by one space and the router pattern.
 func ValidateRoutes(registered []string) error {
-	policies := make(map[string]bool, len(Routes))
-	for _, route := range Routes {
+	policies := make(map[string]bool, len(routes))
+	for _, route := range routes {
 		key := route.Method + " " + route.Path
 		if policies[key] {
 			return fmt.Errorf("duplicate route policy: %s", key)
@@ -586,11 +586,11 @@ func validateRoutePolicy(route RoutePolicy) error {
 				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindSourceBundle, BindData, BindExpansion, BindClaimSelection, BindOwnToken,
 				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval, BindSourceReport,
 			}, access.Binding) ||
-			!slices.ContainsFunc(LivenessPolicies, func(policy LivenessPolicy) bool { return policy.Class == access.Liveness }) {
+			!slices.ContainsFunc(livenessPolicies, func(policy LivenessPolicy) bool { return policy.Class == access.Liveness }) {
 			return fmt.Errorf("invalid access policy")
 		}
 		for i, grant := range access.Grants {
-			if !slices.Contains(Grants, grant) || slices.Contains(access.Grants[:i], grant) {
+			if !slices.Contains(grants, grant) || slices.Contains(access.Grants[:i], grant) {
 				return fmt.Errorf("unknown or duplicate grant")
 			}
 		}

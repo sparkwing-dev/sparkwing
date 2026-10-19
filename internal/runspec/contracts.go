@@ -47,24 +47,8 @@ type Repository struct {
 	Display string  `json:"display"`
 }
 
-// safety: RepoRule makes case and machine-scope rules available to conformance tests.
-type RepoRule struct {
-	Kind         string
-	Prefix       string
-	HostCase     string
-	PathCase     string
-	MachineLocal bool
-}
-
-// RepoRules enumerates every canonical identity form.
-var RepoRules = []RepoRule{
-	{"github", "gh:", "lower", "numeric_id", false},
-	{"git", "git:", "lower", "preserve_except_provider_table", false},
-	{"filesystem", "local:", "", "sha256_clean_absolute_path", true},
-}
-
-// CaseInsensitiveProviders is the complete approved path-folding set.
-var CaseInsensitiveProviders = []string{"gitlab.com", "bitbucket.org"}
+// caseInsensitiveProviders is the complete approved path-folding set.
+var caseInsensitiveProviders = []string{"gitlab.com", "bitbucket.org"}
 
 // safety: RepoUse separates machine-local storage from controller authorization scopes.
 type RepoUse string
