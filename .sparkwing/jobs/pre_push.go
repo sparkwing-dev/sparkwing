@@ -120,8 +120,14 @@ func runBuildTouched(ctx context.Context) error {
 
 // safety: go vet type-checks the test files go build never reads, so a test
 // that does not compile fails here rather than in the first suite that runs.
+// It also vets the qatrust flavour, which no default build compiles.
 func runVetTouched(ctx context.Context) error {
-	return goOverTouchedPackages(ctx, "vet", "Go file(s)", existingGoFiles)
+	return overTouchedPackages(ctx, "vet-touched", "compile", "Go file(s)", existingGoFiles,
+		func(_ string, pkgs []string) string {
+			args := strings.Join(pkgs, " ")
+			cores := prePushTaskCores(runtime.NumCPU())
+			return goCommandAt(cores, "vet", args) + " && " + goCommandAt(cores, "vet", "-tags qatrust "+args)
+		})
 }
 
 // perf: the fast linter subset over the packages the push touches. The full
