@@ -70,9 +70,22 @@ type Options struct {
 	// Nil uses the standard HTTP transport.
 	BundleTransport http.RoundTripper
 	// ReadFile reads one committed file through host authority; nil fetches it with Access.
-	ReadFile func(ctx context.Context, sha, name string) ([]byte, bool, error)
-	Base     procenv.Base
+	ReadFile  func(ctx context.Context, sha, name string) ([]byte, bool, error)
+	Base      procenv.Base
+	GitAccess GitAccess
 }
+
+// GitAccess selects whose credentials fetch remote source; hosts derive it from authenticated placement.
+type GitAccess uint8
+
+const (
+	// GitAccessTeam fetches with the controller-released team or App credential through pinned hosts.
+	GitAccessTeam GitAccess = iota
+	// GitAccessOwner fetches with the host owner's own Git configuration and never requests team credentials.
+	GitAccessOwner
+)
+
+func (o Options) ownerGit() bool { return o.Base.Local || o.GitAccess == GitAccessOwner }
 
 // Entry contains the acquired checkout and SDK command without protocol arguments.
 type Entry struct {

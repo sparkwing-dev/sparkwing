@@ -32,6 +32,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -394,6 +395,55 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 			}
 			if !strings.Contains(string(output), want) {
 				t.Fatalf("installed entrypoint did not reach its production HTTP operation: %s", output)
+			}
+		})
+	}
+}
+
+func TestProductionRunnerFetchesPrivateSourceByPlacement(t *testing.T) {
+	for _, owner := range []bool{true, false} {
+		t.Run(fmt.Sprintf("owner=%t", owner), func(t *testing.T) {
+			hosting, unit := productionNativeAward(t, capability.UnitNode)
+			unit.OwnerMachine = owner
+			repository, sha := sourcetest.Repository(t)
+			remote := "https://8.8.8.8/acme/project"
+			log := sourcetest.Remote(t, map[string]string{remote: repository})
+			helperLog := filepath.Join(t.TempDir(), "helper.log")
+			sourcetest.Write(t, filepath.Join(os.Getenv("HOME"), ".gitconfig"), "[credential]\n\thelper = \"!f() { echo called >> "+helperLog+"; echo username=owner; echo password=owner-secret; }; f\"\n")
+			controller, err := client.NewEngineClient(client.EngineOptions{URL: hosting.ControllerURL, HTTP: hosting.HTTP, Bearer: fixedBearer(unit.Capability)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			services, _, err := hosting.Bind(t.Context(), unit, controller)
+			if services.Close != nil {
+				t.Cleanup(func() { _ = services.Close() })
+			}
+			var socket *net.OpError
+			if err != nil && errors.As(err, &socket) && socket.Op == "listen" && errors.Is(err, syscall.EPERM) {
+				t.Skipf("native host reached the sandbox socket boundary: %v", err)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/acme/project", RemoteURL: remote, SHA: sha}, services.Config.Source)
+			if entry != nil {
+				t.Cleanup(func() { _ = entry.Close() })
+			}
+			_, helperErr := os.Stat(helperLog)
+			if owner {
+				if err != nil || helperErr != nil {
+					t.Fatalf("personal runner checkout = %v, owner helper used = %v", err, helperErr == nil)
+				}
+				if got := sourcetest.Git(t, entry.Directory, "rev-parse", "HEAD"); got != sha {
+					t.Fatalf("checked out %s, want %s", got, sha)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "authorize source") || helperErr == nil {
+				t.Fatalf("shared runner checkout = %v, owner helper used = %v", err, helperErr == nil)
+			}
+			if commands, _ := os.ReadFile(log); strings.Contains(string(commands), `"fetch"`) {
+				t.Fatal("shared runner fetched without a controller-released credential")
 			}
 		})
 	}

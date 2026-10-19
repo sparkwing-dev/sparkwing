@@ -82,7 +82,7 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		return hereHostSession{}, err
 	}
 	if award.Request.Request.Source.Location.LocalCheckout == "" {
-		sourceOptions.Base.OwnerMachine = award.OwnerMachine
+		sourceOptions.Base.OwnerMachine, sourceOptions.GitAccess = award.OwnerMachine, gitAccess(award.OwnerMachine)
 		spec, err := source.ForRequest(award.Request)
 		if err != nil {
 			return hereHostSession{}, err

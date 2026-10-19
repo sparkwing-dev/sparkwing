@@ -162,7 +162,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 	}
 	defer func() { resultErr = errors.Join(resultErr, selection.execution.Close()) }()
 	options.SDK = ""
-	options.Base = procenv.Base{Local: true, Captured: captured, Masker: masker}
+	options.Base, options.GitAccess = procenv.Base{Local: true, Captured: captured, Masker: masker}, source.GitAccessOwner
 	install := options.InstallSDK
 	options.InstallSDK = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 		if err := resolveSparks(ctx, filepath.Join(request.Directory, request.PipelineDir), flags.noUpdate); err != nil {

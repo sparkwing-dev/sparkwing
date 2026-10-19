@@ -82,7 +82,11 @@ never receives one, and no setting changes that: the release answers 403 with
 reason `personal_machine`. Cloud identity comes from the award and current
 enrollment. Shared or personal comes from the machine's enrollment record, not
 from anything the runner reports. A personal machine fetches with its owner's
-own git access, under the owner's repository allow-list.
+own git access, under the owner's repository allow-list. The controller marks a
+claim as the owner's own machine from the claimant's enrollment, and the host
+then uses the owner's Git configuration and credential helper and never asks the
+controller for a team credential. Every other host asks the controller and never
+reads the host account's Git credential helper.
 
 Each release records the repository, host, run, job, generation, machine,
 owner, capability prefix and store timestamp. Audit failure returns no

@@ -128,7 +128,9 @@ local run, and from the hosting process's environment when the controller
 authenticates the claimant as the requester's own host or a personal machine
 the requester enrolled. Credentials embedded in a
 `GOPROXY` entry or the `GOSUMDB` URL are registered with the masker before any
-process starts, so logs show `***` in their place. Cloud and shared runners drop
+process starts, so logs show `***` in their place. A `GOPROXY` entry or
+`GOSUMDB` URL with a path or query is masked whole, because proxies may carry an
+access token there. Cloud and shared runners drop
 these settings unless the operator's allow list names them.
 
 | Variable | Class | Policy |

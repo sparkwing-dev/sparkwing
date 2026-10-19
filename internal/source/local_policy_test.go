@@ -39,7 +39,7 @@ func TestCommittedCheckoutPolicyHasLocalRemoteParity(t *testing.T) {
 						spec.RemoteURL, spec.LocalCheckout = "", parent
 					}
 					credential := source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private", ExtraRepositories: []string{"team/library"}}
-					entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{Workspace: t.TempDir(), Access: &access{credential: credential}, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
+					entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{Workspace: t.TempDir(), Access: &access{credential: credential}, Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
 					if err != nil {
 						t.Fatal(err)
 					}

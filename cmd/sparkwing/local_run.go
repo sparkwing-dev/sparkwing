@@ -156,6 +156,13 @@ func openProfileCache(ctx context.Context, environment []string, profile string,
 	return cache, closeCache, nil
 }
 
+func gitAccess(owner bool) source.GitAccess {
+	if owner {
+		return source.GitAccessOwner
+	}
+	return source.GitAccessTeam
+}
+
 func hostSourceOptions(home string, captured []string, masker *secrets.Masker, local bool) (source.Options, error) {
 	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
 	if err != nil {
@@ -169,6 +176,7 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 		Engines: engines, SDK: engine.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: captured, SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
+		GitAccess: gitAccess(local),
 	}, nil
 }
 

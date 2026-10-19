@@ -42,7 +42,7 @@ func FuzzSourceAuthorizationPrecedesBytes(f *testing.F) {
 		if fresh {
 			workspace = filepath.Join(workspace, "new-workspace")
 		}
-		entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{Workspace: workspace, Access: a, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
+		entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{Workspace: workspace, Access: a, Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
 		if entry != nil {
 			_ = entry.Close()
 		}
