@@ -69,11 +69,6 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID, requestSeal.Request); err != nil {
 		return profile, match.Demand{}, err
 	}
-	if runAnywhere(requestSeal.Request) {
-		if _, err := claimRankTx(ctx, tx, Team(team), chain, unit.RunID); err != nil {
-			return profile, match.Demand{}, err
-		}
-	}
 	if requestSeal.Request.Burst != nil {
 		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {
 			return profile, match.Demand{}, err
@@ -135,7 +130,10 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if !validMatchingResources(profile.Capacity) || !validMatchingResources(request.Available) || !validMatchingResources(demand.Request) {
 		return profile, demand, authorityError(apierr.BadRequest, "invalid claim resources")
 	}
-	return profile, demand, nil
+	if rankedUnit(requestSeal.Request, demand) {
+		_, err = claimRankTx(ctx, tx, Team(team), chain, requestSeal.Request)
+	}
+	return profile, demand, err
 }
 
 func matchingResources(v runspec.Resources) match.Resources {

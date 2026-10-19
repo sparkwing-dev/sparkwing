@@ -111,6 +111,7 @@ var Routes = []RoutePolicy{
 	route("PUT", "/api/v1/team/settings", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("DELETE", "/api/v1/runners/{runner}", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("PUT", "/api/v1/runners/{runner}/automation", OwnerTeam, RetrySafe, member(RunsWrite)),
+	route("PUT", "/api/v1/runners/{runner}/automation/approval", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("POST", "/api/v1/runners/github", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
 	route("DELETE", "/api/v1/runners/github/{repository}", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("POST", "/api/v1/pools/{pool}/rules", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),

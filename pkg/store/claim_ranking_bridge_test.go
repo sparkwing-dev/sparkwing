@@ -17,11 +17,11 @@ const rankingSHA = "0123456789abcdef0123456789abcdef01234567"
 
 // RankingFixture is one run-anywhere run with a plan unit, a ready job and one claimant per tier.
 type RankingFixture struct {
-	Store                                     *Store
-	Self, Personal, Actions, Launcher, Second string
-	Owner, Admin, Member                      Actor
-	ReadyAt                                   time.Time
-	now                                       time.Time
+	Store                                             *Store
+	Self, Personal, Tablet, Actions, Launcher, Second string
+	Owner, Admin, Member                              Actor
+	ReadyAt                                           time.Time
+	now                                               time.Time
 }
 
 // TestOnlyRankingFixture seals a run-anywhere run whose plan unit and job become ready at ReadyAt.
@@ -40,6 +40,7 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	f.Admin = rankingMember(t, s, "admin", RoleOwner)
 	f.Member = rankingMember(t, s, "member", RoleEditor)
 	f.Personal = f.personalMachine(t, f.Owner, "laptop")
+	f.Tablet = f.personalMachine(t, f.Owner, "tablet")
 	f.Second = f.personalMachine(t, f.Member, "desktop")
 	actions := authorityRoot("actions", "a")
 	actions.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
@@ -100,7 +101,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Store.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch=?`, body, string(request.Dispatch))
+	f.Store.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch=?,trigger_source=?`, body, string(request.Dispatch), string(request.Origin))
 }
 
 // Poll records an ordered-queue ask from the claimant at the current clock.
@@ -137,6 +138,29 @@ func (f *RankingFixture) Rank(t *testing.T, actor Actor, tiers ...string) error 
 func (f *RankingFixture) AddJob(t *testing.T, id string, readyAt time.Time) {
 	t.Helper()
 	f.Store.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,status,?,spec_json,execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`, id, readyAt.UnixNano())
+}
+
+// Approve has the owner request automated runs for the machine and the admin approve them.
+func (f *RankingFixture) Approve(t *testing.T, machine string) {
+	t.Helper()
+	tenant := &Tenant{s: f.Store, team: "a"}
+	if _, err := tenant.RequestMachineAutomation(t.Context(), f.Owner.Authority, machine, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.ApproveMachineAutomation(t.Context(), teamAuthorization(t, f.Store, f.Admin, "a", "PUT", "/api/v1/runners/{runner}/automation/approval"), machine, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// AdminAuthorization authorizes the approval route as the given member.
+func (f *RankingFixture) AdminAuthorization(t *testing.T, actor Actor) (capability.Authorized, error) {
+	t.Helper()
+	p, err := f.Store.ResolveAuthority(t.Context(), actor.Authority)
+	if err != nil {
+		return capability.Authorized{}, err
+	}
+	route, _ := capability.LookupRoute("PUT", "/api/v1/runners/{runner}/automation/approval")
+	return capability.Authorize(t.Context(), f.Store, route, capability.Authenticated{Principal: p, Method: "PUT", Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: "a"})
 }
 
 // LinkGitHub links the account to a GitHub user ID.

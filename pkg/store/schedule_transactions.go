@@ -250,7 +250,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 			request.Team = string(t.team)
 			request.Mode = runspec.IntakeExecute
 			request.Origin = runspec.OriginSchedule
-			request.Dispatch = runspec.DispatchController
+			request.Dispatch = ""
 			request.RequestedArgs = row.Args
 			request.Git.App = runspec.Optional[runspec.AppFacts]{}
 			request.Lineage = runspec.Lineage{}

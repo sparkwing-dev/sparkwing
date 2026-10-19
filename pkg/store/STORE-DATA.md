@@ -508,27 +508,32 @@ collect possible copied bytes and release every quota dimension.
 
 ## Run-anywhere claim ranking
 
-A run is run anywhere when its sealed request executes with controller dispatch
-and no runner selection, `pool=` or `class=cloud` requirement, or burst
-preferences. `readMatchingInputsTx` refuses a claimant whose tier is outside the
-team's `claim_ranking`. Tiers come from the authenticated chain: here, personal,
-github-actions, self-hosted or cloud. An empty ranking means first come, and an
-unset ranking means the default order.
+`SelectDispatch` seals controller dispatch for an executing run with no runner
+selection, `pool=` requirement or burst preferences, on every controller. A
+unit is ranked when its run is run anywhere and the unit's own requirements pin
+no `pool=`, `name=` or `class=` term. `readMatchingInputsTx` refuses a claimant
+whose tier is outside the team's `claim_ranking`. Tiers come from the
+authenticated chain: here (the personal machine sealed as `OriginMachine` at
+intake), personal, github-actions, self-hosted or cloud. An empty ranking means
+first come, and an unset ranking means the default order.
 
-`unitPlacementTx` holds a plan, eval or job claim for `limits.RankingWindow`
-from the unit's readiness. A claim waits while a better-ranked eligible
-claimant is live and wants the unit's kind. For one more window, it waits only
-for a better-ranked claimant whose last poll fell inside the first window. The
-scan reuses the burst placement observations. Launcher and Actions polls are
-recorded with their kinds, so every tier can be observed. A launcher counts only
-while `eligibleUnitBillingTx` admits the unit. Claims lock the owner, run and
-node rows before evaluating holds, so concurrent claims serialize and one award
-wins.
+`unitPlacementTx` resolves a ranked unit's placement once and applies only the
+ranking. Inside `limits.RankingWindow` from readiness, a claim waits while a
+better-ranked eligible claimant is live and wants the unit's kind, and the
+waiting claim's ask is upserted into `unit_asks` after its transaction rolls
+back. For `limits.RankingAward` after the window, a claim waits only for a
+better-ranked ask recorded inside the window. An award deletes the unit's asks.
+A launcher counts only while `eligibleUnitBillingTx` admits the unit. Claims
+lock the owner, run and node rows before evaluating holds, so concurrent claims
+serialize and one award wins.
 
-A personal machine takes a run only for its owner. For a schedule, the owner is
-the arming account. For an App run, it is the member whose GitHub identity
-matches the sealed sender ID. Automated runs also need the owner's
-`machine_automation` opt-in for that machine.
+A personal machine takes a manual run only for its owner. An automated run
+(App or schedule) also needs a `machine_automation` row with an admin approval
+for the machine's root prefix and owner. The run's owner must be that owner:
+the arming account for a schedule, or the member linked to the sealed GitHub
+author for an App run. Every repository the run reads needs a fresh
+`machine_repo_access` row with `allowed=1`, written by the controller from the
+GitHub App. Both tables cascade from the machine's capability row.
 
 ## Database observations
 

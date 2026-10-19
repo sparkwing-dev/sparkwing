@@ -16,7 +16,9 @@ import (
 
 func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	var out UnitClaim
+	var asks []unitAsk
 	err := s.inTx(ctx, func(tx *storeTx) error {
+		defer func() { asks = tx.rankingAsks }()
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
@@ -51,7 +53,7 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 		if errors.As(err, &unpriced) && unpriced.RunID != "" && unpriced.NodeID != "" {
 			err = errors.Join(err, s.failUnpricedClaim(ctx, demand, unpriced))
 		}
-		return UnitClaim{}, err
+		return UnitClaim{}, errors.Join(err, recordUnitAsks(ctx, s, asks))
 	}
 	return out, nil
 }
@@ -171,6 +173,9 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	}
 	if placement.hold {
 		return UnitClaim{}, authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=?`, team, unit.RunID, unit.Kind, unit.NodeID); err != nil {
+		return UnitClaim{}, err
 	}
 	unitID, err := encodeAwardUnit(unit)
 	if err != nil {

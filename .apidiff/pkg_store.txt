@@ -147,6 +147,9 @@ type ApprovalResolution struct {
 const ApprovalResolutionApproved = "approved"
 const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
+const AutomationApproved = "approved"
+const AutomationNone = "none"
+const AutomationRequested = "requested"
 type BillingStanding struct {
 	Tier           string
 	CloudVCPU      int64
@@ -720,6 +723,7 @@ const DecisionReady DecisionKind = "ready"
 const DecisionTerminal DecisionKind = "terminal"
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
+var DefaultClaimRanking = []string{TierHere, TierPersonal, TierActions, TierSelfHosted, TierCloud}
 const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultCreditGraceSeconds = 10 * 60
 const DefaultCreditMaxChargeSeconds = 30
@@ -1004,6 +1008,7 @@ type GitHubAppAutomation struct {
 	InstallationID int64
 	Enabled        bool
 	EnabledBy      string
+	Runner         GitHubAppRunner
 	EnabledAt      time.Time
 }
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
@@ -1021,6 +1026,10 @@ type GitHubAppInstallation struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
+type GitHubAppRunner string
+const GitHubAppRunnerActions GitHubAppRunner = "github-actions"
+const GitHubAppRunnerAnywhere GitHubAppRunner = "anywhere"
+const GitHubAppRunnerCloud GitHubAppRunner = "cloud"
 type GitHubAppTrigger struct {
 	Team                      Team
 	RepositoryID              int64
@@ -1040,6 +1049,7 @@ type GitHubAppTrigger struct {
 	ReleasePrereleased        bool
 	BranchCreate              bool
 	BranchDelete              bool
+	Runner                    GitHubAppRunner
 	CreatedBy                 string
 	CreatedAt                 time.Time
 }
@@ -1128,6 +1138,8 @@ type IntakeRequest struct {
 	LocalSecrets       map[string]string
 	VerifiedDeliveryID string
 	RetryMode          string
+
+	OriginMachine string
 }
 func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, team Team) (ComputeLimits, bool, error)
 type Invitation struct {
@@ -1249,6 +1261,7 @@ const MinCardChargeCents = 50
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
+const NoCreditsHold = "team has no remaining credits; add credits or a payment method"
 type Node struct {
 	RunID        string
 	NodeID       string
@@ -1565,6 +1578,7 @@ var PaidTierQuota = StorageQuota{
 	MaxBytesPerMonth: 100 << 30,
 	MaxObjectsPerRun: 100_000,
 }
+func ParseGitHubAppRunner(raw string) (GitHubAppRunner, error)
 func ParseGitHubRepo(slug string) (GitHubRepo, bool)
 func ParseRunFilter(q url.Values) RunFilter
 func ParseRunFilterValidated(q url.Values) (RunFilter, error)
@@ -1588,6 +1602,10 @@ type PaymentWarning struct {
 	Fingerprint   string
 
 	Actionable bool
+}
+type PersonalRepoAccessNeed struct {
+	OwnerGitHubID int64
+	Repository    string
 }
 type PipelineProfile struct {
 	Pipeline        string
@@ -1758,10 +1776,6 @@ type RegisteredAgent struct {
 	Profile  match.Profile
 	LastSeen time.Time
 }
-type RepoDispatch string
-const RepoDispatchController RepoDispatch = "controller"
-const RepoDispatchTrigger RepoDispatch = "trigger"
-func RepoKey(owner, name string) string
 func RequestPlacement(request runspec.Request) nodeproto.Placement
 type RetentionRequest struct {
 	Lease SingletonLease
@@ -1957,6 +1971,7 @@ type RunView struct {
 	Attempts []NodeAttempt
 	Logs     []blob.LogSubject
 	Failures []string
+	Waiting  *UnclaimedUnit
 }
 const RunnerIdentityHeader = "X-Sparkwing-Runner"
 const RunnerTokenLifetime = 90 * 24 * time.Hour
@@ -2054,6 +2069,9 @@ var SchemaTables = []SchemaTable{
 	{Name: "leases", Owner: SchemaOperator},
 	{Name: "memberships", Owner: SchemaTenant},
 	{Name: "overflow_controls", Owner: SchemaTenant},
+	{Name: "machine_automation", Owner: SchemaTenant},
+	{Name: "machine_repo_access", Owner: SchemaTenant},
+	{Name: "unit_asks", Owner: SchemaTenant},
 	{Name: "node_attempts", Owner: SchemaTenant},
 	{Name: "log_segments", Owner: SchemaTenant},
 	{Name: "log_streams", Owner: SchemaTenant},
@@ -2169,6 +2187,7 @@ type SegmentCommit struct {
 	IncompleteReason string
 	RetentionClass   string
 }
+func SelectDispatch(request runspec.Request) runspec.Dispatch
 type Session struct {
 	ID               string
 	Principal        string
@@ -2559,6 +2578,7 @@ func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]str
 func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID, kind string, payload []byte) (int64, error)
 func (t *Tenant) ApplyProfileFold(ctx context.Context, delivery EffectDelivery, observations map[string]ProfileObservation) (bool, error)
+func (t *Tenant) ApproveMachineAutomation(ctx context.Context, a capability.Authorized, machine string, approved bool) (string, error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
 func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capability.Authorized, row GitHubAppInstallation) (GitHubAppInstallation, error)
@@ -2662,6 +2682,7 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) NodeIsAncestor(ctx context.Context, runID, ancestor, node string) (found bool, err error)
 func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, body *controllerwire.ScheduleOverride) (string, error)
 func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, paused bool) (string, error)
+func (t *Tenant) PersonalRepoAccessNeeds(ctx context.Context, prefix string) ([]PersonalRepoAccessNeed, error)
 func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.Authorized, kind capability.BillingPageKind, amount int64, key string) (capability.BillingPage, error)
 func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, actor Actor) (string, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
@@ -2698,6 +2719,7 @@ func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error)
 func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRun int64) (int64, error)
+func (t *Tenant) RecordPersonalRepoAccess(ctx context.Context, prefix string, access map[string]bool) error
 func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error
@@ -2721,6 +2743,7 @@ func (t *Tenant) ReplaceAuthorizedLocalSchedules(ctx context.Context, a capabili
 func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Authorized, body controllerwire.ScheduleRepoRequest) ([]string, []string, error)
 func (t *Tenant) ReplayRun(ctx context.Context, request IntakeRequest) (AdmissionResult, bool, error)
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error
+func (t *Tenant) RequestMachineAutomation(ctx context.Context, authority capability.AuthorityRef, machine string, requested bool) (string, error)
 func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error)
 func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error)
 func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.AuthorityRef, u SourceUpload) (SourceUpload, error)
@@ -2742,7 +2765,7 @@ func (t *Tenant) RunAuthorizedSchedule(ctx context.Context, a capability.Authori
 func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Authorized, trust bool) error
 func (t *Tenant) SetAuthorizedGitHubExtraRepos(ctx context.Context, a capability.Authorized, repository string, extras []string, ids map[string]int64) ([]string, error)
 func (t *Tenant) SetAuthorizedSpendBudget(ctx context.Context, a capability.Authorized, cents int64) error
-func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, settings controllerwire.TeamSettings) error
+func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update controllerwire.TeamSettingsUpdate) error
 func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
@@ -2783,7 +2806,12 @@ func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, ru
 func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, sealed SealedSecret) error
 func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error
 func (t *Tenant) WriteUsage(ctx context.Context, a capability.Authorized, usage NodeUsage) error
+const TierActions = "github-actions"
+const TierCloud = "cloud"
+const TierHere = "here"
+const TierPersonal = "personal"
 func TierQuota(tier string) (StorageQuota, bool)
+const TierSelfHosted = "self-hosted"
 type TransitionCause string
 type TransitionExtra struct {
 	Publication *runspec.PublishedAttempt
@@ -2836,6 +2864,15 @@ type TriggerFilter struct {
 }
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
+type UnclaimedUnit struct {
+	Kind   capability.UnitKind
+	NodeID string
+	Since  time.Time
+
+	CreditHold string
+
+	NoEligible string
+}
 type UnitClaim struct {
 	Team             Team
 	Kind             capability.UnitKind
@@ -2897,6 +2934,7 @@ type UsageDelta struct {
 }
 func ValidComputeLimit(name string) bool
 func ValidRunnerName(name string) bool
+func ValidateClaimRanking(tiers []string) error
 func ValidateEventKind(kind string) error
 func ValidateGitHubTagPatterns(patterns []string) error
 func ValidateSlug(slug string) error

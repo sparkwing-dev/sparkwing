@@ -187,5 +187,9 @@ func capabilityMetadataTx(ctx context.Context, tx *storeTx, prefix string) (capa
 	}
 	row.LastUsedAt = stateTime(last)
 	row.GitCredentials = c.Subject.Kind == capability.SubjectMachine && consent == 1
-	return c, row, nil
+	if personal, err := personalRootTx(ctx, tx, []authorityNode{{principal: capability.Principal{Capability: c}}}); err != nil || !personal {
+		return c, row, err
+	}
+	row.Automation, err = machineAutomationTx(ctx, tx, Team(c.Team), c.Prefix)
+	return c, row, err
 }

@@ -57,12 +57,22 @@ func runAnywhere(r runspec.Request) bool {
 	if r.Mode != runspec.IntakeExecute || r.Dispatch != runspec.DispatchController || r.Burst != nil {
 		return false
 	}
-	if r.Options.Runner.Set && r.Options.Runner.Value.Kind != runspec.RunnerAny {
-		return false
+	return !(r.Options.Runner.Set && r.Options.Runner.Value.Kind != runspec.RunnerAny) && !slices.ContainsFunc(r.Options.Requires.Value, pinnedTerm)
+}
+
+// safety: a unit whose own requirements pin a runner, pool or class skips ranking so a dropped tier cannot strand it.
+func rankedUnit(r runspec.Request, demand match.Demand) bool {
+	return runAnywhere(r) && !slices.ContainsFunc(demand.Selector, pinnedTerm)
+}
+
+func pinnedTerm(term string) bool {
+	for _, alternative := range strings.Split(term, ",") {
+		alternative = strings.TrimSpace(alternative)
+		if strings.HasPrefix(alternative, "pool=") || strings.HasPrefix(alternative, "name=") || strings.HasPrefix(alternative, "class=") {
+			return true
+		}
 	}
-	return !slices.ContainsFunc(r.Options.Requires.Value, func(term string) bool {
-		return requiresPool(term) || slices.Contains(strings.Split(strings.ReplaceAll(term, " ", ""), ","), "class="+match.ClassCloud)
-	})
+	return false
 }
 
 func automatedRun(r runspec.Request) bool {
@@ -78,42 +88,57 @@ func sealedRequestTx(ctx context.Context, tx *storeTx, team Team, run string) (r
 	return seal, json.Unmarshal(body, &seal)
 }
 
-func claimTierTx(ctx context.Context, tx *storeTx, chain []authorityNode, run string) (string, error) {
+func claimTierTx(ctx context.Context, tx *storeTx, chain []authorityNode, request runspec.Request) (string, error) {
 	if launcherClaimant(chain[0].principal.Capability) {
 		return TierCloud, nil
 	}
 	for _, ancestor := range chain {
-		c := ancestor.principal.Capability
-		if c.Purpose == capability.PurposeHere && c.Binding.RunID == run {
-			return TierHere, nil
-		}
-		if c.Binding.Kind == capability.BindingPush {
+		if ancestor.principal.Capability.Binding.Kind == capability.BindingPush {
 			return TierActions, nil
 		}
 	}
 	root := chain[len(chain)-1].principal.Capability
+	if root.Subject.Kind == capability.SubjectLocal {
+		return TierSelfHosted, nil
+	}
 	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
 		return "", nil
 	}
-	record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
-	if err != nil || record.Origin == nil || !record.Origin.Personal {
+	personal, err := personalRootTx(ctx, tx, chain)
+	switch {
+	case err != nil || !personal:
 		return TierSelfHosted, err
+	case automatedRun(request):
+		return TierSelfHosted, nil
+	case request.OriginMachine != "" && request.OriginMachine == root.Subject.ID:
+		return TierHere, nil
 	}
 	return TierPersonal, nil
 }
 
-func claimRankTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, run string) (int, error) {
+func personalRootTx(ctx context.Context, tx *storeTx, chain []authorityNode) (bool, error) {
+	root := chain[len(chain)-1].principal.Capability
+	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
+		return false, nil
+	}
+	record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+	return err == nil && record.Origin != nil && record.Origin.Personal, err
+}
+
+var errTierOutsideRanking = authorityError(apierr.Forbidden, "claimant tier is outside the team's claim ranking")
+
+func claimRankTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, request runspec.Request) (int, error) {
 	ranking, err := claimRankingTx(ctx, tx, team)
 	if err != nil || len(ranking) == 0 {
 		return -1, err
 	}
-	tier, err := claimTierTx(ctx, tx, chain, run)
+	tier, err := claimTierTx(ctx, tx, chain, request)
 	if err != nil {
 		return -1, err
 	}
 	rank := slices.Index(ranking, tier)
 	if rank < 0 {
-		return -1, authorityError(apierr.Forbidden, "claimant tier is outside the team's claim ranking")
+		return -1, errTierOutsideRanking
 	}
 	return rank, nil
 }
@@ -132,13 +157,22 @@ func unitReadyTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) (tim
 	return time.Unix(0, at.Int64).UTC(), at.Valid, err
 }
 
-// safety: a polled better-ranked claimant keeps priority for one more window, so a dead winner cannot starve the unit.
-func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant string, liveness time.Duration) (bool, error) {
+type unitAsk struct {
+	team     Team
+	unit     UnitRef
+	claimant string
+	rank     int
+	since    time.Time
+	at       time.Time
+}
+
+// safety: a held ask is written after the claim transaction rolls back, so a later poll cannot erase it.
+func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request, claimant string, liveness time.Duration) (bool, error) {
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant}, false)
 	if err != nil {
 		return false, err
 	}
-	rank, err := claimRankTx(ctx, tx, team, chain, unit.RunID)
+	rank, err := claimRankTx(ctx, tx, team, chain, request)
 	if err != nil || rank <= 0 {
 		return false, err
 	}
@@ -147,8 +181,13 @@ func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, cl
 		return false, err
 	}
 	now, end := tx.now(), since.Add(limits.RankingWindow)
-	if !now.Before(end.Add(limits.RankingWindow)) {
-		return false, nil
+	if !now.Before(end) {
+		if !now.Before(end.Add(limits.RankingAward)) {
+			return false, nil
+		}
+		var best sql.NullInt64
+		err := tx.QueryRowContext(ctx, `SELECT MIN(claim_rank) FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=? AND claimant<>? AND asked_at>=? AND asked_at<?`, team, unit.RunID, unit.Kind, unit.NodeID, claimant, since.UnixNano(), end.UnixNano()).Scan(&best)
+		return best.Valid && best.Int64 < int64(rank), err
 	}
 	polls, err := placementRunnersTx(ctx, tx, team, liveness, true)
 	if err != nil {
@@ -158,18 +197,19 @@ func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, cl
 		if poll.CapabilityPrefix == claimant || len(poll.Kinds) > 0 && !slices.Contains(poll.Kinds, unit.Kind) {
 			continue
 		}
-		if !now.Before(end) && (poll.ObservedAt.Before(since) || !poll.ObservedAt.Before(end)) {
-			continue
+		better, err := betterRankedTx(ctx, tx, team, unit, request, poll, rank)
+		if err != nil {
+			return false, err
 		}
-		better, err := betterRankedTx(ctx, tx, team, unit, poll, rank)
-		if err != nil || better {
-			return better, err
+		if better {
+			tx.rankingAsks = append(tx.rankingAsks, unitAsk{team: team, unit: unit, claimant: claimant, rank: rank, since: since, at: now})
+			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func betterRankedTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, poll runnerPoll, rank int) (bool, error) {
+func betterRankedTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request, poll runnerPoll, rank int) (bool, error) {
 	profile, required, err := placementRunnerTx(ctx, tx, team, unit, poll.UnitDemand)
 	var denied *apierr.Error
 	if errors.As(err, &denied) && (denied.Code == apierr.Unauthenticated || denied.Code == apierr.Forbidden) {
@@ -185,7 +225,7 @@ func betterRankedTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, p
 	if err != nil {
 		return false, err
 	}
-	theirs, err := claimRankTx(ctx, tx, team, chain, unit.RunID)
+	theirs, err := claimRankTx(ctx, tx, team, chain, request)
 	if err != nil || theirs >= rank {
 		return false, err
 	}
@@ -201,4 +241,18 @@ func betterRankedTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, p
 		return false, err
 	}
 	return eligibleUnitBillingTx(ctx, tx, team, unit, price, true)
+}
+
+func recordUnitAsks(ctx context.Context, s *Store, asks []unitAsk) error {
+	if len(asks) == 0 {
+		return nil
+	}
+	return s.inTx(ctx, func(tx *storeTx) error {
+		for _, ask := range asks {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO unit_asks(team,run_id,unit_kind,node_id,claimant,claim_rank,asked_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(team,run_id,unit_kind,node_id,claimant) DO UPDATE SET claim_rank=excluded.claim_rank,asked_at=excluded.asked_at WHERE unit_asks.asked_at<?`, ask.team, ask.unit.RunID, ask.unit.Kind, ask.unit.NodeID, ask.claimant, ask.rank, ask.at.UnixNano(), ask.since.UnixNano()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

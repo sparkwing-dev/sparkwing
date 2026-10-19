@@ -177,6 +177,10 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		edge.Kind = blob.EdgeDependency
 		return edge, selected, err
 	}
+	if source := a.source.Unit.Value.Source; a.source.Kind == blob.UploadOwnerUnit && a.capability.Unit == capability.UnitEval && source.Set {
+		edge.Kind = blob.EdgeDependency
+		return edge, c.kind == blob.KindOutput && c.run == source.Value.RunID && c.node == source.Value.NodeID && c.attempt == source.Value.Attempt && c.generation == source.Value.Generation, nil
+	}
 	if !a.authority.Attempt.Set {
 		return edge, false, nil
 	}

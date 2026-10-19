@@ -139,7 +139,7 @@ type AppFacts struct {
 	SHA               string    `json:"sha"`
 	DefaultBranch     string    `json:"default_branch"`
 	DefaultBranchPush bool      `json:"default_branch_push"`
-	SenderID          int64     `json:"sender_id,omitempty"`
+	AuthorID          int64     `json:"author_id,omitempty"`
 	VerifiedAt        time.Time `json:"verified_at"`
 }
 
@@ -395,6 +395,8 @@ type Request struct {
 	Env               EnvSnapshot           `json:"env"`
 	Options           Options               `json:"options"`
 	ExecutionLocation string                `json:"execution_location"`
+	// OriginMachine names the personal machine whose credential intake verified for the submitter; requests cannot set it.
+	OriginMachine string `json:"origin_machine,omitempty"`
 }
 
 // safety: IntakeFacts are server-derived, with opaque authority IDs resolved only by C2.

@@ -565,14 +565,6 @@ CREATE TABLE overflow_controls (
     PRIMARY KEY (team,account_id)
 );
 
-CREATE TABLE machine_automation (
-    team TEXT NOT NULL REFERENCES teams(name),
-    machine TEXT NOT NULL,
-    owner TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    created_at BIGINT NOT NULL,
-    PRIMARY KEY (team,machine)
-);
-
 CREATE TABLE memberships (
     team TEXT NOT NULL REFERENCES teams(name),
     account_id TEXT NOT NULL,
@@ -1132,6 +1124,37 @@ CREATE TABLE capabilities (
     CHECK(issuance = 'delegate' OR team IS NOT NULL),
     CHECK(issuance = 'delegate' OR (payer_team IS NOT NULL AND executor_class IS NOT NULL AND reservation_id IS NOT NULL AND billing_start IS NOT NULL AND unit_kind IS NOT NULL AND billing_unit IS NOT NULL)),
     FOREIGN KEY(team,bind_run) REFERENCES runs(team,id) ON DELETE CASCADE
+);
+
+CREATE TABLE machine_automation (
+    team TEXT NOT NULL REFERENCES teams(name),
+    prefix TEXT NOT NULL REFERENCES capabilities(prefix) ON DELETE CASCADE,
+    owner TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    requested_at BIGINT NOT NULL,
+    approved_by TEXT NOT NULL DEFAULT '',
+    approved_at BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (team,prefix)
+);
+
+CREATE TABLE machine_repo_access (
+    team TEXT NOT NULL REFERENCES teams(name),
+    prefix TEXT NOT NULL REFERENCES capabilities(prefix) ON DELETE CASCADE,
+    repo TEXT NOT NULL,
+    allowed BIGINT NOT NULL CHECK(allowed IN (0,1)),
+    checked_at BIGINT NOT NULL,
+    PRIMARY KEY (team,prefix,repo)
+);
+
+CREATE TABLE unit_asks (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    unit_kind TEXT NOT NULL CHECK(unit_kind IN ('plan','eval','node')),
+    node_id TEXT NOT NULL,
+    claimant TEXT NOT NULL,
+    claim_rank BIGINT NOT NULL CHECK(claim_rank >= 0),
+    asked_at BIGINT NOT NULL,
+    PRIMARY KEY (team,run_id,unit_kind,node_id,claimant),
+    FOREIGN KEY (team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
 CREATE TABLE blobs (

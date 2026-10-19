@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -75,51 +76,88 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if record.Origin == nil || !record.Origin.Personal {
 		return nil
 	}
-	var owner string
+	var owner, requester, kind string
 	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&owner); err != nil {
 		return err
 	}
-	requester, err := runAccountTx(ctx, tx, Team(root.Team), run, request)
+	if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, root.Team, run).Scan(&requester, &kind); err != nil {
+		return err
+	}
+	if automatedRun(request) {
+		return personalAutomatedRunTx(ctx, tx, Team(root.Team), root.Prefix, owner, requester, request)
+	}
+	if owner == "" || owner != requester || kind != string(capability.SubjectAccount) {
+		return authorityError(apierr.Forbidden, "personal machine is reserved for its owner's runs")
+	}
+	return nil
+}
+
+// safety: the only rule that admits a personal machine to an automated run:
+// its owner owns the run, an admin approved it and the owner can read every repository.
+func personalAutomatedRunTx(ctx context.Context, tx *storeTx, team Team, prefix, owner, requester string, request runspec.Request) error {
+	refused := authorityError(apierr.Forbidden, "personal machine takes only its owner's automated runs after admin approval")
+	var account string
+	var err error
+	switch request.Origin {
+	case runspec.OriginSchedule:
+		err = tx.QueryRowContext(ctx, `SELECT account_id FROM memberships WHERE team=? AND account_id=?`, team, requester).Scan(&account)
+	case runspec.OriginApp:
+		if !request.Git.App.Set || request.Git.App.Value.AuthorID <= 0 {
+			return refused
+		}
+		err = tx.QueryRowContext(ctx, `SELECT i.account_id FROM identities i JOIN memberships m ON m.account_id=i.account_id AND m.team=? WHERE i.provider=? AND i.subject=?`, team, ProviderGitHub, strconv.FormatInt(request.Git.App.Value.AuthorID, 10)).Scan(&account)
+	}
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (account == "" || account != owner) {
+		return refused
+	}
 	if err != nil {
 		return err
 	}
-	if owner == "" || owner != requester {
-		return authorityError(apierr.Forbidden, "personal machine is reserved for its owner's runs")
+	var approved int64
+	err = tx.QueryRowContext(ctx, `SELECT approved_at FROM machine_automation WHERE team=? AND prefix=? AND owner=?`, team, prefix, owner).Scan(&approved)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && approved <= 0 {
+		return refused
 	}
-	if !automatedRun(request) {
-		return nil
+	if err != nil {
+		return err
 	}
-	var opted string
-	err = tx.QueryRowContext(ctx, `SELECT owner FROM machine_automation WHERE team=? AND machine=?`, root.Team, root.Subject.ID).Scan(&opted)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && opted != owner {
-		return authorityError(apierr.Forbidden, "personal machine takes automated runs only when its owner opts it in")
+	repos, err := runReposTx(ctx, tx, team, request)
+	if err != nil || len(repos) == 0 {
+		return errors.Join(err, refused)
 	}
-	return err
+	for _, repo := range repos {
+		var allowed int64
+		err := tx.QueryRowContext(ctx, `SELECT allowed FROM machine_repo_access WHERE team=? AND prefix=? AND repo=? AND checked_at>?`, team, prefix, repo, tx.now().Add(-limits.PersonalRepoAccess).UnixNano()).Scan(&allowed)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && allowed != 1 {
+			return refused
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// safety: an App run belongs only to the member whose linked GitHub identity sent the verified delivery.
-func runAccountTx(ctx context.Context, tx *storeTx, team Team, run string, request runspec.Request) (string, error) {
-	var principal, kind string
-	if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, team, run).Scan(&principal, &kind); err != nil {
-		return "", err
+func runReposTx(ctx context.Context, tx *storeTx, team Team, request runspec.Request) ([]string, error) {
+	repo := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(request.Git.Repository.Display, "https://"), "github.com/"), ".git"))
+	raw, keyed := strings.CutPrefix(string(request.Git.Repository.Key), "gh:")
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if _, ok := ParseGitHubRepo(repo); !ok || !keyed || err != nil {
+		return nil, nil
 	}
-	switch {
-	case request.Origin == runspec.OriginSchedule:
-		return principal, nil
-	case request.Origin == runspec.OriginApp:
-		if !request.Git.App.Set || request.Git.App.Value.SenderID <= 0 {
-			return "", nil
-		}
-		var account string
-		err := tx.QueryRowContext(ctx, `SELECT i.account_id FROM identities i JOIN memberships m ON m.account_id=i.account_id AND m.team=? WHERE i.provider=? AND i.subject=?`, team, ProviderGitHub, strconv.FormatInt(request.Git.App.Value.SenderID, 10)).Scan(&account)
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil
-		}
-		return account, err
-	case kind == string(capability.SubjectAccount):
-		return principal, nil
+	repos := []string{repo}
+	rows, err := tx.QueryContext(ctx, `SELECT extra_repo FROM github_app_extra_repos WHERE team=? AND repository_id=? ORDER BY extra_repo`, team, id)
+	if err != nil {
+		return nil, err
 	}
-	return "", nil
+	for rows.Next() {
+		var extra string
+		if err := rows.Scan(&extra); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		repos = append(repos, strings.ToLower(extra))
+	}
+	return repos, errors.Join(rows.Err(), rows.Close())
 }
 
 func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, unit UnitRef) error {
