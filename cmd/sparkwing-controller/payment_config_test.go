@@ -46,3 +46,19 @@ func TestPaymentConfiguration(t *testing.T) {
 		t.Fatal("absent payment configuration did not stay disabled")
 	}
 }
+
+func TestPaymentDeploymentNamesTheExternalHost(t *testing.T) {
+	for _, tc := range []struct{ external, billing, mode, want string }{
+		{"https://Staging.Sparkwing.dev:8443/x", "http://checkout", "", "staging.sparkwing.dev"},
+		{"https://api.sparkwing.dev", "", "test", "api.sparkwing.dev"},
+		{"", "", "", ""},
+	} {
+		got, err := paymentDeployment(tc.external, tc.billing, tc.mode)
+		if err != nil || got != tc.want {
+			t.Fatalf("%+v: %q %v", tc, got, err)
+		}
+	}
+	if _, err := paymentDeployment("", "http://checkout", ""); err == nil {
+		t.Fatal("a billing deployment without --external-url started")
+	}
+}

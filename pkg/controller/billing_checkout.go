@@ -45,9 +45,9 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
-func (c *billingCheckout) openReservedPage(ctx context.Context, page *capability.BillingPage) error {
+func (c *billingCheckout) openReservedPage(ctx context.Context, deployment string, page *capability.BillingPage) error {
 	path := "/internal/checkout"
-	body := map[string]any{"team": page.Team, "key": page.ReservationID}
+	body := map[string]any{"team": page.Team, "key": page.ReservationID, "deployment": deployment}
 	switch page.Kind {
 	case capability.BillingPageCredits:
 		body["amount_cents"] = page.AmountCents
@@ -139,10 +139,10 @@ type cardChargeResult struct {
 	Fingerprint   string `json:"fingerprint"`
 }
 
-func (c *billingCheckout) charge(ctx context.Context, w store.CardChargeWork) (cardChargeResult, error) {
+func (c *billingCheckout) charge(ctx context.Context, deployment string, w store.CardChargeWork) (cardChargeResult, error) {
 	var out cardChargeResult
 	err := c.post(ctx, "/internal/charge", map[string]any{
-		"team": string(w.Team), "charge_id": w.ChargeID, "attempt_id": w.AttemptID,
+		"team": string(w.Team), "deployment": deployment, "charge_id": w.ChargeID, "attempt_id": w.AttemptID,
 		"amount_cents": w.AmountCents, "customer": w.Customer, "payment_method": w.PaymentMethod,
 		"payment_intent": w.PaymentIntent,
 	}, &out)

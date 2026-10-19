@@ -193,7 +193,7 @@ func (s *Server) cardBillingPass(ctx context.Context) {
 // by that id; no search of the customer's payments is needed.
 func (s *Server) chargeCard(ctx context.Context, wk store.CardChargeWork) (cardChargeResult, error) {
 	if wk.PaymentIntent == "" {
-		res, err := s.checkout.charge(ctx, wk)
+		res, err := s.checkout.charge(ctx, s.deployment, wk)
 		if err != nil || res.Status != cardChargeCreated {
 			return res, err
 		}
@@ -202,7 +202,7 @@ func (s *Server) chargeCard(ctx context.Context, wk store.CardChargeWork) (cardC
 		}
 		wk.PaymentIntent = res.PaymentIntent
 	}
-	return s.checkout.charge(ctx, wk)
+	return s.checkout.charge(ctx, s.deployment, wk)
 }
 
 // safety: a payment that paid no charge is refunded under a key naming its

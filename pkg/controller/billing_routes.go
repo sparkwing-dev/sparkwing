@@ -87,7 +87,7 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 		return missingEndpointPolicy()
 	}
 	if page.URL == "" {
-		if err := s.checkout.openReservedPage(r.Context(), &page); err != nil {
+		if err := s.checkout.openReservedPage(r.Context(), s.deployment, &page); err != nil {
 			recordErr := writer.RecordAuthorizedBillingPageFailure(r.Context(), a, page)
 			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the payment page could not be opened; try again"}, err, recordErr)
 		}

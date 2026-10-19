@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -14,6 +15,12 @@ import (
 // PaymentSettler commits verified provider outcomes against stored billing records.
 type PaymentSettler interface {
 	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
+}
+
+// WithPaymentDeployment names this deployment on every Stripe page and payment it opens, so it settles only its own events.
+func (s *Server) WithPaymentDeployment(name string) *Server {
+	s.deployment = strings.ToLower(strings.TrimSpace(name))
+	return s
 }
 
 // WithPayments wires the provider verifier and the store's atomic settlement boundary.
@@ -74,10 +81,25 @@ func (s *Server) settlePaymentRequest(w http.ResponseWriter, r *http.Request, _ 
 	if !ok {
 		return missingEndpointPolicy()
 	}
-	if proof.event != nil {
-		if _, err := s.paymentLedger.SettlePayment(r.Context(), *proof.event); err != nil {
-			return err
+	if proof.event == nil {
+		s.logger.Debug("stripe event acknowledged without settlement", "reason", "unhandled")
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	event := proof.event.Event()
+	if event.Deployment != "" && event.Deployment != s.deployment {
+		s.logger.Debug("stripe event acknowledged without settlement", "reason", "another deployment", "event", event.EventID, "deployment", event.Deployment)
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	if _, err := s.paymentLedger.SettlePayment(r.Context(), *proof.event); err != nil {
+		var unknown *apierr.Error
+		if event.Deployment == "" && errors.As(err, &unknown) && unknown.Code == apierr.NotFound {
+			s.logger.Debug("stripe event acknowledged without settlement", "reason", "not this deployment's object", "event", event.EventID, "kind", event.Kind)
+			w.WriteHeader(http.StatusNoContent)
+			return nil
 		}
+		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil

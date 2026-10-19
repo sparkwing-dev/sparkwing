@@ -108,7 +108,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 		case "/v1/charges/ch_native":
 			body = `{"id":"ch_native","object":"charge","livemode":false,"payment_intent":"pi_recovery","payment_method_details":{"card":{"fingerprint":"fp_native"}}}`
 		case "/v1/payment_intents/pi_prepay":
-			body = `{"id":"pi_prepay","object":"payment_intent","livemode":false,"latest_charge":"ch_prepay"}`
+			body = `{"id":"pi_prepay","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"latest_charge":"ch_prepay"}`
 		case "/v1/charges/ch_prepay":
 			body = `{"id":"ch_prepay","object":"charge","livemode":false,"payment_intent":"pi_prepay","payment_method_details":{"card":{"fingerprint":"fp_native","three_d_secure":{"result":"authenticated"}}}}`
 		default:
@@ -119,7 +119,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.WithPayments(verifier, s.store)
+	s.WithPayments(verifier, s.store).WithPaymentDeployment("Staging.Sparkwing.dev")
 	counts := map[string]int{}
 	s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
 		counts[r.URL.Path]++
@@ -127,7 +127,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			t.Fatal(err)
 		}
-		if in["team"] != "a" {
+		if in["team"] != "a" || r.URL.Path != "/internal/refund" && in["deployment"] != "staging.sparkwing.dev" {
 			t.Fatalf("provider team=%v", in)
 		}
 		body := ""
@@ -195,7 +195,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 		call("card", "", 200)
 	}
 	for range 2 {
-		webhook("evt_setup", "setup_intent.succeeded", `{"id":"seti_native","object":"setup_intent","livemode":false,"status":"succeeded","customer":"cus_native","payment_method":"pm_native"}`)
+		webhook("evt_setup", "setup_intent.succeeded", `{"id":"seti_native","object":"setup_intent","livemode":false,"metadata":{"purpose":"card_setup"},"status":"succeeded","customer":"cus_native","payment_method":"pm_native"}`)
 	}
 	tenant, err := s.store.ForTeam(t.Context(), "a")
 	if err != nil {
@@ -218,7 +218,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 	engineSQL(t, s.store, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,seconds,kind,amount_micro,charged_at) VALUES ('debt','a','','','',0,'storage',?,?)`, 2600*store.MicroCreditsPerCent, time.Now().UnixNano())
 	s.cardBillingPass(t.Context())
 	for range 2 {
-		webhook("evt_decline", "payment_intent.payment_failed", `{"id":"pi_auto","object":"payment_intent","livemode":false,"status":"requires_payment_method","amount":600,"currency":"usd","customer":"cus_native","last_payment_error":{"decline_code":"insufficient_funds"}}`)
+		webhook("evt_decline", "payment_intent.payment_failed", `{"id":"pi_auto","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"status":"requires_payment_method","amount":600,"currency":"usd","customer":"cus_native","last_payment_error":{"decline_code":"insufficient_funds"}}`)
 	}
 	standing, err = tenant.BillingStanding(t.Context(), time.Now())
 	if err != nil || standing.Tier != "Held" {
@@ -228,7 +228,7 @@ func TestBillingModelProductionCardPrepayAndRecoverySettlement(t *testing.T) {
 		call("pay", "", 200)
 	}
 	for range 2 {
-		webhook("evt_recovery", "payment_intent.succeeded", `{"id":"pi_recovery","object":"payment_intent","livemode":false,"status":"succeeded","amount":600,"amount_received":600,"currency":"usd","customer":"cus_native","latest_charge":"ch_native"}`)
+		webhook("evt_recovery", "payment_intent.succeeded", `{"id":"pi_recovery","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"status":"succeeded","amount":600,"amount_received":600,"currency":"usd","customer":"cus_native","latest_charge":"ch_native"}`)
 	}
 	spend, err = tenant.SpendStanding(t.Context(), time.Now())
 	if err != nil || spend.OpenCharge != nil || spend.BalanceMicro != 0 || spend.Billing.Tier != "Established" {

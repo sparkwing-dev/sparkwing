@@ -47,6 +47,7 @@ type paymentObject struct {
 	Actionable     *bool            `json:"actionable"`
 	Reason         string           `json:"reason"`
 	Type           string           `json:"type"`
+	Metadata       paymentMetadata  `json:"metadata"`
 	Card           struct {
 		Fingerprint string `json:"fingerprint"`
 		Brand       string `json:"brand"`
@@ -73,6 +74,12 @@ func (a *paymentAuthenticator) providerEvent(ctx context.Context, id string, cre
 	event := PaymentEvent{
 		EventID: id, ObjectID: object.ID, Created: created, Mode: a.mode, Kind: policy.Kind, Status: object.Status,
 		CustomerID: string(object.Customer), MethodID: string(object.PaymentMethod), PaymentID: string(object.PaymentIntent), ChargeID: string(object.Charge), Reason: object.Reason,
+	}
+	event.Deployment = object.Metadata.get(PaymentDeploymentMetadata)
+	switch purpose := object.Metadata.get(paymentPurposeMetadata); {
+	case policy.Kind == PaymentCardSetup && purpose != paymentPurposeSetup,
+		(policy.Kind == PaymentCardPaid || policy.Kind == PaymentCardFailed) && purpose != paymentPurposeCharge:
+		return nil, nil
 	}
 	var err error
 	switch policy.Kind {

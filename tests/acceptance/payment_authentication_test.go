@@ -121,7 +121,7 @@ func TestPaymentHTTPAuthenticationBoundary(t *testing.T) {
 
 func TestPaymentHTTPRefusals(t *testing.T) {
 	verifier := paymentVerifier(t, capability.PaymentTest)
-	for _, name := range []string{"missing proof", "wrong proof", "duplicate header", "expired proof", "changed body", "wrong mode", "malformed event", "ledger unavailable", "settlement conflict", "unknown checkout", "unconfigured", "missing ledger", "oversized body"} {
+	for _, name := range []string{"missing proof", "wrong proof", "duplicate header", "expired proof", "changed body", "wrong mode", "malformed event", "ledger unavailable", "settlement conflict", "unconfigured", "missing ledger", "oversized body"} {
 		t.Run(name, func(t *testing.T) {
 			ledger := &paymentLedger{}
 			auth := verifier
@@ -153,9 +153,6 @@ func TestPaymentHTTPRefusals(t *testing.T) {
 			case "settlement conflict":
 				ledger.err = &apierr.Error{Code: apierr.Conflict, Message: "payment differs from committed checkout"}
 				want = apierr.Conflict
-			case "unknown checkout":
-				ledger.err = &apierr.Error{Code: apierr.NotFound, Message: "checkout not found"}
-				want = apierr.NotFound
 			case "unconfigured":
 				auth = nil
 				want = apierr.Unavailable
@@ -286,7 +283,7 @@ func TestPaymentHTTPFinancialProviderHandoffProperty(t *testing.T) {
 					if json.Unmarshal([]byte(tc.object), &object) != nil {
 						return false
 					}
-					object["metadata"] = map[string]any{"team": metadata, "amount_micro": metadata, "attempt": metadata}
+					object["metadata"] = map[string]any{"team": metadata, "amount_micro": metadata, "attempt": metadata, "purpose": "card_charge"}
 					object["livemode"] = mode == capability.PaymentLive
 					encoded, _ := json.Marshal(object)
 					body := fmt.Sprintf(`{"id":"evt_provider","object":"event","created":900,"type":%q,"livemode":%t,"data":{"object":%s}}`, tc.kind, mode == capability.PaymentLive, encoded)
@@ -322,5 +319,50 @@ func TestPaymentHTTPFinancialProviderHandoffProperty(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A signed event for another deployment, or for an object this deployment does
+// not know and did not stamp, is acknowledged so Stripe stops retrying it, and
+// is never settled; this deployment's own unknown object still fails loudly.
+func TestPaymentHTTPAcknowledgesEventsThisDeploymentDoesNotOwn(t *testing.T) {
+	verifier := paymentVerifier(t, capability.PaymentTest)
+	stamped := func(deployment string) string {
+		body := paymentBody(capability.PaymentTest, "checkout.session.completed", "evt_"+deployment, "paid")
+		return strings.Replace(body, `"metadata":{`, `"metadata":{"sparkwing_deployment":"`+deployment+`",`, 1)
+	}
+	for name, tc := range map[string]struct {
+		body    string
+		missing bool
+		status  int
+		settles int
+	}{
+		"another deployment":            {stamped("api.sparkwing.dev"), false, http.StatusNoContent, 0},
+		"unknown and unstamped":         {paymentBody(capability.PaymentTest, "checkout.session.completed", "evt_unstamped", "paid"), true, http.StatusNoContent, 1},
+		"unhandled event type":          {paymentBody(capability.PaymentTest, "customer.created", "evt_customer", "paid"), false, http.StatusNoContent, 0},
+		"this deployment's unknown one": {stamped("staging.sparkwing.dev"), true, http.StatusNotFound, 1},
+		"this deployment's known one":   {stamped("staging.sparkwing.dev"), false, http.StatusNoContent, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := &paymentLedger{}
+			if tc.missing {
+				ledger.err = &apierr.Error{Code: apierr.NotFound, Message: "committed checkout is unavailable"}
+			}
+			server := paymentServer(verifier, ledger).WithPaymentDeployment("staging.sparkwing.dev")
+			r := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", strings.NewReader(tc.body))
+			r.Header.Set("Stripe-Signature", paymentSignature(tc.body, time.Now()))
+			w := httptest.NewRecorder()
+			server.Handler().ServeHTTP(w, r)
+			if w.Code != tc.status || len(ledger.events) != tc.settles {
+				t.Fatalf("status %d settled %d, want %d and %d: %s", w.Code, len(ledger.events), tc.status, tc.settles, w.Body)
+			}
+		})
+	}
+	unsigned := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", strings.NewReader(stamped("api.sparkwing.dev")))
+	unsigned.Header.Set("Stripe-Signature", paymentSignature("other body", time.Now()))
+	w := httptest.NewRecorder()
+	paymentServer(verifier, &paymentLedger{}).WithPaymentDeployment("staging.sparkwing.dev").Handler().ServeHTTP(w, unsigned)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("badly signed foreign event = %d, want 401", w.Code)
 	}
 }

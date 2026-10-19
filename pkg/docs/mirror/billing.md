@@ -93,3 +93,16 @@ Owner budgets take effect when their update commits.
 The controller's `--payment-mode` configures both provider verification and the
 ledger mode for new reservations. Test and live provider records retain separate
 mode tags. Empty mode disables settlement.
+
+`--billing-url` and `--payment-mode` need `--external-url`, whose host names the
+deployment. The checkout service stamps that name as
+`metadata[sparkwing_deployment]` on every Checkout Session, setup intent,
+payment intent and customer it creates for the controller. Deployments that
+share one Stripe account each receive the other's events at `/webhooks/stripe`.
+A correctly signed event is acknowledged with 204 and settles nothing when it
+names another deployment, when it is a type or object the controller settles
+elsewhere (a card setup or pay-now page, or an Add funds payment intent), or
+when it names no deployment and refers to nothing this controller recorded. An
+event naming this deployment for an object it does not know still fails, so
+Stripe retries it. Unsigned and badly signed requests are refused.
+

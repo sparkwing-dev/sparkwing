@@ -46,9 +46,9 @@ func verifiedProviderBody(mode PaymentMode, kind, object string) []byte {
 func financialObjects(mode PaymentMode) map[string]string {
 	live := fmt.Sprintf(`,"livemode":%t}`, mode == PaymentLive)
 	return map[string]string{
-		"setup_intent.succeeded":            `{"id":"seti_setup","object":"setup_intent","status":"succeeded","customer":"cus_owner","payment_method":"pm_card"` + live,
-		"payment_intent.succeeded":          `{"id":"pi_paid","object":"payment_intent","status":"succeeded","amount":1200,"amount_received":1200,"currency":"usd","latest_charge":"ch_paid"` + live,
-		"payment_intent.payment_failed":     `{"id":"pi_failed","object":"payment_intent","status":"requires_payment_method","amount":1200,"currency":"usd","last_payment_error":{"decline_code":"insufficient_funds"}` + live,
+		"setup_intent.succeeded":            `{"id":"seti_setup","object":"setup_intent","status":"succeeded","customer":"cus_owner","payment_method":"pm_card","metadata":{"purpose":"card_setup","sparkwing_deployment":"staging.sparkwing.dev"}` + live,
+		"payment_intent.succeeded":          `{"id":"pi_paid","object":"payment_intent","status":"succeeded","amount":1200,"amount_received":1200,"currency":"usd","latest_charge":"ch_paid","metadata":{"purpose":"card_charge","sparkwing_deployment":"staging.sparkwing.dev"}` + live,
+		"payment_intent.payment_failed":     `{"id":"pi_failed","object":"payment_intent","status":"requires_payment_method","amount":1200,"currency":"usd","last_payment_error":{"decline_code":"insufficient_funds"},"metadata":{"purpose":"card_charge"}` + live,
 		"refund.created":                    `{"id":"re_refund","object":"refund","payment_intent":"pi_paid","charge":"ch_paid","status":"pending","amount":600,"currency":"usd"` + live,
 		"refund.updated":                    `{"id":"re_refund","object":"refund","payment_intent":{"id":"pi_paid"},"charge":{"id":"ch_paid"},"status":"succeeded","amount":600,"currency":"usd"` + live,
 		"refund.failed":                     `{"id":"re_refund","object":"refund","payment_intent":"pi_paid","charge":"ch_paid","status":"failed","amount":600,"currency":"usd"` + live,
@@ -82,7 +82,7 @@ func TestPaymentProviderOutcomes(t *testing.T) {
 				if strings.HasPrefix(kind, "refund.") && (e.AmountMinor != 600 || e.PaymentID != "pi_paid" || e.ChargeID != "ch_paid" || *calls != 0) {
 					t.Fatalf("refund %+v", e)
 				}
-				if kind == "payment_intent.succeeded" && (e.AmountMinor != 1200 || e.Fingerprint != "card-fingerprint" || *calls != 1) {
+				if kind == "payment_intent.succeeded" && (e.AmountMinor != 1200 || e.Fingerprint != "card-fingerprint" || *calls != 1 || e.Deployment != "staging.sparkwing.dev") {
 					t.Fatalf("paid %+v", e)
 				}
 			})
@@ -99,7 +99,8 @@ func TestPaymentProviderProofProperty(t *testing.T) {
 				if json.Unmarshal([]byte(object), &raw) != nil {
 					return false
 				}
-				raw["metadata"] = map[string]any{"team": metadata, "credits": metadata, "charge": metadata, "attempt": metadata, "fingerprint": metadata}
+				purpose, _ := raw["metadata"].(map[string]any)
+				raw["metadata"] = map[string]any{"team": metadata, "credits": metadata, "charge": metadata, "attempt": metadata, "fingerprint": metadata, "purpose": purpose["purpose"]}
 				encoded, _ := json.Marshal(raw)
 				body := verifiedProviderBody(PaymentTest, kind, string(encoded))
 				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
@@ -184,7 +185,7 @@ func TestPaymentProviderRequiresFinancialEvidenceProperty(t *testing.T) {
 				if err := json.Unmarshal([]byte(financialObjects(PaymentTest)[kind]), &object); err != nil {
 					t.Fatal(err)
 				}
-				object["metadata"] = map[string]any{"fingerprint": metadata, "reason": metadata}
+				object["metadata"] = map[string]any{"fingerprint": metadata, "reason": metadata, "purpose": paymentPurposeCharge}
 				if strings.HasPrefix(kind, "charge.dispute.") {
 					switch shape % 3 {
 					case 0:
@@ -224,5 +225,21 @@ func TestPaymentProviderRequiresFinancialEvidenceProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestPaymentProviderAcknowledgesIntentsSettledElsewhere(t *testing.T) {
+	objects := financialObjects(PaymentTest)
+	for kind, replace := range map[string][2]string{
+		"payment_intent.succeeded":      {`"purpose":"card_charge"`, `"team":"acme"`},
+		"payment_intent.payment_failed": {`"metadata":{"purpose":"card_charge"},`, ``},
+		"setup_intent.succeeded":        {`"purpose":"card_setup"`, `"purpose":"other"`},
+	} {
+		v, calls := providerVerifier(t, PaymentTest)
+		body := verifiedProviderBody(PaymentTest, kind, strings.Replace(objects[kind], replace[0], replace[1], 1))
+		proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
+		if err != nil || proof != nil || *calls != 0 {
+			t.Fatalf("%s without its purpose: proof=%v err=%v calls=%d", kind, proof, err, *calls)
+		}
 	}
 }

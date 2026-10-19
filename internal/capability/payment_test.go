@@ -175,3 +175,28 @@ func TestPaidCheckoutReadsThreeDSecureFromTheSettledCharge(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckoutEventsSettleOnlyAddFundsSessions(t *testing.T) {
+	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	secret := "whsec_fixture_only"
+	provider := newPaymentProvider("sk_test_fixture")
+	provider.client.Transport = paymenttest.Provider{}.SettledCheckout("pi_fixture", false, "")
+	v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }, provider: provider}
+	base := string(paymentBody("checkout.session.completed", "paid", false))
+	for name, tc := range map[string]struct {
+		body       string
+		deployment string
+		settles    bool
+	}{
+		"add funds":       {strings.Replace(base, `"metadata":{`, `"metadata":{"sparkwing_deployment":"api.sparkwing.dev",`, 1), "api.sparkwing.dev", true},
+		"setup page":      {strings.Replace(base, `"mode":"payment"`, `"mode":"setup"`, 1), "", false},
+		"pay now page":    {strings.Replace(base, `"metadata":{`, `"metadata":{"purpose":"card_charge",`, 1), "", false},
+		"card setup page": {strings.Replace(base, `"metadata":{`, `"metadata":{"purpose":"card_setup",`, 1), "", false},
+	} {
+		body := []byte(tc.body)
+		proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)})
+		if err != nil || (proof != nil) != tc.settles || proof != nil && proof.Event().Deployment != tc.deployment {
+			t.Fatalf("%s: proof=%+v err=%v", name, proof, err)
+		}
+	}
+}

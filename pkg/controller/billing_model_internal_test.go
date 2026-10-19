@@ -222,7 +222,7 @@ func TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish(t
 		switch phase {
 		case "held":
 			for range 2 {
-				webhook("collection-declined", "payment_intent.payment_failed", `{"id":"collection-payment","object":"payment_intent","livemode":false,"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
+				webhook("collection-declined", "payment_intent.payment_failed", `{"id":"collection-payment","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
 			}
 			wantTier, wantFailures = "Held", 1
 		case "released":
@@ -233,7 +233,7 @@ func TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish(t
 			if released, err := tenant.ReleaseCreditFreezes(t.Context(), holds.Disputes[0], "operator", "reviewed", time.Now()); err != nil || released != 1 {
 				t.Fatalf("release=%d: %v", released, err)
 			}
-			webhook("collection-declined", "payment_intent.payment_failed", `{"id":"collection-payment","object":"payment_intent","livemode":false,"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
+			webhook("collection-declined", "payment_intent.payment_failed", `{"id":"collection-payment","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
 			wantFailures = 1
 		case "retry-held":
 			dueAt := time.Now().Add(25 * time.Hour)
@@ -245,7 +245,7 @@ func TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish(t
 				t.Fatal(err)
 			}
 			for range 2 {
-				webhook("retry-declined", "payment_intent.payment_failed", `{"id":"retry-payment","object":"payment_intent","livemode":false,"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
+				webhook("retry-declined", "payment_intent.payment_failed", `{"id":"retry-payment","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_charge"},"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
 			}
 			wantTier, wantFailures = "Held", 2
 		}

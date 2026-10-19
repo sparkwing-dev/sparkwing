@@ -144,6 +144,7 @@ type Server struct {
 
 	githubApp       *githubAppState
 	checkout        *billingCheckout
+	deployment      string
 	paymentVerifier capability.PaymentAuthenticator
 	paymentLedger   PaymentSettler
 	operators       atomic.Pointer[map[string]bool]
