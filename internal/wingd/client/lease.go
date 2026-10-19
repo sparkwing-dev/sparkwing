@@ -48,7 +48,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 			}
 			continue
 		}
-		lease, terminal, transient := cl.readGrant(req, progressed)
+		lease, terminal, transient := cl.readGrant(progressed)
 		if transient == nil {
 			return lease, terminal
 		}
@@ -61,7 +61,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 	}
 }
 
-func (cl *Client) readGrant(req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (lease *Lease, terminal, transient error) {
+func (cl *Client) readGrant(onQueued func(wingwire.Queued)) (lease *Lease, terminal, transient error) {
 	for {
 		msg, err := cl.dec.read()
 		if err != nil {

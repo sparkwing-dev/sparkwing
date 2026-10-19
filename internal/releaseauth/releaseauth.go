@@ -7,9 +7,11 @@ import (
 	"fmt"
 )
 
-var TrustedPublicKeys = []string{
-	"whVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI=",
-}
+// ProductionPublicKey verifies every official release; install/install.sh carries the same key.
+const ProductionPublicKey = "whVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI="
+
+// TrustedPublicKeys is the production key, plus the QA key only in a qatrust build.
+var TrustedPublicKeys = append([]string{ProductionPublicKey}, qaPublicKeys...)
 
 func TrustedPublicKey(encoded string) bool {
 	for _, trusted := range TrustedPublicKeys {

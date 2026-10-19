@@ -18,6 +18,7 @@ func TestReleaseTargetBuildsAllSupportedBinaries(t *testing.T) {
 			t.Run(target+"/"+arch, func(t *testing.T) {
 				dir := t.TempDir()
 				writeReleaseGoTool(t, dir)
+				initReleaseRepo(t, dir)
 				cmd := exec.Command("bash", script)
 				cmd.Dir = dir
 				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS="+target, "GOARCH="+arch, "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls"))
@@ -63,6 +64,7 @@ func TestReleaseTargetFailsWhenAnyBinaryBuildFails(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writeReleaseGoTool(t, dir)
+	initReleaseRepo(t, dir)
 	cmd := exec.Command("bash", script)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS=linux", "GOARCH=amd64", "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls"), "FAIL_PACKAGE=sparkwing-controller")
@@ -77,6 +79,12 @@ func writeReleaseGoTool(t *testing.T, dir string) {
 	t.Helper()
 	goTool := `#!/bin/sh
 set -eu
+if [ "$1" = version ]; then
+  version="${STAMPED_VERSION-$TAG}"
+  case "$3" in */"${UNSTAMPED_BINARY:-none}"*) version="(devel)" ;; esac
+  printf '%s: go1.26.9\n\tmod\tgithub.com/sparkwing-dev/sparkwing\t%s\n\tbuild\t-tags=%s\n' "$3" "$version" "${BUILD_TAGS:-}"
+  exit 0
+fi
 printf 'call\n' >>"$CALLS_FILE"
 out=
 packages=
@@ -106,5 +114,68 @@ done
 `
 	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(goTool), 0o700); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReleaseTargetPublishesOnlyStampedBinariesOfTheRightFlavour(t *testing.T) {
+	script, err := filepath.Abs("build-release-target.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		release string
+		env     []string
+		tagged  bool
+		ok      bool
+	}{
+		"release":                 {release: "v0.52.4", ok: true},
+		"qa release":              {release: "v0.52.4-qa.1", env: []string{"BUILD_TAGS=qatrust"}, ok: true},
+		"unstamped":               {release: "v0.52.4", env: []string{"STAMPED_VERSION=(devel)"}},
+		"one binary unstamped":    {release: "v0.52.4", env: []string{"UNSTAMPED_BINARY=sparkwing-runner"}},
+		"tag elsewhere":           {release: "v0.52.4", tagged: true},
+		"release carries qatrust": {release: "v0.52.4", env: []string{"BUILD_TAGS=netgo,qatrust"}},
+		"qa release lacks it":     {release: "v0.52.4-qa.1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeReleaseGoTool(t, dir)
+			initReleaseRepo(t, dir)
+			if tc.tagged {
+				gitIn(t, dir, "tag", tc.release)
+				gitIn(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "next")
+			}
+			cmd := exec.Command("bash", script)
+			cmd.Dir = dir
+			cmd.Env = append(append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS=linux", "GOARCH=amd64", "TAG="+tc.release, "CALLS_FILE="+filepath.Join(dir, "calls")), tc.env...)
+			out, err := cmd.CombinedOutput()
+			if (err == nil) != tc.ok {
+				t.Fatalf("err=%v, want ok=%v: %s", err, tc.ok, out)
+			}
+			published, _ := os.ReadDir(filepath.Join(dir, "dist"))
+			if !tc.ok && len(published) != 0 {
+				t.Fatalf("refused build left %d binaries in dist", len(published))
+			}
+			if !tc.tagged {
+				tags := exec.Command("git", "-C", dir, "tag", "-l")
+				if listed, err := tags.Output(); err != nil || len(listed) != 0 {
+					t.Fatalf("script left tags %q (%v)", listed, err)
+				}
+			}
+		})
+	}
+}
+
+func initReleaseRepo(t *testing.T, dir string) {
+	t.Helper()
+	gitIn(t, dir, "init", "-q")
+	gitIn(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "release")
+}
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }

@@ -179,7 +179,7 @@ func (f *fixtureTransport) release(t *testing.T, version string, target releasea
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := GitHubReleaseBase + "/" + version + "/"
+	base := ReleaseBase + "/" + version + "/"
 	for path, body := range map[string][]byte{"SHA256SUMS": bundle.Manifest, "SHA256SUMS.sig": bundle.ManifestSignature, name: bundle.Asset, name + ".sig": bundle.AssetSignature} {
 		f.responses[base+path] = body
 	}
@@ -288,7 +288,7 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 		requireCode(t, err, code)
 	}
 	for _, request := range transport.requests {
-		if !strings.HasPrefix(request, GitHubReleaseBase) && request != VersionIndexURL && request != VersionIndexSignatureURL {
+		if !strings.HasPrefix(request, ReleaseBase) && request != VersionIndexURL && request != VersionIndexSignatureURL {
 			t.Fatalf("unofficial fetch: %s", request)
 		}
 	}

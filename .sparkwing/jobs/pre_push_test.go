@@ -193,6 +193,20 @@ func TestVetTouchedJudgesTheTestFilesBuildNeverReads(t *testing.T) {
 	}
 }
 
+func TestVetTouchedJudgesTheQATrustFlavour(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	writeGoFile(t, filepath.Join(root, "internal", "qa.go"),
+		"//go:build qatrust\n\npackage internal\n\nfunc QA() int { return \"not an int\" }\n")
+	gitCommitAll(t, root, "a QA-only file that does not compile")
+
+	if err := runVetTouched(context.Background()); err == nil {
+		t.Error("vet-touched passed a qatrust file that does not compile")
+	}
+}
+
 func TestThePushTierRepeatsNothingTheCommitTierAlreadyRan(t *testing.T) {
 	commit := stepIDs(t, &PreCommit{})
 	for _, id := range stepIDs(t, &PrePush{}) {

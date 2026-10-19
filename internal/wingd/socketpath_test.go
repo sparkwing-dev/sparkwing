@@ -58,18 +58,6 @@ func TestSocketPath_DistinctPerHome(t *testing.T) {
 	}
 }
 
-func writeSocketPlaceholder(t *testing.T, sock string) string {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
-		t.Fatalf("make socket dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(sock)) })
-	if err := os.WriteFile(sock, nil, 0o600); err != nil {
-		t.Fatalf("write socket placeholder: %v", err)
-	}
-	return sock
-}
-
 func TestValidateSocketPath_RejectsOverLength(t *testing.T) {
 	long := "/tmp/" + strings.Repeat("x", maxSunPath())
 	err := ValidateSocketPath(long)

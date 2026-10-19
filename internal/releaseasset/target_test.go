@@ -1,6 +1,9 @@
 package releaseasset
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNamesContainEveryOfficialRunnerPlatform(t *testing.T) {
 	want := map[string]bool{
@@ -45,5 +48,25 @@ func TestTargetNameRejectsNonReleaseCombinations(t *testing.T) {
 		if name, err := target.Name(); err == nil {
 			t.Errorf("Target(%+v).Name() = %q", target, name)
 		}
+	}
+}
+
+// A publisher change fails this until the change adds a new matrix range.
+func TestNewestMatrixRangeMatchesThePublisher(t *testing.T) {
+	for _, version := range []string{"v0.68.0-qa.1", "v0.68.0", "v1.2.3"} {
+		names, err := NamesForVersion(version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(names, " ") != strings.Join(Names(), " ") {
+			t.Fatalf("NamesForVersion(%s) = %v, but the publisher builds %v; add a matrix range", version, names, Names())
+		}
+	}
+	cache := Target{Binary: "sparkwing-cache", GOOS: "linux", GOARCH: "amd64"}
+	if _, err := cache.NameForVersion("v0.67.0"); err != nil {
+		t.Fatalf("v0.67.0 lost its retained sparkwing-cache asset: %v", err)
+	}
+	if name, err := cache.NameForVersion("v0.68.0-qa.1"); err == nil {
+		t.Fatalf("v0.68.0-qa.1 requires unpublished asset %s", name)
 	}
 }

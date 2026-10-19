@@ -277,15 +277,6 @@ func credentialRef(t *testing.T, rendered, file string) *renderedSecretKeyRef {
 	return nil
 }
 
-func flagValue(args []string, flag string) (string, bool) {
-	for i, a := range args {
-		if a == flag && i+1 < len(args) {
-			return args[i+1], true
-		}
-	}
-	return "", false
-}
-
 type renderedClaim struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
@@ -615,11 +606,6 @@ func runnerEnv(t *testing.T, rendered string) map[string]string {
 func renderRunner(t *testing.T, sets ...string) string {
 	t.Helper()
 	return helmRender(t, "./sparkwing-runner-bundle", "templates/runner-deployment.yaml", "sparkwing", sets...)
-}
-
-func renderRunnerInNamespace(t *testing.T, namespace string, sets ...string) string {
-	t.Helper()
-	return helmRenderInNamespace(t, "./sparkwing-runner-bundle", "templates/runner-deployment.yaml", "sparkwing", namespace, sets...)
 }
 
 func goCachePaths(t *testing.T, container renderedContainer) (string, string) {

@@ -751,7 +751,7 @@ Assigned to an Opus implementer (env 1087).
 
 2. Run anywhere (supersedes "Cloud triggers use controller dispatch" for unselected runs). A run or unit with no placement selection can be claimed by any eligible claimant.
    - Default ranking: (1) the machine that started the run (here); (2) the requester's other personal machines; (3) GitHub Actions runners; (4) self-hosted team runners; (5) the Cloud launcher. The launcher is eligible only when the team has billing enabled (prepaid funds, a saved card, or operator-granted credits).
-   - Each unit (plan step and every job) has its own 5-second window from readiness. If a claimant from the highest-ranked tier present in the ranking asks, it is awarded immediately. Otherwise, at the end of the window, the highest-ranked claimant that asked during the window wins. After the window, first eligible asker wins. A team with no ranking set uses first-come.
+   - Each unit (plan step and every job) has its own 5-second window from readiness. If a claimant from the highest-ranked tier present in the ranking asks, it is awarded immediately. Otherwise, at the end of the window, the highest-ranked claimant that asked during the window wins. After the window, first eligible asker wins. A team that has never set a ranking uses the default ranking; a team that sets an empty ranking uses first-come, and a tier left out of a set ranking takes no unselected work. (Lead clarification 2026-10-18 of "if there is no ranking it's always first"; pending Korey ratification.)
    - Automatically started runs (push, PR, schedule) skip tiers 1-2 by default. A personal machine's owner may opt that machine in to the owner's automated runs (a per-machine setting, off by default).
    - The ranking is a per-team setting a team admin can change: reorder tiers or drop tiers. An explicit placement (`--runner`, pool requirement, App `runner:`) still pins the run and takes it out of run-anywhere.
    - Self-hosted runners, personal machines and Actions runners must be able to claim the plan unit too, not only jobs.
@@ -769,3 +769,20 @@ Assigned to an Opus implementer (env 1087).
 8. Landing order: Cloud QA on the QA pre-release, then fixes, then merge to main, then v0.68.0 (Korey approves the release), then Ryan's migration guide and the kikd-infra release pipeline.
 9. Store and launcher code-volume trims run alongside QA, with no behaviour change and the full suite green.
 10. Stripe test mode on kikd during Cloud QA (Add funds, card setup, collection ladder, webhook at /webhooks/stripe); live keys at launch.
+
+## 2026-10-18 Korey decision 11: prepaid standing and fraud
+
+- 3-D Secure is required on every Add-funds top-up (Stripe Checkout).
+- Prepaid balance can raise a team's standing by at most ONE tier above its history-earned tier. New can reach Trusted through prepay; High needs history (30 clean days and $500 paid), or an operator grant of standing.
+- The billing page (console) and the CLI offer a "contact us to unlock higher tiers" request. It creates an operator task in the operator console queue, which the operator approves with the existing grant of standing.
+- docs/billing.md documents the cap, 3DS and the request.
+- A chargeback still puts the team on Held (no new admissions).
+
+## 2026-10-18 Korey decision 12: Cloud jobs do not get node root
+
+- Source: Opus launcher security review C1 (review/areas/launcher-security-opus.md). Job pods reached node root through the privileged Docker sidecar, and from it the shared node role `kikd-prod-karpenter-node` (AmazonEKS_CNI_Policy, SSM) and the aws-node token.
+- The Docker sidecar runs rootless (no privileged container in job pods; prefer user-namespaced pods). Customers keep docker build/run/compose; `docker run --privileged` and host-level Docker features are not available on Cloud. Customer-visible and approved. GitHub Actions and CircleCI give root only inside a per-job VM.
+- Job and team nodes use their own instance role with only ECR read-only and EKS worker permissions (no CNI, no SSM). aws-node gets CNI permissions through Pod Identity/IRSA, not the node role.
+- The admission policy forbids privileged containers in job pods, including the Docker sidecar. Any remaining privileged probe needs a stated reason.
+- A per-job VM option with privileged Docker may come later as a paid feature, only if customers ask.
+- With node root gone, per-team node reuse (review M2) stays as is.
