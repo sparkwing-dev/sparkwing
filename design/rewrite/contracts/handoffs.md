@@ -876,3 +876,8 @@ Assigned to an Opus implementer (env 1087).
 - Larger, less frequent charges are preferred; smarter sizing for high-volume teams (for example suggesting about a week of recent usage) is a later improvement, not launch scope.
 - Standing tiers additionally cap refill size and frequency as a stolen-card brake. Korey agrees in principle; the lead proposes the specific per-tier values for ratification.
 - Ratified 2026-10-19 (decision 27 standing caps): New $50 per refill / 1 per day / $100 per week; Established $200 / 2 / $500; Trusted $1,000 / 3 / $3,000; High uses the team's own limits only. Plain constants; teams that outgrow them use the decision 11 tier request.
+
+## 2026-10-19 Korey decision 28: structural simplification plan approved
+
+- Korey approved every recommendation in /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/simplicity/PLAN.md §4 (decisions 1-6 and 9-21 as recommended; 7-9 amended by §7 for prepaid), including moving pkg/store and pkg/controller under internal/, Sol's six cuts, GitHub-model provenance and cache trust, withdrawing the pool-runner residual, declared deployment kind, the 5-minute cancel drain deadline, Cloud fair shares, child-run limits (depth 10, 50 per root), CLI token limits, team-owned shared runners, append-only audit, the durable webhook inbox and declared restore.
+- Feature freeze: no new ranking, launcher or billing features beyond the plan until its §5 stop rule is met. Work proceeds in the plan's waves; every workstream deletes the old path and lands with its guard.
