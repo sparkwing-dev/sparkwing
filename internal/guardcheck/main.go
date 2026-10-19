@@ -111,7 +111,7 @@ var (
 )
 
 func lintFindings(repo string, fast bool) (map[string][]string, error) {
-	args := []string{"run", "-c", guardConfig, "--output.json.path=stdout", "--output.text.path=" + os.DevNull, "--show-stats=false"}
+	args := []string{"run", "-c", guardConfig, "--output.json.path=stdout", "--output.text.path=" + os.DevNull, "--show-stats=false", "--allow-parallel-runners"}
 	if fast {
 		args = append(args, "--enable-only=depguard")
 	}
