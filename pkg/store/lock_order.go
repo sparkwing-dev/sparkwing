@@ -2,6 +2,7 @@ package store
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"strings"
 
@@ -44,6 +45,16 @@ func compareLockTiers(a, b storeLockTier) int {
 	return cmp.Compare(slices.Index(storeLockOrder[:], a), slices.Index(storeLockOrder[:], b))
 }
 
+// lockAuthorityThenRunTx takes a writer's authority chain, then its run, in
+// store lock order. Renewal holds authority while it waits for the run, so
+// taking the run first deadlocks against it (B15).
+func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor) error {
+	if _, err := resolveActorTx(ctx, tx, actor); err != nil {
+		return err
+	}
+	return lockStateRunTx(ctx, tx, team, runID)
+}
+
 type authorityLock struct {
 	ref   capability.AuthorityRef
 	depth int
@@ -75,4 +86,46 @@ func compareStoreLocks(a, b storeLockKey) int {
 		}
 	}
 	return cmp.Compare(a.generation, b.generation)
+}
+
+// Row-lock clauses live only here, so a reviewer of lock order reads one file
+// (TestRowLockClausesLiveInLockOrder). SQLite serializes writers and takes no
+// row locks; snapshot reads take none either.
+
+func (s *Store) forUpdate() string {
+	if s.dialect == DialectPostgres {
+		return " FOR UPDATE"
+	}
+	return ""
+}
+
+func (t *storeTx) forUpdate() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR UPDATE"
+	}
+	return ""
+}
+
+func (t *storeTx) forKeyShare() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR KEY SHARE"
+	}
+	return ""
+}
+
+func (t *storeTx) forShare() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR SHARE"
+	}
+	return ""
+}
+
+// safety: FOR UPDATE also blocks the key-share lock an event insert's foreign
+// key takes on its run while holding the run's sequence lock, so a transaction
+// that locks its run and then appends an event deadlocks with that insert.
+func (t *storeTx) forNoKeyUpdate() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR NO KEY UPDATE"
+	}
+	return ""
 }

@@ -272,7 +272,7 @@ func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
 		return nil
 	}
 	var id string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id = ? FOR UPDATE`, accountID).Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id = ?`+tx.forUpdate(), accountID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}

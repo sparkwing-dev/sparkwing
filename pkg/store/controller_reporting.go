@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
@@ -14,25 +15,23 @@ func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, a
 	if err := subject.Validate(); err != nil {
 		return "", authorityError(apierr.BadRequest, "invalid log subject")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer rollbackOrLog(tx)
-	if err := lockStateRunTx(ctx, tx, t.team, subject.RunID); err != nil {
-		return "", err
-	}
-	if err := checkLogWriterTx(ctx, tx, t.team, subject, actor, false); err != nil {
-		return "", err
-	}
 	var class string
-	if err := tx.QueryRowContext(ctx, `SELECT log_retention_class FROM runs WHERE team=? AND id=?`, t.team, subject.RunID).Scan(&class); err != nil {
-		return "", err
-	}
-	if _, ok := blob.LogClassDays(class); !ok {
-		return "", authorityError(apierr.Unavailable, "invalid persisted log retention")
-	}
-	if err := tx.Commit(); err != nil {
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockAuthorityThenRunTx(ctx, tx, t.team, subject.RunID, actor); err != nil {
+			return err
+		}
+		if err := checkLogWriterTx(ctx, tx, t.team, subject, actor, false); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT log_retention_class FROM runs WHERE team=? AND id=?`, t.team, subject.RunID).Scan(&class); err != nil {
+			return err
+		}
+		if _, ok := blob.LogClassDays(class); !ok {
+			return authorityError(apierr.Unavailable, "invalid persisted log retention")
+		}
+		return nil
+	})
+	if err != nil {
 		return "", err
 	}
 	return class, nil
