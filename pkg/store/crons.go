@@ -37,6 +37,16 @@ const (
 	CronWhereController = "controller"
 )
 
+// ScheduleDispatch seals host dispatch for a local schedule because the local
+// queue claims trigger and job units, never a plan unit. Cloud intake still
+// moves an unselected run to controller dispatch through [SelectDispatch].
+func ScheduleDispatch(where string) runspec.Dispatch {
+	if where == CronWhereLocal || where == "" {
+		return runspec.DispatchHost
+	}
+	return runspec.DispatchController
+}
+
 // CronScheduleDefaultName is the name a repository's lone schedule for a
 // pipeline carries, so a pipeline that declares one cadence needs no name
 // anywhere.

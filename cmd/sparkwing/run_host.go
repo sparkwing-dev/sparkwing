@@ -42,6 +42,8 @@ type localRunRuntime struct {
 	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
 	publish          func(context.Context, string, string) error
 	follow           func(context.Context, string, string, io.Writer) error
+	// ownerClaimed releases a standalone queue held for the CLI's own trigger claim.
+	ownerClaimed func()
 }
 
 type localRunDependencies struct {
@@ -272,6 +274,9 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 		return completion, err
 	}
 	response, err := runtime.controller.Claim(ctx, controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: version, AvailableCores: float64(runtimehost.NumCPU())})
+	if runtime.ownerClaimed != nil {
+		runtime.ownerClaimed()
+	}
 	if err != nil {
 		return completion, err
 	}

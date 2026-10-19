@@ -19,7 +19,7 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 	request.Pipeline = row.Pipeline
 	request.Mode = runspec.IntakeExecute
 	request.Origin = runspec.OriginSchedule
-	request.Dispatch = runspec.DispatchController
+	request.Dispatch = store.ScheduleDispatch(row.Where)
 	request.RequestedArgs = row.Effective().Args
 	if row.Where != store.CronWhereLocal {
 		request.Git.Ref = row.GitBranch

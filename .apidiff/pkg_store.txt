@@ -1970,6 +1970,7 @@ type ScheduleDecision struct {
 	Outcome string
 	Reason  string
 }
+func ScheduleDispatch(where string) runspec.Dispatch
 type ScheduleExpansion struct {
 	GeneratorID  string
 	SourceNodeID string
@@ -2686,6 +2687,8 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
 func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authorized) (capability.OIDCFacts, error)
 func (t *Tenant) ReadOverflowControl(ctx context.Context, authority capability.AuthorityRef) (OverflowControl, error)
+func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref NodeRef) (NodeRow, error)
+func (t *Tenant) ReadOwnerNodes(ctx context.Context, authority capability.AuthorityRef, runID string) ([]NodeRow, error)
 func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string) (RunSnapshot, error)
 func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[string][]string, error)
 func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error)
