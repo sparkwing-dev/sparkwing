@@ -23,7 +23,8 @@ Kinds:
 
 The services (`sparkwing-controller` and
 `sparkwing-runner`) read their settings from flags and their secrets from
-the files in `--credentials-dir`, so no service configuration appears here.
+the files in `--credentials-dir`, so the only service configuration here is
+the break-glass guard below.
 
 
 ## Configuration: the `sparkwing` CLI and local runs
@@ -43,6 +44,12 @@ the files in `--credentials-dir`, so no service configuration appears here.
 | Variable | Described in |
 |---|---|
 | `SPARKWING_RELEASE_SIGNING_KEY` | [security](security.md) |
+
+## Configuration: `sparkwing-controller admin`
+
+| Variable | Described in |
+|---|---|
+| `SPARKWING_ADMIN_GRANT_ALLOW_LARGE` | [auth](auth.md) |
 
 ## Runtime
 
