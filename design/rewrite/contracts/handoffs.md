@@ -855,3 +855,29 @@ Assigned to an Opus implementer (env 1087).
 ## 2026-10-19 Korey decision 24: staging amd64 pool
 
 - Staging keeps the tainted amd64 `staging-infra` NodePool (2 vCPU cap, empties when staging is down) for amd64-only QA images; kikd app nodes stay arm64.
+
+## 2026-10-19 Korey decision 25: staging shares the Stripe test sandbox
+
+- Staging and production share one Stripe test-mode sandbox. Each controller stamps its Checkout sessions and setups with a deployment identity in metadata and acknowledges (2xx) but never settles events carrying another deployment's identity or events it does not handle.
+
+## 2026-10-19 Korey decision 26: Cloud billing is prepaid credits with automatic refill
+
+- Supersedes post-pay debt and collections (decisions 112, 19's charge-failure holds, and the card-charge/collection/recovery design). Cloud usage only ever draws on a balance already paid for; there is no debt.
+- Credits are bought through Stripe Checkout (3-D Secure) and may save the card. Optional automatic refill: when the balance falls below a threshold, the controller starts one off-session payment for the refill amount (one in flight per team, idempotent); it settles exactly like Add funds from the signed webhook. A failed refill (decline, 3DS required) is recorded and surfaced ("update your card"); credits then run down normally.
+- Metering is slice by slice at lease renewal: admission needs the first slice covered (the existing award hold); each renewal reserves the next slice from the balance first. If the next slice is not covered, the renewal is refused and the job is stopped with "out of credits" (hard stop, no grace), bounded by the drain deadline. Overage is at most one slice per running job.
+- Refunds, disputes and early fraud warnings stay (any card payment can be clawed back); a clawback can take the balance negative, which blocks new Cloud work. Card pinning and fraud-card blocking stay.
+- Open for Korey: auto-refill opt-in vs default, default threshold and refill size, and what standing tiers still cap (refill size and frequency as a stolen-card brake).
+
+## 2026-10-19 Korey decision 27: refill settings and customer spending limits
+
+- Auto-refill is opt-in.
+- The team sets its own refill threshold and refill amount (the console suggests values; no forced defaults). A minimum refill amount of $10 keeps card fees reasonable.
+- Teams can set their own spending limits on refills, per week and per month (for example "no more than $25 a week, $100 a month"). A refill that would exceed a limit is not made; credits then run down and Cloud work hard-stops at zero, with a notice naming the limit.
+- Larger, less frequent charges are preferred; smarter sizing for high-volume teams (for example suggesting about a week of recent usage) is a later improvement, not launch scope.
+- Standing tiers additionally cap refill size and frequency as a stolen-card brake. Korey agrees in principle; the lead proposes the specific per-tier values for ratification.
+- Ratified 2026-10-19 (decision 27 standing caps): New $50 per refill / 1 per day / $100 per week; Established $200 / 2 / $500; Trusted $1,000 / 3 / $3,000; High uses the team's own limits only. Plain constants; teams that outgrow them use the decision 11 tier request.
+
+## 2026-10-19 Korey decision 28: structural simplification plan approved
+
+- Korey approved every recommendation in /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/simplicity/PLAN.md §4 (decisions 1-6 and 9-21 as recommended; 7-9 amended by §7 for prepaid), including moving pkg/store and pkg/controller under internal/, Sol's six cuts, GitHub-model provenance and cache trust, withdrawing the pool-runner residual, declared deployment kind, the 5-minute cancel drain deadline, Cloud fair shares, child-run limits (depth 10, 50 per root), CLI token limits, team-owned shared runners, append-only audit, the durable webhook inbox and declared restore.
+- Feature freeze: no new ranking, launcher or billing features beyond the plan until its §5 stop rule is met. Work proceeds in the plan's waves; every workstream deletes the old path and lands with its guard.
