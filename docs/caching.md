@@ -115,6 +115,10 @@ binary built with checksum verification relaxed is never reused by a run with it
 on. Different build settings produce
 different cache entries.
 
+Directories whose names begin with `.` or `_`, which Go never builds from, and
+`node_modules` are left out of these hashes, so a tool's transient directory
+inside a replacement checkout does not change the key.
+
 Contents are hashed, not timestamps -- editing a file back to its
 previous bytes restores the previous key. Paths are recorded relative
 to the module, and local `replace` targets are recorded by module path

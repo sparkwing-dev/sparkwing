@@ -462,6 +462,9 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 		}
 		rel, _ := filepath.Rel(dir, path)
 		f, err := os.Open(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return stats, err
 		}
@@ -482,11 +485,16 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if path != dir && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", ".git", ".claude-scratch":
+			switch name := d.Name(); {
+			case name == "node_modules":
+				return filepath.SkipDir
+			case path != dir && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")):
 				return filepath.SkipDir
 			}
 			return nil

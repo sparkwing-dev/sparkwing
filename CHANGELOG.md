@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **cli:** The pipeline binary cache key skips directories whose names begin with `.` or `_`, and a file that vanishes while the key is computed is left out instead of failing the SDK install.
 - **cli:** An open dashboard event stream ends when its session reaches the 24-hour lifetime or logs out. A `GOPROXY` query token stays masked when Go prints the proxy URL with a module path inserted. A child run started by a job on a personal machine prefers, and is marked on, that machine owner's other personal machines.
 - **cli:** `sparkwing update` says after a new CLI install that installed runner services update themselves from their controller (JSON `runner_services`); it never restarts them. The unused runner-service `Refresh` is removed
 - **runners:** A personal machine the controller marks as the run requester's own fetches private source with its owner's Git configuration and credential helper and never asks for a team credential, so it checks out without a bundle after team credentials stopped reaching personal machines. Shared runners and Cloud ask the controller and never read the host account's credential helper. See [git credentials](docs/git-credentials.md#who-receives-it).
