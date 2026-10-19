@@ -24,6 +24,13 @@ Create the controller credential Secret separately. The chart mounts it into the
 runner's credentials directory. Pipeline code on that runner can read its runner
 credential. Limit the credential to the runner's authorized work.
 
+`runner.trust` selects the runs this pool takes. Empty leaves it to the
+controller: a pool holding a secret reserved to it takes only verified pushes to
+the repository's default branch, and any other pool takes any run. Set
+`verified-default` or `any` to override it. `runner.submitEnvAllow` lists the
+submitted environment names this pool's jobs receive; empty accepts none. See
+[pool trust](../../docs/self-hosting.md#shared-runners-and-pool-trust).
+
 Set `runner.repos` to the repository patterns this machine may fetch, such as
 `github.com/your-org/*`. The runner checks this list before hosting each award.
 The default empty list admits no repositories. The full chart exposes it as

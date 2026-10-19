@@ -58,7 +58,7 @@ selects the controller for `pipeline trigger`, run observations and management.
 
 An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
 file. The selected cache profile supplies a temporary repository reader for
-verified default-branch records. The credential follows the profile's live
+verified default-branch records to a member with the editor role or above. The credential follows the profile's live
 membership and revocation and is revoked when the host closes.
 
 `--publish P` uploads completed local job results, artifacts and retained logs

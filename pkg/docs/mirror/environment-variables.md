@@ -133,6 +133,14 @@ process starts, so logs show `***` in their place. A `GOPROXY` entry or
 access token there. Cloud and shared runners drop
 these settings unless the operator's allow list names them.
 
+A run cannot submit a Go toolchain or network base name (`PATH`, `HOME`,
+`TMPDIR`, the proxy and CA settings, and similar) through
+`run.submit_env_allow`: intake refuses it and the CLI does not capture it,
+because it would reconfigure the executing host. Submitted names reach a shared
+runner only when its operator also lists them. Remote builds on a host the
+run's owner does not own set `GOENV=off`, so a `go env -w` file on that host
+does not change the build.
+
 | Variable | Class | Policy |
 |---|---|---|
 | `SPARKWING_DEBUG` | Diagnostic | SDK diagnostic output selection. |

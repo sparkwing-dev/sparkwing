@@ -112,6 +112,15 @@ runner:
   # state from previous jobs. 0 disables.
   maxClaimsBeforeRestart: 25
 
+  # Runs this pool takes work from. Empty takes the controller default: a
+  # pool that holds a secret reserved to it takes only verified pushes to the
+  # repository's default branch, and any other pool takes any run.
+  # "verified-default" or "any" overrides the default.
+  trust: ""
+  # Environment names a requester's run.submit_env_allow may deliver to this
+  # pool's jobs. Go-toolchain and network names are refused regardless; empty
+  # accepts no submitted values.
+  submitEnvAllow: []
   # When true, this pool also claims TRIGGERS (the webhook-side
   # workflow that turns a push into a Run). Single-pool deployments
   # want this on. Multi-pool deployments typically dedicate one pool
@@ -159,8 +168,10 @@ runner:
       # Every runner replica mounts the one claim, so the class must
       # serve ReadWriteMany whenever runner.replicas is above 1; the
       # chart refuses to render otherwise. The go command locks both
-      # caches and addresses their contents by hash, so replicas sharing
-      # them is safe and one pod's compile warms the pool.
+      # caches, so replicas can share them and one pod's compile warms
+      # the pool. Every job on the pool can write them, so a pool that
+      # serves untrusted branches should not share a claim with one that
+      # holds deployment secrets.
       accessModes:
         - ReadWriteMany
       # helm uninstall keeps the claim (annotation

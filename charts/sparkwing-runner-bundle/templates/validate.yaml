@@ -4,6 +4,9 @@
 {{- if .Values.logs -}}
 {{- fail "sparkwing-runner-bundle: logs was removed with the sparkwing-logs Deployment; runners upload node logs to the controller now. Unset logs and follow the migration guide section \"The logs service is removed\"" -}}
 {{- end -}}
+{{- if and .Values.runner.trust (not (has .Values.runner.trust (list "verified-default" "any"))) -}}
+{{- fail "sparkwing-runner-bundle: runner.trust must be empty, verified-default or any" -}}
+{{- end -}}
 {{- if and .Values.resourceQuota.enabled (not .Values.limitRange.enabled) -}}
 {{- fail "sparkwing-runner-bundle: resourceQuota.enabled=true requires limitRange.enabled=true, whose default and defaultRequest give a pod that declares no resources something for the quota to count. Without it the API server rejects every such pod in the namespace" -}}
 {{- end -}}
