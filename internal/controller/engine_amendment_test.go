@@ -39,6 +39,7 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 	}
 	authorized := capability.Authorized{Principal: root, Binding: root.Capability.Binding, Target: capability.Target{Team: "a"}}
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
+	engineAcceptedFixturePlan(t, server, "a", "run")
 	server.Store.SetClaimProfileResolver(engineEnrollmentFunc(func(_ context.Context, principal capability.Principal) (match.Profile, match.Resources, error) {
 		if principal.Authority.ID != "runner" {
 			t.Fatal("enrollment received a caller-selected identity")
@@ -195,6 +196,7 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 			} else {
 				target.NodeID = "job"
 				engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+				engineAcceptedFixturePlan(t, server, "a", "run")
 			}
 			claim, err := server.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 			if err != nil {

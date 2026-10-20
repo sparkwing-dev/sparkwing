@@ -200,11 +200,11 @@ func TestCredentialMutationsHTTPGitValuesStayPrivateAndTenantBound(t *testing.T)
 		if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || json.Unmarshal(w.Body.Bytes(), &public) != nil || !public.Confirmed || public.Host != "git.invalid" || public.CreatedBy != "account" || err != nil || strings.Contains(w.Body.String(), token) || strings.Contains(w.Body.String(), row.Secret) {
 			return false
 		}
-		plain, err := cipher.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, row.Secret)
+		plain, err := cipher.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, row.Secret)
 		if err != nil || plain != token || row.Username != "x-access-token" {
 			return false
 		}
-		if _, err := cipher.OpenBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential", false, true, row.Secret); err == nil {
+		if _, err := cipher.OpenBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, row.Secret); err == nil {
 			return false
 		}
 		w = authorityHTTP(h, b, "DELETE", "/api/v1/team/git-credentials/git.invalid?"+query.Encode(), "")

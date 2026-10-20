@@ -72,7 +72,19 @@ func (f *gitReleaseFixture) put(token string) {
 
 func (f *gitReleaseFixture) registerRunner(personal bool) {
 	f.t.Helper()
-	registerFixtureRunner(f.t, f.s.store, personal)
+	registerFixtureRunner(f.t, f.s.store, false)
+	if personal {
+		w := f.request("POST", "/api/v1/runners", `{"name":"personal-source","repos":["gitlab.example.com/acme/*"],"personal":true}`, 201)
+		var issued credentialResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &issued); err != nil {
+			f.t.Fatal(err)
+		}
+		var requirement string
+		if err := teststore.SQL(f.t, f.s.store).QueryRow(`SELECT json_extract(authority_json,'$.origin.requirement') FROM capabilities WHERE prefix=?`, issued.Prefix).Scan(&requirement); err != nil {
+			f.t.Fatal(err)
+		}
+		engineSQL(f.t, f.s.store, `UPDATE capabilities SET authority_json=json_set(authority_json,'$.origin.personal',json('true'),'$.origin.requirement',json(?)) WHERE prefix='runner'`, requirement)
+	}
 }
 
 func registerFixtureRunner(t *testing.T, s *store.Store, personal bool) {
@@ -273,7 +285,7 @@ func TestTeamGitCredentialIsOwnerManagedAndWriteOnly(t *testing.T) {
 
 func TestTeamGitCredentialNeedsASecretsKey(t *testing.T) {
 	f := newGitReleaseFixture(t)
-	w := f.request("POST", "/api/v1/tokens", `{"grants":["team.admin"]}`, 201)
+	w := f.request("POST", "/api/v1/tokens", `{"grants":["team.admin"],"allow_team_admin":true}`, 201)
 	var member credentialResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &member); err != nil {
 		t.Fatal(err)

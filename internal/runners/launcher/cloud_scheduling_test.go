@@ -22,6 +22,7 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		case 0:
 			award.Binding.Kind = CloudPlan
 			award.Binding.NodeID = ""
+			award.Binding.Attempt = 0
 		case 1:
 			award.Binding.Kind = CloudEval
 			award.Binding.SourceNodeID = award.Binding.NodeID
@@ -62,7 +63,7 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		case 1:
 			admitted.Spec.Template.Spec.Tolerations = nil
 		case 2:
-			admitted.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("cloud", team + "foreign")
+			admitted.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("cloud", team+"foreign")
 		}
 		if err := validateAdmittedJob(r.Job, admitted); err == nil {
 			t.Fatal("admission weakened Cloud protection")

@@ -29,7 +29,7 @@ func credentialSessionServer(t *testing.T, opts ...store.Option) (*Server, strin
 	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
 	raw := "private-account-session"
 	digest := sha256.Sum256([]byte(raw))
-	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','runs.read,runs.write',1,?,'a','member')`, hex.EncodeToString(digest[:]), time.Now().Add(time.Hour).UnixNano())
+	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','runs.read,runs.write',?,?,'a','member')`, hex.EncodeToString(digest[:]), time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano())
 	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	a := server.authorization
 	a.Authenticator = capability.NewAuthenticator(s)
@@ -64,12 +64,12 @@ func TestCredentialIssuancePersistsMemberRootAndDelegation(t *testing.T) {
 	s, session := credentialSessionServer(t)
 	h := s.Handler()
 	var root, child credentialResponse
-	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"],"expires_at":"2100-01-01T00:00:00Z"}`, false)
+	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &root) != nil {
 		t.Fatalf("root HTTP %d %s", w.Code, w.Body.String())
 	}
 	p, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability)))
-	if err != nil || p.Capability.Parent != nil || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) || p.Capability.Team != "a" || p.Capability.ExpiresAt.Year() != 2100 {
+	if err != nil || p.Capability.Parent == nil || p.Capability.Parent.Kind != capability.AuthoritySession || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) || p.Capability.Team != "a" || p.Capability.ExpiresAt == nil || p.Capability.ExpiresAt.After(time.Now().Add(90*24*time.Hour)) {
 		t.Fatalf("root=%+v err=%v", p, err)
 	}
 	w = credentialRequestHTTP(t, h, root.Capability, `{"grants":["runs.read"]}`, true)
@@ -77,7 +77,7 @@ func TestCredentialIssuancePersistsMemberRootAndDelegation(t *testing.T) {
 		t.Fatalf("child HTTP %d %s", w.Code, w.Body.String())
 	}
 	delegated, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(child.Capability)))
-	if err != nil || delegated.Capability.Parent == nil || *delegated.Capability.Parent != p.Authority || !delegated.Capability.ExpiresAt.Equal(*p.Capability.ExpiresAt) {
+	if err != nil || delegated.Capability.Parent == nil || *delegated.Capability.Parent != p.Authority || delegated.Capability.ExpiresAt.After(*p.Capability.ExpiresAt) {
 		t.Fatalf("delegate=%+v err=%v", delegated, err)
 	}
 	w = credentialRequestHTTP(t, h, root.Capability, `{"grants":["runs.write"]}`, true)
@@ -87,15 +87,8 @@ func TestCredentialIssuancePersistsMemberRootAndDelegation(t *testing.T) {
 	}
 	digest := sha256.Sum256([]byte(session))
 	engineSQL(t, s.store, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, hex.EncodeToString(digest[:]))
-	if _, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability))); err != nil {
-		t.Fatalf("session revocation ended member root: %v", err)
-	}
-	tenant, err := s.store.ForTeam(t.Context(), "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: p.Authority, CapabilityPrefix: root.Prefix}, p.Authority); err != nil {
-		t.Fatal(err)
+	if _, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability))); err == nil {
+		t.Fatal("session revocation left its member credential live")
 	}
 	w = credentialRequestHTTP(t, h, child.Capability, `{"grants":["runs.read"]}`, true)
 	if w.Code != 401 {

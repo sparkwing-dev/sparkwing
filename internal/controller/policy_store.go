@@ -34,9 +34,9 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 		}
 		return capability.AuthenticationSnapshot{}, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "authentication service unavailable"}, err)
 	}
-	for _, authority := range snapshot.Authorities {
+	for i, authority := range snapshot.Authorities {
 		p := authority.Principal
-		if p.Class == capability.CredentialSession && (!reader.sessions || reader.server.sessionExpired(p.Capability.IssuedAt, snapshot.Now)) {
+		if p.Class == capability.CredentialSession && (i == 0 && !reader.sessions || reader.server.sessionExpired(p.Capability.IssuedAt, snapshot.Now)) {
 			return capability.AuthenticationSnapshot{}, sessionUnavailable()
 		}
 	}

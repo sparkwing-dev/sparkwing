@@ -199,7 +199,10 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, f.request("GET", "/api/v1/auth/session", ""))
 		count, stored := f.state(t)
-		if elapsed < 0 || elapsed >= maximum {
+		if elapsed < 0 {
+			return w.Code == 401 && count == 1 && stored == expires.UnixNano()
+		}
+		if elapsed >= maximum {
 			return w.Code == 401 && count == 0
 		}
 		var result struct {

@@ -190,7 +190,7 @@ func TestCredentialRotationHTTPPreservesTenantAndRowBindings(t *testing.T) {
 		if _, err := current.OpenBound(secrets.PurposeSecret, "team", row.Name, pipeline, shared, masked, row.Value); err == nil {
 			return false
 		}
-		sealed, err := old.SealBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, plain)
+		sealed, err := old.SealBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, plain)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -213,7 +213,7 @@ func TestCredentialRotationHTTPPreservesTenantAndRowBindings(t *testing.T) {
 		if _, err := current.OpenBound(secrets.PurposeSecret, "foreign", row.Name, pipeline, shared, masked, f.secrets[0].Value); err == nil {
 			return false
 		}
-		if opened, err := current.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, f.git[0].Secret); err != nil || opened != plain {
+		if opened, err := current.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, f.git[0].Secret); err != nil || opened != plain {
 			return false
 		}
 		f.secrets[0].Value, f.git[0].Secret = row.Value, git.Secret
@@ -304,7 +304,7 @@ func TestCredentialRotationHTTPGitFailureCommitsNothing(t *testing.T) {
 		row := store.GitCredential{HostWide: true, Team: "team", Host: "git.invalid", Secret: "private-broken-envelope"}
 		if failure == "team" {
 			row.Team = "foreign"
-			row.Secret, err = old.SealBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential", false, true, "foreign-private")
+			row.Secret, err = old.SealBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, "foreign-private")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -496,11 +496,11 @@ func TestCredentialRotationHTTPCipherFailuresCommitNothing(t *testing.T) {
 				}
 				f.secrets = []store.Secret{{Name: "TOKEN", Masked: true, Value: value}}
 			} else {
-				value, err := old.SealBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, "private-value")
+				value, err := old.SealBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, "private-value")
 				if err != nil {
 					t.Fatal(err)
 				}
-				f.git = []store.GitCredential{{Team: "team", Host: "git.invalid", Secret: value}}
+				f.git = []store.GitCredential{{HostWide: true, Team: "team", Host: "git.invalid", Secret: value}}
 			}
 			beforeSecrets, beforeGit := append([]store.Secret(nil), f.secrets...), append([]store.GitCredential(nil), f.git...)
 			cipher := rotationCipherFailure{Cipher: rotating}

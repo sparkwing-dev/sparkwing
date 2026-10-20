@@ -32,7 +32,7 @@ func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
 			allowed = append(allowed, capability.TeamAdmin)
 		}
 		grant := []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.LogsRead, capability.ApprovalsWrite, capability.TeamAdmin, capability.NodesClaim}[selection%7]
-		body, err := json.Marshal(credentialRequest{Grants: []capability.Grant{grant}})
+		body, err := json.Marshal(credentialRequest{Grants: []capability.Grant{grant}, AllowTeamAdmin: grant == capability.TeamAdmin})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +53,7 @@ func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
 			return false
 		}
 		principal, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Capability)))
-		return err == nil && principal.Capability.Parent == nil && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) && principal.Capability.Team == "a"
+		return err == nil && principal.Capability.Parent != nil && principal.Capability.Parent.Kind == capability.AuthoritySession && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) && principal.Capability.Team == "a"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 42}); err != nil {
 		t.Fatal(err)
@@ -79,8 +79,8 @@ func TestCredentialMemberHTTPMembershipAndSessionLifecycle(t *testing.T) {
 			case "session revoked":
 				digest := sha256.Sum256([]byte(session))
 				engineSQL(t, s.store, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, hex.EncodeToString(digest[:]))
-				if w := credentialRequestHTTP(t, h, issued.Capability, `{"grants":["runs.read"]}`, true); w.Code != 201 {
-					t.Fatalf("delegation: %d %s", w.Code, w.Body)
+				if w := credentialRequestHTTP(t, h, issued.Capability, `{"grants":["runs.read"]}`, true); w.Code != 401 {
+					t.Fatalf("revoked session descendant: %d %s", w.Code, w.Body)
 				}
 			case "removed":
 				engineSQL(t, s.store, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)

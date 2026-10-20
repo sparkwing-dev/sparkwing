@@ -50,6 +50,7 @@ func registeredRunnerZeroHeadroom(t *testing.T, execution string, available floa
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display=? WHERE id='run'`, requestBody, sealed.Request.Git.Repository.Display)
+	engineAcceptedFixturePlan(t, e, "a", "run")
 	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(execution))
 	request := `{"runner_version":"v1.2.3","kinds":["node"],"capacity":{"cores":8,"memory_bytes":8192},"available_cores":0,"available_memory_bytes":0,"os":"linux","arch":"arm64"}`
 	response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", request, 200)

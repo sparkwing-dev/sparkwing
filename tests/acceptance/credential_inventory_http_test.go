@@ -134,7 +134,7 @@ func TestCredentialInventoryHTTPNeverExposesPrivateValues(t *testing.T) {
 		f := &credentialInventory{
 			team:    "team",
 			secrets: []store.Secret{{Name: "SECRET", Value: value, Masked: true, Pipeline: "build", Principal: "creator"}},
-			git:     []store.GitCredential{{ID: value, Team: store.Team(value), Secret: value, Host: "git.invalid", Kind: store.GitCredentialHTTPS}},
+			git:     []store.GitCredential{{HostWide: true, ID: value, Team: store.Team(value), Secret: value, Host: "git.invalid", Kind: store.GitCredentialHTTPS}},
 		}
 		h := inventoryServer(t, b, f).Handler()
 		for _, path := range []string{"/api/v1/secrets", "/api/v1/team/git-credentials"} {
@@ -149,13 +149,13 @@ func TestCredentialInventoryHTTPNeverExposesPrivateValues(t *testing.T) {
 				return false
 			}
 			row := body[key][0]
-			allowed := []string{"host", "kind", "confirmed", "created_by", "created_at", "updated_at"}
+			allowed := []string{"host", "repository", "host_wide", "kind", "confirmed", "created_by", "created_at", "updated_at"}
 			if key == "secrets" {
 				allowed = []string{"name", "principal", "pipeline", "masked", "bound", "created_at", "updated_at"}
 				if string(row["name"]) != `"SECRET"` || string(row["masked"]) != "true" {
 					return false
 				}
-			} else if string(row["host"]) != `"git.invalid"` {
+			} else if string(row["host"]) != `"git.invalid"` || string(row["repository"]) != `""` || string(row["host_wide"]) != "true" {
 				return false
 			}
 			for field := range row {

@@ -125,8 +125,13 @@ func TestAuthenticationTerminalExceptions(t *testing.T) {
 	}
 	authenticator := capability.NewAuthenticator(r)
 	auth, err := authenticator.Authenticate(t.Context(), p, route)
-	if err != nil || len(auth.Live) != 1 || !auth.Live[0].ResultReplay {
+	if err != nil || len(auth.Live) != 2 {
 		t.Fatalf("replay = %+v, %v", auth, err)
+	}
+	for _, live := range auth.Live {
+		if !live.ResultReplay {
+			t.Fatalf("non-replay terminal access = %+v", live)
+		}
 	}
 	p.Evidence.ResultDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	_, err = authenticator.Authenticate(t.Context(), p, route)
@@ -235,13 +240,13 @@ func TestAuthenticationSessionMatchesOnlyItsCommittedRowProperty(t *testing.T) {
 	}
 }
 
-func TestTriggerAuthorityCannotWriteNodeResults(t *testing.T) {
+func TestTriggerAuthorityUsesSupportedJobBindings(t *testing.T) {
 	reader, presentation, _ := authenticationFixture()
 	p := reader.snapshot.Authorities[0].Principal
 	p.Capability.Unit, p.Capability.Purpose = capability.UnitTrigger, capability.PurposeTrigger
 	p.Capability.Binding.Kind, p.Capability.Binding.NodeID, p.Capability.Binding.Attempt = capability.BindingTrigger, "", 0
 	p.Capability.Grants = []capability.Grant{capability.NodeResult, capability.NodeReport, capability.LogTail}
-	for _, suffix := range []string{"transition", "steps/start", "steps/finish", "logs", "log-manifest"} {
+	for _, suffix := range []string{"transition", "metrics", "usage", "activity", "steps/start", "steps/finish", "steps/skip", "steps/annotations", "steps/summary", "logs", "log-segments", "log-manifest"} {
 		route, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/"+suffix)
 		if !ok {
 			t.Fatalf("missing route %s", suffix)
@@ -250,8 +255,13 @@ func TestTriggerAuthorityCannotWriteNodeResults(t *testing.T) {
 		for i := range route.Access {
 			auth.Live = append(auth.Live, capability.LiveAccess{RuleIndex: i})
 		}
-		if _, err := capability.Authorize(t.Context(), allowAuthenticationBinding{}, route, auth, presentation.Evidence.Target); err == nil {
-			t.Fatalf("trigger wrote node %s", suffix)
+		authorized, err := capability.Authorize(t.Context(), allowAuthenticationBinding{}, route, auth, presentation.Evidence.Target)
+		if suffix == "transition" || suffix == "metrics" || suffix == "usage" {
+			if err != nil || authorized.Access.Binding != capability.BindRunOfTrigger {
+				t.Fatalf("trigger %s: binding=%s err=%v", suffix, authorized.Access.Binding, err)
+			}
+		} else {
+			requireAuthenticationCode(t, err, apierr.Forbidden)
 		}
 	}
 }

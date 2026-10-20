@@ -12140,6 +12140,11 @@ paths:
               - node.report
             binding: ownNode
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.report
+            binding: runOfTrigger
+            liveness: reporting
           - credential: local_run_publisher
             grants:
               - data.write
@@ -12667,6 +12672,11 @@ paths:
               - node.result
             binding: ownNode
             liveness: result
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.result
+            binding: runOfTrigger
+            liveness: result
           - credential: local_run_publisher
             grants:
               - data.write
@@ -12706,6 +12716,11 @@ paths:
             grants:
               - node.report
             binding: ownNode
+            liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.report
+            binding: runOfTrigger
             liveness: reporting
           - credential: local_run_publisher
             grants:
@@ -13135,6 +13150,11 @@ paths:
             grants:
               - node.result
             binding: ownNode
+            liveness: result
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.result
+            binding: runOfTrigger
             liveness: result
         retry: exact_body
       x-sparkwing-wire: undocumented

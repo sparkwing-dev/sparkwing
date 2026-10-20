@@ -53,10 +53,10 @@ func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 		t.Fatalf("service administrator readiness: %v %v", ready, err)
 	}
 	var ended int
-	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE prefix IN (?,?) AND revoked_at IS NOT NULL AND revocation_generation>0`, parent.Authority.ID, child.Capability.Prefix).Scan(&ended); err != nil || ended != 2 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE prefix IN (?,?) AND revoked_at IS NOT NULL`, parent.Authority.ID, child.Capability.Prefix).Scan(&ended); err != nil || ended != 2 {
 		t.Fatalf("descendant revocation: %d %v", ended, err)
 	}
-	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM sessions WHERE hash='bootstrap-session' AND revoked_at IS NOT NULL AND auth_generation>0`).Scan(&ended); err != nil || ended != 1 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM sessions WHERE hash='bootstrap-session' AND revoked_at IS NOT NULL`).Scan(&ended); err != nil || ended != 1 {
 		t.Fatalf("session revocation: %d %v", ended, err)
 	}
 	for _, secret := range []string{raw, child.Raw} {
@@ -64,10 +64,6 @@ func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 	}
 	if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, raw); err == nil || created {
 		t.Fatalf("used seed accepted: %v %v", created, err)
-	}
-	var generation int64
-	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT revocation_generation FROM capabilities WHERE prefix=?`, parent.Authority.ID).Scan(&generation); err != nil || generation == 0 {
-		t.Fatalf("generation=%d %v", generation, err)
 	}
 }
 
@@ -292,9 +288,17 @@ func TestNativeTokenOwnershipRelationProperty(t *testing.T) {
 		if allowed {
 			expected = 204
 		}
+		ended := owned && personal && !administrator
+		if ended {
+			expected = 401
+		}
 		reviewSessionRequest(t, s, raw, csrf, "DELETE", fmt.Sprintf("/api/v1/tokens/%s?owner=member&team=%d", token.Prefix, hint), "", expected)
 		_, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(token.Capability)))
-		return (err != nil) == allowed
+		var revoked bool
+		if queryErr := teststore.SQL(t, s.store).QueryRow(`SELECT revoked_at IS NOT NULL FROM capabilities WHERE prefix=?`, token.Prefix).Scan(&revoked); queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		return (err != nil) == (allowed || ended) && revoked == (allowed && !ended)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

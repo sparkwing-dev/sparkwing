@@ -142,23 +142,23 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLi
 	}
 	defer rollbackOrLog(tx)
 	digest := sessionDigest(rawSession)
-	var sess Session
-	var created, expires int64
-	var lastUsed sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,last_used_at
- FROM sessions WHERE hash=?`+tx.forUpdate(), digest).Scan(&sess.Principal, &sess.Team, &sess.AccountID, &sess.CapabilityPrefix, &created, &expires, &lastUsed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errors.New("unknown session")
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
-	}
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: digest}, true)
+	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: digest}, true, digest)
 	if err != nil {
 		var failure *apierr.Error
 		if errors.As(err, &failure) && failure.Code == apierr.Unauthenticated {
 			return nil, err
 		}
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
+	}
+	var sess Session
+	var created, expires int64
+	var lastUsed sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,last_used_at
+ FROM sessions WHERE hash=?`, digest).Scan(&sess.Principal, &sess.Team, &sess.AccountID, &sess.CapabilityPrefix, &created, &expires, &lastUsed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errors.New("unknown session")
+	}
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
 	now := tx.now()

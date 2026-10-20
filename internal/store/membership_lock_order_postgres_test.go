@@ -63,3 +63,28 @@ func TestPostgresAccountResolutionLocksMembershipBeforeAuthorityAgainstDemotion(
 	b.waitBlocked(2)
 	b.release(2)
 }
+
+func TestPostgresSessionRenewalLocksMembershipBeforeSession(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	t.Cleanup(cancel)
+	owner := signIn(t, st, "owner", "owner@example.com")
+	raw, _, _, err := st.CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := blockMembership(t, ctx, st, owner.PersonalTeam, owner.Account.ID)
+	b.start(func() error {
+		_, err := st.LookupSessionAndRenew(ctx, raw, 2*time.Hour, 24*time.Hour)
+		return err
+	})
+	b.waitBlocked(1)
+	if b.held(`SELECT 1 FROM sessions WHERE account_id='` + owner.Account.ID + `' FOR UPDATE`) {
+		t.Fatal("session renewal waits for membership while holding its session")
+	}
+	b.release(1)
+	session, err := st.LookupSession(ctx, raw)
+	if err != nil || session.ExpiresAt.Before(time.Now().Add(time.Hour)) {
+		t.Fatalf("renewal did not commit: session=%+v err=%v", session, err)
+	}
+}

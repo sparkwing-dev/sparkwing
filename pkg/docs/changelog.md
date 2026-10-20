@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **auth:** Token sign-in preserves an existing minting session when the token depends on it, so replacing the browser cookie leaves the new session usable. Explicit logout of the minting session still ends its tokens and descendant sessions. Session renewal acquires membership and ancestry locks in the shared lock order.
+
 - **go api (Breaking):** Move the store, controller, controller client, cipher tests and storage backends under `internal/`. External Go imports of their former `pkg/` paths are removed. HTTP credential DTOs and `NodeRef` live in `internal/controllerwire`; JSON contracts are unchanged. Use the author SDK, public wire packages or the documented HTTP API. See [migration](docs/migrations/_unreleased.md#controller-and-store-packages-are-internal).
 
 - **billing:** Payment events and refund responses share one state owner, including operator refunds and outcomes delivered before the payer is known. Terminal refunds cannot regress to pending. Refunds, disputes and warning consequences commit with the paid grant, and only actual refunds count as provider money returned.

@@ -400,9 +400,9 @@ func (node authorityNode) readsMembership() bool {
 	return c.Subject.Kind == capability.SubjectAccount && !(c.Team == "" && node.principal.Class == capability.CredentialSession && c.Parent == nil)
 }
 
-func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool) ([]authorityNode, error) {
+func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, writes ...string) ([]authorityNode, error) {
 	if lock {
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}); err != nil {
+		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, writes...); err != nil {
 			return nil, err
 		}
 	}
@@ -509,7 +509,7 @@ func lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.Autho
 		memberships = append(memberships, authorityMembershipKeys(chain)...)
 		for i, node := range chain {
 			ref := node.principal.Authority
-			write := ref.Kind == capability.AuthorityCapability && (registeredClaimant(node.principal.Capability) || slices.Contains(writes, ref.ID))
+			write := slices.Contains(writes, ref.ID) || ref.Kind == capability.AuthorityCapability && registeredClaimant(node.principal.Capability)
 			if at := slices.IndexFunc(set, func(h authorityLock) bool { return h.ref == ref }); at >= 0 {
 				set[at].write = set[at].write || write
 				continue

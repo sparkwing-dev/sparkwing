@@ -45,7 +45,7 @@ func (c *sourceCipher) SealBound(secrets.Purpose, string, string, string, bool, 
 
 func (c *sourceCipher) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
 	c.opens++
-	if team != "team" || name != "git-credential:git.example" || scope != "git-credential" || shared || !masked || envelope != "private-envelope" {
+	if team != "team" || name != "git-credential:git.example" || scope != "git-credential:host:git.example" || shared || !masked || envelope != "private-envelope" {
 		return "", errors.New("private-cipher-binding")
 	}
 	return "private-source-secret", c.err

@@ -187,7 +187,11 @@ func TestSessionFlowHTTPLifetimeCases(t *testing.T) {
 			count, stored := f.state(t)
 			if test.refused {
 				assertEngineError(t, w, 401, apierr.Unauthenticated)
-				if count != 0 || !strings.Contains(w.Body.String(), "maximum lifetime") {
+				if test.age < 0 {
+					if count != 1 || stored != now.Add(test.expiry).UnixNano() {
+						t.Fatalf("future session was changed: count=%d expiry=%d", count, stored)
+					}
+				} else if count != 0 || !strings.Contains(w.Body.String(), "maximum lifetime") {
 					t.Fatalf("refused session: count=%d body=%s", count, w.Body.String())
 				}
 				return

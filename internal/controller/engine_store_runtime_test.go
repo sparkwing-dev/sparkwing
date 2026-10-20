@@ -13,8 +13,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -242,19 +244,51 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	}
 }
 
-func engineAcceptedFixturePlan(t *testing.T, e *EngineController) {
+func engineAcceptedFixturePlan(t *testing.T, e *EngineController, team store.Team, runID string, jobs ...string) {
 	t.Helper()
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	tenant, err := e.Store.ForTeam(t.Context(), team)
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := tenant.ReadRun(t.Context(), "run")
+	run, err := tenant.ReadRun(t.Context(), runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec, err := json.Marshal(runspec.Spec{Version: 1, Request: run.Request, Hash: "spec", PlanHash: "plan", Resolved: runspec.Resolved{Guards: runspec.Guards{Passed: true}}})
+	if len(jobs) == 0 {
+		jobs = []string{"job"}
+	}
+	plan := nodeproto.PlanDoc{Jobs: make([]nodeproto.JobSpec, 0, len(jobs))}
+	for _, id := range jobs {
+		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: id})
+	}
+	rawPlan, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, e.Store, `UPDATE runs SET spec_json=?,spec_hash='spec',sealed_at=1,plan_json=?,plan_hash='plan' WHERE team='a' AND id='run'`, spec, []byte(`{"jobs":[{"id":"job"}]}`))
+	run.Request.RunID, run.Request.Request.Team = runID, string(team)
+	run.Request.Hash, err = runspec.CanonicalHash(run.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawRequest, err := json.Marshal(run.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: run.Request, Declarations: declarations, Plan: plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := runspec.SealSpec(runspec.SealInput{Request: run.Request, Declarations: declarations, Plan: rawPlan, Now: time.Unix(0, 1), Resolved: runspec.Resolved{
+		Args: run.Request.Request.RequestedArgs, SecretArgs: append([]string{}, run.Request.Request.SecretArgs.Value...), Settings: resolved, Engine: engine.Identity{Version: "v1.2.3"}, Guards: runspec.Guards{Passed: true},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawSpec, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,request_hash=?,spec_json=?,spec_hash=?,sealed_at=1,plan_json=?,plan_hash=? WHERE team=? AND id=?`, rawRequest, run.Request.Hash, rawSpec, spec.Hash, rawPlan, spec.PlanHash, team, runID)
+	engineSQL(t, e.Store, `UPDATE nodes SET queue_started_at=? WHERE team=? AND run_id=? AND ready_at IS NOT NULL AND queue_started_at IS NULL`, time.Now().UnixNano(), team, runID)
 }

@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +24,27 @@ type localControllerConn struct {
 }
 
 func (c localControllerConn) PeerIdentity() wingd.LocalPeerIdentity { return c.peer }
+
+func localControllerIdentity(t *testing.T) (wingd.LocalPeerIdentity, string) {
+	t.Helper()
+	subject, err := wingd.CurrentLocalSubject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := wingd.LocalPeerIdentity{GOOS: runtime.GOOS}
+	account := strings.TrimPrefix(subject, "local:")
+	if runtime.GOOS == "windows" {
+		peer.SID = account
+	} else {
+		uid, err := strconv.ParseUint(account, 10, 32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value := uint32(uid)
+		peer.UID = &value
+	}
+	return peer, subject
+}
 
 type localControllerListener struct {
 	connections chan net.Conn
@@ -62,7 +85,7 @@ func testLocalControllerHTTP(t *testing.T, native bool) {
 	}
 	services := s.HTTP()
 	s.HTTP()
-	uid := uint32(1234)
+	peer, subject := localControllerIdentity(t)
 	listener := &localControllerListener{connections: make(chan net.Conn), done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -70,7 +93,7 @@ func testLocalControllerHTTP(t *testing.T, native bool) {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		client, server := net.Pipe()
 		select {
-		case listener.connections <- localControllerConn{Conn: server, peer: wingd.LocalPeerIdentity{GOOS: "linux", UID: &uid}}:
+		case listener.connections <- localControllerConn{Conn: server, peer: peer}:
 			return client, nil
 		case <-ctx.Done():
 			client.Close()
@@ -112,7 +135,7 @@ func testLocalControllerHTTP(t *testing.T, native bool) {
 		}
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return err == nil && resp.StatusCode == status && (status != 200 || strings.Contains(string(body), `"principal":"local:1234"`)) && !strings.Contains(string(body), forged)
+		return err == nil && resp.StatusCode == status && (status != 200 || strings.Contains(string(body), `"principal":`+strconv.Quote(subject))) && !strings.Contains(string(body), forged)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
 		t.Fatal(err)

@@ -13,7 +13,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
@@ -24,7 +23,7 @@ func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
 	}
 	engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default','local-history',1,'ci','success',?,'request',1,'repo','host','execute',?,'local',1,2,'r30',30)`, raw, []byte(`[]`))
 	services := s.HTTP()
-	uid := uint32(1234)
+	peer, _ := localControllerIdentity(t)
 	listener := &localControllerListener{connections: make(chan net.Conn), done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -32,7 +31,7 @@ func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		local, remote := net.Pipe()
 		select {
-		case listener.connections <- localControllerConn{Conn: remote, peer: wingd.LocalPeerIdentity{GOOS: "linux", UID: &uid}}:
+		case listener.connections <- localControllerConn{Conn: remote, peer: peer}:
 			return local, nil
 		case <-ctx.Done():
 			_ = local.Close()

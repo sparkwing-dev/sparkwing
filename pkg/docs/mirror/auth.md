@@ -402,9 +402,16 @@ deletion failure returns `503` and leaves the cookies in place.
 
 A session renewal extends expiry by seven days, but never past 30 days from
 creation. Ordinary policy reads and writes check that lifetime without
-renewing. The renewal endpoint refuses an over-age or future-created session
-and removes its row. An embedder changes the cap with
+renewing. The renewal endpoint refuses an over-age session and removes its row.
+Future-created sessions are refused before renewal and remain unchanged.
+An embedder changes the cap with
 `controller.Server.WithSessionMaxLifetime`.
+
+Token sign-in ends the browser's prior session unless that session is an ancestor
+of the submitted token. The minting session remains live because ending it would
+also end the token and the new session. Explicit logout of the minting session
+ends its tokens and descendant sessions. Logging out a descendant ends only
+that descendant's authority.
 
 <!-- design:begin -->
 

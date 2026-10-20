@@ -98,32 +98,27 @@ func TestEngineReportingTextBounds(t *testing.T) {
 	}
 }
 
-func TestEngineStepReadsOwnerAndPublisherAttempts(t *testing.T) {
-	for _, authority := range []string{"owner", "publisher"} {
-		for _, name := range []string{"missing", "private error", "unstarted"} {
-			t.Run(authority+"/"+name, func(t *testing.T) {
-				b := ownerBoundary()
-				if authority == "publisher" {
-					b = publisherBoundary()
-				}
-				f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}}}
-				status, code := 500, apierr.Internal
-				switch name {
-				case "missing":
-					f.readErr = store.ErrNotFound
-					status, code = 404, apierr.NotFound
-				case "private error":
-					f.readErr = errors.New("private credential")
-				case "unstarted":
-					status, code = 409, apierr.IllegalTransition
-				}
-				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"compile","state":"running","source_attempt":2}`)
-				assertEngineError(t, w, status, code)
-				if f.writes != 0 {
-					t.Fatal("invalid attempt reached transaction")
-				}
-			})
-		}
+func TestEngineStepReadsPublisherAttempts(t *testing.T) {
+	for _, name := range []string{"missing", "private error", "unstarted"} {
+		t.Run(name, func(t *testing.T) {
+			b := publisherBoundary()
+			f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}}}
+			status, code := 500, apierr.Internal
+			switch name {
+			case "missing":
+				f.readErr = store.ErrNotFound
+				status, code = 404, apierr.NotFound
+			case "private error":
+				f.readErr = errors.New("private credential")
+			case "unstarted":
+				status, code = 409, apierr.IllegalTransition
+			}
+			w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"compile","state":"running","source_attempt":2}`)
+			assertEngineError(t, w, status, code)
+			if f.writes != 0 {
+				t.Fatal("invalid attempt reached transaction")
+			}
+		})
 	}
 }
 
@@ -182,6 +177,13 @@ func TestEngineReportingAuthorities(t *testing.T) {
 					body = strings.ReplaceAll(body, `"source_attempt":2`, `"source_attempt":`+strconv.FormatInt(attempt, 10))
 				}
 				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/"+operation.suffix, body)
+				if authority == "owner" && strings.HasPrefix(operation.suffix, "steps/") {
+					assertEngineError(t, w, http.StatusForbidden, apierr.Forbidden)
+					if f.writes != 0 {
+						t.Fatal("trigger owner reported a job step")
+					}
+					return
+				}
 				wantStatus := http.StatusNoContent
 				if strings.Contains(body, "source_attempt") {
 					wantStatus = http.StatusOK
@@ -452,12 +454,12 @@ func TestEngineTypedStepHTTP(t *testing.T) {
 func TestEngineTypedStepAttemptProperty(t *testing.T) {
 	check := func(seed uint32, delayed bool) bool {
 		observed := int64(seed) + 1
-		for _, owner := range []bool{false, true} {
+		for _, publisher := range []bool{false, true} {
 			b := newCredentialBoundary()
-			if owner {
-				b = ownerBoundary()
+			if publisher {
+				b = publisherBoundary()
 			}
-			if !owner {
+			if !publisher {
 				b.snapshot.Authorities[0].Principal.Capability.Binding.Attempt = observed
 				b.snapshot.Binding.Current.Attempt = observed
 			}
@@ -465,7 +467,7 @@ func TestEngineTypedStepAttemptProperty(t *testing.T) {
 			if delayed {
 				current++
 			}
-			if !owner {
+			if !publisher {
 				b.snapshot.Authorities[0].Principal.Capability.Binding.Attempt = current
 				b.snapshot.Binding.Current.Attempt = current
 			}
