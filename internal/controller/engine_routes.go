@@ -264,6 +264,10 @@ func decodeEngineRequest(r *http.Request, body any) error {
 }
 
 func engineLookupError(err error) error {
+	var integrity *apierr.Error
+	if errors.As(err, &integrity) && integrity.Code == apierr.IntegrityFailure {
+		return errors.Join(&apierr.Error{Code: apierr.Internal, Message: "stored state is invalid"}, err)
+	}
 	var unpriced *store.UnpricedCPUClassError
 	if errors.As(err, &unpriced) {
 		return &apierr.Error{Code: apierr.Conflict, Message: unpriced.Error(), Details: map[string]any{"reason": UnpricedCPUClassCode}}

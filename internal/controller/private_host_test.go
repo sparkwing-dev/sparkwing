@@ -388,7 +388,7 @@ func (b cancelSnapshotBinding) CheckBinding(ctx context.Context, p capability.Pr
 }
 
 func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
-	for _, stage := range []string{"store", "handler_cancel", "authentication_cancel"} {
+	for _, stage := range []string{"store", "state", "handler_cancel", "authentication_cancel"} {
 		t.Run(stage, func(t *testing.T) {
 			engine, _ := engineRuntimeStore(t)
 			engineRuntimeClaim(t, engine, capability.UnitNode)
@@ -405,6 +405,9 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			switch stage {
 			case "store":
 				engineSQL(t, engine.Store, `UPDATE nodes SET execution_json=?`, []byte(`!`))
+			case "state":
+				engineSQL(t, engine.Store, `UPDATE nodes SET status='running',attempt=0`)
+				wantCause = "running job has no claim or attempt"
 			case "handler_cancel":
 				server.authorization.Bindings = cancelSnapshotBinding{server.authorization.Bindings, cancel}
 				wantCause = "context canceled"
@@ -420,6 +423,9 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			records := auditLines(t, &logs, "http request failed")
 			if w.Code != wantStatus || len(records) != 1 || records[0]["request_id"] != "snapshot-request" || !strings.Contains(records[0]["err"].(string), wantCause) || records[0]["route"] != "/api/v1/runs/{run}/local-host/snapshot" {
 				t.Fatalf("snapshot HTTP %d: %s logs=%s", w.Code, w.Body, logs.String())
+			}
+			if strings.Contains(w.Body.String(), wantCause) {
+				t.Fatalf("snapshot exposes private cause: %s", w.Body)
 			}
 		})
 	}
