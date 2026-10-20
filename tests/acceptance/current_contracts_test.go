@@ -91,7 +91,7 @@ func contractSymbols(t *testing.T, directory string) map[string]string {
 func TestCurrentContractSymbolInventories(t *testing.T) {
 	const root = "../../"
 	packages := map[string]map[string]string{}
-	for _, name := range []string{"settings", "nodehost", "store"} {
+	for _, name := range []string{"settings", "nodehost", "store", "capability"} {
 		packages[name] = contractSymbols(t, root+"internal/"+name)
 	}
 	path := root + "design/rewrite/contracts/c4-surface-config.md"
@@ -138,20 +138,35 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 		t.Fatal("missing host inventory")
 	}
 	inventory, _, _ = strings.Cut(inventory, "## Lease and source export inventory")
+	checkContractInventory(t, inventory, "", packages)
+	data, err = os.ReadFile(root + "design/rewrite/contracts/c2-credentials.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, inventory, ok = strings.Cut(string(data), "## Exported API\n")
+	if !ok {
+		t.Fatal("missing capability inventory")
+	}
+	inventory, _, _ = strings.Cut(inventory, "| Other package API |")
+	checkContractInventory(t, inventory, "capability", packages)
+}
+
+func checkContractInventory(t *testing.T, inventory, defaultOwner string, packages map[string]map[string]string) {
+	t.Helper()
 	quoted := regexp.MustCompile("`([^`]+)`")
 	for _, line := range strings.Split(inventory, "\n") {
 		cells := strings.Split(line, "|")
 		if len(cells) < 3 {
 			continue
 		}
-		owner := ""
+		owner := defaultOwner
 		for _, match := range quoted.FindAllStringSubmatch(cells[1], -1) {
 			symbol := match[1]
 			if prefix, name, found := strings.Cut(symbol, "."); found && packages[prefix] != nil {
 				owner, symbol = prefix, name
 			}
 			if owner == "" || packages[owner][symbol] == "" {
-				t.Errorf("host inventory names missing symbol %s.%s", owner, symbol)
+				t.Errorf("inventory names missing symbol %s.%s", owner, symbol)
 			}
 		}
 	}

@@ -1126,7 +1126,6 @@ All capability names below are in `internal/capability`.
 | `AuthenticationReader.ReadAuthentication` | Load committed facts for the verifier, including the awarded team's membership and cross-team ancestors. |
 | `NewAuthenticator`, `ValidateAuthority` | Verify fresh snapshots and share ancestry checks with transactional authority resolution. |
 | `AuthorityResolver.ResolveAuthority` | Resolve tagged capability/session authority and recheck ancestry and membership inside the store transaction. |
-| `AuthCacheEntry.Reusable` | Require a fresh complete generation vector, an unexpired credential and age strictly below the shared cache TTL. |
 | `Authenticator.Authenticate` | Validate identity and ancestry using route-specific liveness. |
 | `LiveAccess`, `Authenticated` | Preserve which alternatives passed liveness for the matched route. |
 | `BindingChecker.CheckBinding` | Resolve relational authority in the store or sealed node-host plan. |
@@ -1137,7 +1136,6 @@ All capability names below are in `internal/capability`.
 | `BillingStart`, `BillingUnit` | Separate charging start from compute kind. |
 | `BillingProvenance` | Freeze payer, metering, executor class, reservation, start and unit at award. |
 | `UnitBilling`, `UnitBillingMappings` | Map trigger to host, node to job, plan to plan and eval to eval billing. |
-| `BillingRule` | Define unit minimums and nonbillable intervals. |
 | `BillableInterval` | Record actual compute under an award. |
 | `BillingSettlement` | Return billable seconds and unstarted-refund status for the ledger owner. |
 | `SettleBilling` | Calculate settlement from immutable provenance and persisted intervals. |
@@ -1363,8 +1361,7 @@ The original here Award also requires its immediate requester's current
 `ValidateAuthority` supplies these checks to the transactional resolver too.
 
 The verifier reads a fresh snapshot for each request. It does not cache
-authority or liveness. An adapter that later caches facts must still satisfy
-`AuthCacheEntry.Reusable` and read fresh liveness on every request.
+authority or liveness.
 
 `Presentation.Evidence` supplies decoded selectors and the exact request-body
 SHA-256. The verifier supplies method and pattern from the matched route.
