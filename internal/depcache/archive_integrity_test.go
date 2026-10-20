@@ -45,7 +45,12 @@ func TestArchiveTrailerVerifiedBeforePublish(t *testing.T) {
 			if fault == "cancelled" {
 				reader.cancel = cancel
 			}
-			if err := depcache.ExtractArchiveStaged(ctx, reader, dest); err == nil {
+			root, err := os.OpenRoot(parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			if err := depcache.ExtractArchiveStagedRoot(ctx, reader, root, "cache"); err == nil {
 				t.Fatal("corrupt archive published")
 			} else if fault == "cancelled" && !errors.Is(err, context.Canceled) {
 				t.Fatalf("cancelled extraction = %v", err)

@@ -73,11 +73,10 @@ func (b *dataBackend) Fetch(ctx context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	return RestoreArchive(ctx, r, dir)
+	return restoreArchive(ctx, r, dir)
 }
 
-// RestoreArchive publishes a dependency directory only after verified EOF and staged extraction.
-func RestoreArchive(ctx context.Context, r blob.VerifiedReader, dir string) (int64, error) {
+func restoreArchive(ctx context.Context, r blob.VerifiedReader, dir string) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return 0, errors.Join(err, closeReader(r))
 	}

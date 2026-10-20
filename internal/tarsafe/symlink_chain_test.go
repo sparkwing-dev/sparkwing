@@ -30,7 +30,7 @@ func TestExtractRefusesASymlinkChainOutOfTheRoot(t *testing.T) {
 		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		err := ExtractInRoot(rawTar(t, entries, nil), dir, Policy{AllowSymlinks: true})
+		err := extractInRoot(rawTar(t, entries, nil), dir, Policy{AllowSymlinks: true})
 		if err == nil {
 			got, _ := filepath.EvalSymlinks(filepath.Join(dir, "e"))
 			t.Fatalf("%s: extraction accepted e, which resolves to %s", name, got)
@@ -60,7 +60,7 @@ func TestExtractedSymlinksStayInsideTheRootProperty(t *testing.T) {
 			}
 			entries = append(entries, &tar.Header{Name: names[r.Intn(len(names))], Typeflag: tar.TypeSymlink, Linkname: strings.Join(link, "/")})
 		}
-		if ExtractInRoot(rawTar(t, entries, nil), dir, Policy{AllowSymlinks: true}) != nil {
+		if extractInRoot(rawTar(t, entries, nil), dir, Policy{AllowSymlinks: true}) != nil {
 			continue
 		}
 		_ = filepath.Walk(dir, func(path string, _ os.FileInfo, err error) error {

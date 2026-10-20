@@ -43,9 +43,7 @@ func extractArchiveRoot(r io.Reader, root *os.Root) error {
 	return err
 }
 
-// ExtractArchiveStaged publishes only after extraction and gzip verification.
-// Cancellation before publication preserves the previous directory.
-func ExtractArchiveStaged(ctx context.Context, r io.Reader, dir string) error {
+func extractArchiveStaged(ctx context.Context, r io.Reader, dir string) error {
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return err
 	}

@@ -60,5 +60,5 @@ func (r remoteReader) Fetch(ctx context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	return RestoreArchive(ctx, body, dir)
+	return restoreArchive(ctx, body, dir)
 }

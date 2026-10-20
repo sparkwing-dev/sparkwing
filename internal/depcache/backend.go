@@ -115,7 +115,7 @@ func (l *localBackend) Fetch(ctx context.Context, key, dir string) (int64, error
 	if err != nil {
 		return 0, err
 	}
-	if err := ExtractArchiveStaged(ctx, f, dir); err != nil {
+	if err := extractArchiveStaged(ctx, f, dir); err != nil {
 		return 0, err
 	}
 	return fi.Size(), nil

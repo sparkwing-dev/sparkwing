@@ -32,9 +32,7 @@ type Policy struct {
 	Rename func(name string) (string, bool)
 }
 
-// ExtractInRoot writes every entry of tr under dir, refusing entries that
-// escape it and stopping once the archive has produced 20 GiB.
-func ExtractInRoot(tr *tar.Reader, dir string, policy Policy) error {
+func extractInRoot(tr *tar.Reader, dir string, policy Policy) error {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
@@ -44,7 +42,7 @@ func ExtractInRoot(tr *tar.Reader, dir string, policy Policy) error {
 }
 
 // ExtractIntoRoot writes every entry of tr under an opened root, with the
-// same refusals as ExtractInRoot.
+// same refusals as extractInRoot.
 func ExtractIntoRoot(tr *tar.Reader, root *os.Root, policy Policy) error {
 	type dirMode struct {
 		path string
