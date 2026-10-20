@@ -9,9 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// safety: a refund is kept by its payment whatever order Stripe delivers them in; the refund and the payment's
-// settlement each apply it, so a refund that arrives first is taken back in the transaction that grants the payment.
-func recordProviderRefundTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) error {
+// safety: every reversal obligation survives until its payment can settle in the same transaction.
+func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent, kind string) error {
 	amount, err := billingProduct(e.AmountMinor, MicroCreditsPerCent)
 	if err != nil {
 		return err
@@ -19,53 +18,87 @@ func recordProviderRefundTx(ctx context.Context, tx *storeTx, e capability.Payme
 	var payment, status string
 	var recorded int64
 	err = tx.QueryRowContext(ctx, `SELECT payment_intent, amount_micro, status FROM payment_refunds
-	    WHERE payment_mode = ? AND refund_id = ?`+tx.forUpdate(), e.Mode, e.ObjectID).Scan(&payment, &recorded, &status)
+	    WHERE payment_mode = ? AND kind = ? AND refund_id = ?`+tx.forUpdate(), e.Mode, kind, e.ObjectID).Scan(&payment, &recorded, &status)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		_, err = tx.ExecContext(ctx, `INSERT INTO payment_refunds (payment_mode, refund_id, payment_intent, amount_micro,
-		    status, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, e.Mode, e.ObjectID, e.PaymentID, amount, e.Status, tx.now().UnixNano())
+		_, err = tx.ExecContext(ctx, `INSERT INTO payment_refunds (payment_mode, kind, refund_id, payment_intent, amount_micro,
+		    status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, e.Mode, kind, e.ObjectID, e.PaymentID, amount, e.Status, tx.now().UnixNano())
 		return err
 	case err != nil:
 		return err
 	case payment != e.PaymentID || recorded != amount:
-		return authorityError(apierr.Conflict, "refund changed its payment or amount")
+		return authorityError(apierr.Conflict, "payment consequence changed its payment or amount")
 	case status == CardRefundSucceeded:
 		return nil
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE payment_refunds SET status = ?, updated_at = ? WHERE payment_mode = ? AND refund_id = ?`,
-		e.Status, tx.now().UnixNano(), e.Mode, e.ObjectID)
+	_, err = tx.ExecContext(ctx, `UPDATE payment_refunds SET status = ?, updated_at = ? WHERE payment_mode = ? AND kind = ? AND refund_id = ?`,
+		e.Status, tx.now().UnixNano(), e.Mode, kind, e.ObjectID)
 	return err
 }
 
-// safety: each succeeded refund reverses under its own reference, so applying the refunds again after either the
-// refund or the payment settles takes back nothing twice.
-func applyPaymentRefundsTx(ctx context.Context, tx *storeTx, paymentIntent string) error {
-	if _, funded, err := paidGrantForPaymentTx(ctx, tx, paymentIntent); err != nil || !funded {
-		return err
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT payment_mode, refund_id, amount_micro FROM payment_refunds
-	    WHERE payment_intent = ? AND status = ? ORDER BY updated_at, refund_id`, paymentIntent, CardRefundSucceeded)
+// safety: pending payments retain their obligations; refused payments have no grant to reverse.
+// Each consequence has one reference, and all reversals together are capped by the original grant.
+func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, paymentIntent string) error {
+	mode, err := paymentModeTx(ctx, tx)
 	if err != nil {
 		return err
 	}
-	type refund struct {
-		mode, id string
+	var protected sql.NullInt64
+	var grant sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT liability_shift, grant_id FROM credit_checkouts
+	    WHERE payment_mode = ? AND payment_id = ?`, mode, paymentIntent).Scan(&protected, &grant)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// safety: a failed attempt may close a pending payment, but only a paid outcome records protection.
+	if !protected.Valid {
+		return nil
+	}
+	if !grant.Valid {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT kind, refund_id, amount_micro FROM payment_refunds
+	    WHERE payment_mode = ? AND payment_intent = ? AND status = ? ORDER BY updated_at, kind, refund_id`, mode, paymentIntent, CardRefundSucceeded)
+	if err != nil {
+		return err
+	}
+	type consequence struct {
+		kind, id string
 		amount   int64
 	}
-	var refunds []refund
+	var consequences []consequence
 	for rows.Next() {
-		var r refund
-		if err := rows.Scan(&r.mode, &r.id, &r.amount); err != nil {
+		var r consequence
+		if err := rows.Scan(&r.kind, &r.id, &r.amount); err != nil {
 			return errors.Join(err, rows.Close())
 		}
-		refunds = append(refunds, r)
+		consequences = append(consequences, r)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
-	for _, r := range refunds {
-		if _, err := reversePaymentTx(ctx, tx, paymentIntent, "refund:"+r.mode+":"+r.id, "payment_provider", r.amount); err != nil {
+	for _, r := range consequences {
+		reference := "refund:" + string(mode) + ":" + r.id
+		switch r.kind {
+		case "dispute":
+			reference = r.id
+		case "warning":
+			if protected.Int64 == 1 {
+				continue
+			}
+			reference = "fraud_warning:" + r.id
+		}
+		reversed, err := reversePaymentTx(ctx, tx, paymentIntent, reference, "payment_provider", r.amount)
+		if err != nil {
 			return err
+		}
+		if r.kind == "warning" {
+			if err := queueCardRefundTx(ctx, tx, reversed.Team, paymentIntent, reversed.PaidMicro/MicroCreditsPerCent, CardRefusedWarning, tx.now()); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -86,7 +119,7 @@ func closeRefundedQueueTx(ctx context.Context, tx *storeTx, paymentIntent string
 func refundedMicroTx(ctx context.Context, tx *storeTx, paymentIntent string) (int64, error) {
 	var refunded int64
 	err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount_micro), 0) FROM payment_refunds
-	    WHERE payment_intent = ? AND status = ?`, paymentIntent, CardRefundSucceeded).Scan(&refunded)
+	    WHERE payment_intent = ? AND kind = 'refund' AND status = ?`, paymentIntent, CardRefundSucceeded).Scan(&refunded)
 	return refunded, err
 }
 
@@ -96,7 +129,7 @@ func refundOutcomeTx(ctx context.Context, tx *storeTx, paymentIntent, refundID s
 		return "", err
 	}
 	var status string
-	err = tx.QueryRowContext(ctx, `SELECT status FROM payment_refunds WHERE payment_mode = ? AND payment_intent = ? AND refund_id = ?`,
+	err = tx.QueryRowContext(ctx, `SELECT status FROM payment_refunds WHERE payment_mode = ? AND kind = 'refund' AND payment_intent = ? AND refund_id = ?`,
 		mode, paymentIntent, refundID).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil

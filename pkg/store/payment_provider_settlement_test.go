@@ -46,6 +46,63 @@ func providerRefillEvent(t *testing.T, s *Store, now time.Time, kind capability.
 	return e
 }
 
+func TestLostDisputeBeforeDelayedPaymentReversesGrant(t *testing.T) {
+	for _, paidFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("paid_first=%t", paidFirst), func(t *testing.T) {
+			s, tenant, now := providerPaymentFixture(t)
+			payment := providerRefillEvent(t, s, now, capability.PaymentCardPaid)
+			dispute := providerPaymentEvent(now, capability.PaymentDisputeClosed)
+			dispute.AmountMinor, dispute.Status = payment.AmountMinor, "lost"
+			events := []capability.PaymentEvent{dispute, payment}
+			if paidFirst {
+				events[0], events[1] = events[1], events[0]
+			}
+			for _, event := range events {
+				if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+					t.Fatal(err)
+				}
+				blobAccountingDiskStore(t, s)
+			}
+			if _, err := tenant.ReleaseCreditFreezes(t.Context(), dispute.ObjectID, "operator", "reviewed", now); err != nil {
+				t.Fatal(err)
+			}
+			for _, event := range events {
+				if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 0 {
+				t.Fatalf("lost dispute left spendable credits after hold release: %d: %v", balance, err)
+			}
+			rewriteSchemaCount(t, s.db, "credit_grants", 2)
+		})
+	}
+}
+
+func TestPendingDisputeReversalAndDelayedGrantCommitTogether(t *testing.T) {
+	s, tenant, now := providerPaymentFixture(t)
+	payment := providerRefillEvent(t, s, now, capability.PaymentCardPaid)
+	dispute := providerPaymentEvent(now, capability.PaymentDisputeClosed)
+	dispute.AmountMinor, dispute.Status = payment.AmountMinor, "lost"
+	if _, err := s.settlePaymentFacts(t.Context(), dispute); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_reversal BEFORE INSERT ON credit_grants
+	    WHEN NEW.kind = 'reversal' BEGIN SELECT RAISE(ABORT,'reversal unavailable'); END`)
+	if _, err := s.settlePaymentFacts(t.Context(), payment); err == nil {
+		t.Fatal("payment granted without consuming its pending reversal")
+	}
+	rewriteSchemaCount(t, s.db, "credit_grants", 0)
+	rewriteSchemaCount(t, s.db, "payment_events", 1)
+	rewriteSchemaExec(t, s.db, "DROP TRIGGER refuse_reversal")
+	if _, err := s.settlePaymentFacts(t.Context(), payment); err != nil {
+		t.Fatal(err)
+	}
+	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 0 {
+		t.Fatalf("balance after retry = %d: %v", balance, err)
+	}
+}
+
 func TestProviderPaymentsCommitFinancialStateWithReceipt(t *testing.T) {
 	for _, kind := range []capability.PaymentEventKind{capability.PaymentCardSetup, capability.PaymentCardPaid, capability.PaymentCardFailed, capability.PaymentRefund, capability.PaymentWarningEvent, capability.PaymentDisputeOpened, capability.PaymentDisputeClosed} {
 		t.Run(string(kind), func(t *testing.T) {
@@ -322,7 +379,12 @@ func TestProviderPaymentModeSwitchCannotReassignAnExistingPayment(t *testing.T) 
 			t.Fatalf("mode switch reassigned %s: %+v: %v", kind, got, err)
 		}
 	}
-	if !reflect.DeepEqual(before, paymentMutationSnapshot(t, s)) {
+	after := paymentMutationSnapshot(t, s)
+	// The live refund remains an obligation for a future live payment, never the test-mode grant.
+	delete(before, "payment_refunds")
+	delete(after, "payment_refunds")
+	rewriteSchemaCount(t, s.db, "payment_refunds WHERE payment_mode='live' AND kind='refund'", 1)
+	if !reflect.DeepEqual(before, after) {
 		t.Fatal("mode switch changed financial state")
 	}
 }

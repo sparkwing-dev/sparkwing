@@ -223,22 +223,18 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 			return result, nil
 		}
 		if e.Status == "lost" {
-			// safety: a payment that never granted credit, because it was refused, has no credit to take back.
-			if _, funded, err := paidGrantForPaymentTx(ctx, tx, e.PaymentID); err != nil || !funded {
+			e.Status = CardRefundSucceeded
+			if err := recordPaymentConsequenceTx(ctx, tx, e, "dispute"); err != nil {
 				return result, err
 			}
-			amount, err := billingProduct(e.AmountMinor, MicroCreditsPerCent)
-			if err != nil {
+			if err := applyPaymentConsequencesTx(ctx, tx, e.PaymentID); err != nil {
 				return result, err
 			}
-			reversed, err := reversePaymentTx(ctx, tx, e.PaymentID, e.ObjectID, "payment_provider", amount)
-			if err != nil {
-				return result, err
+			reversal, found, err := creditGrantByReferenceTx(ctx, tx, team, CreditGrantReversal, e.ObjectID)
+			if found {
+				result.GrantID, result.AmountMicro = reversal.ID, reversal.AmountMicro
 			}
-			if reversed.Grant != nil {
-				result.GrantID, result.AmountMicro = reversed.Grant.ID, reversed.Grant.AmountMicro
-			}
-			return result, nil
+			return result, err
 		}
 		_, err = releaseCreditFreezesTx(ctx, tx, team, e.ObjectID, false, false, "", "", tx.now())
 		return result, err
@@ -252,10 +248,10 @@ func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.Payme
 		return PaymentSettlement{}, err
 	}
 	result := PaymentSettlement{Team: team, Payment: e.PaymentID}
-	if err := recordProviderRefundTx(ctx, tx, e); err != nil {
+	if err := recordPaymentConsequenceTx(ctx, tx, e, "refund"); err != nil {
 		return result, err
 	}
-	if err := applyPaymentRefundsTx(ctx, tx, e.PaymentID); err != nil {
+	if err := applyPaymentConsequencesTx(ctx, tx, e.PaymentID); err != nil {
 		return result, err
 	}
 	if err := closeRefundedQueueTx(ctx, tx, e.PaymentID); err != nil {

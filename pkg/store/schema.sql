@@ -953,12 +953,13 @@ CREATE TABLE payment_warnings (
 
 CREATE TABLE payment_refunds (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    kind TEXT NOT NULL DEFAULT 'refund' CHECK(kind IN ('refund','dispute','warning')),
     refund_id TEXT NOT NULL,
     payment_intent TEXT NOT NULL,
     amount_micro BIGINT NOT NULL CHECK(amount_micro > 0),
     status TEXT NOT NULL CHECK(status IN ('pending','requires_action','succeeded','failed','canceled')),
     updated_at BIGINT NOT NULL,
-    PRIMARY KEY (payment_mode, refund_id)
+    PRIMARY KEY (payment_mode, kind, refund_id)
 );
 
 CREATE TABLE payment_cards (

@@ -3,6 +3,7 @@ package launcher
 import (
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,5 +79,70 @@ func TestJobDeadlineRequiresFundingAndRespectsExecutionAuthority(t *testing.T) {
 	}
 	if !resources.JobDeadline.Equal(award.Binding.OwnerDeadline) {
 		t.Fatal("funded deadline escaped the execution authority")
+	}
+}
+
+func TestJobDeadlineAccountsForDelayedStartTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, control := fixture()
+		launch := time.Now()
+		bound := launch.Add(time.Minute)
+		control.award.LeaseExpiresAt = bound
+		if _, err := l.LaunchOne(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		jobs := kube.BatchV1().Jobs(l.Config.Namespace)
+		job, err := jobs.Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := launch.Add(10 * time.Second)
+		if deadline := start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second); deadline.After(bound) {
+			t.Fatalf("late Kubernetes StartTime extends provisional deadline to %v beyond %v", deadline, bound)
+		}
+		time.Sleep(10 * time.Second)
+		if err := l.Sync(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		job, err = jobs.Get(t.Context(), job.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if deadline := start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second); deadline.After(bound) {
+			t.Fatalf("renewal without StartTime extends provisional deadline to %v beyond %v", deadline, bound)
+		}
+		job.Status.StartTime = &metav1.Time{Time: start}
+		if _, err := jobs.UpdateStatus(t.Context(), job, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		control.fail = errors.New("controller offline")
+		if err := l.Sync(t.Context()); err == nil {
+			t.Fatal("controller outage hidden")
+		}
+		job, err = jobs.Get(t.Context(), job.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if deadline := start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second); !deadline.Equal(bound) {
+			t.Fatalf("first StartTime sync gives deadline %v, want %v", deadline, bound)
+		}
+	})
+}
+
+func TestJobDeadlineDoesNotRoundAnElapsedDurationUp(t *testing.T) {
+	now := time.Now()
+	for _, duration := range []time.Duration{-time.Second, 0, time.Second / 2} {
+		for _, started := range []bool{false, true} {
+			if got := jobDeadlineSeconds(now.Add(duration), now, started); got > 0 {
+				t.Fatalf("%v started=%t rounded to %d seconds", duration, started, got)
+			}
+		}
+	}
+}
+
+func TestJobDeadlinePreservesShortPositiveDurations(t *testing.T) {
+	now := time.Now()
+	if got := jobDeadlineSeconds(now.Add(time.Second), now, false); got != 1 {
+		t.Fatalf("one second of execution became %d seconds", got)
 	}
 }

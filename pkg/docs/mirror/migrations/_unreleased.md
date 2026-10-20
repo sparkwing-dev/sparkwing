@@ -14,10 +14,14 @@ schema baseline moves to version 13, which drops `card_charges`,
 `credit_checkouts.liability_shift` payment snapshot;
 recreate stores at an earlier version. Saved cards, card pins, fraud warnings
 and refunds carry over in schema terms. Automatic refill starts off for every
-team. An early fraud warning holds the team and blocks its card. Payments
-with the 3-D Secure liability shift keep their remaining credit frozen without
-a refund; payments without it are refunded and their credit reversed. The
-controller records that protection from verified payment data at settlement.
+team. An early fraud warning holds the team and blocks its card. Only payments
+whose verified 3-D Secure result was `authenticated` keep their remaining credit
+frozen without a refund. Other results, including `attempt_acknowledged` and
+missing protection, are refunded and their credit reversed. The controller
+stores the authentication result and its protection decision at settlement.
+`payment_refunds.kind` distinguishes refunds, lost disputes and warning
+obligations in the same durable settlement path. Pending obligations are
+consumed atomically when their delayed payment grants credit.
 
 Clients reading these fields must stop:
 

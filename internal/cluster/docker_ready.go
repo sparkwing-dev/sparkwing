@@ -2,10 +2,13 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -20,15 +23,10 @@ const dockerStartup = 3 * time.Minute
 func waitForDocker(ctx context.Context, dockerHost string, within time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, within)
 	defer cancel()
-	socket, ok := strings.CutPrefix(dockerHost, "unix://")
-	if !ok || socket == "" {
-		return fmt.Errorf("Cloud Jobs need a unix DOCKER_HOST, got %q", dockerHost)
+	client, err := dockerClient(dockerHost)
+	if err != nil {
+		return err
 	}
-	transport := &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	}}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Timeout: 2 * time.Second, Transport: transport}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	var last error
@@ -39,10 +37,61 @@ func waitForDocker(ctx context.Context, dockerHost string, within time.Duration)
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("Docker at %s was not usable within %s: %w", socket, within, last)
+			return fmt.Errorf("Docker at %s was not usable within %s: %w", dockerHost, within, last)
 		case <-ticker.C:
 		}
 	}
+}
+
+func dockerClient(dockerHost string) (*http.Client, error) {
+	socket, ok := strings.CutPrefix(dockerHost, "unix://")
+	if !ok || socket == "" {
+		return nil, fmt.Errorf("Cloud Jobs need a unix DOCKER_HOST, got %q", dockerHost)
+	}
+	transport := &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
+	return &http.Client{Timeout: 2 * time.Second, Transport: transport}, nil
+}
+
+// safety: API failure must still stop the daemon within the shared administrative kill budget.
+func stopDocker(ctx context.Context, client *http.Client, stopDaemon func() error) (err error) {
+	defer func() { err = errors.Join(err, stopDaemon()) }()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/json", nil)
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("Docker container listing answered %d", response.StatusCode)
+	}
+	var containers []struct {
+		ID string `json:"Id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(&containers); err != nil {
+		return err
+	}
+	for _, container := range containers {
+		request, e := http.NewRequestWithContext(ctx, http.MethodPost, "http://docker/containers/"+url.PathEscape(container.ID)+"/kill?signal=KILL", nil)
+		if e != nil {
+			err = errors.Join(err, e)
+			continue
+		}
+		response, e := client.Do(request)
+		if e != nil {
+			err = errors.Join(err, e)
+			continue
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusNotFound && response.StatusCode != http.StatusConflict {
+			err = errors.Join(err, fmt.Errorf("Docker container kill answered %d", response.StatusCode))
+		}
+	}
+	return err
 }
 
 func ping(ctx context.Context, client *http.Client) error {

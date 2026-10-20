@@ -93,7 +93,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 func paymentMutationSnapshot(t *testing.T, s *Store) map[string][]string {
 	t.Helper()
 	out := make(map[string][]string)
-	for _, table := range []string{"teams", "credit_grants", "credit_checkouts", "credit_freezes", "card_refunds", "payment_warnings", "business_events"} {
+	for _, table := range []string{"teams", "credit_grants", "credit_checkouts", "credit_freezes", "card_refunds", "payment_warnings", "payment_refunds", "business_events"} {
 		rows, err := s.db.QueryContext(t.Context(), "SELECT * FROM "+table)
 		if err != nil {
 			t.Fatal(err)

@@ -161,8 +161,11 @@ does the same for active metered work. The reason names the shortfall or hold
 and what resolves it. The owner and keeper stop execution when they receive that
 cancellation. The lease ends at the earlier of its paid horizon and a drain deadline at most one slice away. The host kills the SDK
 process tree at that bound, including commands that ignore cancellation.
-SDK cancellation and cleanup share the time remaining under the bound.
-Kubernetes Jobs use the committed lease deadline and zero termination grace.
+It also kills DinD containers and stops their daemon. SDK cancellation and
+cleanup share the time remaining under the bound. Kubernetes Jobs use a
+conservative duration from launch, corrected against the Job's StartTime once
+observed, and zero termination grace. The keeper enforces the absolute bound
+even when the Kubernetes controller starts the Job late or the launcher is lost.
 Renewals cannot move a funding stop's deadline. There is no grace period,
 and lifting the hold or adding funds does not resume the stopped job.
 Final settlement refunds the unused part of the last slice.
@@ -257,8 +260,11 @@ from Stripe again when a warning arrives. A later payment by a blocked card
 holds its team and is refunded. A refused payment raises the
 `card_payment_refused` alert, and each refund made raises `card_refund`.
 
-A refund and a fraud warning are kept against their payment whatever order Stripe
-delivers them in. A refund that arrives before its payment is taken back in the
-transaction that grants the payment, and a refund already made in full is not
-queued again. A replay of a signed event is recognized by what Stripe signed,
-not by the card details read from Stripe afterwards.
+Refunds, lost disputes and fraud warnings are kept against their payment
+whatever order Stripe delivers them in. A pending payment retains each reversal
+obligation. Settlement applies those obligations in the transaction that grants
+the credit, using the stored protection decision for warnings. A refused
+payment has no granted credit to reverse. All reversals together take back at
+most the original grant. Only actual refunds count toward a queued refund
+already being paid. A replay of a signed event is recognized by what Stripe
+signed, not by the card details read from Stripe afterwards.

@@ -73,3 +73,35 @@ func TestKeeperHonorsTheReturnedBoundAcrossSlowAndLostRenewals(t *testing.T) {
 		})
 	}
 }
+
+func TestKeeperStopsOtherExecutionWithoutDelayingSDKCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		bound := time.Now().Add(20 * time.Second)
+		stopping, release := make(chan struct{}), make(chan struct{})
+		calls := 0
+		keeper := lease.Keeper{
+			Lease: time.Minute, Interval: time.Second,
+			Renew: func(context.Context) (lease.Beat, error) {
+				return lease.Beat{ExpiresAt: bound, CancelRequested: true}, nil
+			},
+			ExecutionEnded: func() { calls++; close(stopping); <-release },
+		}
+		ctx, stop := keeper.Run(t.Context())
+		<-ctx.Done()
+		synctest.Wait()
+		if calls != 0 {
+			t.Fatal("requested cancellation stopped execution before its cleanup bound")
+		}
+		execution := lease.ExecutionContext(ctx)
+		<-execution.Done()
+		<-stopping
+		if !time.Now().Equal(bound) {
+			t.Fatalf("execution stopped at %v, want %v", time.Now(), bound)
+		}
+		close(release)
+		stop()
+		if calls != 1 {
+			t.Fatalf("execution stopped %d times", calls)
+		}
+	})
+}

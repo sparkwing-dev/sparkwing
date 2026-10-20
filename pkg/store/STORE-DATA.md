@@ -440,6 +440,15 @@ refund, warning and dispute outcomes. Provider correlation and the payment mode
 derive the payer. Settlement, ledger mutations and the event receipt commit
 in one transaction.
 
+`payment_refunds` retains refund, lost-dispute and warning reversal obligations
+by payment mode, kind and provider object. A pending payment has no verified
+paid outcome yet, even if a failed outcome closed its reservation. A refused
+payment has a verified paid outcome but no grant. Settlement consumes pending
+obligations atomically with its grant. Warning obligations use the immutable
+protection snapshot. Replays share the same reversal reference and all reversals
+are capped by the paid grant. Only refund-kind rows count as money returned by
+Stripe when closing the card-refund queue.
+
 Refill reservations persist amount, customer, payment method and receipt email.
 Unbound reservations may expire or be explicitly replaced. A bound payment
 keeps the team's single refill slot until its payment outcome is known.

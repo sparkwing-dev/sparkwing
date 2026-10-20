@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // safety: an actionable warning blocks its card everywhere, and on a payment this deployment settled it holds the
@@ -45,27 +47,16 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 	if err := holdForWarningTx(ctx, tx, team, w.WarningID, payment, now); err != nil {
 		return "", err
 	}
-	grant, funded, err := paidGrantForPaymentTx(ctx, tx, payment)
+	e := capability.PaymentEvent{ObjectID: w.WarningID, PaymentID: payment, Status: CardRefundSucceeded}
+	e.Mode, err = paymentModeTx(ctx, tx)
 	if err != nil {
 		return "", err
 	}
-	// An in-flight payment has no credit to reverse; its paid event verifies protection before choosing a frozen
-	// grant or a refund. A payment already refused was queued for refund when it was.
-	if !funded {
-		return team, nil
-	}
-	var shifted int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(liability_shift,0) FROM credit_checkouts WHERE team = ? AND payment_id = ? AND paid_at IS NOT NULL`, string(team), payment).Scan(&shifted); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT amount_minor FROM credit_checkouts WHERE team = ? AND payment_mode = ? AND payment_id = ?`, string(team), e.Mode, payment).Scan(&e.AmountMinor); err != nil {
 		return "", err
 	}
-	if shifted == 1 {
-		return team, nil
-	}
-	if _, err := reversePaymentTx(ctx, tx, payment, "fraud_warning:"+w.WarningID, "payment_provider", 0); err != nil {
+	if err := recordPaymentConsequenceTx(ctx, tx, e, "warning"); err != nil {
 		return "", err
 	}
-	if err := queueCardRefundTx(ctx, tx, team, payment, grant.AmountMicro/MicroCreditsPerCent, CardRefusedWarning, now); err != nil {
-		return "", err
-	}
-	return team, nil
+	return team, applyPaymentConsequencesTx(ctx, tx, payment)
 }

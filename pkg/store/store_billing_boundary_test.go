@@ -182,7 +182,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		t.Fatal(err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return recordProviderRefundTx(t.Context(), tx, capability.PaymentEvent{Mode: capability.PaymentTest, ObjectID: "refund-fixture", PaymentID: payment, AmountMinor: 1, Status: "pending"})
+		return recordPaymentConsequenceTx(t.Context(), tx, capability.PaymentEvent{Mode: capability.PaymentTest, ObjectID: "refund-fixture", PaymentID: payment, AmountMinor: 1, Status: "pending"}, "refund")
 	}); err != nil {
 		t.Fatal(err)
 	}

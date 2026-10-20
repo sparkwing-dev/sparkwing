@@ -252,11 +252,12 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
-	remaining := int64(time.Until(r.JobDeadline) / time.Second)
+	launchedAt := time.Now()
+	remaining := jobDeadlineSeconds(r.JobDeadline, launchedAt, false)
 	if remaining <= 0 {
 		return true, errors.Join(limits.ErrNoTime, l.teardown(ctx, created, r.Reservation))
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"resourceVersion": created.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: r.JobDeadline.Format(time.RFC3339Nano)}}, "spec": map[string]any{"suspend": false, "activeDeadlineSeconds": remaining}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"resourceVersion": created.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: r.JobDeadline.Format(time.RFC3339Nano), launchAnnotation: launchedAt.Format(time.RFC3339Nano)}}, "spec": map[string]any{"suspend": false, "activeDeadlineSeconds": remaining}})
 	if err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
@@ -267,6 +268,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	expected := created.DeepCopy()
 	expected.Spec.Suspend, expected.Spec.ActiveDeadlineSeconds = ptr(false), &remaining
 	expected.Annotations[deadlineAnnotation] = r.JobDeadline.Format(time.RFC3339Nano)
+	expected.Annotations[launchAnnotation] = launchedAt.Format(time.RFC3339Nano)
 	if err := validateAdmittedJob(expected, activated); err != nil {
 		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation, rejectedPod))
 	}

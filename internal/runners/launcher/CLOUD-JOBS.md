@@ -385,6 +385,25 @@ carries the exact award LeaseRef, NodeUID and ReservationID. The launcher verifi
 all three, proves Job absence again, and requires container vacancy and matching
 node ownership before release. Parent credential lifetime cannot keep an expired
 unit's vacant reservation or authorize release of another award's reservation.
+The launcher persists the activation time and committed lease deadline. Before
+Kubernetes reports Job StartTime, ActiveDeadlineSeconds reserves up to fifteen
+seconds (at most half the remaining duration) for the controller's delayed start.
+The first sync with StartTime corrects that duration against the same absolute
+deadline before contacting the controller. Only an acknowledged lease renewal
+extends the committed deadline. Subsecond remaining durations fail closed rather
+than rounding up. Kubernetes termination grace is zero.
+
+Kubernetes's relative clock alone cannot cover an arbitrarily delayed StartTime.
+The Cloud keeper also starts Docker termination when its execution lifetime ends,
+independently of SDK process-tree termination and customer cleanup. It sends KILL
+to every running Docker container with one two-second API budget, then marks the
+existing shared scratch volume even when the API fails. The Docker sidecar's PID 1
+shell observes that marker and sends KILL to its entire private PID namespace,
+including detached containers, shims and the daemon. A restarted sidecar parks
+while the marker exists. Admission forbids shared or host PID namespaces; this
+kill cannot reach the workload container or another Pod. Real-cluster acceptance
+still verifies Docker shutdown and kubelet reclamation.
+
 The resulting Cloud execution deadline must remain bounded. Exchange and host dispatch run under that deadline and any earlier caller
 deadline. Expired awards fail before transport construction. Expiry during
 exchange prevents dispatch, and expiry during hosting cancels and joins the host.

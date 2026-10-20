@@ -109,7 +109,8 @@ func (s *Server) refillPass(ctx context.Context) {
 	if !s.deployment.Metering() {
 		return
 	}
-	due, err := s.store.AsOperator().DueRefills(ctx)
+	operator := s.store.AsOperator()
+	due, err := operator.DueRefills(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logger.Error("refill pass", "err", err)
@@ -123,7 +124,7 @@ func (s *Server) refillPass(ctx context.Context) {
 				s.logger.Error("creating a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "status", res.Status, "err", err)
 				continue
 			}
-			if err := s.store.AsOperator().RecordRefillIntent(ctx, r.Team, r.ID, res.PaymentIntent); err != nil {
+			if err := operator.RecordRefillIntent(ctx, r.Team, r.ID, res.PaymentIntent); err != nil {
 				s.logger.Error("recording a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
 				continue
 			}
@@ -140,7 +141,7 @@ func (s *Server) refillPass(ctx context.Context) {
 			continue
 		}
 		if res.Status != "canceled" {
-			allowed, err := s.store.AsOperator().CanConfirmRefill(ctx, r)
+			allowed, err := operator.CanConfirmRefill(ctx, r)
 			if err != nil {
 				s.logger.Error("checking refill confirmation failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
 				continue
@@ -158,7 +159,7 @@ func (s *Server) refillPass(ctx context.Context) {
 			}
 		}
 		if res.Status == "canceled" {
-			if err := s.store.AsOperator().RecordRefillCanceled(ctx, r); err != nil {
+			if err := operator.RecordRefillCanceled(ctx, r); err != nil {
 				s.logger.Error("recording a canceled refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
 			}
 		}
@@ -169,7 +170,8 @@ func (s *Server) refillPass(ctx context.Context) {
 // repeated pass repeats the same refund and a retry after a failed one makes a
 // new one; the refund's success reverses any grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
-	due, err := s.store.AsOperator().DueCardRefunds(ctx, time.Now())
+	operator := s.store.AsOperator()
+	due, err := operator.DueCardRefunds(ctx, time.Now())
 	if err != nil {
 		s.logger.Error("listing queued card refunds", "err", err)
 		return
@@ -181,7 +183,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 				"payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		if err := s.store.AsOperator().MarkCardRefundMade(ctx, d.Team, d.Key, refund, status, time.Now()); err != nil {
+		if err := operator.MarkCardRefundMade(ctx, d.Team, d.Key, refund, status, time.Now()); err != nil {
 			s.logger.Error("recording a card refund failed", "payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}

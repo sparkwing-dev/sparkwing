@@ -3,11 +3,13 @@ package cluster
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -152,10 +154,31 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			services.Config.Admission.Controller = connection.URL
 			services.Config.ClaimAdmission = services.Config.Admission
 		}
+
 		processes = services.Config.Processes
 		closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
 		originalClose := services.Close
 		services.Close = func() error { return errors.Join(originalClose(), private.Close()) }
+		if checkout != "" {
+			docker, e := dockerClient(os.Getenv("DOCKER_HOST"))
+			if e != nil {
+				return services, principal, e
+			}
+			services.Config.Lease.ExecutionEnded = func() {
+				kill, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				err := stopDocker(kill, docker, func() error {
+					err := os.Mkdir(launcher.DockerStopPath, 0o700)
+					if errors.Is(err, os.ErrExist) {
+						return nil
+					}
+					return err
+				})
+				if err != nil {
+					slog.Error("stop Cloud Docker execution", "err", err)
+				}
+			}
+		}
 		if unit.Unit == capability.UnitTrigger {
 			adopt := services.Config.Owner.AdoptClaim
 			services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {

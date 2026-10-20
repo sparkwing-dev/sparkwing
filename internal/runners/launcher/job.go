@@ -25,14 +25,17 @@ import (
 
 // Cloud Jobs use a separate API identity, and labels bind Kubernetes objects to their reservation.
 const (
-	ServiceAccount        = "sparkwing-customer-job"
-	JobLabel              = "sparkwing.dev/job"
-	JobBinary             = "sparkwing-runner"
-	TeamLabel             = "sparkwing.dev/team"
-	TeamNodeLabel         = "node-restriction.kubernetes.io/sparkwing-team-node"
-	managedByLauncher     = "sparkwing-launcher"
-	bindingAnnotation     = "sparkwing.dev/award-binding"
-	deadlineAnnotation    = "sparkwing.dev/job-deadline"
+	ServiceAccount     = "sparkwing-customer-job"
+	JobLabel           = "sparkwing.dev/job"
+	JobBinary          = "sparkwing-runner"
+	TeamLabel          = "sparkwing.dev/team"
+	TeamNodeLabel      = "node-restriction.kubernetes.io/sparkwing-team-node"
+	managedByLauncher  = "sparkwing-launcher"
+	bindingAnnotation  = "sparkwing.dev/award-binding"
+	deadlineAnnotation = "sparkwing.dev/job-deadline"
+	launchAnnotation   = "sparkwing.dev/job-launched-at"
+	// DockerStopPath asks the sidecar to end its private Docker execution domain.
+	DockerStopPath        = "/tmp/sparkwing-docker-stop"
 	reservationAnnotation = "sparkwing.dev/node-reservation"
 	cleanupFinalizer      = "sparkwing.dev/cloud-cleanup"
 	doNotDisrupt          = "karpenter.sh/do-not-disrupt"
@@ -87,7 +90,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, err
 	}
-	seconds := int64(deadline.Sub(now) / time.Second)
+	seconds := jobDeadlineSeconds(deadline, now, false)
 	if seconds <= 0 {
 		return CloudJobResources{}, limits.ErrNoTime
 	}
@@ -108,9 +111,18 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
-	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: map[string]string{doNotDisrupt: "true"}}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano), launchAnnotation: now.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: map[string]string{doNotDisrupt: "true"}}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...), awardFileName: metadata}}
 	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline}, nil
+}
+
+// safety: Kubernetes starts its clock asynchronously; the keeper retains the absolute bound.
+func jobDeadlineSeconds(deadline, start time.Time, started bool) int64 {
+	remaining := deadline.Sub(start)
+	if !started {
+		remaining -= max(0, min(15*time.Second, remaining/2, remaining-time.Second))
+	}
+	return int64(remaining / time.Second)
 }
 
 func cloudLeaseDeadline(now time.Time, binding CloudJobBinding, expires time.Time) (time.Time, error) {
@@ -247,8 +259,19 @@ const DockerSeccompProfile = "profiles/sparkwing-dind.json"
 
 var (
 	// safety: given dockerd, the image's entrypoint adds no TCP listener.
-	dockerCommand = []string{"dockerd-entrypoint.sh"}
-	dockerArgs    = []string{"dockerd", "--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
+	dockerCommand = []string{"sh", "-c", `
+if [ -e "` + DockerStopPath + `" ] || [ -L "` + DockerStopPath + `" ]; then exec sleep infinity; fi
+dockerd-entrypoint.sh "$@" &
+daemon=$!
+while kill -0 "$daemon" 2>/dev/null; do
+  if [ -e "` + DockerStopPath + `" ] || [ -L "` + DockerStopPath + `" ]; then
+    kill -KILL -1
+    break
+  fi
+  sleep 0.1
+done
+wait "$daemon"`, "sparkwing-docker"}
+	dockerArgs = []string{"dockerd", "--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
 )
 
 func dockerContainer(cfg CloudJobConfig) corev1.Container {

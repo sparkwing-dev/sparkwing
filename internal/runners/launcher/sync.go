@@ -63,6 +63,10 @@ func (l *Launcher) sync(ctx context.Context) error {
 			remove = true
 		}
 		if !remove {
+			if err := l.renewJobDeadline(ctx, &jobs.Items[i], binding, deadline); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 			live[job.Name] = i
 			observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
 		}
@@ -104,11 +108,14 @@ func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, bindi
 	if err != nil {
 		return err
 	}
-	start := time.Now()
+	start, err := time.Parse(time.RFC3339Nano, job.Annotations[launchAnnotation])
+	if err != nil {
+		return fmt.Errorf("Cloud Job has invalid launch time: %w", err)
+	}
 	if job.Status.StartTime != nil {
 		start = job.Status.StartTime.Time
 	}
-	seconds := int64(expires.Sub(start) / time.Second)
+	seconds := jobDeadlineSeconds(expires, start, job.Status.StartTime != nil)
 	if seconds <= 0 {
 		return errors.New("Cloud lease deadline has elapsed")
 	}
@@ -126,7 +133,11 @@ func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, bindi
 	expected := job.DeepCopy()
 	expected.Spec.ActiveDeadlineSeconds = &seconds
 	expected.Annotations[deadlineAnnotation] = expires.Format(time.RFC3339Nano)
-	return validateAdmittedJob(expected, updated)
+	if err := validateAdmittedJob(expected, updated); err != nil {
+		return err
+	}
+	*job = *updated
+	return nil
 }
 
 func (l *Launcher) syncReservations(ctx context.Context) error {
