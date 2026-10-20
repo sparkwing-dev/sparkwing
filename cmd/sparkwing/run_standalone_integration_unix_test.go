@@ -134,7 +134,7 @@ func (parent) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)er
   got,err:=sw.RunAndAwait[out,sw.NoInputs](ctx,"child","stamp",sw.WithFreshTimeout(90*time.Second))
   if err!=nil{return err}
   return os.WriteFile("child-result",[]byte(got.Value),0600)
- });return nil
+ }).StartsChildren("child");return nil
 }
 func main(){
  sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return parent{}})

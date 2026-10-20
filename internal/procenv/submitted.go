@@ -126,11 +126,16 @@ func WithSubmitted(base Base, values map[string][]byte, accept SubmitAccept) (Ba
 	}
 	base.Ambient, base.Submitted = slices.Clone(base.Ambient), slices.Clone(base.Submitted)
 	for name, value := range values {
-		if !accept.accepts(name) || hostSet[envKey(name)] {
+		if !accept.accepts(name) {
 			continue
 		}
-		base.Ambient = append(base.Ambient, name+"="+string(value))
-		base.Submitted = append(base.Submitted, name)
+		if !hostSet[envKey(name)] {
+			base.Ambient = append(base.Ambient, name+"="+string(value))
+		}
+		// Independently allowed host values must remain available to installs.
+		if !hostSet[envKey(name)] || !submitAllowed(name, base.SubmitEnvAllow) {
+			base.Submitted = append(base.Submitted, name)
+		}
 	}
 	return base, nil
 }
