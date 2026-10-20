@@ -98,9 +98,6 @@ spec:
             {{- range .Values.runner.repos }}
             - {{ printf "--repos=%s" . | quote }}
             {{- end }}
-            {{- with .Values.runner.trust }}
-            - {{ printf "--trust=%s" . | quote }}
-            {{- end }}
             {{- range .Values.runner.submitEnvAllow }}
             - {{ printf "--submit-env-allow=%s" . | quote }}
             {{- end }}

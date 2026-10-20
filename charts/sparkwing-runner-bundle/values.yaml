@@ -112,11 +112,6 @@ runner:
   # state from previous jobs. 0 disables.
   maxClaimsBeforeRestart: 25
 
-  # Runs this pool takes work from. Empty takes the controller default: a
-  # pool that holds a secret reserved to it takes only verified pushes to the
-  # repository's default branch, and any other pool takes any run.
-  # "verified-default" or "any" overrides the default.
-  trust: ""
   # Environment names a requester's run.submit_env_allow may deliver to this
   # pool's jobs. Go-toolchain and network names are refused regardless; empty
   # accepts no submitted values.

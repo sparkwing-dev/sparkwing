@@ -149,7 +149,7 @@ func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (cfg userconfig.Ru
 			accepted = file.Run.SubmitEnvAllow
 		}
 	}
-	stringFields := map[string]**string{"controller": &cfg.Controller, "credentials-dir": &cfg.CredentialsDir, "holder-prefix": &cfg.HolderPrefix, "poll": &cfg.Poll, "heartbeat": &cfg.Heartbeat, "lease": &cfg.Lease, "keep-free": &cfg.KeepFree, "trust": &cfg.Trust}
+	stringFields := map[string]**string{"controller": &cfg.Controller, "credentials-dir": &cfg.CredentialsDir, "holder-prefix": &cfg.HolderPrefix, "poll": &cfg.Poll, "heartbeat": &cfg.Heartbeat, "lease": &cfg.Lease, "keep-free": &cfg.KeepFree}
 	for name, target := range stringFields {
 		if fs.Changed(name) {
 			value := textFlag(fs, name)
@@ -193,12 +193,6 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 	}
 	if _, err := sourceurl.ParseRepoAllowlist(cfg.Repos); err != nil {
 		return options, fmt.Errorf("runner repos: %w", err)
-	}
-	if cfg.Trust != nil {
-		if !slices.Contains([]string{"verified-default", "any"}, *cfg.Trust) {
-			return options, errors.New("runner trust must be verified-default or any")
-		}
-		options.Loop.Trust = *cfg.Trust
 	}
 	if cfg.KeepFree != nil {
 		if _, err := userconfig.ParseBudget(*cfg.KeepFree); err != nil {

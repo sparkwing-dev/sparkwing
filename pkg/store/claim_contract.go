@@ -28,7 +28,6 @@ type UnitDemand struct {
 	Arch             string
 	Capacity         match.Resources
 	Available        match.Resources
-	Trust            RunnerTrust
 }
 
 // UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation.

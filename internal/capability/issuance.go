@@ -194,6 +194,7 @@ type ProvisionSpec struct {
 	Grants         []Grant
 	Binding        Binding
 	ReservedPools  []string
+	Trust          Trust
 	Repositories   []string
 	Data           *DataScope
 	Metered        bool

@@ -411,7 +411,7 @@ func Registry() []Command {
 			{Name: "sw-run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --personal."},
@@ -424,6 +424,7 @@ func Registry() []Command {
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
+			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "any"}},
 		}},
 		{Path: "sparkwing runners list", Authority: TeamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
@@ -868,7 +869,6 @@ func Registry() []Command {
 			{Name: "repos", Argument: "REPO", Repeatable: true, CommaList: true},
 			{Name: "credentials-dir", Argument: "PATH"},
 			{Name: "submit-env-allow", Argument: "NAME", Repeatable: true, CommaList: true},
-			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "any"}},
 		}},
 	}
 }

@@ -307,9 +307,11 @@ runs may share that state:
   a verified push to the repository's default branch. Pull request, feature
   branch, manual and scheduled runs wait for another runner.
 - Any other runner takes any run its repository patterns and labels admit.
-- `--trust=verified-default` or `runner.trust: verified-default` applies the
-  restriction to a runner without reserved secrets. `--trust=any` lifts it from
-  a pool with reserved secrets.
+- A team admin sets a runner's trust class when registering it:
+  `sparkwing runners add --profile prod --runner deploy-1 --trust=verified-default` applies the restriction to a
+  runner without reserved secrets, and `--trust=any` lifts it from a pool with
+  reserved secrets. The class is stored with the runner's credential, so the
+  runner, or anyone holding its token, cannot change it.
 
 A cached pipeline binary runs only as a private copy whose bytes matched the
 digest recorded when it was compiled. Jobs on a shared runner run under the

@@ -19,10 +19,10 @@ supplied no longer reach it unchecked.
 - **Pool trust.** A runner that holds a pool with a secret reserved to it takes only
   runs from a verified push to the repository's default branch. Pull request,
   feature branch, manual and scheduled runs wait for another runner. To keep the
-  old behavior for such a pool, start its runners with `--trust=any`, set
-  `runner.trust: any` in the machine file, or set `runner.trust=any` in the
-  runner chart. `--trust=verified-default` applies the restriction to a pool
-  without reserved secrets.
+  old behavior for such a pool, a team admin re-registers its runners with
+  `sparkwing runners add --profile prod --runner deploy-1 --trust=any`. `--trust=verified-default` applies the
+  restriction to a pool without reserved secrets. The class is stored with the
+  runner's credential and survives rotation.
 - **Submitted environment.** A run's `run.submit_env_allow` values reach a
   shared runner only under names the runner's operator also lists, in the
   runner's own machine file `run.submit_env_allow`, `--submit-env-allow`, or the

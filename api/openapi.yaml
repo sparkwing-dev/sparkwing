@@ -775,8 +775,6 @@ components:
           type: string
         runner_version:
           type: string
-        trust:
-          type: string
       required:
         - runner_version
         - kinds
@@ -5967,6 +5965,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        trust:
+          type: string
       required:
         - name
         - repos

@@ -59,7 +59,7 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(apierr.Forbidden, "claimant does not take this kind of unit"))
 		return e, nil
 	}
-	if trusted, err := claimantTrustsRunTx(ctx, tx, team, unit.RunID, chain[len(chain)-1].principal.Capability, claimant.Trust); err != nil || !trusted {
+	if trusted, err := claimantTrustsRunTx(ctx, tx, team, unit.RunID, chain[len(chain)-1].principal.Capability); err != nil || !trusted {
 		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, "claimant takes only verified default-branch work")
 		return e, err
 	}
@@ -127,27 +127,14 @@ func localClaimant(c capability.Capability) bool {
 	return c.Subject.Kind == capability.SubjectLocal && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
 }
 
-// RunnerTrust is the runs a claimant accepts work from. The empty value takes the
-// server default: verified default-branch work only when the claimant holds a
-// pool that a secret is reserved to, and any run otherwise.
-type RunnerTrust string
-
-const (
-	TrustVerifiedDefault RunnerTrust = "verified-default"
-	TrustAny             RunnerTrust = "any"
-)
-
-// Valid reports whether t is the server default or a named class.
-func (t RunnerTrust) Valid() bool { return t == "" || t == TrustVerifiedDefault || t == TrustAny }
-
 // safety: a claimant that runs one job after another shares host state between them,
 // so work from a run anyone can push must not reach a host that later holds a pool's
 // reserved secrets.
-func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, trust RunnerTrust) (bool, error) {
-	if trust == TrustAny {
+func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability) (bool, error) {
+	if root.Trust == capability.TrustAny {
 		return true, nil
 	}
-	if trust == "" {
+	if root.Trust == "" {
 		reserved, err := poolsHoldSecretsTx(ctx, tx, team, root.ReservedPools)
 		if err != nil || !reserved {
 			return true, err

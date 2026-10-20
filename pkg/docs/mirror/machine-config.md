@@ -73,11 +73,6 @@ any other name is dropped before a process starts; an empty list accepts none.
 Cloud Jobs, here-hosted runs and the requester's own personal machines accept every submittable name. Go toolchain and
 network base names cannot be submitted at all.
 
-`runner.trust` selects the runs a shared runner takes work from. Unset, the
-controller decides: a runner that holds a pool with a secret reserved to it
-takes only verified pushes to the repository's default branch, and any other
-runner takes any run. `verified-default` and `any` override that default.
-
 Connections come only from this machine file. A project can name a profile but
 cannot define one. A controller observation uses a profile only when selected
 with `--profile`. See [Controller connections](backends.md).

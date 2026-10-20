@@ -13,20 +13,21 @@ import (
 )
 
 // A pool runner runs one job after another in shared host state, so a pool that a secret
-// is reserved to takes only verified default-branch work unless its operator says otherwise.
+// is reserved to takes only verified default-branch work unless an admin registered it
+// with another trust class. The class lives on the runner's root credential.
 func TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		secret   bool
-		trust    store.RunnerTrust
+		trust    capability.Trust
 		verified bool
 		claims   bool
 	}{
 		{name: "pool without a reserved secret takes any run", claims: true},
 		{name: "reserved secret pool refuses an unverified run", secret: true},
 		{name: "reserved secret pool takes the verified default branch", secret: true, verified: true, claims: true},
-		{name: "operator opts the pool into any run", secret: true, trust: store.TrustAny, claims: true},
-		{name: "declared verified-default refuses an unverified run", trust: store.TrustVerifiedDefault},
+		{name: "operator opts the pool into any run", secret: true, trust: capability.TrustAny, claims: true},
+		{name: "declared verified-default refuses an unverified run", trust: capability.TrustVerifiedDefault},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, named := range []bool{false, true} {
@@ -36,7 +37,7 @@ func TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork(t *testing.T) {
 	}
 }
 
-func checkPoolTrust(t *testing.T, named, secret bool, trust store.RunnerTrust, verified, claims bool) {
+func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, verified, claims bool) {
 	t.Helper()
 	ctx := t.Context()
 	s := storetest.OpenSQLite(t)
@@ -80,12 +81,12 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust store.RunnerTrust, v
 		}
 	}
 	authority := plan.Seal.Request.AuthorityRef
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":pool", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pool"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}})
+	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":pool", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pool"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}, Trust: trust})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.SetClaimProfileResolver(&matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}})
-	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Available: match.Resources{Cores: 8}, Trust: trust}
+	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Available: match.Resources{Cores: 8}}
 	if named {
 		demand.Target = &store.UnitRef{Kind: capability.UnitNode, RunID: plan.RunID, NodeID: "job"}
 	}
@@ -96,5 +97,29 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust store.RunnerTrust, v
 	}
 	if err != nil || claim.RunID != plan.RunID {
 		t.Fatalf("pool claim: %+v %v", claim, err)
+	}
+}
+
+func TestRunnerTrustIsAnAdminSetCredentialFact(t *testing.T) {
+	ctx := t.Context()
+	s := storetest.OpenSQLite(t)
+	_, plan, err := storePlanSealRequestWith(ctx, s, func(*store.IntakeRequest, *nodeproto.PlanDoc) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := plan.Seal.Request.AuthorityRef
+	spec := func(id string, personal bool) capability.ProvisionSpec {
+		return capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: personal, Authority: &authority, Team: plan.Seal.Request.Request.Team, RegistrationID: "runner:" + plan.Seal.Request.Request.Team + ":" + id, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: id}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Trust: capability.TrustAny}
+	}
+	if _, err := s.ProvisionCapability(ctx, spec("personal", true)); err == nil {
+		t.Fatal("a personal machine registered a trust class")
+	}
+	issued, err := s.ProvisionCapability(ctx, spec("shared", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+	if err != nil || p.Capability.Trust != capability.TrustAny {
+		t.Fatalf("stored trust = %q, %v", p.Capability.Trust, err)
 	}
 }

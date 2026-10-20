@@ -31,6 +31,7 @@ type EnrollRunnerRequest struct {
 	Name          string
 	Repos         []string
 	ReservedPools []string
+	Trust         string
 	Grants        []string
 	ExpiresAt     *time.Time
 }
