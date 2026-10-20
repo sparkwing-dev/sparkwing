@@ -247,7 +247,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		body, err := json.Marshal(response)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 	})}}
-	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{}), unit
+	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", "box", false, procenv.SubmitAccept{}), unit
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
@@ -487,15 +487,18 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				})
 			}
 			identity := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
-			unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: identity}}, PlanHash: "plan-hash", Plan: json.RawMessage(`{"jobs":[{"id":"job"}]}`)}
+			unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: identity}}, PlanHash: "plan-hash", Plan: json.RawMessage(`{"jobs":[{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}]}`)}
 			unit.Accepted.Spec.Resolved.Settings.Options.Resources.Set = true
 			unit.Accepted.Spec.Resolved.Settings.Options.Resources.Value.Cores.Set = true
 			unit.Accepted.Spec.Resolved.Settings.Options.Resources.Value.Cores.Value = 0.01
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash", Spec: json.RawMessage(`{"id":"job"}`)}
+			group := runspec.Concurrency{Group: "serial", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}
+			row := store.NodeRow{Execution: runspec.JobExecutionSettings{Concurrency: []runspec.Concurrency{group}}, Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash", Spec: json.RawMessage(`{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}`)}
 			row.OwnerExecution = &store.OwnerExecution{Owner: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Team: "team", Generation: unit.Binding.Generation, Node: row.Ref, NodeGeneration: row.Generation, SpecHash: row.SpecHash, Allowed: true}
 			snapshot := store.RunSnapshot{Run: store.RunRow{ID: unit.RunID, Team: "team", State: store.RunRunning, Request: unit.Request, Spec: &unit.Accepted.Spec, Plan: unit.Accepted.Plan, PlanHash: string(unit.Accepted.PlanHash), Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: unit.RunID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation}}, Nodes: []store.NodeRow{row}}
 			scheduled := make(chan struct{})
 			var once sync.Once
+			var capacity sync.Mutex
+			var held *store.CapacityHolder
 			boundary := errors.New("eligible job reached self claim")
 			connection := client.EngineOptions{URL: base.ControllerURL, HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
 				var response any
@@ -513,7 +516,34 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 						return nil, fmt.Errorf("unexpected scheduled transition: %+v", change)
 					}
 					response = store.Applied{}
+				case "POST /api/v1/runs/run/local-host/capacity/adopt", "POST /api/v1/runs/run/local-host/capacity/acquire":
+					var request localhostwire.LocalCapacityRequest
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						return nil, err
+					}
+					if request.Key != "run:3:run:serial" || request.HolderID != "run/job" || request.Binding != (store.CapacityBinding{RunID: unit.RunID, NodeID: "job", Generation: row.Generation}) {
+						return nil, fmt.Errorf("capacity changed its job or group: %+v", request)
+					}
+					capacity.Lock()
+					defer capacity.Unlock()
+					if strings.HasSuffix(r.URL.Path, "/acquire") {
+						if request.Acquire == nil || request.Acquire.Capacity != 1 || request.Acquire.Cost != 1 || request.Acquire.Policy != "queue" || request.Acquire.RunID != unit.RunID || request.Acquire.NodeID != "job" {
+							return nil, fmt.Errorf("capacity changed its declaration: %+v", request)
+						}
+						held = &store.CapacityHolder{Key: request.Key, ID: request.HolderID, Binding: request.Binding, Cost: 1, LeaseExpiresAt: unit.LeaseExpiresAt}
+						response = store.AcquireSlotResponse{Kind: store.AcquireGranted, HolderID: request.HolderID, LeaseExpiresAt: unit.LeaseExpiresAt}
+					} else if held == nil {
+						response = store.CapacityAdoption{Kind: store.AcquireAgain}
+					} else {
+						response = store.CapacityAdoption{Kind: store.AdoptHolder, Holder: held}
+					}
 				case "POST /api/v1/runs/run/jobs/job/reconcile":
+					capacity.Lock()
+					admitted := held != nil
+					capacity.Unlock()
+					if !admitted {
+						return nil, errors.New("job scheduled without its concurrency lease")
+					}
 					if compute {
 						state, err := wingdclient.Query(r.Context(), wingdclient.Options{Home: home, Version: "v1.2.3"})
 						if err != nil {
@@ -541,7 +571,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				body, err := json.Marshal(response)
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 			})}}
-			hosting := productionHostingAt(home, "v1.2.3", connection, "", "", compute, procenv.SubmitAccept{})
+			hosting := productionHostingAt(home, "v1.2.3", connection, "", "", "box", compute, procenv.SubmitAccept{})
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: connection.URL, HTTP: connection.HTTP, Bearer: fixedBearer(unit.Capability)})
 			if err != nil {
 				t.Fatal(err)

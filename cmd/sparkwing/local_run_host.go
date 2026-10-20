@@ -99,15 +99,16 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	if !ok {
 		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
-	admission, err := nodehost.MachineAdmission(home, installedVersion())
+	boxID, err := nodehost.MachineBoxID()
 	if err != nil {
 		return hereHostSession{}, err
 	}
+	admission := nodehost.MachineAdmission(home, installedVersion(), boxID)
 	if options.URL != wingdclient.APIBaseURL {
 		admission.Controller = options.URL
 	}
 	services, err := nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{
-		Admission:    nodehost.ComposeNativeAdmission(nil, admission.BoxID, admission, true),
+		Admission:    nodehost.ComposeNativeAdmission(state, admission.BoxID, admission, true),
 		SubmittedEnv: award.SubmittedEnv, SubmitAccept: procenv.SubmitAcceptAll(),
 		Home: home, Store: state, Parent: private, Bindings: private,
 		Principal: principal, Refresh: refresh, Source: sourceOptions, Local: store.OwnerCanExecute(principal),

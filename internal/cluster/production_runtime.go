@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -43,7 +44,15 @@ func ProductionRuntime(version string) Runtime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept)}
+			hostname, err := os.Hostname()
+			if err != nil && options.BoxID == nil {
+				return runners.RuntimeConfig{}, err
+			}
+			boxID, _, err := settings.BoxID(settings.Inputs{Context: settings.Context{Hostname: hostname}, Machine: settings.Values{BoxID: options.BoxID}})
+			if err != nil {
+				return runners.RuntimeConfig{}, err
+			}
+			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", boxID, options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept)}
 			installation, err := productionInstallation(options.ConfigPath, hosting)
 			if err != nil {
 				return runners.RuntimeConfig{}, err
@@ -68,7 +77,11 @@ func ProductionRuntime(version string) Runtime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, false, procenv.SubmitAcceptAll())}, nil, nil
+				boxID, err := os.Hostname()
+				if err != nil {
+					return launcher.BootstrapHost{}, nil, err
+				}
+				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, boxID, false, procenv.SubmitAcceptAll())}, nil, nil
 			},
 		},
 	}
@@ -79,7 +92,7 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 }
 
 // safety: a Cloud Job serves one claim and is then discarded, and a requester's own machine is its operator, so both accept every submittable name.
-func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool, accept procenv.SubmitAccept) runners.Hosting {
+func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules, boxID string, admission bool, accept procenv.SubmitAccept) runners.Hosting {
 	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services nodehost.NativeServices, principal capability.Principal, err error) {
 		options := connection
 		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
@@ -140,14 +153,11 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 		}
 		var machineAdmission *nodehost.LocalAdmission
 		if admission {
-			machineAdmission, err = nodehost.MachineAdmission(home, version)
-			if err != nil {
-				return services, principal, err
-			}
+			machineAdmission = nodehost.MachineAdmission(home, version, boxID)
 			machineAdmission.Controller = connection.URL
 		}
 		services, err = nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{
-			Admission:    nodehost.ComposeNativeAdmission(nil, "", machineAdmission, admission),
+			Admission:    nodehost.ComposeNativeAdmission(state, boxID, machineAdmission, false),
 			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
 			Home: home, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
 			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},

@@ -27,6 +27,7 @@ import (
 
 type cliOwnerStore struct {
 	nodehost.NativeHostStore
+	nodehost.CapacityStore
 	mu       sync.Mutex
 	snapshot store.RunSnapshot
 	actor    store.Actor

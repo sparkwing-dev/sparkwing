@@ -375,3 +375,31 @@ var (
 		TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
 	} = (*LocalHostClient)(nil)
 )
+
+// AdoptCapacity checks continuously held capacity under the authenticated owner award.
+func (c *LocalHostClient) AdoptCapacity(ctx context.Context, key, id string, binding store.CapacityBinding, _ store.Actor) (store.CapacityAdoption, error) {
+	var result store.CapacityAdoption
+	err := c.capacity(ctx, "/adopt", localhostwire.LocalCapacityRequest{Key: key, HolderID: id, Binding: binding}, &result)
+	return result, err
+}
+
+// AcquireCapacity admits pending work under the authenticated owner award.
+func (c *LocalHostClient) AcquireCapacity(ctx context.Context, request store.AcquireSlotRequest, binding store.CapacityBinding, _ store.Actor) (store.AcquireSlotResponse, error) {
+	var result store.AcquireSlotResponse
+	err := c.capacity(ctx, "/acquire", localhostwire.LocalCapacityRequest{Key: request.Key, HolderID: request.HolderID, Binding: binding, Acquire: &request}, &result)
+	return result, err
+}
+
+// ResolveCapacityWaiter uses the store's sealed queue policy and persisted arrival.
+func (c *LocalHostClient) ResolveCapacityWaiter(ctx context.Context, key string, binding store.CapacityBinding, _ store.Actor) (store.WaiterResolution, error) {
+	var result store.WaiterResolution
+	err := c.capacity(ctx, "/resolve", localhostwire.LocalCapacityRequest{Key: key, Binding: binding}, &result)
+	return result, err
+}
+
+func (c *LocalHostClient) capacity(ctx context.Context, operation string, body localhostwire.LocalCapacityRequest, result any) error {
+	if c.node != "" || body.Binding.RunID != c.run {
+		return localHostClientRefusal()
+	}
+	return c.request(ctx, "POST", "/capacity"+operation, "", body, result)
+}

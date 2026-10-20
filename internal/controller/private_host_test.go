@@ -73,6 +73,12 @@ func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
 
 func localHostFixture(t *testing.T, opts ...store.Option) (*serverFixture, *client.LocalHostClient, *store.Tenant, capability.Principal) {
 	t.Helper()
+	server, host, tenant, principal, _ := localHostAwardFixture(t, opts...)
+	return server, host, tenant, principal
+}
+
+func localHostAwardFixture(t *testing.T, opts ...store.Option) (*serverFixture, *client.LocalHostClient, *store.Tenant, capability.Principal, string) {
+	t.Helper()
 	engine, tenant := engineRuntimeStore(t, opts...)
 	engineRuntimeClaim(t, engine, capability.UnitNode)
 	engineSQL(t, engine.Store, `DELETE FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`)
@@ -91,7 +97,7 @@ func localHostFixture(t *testing.T, opts ...store.Option) (*serverFixture, *clie
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = host.Close() })
-	return &serverFixture{Server: server, store: engine.Store, engine: engine}, host, tenant, principal
+	return &serverFixture{Server: server, store: engine.Store, engine: engine}, host, tenant, principal, string(award.Bearer)
 }
 
 func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) {

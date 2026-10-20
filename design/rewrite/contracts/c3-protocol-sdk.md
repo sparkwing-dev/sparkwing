@@ -800,7 +800,12 @@ opening uses the store transition and state follower. Its caller-supplied
 `OwnerOperations` supplies active debug and memo policies. Requester adapters
 require machine CPU/memory admission. Runner adapters enable compute admission
 only with `runner.local_admission`; placement eligibility does not decide this
-requirement. Logical concurrency remains independent of compute admission. Selection uses the scheduler's dependency closure, including present
+requirement. `ComposeNativeAdmission` always supplies controller-backed logical
+concurrency to remote owners through `RemoteHostStore`. Its capacity store uses
+the private owner transport, including before a job has an execution award.
+Runner composition resolves the captured `machine.box_id` setting once and
+passes the same box scope with compute admission on or off.
+Selection uses the scheduler's dependency closure, including present
 optional dependencies and generator sources. The
 native layer logs timeout indices and proposes a skipped transition only after
 evaluation, revocation and cleanup join. Approval SkipIf success still requires

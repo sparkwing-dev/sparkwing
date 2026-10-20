@@ -467,3 +467,17 @@ change before activating the affected case. A polling sleep is not a substitute.
    execution restriction on the owner's behalf.
 
 <!-- design:end -->
+
+## Remote owner concurrency and optional compute
+
+`TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission` builds
+production runner composition and reaches self-claim with `runner.local_admission`
+on and off. The job declares `{group:serial, scope:run, capacity:1, on_limit:queue}`.
+Both settings require its controller concurrency holder before reconciliation.
+The enabled setting also requires a machine compute lease.
+`TestPrivateCapacityAdmitsPendingJobsAndPromotesAfterTerminalRelease` exercises
+the real controller and store with two pending jobs. The second queues until
+the first reaches a terminal transition, then adopts its promoted holder.
+`TestPrivateCapacityRejectsForeignTeamAndWrongUnit` refuses node, root and
+foreign-team credentials on every private capacity operation.
+The route inventory is checked by `TestFinalCredentialRouteDeclarations`.

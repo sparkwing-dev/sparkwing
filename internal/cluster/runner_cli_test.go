@@ -18,6 +18,7 @@ import (
 )
 
 func TestStartUsesRunnerSectionAndReplacesRepos(t *testing.T) {
+	box := "configured-box"
 	controller, concurrent, heartbeat, lease := "https://controller.example", 2, "20s", "2m"
 	credentials := runnerCredentials(t)
 	boundary := errors.New("runtime boundary")
@@ -26,9 +27,12 @@ func TestStartUsesRunnerSectionAndReplacesRepos(t *testing.T) {
 			if path != "/fixture/config.yaml" {
 				t.Errorf("config path %q", path)
 			}
-			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrent, Repos: []string{"github.com/old/*"}, Labels: []string{"linux"}, Heartbeat: &heartbeat, Lease: &lease}}, nil
+			return userconfig.Config{Machine: &userconfig.MachineConfig{BoxID: &box}, Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrent, Repos: []string{"github.com/old/*"}, Labels: []string{"linux"}, Heartbeat: &heartbeat, Lease: &lease}}, nil
 		},
 		Factory: func(_ context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
+			if options.BoxID == nil || *options.BoxID != box {
+				t.Fatalf("lost configured box identity: %+v", options.BoxID)
+			}
 			if !reflect.DeepEqual(options.Config.Repos, []string{"github.com/a/*", "github.com/b/*", "github.com/c/*"}) {
 				t.Errorf("repos: %v", options.Config.Repos)
 			}

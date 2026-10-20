@@ -12,6 +12,7 @@ import (
 
 // PrivateHostState supplies award-bound execution state.
 type PrivateHostState interface {
+	CapacityStore
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)

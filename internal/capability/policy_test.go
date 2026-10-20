@@ -200,3 +200,17 @@ func TestPaymentCallbackRequiresProviderProof(t *testing.T) {
 		t.Fatal("payment event inventory incomplete")
 	}
 }
+
+func TestPrivateCapacityRoutesRequireLiveTriggerOwner(t *testing.T) {
+	for _, operation := range []string{"adopt", "acquire", "resolve"} {
+		path := "/api/v1/runs/{run}/local-host/capacity/" + operation
+		route, ok := capability.LookupRoute("POST", path)
+		if !ok || route.Authentication != capability.AuthCapability || route.Owner != capability.OwnerRun || route.Retry != capability.RetryExactBody || len(route.Access) != 1 {
+			t.Fatalf("missing private capacity policy: %s %+v", path, route)
+		}
+		access := route.Access[0]
+		if access.Credential != capability.CredentialClaim || access.Binding != capability.BindRunOfTrigger || access.Liveness != capability.LiveSensitive || !slices.Equal(access.Grants, []capability.Grant{capability.TriggerHost}) {
+			t.Fatalf("capacity authority exceeds owner award: %s %+v", path, access)
+		}
+	}
+}

@@ -11,8 +11,8 @@ C2 owns the production route policy. T1 owns independent expected results and cr
 ## Final route permission coverage
 
 `internal/controller/credential_route_expectations_test.go` contains committed literal expectations
-for all declared final C2 method/path pairs, including the eleven node-host
-routes and every public, browser and external-proof route. Each alternative pins
+for all declared final C2 method/path pairs, including private host
+capacity routes and every public, browser and external-proof route. Each alternative pins
 its credential class, complete grant conjunction, binding and liveness together.
 Audience, resource owner and authentication proof are pinned per route. Empty
 grants are explicit, including account and discovery alternatives. No expected

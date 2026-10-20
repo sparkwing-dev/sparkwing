@@ -928,6 +928,15 @@ available while a current holder drains cancellation. Node credentials use
 node-scoped snapshot, authentication and binding endpoints. Their snapshots
 contain only the awarded node.
 
+The private `capacity/adopt`, `capacity/acquire` and `capacity/resolve` POST
+endpoints admit pending jobs with the trigger owner's award credential.
+They require `trigger.host`, the live `runOfTrigger` binding and the selected
+run. Node, plan, root and foreign-team credentials cannot use them. The body
+carries the group and captured work generation. The controller derives the
+actor from the bearer and calls C1's existing capacity operations. Terminal
+transitions release capacity in the same transaction. There is no separate
+remote semaphore or release operation.
+
 Private reconciliation also preserves `owner_capability_prefix` beside the node
 claim prefix. The local host checks the persisted owner relation before adopting
 the store-issued node award. Each job process delegates from that node award.
