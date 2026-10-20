@@ -907,3 +907,9 @@ Assigned to an Opus implementer (env 1087).
 
 - A payment that passed 3-D Secure with liability shift (Stripe's three_d_secure result authenticated/attempt with liability shifted) is not refunded on an early fraud warning: the team is held, the card is blocked deployment-wide, and the payment's unspent credit is frozen. A later chargeback is the issuer's liability; if none arrives within the dispute window an operator may release the hold.
 - A payment without that protection (off-session refills, Add funds where 3-D Secure was not completed) is refunded automatically as before, its credit reversed, the team held and the card blocked.
+
+## 2026-10-19 Korey decision 34: child identity and branch-pinned secrets (ratified)
+
+- A child run inherits its parent's verified identity, and the parent pipeline's secrets and OIDC, only when it runs the parent's exact commit; otherwise it is asserted (trigger:manual, no ref or sha claims). Children may start only pipelines their parent's accepted plan declares (decision 28 item 11). This matches GitHub reusable workflows.
+- A pipeline whose `source:` pins a branch is unverified but still receives that pipeline's secrets, matching GitHub repository secrets. Both rules are documented plainly for launch.
+- Protected secrets (released only to verified default-branch runs, including decision 31 schedules) are a post-launch feature.
