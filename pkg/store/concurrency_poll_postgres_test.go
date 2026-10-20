@@ -11,15 +11,16 @@ import (
 
 // A queued job's poll used to wait for the entry lock behind every other poll,
 // so a release queued behind all of them and handoffs slowed as waiters grew
-// (TestConcurrency_BurstConcurrentAcquireAndRelease missed its deadline).
+// (TestConcurrency_BurstConcurrentAcquireAndRelease missed its deadline). Only
+// the head of the queue, which is next to promote, still waits.
 func TestPostgresWaiterPollDoesNotQueueBehindEntryWriter(t *testing.T) {
 	s := storetest.NewPostgres(t).Open(t)
 	ctx := ctxT(t)
-	for _, run := range []string{"r0", "r1"} {
+	for _, run := range []string{"r0", "r1", "r2"} {
 		createLiveRunT(t, s, run)
 	}
 	tenant := tenantFor(t, s, store.DefaultTeam)
-	for i, run := range []string{"r0", "r1"} {
+	for i, run := range []string{"r0", "r1", "r2"} {
 		resp, err := tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "k", HolderID: "h-" + run, RunID: run, NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue})
 		if err != nil || (i == 0) != (resp.Kind == store.AcquireGranted) {
 			t.Fatalf("arrival %s: %+v %v", run, resp, err)
@@ -35,8 +36,8 @@ func TestPostgresWaiterPollDoesNotQueueBehindEntryWriter(t *testing.T) {
 	}
 	poll, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	res, err := tenant.ResolveWaiter(poll, "k", "r1", "n", "", "", "", false)
-	if err != nil || res.Status != store.WaiterStillWaiting || res.Position != 0 || len(res.Holders) != 1 {
+	res, err := tenant.ResolveWaiter(poll, "k", "r2", "n", "", "", "", false)
+	if err != nil || res.Status != store.WaiterStillWaiting || res.Position != 1 || len(res.Holders) != 1 {
 		t.Fatalf("poll behind a busy entry = %+v, %v", res, err)
 	}
 	if err := writer.Rollback(); err != nil {

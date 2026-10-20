@@ -1174,8 +1174,13 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRu
 	if busy {
 		// safety: a writer holds the entry, so its commit decides this waiter;
 		// a poll that queued behind it would delay that writer for nothing.
-		if observed, ok, err := t.observeWaiterTx(ctx, tx, key, runID, nodeID); err != nil || ok {
-			return observed, err
+		// The head of the queue still waits, because it is next to promote.
+		observed, ok, err := t.observeWaiterTx(ctx, tx, key, runID, nodeID)
+		if err != nil {
+			return WaiterResolution{}, err
+		}
+		if ok && (observed.Status != WaiterStillWaiting || observed.Position > 0) {
+			return observed, nil
 		}
 	}
 	result, err := t.resolveWaiterTx(ctx, tx, key, runID, nodeID, leaderRunID, leaderNodeID, DefaultConcurrencyLease, fence)
