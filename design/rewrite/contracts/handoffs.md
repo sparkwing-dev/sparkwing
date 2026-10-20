@@ -902,3 +902,8 @@ Assigned to an Opus implementer (env 1087).
 
 - The largest single payment is $1,000 for now, for both automatic refills and manual Add funds (it will likely rise later). It applies to every standing tier, including High; the per-standing refill caps below it still apply.
 - Anyone wanting a larger payment or higher limits uses the "contact us" request (decision 11's request flow), which reaches Korey as an operator task.
+
+## 2026-10-19 Korey decision 33: early fraud warnings respect the 3-D Secure liability shift
+
+- A payment that passed 3-D Secure with liability shift (Stripe's three_d_secure result authenticated/attempt with liability shifted) is not refunded on an early fraud warning: the team is held, the card is blocked deployment-wide, and the payment's unspent credit is frozen. A later chargeback is the issuer's liability; if none arrives within the dispute window an operator may release the hold.
+- A payment without that protection (off-session refills, Add funds where 3-D Secure was not completed) is refunded automatically as before, its credit reversed, the team held and the card blocked.
