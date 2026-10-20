@@ -50,9 +50,14 @@ execution cannot use those secrets. See [authentication](auth.md).
 An access rule may name a branch with `sparkwing pools allow --branch`. The
 branch is stored without `refs/heads/`, so `main` and `refs/heads/main` are the
 same rule, and it matches as a Go `path.Match` glob, the matcher App
-subscriptions use. Only a run a signed GitHub App delivery started on that
-branch, or a child or retry that inherits that run's identity, matches a branch
-rule. CLI, API, schedule and GitHub Actions runs never do.
+subscriptions use. A run a signed GitHub App delivery started on that branch,
+a child or retry that inherits that run's identity, and a fire of an
+admin-armed default-branch schedule (see [schedules](schedules.md#pause-edit-and-run))
+when the rule names the default branch match a branch rule. Pools are granted at
+all only to those runs; a rule with source `github` also requires a run a
+signed App delivery started. A typed repository grants nothing, so CLI, API,
+GitHub Actions runs and schedules a non-admin armed, or that are locked,
+overridden or off the default branch, never receive a reserved pool.
 
 ## Job modifiers
 

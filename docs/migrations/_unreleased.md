@@ -2797,56 +2797,74 @@ scheduled run's cadence without the legacy trigger environment column.
 
 Intake seals every run with the identity it speaks for: a trust class
 (`verified-default`, `verified`, `actions`, `schedule` or `asserted`), the ref,
-commit, event and pipeline, and GitHub's repository ID for a verified run. OIDC
-claims, data and cache scopes, pool access rules and pipeline-scoped secret
-release read only that value. Check each of these before upgrading:
+commit, event and pipeline, and GitHub's repository ID for every class except
+`asserted`. OIDC claims, data and cache scopes, pool access rules and
+pipeline-scoped secret release read only that value. Check each of these before
+upgrading:
 
-- **Trust policies that accept `trigger:cron`.** A schedule's "run now" and a
-  fire whose arguments were overridden now mint `trigger:manual` with no
-  `repository_id`, `ref` or `sha`. Only an unmodified fire mints `trigger:cron`,
-  with the schedule's ref. Move deployments that relied on "run now" to an App
-  push or an unmodified fire.
-- **Trust policies that read a manual run's `ref` or `sha`.** CLI, API and
-  dashboard runs, children that name their own branch and runs demoted by a
-  `source:` pin omit both claims, so their subject ends in `ref:`. A policy that
-  names a ref now admits only verified App runs, unmodified schedule fires and
-  GitHub Actions-bound runs, which keep `trigger:manual` with the push's ref and
-  sha.
-- **Trust policies that name a child run's pipeline.** A child's `pipeline`
-  claim and subject segment are now its parent's. Name the parent pipeline.
-- **Pipeline-scoped secrets read by child runs.** A child reads its parent
-  pipeline's secrets. Scope the secret to the parent pipeline, or make it shared.
-- **Child requests.** A child either runs its parent's exact revision or names
-  a branch the controller resolves; pairing another ref or code commit with an
-  explicit commit answers `403`, as does another repository. Children nest at
-  most 10 levels deep counting the root and one root starts at most 50 children,
-  retries excluded; past either bound intake answers `409` with `limit`
-  `max_child_depth` or `max_children_per_root`. A child spends the hourly run
-  budget of whoever created its root.
-- **Release subscriptions without `tags`.** A `release_published` or
-  `release_prereleased` subscription now starts a run only when the release tag
-  matches its `tags` patterns, so one with no patterns starts nothing. Add
-  patterns such as `["v*"]` and protect those tags in GitHub.
-- **Closed pull request subscriptions.** `pull_request_closed` now runs only a
-  merged pull request, at its merge commit. A pull request closed without
-  merging starts nothing. Pipelines that cleaned up after abandoned pull
-  requests need another trigger.
+- **Trust policies that accept `trigger:cron`.** A schedule mints
+  `trigger:cron`, with `repository_id`, `refs/heads/<default>` and the branch
+  head, only when a team admin armed it (App automation consent, or a member
+  holding `team.admin` when it fires), it follows the default branch GitHub
+  reports through the App at fire time, it has no locked commit and no override
+  of arguments, cadence, timezone, overlap or catch-up, and the App resolves its
+  commit at fire time. Schedules an editor armed, locked, overridden or
+  non-default-branch schedules and "run now" mint `trigger:manual` with no
+  `repository_id`, `ref` or `sha`. Name the repository in `cron` policies, and
+  have an admin re-arm any deployment schedule an editor armed.
+- **Trust policies that read a manual run's `repository_id`, `ref`, `sha` or
+  `repository`.** CLI, API and dashboard runs, the schedules above, children not
+  at their parent's exact revision and runs demoted by a `source:` pin omit all
+  four, so their subject reads `repository_id::` and ends in `ref:`.
+- **Trust policies for GitHub Actions-bound runs.** These keep
+  `trigger:manual` with the push's ref and sha, and now carry its
+  `repository_id` and `repository`. Policies matching `repository_id::` for them
+  must name the repository ID.
+- **Child runs.** A job may start only the child pipelines its plan declares,
+  with Go `JobNode.StartsChildren("deploy", ...)` or TypeScript
+  `job.startsChildren("deploy")`; an undeclared child answers `403`. A child at
+  its parent's exact revision inherits the parent's identity, including its
+  `pipeline` claim and pipeline-scoped secrets. Any other child is asserted
+  under its own pipeline name and reads only team-wide shared secrets, like a
+  GitHub reusable workflow called without `secrets: inherit`. Pairing another
+  ref or code commit with an explicit commit, or naming another repository,
+  answers `403`. Children nest at most 10 levels deep counting the root and one
+  root starts at most 50 children, retries excluded; past either bound intake
+  answers `409` with `limit` `max_child_depth` or `max_children_per_root`. A
+  child spends the hourly, flood and queue-depth budgets of whoever created its
+  root.
+- **Release subscriptions.** `release_published` and `release_prereleased`
+  require the new `release_tags` patterns on
+  `PUT /api/v1/team/github-app/triggers`; a release subscription without them
+  answers `400`. `tags` now selects tag pushes only. Add `release_tags` such as
+  `["v*"]` and protect those tags in GitHub.
+- **Closed pull request subscriptions.** `pull_request_closed` runs only a
+  merged pull request, at its merge commit, as `refs/heads/<base>` with
+  `trigger:pull_request`. A pull request closed without merging starts nothing.
 - **`source:` branch or tag pins.** A pin that is not a full commit ID, unless
   it resolves to the execution commit, demotes App, schedule and Actions runs
-  to asserted: `trigger:manual` with no `ref` or `sha`, and a cache scope of
-  their own. Pin a full commit ID to keep the run's identity.
-- **Shared manual caches.** Records an unverified run writes now land in
-  `manual:<writer>:<ref>`, keyed by the submitting principal, the schedule and
-  its armer, the parent or demoted run, or `actions`. Manual runs by different
-  members no longer share memo, dependency-cache or output entries, and expect
-  cold caches after the upgrade. An unverified run reads only its own scope; a
-  verified App run also reads verified records of the default branch and, for
-  a pull request, its base. Selectors that named `manual:<ref>` must name
-  the writer. See [caching](../caching.md#who-shares-a-cache).
-- **Pool rules with `--branch`.** Branches are normalized and matched as globs,
-  and only verified App runs on that branch, with children and retries that
-  inherit them, match. Manual, schedule and Actions runs no longer match a
-  branch rule.
+  to asserted: no OIDC `repository_id`, `ref` or `sha`, no branch-scoped pool
+  and a cache scope of their own. The run still receives its pipeline's scoped
+  secrets. Pin a full commit ID, or protect the pinned branch. See
+  [secrets](../secrets.md).
+- **Shared manual caches.** Every run writes only its own scope: records an
+  unverified run writes land in `manual:<writer>:<ref>`, keyed by the submitting
+  principal, the member who armed a schedule, an admin-armed schedule, the parent
+  or demoted run, or `actions`. Manual runs by different members no longer share
+  memo, dependency-cache or output entries. Every run reads verified records of
+  the default branch, and a verified pull request also its base. Selectors that
+  named `manual:<ref>` must name the writer. See
+  [caching](../caching.md#who-shares-a-cache).
+- **Pool rules.** Reserved pools are granted only to verified App runs, with
+  the children and retries that inherit them, and to fires of admin-armed
+  default-branch schedules. A typed repository grants nothing, a rule with
+  source `github` requires a run a signed App delivery started, and a
+  `--branch` rule, normalized and matched as a glob, matches only a verified
+  App run on that branch or an admin-armed schedule fire when it names the
+  default branch.
+- **Extra repositories.** Owner-approved extra repositories join the source
+  token only for a verified push to the default branch. Other runs fetch only
+  their own repository.
 
 A run admitted before the upgrade has no sealed provenance, so its OIDC mints,
 data grants, children and pipeline-scoped secret reads are refused. A retry

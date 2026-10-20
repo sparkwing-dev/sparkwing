@@ -100,18 +100,18 @@ other run writes under its own scope, `manual:<writer>:<ref>`:
 | Run | Writer |
 | --- | --- |
 | CLI, API or dashboard run, and a schedule's "run now" | The submitting principal, for example `account/<id>` |
-| Child that names its own branch under a manual parent | The parent's writer |
-| Child that names its own branch under any other parent | The parent run, `run/<id>` |
-| App, schedule or Actions run demoted by a branch or tag `source:` pin, and a schedule fire with overridden arguments | That run alone |
-| Unmodified schedule fire | The schedule and the account that armed it |
+| Fire of a schedule a non-admin armed | The member who armed it, `armer/<id>`, shared across that member's schedules |
+| Fire of an admin-armed default-branch schedule ([schedules](schedules.md#pause-edit-and-run)) | That schedule, `schedule/<id>` |
+| Fire of a locked, overridden or non-default-branch admin-armed schedule, and an App, schedule or Actions run demoted by a branch or tag `source:` pin | That run alone |
+| Child not at its parent's exact revision, under an asserted parent | The parent's writer |
+| Child not at its parent's exact revision, under any other parent | The parent run, `run/<id>` |
 | Run bound to a GitHub Actions push | `actions`, shared per ref |
 
-A child that runs its parent's exact revision, and a retry, write under the
-scope of the run they inherit from. A verified App run, and a child that
-inherits its identity, reads its own scope, verified records from the
-repository's default branch and, for a verified pull request, verified records
-from its base branch. Every other run, including manual, schedule and GitHub
-Actions runs, reads only its own writer scope. One member's manual run therefore
+A child at its parent's exact revision, and a retry, write under the scope of
+the run they inherit from. Every run writes only its own scope. Every run also
+reads verified records of the repository's default branch, which intake learns
+from the verified records already stored, and a verified pull request also
+reads verified records of its base branch. One member's manual run therefore
 cannot feed memo or cache entries to another member's runs or to scheduled,
 Actions or App builds of `main`, and manual runs by different members do not
 share a cache. GitHub Actions restores from the current branch, the default

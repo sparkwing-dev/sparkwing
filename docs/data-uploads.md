@@ -49,12 +49,11 @@ Misses omit the observation. With no ref selector, the store selects from the
 credential's authorized refs and accepts only persisted verified-default evidence.
 The `ref` selector and response metadata use `manual:<writer>:<ref>` for
 records an unverified run wrote and the plain ref for records a verified GitHub
-App run wrote. The writer is the submitting principal, the schedule and its
-armer, the parent or demoted run, or `actions`, as
+App run wrote. The writer is the submitting principal, the member who armed a
+schedule, an admin-armed default-branch schedule, the parent or demoted run, or `actions`, as
 [caching](caching.md#who-shares-a-cache) lists. Each lookup requires the
-matching read grant. A verified App run holds grants for its own scope, the
-verified default branch and a verified pull request's base; every other run
-holds a grant only for its own writer scope. Selecting a plain ref never
+matching read grant. Every run holds grants for its own scope and the verified
+default branch, and a verified pull request also for its base branch. Selecting a plain ref never
 inherits a manual write's scope.
 
 `POST /api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
