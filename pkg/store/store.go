@@ -22,8 +22,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -111,6 +112,7 @@ type Store struct {
 	clock            func() time.Time
 	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
 	db               *sql.DB
+	conn             *sql.Conn // Break-glass verification and writes share this session.
 	githubLocks      *sql.DB
 	dialect          Dialect
 	cleanup          func() error
@@ -495,7 +497,22 @@ func OpenPostgres(ctx context.Context, dsn string) (*Store, error) {
 	if dsn == "" {
 		return nil, errors.New("OpenPostgres: dsn is required")
 	}
-	return openSQL(ctx, "pgx", dsn, DialectPostgres, "drop the database")
+	cfg, err := postgresConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	return openPostgresConfig(ctx, cfg)
+}
+
+func openPostgresConfig(ctx context.Context, cfg *pgx.ConnConfig) (*Store, error) {
+	dsn := stdlib.RegisterConnConfig(cfg)
+	st, err := openSQL(ctx, "pgx", dsn, DialectPostgres, "drop the database")
+	if err != nil {
+		stdlib.UnregisterConnConfig(dsn)
+		return nil, err
+	}
+	st.cleanup = func() error { stdlib.UnregisterConnConfig(dsn); return nil }
+	return st, nil
 }
 
 func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy string) (*Store, error) {
@@ -531,7 +548,11 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 // Close releases the underlying database handle and any private snapshot.
 func (s *Store) Close() error {
 	s.localSecrets.Clear()
-	dbErr := s.db.Close()
+	var dbErr error
+	if s.conn != nil {
+		dbErr = s.conn.Close()
+	}
+	dbErr = errors.Join(dbErr, s.db.Close())
 	if s.githubLocks != nil {
 		dbErr = errors.Join(dbErr, s.githubLocks.Close())
 	}

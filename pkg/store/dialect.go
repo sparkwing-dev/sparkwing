@@ -82,28 +82,42 @@ func rewritePh(dialect Dialect, q string) string {
 	return b.String()
 }
 
+type sqlRunner interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+func (s *Store) sqlRunner() sqlRunner {
+	if s.conn != nil {
+		return s.conn
+	}
+	return s.db
+}
+
 func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	return s.db.ExecContext(ctx, rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().ExecContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) execNoCtx(q string, args ...any) (sql.Result, error) {
-	return s.db.Exec(rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().ExecContext(context.Background(), rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	return s.db.QueryContext(ctx, rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().QueryContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) queryNoCtx(q string, args ...any) (*sql.Rows, error) {
-	return s.db.Query(rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().QueryContext(context.Background(), rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) queryRow(ctx context.Context, q string, args ...any) *sql.Row {
-	return s.db.QueryRowContext(ctx, rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().QueryRowContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
-	return s.db.QueryRow(rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().QueryRowContext(context.Background(), rewritePh(s.dialect, q), args...)
 }
 
 type storeTx struct {
@@ -189,7 +203,7 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 		}
 		return tx, err
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{
+	tx, err := s.sqlRunner().BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,
 	})
@@ -200,7 +214,7 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 }
 
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.sqlRunner().BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -65,21 +65,25 @@ run and output pins. Verify retention through persisted reads after completion.
 Native signing, lifecycle verification and final completeness still need
 integration evidence. See [log completeness](observability.md#log-completeness).
 
-### Overlapping controllers during an upgrade
+### One active controller
 
-Two controllers may serve one store at the same time, for example the old
-and new pod during an upgrade. Every write is a transaction, and every
-background job that must run once holds its own lease row in the store: the
-reaper and claim-attention sweep, run recovery, run completion effects,
-storage maintenance, the cron tick, bucket measurement, and each team
-deletion. What does not carry across controllers is per-process: request and
-flood budgets apply per controller, so two controllers allow up to twice the
-configured rate, and a live log tail shows only what reached the controller
-the reader asked. Filesystem data lives under each controller's own
-`SPARKWING_HOME`, so controllers sharing a store need the S3 data store.
-`--payment-mode` and `--free-team-slots` are shared settings each controller
-writes at startup; controllers on one store must declare the same values, or
-the last one started wins.
+A store has one active controller. Before migrations, startup writes or serving,
+a PostgreSQL controller takes a session advisory lock derived from the database
+and Sparkwing schema on a dedicated connection. A second controller blocks as a
+standby. The active controller checks that connection and lock every second,
+with a five-second query timeout. Losing either exits the process non-zero
+immediately, without draining. Its supervisor restarts it, and a waiting standby
+can take over. SQLite deployments run one controller process.
+
+Webhook ordering, bucket measurement and write guards, request budgets and live
+log tails use the active process's state. Cross-controller webhook ordering and
+storage-state propagation are therefore outside this topology. Several active
+controllers require a separately reviewed design. Standbys using filesystem
+data must share the active controller's `SPARKWING_HOME`. S3 data is shared
+through the bucket.
+
+`--payment-mode` and `--free-team-slots` remain shared settings written at
+startup. All controllers on one store must declare matching values.
 
 ### Declared deployment
 

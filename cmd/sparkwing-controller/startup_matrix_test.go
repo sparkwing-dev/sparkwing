@@ -51,6 +51,7 @@ func TestStartupMatrixRefusesBeforeTouchingTheStore(t *testing.T) {
 			[]string{"--payment-mode=test", "--addr=nope"},
 			"--addr",
 		},
+		{"empty API address", nil, []string{"--free-team-slots=5", "--addr="}, "--addr"},
 		{"occupied port", nil, []string{"--free-team-slots=5", "--addr=" + taken.Addr().String()}, "--addr"},
 		{"occupied metrics port", nil, []string{"--free-team-slots=5", "--metrics-addr=" + taken.Addr().String()}, "--metrics-addr"},
 	} {
@@ -75,5 +76,19 @@ func TestStartupMatrixRefusesBeforeTouchingTheStore(t *testing.T) {
 				t.Fatalf("a refused start opened the store: %v", serr)
 			}
 		})
+	}
+}
+
+func TestEmptyAPIAddressRefusesBeforeOpeningStore(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	if err := run([]string{"--addr=", "--free-team-slots=5"}); err == nil || !strings.Contains(err.Error(), "--addr") {
+		t.Fatalf("empty --addr: %v", err)
+	}
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.StateDB()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty --addr opened the store: %v", err)
 	}
 }

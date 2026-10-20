@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -42,7 +43,10 @@ func bytesOrNil(s string) []byte {
 
 func openControllerStore(ctx context.Context, cfg deployment.Config, sqlitePath string) (*store.Store, error) {
 	if cfg.Store() == deployment.StorePostgres {
-		return store.OpenPostgres(ctx, cfg.PGURL())
+		return store.OpenControllerPostgres(ctx, cfg.PGURL(), func(err error) {
+			slog.Error("controller must fail-stop", "err", err)
+			os.Exit(1)
+		})
 	}
 	return store.Open(sqlitePath) //nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
 }
@@ -94,8 +98,8 @@ func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.C
 }
 
 // openDeclaredStore opens the store the serving controller recorded. It
-// never creates one, and before returning it checks that its own connection
-// landed on the recorded target and baseline.
+// never creates one. Verification and subsequent mutations retain the same
+// connection, so reconnecting cannot silently redirect an admin operation.
 func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error) {
 	path := deploymentRecordPath(stateDB)
 	body, err := os.ReadFile(path)

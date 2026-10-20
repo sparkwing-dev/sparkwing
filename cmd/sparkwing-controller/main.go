@@ -566,8 +566,8 @@ func run(args []string) error {
 	// safety: these are the only database writes startup makes, and they come
 	// after every check above and after every listener is bound, so a start
 	// that fails earlier changes nothing. The payment mode and free team
-	// slots are shared settings: controllers serving one store must declare
-	// the same values, or the last one started wins.
+	// slots are shared settings: active and standby controllers must declare
+	// the same values.
 	if err := ensureBootstrapAdmin(ctx, st, creds.BootstrapAdminToken, slog.Default()); err != nil {
 		return err
 	}
@@ -595,6 +595,9 @@ type boundListeners struct{ controller.Listeners }
 // address or a taken port fails the start before it changes anything.
 func bindListeners(api, trustedProxy, metrics string) (boundListeners, error) {
 	var b boundListeners
+	if api == "" {
+		return b, errors.New("--addr must not be empty")
+	}
 	for _, l := range []struct {
 		flag, addr string
 		into       *net.Listener
