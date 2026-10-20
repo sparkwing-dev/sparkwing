@@ -92,6 +92,21 @@
       ],
       "type": "object"
     },
+    "childPipeline": {
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipeline"
+      ],
+      "type": "object"
+    },
     "closures": {
       "additionalProperties": false,
       "properties": {
@@ -274,7 +289,7 @@
         },
         "children": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/childPipeline"
           },
           "type": "array"
         },
