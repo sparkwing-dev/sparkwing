@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -57,14 +56,8 @@ func TestTheServerIsItsOwnFreeTierSource(t *testing.T) {
 	if err := s.SetFreeTeamSlots(t.Context(), 0); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now()
-	pub, priv := licensetest.NewKey(t)
-	lic := license.Resolve(licensetest.Sign(t, priv, licensetest.Terms{
-		Features: []string{license.FeatureMultiTeam}, IssuedTo: "test",
-		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
-	}), pub, now, nil)
 	var logs bytes.Buffer
-	server := New(s, slog.New(slog.NewJSONHandler(&logs, nil))).WithLicense(lic)
+	server := NewDeployment(s, deploymenttest.Team(t), slog.New(slog.NewJSONHandler(&logs, nil)))
 	server.WithFreeTier(server).CheckFreeTierSource()
 	if strings.Contains(logs.String(), "signup.free_tier_unwired") {
 		t.Fatalf("configured source logged as missing: %s", logs.String())

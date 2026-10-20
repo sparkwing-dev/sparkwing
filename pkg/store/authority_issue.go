@@ -247,8 +247,8 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if !claimOK {
 		return capability.Capability{}, authorityError(apierr.Forbidden, "claimant lacks the award grant")
 	}
-	launcher := claimant.Capability.Subject.Kind == capability.SubjectService && claimant.Capability.Binding.Kind == capability.BindingNone && slices.Contains(claimant.Capability.Grants, capability.ClaimsLaunch)
-	if spec.Delivery == capability.DeliveryBootstrap && (!launcher || !slices.Contains(capability.BootstrapUnits(), spec.Unit)) {
+	cloudLauncher := capability.CloudLauncher(claimant.Capability)
+	if spec.Delivery == capability.DeliveryBootstrap && (!capability.Launcher(claimant.Capability) || !slices.Contains(capability.BootstrapUnits(), spec.Unit)) {
 		return capability.Capability{}, authorityError(apierr.Forbidden, "bootstrap requires launcher authority")
 	}
 	row, err := loadAwardRowTx(ctx, tx, spec)
@@ -275,7 +275,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		}
 		row.holder, row.generation, row.lease = prospective.holder, prospective.generation, prospective.lease
 	}
-	if !launcher && claimant.Capability.Team != row.team {
+	if !cloudLauncher && claimant.Capability.Team != row.team {
 		return capability.Capability{}, authorityError(apierr.Forbidden, "claimant belongs to another team")
 	}
 	if claimant.Capability.Binding.Kind != capability.BindingNone && claimant.Capability.Binding.RunID != "" && claimant.Capability.Binding.RunID != row.run {
@@ -332,7 +332,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		c.Binding.Generation = unit.SourceGeneration
 		c.Binding.Expansion = &capability.LeaseRef{Kind: spec.Unit, ID: spec.UnitID, Generation: row.generation, Holder: row.holder}
 	}
-	if launcher {
+	if cloudLauncher {
 		if _, err := lockLedgerTx(ctx, tx, Team(row.team)); err != nil {
 			return capability.Capability{}, err
 		}
@@ -372,7 +372,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	}
 	start := capability.BillingAtAward
 	executor := "runner"
-	if launcher {
+	if cloudLauncher {
 		start = capability.BillingAtStart
 		executor = "cloud"
 	}

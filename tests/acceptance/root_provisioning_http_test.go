@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -265,7 +266,7 @@ func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 			}
 			f := &rootIssuer{}
 			w := authorityHTTP(rootServer(b, f), b, "POST", path, string(raw))
-			allowed := grant == capability.NodesClaim || grant == capability.TriggersClaim
+			allowed := grant == capability.NodesClaim || grant == capability.TriggersClaim || grant == capability.ClaimsLaunch
 			if service {
 				allowed = grant == capability.ClaimsLaunch || grant == capability.OperatorLimits || grant == capability.OperatorObjectStore || grant == capability.OperatorTokens
 			}
@@ -345,8 +346,7 @@ func TestRootProvisioningHTTPMethodsAndRetry(t *testing.T) {
 }
 
 func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
-	f := newSessionFlow(t)
-	f.server.WithCloudDeployment(true)
+	f := newDeploymentSessionFlow(t, deploymenttest.Cloud(t, "https://controller.test"))
 	secret := sha256.Sum256([]byte(t.Name()))
 	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
 	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), f.store, seed); err != nil || !created {

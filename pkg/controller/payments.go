@@ -20,7 +20,7 @@ type PaymentSettler interface {
 
 // WithPaymentDeployment names this deployment on every Stripe page and payment it opens, so it settles only its own events.
 func (s *Server) WithPaymentDeployment(name string) *Server {
-	s.deployment = strings.ToLower(strings.TrimSpace(name))
+	s.paymentDeployment = strings.ToLower(strings.TrimSpace(name))
 	return s
 }
 
@@ -68,10 +68,10 @@ func (s *Server) verifyPaymentRequest(r *http.Request) error {
 		}
 		return &apierr.Error{Code: apierr.BadRequest, Message: "payment event could not be read"}
 	}
-	event, err := s.paymentVerifier.VerifyPaymentEvent(r.Context(), capability.PaymentPresentation{Body: body, Signature: signatures[0]}, capability.PaymentScope{Deployment: s.deployment, Records: s.paymentLedger})
+	event, err := s.paymentVerifier.VerifyPaymentEvent(r.Context(), capability.PaymentPresentation{Body: body, Signature: signatures[0]}, capability.PaymentScope{Deployment: s.paymentDeployment, Records: s.paymentLedger})
 	var conflict *apierr.Error
 	if errors.As(err, &conflict) && conflict.Details["reason"] == capability.PaymentOwnershipReason {
-		s.logger.Error("stripe event names another deployment for an object recorded here; not settled, Stripe retries", "alert", "payment_ownership_conflict", "object", conflict.Details["object"], "stamp", conflict.Details["stamp"], "deployment", s.deployment)
+		s.logger.Error("stripe event names another deployment for an object recorded here; not settled, Stripe retries", "alert", "payment_ownership_conflict", "object", conflict.Details["object"], "stamp", conflict.Details["stamp"], "deployment", s.paymentDeployment)
 		return &apierr.Error{Code: apierr.Internal, Message: "payment event ownership conflicts with committed records"}
 	}
 	if err != nil {

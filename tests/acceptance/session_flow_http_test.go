@@ -15,8 +15,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -33,6 +33,11 @@ type sessionFlow struct {
 
 func newSessionFlow(t *testing.T) sessionFlow {
 	t.Helper()
+	return newDeploymentSessionFlow(t, deploymenttest.Team(t))
+}
+
+func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
+	t.Helper()
 	s, cipher := credentialMutationStore(t)
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
@@ -42,15 +47,8 @@ func newSessionFlow(t *testing.T) sessionFlow {
 			t.Fatal(err)
 		}
 	}
-	pub, key := licensetest.NewKey(t)
-	now := time.Now()
-	signed := licensetest.Sign(t, key, licensetest.Terms{Features: []string{license.FeatureMultiTeam}, IssuedTo: "synthetic", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)})
-	lic, err := license.Verify(signed, pub, now)
-	if err != nil {
-		t.Fatal(err)
-	}
 	logs := &bytes.Buffer{}
-	server := controller.New(s, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher).WithLicense(lic)
+	server := controller.NewDeployment(s, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher)
 	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +255,11 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 	for _, state := range []string{"expired", "revoked", "removed member", "maximum lifetime", "future creation", "license", "missing key", "wrong key", "backend", "head", "body"} {
 		t.Run(state, func(t *testing.T) {
-			f := newSessionFlow(t)
+			cfg := deploymenttest.Team(t)
+			if state == "license" {
+				cfg = deployment.Config{}
+			}
+			f := newDeploymentSessionFlow(t, cfg)
 			method, path, body, code := "GET", "/api/v1/auth/session", "", apierr.Unauthenticated
 			digest := sha256.Sum256([]byte(f.raw))
 			query, value := "", int64(0)
@@ -273,7 +275,6 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 			case "future creation":
 				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(time.Hour).UnixNano()
 			case "license":
-				f.server.WithLicense(nil)
 			case "missing key":
 				f.server.WithSecretsCipher(nil)
 				code = apierr.Unavailable

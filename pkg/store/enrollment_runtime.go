@@ -51,7 +51,10 @@ func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.Pro
 		if err := (&Tenant{s: tx.store, team: Team(spec.Team)}).lockTeamTx(ctx, tx); err != nil {
 			return err
 		}
-		allowed = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
+		allowed = []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.ClaimsLaunch}
+		if slices.Contains(spec.Grants, capability.ClaimsLaunch) && (spec.Personal || len(spec.ReservedPools) == 0 || len(spec.Grants) != 1 || spec.Metered) {
+			return bindingRefusal()
+		}
 	} else {
 		if spec.RegistrationID != "service:"+spec.Subject.ID || strings.TrimSpace(spec.Subject.ID) != spec.Subject.ID {
 			return bindingRefusal()

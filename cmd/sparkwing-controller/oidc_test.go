@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 )
 
 func oidcTestKey(t *testing.T) []byte {
@@ -23,15 +25,23 @@ func oidcTestKey(t *testing.T) []byte {
 func TestLoadOIDCIssuer(t *testing.T) {
 	key := oidcTestKey(t)
 
-	iss, err := loadOIDCIssuer(nil, nil, "https://api.sparkwing.dev", 0, &bytes.Buffer{})
+	parse := func(t *testing.T, in deployment.Inputs) deployment.Config {
+		t.Helper()
+		cfg, err := deployment.Parse(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	iss, err := loadOIDCIssuer(parse(t, deployment.Inputs{PublicOrigin: "https://api.sparkwing.dev"}), 0, &bytes.Buffer{})
 	if err != nil || iss != nil {
 		t.Fatalf("no key: issuer %v, err %v; want the feature off", iss, err)
 	}
-	if _, err := loadOIDCIssuer(nil, key, "https://api.sparkwing.dev", 0, &bytes.Buffer{}); err == nil {
+	if _, err := deployment.Parse(deployment.Inputs{OIDCPublishedKey: key, PublicOrigin: "https://api.sparkwing.dev"}); err == nil {
 		t.Error("a published key with no signing key was accepted")
 	}
-	for _, external := range []string{"", "http://api.sparkwing.dev", "https://api.sparkwing.dev/oidc"} {
-		if _, err := loadOIDCIssuer(key, nil, external, 0, &bytes.Buffer{}); err == nil {
+	for _, external := range []string{"", "http://127.0.0.1:4344", "https://api.sparkwing.dev/oidc"} {
+		if _, err := loadOIDCIssuer(parse(t, deployment.Inputs{OIDCKey: key, PublicOrigin: external}), 0, &bytes.Buffer{}); err == nil {
 			t.Errorf("external URL %q was accepted as an issuer", external)
 		}
 	}
@@ -41,7 +51,11 @@ func TestLoadOIDCIssuer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iss, err = loadOIDCIssuer(creds.OIDCKey, creds.OIDCPublishedKey, "https://api.sparkwing.dev/", 15*time.Minute, &log)
+	cfg, err := parseDeployment(deploymentFlags{ExternalURL: "https://api.sparkwing.dev/"}, creds, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss, err = loadOIDCIssuer(cfg, 15*time.Minute, &log)
 	if err != nil || iss == nil {
 		t.Fatalf("credential key: issuer %v, err %v", iss, err)
 	}

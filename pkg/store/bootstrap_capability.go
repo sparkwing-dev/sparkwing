@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"slices"
 
@@ -12,6 +13,12 @@ import (
 )
 
 const bootstrapUsedKey = "bootstrap_admin"
+
+// ErrBootstrapSeedConsumed reports that the supplied seed is the one that
+// bootstrapped this store and its authority has since ended. The seed has
+// done its job, so a caller starting up warns that it can be removed rather
+// than failing.
+var ErrBootstrapSeedConsumed = errors.New("the bootstrap admin seed was already used on this store")
 
 func lockBootstrapGateTx(ctx context.Context, tx *storeTx) (string, error) {
 	var prefix string
@@ -59,12 +66,16 @@ func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.P
 			if prefix != spec.Seed[:16] {
 				return authorityError(apierr.Conflict, "bootstrap has already been consumed")
 			}
-			p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
-			if err != nil {
+			var digest string
+			var revoked bool
+			if err := tx.QueryRowContext(ctx, `SELECT digest, revoked_at IS NOT NULL FROM capabilities WHERE prefix = ?`, prefix).Scan(&digest, &revoked); err != nil {
 				return err
 			}
-			if p.Capability.Digest != sha256.Sum256([]byte(spec.Seed)) {
+			if want := sha256.Sum256([]byte(spec.Seed)); digest != hex.EncodeToString(want[:]) {
 				return bindingRefusal()
+			}
+			if revoked {
+				return ErrBootstrapSeedConsumed
 			}
 			return nil
 		}

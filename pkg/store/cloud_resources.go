@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// CloudAwardResources reads the allocation from the award's immutable billing reservation.
+// CloudAwardResources reads Cloud's committed allocation or a self-hosted pool's sealed resource pins.
 func (s *Store) CloudAwardResources(ctx context.Context, ref capability.AuthorityRef) (*match.Resources, error) {
 	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
@@ -20,6 +20,21 @@ func (s *Store) CloudAwardResources(ctx context.Context, ref capability.Authorit
 		return nil, err
 	}
 	c := chain[0].principal.Capability
+	if len(chain) > 1 && launcherClaimant(chain[len(chain)-1].principal.Capability) && !capability.CloudLauncher(chain[len(chain)-1].principal.Capability) {
+		run, err := readRunTx(ctx, tx, Team(c.Team), c.Binding.RunID)
+		if err != nil {
+			return nil, err
+		}
+		resources, err := unitResourcesTx(ctx, tx, Team(c.Team), run, UnitRef{Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID})
+		if err != nil {
+			return nil, err
+		}
+		allocation := matchingResources(resources)
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return &allocation, nil
+	}
 	if c.Billing == nil || c.Billing.ExecutorClass != "cloud" {
 		return nil, tx.Commit()
 	}

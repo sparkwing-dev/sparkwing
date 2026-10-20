@@ -86,13 +86,15 @@ should use the private socket, which needs no session.
 A runner runs one job after another in shared host state, so three inputs a run
 supplied no longer reach it unchecked.
 
-- **Pool trust.** A runner that holds a pool with a secret reserved to it takes only
-  runs from a verified push to the repository's default branch. Pull request,
-  feature branch, manual and scheduled runs wait for another runner. To keep the
-  old behavior for such a pool, a team admin re-registers its runners with
-  `sparkwing runners add --profile prod --runner deploy-1 --trust=any`. `--trust=verified-default` applies the
-  restriction to a pool without reserved secrets. The class is stored with the
-  runner's credential and survives rotation.
+- **Pool trust.** A pool with reserved secrets defaults to `verified-default`.
+  It requires verified default-branch work and a launcher-only credential.
+  Enroll with `sparkwing runners add --profile prod --runner deploy-1 --repos github.com/acme/* --reserved-for deploy --trust verified-default --launcher`.
+  In the runner chart, use `launcher.enabled=true` and `launcher.tokenSecret`.
+  Remove `runner.trustClass` and `runner.reservedPools`; the credential supplies
+  both facts. Enabling the launcher replaces the persistent runner and cache
+  PVC. A run-level pool pin now uses controller dispatch. A team admin can
+  register a persistent pool with `--trust=any`, which retains the same-uid
+  credential and cross-claim state exposure described in the self-hosting guide.
 - **Submitted environment.** A run's `run.submit_env_allow` values reach a
   shared runner only under names the runner's operator also lists, in the
   runner's own machine file `run.submit_env_allow`, `--submit-env-allow`, or the
@@ -2894,3 +2896,69 @@ from High-standing teams also reach the operator queue. A standing grant does
 not raise the maximum per payment. `GET /api/v1/team/billing` reports
 `purchase_max_cents` alongside the purchase minimum. An older saved refill above
 the maximum stops with `refill.limit=payment_size`.
+
+## The controller declares its deployment
+
+`sparkwing-controller` no longer works out what kind of deployment it is from
+which credential files exist. Declare it:
+
+- `--deployment=local|team|cloud` (default `local`). A controller with a
+  multi-team license must pass `--deployment=team`; the hosted service passes
+  `cloud`. `team` and `cloud` refuse to start without a license that verifies
+  and grants multi-team. A `cloud` or `cloud-free` limits profile needs
+  `--deployment=cloud`, which also needs `--external-url`.
+- `--store=sqlite|postgres` (default `sqlite`). A controller with a `pg-url`
+  credential must pass `--store=postgres`; `cloud` requires it.
+
+A license that expires while the controller runs no longer turns metering, the
+free tier and sign-in off. Health reports `degraded` with a `license: expired`
+problem, and the next start refuses until the license is renewed.
+
+The credentials directory now refuses any file whose name the controller does
+not read, so a Secret key such as `pg_url` stops startup instead of leaving the
+controller on an empty SQLite store. Move unrelated keys out of the Secret named
+by `controller.credentialsSecret`. A `.previous` or `.published` key without its
+current key, including `github-app-webhook-secret.previous` on its own, stops
+startup.
+
+Startup binds every listener before it opens the store, and writes the
+bootstrap seed, `--payment-mode` and `--free-team-slots` only after every other
+check passes. Controllers sharing a store must declare the same payment mode
+and free team slots. `--external-url` follows the runners' rule:
+`https`, or `http` only on loopback or a Kubernetes Service. Without
+`--external-url`, the GitHub runner binding routes answer
+`capability_unsupported` rather than a workflow built from the request's host.
+
+`sparkwing-controller admin` drops `--credentials-dir`. It opens the store the
+serving controller recorded in `$SPARKWING_HOME/deployment.json`, checks that
+it is the same store, and refuses otherwise, instead of creating a SQLite store.
+
+Runners and the launcher refuse a plain `http://` controller URL unless its host
+is loopback or a Kubernetes Service (`*.svc`, `*.svc.cluster.local`); use
+`https://`.
+
+The `sparkwing-full` chart (0.3.0) adds `controller.deployment` and
+`controller.store`, validates mode values against `values.schema.json`, and
+always passes `--require-auth`. `controller.requireAuth` and
+`controller.allowOpenBootstrap` are removed: unset them. A bootstrap seed left
+mounted after its handoff now only logs a warning, so you can remove it from
+the Secret whenever convenient. Charts that set
+`controller.databaseSecret.name` must also set `controller.store=postgres`.
+
+### Single active controller
+
+PostgreSQL controllers take a dedicated session advisory lock before migrations
+or startup writes. A second controller waits as a standby. Loss of the lock or
+its connection causes an immediate non-zero exit without draining. Promotion
+bumps a `controller_epoch` row in the lock transaction. Every write transaction
+locks and checks that epoch, so promotion waits for in-flight writes and the
+former controller's later writes abort and fail-stop. SQLite controllers and
+wingd share the home's `wingd/d.lock` OS file lock. A second owner fails fast,
+while admin remains available. Webhook ordering and bucket write guards use the active
+process's state, so cross-controller ordering and storage-state propagation do
+not apply. `--payment-mode` and `--free-team-slots` remain matching shared
+settings.
+
+Break-glass admin checks the actual table schema and transport endpoint,
+including Unix sockets, and keeps verification and writes on that connection.
+Schema-validation and connection-configuration errors omit credentials. An empty `--addr` refuses startup before opening the store.

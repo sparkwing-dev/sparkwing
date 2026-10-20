@@ -26,8 +26,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.2.4" {
-		t.Fatalf("full chart version = %q, want 0.2.4", chart.Version)
+	if chart.Version != "0.3.1" {
+		t.Fatalf("full chart version = %q, want 0.3.1", chart.Version)
 	}
 }
 
@@ -36,7 +36,7 @@ func tokenSecretDefaults(chart string) []string {
 	var controller []string
 	if strings.Contains(chart, "sparkwing-full") {
 		prefix = "sparkwing-runner-bundle."
-		controller = []string{"controller.allowOpenBootstrap=true", "controller.image.repository=registry.example/controller", "controller.image.tag=test"}
+		controller = []string{"controller.image.repository=registry.example/controller", "controller.image.tag=test"}
 	}
 	return append(controller,
 		prefix+"controller.tokenSecret.name=sparkwing-token",
@@ -951,7 +951,6 @@ func TestControllerNumbersFromAValuesFileRenderWhole(t *testing.T) {
 // startup checks decide.
 func TestControllerCredentialsBundleSkipsTheChartsKeyChecks(t *testing.T) {
 	args := renderController(t,
-		"controller.allowOpenBootstrap=false",
 		"controller.credentialsSecret.name=sparkwing-credentials",
 		"controller.secretsPreviousKey.name=sparkwing-old-key").Args
 	if !containsArg(args, "--require-auth") || !containsArg(args, "--credentials-dir=/etc/sparkwing/credentials") {
@@ -966,7 +965,7 @@ func TestControllerCredentialsBundleSkipsTheChartsKeyChecks(t *testing.T) {
 // safety: --reuse-values carries an older release's values, which have no
 // credentialsSecret map at all.
 func TestControllerRendersValuesFromBeforeTheCredentialsBundle(t *testing.T) {
-	renderController(t, "controller.credentialsSecret=null", "controller.allowOpenBootstrap=false",
+	renderController(t, "controller.credentialsSecret=null",
 		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin")
 	if notes := renderNotes(t, "controller.credentialsSecret=null"); !strings.Contains(notes, "/data/secrets.key") {
 		t.Errorf("notes for values without credentialsSecret:\n%s", notes)
@@ -1005,7 +1004,7 @@ func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
 	if strings.Contains(notes, "plaintext") || strings.Contains(notes, "openssl rand") {
 		t.Errorf("SQLite notes still describe plaintext storage or a fresh key:\n%s", notes)
 	}
-	notes = renderNotes(t, "controller.databaseSecret.name=sparkwing-db", "controller.storage.type=emptyDir")
+	notes = renderNotes(t, "controller.store=postgres", "controller.databaseSecret.name=sparkwing-db", "controller.storage.type=emptyDir")
 	if !strings.Contains(notes, "refuses to store secrets until it has a key") || strings.Contains(notes, "/data/secrets.key") {
 		t.Errorf("PostgreSQL notes:\n%s", notes)
 	}
@@ -1019,10 +1018,10 @@ func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
 	if strings.Contains(notes, "openssl rand") || strings.Contains(notes, "secretsKey.name is empty") {
 		t.Errorf("notes with a credentials bundle claim a key state the chart cannot see:\n%s", notes)
 	}
-	if !strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "(umask 077 && kubectl") || !strings.Contains(notes, "With pg-url") {
-		t.Errorf("notes with a credentials bundle must cover both backends it may select:\n%s", notes)
+	if !strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "(umask 077 && kubectl") || strings.Contains(notes, "PostgreSQL") {
+		t.Errorf("SQLite notes with a credentials bundle:\n%s", notes)
 	}
-	notes = renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials", "controller.databaseSecret.name=sparkwing-db")
+	notes = renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials", "controller.store=postgres")
 	if strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "refuses to store secrets until") {
 		t.Errorf("PostgreSQL notes with a credentials bundle:\n%s", notes)
 	}
@@ -1046,6 +1045,7 @@ func TestControllerDatabaseURLIsACredentialFile(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	rendered := renderControllerYAML(t,
+		"controller.store=postgres",
 		"controller.databaseSecret.name=sparkwing-database",
 		"controller.databaseSecret.key=connection",
 	)
@@ -1608,7 +1608,7 @@ func TestStringInsecureOptInFailsAtRender(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			out := helmRenderErrorSetString(t, "./sparkwing-full", "sparkwing",
 				"ingress.enabled=true", "ingress.allowInsecure="+value)
-			if !strings.Contains(out, "ingress.allowInsecure must be a bool") {
+			if !strings.Contains(out, "/ingress/allowInsecure") || !strings.Contains(out, "want boolean") {
 				t.Fatalf("render error does not reject the quoted opt-out:\n%s", out)
 			}
 		})
@@ -1619,7 +1619,6 @@ func TestStringInsecureOptInFailsAtRender(t *testing.T) {
 var publishedSets = []string{
 	"ingress.enabled=true",
 	"ingress.tls[0].secretName=sparkwing-tls",
-	"controller.allowOpenBootstrap=false",
 	"controller.bootstrapAdminToken.name=sparkwing-bootstrap",
 }
 
@@ -1628,27 +1627,9 @@ func TestPublishedControllerWithoutTLSFailsAtRender(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
-		"ingress.enabled=true", "controller.allowOpenBootstrap=false",
-		"controller.bootstrapAdminToken.name=sparkwing-bootstrap")
+		"ingress.enabled=true", "controller.bootstrapAdminToken.name=sparkwing-bootstrap")
 	if !strings.Contains(out, "ingress.tls") || !strings.Contains(out, "ingress.allowInsecure=true") {
 		t.Fatalf("render error does not name the TLS knob or its opt-out:\n%s", out)
-	}
-}
-
-func TestPublishedControllerWithoutStartupCredentialRequirementFailsAtRender(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	for name, sets := range map[string][]string{
-		"open bootstrap without a token": {"ingress.enabled=true", "ingress.tls[0].secretName=sparkwing-tls"},
-		"auth not required":              append(slices.Clone(publishedSets), "controller.requireAuth=false"),
-	} {
-		t.Run(name, func(t *testing.T) {
-			out := helmRenderError(t, "./sparkwing-full", "sparkwing", sets...)
-			if !strings.Contains(out, "without the chart's startup credential requirement") || !strings.Contains(out, "ingress.allowInsecure=true") {
-				t.Fatalf("render error does not name the startup credential guard or its opt-out:\n%s", out)
-			}
-		})
 	}
 }
 
@@ -1657,9 +1638,10 @@ func TestPublishedControllerRendersWithTLSAndABootstrapToken(t *testing.T) {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
 	for name, sets := range map[string][]string{
-		"secret name":                 publishedSets,
-		"no secret name":              {"ingress.enabled=true", "ingress.tls[0].hosts[0]=sparkwing.example.com", "controller.allowOpenBootstrap=false", "controller.bootstrapAdminToken.name=sparkwing-bootstrap"},
-		"open bootstrap with a token": {"ingress.enabled=true", "ingress.tls[0].secretName=sparkwing-tls", "controller.bootstrapAdminToken.name=sparkwing-bootstrap"},
+		"secret name":    publishedSets,
+		"no secret name": {"ingress.enabled=true", "ingress.tls[0].hosts[0]=sparkwing.example.com", "controller.bootstrapAdminToken.name=sparkwing-bootstrap"},
+		// safety: a seed removed after handoff must not keep a published controller from rendering.
+		"no bootstrap token": {"ingress.enabled=true", "ingress.tls[0].secretName=sparkwing-tls"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rendered := helmRender(t, "./sparkwing-full", "templates/ingress.yaml", "sparkwing", sets...)
@@ -1972,75 +1954,12 @@ func TestFullChartRequiresAuthWithABootstrapTokenByDefault(t *testing.T) {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
 	rendered := renderControllerYAML(t,
-		"controller.allowOpenBootstrap=false",
 		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin")
 	if args := runnerContainer(t, rendered).Args; !slices.Contains(args, "--require-auth") {
 		t.Fatalf("args = %+v, want --require-auth by default", args)
 	}
 	if ref := credentialRef(t, rendered, "bootstrap-admin-token"); ref == nil {
 		t.Fatal("the bootstrap admin token is not a credential file")
-	}
-}
-
-func TestFullChartRefusesADefaultRenderWithoutABootstrapToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.allowOpenBootstrap=false")
-	for _, want := range []string{"controller.bootstrapAdminToken.name", "controller.allowOpenBootstrap=true"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("render error does not name %s:\n%s", want, out)
-		}
-	}
-}
-
-func TestFullChartAllowOpenBootstrapDropsRequireAuth(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	for _, sets := range [][]string{
-		{"controller.allowOpenBootstrap=true"},
-		{"controller.allowOpenBootstrap=false", "controller.requireAuth=false"},
-		{"controller.allowOpenBootstrap=true", "controller.credentialsSecret.name=sparkwing-credentials"},
-	} {
-		container := runnerContainer(t, helmRender(t, "./sparkwing-full",
-			"templates/controller-deployment.yaml", "sparkwing", sets...))
-		for _, arg := range container.Args {
-			if arg == "--require-auth" {
-				t.Fatalf("%v: args = %+v, want neither --require-auth nor a bootstrap token", sets, container.Args)
-			}
-		}
-	}
-	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
-		"templates/controller-deployment.yaml", "sparkwing",
-		"controller.allowOpenBootstrap=true",
-		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin"))
-	if !slices.Contains(container.Args, "--require-auth") {
-		t.Fatalf("args = %+v, want --require-auth with a bootstrap credential", container.Args)
-	}
-}
-
-func TestFullChartIngressRefusesOpenBootstrapWithOnlyACredentialBundle(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: helm render")
-	}
-	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
-		"controller.allowOpenBootstrap=true",
-		"controller.credentialsSecret.name=sparkwing-credentials",
-		"ingress.enabled=true",
-		"ingress.tls[0].secretName=sparkwing-tls")
-	if !strings.Contains(out, "without the chart's startup credential requirement") {
-		t.Fatalf("render output = %s, want the published-controller refusal", out)
-	}
-}
-
-func TestFullChartRefusesAQuotedAllowOpenBootstrap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	out := helmRenderErrorSetString(t, "./sparkwing-full", "sparkwing", "controller.allowOpenBootstrap=false")
-	if !strings.Contains(out, "controller.allowOpenBootstrap must be a bool") {
-		t.Fatalf("render error does not refuse the quoted value:\n%s", out)
 	}
 }
 

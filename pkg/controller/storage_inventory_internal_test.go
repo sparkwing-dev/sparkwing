@@ -9,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -52,13 +51,8 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	lic := license.Resolve(licensetest.Sign(t, priv, licensetest.Terms{
-		Features: []string{license.FeatureMetering}, IssuedTo: "test",
-		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
-	}), pub, now, nil)
 	var logs bytes.Buffer
-	server := New(s, slog.New(slog.NewJSONHandler(&logs, nil))).WithLicense(lic)
+	server := NewDeployment(s, deploymenttest.Metered(t), slog.New(slog.NewJSONHandler(&logs, nil)))
 	server.MaintainStorage(t.Context())
 	decoder := json.NewDecoder(&logs)
 	for decoder.More() {

@@ -34,6 +34,6 @@ func productionLauncher(version string) LauncherFactory {
 		if err != nil {
 			return nil, err
 		}
-		return launcher.NewLauncher(ctx, launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: jobs, Bearer: bearer, Demand: controllerwire.ClaimRequest{RunnerVersion: version, Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: jobs.CPUCeiling, AvailableMemoryBytes: jobs.MemoryCeiling}})
+		return launcher.NewLauncher(ctx, launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: jobs, Bearer: bearer, Demand: controllerwire.ClaimRequest{Labels: jobs.Labels, RunnerVersion: version, Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: jobs.CPUCeiling, AvailableMemoryBytes: jobs.MemoryCeiling}})
 	}
 }

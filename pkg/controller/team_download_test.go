@@ -23,9 +23,8 @@ type teamDownloadFixture struct {
 
 func newTeamDownloadFixture(t *testing.T, freeCap int64) teamDownloadFixture {
 	t.Helper()
-	raw, pub := multiTeamLicense(t)
 	meter := egress.New(egress.Config{})
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
 		s.WithTeamDownloadCaps(freeCap, 0).WithEgressMeter(meter)
 	}})
 	return teamDownloadFixture{identityFixture: f, meter: meter}

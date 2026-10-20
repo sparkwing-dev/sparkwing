@@ -334,6 +334,13 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 			t.Fatalf("owner did not observe successful SDK execution: %+v %v", completed, err)
 		}
 	}
+	if proof == nil && placement != "cloud-retry" {
+		workerClient := newClient(awarded.Claim.Capability, false)
+		sourceAttempt := int64(0)
+		if _, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeRunning), Cause: string(store.CauseStart), SourceAttempt: &sourceAttempt}); err != nil {
+			t.Fatalf("worker start before cancellation: %v", err)
+		}
+	}
 	if applied, err := member.Cancel(t.Context(), created.RunID, controllerwire.CancelRequest{Reason: "user_cancelled"}); err != nil || !applied.CancelRequested {
 		t.Fatalf("requester cancellation: %+v %v", applied, err)
 	}

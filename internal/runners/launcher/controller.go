@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // LauncherController is the shared wire client's claim and reconciliation boundary.
@@ -61,10 +62,11 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 	if !slices.Contains(c.demand.Kinds, unit.Unit) || unit.Capability == "" {
 		return nil, errors.New("controller returned an unexpected launcher award")
 	}
-	if unit.CloudResources == nil {
+	resources := c.resources(unit)
+	if resources == nil {
 		return nil, errors.New("Cloud award is missing its committed allocation")
 	}
-	award := &CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: unit.CloudResources.Cores, Memory: unit.CloudResources.MemoryBytes}
+	award := &CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores, Memory: resources.MemoryBytes}
 	if err := validateAward(*award); err != nil {
 		return nil, err
 	}
@@ -77,6 +79,21 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 		return nil, err
 	}
 	return &captured, nil
+}
+
+func (c *ControllerControl) resources(unit controllerwire.ClaimedUnit) *match.Resources {
+	if unit.CloudResources == nil || unit.Runner.Type != "runner" {
+		return unit.CloudResources
+	}
+	resources := *unit.CloudResources
+	// Self-hosted work without a pin uses the operator's configured pod budget.
+	if resources.Cores == 0 {
+		resources.Cores = c.demand.AvailableCores
+	}
+	if resources.MemoryBytes == 0 {
+		resources.MemoryBytes = c.demand.AvailableMemoryBytes
+	}
+	return &resources
 }
 
 func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {
@@ -206,7 +223,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
 			return nil, errAwardMismatch
 		}
-		states[i].Binding, states[i].Resources = observations[i].Binding, unit.CloudResources
+		states[i].Binding, states[i].Resources = observations[i].Binding, c.resources(unit)
 	}
 	for _, job := range response.Remove {
 		i, ok := byJob[job.Name]

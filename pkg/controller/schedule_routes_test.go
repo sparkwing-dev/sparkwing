@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -193,7 +194,12 @@ type scheduleHTTPFixture struct {
 
 func newScheduleHTTPFixture(t *testing.T) scheduleHTTPFixture {
 	t.Helper()
-	s := New(newStoreForAuth(t), nil)
+	return newDeploymentScheduleHTTPFixture(t, deployment.Config{})
+}
+
+func newDeploymentScheduleHTTPFixture(t *testing.T, cfg deployment.Config) scheduleHTTPFixture {
+	t.Helper()
+	s := NewDeployment(newStoreForAuth(t), cfg, nil)
 	s.store.SetIntakePolicy(scheduleIntakePolicy{})
 	tenant, err := s.store.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {

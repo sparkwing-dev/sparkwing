@@ -65,31 +65,89 @@ run and output pins. Verify retention through persisted reads after completion.
 Native signing, lifecycle verification and final completeness still need
 integration evidence. See [log completeness](observability.md#log-completeness).
 
-### Overlapping controllers during an upgrade
+### One active controller
 
-One controller replica is the supported topology. SQLite has one controller
-owner. PostgreSQL coordination uses persistent claim fences and singleton leases
-for maintenance and recovery. Replica-safe storage alone does not establish
-cross-replica live-log fan-out or coordinated request limiting. Validate upgrades
-against the deployment's native acceptance driver.
+A store has one active controller. Before migrations, startup writes or serving,
+a PostgreSQL controller takes a session advisory lock derived from the database
+and Sparkwing schema on a dedicated connection. A second controller blocks as a
+standby. Promotion bumps the `controller_epoch` row in the same transaction
+that takes the lock. Every write transaction holds a shared lock on that row
+and checks its promoted epoch. Promotion waits for in-flight writes to finish.
+The former controller's later writes abort and trigger fail-stop, even before
+its lock watchdog runs. The active controller checks the connection and lock every second,
+with a five-second query timeout. Losing either exits the process non-zero
+immediately, without draining. Its supervisor restarts it, and a waiting standby
+can take over. SQLite controllers hold the home's `wingd/d.lock` OS file lock
+before opening the store, through shutdown. Another controller or wingd on the
+same home fails fast. Break-glass admin can still use the store.
+
+Webhook ordering, bucket measurement and write guards, request budgets and live
+log tails use the active process's state. Cross-controller webhook ordering and
+storage-state propagation are therefore outside this topology. Several active
+controllers require a separately reviewed design. Standbys using filesystem
+data must share the active controller's `SPARKWING_HOME`. S3 data is shared
+through the bucket.
+
+`--payment-mode` and `--free-team-slots` remain shared settings written at
+startup. All controllers on one store must declare matching values.
+
+### Declared deployment
+
+The controller is told what it is; it never infers it from which files happen
+to exist, and it settles the answer once at startup.
+
+| Flag | Values | Meaning |
+|---|---|---|
+| `--deployment` | `local` (default), `team`, `cloud` | `local` holds one team. `team` holds many teams under a multi-team license and meters usage. `cloud` is the hosted service. |
+| `--store` | `sqlite` (default), `postgres` | Where state lives. `postgres` reads the `pg-url` credential. |
+| `--external-url` | an `https` URL, an `http` URL on loopback or a Kubernetes Service (`*.svc`), or empty | The origin runners, OIDC tokens and GitHub Actions workflows name. Runners accept the same addresses. |
+| `--payment-mode` | `test`, `live` or empty | Which Stripe credentials settle payments. |
+
+Startup refuses, before it opens the store or writes any setting, when:
+
+- `--deployment=team` or `cloud` has no license, or the license does not verify,
+  has expired or does not grant multi-team;
+- a `local` deployment has a license that grants multi-team, or one that does not
+  verify;
+- `--store=postgres` has no `pg-url`, a `pg-url` is present under `--store=sqlite`,
+  or `--deployment=cloud` is not on PostgreSQL;
+- `--deployment=cloud` has no `--external-url`, or a `cloud` limits profile runs
+  under another kind;
+- any other flag is invalid, or `--addr`, `--trusted-proxy-addr` or
+  `--metrics-addr` cannot be bound. Every listener is bound before the store is
+  opened. The bootstrap seed, the payment mode and the free team slots are
+  written only after every check passes.
+
+A license that expires while the controller runs does not change the
+deployment. Metering, the free tier and sign-in keep working, and
+`GET /api/v1/health` reports `degraded` with a `license: expired` problem
+while the controller logs an error every hour. The next start refuses until the
+license is renewed.
+
+Without `--external-url`, the GitHub runner binding routes answer
+`capability_unsupported` instead of handing out a workflow that points at
+whatever host name the request used.
 
 ### Controller credentials
 
 `sparkwing-controller` reads every secret from one directory, named with
 `--credentials-dir`, holding one file per credential under a fixed name. A file
 that is absent leaves the feature it guards off, and a file that is present
-but empty or only whitespace stops startup, naming the file; there is no
-environment or flag form of any of them. The chart projects its Secret values into this
+but empty or only whitespace stops startup, naming the file. A file whose name
+is not in the table below also stops startup, so a misspelled `pg_url` cannot
+leave the controller on an empty SQLite store. A `.previous` or `.published`
+file without its current key stops startup too. There is no environment or
+flag form of any of them. The chart projects its Secret values into this
 directory, and `controller.credentialsSecret` names a Secret whose keys are
 these file names, mounted whole.
 
 | File | Holds | Without it |
 |---|---|---|
-| `pg-url` | PostgreSQL connection string for the state store | SQLite at `$SPARKWING_HOME/state.db` |
+| `pg-url` | PostgreSQL connection string for the state store | `--store=postgres` refuses to start |
 | `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-at-rest) |
 | `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
 | `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |
-| `license` | Signed multi-team license | one team |
+| `license` | Signed multi-team license | `--deployment=team` and `cloud` refuse to start |
 | `oidc-key`, `oidc-key.published` | OIDC signing key and the extra key the key set publishes | no ID tokens; see [OIDC](oidc.md) |
 | `google-client-secret`, `github-client-secret` | OAuth client secrets for sign-in | no sign-in with that provider |
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
@@ -166,7 +224,9 @@ gateway endpoint. Without an S3 bucket, the standalone controller opens filesyst
 its home directory's `data` directory and mounts signed data and log transfers.
 It uses `--external-url` when set, otherwise its listener address. Wildcard
 listener addresses use localhost in signed URLs. Set `--external-url` for remote
-runners. Filesystem storage needs no CloudFront signing keys.
+runners. The key that signs these URLs is kept in `$SPARKWING_HOME/data-signing.key`,
+so a restart does not invalidate transfers in flight. Filesystem storage needs
+no CloudFront signing keys.
 Controller embedders configure authenticated data routes through
 `WithDataController`. Host storage bindings need separate wiring. See
 [Data downloads](api.md#data-downloads) for route behavior.
@@ -207,18 +267,20 @@ kubectl -n sparkwing create secret generic sparkwing-database \
     --from-file=dsn=/private/path/database-dsn
 
 helm upgrade --install sparkwing ./charts/sparkwing-full -f my-values.yaml \
+    --set controller.store=postgres \
     --set controller.databaseSecret.name=sparkwing-database \
     --set controller.databaseSecret.key=dsn \
     --set controller.storage.type=emptyDir
 ```
 
-The controller reads the Secret as its `pg-url` credential. Keep the DSN out of Helm
+The chart passes `--store=postgres`, and the controller reads the Secret as its
+`pg-url` credential. Keep the DSN out of Helm
 values and command arguments. Initialize and verify the PostgreSQL data before
 starting the controller against it.
 
 Filesystem node outputs use signed URLs on the controller. Behind a proxy, set
 the controller's `--external-url` to the address runners can reach. Without that
-setting, the URLs use the controller request's address. Uploads and downloads
+setting, the URLs use the controller's listener address. Uploads and downloads
 use the signed URL's authority and carry no runner token.
 
 Working-tree source bundles use the source-bundle authority and upload contract.
@@ -299,9 +361,7 @@ installing a login service. See [runner reference](cli-runners.md) and
 
 ### Shared runners and pool trust
 
-A shared runner runs one job after another under one account, so a job can
-leave files, caches and processes that a later job meets. Trust decides which
-runs may share that state:
+A runner's credential fixes which runs it accepts:
 
 - A runner that holds a pool with a secret reserved to it takes only runs from
   a verified push to the repository's default branch. Pull request, feature
@@ -313,17 +373,36 @@ runs may share that state:
   reserved secrets. The class is stored with the runner's credential, so the
   runner, or anyone holding its token, cannot change it.
 
+For a verified-default pool, enroll a launcher-only credential with
+`--reserved-for deploy --trust verified-default --launcher` on `runners add`.
+On Kubernetes, set `launcher.enabled=true` and reference that credential in
+`launcher.tokenSecret` in the runner bundle chart. The server refuses verified
+pool work to persistent runner credentials, including when reserved secrets
+select verified-default by default. Pool and trust settings live on the
+credential. A run-level `--requires pool=deploy` uses controller dispatch so
+its plan and jobs can be claimed by the launcher.
+The launcher runs each plan, evaluation and job claim in a fresh pod through the
+same admission policy, bootstrap exchange, quarantine and boundary probe as Cloud.
+Only the launcher mounts the pool credential. Each job receives a one-time
+bootstrap, its own scratch storage and no persistent cache volumes. Self-hosted
+pool claims consume no Cloud credits. See the [runner chart](../charts/sparkwing-runner-bundle/README.md)
+for enrollment and node prerequisites.
+
+On plain machines (VMs and bare metal), pipeline code runs under the runner's
+Unix uid and can read its credential, rewrite its caches, inspect concurrent
+jobs and leave files or processes for later claims. A trust class restricts
+admission; it does not isolate jobs. Keep machines that serve untrusted branches
+apart from pools that hold deployment secrets. GitHub documents the same risk
+for [persistent self-hosted runners](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners).
+
 A cached pipeline binary runs only as a private copy whose bytes matched the
 digest recorded when it was compiled. Jobs on a shared runner run under the
 runner's account and can rewrite both the binary and its digest, so the check
-catches corruption, not tampering, until jobs run under a separate account. Builds on a host the run's owner does not own set
+catches corruption rather than tampering on a persistent machine runner. Builds
+on a host the run's owner does not own set
 `GOENV=off`. A run's submitted environment reaches the runner only under names
 the runner's own `run.submit_env_allow` lists; see
 [machine settings](machine-config.md).
-
-Pipeline code runs as the runner's own account and can read the runner's
-credential file. Keep runners that serve untrusted branches apart from pools
-that hold deployment secrets.
 
 ### Operate the service
 

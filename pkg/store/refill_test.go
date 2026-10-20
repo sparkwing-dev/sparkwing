@@ -53,8 +53,7 @@ func payRefill(t *testing.T, s *Store, r Refill, now time.Time) {
 	}
 }
 
-// A refill is opened only for an opted-in team whose balance fell below its threshold, one at a time, and moves
-// money only when its signed payment settles.
+// A refill is opened only for an opted-in team below its threshold, one at a time; only its signed payment grants credits.
 func TestRefillIsOptInBelowTheThresholdAndPaysOnlyFromTheWebhook(t *testing.T) {
 	s, tenant, now := refillFixture(t, true)
 	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
@@ -108,7 +107,7 @@ func TestRefillLimitsStopTheNextRefill(t *testing.T) {
 		want     string
 	}{
 		{"standing size", false, RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 6_000}, 0, RefillLimitStandingSize},
-		{"standing daily", false, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}, 1, RefillLimitStandingDaily},
+		{"standing daily", false, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}, 2, RefillLimitStandingDaily},
 		{"team weekly", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 1_500}, 1, RefillLimitTeamWeekly},
 		{"team monthly", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, MonthLimitCents: 2_500}, 2, RefillLimitTeamMonthly},
 		{"within limits", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 5_000}, 2, ""},
@@ -269,32 +268,27 @@ func TestARefusedRefillStopsRefillsAcrossWorkerPasses(t *testing.T) {
 
 func TestRefillCapsFollowHistoryNotTheBalance(t *testing.T) {
 	s, tenant, now := refillFixture(t, false)
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Refill.Caps != (RefillCaps{AmountCents: 5_000, PerDay: 1, WeekCents: 10_000}) {
+		t.Fatalf("without paid history: caps %+v, %v", st.Refill.Caps, err)
+	}
 	addFunds(t, s, 10_000, "pi_add")
 	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 6_000}); err != nil {
 		t.Fatal(err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
-	if err != nil || st.Billing.Tier != "Trusted" || st.Refill.Caps != (RefillCaps{AmountCents: 5_000, PerDay: 1, WeekCents: 10_000}) || st.Refill.Limit != RefillLimitStandingSize {
-		t.Fatalf("after $100 Add funds: tier %s caps %+v limit %q, %v", st.Billing.Tier, st.Refill.Caps, st.Refill.Limit, err)
+	st, err = tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Billing.Tier != "Trusted" || st.Billing.History.Tier != "Established" || st.Refill.Caps != (RefillCaps{AmountCents: 20_000, PerDay: 2, WeekCents: 50_000}) || st.Refill.Limit != "" {
+		t.Fatalf("after $100 Add funds: tier %s history %s caps %+v limit %q, %v", st.Billing.Tier, st.Billing.History.Tier, st.Refill.Caps, st.Refill.Limit, err)
 	}
-	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
-		t.Fatalf("a $60 refill passed the New cap: %+v", due)
+	for range 2 {
+		due := dueRefillsFor(t, s, "a")
+		if len(due) != 1 {
+			t.Fatalf("refill within Established caps = %+v", due)
+		}
+		payRefill(t, s, due[0], now)
 	}
-	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 5_000}); err != nil {
-		t.Fatal(err)
-	}
-	due := dueRefillsFor(t, s, "a")
-	if len(due) != 1 {
-		t.Fatalf("refill within the New caps = %+v", due)
-	}
-	payRefill(t, s, due[0], now)
 	if again := dueRefillsFor(t, s, "a"); len(again) != 0 {
-		t.Fatalf("a second refill in one day at New caps: %+v", again)
-	}
-	now = now.Add(refillCleanAge + time.Hour)
-	s.clock = func() time.Time { return now }
-	if st, err = tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Caps.AmountCents != 20_000 {
-		t.Fatalf("a week of clean history kept New caps: %+v, %v", st.Refill.Caps, err)
+		t.Fatalf("a third refill in one day at Established caps: %+v", again)
 	}
 }
 

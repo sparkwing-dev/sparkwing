@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
@@ -36,9 +37,23 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 		"changed payload":   base64.RawURLEncoding.EncodeToString([]byte(`{"features":["multi-team"],"issued_to":"other","issued_at":"2026-01-01T00:00:00Z","expires_at":"2099-01-01T00:00:00Z"}`)) + "." + signature,
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newOAuthHTTP(t)
-			f.server.WithGoogleSignIn(googleauth.New(googleauth.Google("client", "private")), []string{oauthOrigin + "/auth/google/callback"})
-			h := f.server.WithLicense(license.Resolve(raw, pub, now, nil)).Handler()
+			d := deployment.Config{}
+			if raw != "" {
+				var err error
+				d, err = deployment.Parse(deployment.Inputs{Kind: string(deployment.KindTeam), License: raw, LicenseKey: pub, Now: now})
+				if name != "valid" {
+					if err == nil {
+						t.Fatal("a team deployment started with this license")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			f := newDeploymentSessionFlow(t, d)
+			p := &oauthProvider{}
+			h := withOAuthGitHub(f.server, p).WithGoogleSignIn(googleauth.New(googleauth.Google("client", "private")), []string{oauthOrigin + "/auth/google/callback"}).Handler()
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/capabilities", nil))
 			var caps struct {
@@ -58,7 +73,7 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 				if name == "valid" {
 					status = 303
 				}
-				if w.Code != status || f.provider.calls != 0 {
+				if w.Code != status || p.calls != 0 {
 					t.Fatalf("%s start HTTP %d %s", provider, w.Code, w.Body)
 				}
 			}

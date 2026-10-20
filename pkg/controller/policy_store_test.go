@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -27,9 +28,11 @@ func TestServerPolicyUsesCurrentPersistedAuthority(t *testing.T) {
 	key := sha256.Sum256([]byte("member-token"))
 	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(key[:])
 	digest := sha256.Sum256([]byte(raw))
-	c := capability.Capability{Prefix: "member", Digest: digest, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
+	c := capability.Capability{
+		Prefix: "member", Digest: digest, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 		Audience: capability.Controller, Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone},
-		Issuance: capability.Delegate, IssuedAt: time.Unix(0, 1).UTC(), ReservedPools: []string{}, Repositories: []string{}}
+		Issuance: capability.Delegate, IssuedAt: time.Unix(0, 1).UTC(), ReservedPools: []string{}, Repositories: []string{},
+	}
 	envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: c})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +104,7 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t))
+	server := NewDeployment(s, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher)
 	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +189,7 @@ func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t)).WithOperatorAccounts([]string{"operator"})
+	s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
 	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

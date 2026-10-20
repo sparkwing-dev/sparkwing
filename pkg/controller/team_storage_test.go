@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -27,11 +28,11 @@ func storageRetentionServer(t *testing.T, multiTeam bool) (*store.Store, *contro
 	if _, err := teststore.SQL(t, s).Exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'old',1,'fixture','failed',?,'fixture',1,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, store.DefaultTeam, []byte(`{}`), []byte(`[]`), old, old); err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.New(s, nil)
+	var cfg deployment.Config
 	if multiTeam {
-		raw, pub := multiTeamLicense(t)
-		srv.WithLicense(license.Resolve(raw, pub, time.Now(), nil))
+		cfg = deploymenttest.Team(t)
 	}
+	srv := controller.NewDeployment(s, cfg, nil)
 	return s, srv
 }
 

@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -54,7 +55,7 @@ func (f *githubRunnerRegistry) RevokeGitHubRunner(_ context.Context, a capabilit
 
 func githubRunnerAdminServer(t testing.TB, b *credentialBoundary, f *githubRunnerRegistry) *controller.Server {
 	t.Helper()
-	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithExternalURL("https://controller.invalid").
+	return controller.NewDeployment(nil, deploymenttest.Local(t, "https://controller.invalid"), slog.New(slog.NewTextHandler(io.Discard, nil))).
 		WithAuthorization(consoleAuthorization(b)).WithGitHubRunnerRegistry(func(_ context.Context, team store.Team) (controller.GitHubRunnerRegistry, error) {
 		if team != "team" {
 			t.Fatalf("resolved foreign tenant %q", team)
@@ -185,7 +186,7 @@ func TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter(t *testing.T) {
 		teststore.SeedTeam(t, st, team)
 	}
 	b := authorityMember()
-	h := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithExternalURL("https://controller.invalid").WithAuthorization(consoleAuthorization(b)).Handler()
+	h := controller.NewDeployment(st, deploymenttest.Local(t, "https://controller.invalid"), slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).Handler()
 	w := authorityHTTP(h, b, "GET", "/api/v1/runners/github?team=foreign", "")
 	var result struct {
 		Bindings []struct {
@@ -196,7 +197,7 @@ func TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Bindings == nil || len(result.Bindings) != 0 || !strings.Contains(result.Workflow, "--team team") {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
-	h = controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithExternalURL("https://controller.invalid").WithAuthorization(consoleAuthorization(b)).WithGitHubRunnerRegistry(func(context.Context, store.Team) (controller.GitHubRunnerRegistry, error) { return nil, nil }).Handler()
+	h = controller.NewDeployment(st, deploymenttest.Local(t, "https://controller.invalid"), slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithGitHubRunnerRegistry(func(context.Context, store.Team) (controller.GitHubRunnerRegistry, error) { return nil, nil }).Handler()
 	assertEngineError(t, authorityHTTP(h, b, "POST", "/api/v1/runners/github", `{"repository":"acme/widgets","repository_id":43,"repository_owner_id":7}`), 500, apierr.PolicyMissing)
 	assertEngineError(t, authorityHTTP(h, b, "DELETE", "/api/v1/runners/github/42", ""), 500, apierr.PolicyMissing)
 }

@@ -70,6 +70,8 @@ spec:
           command: ["/usr/local/bin/sparkwing-controller"]
           args:
             - {{ printf "--addr=0.0.0.0:%d" (int .Values.controller.port) | quote }}
+            - {{ printf "--deployment=%s" .Values.controller.deployment | quote }}
+            - {{ printf "--store=%s" .Values.controller.store | quote }}
             {{- with .Values.controller.dataStore.s3URL }}
             - {{ printf "--cache-blob-store=%s" . | quote }}
             {{- end }}
@@ -135,15 +137,13 @@ spec:
             {{- if and .Values.ingress.enabled .Values.ingress.tls }}
             - "--hsts"
             {{- end }}
-            {{- if and .Values.ingress.enabled (not .Values.ingress.tls) (kindIs "bool" .Values.ingress.allowInsecure) .Values.ingress.allowInsecure }}
+            {{- if and .Values.ingress.enabled (not .Values.ingress.tls) .Values.ingress.allowInsecure }}
             - "--insecure-cookies"
             {{- end }}
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}
             {{- end }}
-            {{- if include "sparkwing-full.controller.rendersRequireAuth" . }}
             - "--require-auth"
-            {{- end }}
             {{- /*
               Every secret arrives as a file in one projected volume rather
               than an environment variable: an environment entry is readable

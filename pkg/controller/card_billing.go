@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -43,9 +42,6 @@ type teamRefillReq struct {
 }
 
 func (s *Server) handleTeamBillingRefill(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if !s.Metering() {
-		return &apierr.Error{Code: apierr.NotFound, Message: "billing is unavailable"}
-	}
 	var req teamRefillReq
 	if err := decodeEngineRequest(r, &req); err != nil {
 		return err
@@ -110,6 +106,9 @@ func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 // crash before the id is recorded leaves a refill the next pass retries, and a recorded one keeps the team's refill
 // slot until its signed outcome arrives.
 func (s *Server) refillPass(ctx context.Context) {
+	if !s.deployment.Metering() {
+		return
+	}
 	due, err := s.store.AsOperator().DueRefills(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -119,7 +118,7 @@ func (s *Server) refillPass(ctx context.Context) {
 	}
 	for _, r := range due {
 		if r.PaymentIntent == "" {
-			res, err := s.checkout.refill(ctx, s.deployment, r)
+			res, err := s.checkout.refill(ctx, s.paymentDeployment, r)
 			if err != nil || res.Status != refillCreated {
 				s.logger.Error("creating a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "status", res.Status, "err", err)
 				continue
@@ -130,7 +129,7 @@ func (s *Server) refillPass(ctx context.Context) {
 			}
 			r.PaymentIntent = res.PaymentIntent
 		}
-		if res, err := s.checkout.refill(ctx, s.deployment, r); err != nil {
+		if res, err := s.checkout.refill(ctx, s.paymentDeployment, r); err != nil {
 			s.logger.Error("confirming a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
 		} else {
 			s.logger.Info("refill payment confirmed; the signed webhook settles it", "team", string(r.Team), "refill", r.ID,

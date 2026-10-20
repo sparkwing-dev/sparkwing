@@ -17,7 +17,7 @@ func (s *Server) teamReadEndpoints() []Endpoint {
 		{Method: "GET", Pattern: "/api/v1/team/github-app/installations/{installation}/repositories", Decode: authorityTarget, Handle: s.handleGitHubAppRepositories},
 		{Method: "GET", Pattern: "/api/v1/team/github-app/triggers", Decode: authorityTarget, Handle: s.handleListGitHubAppTriggers},
 		{Method: "GET", Pattern: "/api/v1/team/github-app/extra-repos", Decode: authorityTarget, Handle: s.handleListGitHubAppExtraRepos},
-		{Method: "GET", Pattern: "/api/v1/team/billing", Decode: authorityTarget, Handle: s.handleTeamBilling},
+		{Method: "GET", Pattern: "/api/v1/team/billing", Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBilling)},
 		{Method: "GET", Pattern: "/api/v1/storage", Decode: authorityTarget, Handle: s.handleStorageShow},
 	}
 	if s.metricsAddr == "" {

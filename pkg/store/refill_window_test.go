@@ -23,8 +23,10 @@ func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 		for _, outcome := range []string{"granted", "refused", "refunded", "declined"} {
 			t.Run(window.name+"/"+outcome, func(t *testing.T) {
 				s, tenant, now := refillFixture(t, window.trusted)
-				settings := RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000,
-					WeekLimitCents: window.week, MonthLimitCents: window.month}
+				settings := RefillSettings{
+					Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000,
+					WeekLimitCents: window.week, MonthLimitCents: window.month,
+				}
 				if err := setRefill(t, s, "a", settings); err != nil {
 					t.Fatal(err)
 				}
@@ -63,11 +65,21 @@ func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				wantCount, wantCents := int64(1), int64(1_000)
+				if window.name == "day" && outcome == "granted" {
+					// The first paid grant earns Established's two refills per day.
+					next := dueRefillsFor(t, s, "a")
+					if len(next) != 1 {
+						t.Fatalf("second Established refill = %+v", next)
+					}
+					payRefill(t, s, next[0], now)
+					wantCount, wantCents = 2, 2_000
+				}
 				st, err := tenant.SpendStanding(t.Context(), now)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 || st.Refill.Limit != window.limit {
+				if st.Refill.DayCount != wantCount || st.Refill.WeekCents != wantCents || st.Refill.MonthCents != wantCents || st.Refill.Limit != window.limit {
 					t.Fatalf("late %s escaped %s window: %+v", outcome, window.name, st.Refill)
 				}
 				if next := dueRefillsFor(t, s, "a"); len(next) != 0 {

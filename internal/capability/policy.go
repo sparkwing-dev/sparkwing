@@ -419,7 +419,7 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 	case CredentialHere:
 		return isClaim(p) && c.Unit == UnitTrigger && c.Purpose == PurposeHere && c.Binding.Reservation == "here:"+c.Binding.RunID
 	case CredentialLauncher:
-		return p.Class == CredentialBearer && c.Subject.Kind == SubjectService && c.Unit == "" && c.Binding.Kind == BindingNone && slices.Contains(c.Grants, ClaimsLaunch)
+		return p.Class == CredentialBearer && Launcher(c)
 	case CredentialDeployment:
 		return DeploymentAuthority(p)
 	case CredentialOperator:

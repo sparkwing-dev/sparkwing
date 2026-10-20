@@ -203,8 +203,7 @@ func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
 	var mu sync.Mutex
 	var notified []string
-	raw, pub := multiTeamLicense(t)
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
 		s.WithSignUpWaitlist(true).WithSignUpApprovalNotifier(func(_ context.Context, a store.Account) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -237,8 +236,7 @@ func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
 func TestAClosedFreeTierWaitlistsNewAccounts(t *testing.T) {
 	var mu sync.Mutex
 	state := controller.FreeTierClosed
-	raw, pub := multiTeamLicense(t)
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
 		s.WithFreeTier(controller.FreeTierFunc(func(context.Context) (controller.FreeTierState, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -369,8 +367,7 @@ func TestYoungGitHubAccountsAreWaitlistedAtSignIn(t *testing.T) {
 func TestAnUnreadableFreeTierWaitlistsNewAccounts(t *testing.T) {
 	var mu sync.Mutex
 	fail := true
-	raw, pub := multiTeamLicense(t)
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
 		s.WithFreeTier(controller.FreeTierFunc(func(context.Context) (controller.FreeTierState, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -399,11 +396,10 @@ func TestAnUnreadableFreeTierWaitlistsNewAccounts(t *testing.T) {
 // A multi-team controller with no free-tier source says so once at startup
 // and treats the free tier as open.
 func TestAnUnwiredFreeTierLogsOnceAtStartup(t *testing.T) {
-	raw, pub := multiTeamLicense(t)
 	var buf syncBuffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 	f := newIdentityFixtureWith(t, fixtureOpts{
-		license: raw, key: pub, logger: logger,
+		logger:    logger,
 		configure: func(s *controller.Server) { s.CheckFreeTierSource(); s.CheckFreeTierSource() },
 	})
 	if n := strings.Count(buf.String(), `"signup.free_tier_unwired"`); n != 1 {
@@ -415,7 +411,7 @@ func TestAnUnwiredFreeTierLogsOnceAtStartup(t *testing.T) {
 
 	var wired syncBuffer
 	newIdentityFixtureWith(t, fixtureOpts{
-		license: raw, key: pub, logger: slog.New(slog.NewJSONHandler(&wired, nil)),
+		logger: slog.New(slog.NewJSONHandler(&wired, nil)),
 		configure: func(s *controller.Server) {
 			s.WithFreeTier(controller.FreeTierFunc(func(context.Context) (controller.FreeTierState, error) {
 				return controller.FreeTierOpen, nil

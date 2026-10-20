@@ -154,3 +154,8 @@ func tryLockEntryTx(ctx context.Context, tx *storeTx, team Team, key string) (bu
 	}
 	return err == nil, err
 }
+
+// controllerEpochLockSQL is the first lock every PostgreSQL write transaction takes: a share lock on the
+// promoted controller's epoch, so a promotion's epoch bump waits for in-flight writes and a superseded
+// controller's next transaction sees the new epoch and stops.
+const controllerEpochLockSQL = `SELECT convert_from(value,'UTF8')::bigint FROM settings WHERE key='controller_epoch' FOR SHARE`

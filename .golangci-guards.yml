@@ -211,6 +211,9 @@ linters:
           msg: "F1: widening the store to a team or operator handle belongs to a composition root (cmd/*, internal/wingd/localcontroller). Take the narrowed port as a dependency instead."
         - pattern: \.TestOnly\w*$
           msg: "F1: TestOnly hooks are for tests; call them only from _test.go files."
+        - pattern: ^license\.\*?License\.Allows$
+          pkg: ^github\.com/sparkwing-dev/sparkwing/internal/license$
+          msg: "F2: only internal/deployment asks what a license allows, once at startup, so the kind stays declared and fixed; read deployment.Config instead."
   exclusions:
     paths:
       - web/node_modules/
@@ -224,6 +227,10 @@ linters:
           - forbidigo
       - path: ^internal/wingd/localcontroller/
         text: "F1: widening"
+        linters:
+          - forbidigo
+      - path: ^internal/deployment/
+        text: "F2: only internal/deployment"
         linters:
           - forbidigo
       # teststore is test-only fixture code; it moves under internal/ with the store.

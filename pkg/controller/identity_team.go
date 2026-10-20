@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -206,9 +207,12 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, 
 
 const maxRunnerRepos = 32
 
-func (s *Server) controllerURL(r *http.Request) string {
-	if s.externalURL != "" {
-		return strings.TrimRight(s.externalURL, "/")
+// safety: a workflow pointing at the request's Host would bind runners to
+// whatever name the caller used, over plain http, so without a declared
+// origin there is no workflow to hand out.
+func (s *Server) publicOrigin() (string, error) {
+	if origin, ok := s.deployment.PublicOrigin(); ok {
+		return origin, nil
 	}
-	return "http://" + r.Host
+	return "", &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "this controller has no --external-url, so it cannot give a GitHub Actions workflow a controller to reach"}
 }

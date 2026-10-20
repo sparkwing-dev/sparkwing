@@ -78,7 +78,7 @@ func loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, l
 	var repo, display string
 	var requestBody, specBody []byte
 	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json,allowed_pools FROM runs WHERE id=?`, runID).Scan(&run.team, &repo, &display, &requestBody, &specBody, &run.pools)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !launcherClaimant(p.Capability) && p.Capability.Team != run.team {
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.CloudLauncher(p.Capability) && p.Capability.Team != run.team {
 		run.err = bindingRefusal()
 		return run
 	}
@@ -192,7 +192,7 @@ func matchingResources(v runspec.Resources) match.Resources {
 func authenticatedClaimProfile(c capability.Capability, profile match.Profile, here bool) match.Profile {
 	profile.Name, profile.ReservedPools, profile.Class = c.Subject.ID, slices.Clone(c.ReservedPools), ""
 	switch {
-	case launcherClaimant(c):
+	case capability.CloudLauncher(c):
 		profile.Class, profile.Location = match.ClassCloud, "cloud"
 	case here || c.Subject.Kind == capability.SubjectLocal:
 		profile.Class, profile.Location = match.ClassCoordinator, "local"
@@ -230,7 +230,7 @@ func checkPushClaimScope(chain []authorityNode, repo, ref, sha string) error {
 }
 
 func launcherClaimant(c capability.Capability) bool {
-	return c.Subject.Kind == capability.SubjectService && c.Binding.Kind == capability.BindingNone && slices.Contains(c.Grants, capability.ClaimsLaunch)
+	return capability.Launcher(c)
 }
 
 func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref NodeRef, reserved *match.Resources) (UnitClaim, error) {

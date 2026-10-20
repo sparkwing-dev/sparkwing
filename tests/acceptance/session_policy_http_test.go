@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -50,7 +52,11 @@ func TestSessionPolicyHTTPTransports(t *testing.T) {
 func TestSessionPolicyHTTPRefusals(t *testing.T) {
 	for _, state := range []string{"expired", "revoked", "membership", "license", "backend"} {
 		t.Run(state, func(t *testing.T) {
-			f := newSessionFlow(t)
+			cfg := deploymenttest.Team(t)
+			if state == "license" {
+				cfg = deployment.Config{}
+			}
+			f := newDeploymentSessionFlow(t, cfg)
 			code := apierr.Unauthenticated
 			var query string
 			switch state {
@@ -61,7 +67,6 @@ func TestSessionPolicyHTTPRefusals(t *testing.T) {
 			case "membership":
 				query = `DELETE FROM memberships`
 			case "license":
-				f.server.WithLicense(nil)
 			case "backend":
 				query, code = `DROP TABLE memberships`, apierr.Unavailable
 			}
@@ -274,7 +279,11 @@ func TestBrowserLogoutHTTPProofProperty(t *testing.T) {
 func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 	for _, state := range []string{"method", "expired", "revoked", "license", "key", "delete", "form"} {
 		t.Run(state, func(t *testing.T) {
-			f := newSessionFlow(t)
+			cfg := deploymenttest.Team(t)
+			if state == "license" {
+				cfg = deployment.Config{}
+			}
+			f := newDeploymentSessionFlow(t, cfg)
 			r := browserLogoutRequest(f, f.csrf)
 			code, query := apierr.Unauthenticated, ""
 			switch state {
@@ -285,7 +294,6 @@ func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 			case "revoked":
 				query = `UPDATE sessions SET revoked_at=1`
 			case "license":
-				f.server.WithLicense(nil)
 			case "key":
 				f.server.WithSecretsCipher(nil)
 				code = apierr.Unavailable

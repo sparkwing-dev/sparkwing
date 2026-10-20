@@ -19,9 +19,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -34,7 +33,7 @@ func billingNativeServer(t *testing.T) (*Server, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, nil).WithSecretsCipher(cipher)
+	s := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	engineSQL(t, s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
 	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
 	session, csrf, _, err := s.store.CreateAccountSession(t.Context(), store.Account{ID: "owner"}, "a", time.Hour)
@@ -45,9 +44,7 @@ func billingNativeServer(t *testing.T) (*Server, string, string) {
 	if err := s.store.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	s.WithLicense(license.Resolve(licensetest.Sign(t, priv, licensetest.Terms{Features: []string{license.FeatureMultiTeam, license.FeatureMetering}, IssuedTo: "test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}), pub, now, nil)).WithBillingCheckout("https://checkout.test", "credential")
+	s.WithBillingCheckout("https://checkout.test", "credential")
 	return s, session, csrf
 }
 

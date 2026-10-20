@@ -3,6 +3,8 @@ package acceptance_test
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/url"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 type runnerMeteringWriter func(context.Context, capability.Authorized, string, bool) error
@@ -90,7 +93,7 @@ func TestRunnerMeteringHTTPRefusals(t *testing.T) {
 				want = apierr.PolicyMissing
 			}
 			if name == "unlicensed" {
-				s.WithLicense(nil)
+				s = controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
 			}
 			if name != "writer" {
 				s.WithRunnerMeteringWriter(runnerMeteringWriter(func(context.Context, capability.Authorized, string, bool) error { calls++; return failure }))

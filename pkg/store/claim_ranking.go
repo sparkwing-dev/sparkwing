@@ -89,7 +89,7 @@ func sealedRequestTx(ctx context.Context, tx *storeTx, team Team, run string) (r
 }
 
 func claimTierTx(ctx context.Context, tx *storeTx, chain []authorityNode, request runspec.Request) (string, error) {
-	if launcherClaimant(chain[0].principal.Capability) {
+	if capability.CloudLauncher(chain[0].principal.Capability) {
 		return TierCloud, nil
 	}
 	for _, ancestor := range chain {

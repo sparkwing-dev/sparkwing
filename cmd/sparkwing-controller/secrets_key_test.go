@@ -11,38 +11,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func secretsTestServer(t *testing.T, features ...string) (*controller.Server, *store.Store) {
+func secretsTestServer(t *testing.T, cfg deployment.Config) (*controller.Server, *store.Store) {
 	t.Helper()
 	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	srv := controller.New(st, nil)
-	if len(features) > 0 {
-		pub, priv := licensetest.NewKey(t)
-		now := time.Now()
-		raw := licensetest.Sign(t, priv, licensetest.Terms{
-			Features: features, IssuedTo: "test", IssuedAt: now, ExpiresAt: now.Add(time.Hour),
-		})
-		lic, err := license.Verify(raw, pub, now)
-		if err != nil {
-			t.Fatal(err)
-		}
-		srv.WithLicense(lic)
-	}
-	return srv, st
+	return controller.NewDeployment(st, cfg, nil), st
 }
 
 func postSecret(t *testing.T, srv *controller.Server, st *store.Store, name, value string) (int, string) {
@@ -69,11 +55,9 @@ func keyFileIn(t *testing.T) string {
 }
 
 func TestConfigureSecrets_MultiTeamRefusesToStartWithoutAKey(t *testing.T) {
-	srv, st := secretsTestServer(t, license.FeatureMultiTeam)
-	if !srv.MultiTeam() {
-		t.Fatal("the test license did not make the controller multi-team")
-	}
-	err := configureSecrets(context.Background(), srv, st, controllerCredentials{}, keyFileIn(t))
+	cfg := deploymenttest.Team(t)
+	srv, st := secretsTestServer(t, cfg)
+	err := configureSecrets(context.Background(), srv, st, cfg, keyFileIn(t))
 	if err == nil {
 		t.Fatal("a multi-team controller started without a secrets key")
 	}
@@ -83,9 +67,9 @@ func TestConfigureSecrets_MultiTeamRefusesToStartWithoutAKey(t *testing.T) {
 }
 
 func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testing.T) {
-	srv, st := secretsTestServer(t)
+	srv, st := secretsTestServer(t, deployment.Config{})
 	keyPath := keyFileIn(t)
-	if err := configureSecrets(context.Background(), srv, st, controllerCredentials{}, keyPath); err != nil {
+	if err := configureSecrets(context.Background(), srv, st, deployment.Config{}, keyPath); err != nil {
 		t.Fatalf("a single-team controller refused to start without a key: %v", err)
 	}
 	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
@@ -104,7 +88,7 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 	}
 
 	restarted := controller.New(st, nil)
-	if err := configureSecrets(context.Background(), restarted, st, controllerCredentials{}, keyPath); err != nil {
+	if err := configureSecrets(context.Background(), restarted, st, deployment.Config{}, keyPath); err != nil {
 		t.Fatalf("restart with the generated key: %v", err)
 	}
 	if code, _ := postSecret(t, restarted, st, "OTHER", "second-value"); code != http.StatusNoContent {
@@ -113,9 +97,9 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 }
 
 func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *testing.T) {
-	srv, st := secretsTestServer(t)
+	srv, st := secretsTestServer(t, deployment.Config{})
 	keyPath := keyFileIn(t)
-	if err := configureSecrets(context.Background(), srv, st, controllerCredentials{}, keyPath); err != nil {
+	if err := configureSecrets(context.Background(), srv, st, deployment.Config{}, keyPath); err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := postSecret(t, srv, st, "TOKEN", "v"); code != http.StatusNoContent {
@@ -124,7 +108,7 @@ func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *test
 	if err := os.Remove(keyPath); err != nil {
 		t.Fatal(err)
 	}
-	err := configureSecrets(context.Background(), controller.New(st, nil), st, controllerCredentials{}, keyPath)
+	err := configureSecrets(context.Background(), controller.New(st, nil), st, deployment.Config{}, keyPath)
 	if err == nil || !strings.Contains(err.Error(), keyPath) {
 		t.Fatalf("start after losing the key = %v, want a refusal naming %s", err, keyPath)
 	}

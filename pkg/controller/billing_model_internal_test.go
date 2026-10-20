@@ -21,8 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -53,7 +52,7 @@ func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 	e.Store.SetClaimProfileResolver(billingCloudProfile{})
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	h := New(e.Store, nil).WithEngineController(e).Handler()
+	h := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e).Handler()
 	for _, id := range []string{"one", "two", "three"} {
 		status := http.StatusOK
 		if id == "three" {
@@ -94,7 +93,7 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 			e.Store.SetClaimProfileResolver(billingCloudProfile{})
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-			h := New(e.Store, nil).WithEngineController(e).Handler()
+			h := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e).Handler()
 			if blocked == "capacity" {
 				for _, id := range []string{"one", "two"} {
 					engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":%q,"available_cores":64}`, id), http.StatusOK)
@@ -187,13 +186,27 @@ func refillIntent(id, status string) string {
 	}
 }
 
+func TestUnmeteredControllerDoesNotRefill(t *testing.T) {
+	e, _ := refillFixture(t)
+	worker := New(e.Store, nil).WithBillingCheckout("https://checkout.test", "credential")
+	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unmetered controller called the payment service: %s", r.URL.Path)
+		return nil, nil
+	})
+	worker.refillPass(t.Context())
+	var opened int
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE kind='refill'`).Scan(&opened); err != nil || opened != 0 {
+		t.Fatalf("unmetered controller opened %d refills: %v", opened, err)
+	}
+}
+
 // The worker opens a due refill, creates its payment unconfirmed, records the intent and only then confirms it;
 // confirmation charges the card, and the signed success webhook grants the credit once.
 func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.T) {
 	e, tenant := refillFixture(t)
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('owner','owner@example.test',1,1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
-	worker := New(e.Store, nil).WithBillingCheckout("https://checkout.test", "credential")
+	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
 	var calls []string
 	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/internal/refill" {
@@ -324,7 +337,7 @@ func billingModelProviderDelivery(t *testing.T, e *EngineController, provider pa
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := configure(New(e.Store, nil).WithEngineController(e).WithPayments(verifier, e.Store)).Handler()
+	h := configure(NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e).WithPayments(verifier, e.Store)).Handler()
 	now := time.Now().Unix()
 	deliver := func(id, kind, object string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -361,7 +374,7 @@ func TestBillingModelControllerWaitlistsThe101stAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, nil).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t)).withProvider(store.ProviderGoogle, billingIdentityProvider{}, []string{"https://app.test/callback"})
+	s := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).withProvider(store.ProviderGoogle, billingIdentityProvider{}, []string{"https://app.test/callback"})
 	for i := range 101 {
 		_, _, err := s.oauthSignIn(t.Context(), store.ProviderGoogle, fmt.Sprint("signup", i), "verifier", "https://app.test/callback")
 		if err != nil {
@@ -390,10 +403,7 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	terms := licensetest.Terms{Features: []string{license.FeatureMultiTeam, license.FeatureMetering}, IssuedTo: "test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
-	server := New(e.Store, nil).WithSecretsCipher(cipher).WithLicense(license.Resolve(licensetest.Sign(t, priv, terms), pub, now, nil)).WithBillingCheckout("https://checkout.test", "credential")
+	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithBillingCheckout("https://checkout.test", "credential")
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
 	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp' WHERE name='a'`)
@@ -454,7 +464,10 @@ func TestPaymentOwnershipFollowsTheStoredIdentityNotTheHost(t *testing.T) {
 		return n
 	}
 	for i, host := range []string{"https://staging.sparkwing.dev", "https://renamed.example"} {
-		_, deliver := billingModelPaymentDelivery(t, e, func(s *Server) *Server { return s.WithExternalURL(host).WithPaymentDeployment(id) })
+		_, deliver := billingModelPaymentDelivery(t, e, func(s *Server) *Server {
+			s.deployment = deploymenttest.Cloud(t, host)
+			return s.WithPaymentDeployment(id)
+		})
 		if w := deliver(fmt.Sprintf("evt_owned_%d", i), "checkout.session.completed", session(id)); w.Code != http.StatusNoContent || grants() != 1 {
 			t.Fatalf("%s: our own payment = %d %s, grants %d", host, w.Code, w.Body, grants())
 		}

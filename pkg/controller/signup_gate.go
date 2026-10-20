@@ -82,7 +82,7 @@ func (s *Server) WithFreeTier(src FreeTierSource) *Server {
 // controller has no free-tier source, in which case the gate treats the free
 // tier as open. Call it at startup, after configuration.
 func (s *Server) CheckFreeTierSource() {
-	if s.identity.signup.freeTier != nil || !s.MultiTeam() {
+	if s.identity.signup.freeTier != nil || !s.deployment.MultiTeam() {
 		return
 	}
 	if s.identity.signup.unwiredLogged.Swap(true) {

@@ -14,20 +14,21 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const adminUsage = `usage: sparkwing-controller admin freeze --team SLUG --reason TEXT [--credentials-dir DIR]
-       sparkwing-controller admin unfreeze --team SLUG --reason TEXT [--hold ID] [--credentials-dir DIR]
-       sparkwing-controller admin grant --team SLUG --cents N --reason TEXT [--key KEY] [--credentials-dir DIR]
+const adminUsage = `usage: sparkwing-controller admin freeze --team SLUG --reason TEXT
+       sparkwing-controller admin unfreeze --team SLUG --reason TEXT [--hold ID]
+       sparkwing-controller admin grant --team SLUG --cents N --reason TEXT [--key KEY]
 
 Break-glass for the operator console. When console sign-in is down, run it in
 the controller pod with kubectl exec; it acts on the controller's state
 database directly, beside the running controller, so the cluster access that
-reaches the pod is the credential.
+reaches the pod is the credential. It opens the store the running controller
+declared (its --store and --credentials-dir, which the controller records
+under SPARKWING_HOME at startup) and never creates one.
 
 freeze holds the team: its metered claims are refused until the hold is
 released, while work already running finishes. unfreeze releases the holds
@@ -79,8 +80,6 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	hold := fs.String("hold", "", "unfreeze only: the one hold to release, as the team's holds name it")
 	cents := fs.Int64("cents", 0, "grant only: the free credits to grant, in cents (required)")
 	key := fs.String("key", "", "grant only: makes a rerun report the first grant instead of granting again")
-	credentialsDir := fs.String(credentials.FlagName, "",
-		"the controller's credentials directory; its "+credPGURL+" file selects the PostgreSQL store")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -126,13 +125,9 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	creds, err := readCredentials(*credentialsDir)
+	st, err := openDeclaredStore(ctx, p.StateDB())
 	if err != nil {
 		return err
-	}
-	st, err := openControllerStore(ctx, p.StateDB(), creds.PGURL)
-	if err != nil {
-		return fmt.Errorf("open state db: %w", err)
 	}
 	defer func() {
 		if cerr := st.Close(); cerr != nil {

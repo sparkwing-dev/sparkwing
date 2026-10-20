@@ -5,11 +5,11 @@ Sparkwing runner bundle installed.
   Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
 
 Components:
-{{- if .Values.runner.enabled }}
+{{- if and .Values.runner.enabled (not .Values.launcher.enabled) }}
   Runner    {{ .Values.runner.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.runner.fullname" . }}
 {{- end }}
 {{- if .Values.launcher.enabled }}
-  Cloud launcher -> {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "launcher") }}
+  Claim launcher -> {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "launcher") }}
   Jobs require team-dedicated nodes and enforced Pod ingress and egress. See
   README.md. The CNI must enforce NetworkPolicy; on EKS, set
   enableNetworkPolicy: "true" in the vpc-cni add-on. Team nodes must be AL2023

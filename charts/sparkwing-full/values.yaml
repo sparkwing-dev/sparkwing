@@ -24,6 +24,20 @@ controller:
   # One replica is supported for both SQLite and PostgreSQL.
   replicas: 1
 
+  # What this controller is (--deployment): "local" for a single-team
+  # self-hosted install, "team" for a licensed multi-team self-hosted one,
+  # "cloud" for the hosted service. The controller refuses a multi-team
+  # license outside team and cloud, refuses team and cloud without one, and
+  # refuses limitsProfile cloud or cloud-free outside cloud. cloud needs
+  # store=postgres.
+  deployment: local
+
+  # Where the controller keeps its state (--store): "sqlite" for state.db
+  # under /data, "postgres" for the pg-url credential from databaseSecret or
+  # credentialsSecret. A SQLite controller refuses a pg-url credential, so
+  # databaseSecret needs postgres.
+  store: sqlite
+
   image:
     # Set repository and tag from one compatible build. Both are required.
     pullPolicy: IfNotPresent
@@ -38,7 +52,6 @@ controller:
   # endpoint onto a container port no Service exposes and serves it
   # without a bearer, so only an in-cluster scraper reaches it.
   metricsPort: 0
-
 
   # Label terms a node whose plan declares no Prefers of its own prefers its
   # runner to advertise, in the Prefers term syntax. Empty leaves such a node
@@ -106,7 +119,8 @@ controller:
   # egress stream and download caps, and idle-poll enforcement, and it fills a
   # guard only where nothing above named one, so an explicit value always wins.
   # Empty, the default, supplies none and leaves a self-hosted controller
-  # exactly as it was. See docs/security.md.
+  # exactly as it was. The cloud profiles need deployment=cloud. See
+  # docs/security.md.
   limitsProfile: ""
 
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.
@@ -146,11 +160,11 @@ controller:
   # github-client-secret, google-client-secret, github-app-key,
   # github-app-webhook-secret, cloudfront-key,
   # billing-token, stripe-api-key, stripe-webhook-secret, and the others below.
-  # Every key is mounted under its own name; a key the controller does not know is ignored. The single
-  # Secret values below land in the same directory under their fixed
-  # names.
+  # Every key is mounted under its own name, and the controller refuses to
+  # start on a file name it does not know. The single Secret values below
+  # land in the same directory under their fixed names.
   # Helm cannot read a Secret's keys, so with this set the chart stops
-  # checking that a bootstrap token or a current secrets key is
+  # checking that a current secrets key or, for store=postgres, a pg-url is
   # configured; the controller refuses at startup, naming what is missing.
   credentialsSecret:
     name: ""
@@ -175,24 +189,19 @@ controller:
     key: key
 
   # Seed the once-only operator bootstrap gate before the listener binds.
+  # The controller always runs with --require-auth, so a fresh install with no
+  # administrator needs this or bootstrap-admin-token in credentialsSecret.
+  # Once the seed is consumed it may be removed; a consumed seed left mounted
+  # only logs a warning to remove it.
   # Supply "swk_" followed by canonical unpadded base64url for 32 random bytes:
   # `printf 'swk_%s' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"`.
   bootstrapAdminToken:
-    # Empty name disables; the render then refuses while requireAuth is
-    # true unless allowOpenBootstrap opts in.
+    # Empty name mounts no seed.
     name: ""
     key: token
 
-  # Require a provisioned credential at startup. Fresh installs need a
-  # bootstrapAdminToken or bootstrap-admin-token in credentialsSecret.
-  requireAuth: true
-
-  # Permit rendering without a bootstrap Secret and omit --require-auth.
-  # Protected routes still require credentials; provision the administrator
-  # out of band before use. Bool only.
-  allowOpenBootstrap: false
-
-  # Optional Secret containing a PostgreSQL DSN. Empty keeps SQLite.
+  # Secret containing a PostgreSQL DSN, mounted as the pg-url credential.
+  # Needs store=postgres.
   databaseSecret:
     name: ""
     key: dsn
@@ -206,6 +215,7 @@ controller:
   storage:
     # "pvc" mounts a PersistentVolumeClaim at /data.
     # "emptyDir" is ephemeral. Pair with PostgreSQL and S3 for durable state.
+    # Any other value fails the render.
     type: pvc
     pvc:
       size: 5Gi
@@ -330,15 +340,12 @@ ingress:
   #     - sparkwing.example.com
   #   secretName: sparkwing-tls
 
-  # Publish the controller without TLS or without --require-auth. An
-  # Ingress exposes the whole controller API and dashboard beyond the
-  # cluster, so the render fails on `tls: []`, on
-  # `controller.requireAuth: false`, or on `controller.allowOpenBootstrap:
-  # true` without a bootstrap token, until this says the exposure is
-  # deliberate. Must be a bool: a quoted string fails the render rather
-  # than reading as an opt-out. With `tls: []` the controller also gets
-  # `--insecure-cookies`, so a browser can hold a session over plain
-  # HTTP.
+  # Publish the controller without TLS. An Ingress exposes the whole
+  # controller API and dashboard beyond the cluster, so the render fails on
+  # `tls: []` until this says the exposure is deliberate. Must be a bool: a
+  # quoted string fails the render rather than reading as an opt-out. With
+  # `tls: []` the controller also gets `--insecure-cookies`, so a browser can
+  # hold a session over plain HTTP.
   allowInsecure: false
 
 # -----------------------------------------------------------------------

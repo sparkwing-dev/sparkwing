@@ -15,14 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type identityConfig struct {
 	providers    map[string]signInProvider
 	redirectURIs []string
-	license      *license.License
 	signup       signUpConfig
 }
 
@@ -53,26 +51,9 @@ func (s *Server) withProvider(name string, p signInProvider, redirectURIs []stri
 	return s
 }
 
-// WithLicense installs a verified license. A nil license grants nothing, so
-// the controller holds one team and offers no identity-provider sign-in.
-func (s *Server) WithLicense(lic *license.License) *Server {
-	s.identity.license = lic
-	return s
-}
-
-// MultiTeam reports whether this controller may hold more than one team.
-func (s *Server) MultiTeam() bool {
-	return s.identity.license.Allows(license.FeatureMultiTeam, time.Now())
-}
-
-// Metering reports whether the signed license grants credit billing.
-func (s *Server) Metering() bool {
-	return s.identity.license.Allows(license.FeatureMetering, time.Now())
-}
-
 func (s *Server) signInProviders() []string {
 	out := []string{}
-	if !s.MultiTeam() {
+	if !s.deployment.MultiTeam() {
 		return out
 	}
 	for _, name := range []string{store.ProviderGoogle, store.ProviderGitHub} {
@@ -138,8 +119,8 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		storage := d.Capabilities.Storage
 		resp.Mode, resp.Storage, resp.Features, resp.ReadOnly = d.Capabilities.Mode, &storage, d.Capabilities.Features, d.Capabilities.ReadOnly
 	}
-	resp.Teams.Enabled = s.MultiTeam()
-	resp.Billing.Enabled = s.Metering()
+	resp.Teams.Enabled = s.deployment.MultiTeam()
+	resp.Billing.Enabled = s.deployment.Metering()
 	resp.Auth.Providers = s.signInProviders()
 	resp.Claims.AllowRepos = true
 	resp.Claims.Profile = true
@@ -183,7 +164,7 @@ func (s *Server) redirectAllowed(uri string) bool {
 }
 
 func (s *Server) offeredProvider(name string) (signInProvider, error) {
-	if p, ok := s.identity.providers[name]; ok && s.MultiTeam() {
+	if p, ok := s.identity.providers[name]; ok && s.deployment.MultiTeam() {
 		return p, nil
 	}
 	return nil, refuse(http.StatusNotFound, "", name+" sign-in is not enabled on this controller")
@@ -382,7 +363,7 @@ type teamJSON struct {
 }
 
 func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if !s.MultiTeam() {
+	if !s.deployment.MultiTeam() {
 		return apierr.Authorization(apierr.ReasonMissingGrant, "creating a team requires a multi-team license")
 	}
 	var req createTeamReq

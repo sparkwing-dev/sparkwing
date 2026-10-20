@@ -15,8 +15,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -171,14 +169,7 @@ func TestAccountReadHTTPDoesNotRenewOrSwitchSession(t *testing.T) {
 
 func TestCreditSettingsReadHTTP(t *testing.T) {
 	f := newSessionFlow(t)
-	pub, key := licensetest.NewKey(t)
-	now := time.Now()
-	raw := licensetest.Sign(t, key, licensetest.Terms{Features: []string{license.FeatureMultiTeam, license.FeatureMetering}, IssuedTo: "synthetic", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)})
-	lic, err := license.Verify(raw, pub, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := f.server.WithLicense(lic).Handler()
+	h := f.server.Handler()
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, f.request("GET", "/api/v1/credits/settings?team=foreign", ""))
 	var got map[string]any

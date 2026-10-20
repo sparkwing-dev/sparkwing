@@ -141,7 +141,7 @@ pg_restore --no-owner --no-privileges --exit-on-error \
     --dbname="postgres://.../sparkwing_verify" "$DEST/controller.dump"
 
 (umask 077 && printf %s "postgres://.../sparkwing_verify" > "$SCRATCH/credentials/pg-url")
-sparkwing-controller --addr 127.0.0.1:4456 --credentials-dir "$SCRATCH/credentials"
+sparkwing-controller --addr 127.0.0.1:4456 --store=postgres --credentials-dir "$SCRATCH/credentials"
 ```
 
 The controller prints the schema it opened as its first line:

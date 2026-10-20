@@ -14,7 +14,7 @@ import (
 )
 
 func meteredPlacement(claimant, root capability.Capability) bool {
-	return launcherClaimant(claimant) || root.RootMetered
+	return capability.CloudLauncher(claimant) || !launcherClaimant(claimant) && root.RootMetered
 }
 
 func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capability) error {

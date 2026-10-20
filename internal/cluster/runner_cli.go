@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
@@ -181,6 +182,9 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 	options := RunnerOptions{Config: cfg, Loop: runners.LoopConfig{Version: version, Labels: slices.Clone(cfg.Labels), MaxConcurrent: limits.RunnerConcurrency}, Output: textFlag(fs, "output"), Checkout: textFlag(fs, "checkout")}
 	if cfg.Controller == nil || strings.TrimSpace(*cfg.Controller) == "" {
 		return options, errors.New("runner controller is required")
+	}
+	if err := deployment.CheckControllerURL("runner controller", *cfg.Controller); err != nil {
+		return options, err
 	}
 	if cfg.MaxConcurrent != nil {
 		options.Loop.MaxConcurrent = *cfg.MaxConcurrent

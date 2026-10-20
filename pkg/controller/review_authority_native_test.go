@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -78,7 +80,7 @@ func reviewAccount(t *testing.T, role string) (*Server, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, nil).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t))
+	s := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	raw, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +177,7 @@ func TestReviewMembersRevokeOwnTokens(t *testing.T) {
 func TestReviewLicensedSelfHostRefusesDeploymentBearer(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	raw := reviewSeed(t, e.Store)
-	s := New(e.Store, nil).WithLicense(accountSessionTestLicense(t))
+	s := NewDeployment(e.Store, deploymenttest.Team(t), nil)
 	engineClaimHTTP(t, s.Handler(), raw, "GET", "/api/v1/operator/tokens", "", 401)
 }
 
@@ -302,18 +304,16 @@ func TestNativeTokenOwnershipRelationProperty(t *testing.T) {
 func TestNativeDeploymentEligibilityProperty(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	raw := reviewSeed(t, e.Store)
-	lic := accountSessionTestLicense(t)
-	property := func(licensed, cloud bool, hint uint64) bool {
-		s := New(e.Store, nil).WithCloudDeployment(cloud)
-		if licensed {
-			s.WithLicense(lic)
-		}
+	deployments := []deployment.Config{{}, deploymenttest.Team(t), deploymenttest.Cloud(t, "https://controller.test")}
+	property := func(pick uint8, hint uint64) bool {
+		d := deployments[int(pick)%len(deployments)]
+		s := NewDeployment(e.Store, d, nil)
 		r := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/operator/tokens?mode=cloud&eligible=%d", hint), nil)
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		expected := 200
-		if licensed && !cloud {
+		if d.Kind() == deployment.KindTeam {
 			expected = 401
 		}
 		return w.Code == expected

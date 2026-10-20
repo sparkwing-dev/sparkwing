@@ -45,6 +45,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	egressState, egressProblems := s.egressHealth()
 	problems = append(problems, egressProblems...)
 
+	if problem := s.deployment.LicenseProblem(time.Now()); problem != "" {
+		problems = append(problems, problem)
+	}
+
 	resp := map[string]any{
 		"status": "ok", "auth": authState,
 		"object_store": objectStore, "database": s.storageHealth(),

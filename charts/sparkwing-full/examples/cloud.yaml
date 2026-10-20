@@ -4,6 +4,8 @@ controller:
   image:
     repository: ghcr.io/sparkwing-dev/sparkwing-controller
     tag: rewrite-cloud
+  deployment: cloud
+  store: postgres
   databaseSecret: {name: sparkwing-database, key: dsn}
   bootstrapAdminToken: {name: sparkwing-bootstrap-admin, key: token}
   secretsKey: {name: sparkwing-secrets-key, key: key}

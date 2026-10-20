@@ -42,10 +42,6 @@ const (
 // outcome arrives.
 const refillKeyLife = 23 * time.Hour
 
-// safety: refillCleanAge is how long a team's paid history must stay clean before it loosens refill caps, so the first
-// payment of a stolen card cannot raise the caps on charging that card again.
-const refillCleanAge = 7 * 24 * time.Hour
-
 // safety: these closures moved no money, so they neither count against limits nor stop later refills.
 const (
 	refillExpired  = "expired"
@@ -152,9 +148,7 @@ func refillCaps(b BillingStanding, now time.Time) RefillCaps {
 		row = billingPolicy[len(billingPolicy)-1]
 	} else {
 		for _, candidate := range billingPolicy[1:] {
-			aged := candidate
-			aged.cleanAge = max(aged.cleanAge, refillCleanAge)
-			if b.History.earns(aged, now) {
+			if b.History.earns(candidate, now) {
 				row = candidate
 			}
 		}

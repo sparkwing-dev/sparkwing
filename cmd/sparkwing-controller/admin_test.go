@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -201,10 +205,111 @@ func openState(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := openControllerStore(context.Background(), p.StateDB(), "")
+	if err := p.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := openControllerStore(context.Background(), deployment.Config{}, p.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
 	teststore.RegisterSQLite(st, p.StateDB())
+	if err := writeDeploymentRecord(t.Context(), p.StateDB(), deployment.Config{}, "", st); err != nil {
+		t.Fatal(err)
+	}
 	return st
+}
+
+// Break-glass acts only on the store the serving controller recorded: an
+// operator in the wrong pod gets a refusal rather than a fresh SQLite store,
+// and a store that is not the recorded one is refused by identity.
+func TestAdminActsOnlyOnTheRecordedStore(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	freeze := func() error {
+		return runAdmin([]string{"freeze", "--team", "default", "--reason", "abuse"}, &bytes.Buffer{}, &bytes.Buffer{})
+	}
+	if err := freeze(); err == nil || !strings.Contains(err.Error(), "deployment.json") {
+		t.Fatalf("admin on an empty home = %v, want a refusal naming the deployment record", err)
+	}
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.StateDB()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("admin created a store: %v", err)
+	}
+
+	if err := openState(t).Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(p.StateDB() + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+	}
+	if err := freeze(); err == nil || !strings.Contains(err.Error(), "open existing store") {
+		t.Fatalf("admin with a record and no store = %v, want an open-existing refusal", err)
+	}
+	other, err := openControllerStore(t.Context(), deployment.Config{}, p.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := freeze(); err == nil || !strings.Contains(err.Error(), "recorded") {
+		t.Fatalf("admin on a store other than the recorded one = %v, want an identity refusal", err)
+	}
+
+	// A record naming another connection target, as when pg-url now points
+	// at a restored clone elsewhere, is refused before admin acts.
+	path := deploymentRecordPath(p.StateDB())
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec deploymentRecord
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.Fatal(err)
+	}
+	rec.Connection.Target = "postgres://10.0.0.9:5432/sparkwing/public"
+	if body, err = json.Marshal(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := freeze(); err == nil || !strings.Contains(err.Error(), "connected to") {
+		t.Fatalf("admin on another connection target = %v, want a target refusal", err)
+	}
+}
+
+func TestSQLiteControllerLockPreservesAdminAccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	lock, err := wingd.AcquireControllerLock(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	st := openState(t)
+	defer func() { _ = st.Close() }()
+	if err := runAdmin([]string{"freeze", "--team=default", "--reason=abuse"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("admin while controller owns store: %v", err)
+	}
+}
+
+func TestSQLiteControllerRefusesAnOwnedStore(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	lock, err := wingd.AcquireControllerLock(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	if err := run([]string{"--addr=127.0.0.1:0"}); err == nil || !strings.Contains(err.Error(), "already owns store directory") {
+		t.Fatalf("second controller: %v", err)
+	}
+	if _, err := os.Stat(home + "/state.db"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("second controller opened the store: %v", err)
+	}
 }

@@ -53,6 +53,7 @@ func (l *budgetLease) Release() error {
 	})
 	return nil
 }
+
 func (l *budgetLease) Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error {
 	<-l.released
 	return nil
