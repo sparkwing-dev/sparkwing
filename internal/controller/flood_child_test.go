@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -172,5 +173,16 @@ func TestChildFloodAdmissionRequiresRecordedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := e.Server.WithEngineController(e.EngineController).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
-	engineClaimHTTP(t, s.Handler(), claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", root.Request.Request.Git), http.StatusUnprocessableEntity)
+	response := engineClaimHTTP(t, s.Handler(), claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", root.Request.Request.Git), http.StatusInternalServerError)
+	var body apierr.Envelope
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error == nil || body.Error.Code != apierr.Internal || body.Error.Message != "request failed" || body.Error.Hint != "" || len(body.Error.Details) != 0 {
+		t.Fatalf("persisted identity failure exposed internal details: %+v", body.Error)
+	}
+	var count int
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("refused child wrote a run: %d %v", count, err)
+	}
 }
