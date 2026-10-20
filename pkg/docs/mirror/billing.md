@@ -101,9 +101,8 @@ commits.
 
 Refills are capped by the team's paid history alone, so a stolen card cannot buy
 much compute before its owner disputes the charge. The prepaid balance never
-raises these caps, and a history tier counts for refills only once the team's
-first payment is at least 7 days old and its history has 7 clean days; until then a team has the New
-caps, whatever its balance or capacity tier. An operator grant of standing
+raises these caps. Refills use the history tier's payment and clean-day requirements
+listed above. An operator grant of standing
 gives the High caps. Teams that outgrow these caps use the contact request for
 higher limits.
 
