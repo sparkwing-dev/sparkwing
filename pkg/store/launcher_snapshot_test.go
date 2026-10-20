@@ -11,6 +11,11 @@ import (
 
 func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind, previousAttempts ...int64) (*Store, UnitDemand, UnitClaim, *time.Time) {
 	t.Helper()
+	return launcherSnapshotFixtureExpiry(t, kind, 2*time.Hour, previousAttempts...)
+}
+
+func launcherSnapshotFixtureExpiry(t *testing.T, kind capability.UnitKind, lifetime time.Duration, previousAttempts ...int64) (*Store, UnitDemand, UnitClaim, *time.Time) {
+	t.Helper()
 	s, demand := unitClaimFixture(t)
 	fundUnitClaim(t, s)
 	now := s.now()
@@ -18,7 +23,7 @@ func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind, previousAtt
 	root := authorityRoot("launcher", "")
 	root.Subject.Kind = capability.SubjectService
 	root.Grants = []capability.Grant{capability.ClaimsLaunch}
-	expires := now.Add(2 * time.Hour)
+	expires := now.Add(lifetime)
 	root.ExpiresAt = &expires
 	authorityPersist(t, s, root)
 	demand.CapabilityPrefix = root.Prefix

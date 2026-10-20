@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -48,7 +49,7 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 			demand.CapabilityPrefix, demand.Target, demand.Kinds = root.Prefix, nil, []capability.UnitKind{kind}
 			tenant := &Tenant{s: s, team: "a"}
 			view, err := tenant.ReadRunView(t.Context(), "run")
-			if err != nil || view.Waiting == nil || view.Waiting.Kind != kind || view.Waiting.CreditHold != NoCreditsHold {
+			if err != nil || view.Waiting == nil || view.Waiting.Kind != kind || !strings.HasPrefix(view.Waiting.CreditHold, "out of credits:") || !strings.Contains(view.Waiting.CreditHold, "add funds") {
 				t.Fatalf("unfunded waiting unit = %+v, %v", view.Waiting, err)
 			}
 			if _, err = s.ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
@@ -98,8 +99,8 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 	if err != nil || view.Waiting == nil || view.Waiting.Kind != kind {
 		t.Fatalf("waiting unit = %+v, %v", view.Waiting, err)
 	}
-	if want := map[string]string{"unmetered": "", "metered": NoCreditsHold, "revoked": ""}[runner]; view.Waiting.CreditHold != want {
-		t.Fatalf("%s runner: credit hold = %q, want %q", runner, view.Waiting.CreditHold, want)
+	if want := map[string]bool{"unmetered": false, "metered": true, "revoked": false}[runner]; strings.HasPrefix(view.Waiting.CreditHold, "out of credits:") != want {
+		t.Fatalf("%s runner: credit hold = %q, want an out-of-credits hold %v", runner, view.Waiting.CreditHold, want)
 	}
 	if runner != "unmetered" {
 		return

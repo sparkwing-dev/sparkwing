@@ -2,7 +2,7 @@ package controllerwire
 
 import "context"
 
-// RefillCaps are the standing tier's refill caps; a zero field is no cap.
+// RefillCaps are the refill caps the team's paid history earns; a zero field is no cap.
 type RefillCaps struct {
 	AmountCents int64 `json:"amount_cents"`
 	PerDay      int64 `json:"per_day"`

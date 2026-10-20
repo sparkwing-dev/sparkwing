@@ -134,7 +134,12 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err := expansionAuthorityTx(ctx, tx, team, request, tx.now()); err != nil {
 		return err
 	}
-	expiry, err := boundedClaimExpiryTx(ctx, tx, actor, tx.now())
+	*beat = LeaseBeat{CancelRequested: run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
+	funded, err := renewUnitBillingTx(ctx, tx, team, unit, actor.Generation, beat)
+	if err != nil {
+		return err
+	}
+	expiry, err := leaseBoundTx(ctx, tx, actor.CapabilityPrefix, tx.now(), funded)
 	if err != nil {
 		return err
 	}
@@ -142,9 +147,6 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err != nil {
 		return err
 	}
-	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
-	if err := renewUnitBillingTx(ctx, tx, team, unit, actor.Generation, beat); err != nil {
-		return err
-	}
+	beat.ExpiresAt = expiry
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 }

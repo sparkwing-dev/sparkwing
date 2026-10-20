@@ -187,9 +187,11 @@ func refillIntent(id, status string) string {
 }
 
 // The worker opens a due refill, creates its payment unconfirmed, records the intent and only then confirms it;
-// the confirmation's reply moves no money, and the signed success webhook grants the credit once.
+// confirmation charges the card, and the signed success webhook grants the credit once.
 func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.T) {
 	e, tenant := refillFixture(t)
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('owner','owner@example.test',1,1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
 	worker := New(e.Store, nil).WithBillingCheckout("https://checkout.test", "credential")
 	var calls []string
 	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
@@ -201,7 +203,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 			t.Fatal(err)
 		}
 		if body["team"] != "a" || body["amount_cents"] != float64(2000) || body["customer"] != "cus_refill" ||
-			body["payment_method"] != "pm_refill" || body["refill_id"] == "" {
+			body["payment_method"] != "pm_refill" || body["receipt_email"] != "owner@example.test" || body["refill_id"] == "" {
 			t.Fatalf("refill request %v", body)
 		}
 		intent, _ := body["payment_intent"].(string)
@@ -258,7 +260,8 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 	}
 }
 
-// A signed failure closes the refill, stops refills until the card or settings change, and alerts and mails the owners.
+// A signed failure closes the refill, stops refills until a card is saved or Add funds succeeds, and alerts and mails
+// the owners.
 func TestARefusedRefillStopsRefillsAndAlerts(t *testing.T) {
 	e, tenant := refillFixture(t)
 	due, err := e.Store.AsOperator().DueRefills(t.Context())
@@ -287,7 +290,7 @@ func TestARefusedRefillStopsRefillsAndAlerts(t *testing.T) {
 		t.Fatalf("a refused refill raised no alert: %s", logs.String())
 	}
 	if due, err := e.Store.AsOperator().DueRefills(t.Context()); err != nil || len(due) != 0 {
-		t.Fatalf("refills after a failure %+v: %v; want none until the card or settings change", due, err)
+		t.Fatalf("refills after a failure %+v: %v; want none until a card is saved or Add funds succeeds", due, err)
 	}
 }
 

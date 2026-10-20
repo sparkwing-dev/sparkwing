@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -190,23 +189,25 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 		return UnitClaim{}, err
 	}
 	now := tx.now()
-	until := now.Add(limits.DefaultLease)
-	if row.expiry.Valid && time.Unix(0, row.expiry.Int64).Before(until) {
-		until = time.Unix(0, row.expiry.Int64).UTC()
+	var deadline time.Time
+	if row.expiry.Valid {
+		deadline = time.Unix(0, row.expiry.Int64).UTC()
 	}
-	if p.Capability.ExpiresAt != nil && p.Capability.ExpiresAt.Before(until) {
-		until = *p.Capability.ExpiresAt
-	}
-	if !until.After(now) {
-		return UnitClaim{}, holderRefusal()
+	until, err := leaseBound(now, deadline, deref(p.Capability.ExpiresAt))
+	if err != nil {
+		return UnitClaim{}, err
 	}
 	row.holder, row.generation, row.lease = p.Capability.Subject.ID, row.generation+1, sql.NullInt64{Int64: until.UnixNano(), Valid: true}
 	issued, err := tx.store.issueTx(ctx, tx, capability.IssueRequest{Kind: capability.Award, Award: &spec}, &row)
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	if issued.Capability.ExpiresAt != nil && issued.Capability.ExpiresAt.Before(until) {
-		until = *issued.Capability.ExpiresAt
+	funded, err := fundedBoundTx(ctx, tx, team, unit, row.generation, now)
+	if err != nil {
+		return UnitClaim{}, err
+	}
+	if until, err = leaseBoundTx(ctx, tx, issued.Capability.Prefix, now, until, funded); err != nil {
+		return UnitClaim{}, err
 	}
 	claim := UnitClaim{Team: team, Kind: unit.Kind, RunID: unit.RunID, NodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: row.generation, LeaseExpiresAt: until}, Bearer: []byte(issued.Raw)}
 	if unit.Kind == capability.UnitNode {
@@ -221,7 +222,7 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	deadline := until
+	deadline = until
 	if unit.Kind == capability.UnitEval {
 		var ownerUntil int64
 		if err := tx.QueryRowContext(ctx, `SELECT until FROM leases WHERE name='controller.owner'`).Scan(&ownerUntil); err != nil {

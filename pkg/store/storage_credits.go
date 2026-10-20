@@ -111,8 +111,5 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 		Seconds: c.Seconds, AmountMicro: c.AmountMicro, StorageBytes: c.Bytes,
 		ChargedAt: time.Unix(0, c.NowNS).UTC(),
 	}
-	if err := l.insertCharge(ctx, charge); err != nil {
-		return nil, err
-	}
-	return &charge, nil
+	return l.debitFunded(ctx, charge)
 }

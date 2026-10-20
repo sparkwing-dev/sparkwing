@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func TestLauncherPreparationKeepsBootstrapUntilExchange(t *testing.T) {
@@ -20,7 +19,7 @@ func TestLauncherPreparationKeepsBootstrapUntilExchange(t *testing.T) {
 			fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
 			previous := claim.Award.LeaseExpiresAt
 			for range 4 {
-				*now = now.Add(limits.DefaultLease * 2 / 3)
+				*now = now.Add(SliceSeconds * time.Second * 2 / 3)
 				if _, err = s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 					t.Fatal(err)
 				}
@@ -36,7 +35,7 @@ func TestLauncherPreparationKeepsBootstrapUntilExchange(t *testing.T) {
 			if _, err = s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
 				t.Fatal(err)
 			}
-			*now = now.Add(time.Minute)
+			*now = now.Add(20 * time.Second)
 			if _, err = s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 				t.Fatal(err)
 			}
@@ -113,7 +112,7 @@ func TestLauncherPreparationSkipsEndedOwnAwards(t *testing.T) {
 				}
 				fences = append(fences, capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation})
 			}
-			*now = now.Add(time.Minute)
+			*now = now.Add(30 * time.Second)
 			switch ended {
 			case "expired":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE node_id='job'`, now.UnixNano())
@@ -123,7 +122,7 @@ func TestLauncherPreparationSkipsEndedOwnAwards(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE node_id='job'`)
 			}
 			prepared, err := s.RenewLauncherPreparation(t.Context(), root, fences)
-			if err != nil || len(prepared) != 1 || prepared[0] != fences[1] {
+			if err != nil || len(prepared) != 1 || prepared[0].Fence != fences[1] {
 				t.Fatalf("ended award blocked live preparation: %+v %v", prepared, err)
 			}
 		})
@@ -155,7 +154,7 @@ func FuzzLauncherPreparationBillingAndGrace(f *testing.F) {
 			return amount
 		}
 		before := total()
-		*now = now.Add(time.Minute + time.Duration(step%60)*time.Second)
+		*now = now.Add(time.Duration(20+step%30) * time.Second)
 		if prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil || len(prepared) != 1 {
 			t.Fatalf("live preparation: %+v %v", prepared, err)
 		}
@@ -163,7 +162,7 @@ func FuzzLauncherPreparationBillingAndGrace(f *testing.F) {
 			t.Fatal("Cloud preparation charged before the pod started")
 		}
 		rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
-		*now = now.Add(time.Duration(15+step%45) * time.Second)
+		*now = now.Add(time.Duration(5+step%30) * time.Second)
 		if prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil || len(prepared) != 0 {
 			t.Fatalf("an unpaid balance kept preparing: %+v %v; want a hard stop at the next renewal", prepared, err)
 		}
@@ -175,4 +174,27 @@ func FuzzLauncherPreparationBillingAndGrace(f *testing.F) {
 			t.Fatal("cancelled preparation exchanged authority")
 		}
 	})
+}
+
+func TestLauncherPreparationReturnsCapabilityBound(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, demand, claim, now := launcherSnapshotFixtureExpiry(t, kind, 17*time.Second)
+			expires := now.Add(17 * time.Second)
+			root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
+			awards, err := s.ReadLauncherAwards(t.Context(), root, nil)
+			if err != nil || len(awards) != 1 {
+				t.Fatalf("initial award: %+v %v", awards, err)
+			}
+			fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+			prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence})
+			if err != nil || len(prepared) != 1 || prepared[0].Fence != fence || !prepared[0].ExpiresAt.Equal(expires) {
+				t.Fatalf("preparation deadline: %+v %v; want %v", prepared, err, expires)
+			}
+			awards, err = s.ReadLauncherAwards(t.Context(), root, nil)
+			if err != nil || len(awards) != 1 || !awards[0].Claim.Award.LeaseExpiresAt.Equal(prepared[0].ExpiresAt) {
+				t.Fatalf("committed preparation deadline: %+v %v; returned %v", awards, err, prepared[0].ExpiresAt)
+			}
+		})
+	}
 }

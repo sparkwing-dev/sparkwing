@@ -564,7 +564,7 @@ func accountTx(ctx context.Context, tx *storeTx, id string) (Account, error) {
 
 const accountSelect = `SELECT id, email, email_verified, name, active_team, created_at, waitlisted_at FROM accounts`
 
-func scanAccount(row *sql.Row) (Account, error) {
+func scanAccount(row rowScanner) (Account, error) {
 	var a Account
 	var verified int
 	var active string

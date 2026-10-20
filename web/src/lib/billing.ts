@@ -145,7 +145,7 @@ export interface SpendLimits {
   max_job_seconds: number;
 }
 
-// RefillCaps are the standing tier's stolen-card brake on refills; a zero
+// RefillCaps are the stolen-card brake on refills, set by payment history alone; a zero
 // field is no cap, which leaves only the team's own limits.
 export interface RefillCaps {
   amount_cents: number;
@@ -164,7 +164,7 @@ export interface Refill {
   min_amount_cents: number;
   max_amount_cents: number;
   caps: RefillCaps;
-  // Unix seconds of the refill the card refused; refills wait until the card or settings change.
+  // Unix seconds of the last failed or refused refill; refills wait until a card is saved or Add funds succeeds.
   failed_at?: number;
   failure?: string;
   open: boolean;
@@ -199,11 +199,11 @@ export function holdNotice(cause: string | undefined): string {
 export function refillLimitReason(r: Refill): string {
   switch (r.limit) {
     case "standing_size":
-      return `The refill amount is above the ${fmtCents(r.caps.amount_cents)} per-refill cap of this team's standing.`;
+      return `The refill amount is above the ${fmtCents(r.caps.amount_cents)} per-refill cap of this team's payment history.`;
     case "standing_daily":
-      return `This team's standing allows ${r.caps.per_day} refill${r.caps.per_day === 1 ? "" : "s"} a day.`;
+      return `This team's payment history allows ${r.caps.per_day} refill${r.caps.per_day === 1 ? "" : "s"} a day.`;
     case "standing_weekly":
-      return `Another refill would pass the ${fmtCents(r.caps.week_cents)} weekly cap of this team's standing.`;
+      return `Another refill would pass the ${fmtCents(r.caps.week_cents)} weekly cap of this team's payment history.`;
     case "team_weekly":
       return `Another refill would pass the team's weekly limit of ${fmtCents(r.week_limit_cents)}.`;
     case "team_monthly":
@@ -218,7 +218,7 @@ export function refillLimitReason(r: Refill): string {
 export function refillStatus(r: Refill): string {
   if (!r.enabled) return "";
   if (r.failed_at)
-    return `The last refill failed${r.failure ? ` (${r.failure})` : ""}. Update your card or the refill settings to start refills again; Cloud work stops when the credits run out.`;
+    return `The last refill failed${r.failure ? ` (${r.failure})` : ""}. Save a card or add funds to start refills again; Cloud work stops when the credits run out.`;
   const reason = refillLimitReason(r);
   return reason ? `${reason} No refill is made until it allows one, so Cloud work stops when the credits run out.` : "";
 }

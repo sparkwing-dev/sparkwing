@@ -387,7 +387,7 @@ func globalRunsPerHourRefusal(ctx context.Context, q rowQuerier, limit, since in
 }
 
 type rowQuerier interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryRowContext(ctx context.Context, query string, args ...any) rowScanner
 }
 
 func rowPresentTx(ctx context.Context, q rowQuerier, query string, args ...any) (bool, error) {

@@ -130,16 +130,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 	}
 	var preparing atomic.Bool
-	var scheduling atomic.Bool
 	preparing.Store(true)
-	renew := h.Renew
-	h.Renew = func(ctx context.Context, actor store.Actor, computing bool) (store.LeaseBeat, error) {
-		beat, err := renew(ctx, actor, computing)
-		if scheduling.Load() {
-			beat.CancelRequested = false
-		}
-		return beat, err
-	}
 	ctx, stop := h.keepOwner(parent, input.Owner, func() bool {
 		return preparing.Load() || h.Computing != nil && h.Computing(input.RunID)
 	})
@@ -200,7 +191,6 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	}
 	preparing.Store(false)
 	schedule := func(ctx context.Context) (RunCompletion, error) {
-		scheduling.Store(true)
 		return h.schedule(ctx, input, accepted, entry)
 	}
 	if h.Around != nil {
@@ -262,7 +252,7 @@ func (h *OwnerHost) keepUnit(parent context.Context, identity lease.Identity, ac
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := h.Renew(ctx, actor, computing())
-		return lease.Beat{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
+		return lease.Beat{ExpiresAt: beat.ExpiresAt, CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
 	return startHostKeeper(parent, keeper)
 }

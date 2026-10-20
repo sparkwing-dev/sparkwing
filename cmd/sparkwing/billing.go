@@ -110,8 +110,10 @@ func manageRefill(ctx context.Context, inv clisurface.Invocation, manager contro
 		changed = changed || inv.Has(name)
 	}
 	if changed {
-		w := controllerwire.RefillWrite{Enabled: refill.Enabled, ThresholdCents: refill.ThresholdCents, AmountCents: refill.AmountCents,
-			WeekLimitCents: refill.WeekLimitCents, MonthLimitCents: refill.MonthLimitCents}
+		w := controllerwire.RefillWrite{
+			Enabled: refill.Enabled, ThresholdCents: refill.ThresholdCents, AmountCents: refill.AmountCents,
+			WeekLimitCents: refill.WeekLimitCents, MonthLimitCents: refill.MonthLimitCents,
+		}
 		if inv.Has("enable") {
 			w.Enabled = true
 		}
@@ -188,9 +190,9 @@ func writeRefill(out io.Writer, format string, r controllerwire.TeamRefill) erro
 	fmt.Fprintf(&b, "Threshold: %s\nAmount: %s (%s to %s)\n", fmtDollars(r.ThresholdCents), fmtDollars(r.AmountCents), fmtDollars(r.MinAmountCents), fmtDollars(r.MaxAmountCents))
 	fmt.Fprintf(&b, "Team limits: %s a week, %s a month\n", limit(r.WeekLimitCents), limit(r.MonthLimitCents))
 	if r.Caps == (controllerwire.RefillCaps{}) {
-		b.WriteString("Standing caps: none, the team's limits apply\n")
+		b.WriteString("Refill caps: none, the team's limits apply\n")
 	} else {
-		fmt.Fprintf(&b, "Standing caps: %s per refill, %d a day, %s a week\n", fmtDollars(r.Caps.AmountCents), r.Caps.PerDay, fmtDollars(r.Caps.WeekCents))
+		fmt.Fprintf(&b, "Refill caps: %s per refill, %d a day, %s a week\n", fmtDollars(r.Caps.AmountCents), r.Caps.PerDay, fmtDollars(r.Caps.WeekCents))
 	}
 	fmt.Fprintf(&b, "Refilled: %s in the last 7 days, %s in the last 30 days\n", fmtDollars(r.WeekCents), fmtDollars(r.MonthCents))
 	if r.Open {
@@ -201,7 +203,7 @@ func writeRefill(out io.Writer, format string, r controllerwire.TeamRefill) erro
 		if r.Failure != "" {
 			fmt.Fprintf(&b, " (%s)", r.Failure)
 		}
-		b.WriteString(". Update your card or the refill settings to start refills again.\n")
+		b.WriteString(". Save a card or add funds to start refills again.\n")
 	}
 	if r.Enabled && r.Limit != "" {
 		name := refillLimitNames[r.Limit]

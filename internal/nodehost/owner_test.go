@@ -91,7 +91,7 @@ func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
 	})
 }
 
-func TestOwnerHostCancellationWaitsForRemoteAttemptCompletion(t *testing.T) {
+func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		state, host, input := newOwnerFixture(t, true)
 		state.snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: input.RunID, NodeID: "remote"}, Status: store.StatusRunning, ClaimedBy: "personal-machine"}}
@@ -128,8 +128,9 @@ func TestOwnerHostCancellationWaitsForRemoteAttemptCompletion(t *testing.T) {
 			return nil
 		}
 		completion, err := host.Run(t.Context(), input)
-		if err != nil || completion.Outcome != "cancelled" || state.finished.Transition.To != store.RunCancelled || !slices.Contains(state.trace, "remote-joined") {
-			t.Fatalf("owner abandoned cancellation before its remote attempt joined: %+v %v trace=%v", completion, err, state.trace)
+		var cancelled *lease.CancelError
+		if !errors.As(err, &cancelled) || completion.Outcome != "" || state.finished.Transition.To != "" || slices.Contains(state.trace, "remote-joined") {
+			t.Fatalf("scheduling suppressed cancellation or finished live remote work: %+v %v trace=%v", completion, err, state.trace)
 		}
 	})
 }
@@ -474,5 +475,68 @@ func TestOwnerHostRetainsIntakeSecretClassifications(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.accepted.Seal.Resolved.SecretArgs, []string{"sdk-secret", "token"}) {
 		t.Fatalf("secret classification=%v", f.accepted.Seal.Resolved.SecretArgs)
+	}
+}
+
+// Self-claimed jobs share the owner's keeper, including cancellation and a lost controller's funded deadline.
+func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
+	for _, lost := range []bool{true, false} {
+		name := "funding refused"
+		if lost {
+			name = "controller connection lost"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f, h, in := newOwnerFixture(t, true)
+				f.snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
+				h.Lease = lease.Keeper{Interval: time.Second, Lease: time.Hour}
+				h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
+					if s.Nodes[0].Ready {
+						return store.ScheduleDecision{}
+					}
+					return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
+				}
+				h.Local = func(store.NodeRow) bool { return true }
+				h.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+					return OwnerLayerResult{}, nil
+				}
+				var bound atomic.Pointer[time.Time]
+				started := make(chan struct{})
+				stopped := make(chan time.Duration, 1)
+				h.Executor = ownerNodeFunc(func(ctx context.Context, _ NodeInput) error {
+					deadline := time.Now().Add(time.Minute)
+					bound.Store(&deadline)
+					close(started)
+					<-ctx.Done()
+					stopped <- time.Until(deadline)
+					return context.Cause(ctx)
+				})
+				var announced bool
+				h.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
+					deadline := bound.Load()
+					if deadline == nil {
+						return store.LeaseBeat{}, nil
+					}
+					if lost && announced {
+						return store.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
+					}
+					announced = true
+					return store.LeaseBeat{ExpiresAt: *deadline, CancelRequested: !lost, CancelReason: "out of credits"}, nil
+				}
+				done := make(chan error, 1)
+				go func() { _, err := h.Run(t.Context(), in); done <- err }()
+				<-started
+				left := <-stopped
+				if lost && (left > 0 || left < -time.Second) {
+					t.Fatalf("self-claimed job stopped %v before its funded deadline", left)
+				}
+				if !lost && left < 59*time.Second {
+					t.Fatalf("scheduling delayed cancellation by %v", time.Minute-left)
+				}
+				if err := <-done; err == nil {
+					t.Fatal("owner finished normally after its execution stopped")
+				}
+			})
+		})
 	}
 }

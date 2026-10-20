@@ -266,3 +266,33 @@ func TestRecordedRefundBindingRollsBackWithItsOutcome(t *testing.T) {
 		t.Fatalf("refund outcome was lost on retry: %+v, %v", due, err)
 	}
 }
+
+func TestAWarningBeforeItsRefillIsPaidQueuesNoEmptyRefund(t *testing.T) {
+	s, _, now := cardFixture(t)
+	openRefill(t, s, "a", 1_000, "payment")
+	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
+	warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+	if _, err := s.settlePaymentFacts(t.Context(), warning); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaCount(t, s.db, "card_refunds", 0)
+	if _, err := s.settlePaymentFacts(t.Context(), refillPaid(now, "payment", 1_000)); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaCount(t, s.db, "card_refunds WHERE payment_intent='payment' AND amount_micro=1000000000", 1)
+}
+
+func TestALostDisputeOnARefusedPaymentSettles(t *testing.T) {
+	s, _, now := cardFixture(t)
+	openRefill(t, s, "a", 1_000, "payment")
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('fp_1','b','pi_b',1)`)
+	if got, err := s.settlePaymentFacts(t.Context(), refillPaid(now, "payment", 1_000)); err != nil || got.Refused == "" {
+		t.Fatalf("refill on a pinned card = %+v, %v", got, err)
+	}
+	lost := providerPaymentEvent(now, capability.PaymentDisputeClosed)
+	lost.ObjectID, lost.Reason, lost.Status = "dp_lost", "fraudulent", "lost"
+	if _, err := s.settlePaymentFacts(t.Context(), lost); err != nil {
+		t.Fatalf("a lost dispute on a refused payment = %v", err)
+	}
+	rewriteSchemaCount(t, s.db, "credit_grants WHERE kind='reversal'", 0)
+}

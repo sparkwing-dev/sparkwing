@@ -25,7 +25,7 @@ import (
 // CloudControl supplies awarded bindings from the controller and checks their continued authority.
 // Sync must return exactly one decision for each supplied binding, including dead or cancelled claims.
 type CloudControl interface {
-	Prepare(context.Context, []capability.LeaseRef) error
+	Prepare(context.Context, []capability.LeaseRef) (time.Time, error)
 	Claim(context.Context) (*CloudJobAward, error)
 	Sync(context.Context, []CloudJobObservation) ([]CloudJobState, error)
 }

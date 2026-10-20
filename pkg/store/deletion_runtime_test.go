@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -68,7 +69,9 @@ func seedPurgeScope(t *testing.T, s *Store, team Team, index int) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,object_key,sha256,start_offset,end_offset) VALUES (?,?,'log',1,0,1,'object','digest',0,1)`, team, id)
 	rewriteSchemaExec(t, s.db, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,'quota','period',1)`, team)
 	rewriteSchemaExec(t, s.db, `INSERT INTO quota_reservations(team,id,quota,period,amount,expires_at,state) VALUES (?,'hold','quota','period',1,2,'held')`, team)
-	rewriteSchemaExec(t, s.db, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro) VALUES (?,'award',?,?,1,?,0,'runner','at_start','node','job',1,0)`, team, c.Prefix, id, team)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES (?,?,'paid',10,1)`, team, "grant-"+id)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(team,id,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES (?,?,?,'job',?,'usage',1,1,1)`, team, "charge-"+id, id, c.Prefix)
+	rewriteSchemaExec(t, s.db, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at) VALUES (?,'award',?,?,1,?,0,'runner','at_start','node','job',1)`, team, c.Prefix, id, team)
 	rewriteSchemaExec(t, s.db, `INSERT INTO billable_intervals(team,id,run_id,generation,capability_prefix,reservation_id,payer_team,metered,executor_class,unit_kind,billing_unit,billing_start,started_at,charged_through) VALUES (?,?,?,1,?,'award',?,0,'runner','node','job','at_start',1,1)`, team, id, id, c.Prefix, team)
 }
 
@@ -116,4 +119,31 @@ func purgeRows(t *testing.T, s *Store, team Team, target bool) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+func TestAccountDeletionRelabelsGrantsAcrossTeamsWithoutChangingBalances(t *testing.T) {
+	s := authorityStore(t)
+	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('leaver','leaver@example.com',1,1)`)
+	for i, row := range []struct{ team, creator string }{
+		{"a", "leaver"}, {"b", "leaver@example.com"}, {"b", "someone-else"},
+	} {
+		rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_by,created_at) VALUES (?,?,'paid',10,?,1)`, row.team, fmt.Sprint(i), row.creator)
+	}
+	if _, err := s.DeleteAccount(t.Context(), "leaver", time.Unix(10, 0)); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{DeletedUserLabel, DeletedUserLabel, "someone-else"} {
+		var creator string
+		if err := s.queryRow(t.Context(), `SELECT created_by FROM credit_grants WHERE id=?`, fmt.Sprint(i)).Scan(&creator); err != nil || creator != want {
+			t.Fatalf("grant %d creator = %q, %v; want %q", i, creator, err, want)
+		}
+	}
+	for _, tc := range []struct {
+		team    Team
+		balance int64
+	}{{"a", 10}, {"b", 20}} {
+		if got, err := (&Tenant{s: s, team: tc.team}).CreditBalanceMicro(t.Context()); err != nil || got != tc.balance {
+			t.Fatalf("team %s balance = %d, %v; want %d", tc.team, got, err, tc.balance)
+		}
+	}
 }

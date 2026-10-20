@@ -443,8 +443,8 @@ func TestBuildJobRoundsFractionalCPUUpToKubernetesPrecision(t *testing.T) {
 	}
 }
 
-func (c *controlFake) Prepare(ctx context.Context, _ []capability.LeaseRef) error {
-	return context.Cause(ctx)
+func (c *controlFake) Prepare(ctx context.Context, _ []capability.LeaseRef) (time.Time, error) {
+	return time.Now().Add(time.Minute), context.Cause(ctx)
 }
 
 type retryAfterControl struct {

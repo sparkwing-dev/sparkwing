@@ -13,15 +13,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// NoCreditsHold is the credit hold for a team with neither a balance nor a payment method covering Cloud work.
-const NoCreditsHold = "team has no remaining credits; add credits or a payment method"
-
 // UnclaimedUnit is a live run's longest-waiting unit that no claimant holds.
 type UnclaimedUnit struct {
 	Kind   capability.UnitKind
 	NodeID string
 	Since  time.Time
-	// CreditHold says why the team's credit standing keeps the launcher from claiming the unit; empty when it does not.
+	// CreditHold names the balance shortfall or hold that keeps the launcher from claiming the unit, and its remedy;
+	// empty when nothing does.
 	CreditHold string
 	// NoEligible says why no claimant can take a run-anywhere unit; empty when one can.
 	NoEligible string
@@ -187,9 +185,6 @@ func unitCreditHoldTx(ctx context.Context, tx *storeTx, team Team, run RunRow, u
 	var short *InsufficientCreditsError
 	if !errors.As(err, &short) {
 		return "", err
-	}
-	if short.Hold == "" {
-		return NoCreditsHold, nil
 	}
 	return short.Error(), nil
 }

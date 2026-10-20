@@ -337,9 +337,9 @@ func TestStaleCapacityCleanupSparesTheNewerAward(t *testing.T) {
 			}
 			switch path {
 			case "release":
-				l1.Control = preparationControl{CloudControl: &controlFake{}, prepare: func(context.Context, []capability.LeaseRef) error {
+				l1.Control = preparationControl{CloudControl: &controlFake{}, prepare: func(context.Context, []capability.LeaseRef) (time.Time, error) {
 					resume()
-					return &apierr.Error{Code: apierr.LockHeld, Message: "award exchanged"}
+					return time.Time{}, &apierr.Error{Code: apierr.LockHeld, Message: "award exchanged"}
 				}}
 				if _, err := l1.LaunchOne(t.Context()); err == nil {
 					t.Fatal("a lapsed award was placed")

@@ -49,10 +49,13 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 	if err != nil {
 		return "", err
 	}
-	if funded {
-		if _, err := reversePaymentTx(ctx, tx, payment, "fraud_warning:"+w.WarningID, "payment_provider", 0); err != nil {
-			return "", err
-		}
+	// safety: an unfunded payment has nothing to take back here; if it is still in flight, its paid event meets this
+	// warning and is refused and refunded then, and a payment already refused was queued for refund when it was.
+	if !funded {
+		return team, nil
+	}
+	if _, err := reversePaymentTx(ctx, tx, payment, "fraud_warning:"+w.WarningID, "payment_provider", 0); err != nil {
+		return "", err
 	}
 	if err := queueCardRefundTx(ctx, tx, team, payment, grant.AmountMicro/MicroCreditsPerCent, CardRefusedWarning, now); err != nil {
 		return "", err

@@ -130,9 +130,15 @@ type LauncherSyncRequest struct {
 	Preparing []capability.LeaseRef `json:"preparing,omitempty"`
 }
 
+// LauncherPreparation carries a bootstrap fence and its committed lease deadline.
+type LauncherPreparation struct {
+	capability.LeaseRef
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 // LauncherSyncResponse carries immutable execution inputs and cleanup identities without bearers.
 type LauncherSyncResponse struct {
-	Prepared           []capability.LeaseRef    `json:"prepared,omitempty"`
+	Prepared           []LauncherPreparation    `json:"prepared,omitempty"`
 	Awards             []ClaimedUnit            `json:"awards"`
 	Remove             []LauncherJobRef         `json:"remove"`
 	RemoveReservations []LauncherReservationRef `json:"remove_reservations"`

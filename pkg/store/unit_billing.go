@@ -182,19 +182,54 @@ func settleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitR
 	return err
 }
 
-// safety: a renewal charges what the work used and pays for its next slice in one step, so metered work only ever
-// runs on time its team already paid for; a balance or hold that cannot pay stops it, with no grace.
-func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64, beat *LeaseBeat) error {
+// safety: a renewal charges what the work used and pays for its next slice in one step. A balance or hold that cannot
+// pay writes the award's durable stop, a drain deadline one slice out and the run's cancellation in the same
+// transaction, so every later renewal reports the refusal and no lease outlives the drain. It returns the unit's
+// funded bound for leaseBoundTx.
+func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64, beat *LeaseBeat) (time.Time, error) {
 	a, err := unitBillingAwardTx(ctx, tx, team, unit, generation)
-	if err != nil || a == nil || a.settled.Valid {
+	if err != nil || a == nil {
+		return time.Time{}, err
+	}
+	if a.stop != "" {
+		beat.CancelRequested, beat.CancelReason = true, a.stop
+	}
+	if a.settled.Valid {
+		if a.provenance.Metered && !a.drain.Valid {
+			return time.Time{}, holderRefusal()
+		}
+		return fundedBoundTx(ctx, tx, team, unit, generation, tx.now())
+	}
+	now := tx.now()
+	err = renewBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, now, a.provenance.Metered && !a.drain.Valid)
+	if refused := (*InsufficientCreditsError)(nil); errors.As(err, &refused) {
+		err = stopAwardTx(ctx, tx, team, *a, refused.Error(), now.Add(SliceSeconds*time.Second))
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	a, err = unitBillingAwardTx(ctx, tx, team, unit, generation)
+	if err != nil || a == nil {
+		return time.Time{}, err
+	}
+	if a.stop != "" {
+		beat.CancelRequested, beat.CancelReason = true, a.stop
+	}
+	return fundedBoundTx(ctx, tx, team, unit, generation, now)
+}
+
+func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, reason string, drain time.Time) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE billing_awards SET stop_reason=?,drain_deadline_at=? WHERE team=? AND reservation_id=? AND stop_reason=''`, reason, drain.UnixNano(), team, a.provenance.ReservationID); err != nil {
 		return err
 	}
-	reserve := a.provenance.Metered && !beat.CancelRequested
-	err = renewBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, tx.now(), reserve)
-	if refused := (*InsufficientCreditsError)(nil); errors.As(err, &refused) {
-		beat.CancelRequested, beat.CancelReason = true, EventKindCreditsExhausted
-		return nil
+	run, err := readRunTx(ctx, tx, team, a.run)
+	if err != nil || run.FinishedAt != nil || run.CancelRequestedAt != nil {
+		return err
 	}
+	previous := tx.cancelingTeam
+	tx.cancelingTeam = team
+	defer func() { tx.cancelingTeam = previous }()
+	_, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: a.run, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: reason}, tx.now())
 	return err
 }
 
@@ -294,13 +329,13 @@ func finishExpansionBillingTx(ctx context.Context, tx *storeTx, team Team, reque
 	return settleUnitBillingTx(ctx, tx, team, unit, lease.Generation, tx.now())
 }
 
-func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor Actor, now time.Time, beat *LeaseBeat) error {
+func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor Actor, now time.Time, beat *LeaseBeat) ([]time.Time, error) {
 	if actor.CapabilityPrefix == "" {
-		return nil
+		return nil, nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' AND lease_expires_at>? ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder, now.UnixNano())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	type held struct {
 		node       string
@@ -310,17 +345,20 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 	for rows.Next() {
 		var award held
 		if err := rows.Scan(&award.node, &award.generation); err != nil {
-			return errors.Join(err, rows.Close())
+			return nil, errors.Join(err, rows.Close())
 		}
 		awards = append(awards, award)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
+		return nil, err
 	}
+	var bounds []time.Time
 	for _, award := range awards {
-		if err := renewUnitBillingTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: actor.Owner.RunID, NodeID: award.node}, award.generation, beat); err != nil {
-			return err
+		bound, err := renewUnitBillingTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: actor.Owner.RunID, NodeID: award.node}, award.generation, beat)
+		if err != nil {
+			return nil, err
 		}
+		bounds = append(bounds, bound)
 	}
-	return nil
+	return bounds, nil
 }

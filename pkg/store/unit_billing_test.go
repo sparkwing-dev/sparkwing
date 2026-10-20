@@ -397,3 +397,50 @@ func TestMeteredUnitStaleReportCannotSettleReplacementProperty(t *testing.T) {
 		}
 	}
 }
+
+// A controller outage settles a metered job at its funded lease rather than the longer default lease.
+func TestMeteredLeaseNeverOutrunsWhatWasPaid(t *testing.T) {
+	s, demand, now := meteredUnitFixture(t, true)
+	claim, actor := meteredUnitClaim(t, s, demand)
+	tenant := &Tenant{s: s, team: "a"}
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+		t.Fatal(err)
+	}
+	paid := func() int64 {
+		t.Helper()
+		var amount int64
+		if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges`).Scan(&amount); err != nil {
+			t.Fatal(err)
+		}
+		return amount
+	}
+	start := *now
+	var lease time.Time
+	for range 3 {
+		*now = now.Add(20 * time.Second)
+		beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
+		if err != nil || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.Equal(beat.ExpiresAt) {
+			t.Fatalf("beat %v differs from the lease %+v, %v", beat.ExpiresAt, row.LeaseExpiresAt, err)
+		}
+		if funded := start.Add(time.Duration(paid()/10) * time.Second); beat.ExpiresAt.After(funded) {
+			t.Fatalf("lease runs to %v, past the %v its team paid for", beat.ExpiresAt, funded)
+		}
+		lease = beat.ExpiresAt
+	}
+	before := paid()
+	*now = lease.Add(time.Hour)
+	reaper, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReapUnits(t.Context(), reaper, 10); err != nil {
+		t.Fatal(err)
+	}
+	if settled := paid(); settled > before {
+		t.Fatalf("the lapse settled %d micro-credits beyond the %d paid before the controller went silent", settled-before, before)
+	}
+}

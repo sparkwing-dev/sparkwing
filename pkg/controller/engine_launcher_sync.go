@@ -27,7 +27,7 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	if reader == nil {
 		return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
 	}
-	var prepared []capability.LeaseRef
+	var prepared []store.LauncherPreparation
 	if len(body.Preparing) > 0 {
 		if s.Store == nil {
 			return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
@@ -42,7 +42,10 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
-	response.Prepared = slices.Clone(prepared)
+	response.Prepared = make([]controllerwire.LauncherPreparation, 0, len(prepared))
+	for _, preparation := range prepared {
+		response.Prepared = append(response.Prepared, controllerwire.LauncherPreparation{LeaseRef: preparation.Fence, ExpiresAt: preparation.ExpiresAt})
+	}
 	response.Awards = append([]controllerwire.ClaimedUnit{}, response.Awards...)
 	for i := range response.Awards {
 		response.Awards[i].Capability = ""

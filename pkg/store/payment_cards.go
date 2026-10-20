@@ -71,36 +71,44 @@ func forgetCardTx(ctx context.Context, tx *storeTx, fingerprint, reason string, 
 	if fingerprint == "" {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT name, card_payment_method FROM teams WHERE card_fingerprint = ?`, fingerprint)
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM teams WHERE card_fingerprint = ? ORDER BY name`, fingerprint)
 	if err != nil {
 		return err
 	}
-	type saved struct {
-		team   Team
-		method string
-	}
-	var found []saved
+	var teams []Team
 	for rows.Next() {
-		var s saved
-		if err := rows.Scan(&s.team, &s.method); err != nil {
+		var team Team
+		if err := rows.Scan(&team); err != nil {
 			return errors.Join(err, rows.Close())
 		}
-		found = append(found, s)
+		teams = append(teams, team)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
-	for _, s := range found {
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = '', card_payment_method = '', card_fingerprint = '',
-		    card_brand = '', card_last4 = '', refill_enabled = 0 WHERE name = ? AND card_fingerprint = ?`, string(s.team), fingerprint); err != nil {
-			return err
-		}
-		if err := RecordBusinessEvent(tx, BusinessEvent{
-			Team: s.team, Kind: BusinessEventCardBlocked, SubjectID: s.method, Actor: "payment_provider", At: now,
-			Attrs: map[string]any{"reason": reason},
-		}); err != nil {
+	for _, team := range teams {
+		if err := forgetTeamCardTx(ctx, tx, team, fingerprint, reason, now); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func forgetTeamCardTx(ctx context.Context, tx *storeTx, team Team, fingerprint, reason string, now time.Time) error {
+	var method string
+	err := tx.QueryRowContext(ctx, `SELECT card_payment_method FROM teams WHERE name = ? AND card_fingerprint = ? AND card_fingerprint <> ''`, string(team), fingerprint).Scan(&method)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = '', card_payment_method = '', card_fingerprint = '',
+	    card_brand = '', card_last4 = '', refill_enabled = 0 WHERE name = ? AND card_fingerprint = ?`, string(team), fingerprint); err != nil {
+		return err
+	}
+	return RecordBusinessEvent(tx, BusinessEvent{
+		Team: team, Kind: BusinessEventCardBlocked, SubjectID: method, Actor: "payment_provider", At: now,
+		Attrs: map[string]any{"reason": reason},
+	})
 }

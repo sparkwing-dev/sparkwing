@@ -435,33 +435,26 @@ The unused legacy storage-pass lease API is removed; maintenance uses the electe
 Operator pass.
 
 
-`payment_provider_settlement.go` extends verified-event dispatch to card setup,
-collection, refunds, warnings and disputes. Its receipt and provider-correlation
-schema contract is recorded in `design/rewrite/contracts/c1-data.md`. Tests use
-a schema fake until W1 installs those tables. Production callbacks also need
-the trusted billing-page setup writer. Failed receipt writes cannot leave
-financial mutations behind.
+`payment_provider_settlement.go` dispatches verified card setup, refill,
+refund, warning and dispute outcomes. Provider correlation and the payment mode
+derive the payer. Settlement, ledger mutations and the event receipt commit
+in one transaction.
 
-`Operator.RecordAttemptIntent` binds collection payments and their provider
-correlations under one ledger lock. The persisted attempt and charge supply the
-payer. The trusted worker supplies the customer selected for its provider request,
-so replacing the saved card while that call runs cannot change the association.
-The configured mode and USD currency complete the binding. Immutable replay
-writes nothing. A conflicting association, changed customer or payment, or a
-payment already associated with a checkout fails without changing the attempt.
-Association failure rolls back both writes. This writer requires the pending
-correlation schema and does not fall back to the old unassociated update.
+Refill reservations persist amount, customer, payment method and receipt email.
+Unbound reservations may expire or be explicitly replaced. A bound payment
+keeps the team's single refill slot until its signed outcome arrives. Every
+bound payment counts against refill limits, including refusals and refunds.
+`credit_checkouts.refill_blocked` records an active failure independently of
+its historical decline text. An accepted card save or successful Add funds
+clears that marker in the same transaction. Settings changes leave it blocked.
 
 The unused `ErrMeteredInProcessNodes`, `LiveLogOffsetHeader`,
 `LiveLogAttemptHeader` and `LogWatchHeader` exports are removed. Tagged log
 subjects and the unit-renewal wire own those concerns.
 
-Global payer discovery uses the existing reviewed `paymentWarningTeamTx` owner.
-Verified events require its mode-scoped checkout or collection association to
-agree with any retained grant or attempt. Collection reads the exact attempt
-under the payer derived from its committed correlation. Generated tests replace
-the persisted correlation's team or mode and require financial state to stay
-unchanged across collection, refund, warning and dispute events.
+Global payer discovery uses the payment's mode-scoped checkout correlation
+and checks it against any retained grant. Conflicting payer or provider facts
+refuse settlement without changing financial state.
 
 `Store.CommittedObject`, `Store.NodeOutputObject` and their legacy `Upload` model
 are removed because the controller now reads committed blob records. Source-key
@@ -492,15 +485,19 @@ transaction. A failed delete leaves the column unset for the next pass.
 Abandonment creates no receipt or successful-upload usage. Live tickets, receipts
 and record graphs still protect a shared digest.
 
-Every non-final metered checkpoint checks headroom after charging. Exhaustion
-records the team's existing timestamp. Renewals request `credits_exhausted`
-cancellation at `DefaultCreditGraceSeconds`. Its ten-minute value is a placeholder
-pending Korey's grace decision. Restored headroom clears the timestamp. M4's
-plan/eval execution-start rule remains unchanged.
+Every metered renewal charges usage and reserves the next slice under the team's
+ledger lock. A refusal writes `billing_awards.stop_reason` and
+`drain_deadline_at` (one slice out) and cancels the run in the same
+transaction; the stop is never cleared. `leaseBoundTx` in `lease_bound.go` is
+the only lease bound: every node, owner, eval and launcher-preparation lease is
+the earliest of the default lease, the capability expiry and binding deadline,
+each metered award's funded horizon and its durable drain deadline. A stopped,
+unstarted award retains its drain after refunding the reservation. A refunded
+award without a stop cannot renew. Launcher preparation returns the committed
+expiry to its keeper, including capability bounds shorter than a slice.
 
 The schema enforces one billing award per capability and per unit generation.
-Card settlement scopes both updates to the attempt's team and requires one row
-from each. Every new job attempt clears its job summary and annotations.
+Refill settlement scopes its checkout and grant to the same team. Every new job attempt clears its job summary and annotations.
 
 Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because leased expiry still needs the digest to

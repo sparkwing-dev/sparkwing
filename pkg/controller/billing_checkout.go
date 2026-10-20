@@ -129,7 +129,7 @@ func (c *billingCheckout) refill(ctx context.Context, deployment string, r store
 	var out refillResult
 	err := c.post(ctx, "/internal/refill", map[string]any{
 		"team": string(r.Team), "deployment": deployment, "refill_id": r.ID, "amount_cents": r.AmountCents,
-		"customer": r.Customer, "payment_method": r.PaymentMethod, "payment_intent": r.PaymentIntent,
+		"customer": r.Customer, "payment_method": r.PaymentMethod, "receipt_email": r.ReceiptEmail, "payment_intent": r.PaymentIntent,
 	}, &out)
 	if err == nil && (out.PaymentIntent == "" || out.Status == "") {
 		err = fmt.Errorf("%w: it named no payment and status", errCheckoutRefused)

@@ -191,7 +191,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 		addedAt = c.AddedAt.UnixNano()
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
-	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?, refill_failed_at = 0, refill_failure = ''
+	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?
 	    WHERE name = ? AND card_added_at <= ?`,
 		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, addedAt, string(team), addedAt)
 	if err != nil {
@@ -203,6 +203,9 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	}
 	if saved == 0 {
 		return ErrStaleCardSetup
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND refill_blocked = 1`, string(team)); err != nil {
+		return err
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardAdded, SubjectID: c.PaymentMethod, Actor: actor, At: now,

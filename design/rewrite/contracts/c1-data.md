@@ -3534,13 +3534,13 @@ renewal through exchange and mixed live/ended preparation requests.
 `UnclaimedUnit.CreditHold` is set, for a `dispatch=controller` run, when no
 live unmetered team claimant could take the waiting unit (claim grants,
 `meteredPlacement` false, and the claim's matching inputs and requirements
-evaluate OK) and the unit's minimum reservation fails the same frozen-team and
-headroom checks a launcher claim applies. A balance shortfall reads `NoCreditsHold`
-("team has no remaining credits; add credits or a payment method"); frozen,
-budget, charge-pending and charge-failed holds read that refusal's own message.
+evaluate OK) and the unit's first slice fails the same hold and balance checks a
+launcher claim applies. It reads that refusal's own message, which names the
+balance shortfall and its remedy (add funds or turn on automatic refill) or the
+hold and its remedy.
 The controller reports it as notice kind `credit_hold` in place of
 `unclaimed_work`, after the same 30-second claim attention grace. Intake does not refuse: work waits and is claimed as soon as
-credits or a card cover it (decision 112). An unpriced CPU class reports no hold.
+prepaid credits cover it (decision 26). An unpriced CPU class reports no hold.
 
 ## Break-glass credit grants
 

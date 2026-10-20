@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -49,19 +48,26 @@ func TestEngineLauncherSyncRenewsPreparationBeforeExchange(t *testing.T) {
 				t.Fatal("malformed observation mutated preparation lease")
 			}
 		}
-		engineClaimHTTP(t, handler, raw, "POST", "/api/v1/launcher/sync", string(body), 200)
+		response := engineClaimHTTP(t, handler, raw, "POST", "/api/v1/launcher/sync", string(body), 200)
+		var synced controllerwire.LauncherSyncResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &synced); err != nil {
+			t.Fatal(err)
+		}
 		node, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if exchange == 0 {
-			if node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.After(original.Add(limits.DefaultLease/2)) {
+			if node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.After(original) || node.LeaseExpiresAt.After(original.Add(store.SliceSeconds*time.Second)) {
 				t.Fatalf("preparation did not renew: %+v", node.LeaseExpiresAt)
+			}
+			if len(synced.Prepared) != 1 || synced.Prepared[0].LeaseRef != fence || !synced.Prepared[0].ExpiresAt.Equal(*node.LeaseExpiresAt) {
+				t.Fatalf("preparation response differs from its committed lease: %+v", synced.Prepared)
 			}
 			if _, err = e.Store.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
 				t.Fatal(err)
 			}
-		} else if node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.Equal(original) {
+		} else if len(synced.Prepared) != 0 || node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.Equal(original) {
 			t.Fatal("launcher renewed after exchange")
 		}
 	}

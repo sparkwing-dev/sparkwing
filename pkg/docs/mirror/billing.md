@@ -7,8 +7,9 @@ slice of a running job, the job stops.
 
 ## Standing
 
-Standing caps how much Cloud capacity a team can use at once, how long one job
-may run, and how large and how frequent its automatic refills may be.
+Standing caps how much Cloud capacity a team can use at once and how long one
+job may run. Payment history alone caps its automatic refills; see
+[Automatic refill](#automatic-refill).
 
 | Policy | Concurrent Cloud vCPU | Maximum duration per job | History requirement | Prepaid balance backing this standing |
 | --- | ---: | --- | --- | ---: |
@@ -90,33 +91,46 @@ Set refills on the console billing page, with `sparkwing billing refill`
 `PUT /api/v1/team/billing/refill`. Settings take effect when their update
 commits.
 
-Standing caps refills as well, so a stolen card cannot buy much compute before
-its owner disputes the charge. Teams that outgrow these caps ask for the next
-tier.
+Refills are capped by the team's paid history alone, so a stolen card cannot buy
+much compute before its owner disputes the charge. The prepaid balance never
+raises these caps, and a history tier counts for refills only once the team's
+first payment is 7 days old with no hold since; until then a team has the New
+caps, whatever its balance or capacity tier. An operator grant of standing
+gives the High caps. Teams that outgrow these caps ask for the next tier.
 
-| Standing | Largest refill | Refills per day | Refill total per week |
+| Refill history | Largest refill | Refills per day | Refill total per week |
 | --- | ---: | ---: | ---: |
 | New | $50 | 1 | $100 |
 | Established | $200 | 2 | $500 |
 | Trusted | $1,000 | 3 | $3,000 |
 
-High standing uses only the team's own weekly and monthly limits.
+High uses only the team's own weekly and monthly limits.
 
 The controller checks for due refills every 30 seconds and keeps at most one
-refill in flight per team. It creates the payment under the refill's own id
-before confirming it, so a retried or interrupted refill never charges twice.
-A refill settles only from Stripe's signed webhook, through the same path as
-Add funds: the same card pinning, refund ordering and standing update apply.
-No refill starts while the team is held.
+refill in flight per team. A refill fixes its amount, card, customer and receipt
+address when it opens, and every retry sends that same request under the
+refill's own id, so a retried or interrupted refill never charges twice. The
+payment is created before it is confirmed. A refill whose payment was never
+created is closed after 23 hours, or when the team saves a different card first,
+and the next one starts fresh. Once its payment exists, the refill keeps the
+team's one refill slot until Stripe's signed webhook settles it, however long
+that takes. A refill settles only from that webhook, through the same path as
+Add funds: the same card pinning, refund ordering and standing update apply. No
+refill starts while the team is held, or for a card pinned to another team.
 
-A refill that a team limit or a standing cap would exceed is not made. The
-credits run down and Cloud work stops at zero; the billing page names the
-limit that stopped the refill (`refill.limit` in `GET /api/v1/team/billing`).
+Every refill whose payment exists counts against the limits, whether it is
+granted, declined, refused or refunded. A refill that a team limit or a cap
+would exceed is not made. The credits run down and Cloud work stops at zero; the
+billing page names the limit that stopped the refill (`refill.limit` in
+`GET /api/v1/team/billing`).
 
-A refill the card refuses, whether declined or asking for authentication, is
-recorded with its decline code, and the team's owners receive an email asking
-them to update the card. No further refill starts until an owner saves a card
-or changes the refill settings. The balance runs down as usual.
+A refill the card declines, or that asks for authentication, is recorded with
+its decline code, and the team's owners receive an email asking them to update
+the card. A refill paid with a card pinned to another team is refused, refunded
+in full, and the card is taken off the team, which turns refills off. Either
+way no further refill starts until an owner saves a card or an Add funds payment
+succeeds; changing the refill settings does not restart them. The balance runs
+down as usual.
 
 ## Metering
 
@@ -124,10 +138,21 @@ Cloud work is metered in 60-second slices. Admission reserves the first slice
 from the balance; a job whose first slice the balance cannot cover is refused
 with "out of credits", naming the balance and what the slice needs. Each lease
 renewal charges the time used and reserves the next slice in the same
-transaction. When the balance cannot pay the next slice, the renewal stops the
-job with the reason `credits_exhausted`. There is no grace period, so a team
-overspends by at most one slice per running job. Final settlement refunds the
-unused part of the last slice.
+transaction, and a metered lease never runs past the time already paid for, so
+a job whose runner loses the controller stops, and is settled, within what it
+paid. When the balance or a hold cannot pay the next slice, the renewal records
+the stop and cancels the run in the same transaction, with a reason that names
+the shortfall or hold and what resolves it. The owner and keeper stop execution
+when they receive that cancellation. The lease ends at the earlier of its paid
+horizon and a drain deadline at most one slice away. Renewals cannot move the
+deadline, even if the runner ignores cancellation. There is no grace period,
+and lifting the hold or adding
+funds does not resume the stopped run. Final settlement refunds the unused part
+of the last slice.
+
+Retained storage is charged only from the balance there is: once the balance
+reaches zero, storage accounting advances without a debit. The unfunded part
+is forgiven and is not collected after a top-up.
 
 ## Holds
 

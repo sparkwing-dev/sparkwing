@@ -223,6 +223,10 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 			return result, nil
 		}
 		if e.Status == "lost" {
+			// safety: a payment that never granted credit, because it was refused, has no credit to take back.
+			if _, funded, err := paidGrantForPaymentTx(ctx, tx, e.PaymentID); err != nil || !funded {
+				return result, err
+			}
 			amount, err := billingProduct(e.AmountMinor, MicroCreditsPerCent)
 			if err != nil {
 				return result, err

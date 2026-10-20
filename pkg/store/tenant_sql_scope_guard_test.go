@@ -87,6 +87,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"account deletion counts their owners",
 	"relabelPrincipalTx": "replaces a deleted account's name in every team's rows, because the account " +
 		"belonged to the deployment and acted in each of its teams",
+	"grantCreatorTeamsTx": "lists every team holding grants a deleted account created, to lock each team's ledger " +
+		"before relabelling them",
 	"(*Store).ClaimInvitationEmail": "counts the invitation emails one address received from every team, " +
 		"because the daily cap protects the inbox, not the team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +

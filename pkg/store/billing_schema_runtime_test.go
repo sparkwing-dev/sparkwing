@@ -58,11 +58,25 @@ func TestBillingAwardUniqueIdentitiesAreSchemaConstraints(t *testing.T) {
 			if identity == "capability" {
 				prefix, generation = "capability_prefix", "generation+1"
 			}
-			_, err := s.db.ExecContext(t.Context(), `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro) SELECT team,'replacement',`+prefix+`,run_id,node_id,`+generation+`,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro FROM billing_awards`)
+			_, err := s.db.ExecContext(t.Context(), `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at) SELECT team,'replacement',`+prefix+`,run_id,node_id,`+generation+`,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at FROM billing_awards`)
 			if err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed: billing_awards.team") {
 				t.Fatalf("duplicate billing identity refusal: %v", err)
 			}
 			rewriteSchemaCount(t, s.db, "billing_awards", 1)
 		})
+	}
+}
+
+func TestOnlyAFailedRefillCanBlockRefills(t *testing.T) {
+	s, _, _ := refillFixture(t, true)
+	r := openRefill(t, s, "a", 1_000, "payment")
+	for _, update := range []string{
+		`UPDATE credit_checkouts SET refill_blocked=2 WHERE id='` + r.ID + `'`,
+		`UPDATE credit_checkouts SET refill_blocked=1 WHERE id='` + r.ID + `'`,
+		`UPDATE credit_checkouts SET closed_at=1,failure='failed',refill_blocked=1 WHERE id='checkout'`,
+	} {
+		if _, err := s.db.ExecContext(t.Context(), update); err == nil {
+			t.Fatalf("invalid refill block accepted: %s", update)
+		}
 	}
 }

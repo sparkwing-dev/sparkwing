@@ -15,12 +15,15 @@ import (
 )
 
 type billingAward struct {
-	team                          Team
-	provenance                    capability.BillingProvenance
-	prefix, run, node             string
-	unit                          capability.UnitKind
-	generation, awarded, reserved int64
-	settled                       sql.NullInt64
+	team                Team
+	provenance          capability.BillingProvenance
+	prefix, run, node   string
+	unit                capability.UnitKind
+	generation, awarded int64
+	settled             sql.NullInt64
+	// safety: stop is the durable funding refusal, never cleared; from then on drain bounds every lease.
+	stop  string
+	drain sql.NullInt64
 }
 
 func billingID(kind string, team Team, reservation, key string) string {
@@ -39,7 +42,7 @@ func billingProduct(seconds, rate int64) (int64, error) {
 func readBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string) (billingAward, error) {
 	a := billingAward{team: team}
 	a.provenance.ReservationID = reservation
-	err := tx.QueryRowContext(ctx, `SELECT capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro,settled_at FROM billing_awards WHERE team=? AND reservation_id=?`+tx.forUpdate(), team, reservation).Scan(&a.prefix, &a.run, &a.node, &a.generation, &a.provenance.PayerTeam, &a.provenance.Metered, &a.provenance.ExecutorClass, &a.provenance.Start, &a.unit, &a.provenance.Unit, &a.awarded, &a.reserved, &a.settled)
+	err := tx.QueryRowContext(ctx, `SELECT capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,settled_at,stop_reason,drain_deadline_at FROM billing_awards WHERE team=? AND reservation_id=?`+tx.forUpdate(), team, reservation).Scan(&a.prefix, &a.run, &a.node, &a.generation, &a.provenance.PayerTeam, &a.provenance.Metered, &a.provenance.ExecutorClass, &a.provenance.Start, &a.unit, &a.provenance.Unit, &a.awarded, &a.settled, &a.stop, &a.drain)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrNotFound
 	}
@@ -85,7 +88,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	}
 	existing, err := readBillingAwardTx(ctx, tx, Team(c.Team), b.ReservationID)
 	if err == nil {
-		if existing.provenance != *b || existing.prefix != c.Prefix || existing.run != c.Binding.RunID || existing.node != c.Binding.NodeID || existing.generation != generation || existing.unit != c.Unit || existing.reserved != amount {
+		if existing.provenance != *b || existing.prefix != c.Prefix || existing.run != c.Binding.RunID || existing.node != c.Binding.NodeID || existing.generation != generation || existing.unit != c.Unit {
 			return authorityError(apierr.Conflict, "billing award is immutable")
 		}
 		if b.Metered {
@@ -119,7 +122,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT CASE WHEN created_subject_kind='account' THEN created_principal ELSE '' END FROM runs WHERE team=? AND id=?),'')`, c.Team, c.Binding.RunID).Scan(&requester); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro,requester_account) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Team, b.ReservationID, c.Prefix, c.Binding.RunID, c.Binding.NodeID, generation, b.PayerTeam, boolInt(b.Metered), b.ExecutorClass, b.Start, c.Unit, b.Unit, now, amount, requester)
+	_, err = tx.ExecContext(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,requester_account) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Team, b.ReservationID, c.Prefix, c.Binding.RunID, c.Binding.NodeID, generation, b.PayerTeam, boolInt(b.Metered), b.ExecutorClass, b.Start, c.Unit, b.Unit, now, requester)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ func retainedBillingFixture(t *testing.T) (*Store, SingletonLease, *time.Time) {
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatal(err)
 	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) SELECT name,'fund-'||name,'paid',?,1 FROM teams`, MaxCreditGrantMicro)
 	return s, lease, &now
 }
 
@@ -49,13 +51,15 @@ func TestStoreDataRetainedStoragePricesUniqueBytesAndTenantAllowance(t *testing.
 	retainedBlob(t, s, "b", "a", 4*gb, now.Add(-time.Hour))
 	rewriteSchemaExec(t, s.db, "INSERT INTO storage_quotas(team,storage_allowance_bytes,updated_at) VALUES ('a',?,1)", 2*gb)
 	rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,replica_id,bytes,objects,updated_at) VALUES ('a','one','r1',?,1,1),('a','two','r2',?,1,1)", 9*gb, 9*gb)
+	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES ('a','fund-a','paid',?,1),('b','fund-b','paid',?,1)`, 2*CloudStorageRateMicroPerGBDay, CloudStorageRateMicroPerGBDay)
 	if first := retainedBill(t, s, lease); len(first.Charges) != 0 {
 		t.Fatalf("initial pass charged historical bytes: %+v", first)
 	}
 	*now = now.Add(24 * time.Hour)
 	billed := retainedBill(t, s, lease)
-	if len(billed.Charges) != 2 || billed.ChargedMicro != 4*CloudStorageRateMicroPerGBDay {
-		t.Fatalf("billing=%+v", billed)
+	if len(billed.Charges) != 2 || billed.ChargedMicro != 2*CloudStorageRateMicroPerGBDay {
+		t.Fatalf("billing=%+v; want b's 3 GB-day charge cut to the one its balance funds", billed)
 	}
 	for i, want := range []int64{gb, 3 * gb} {
 		charge := billed.Charges[i]
@@ -66,14 +70,51 @@ func TestStoreDataRetainedStoragePricesUniqueBytesAndTenantAllowance(t *testing.
 	if replay := retainedBill(t, s, lease); len(replay.Charges) != 0 {
 		t.Fatalf("replayed interval=%+v", replay)
 	}
+	*now = now.Add(24 * time.Hour)
+	if unfunded := retainedBill(t, s, lease); len(unfunded.Charges) != 1 || unfunded.Charges[0].Team != "a" {
+		t.Fatalf("an empty balance kept accruing storage debt: %+v", unfunded)
+	}
 	for _, tc := range []struct {
 		team Team
 		want int64
-	}{{"a", -CloudStorageRateMicroPerGBDay}, {"b", -3 * CloudStorageRateMicroPerGBDay}} {
+	}{{"a", 0}, {"b", 0}} {
 		balance, err := (&Tenant{s: s, team: tc.team}).CreditBalanceMicro(t.Context())
 		if err != nil || balance != tc.want {
 			t.Fatalf("team=%s balance=%d: %v", tc.team, balance, err)
 		}
+	}
+}
+
+func TestStoreDataRetainedStorageForgivesUnfundedTimeBeforeTopUp(t *testing.T) {
+	for _, balance := range []int64{0, -100} {
+		t.Run(fmt.Sprint(balance), func(t *testing.T) {
+			s, lease, now := retainedBillingFixture(t)
+			rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+			if balance < 0 {
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,reverses,created_at) VALUES ('a','reversal','reversal',?,'paid-before-clawback',1)`, balance)
+			}
+			retainedBlob(t, s, "a", "a", StorageBytesPerGB, *now)
+			retainedBill(t, s, lease)
+			*now = now.Add(24 * time.Hour)
+			if billed := retainedBill(t, s, lease); len(billed.Charges) != 0 {
+				t.Fatalf("unfunded day created debt: %+v", billed)
+			}
+			tenant := &Tenant{s: s, team: "a"}
+			if got, err := tenant.CreditBalanceMicro(t.Context()); err != nil || got != balance {
+				t.Fatalf("unfunded balance = %d, %v; want %d", got, err, balance)
+			}
+			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES ('a','top-up','paid',?,1)`, CloudStorageRateMicroPerGBDay-balance)
+			if replay := retainedBill(t, s, lease); len(replay.Charges) != 0 {
+				t.Fatalf("top-up collected forgiven storage: %+v", replay)
+			}
+			*now = now.Add(24 * time.Hour)
+			if billed := retainedBill(t, s, lease); len(billed.Charges) != 1 || billed.ChargedMicro != CloudStorageRateMicroPerGBDay {
+				t.Fatalf("funded day = %+v", billed)
+			}
+			if got, err := tenant.CreditBalanceMicro(t.Context()); err != nil || got != 0 {
+				t.Fatalf("funded day balance = %d, %v; want zero", got, err)
+			}
+		})
 	}
 }
 
@@ -190,6 +231,7 @@ func TestStoreDataRetainedStorageLogsAndBlobsShareOneFreeAllowance(t *testing.T)
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		t.Fatal(err)
 	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES ('a','fund','paid',?,1)`, rate)
 	commit := logCommit(actor, attempt)
 	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatal(err)
@@ -205,14 +247,14 @@ func TestStoreDataRetainedStorageLogsAndBlobsShareOneFreeAllowance(t *testing.T)
 		t.Fatalf("combined storage=%+v", billed)
 	}
 	state, err := tenant.CreditState(t.Context(), 0)
-	if err != nil || state.StorageChargedMicro != billed.ChargedMicro || state.BalanceMicro != -billed.ChargedMicro {
+	if err != nil || state.StorageChargedMicro != billed.ChargedMicro || state.BalanceMicro != rate-billed.ChargedMicro {
 		t.Fatalf("reported storage=%+v: %v", state, err)
 	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
 	rewriteSchemaCount(t, s.db, "log_streams", 0)
 	rewriteSchemaCount(t, s.db, "log_segments", 0)
 	rewriteSchemaCount(t, s.db, "credit_charges", 1)
-	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != -billed.ChargedMicro {
+	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != rate-billed.ChargedMicro {
 		t.Fatalf("run deletion restored credit=%d: %v", balance, err)
 	}
 }
@@ -275,6 +317,7 @@ func TestStoreDataRetainedStorageDisabledPriceAndClockRegression(t *testing.T) {
 func TestStoreDataRetainedStorageStableInventoryAndMonthBalance(t *testing.T) {
 	s, lease, now := retainedBillingFixture(t)
 	retainedBlob(t, s, "a", "a", 100*StorageBytesPerGB, *now)
+	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
 	rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000000,1)")
 	retainedBill(t, s, lease)
 	for range 30 {

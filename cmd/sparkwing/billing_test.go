@@ -192,7 +192,7 @@ func TestBillingCLIRefillChangesOnlyTheGivenSettings(t *testing.T) {
 		t.Fatal("parsed --enable with --disable")
 	}
 	out.Reset()
-	if err := runBillingArgs(t.Context(), []string{"refill", "--profile", "work", "-o", "pretty"}, &out, connect); err != nil || !strings.Contains(out.String(), "Automatic refill: off\nThreshold: $10\nAmount: $25.50 ($10 to $5000)\nTeam limits: $1000 a week, none a month\nStanding caps: $50 per refill, 1 a day, $100 a week\n") {
+	if err := runBillingArgs(t.Context(), []string{"refill", "--profile", "work", "-o", "pretty"}, &out, connect); err != nil || !strings.Contains(out.String(), "Automatic refill: off\nThreshold: $10\nAmount: $25.50 ($10 to $5000)\nTeam limits: $1000 a week, none a month\nRefill caps: $50 per refill, 1 a day, $100 a week\n") {
 		t.Fatalf("pretty refill: %q %v", out.String(), err)
 	}
 }

@@ -84,6 +84,12 @@ terminal event after reporting a result.
 Exact replay creates no second event. Native host and controller integration
 must preserve these store decisions.
 
+A funding refusal or hold records a run cancellation naming the balance
+shortfall or hold and its remedy. The owner and keeper stop when they receive
+it. Its lease cannot renew past the funded horizon or the durable drain
+deadline. Add funds, enable automatic refill or resolve the named hold before
+re-running the cancelled work.
+
 ## Failure reasons
 
 A failed node carries a `failure_reason` when the controller could
@@ -98,7 +104,7 @@ the logs.
 | `no_progress_timeout` | Node emitted no observable progress for its configured inactivity window. | Check where the node stopped, stream command output or report progress when work is healthy, and raise the inactivity window if the expected quiet period is longer. |
 | `agent_lost` | The runner holding the job's claim stopped renewing it. Started work requeues in the same run until three disruptions have occurred. | Check the runner and `job_requeued` events. Recovery preserves the application retry budget. |
 | `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no agent claimed the node within its claim wait (default 24h; the error starts `unclaimable:` and names why). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
-| `credits_exhausted` | The team's prepaid balance could not pay the node's next 60-second slice at lease renewal, so the controller stopped it. There is no grace period. Its claim is released. | Add funds or turn on automatic refill on the billing page, then re-run. A node stopped this way holds no slot afterwards, so nothing is left to reclaim. |
+
 | `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, so no claim can be billed. | A Sparkwing Cloud operator can add the class with the private `sparkwing-ops` tool. Otherwise lower the node's cpu request, then re-run. The terminal job event records the `unpriced_cpu_class` reason. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
@@ -538,7 +544,7 @@ returns its whole reservation. Once billing starts, renewals charge the
 seconds used, and final settlement refunds the unused part of the last slice. Two refunds return billed seconds and lower the series: a
 node setup the platform fails before execution, and a trigger claim requeued
 before its run started, which also returns what its heartbeats charged. A node stopped
-with `credits_exhausted` settles there.
+by a funding refusal settles at its drain deadline at the latest.
 
 The `local` series counts what this controller process settled for an unmetered
 credential, read from the claiming credential recorded on the node, and it

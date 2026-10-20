@@ -716,7 +716,6 @@ func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
 const Dispatch ReconcileKind = "dispatch"
-const DispatchedHeartbeatInterval = 5 * time.Second
 type DownloadCapError struct {
 	Team           string
 	Day            string
@@ -843,7 +842,6 @@ type Event struct {
 }
 const EventKindComputeLimitBlocked = "compute_limit_blocked"
 const EventKindCreditsBlocked = "credits_blocked"
-const EventKindCreditsExhausted = "credits_exhausted"
 const EventKindMetricsStopped = "metrics_stopped"
 const EventKindSecretPreflightRefused = "secret_preflight_refused"
 type EventLimits struct {
@@ -1130,6 +1128,10 @@ type LauncherAward struct {
 	Node                   NodeRow
 	ParentCapabilityExpiry *time.Time
 }
+type LauncherPreparation struct {
+	Fence     capability.LeaseRef
+	ExpiresAt time.Time
+}
 type LeaseBeat struct {
 	ExpiresAt       time.Time
 	CancelRequested bool
@@ -1215,7 +1217,6 @@ const MinCardChargeCents = 50
 const MinRefillCents = 1000
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
-const NoCreditsHold = "team has no remaining credits; add credits or a payment method"
 type Node struct {
 	RunID        string
 	NodeID       string
@@ -1644,7 +1645,6 @@ type PoolAccessRule struct {
 	Route          string
 	InstallationID int64
 }
-const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
 type ProfileObservation struct {
 	Partial         bool
@@ -1733,6 +1733,7 @@ type Refill struct {
 	AmountCents   int64
 	Customer      string
 	PaymentMethod string
+	ReceiptEmail  string
 	PaymentIntent string
 }
 type RefillCaps struct {
@@ -2494,7 +2495,7 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 func (s *Store) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (bool, error)
 func (s *Store) RejectLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef) error
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
-func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error)
+func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]LauncherPreparation, error)
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
@@ -3021,6 +3022,7 @@ func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (
 func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLookup) (hit blob.RecordLookupResult, err error)
 func (nativeProvisionPolicy) AuthorizeProvision(ctx context.Context, resolver capability.AuthorityResolver, spec capability.ProvisionSpec) error
 func (values planSecretValues) ContainsSecret(identifier string) bool
+func (r refusedLedgerRow) Scan(...any) error
 func (sharedIntakeContracts) CarryRetry(input runspec.RetryInput) (runspec.RetrySnapshot, error)
 func (sharedIntakeContracts) ResolvePlan(input settings.PlanInputs) (runspec.ExecutionSettings, error)
 func (sharedIntakeContracts) SealRequest(request runspec.Request, facts runspec.IntakeFacts) (runspec.SealedRequest, error)
@@ -3029,7 +3031,7 @@ func (sharedPlanContracts) CanonicalHash(value any) (runspec.Hash, error)
 func (sharedPlanContracts) ResolveExpansion(in settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error)
 func (sharedPlanContracts) ValidatePlan(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
 func (sharedSourceReleaseContracts) AuthorizeSourceRelease(request capability.SourceReleaseRequest, now time.Time) (capability.SourceReleaseAudit, error)
-func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) rowScanner
 func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error
 func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error
 func (t *storeTx) Commit() error
@@ -3037,7 +3039,7 @@ func (t *storeTx) Exec(q string, args ...any) (sql.Result, error)
 func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
 func (t *storeTx) Query(q string, args ...any) (*sql.Rows, error)
 func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
-func (t *storeTx) QueryRow(q string, args ...any) *sql.Row
-func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row
+func (t *storeTx) QueryRow(q string, args ...any) rowScanner
+func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) rowScanner
 func (tx *storeTx) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (t *storeTx) Rollback() error

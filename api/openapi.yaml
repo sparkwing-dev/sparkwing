@@ -1873,6 +1873,28 @@ components:
         - node_uid
       type: object
       x-sparkwing-go-type: controllerwire.LauncherObservation
+    internal.controllerwire.LauncherPreparation:
+      additionalProperties: true
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        generation:
+          type: integer
+        holder:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+      required:
+        - kind
+        - id
+        - generation
+        - holder
+        - expires_at
+      type: object
+      x-sparkwing-go-type: controllerwire.LauncherPreparation
     internal.controllerwire.LauncherReservationRef:
       additionalProperties: true
       properties:
@@ -1919,7 +1941,7 @@ components:
         prepared:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.capability.LeaseRef'
+                $ref: '#/components/schemas/internal.controllerwire.LauncherPreparation'
               type: array
             - type: "null"
         remove:

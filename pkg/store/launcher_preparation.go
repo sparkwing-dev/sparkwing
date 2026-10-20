@@ -5,14 +5,21 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+// LauncherPreparation reports the committed authority bound for an acknowledged bootstrap fence.
+type LauncherPreparation struct {
+	Fence     capability.LeaseRef
+	ExpiresAt time.Time
+}
+
 // RenewLauncherPreparation extends only live unexchanged bootstrap leases owned by this launcher.
-func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error) {
-	prepared := []capability.LeaseRef{}
+func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]LauncherPreparation, error) {
+	prepared := []LauncherPreparation{}
 	err := s.inLauncherBatchTx(ctx, authority, preparing, true, func(tx *storeTx) error {
 		prepared = prepared[:0]
 		chain, err := authorityChainTx(ctx, tx, authority, true)
@@ -30,12 +37,12 @@ func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capabili
 				return bindingRefusal()
 			}
 			seen[fence] = true
-			renewed, err := renewLauncherPreparationTx(ctx, tx, root, claimant, fence)
+			expiry, err := renewLauncherPreparationTx(ctx, tx, root, claimant, fence)
 			if err != nil {
 				return err
 			}
-			if renewed {
-				prepared = append(prepared, fence)
+			if !expiry.IsZero() {
+				prepared = append(prepared, LauncherPreparation{Fence: fence, ExpiresAt: expiry})
 			}
 		}
 		_, err = authorityChainTx(ctx, tx, authority, true)
@@ -47,51 +54,54 @@ func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capabili
 	return prepared, nil
 }
 
-func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capability.Principal, claimant capability.Capability, fence capability.LeaseRef) (bool, error) {
+func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capability.Principal, claimant capability.Capability, fence capability.LeaseRef) (time.Time, error) {
 	if err := launcherReservationAwardTx(ctx, tx, root.Authority, claimant.Subject, fence); err != nil {
-		return false, err
+		return time.Time{}, err
 	}
 	row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
 	if err != nil {
 		if endedLauncherPreparation(err) {
-			return false, nil
+			return time.Time{}, nil
 		}
-		return false, err
+		return time.Time{}, err
 	}
 	if row.prefix == "" || row.holder != fence.Holder || row.generation != fence.Generation {
-		return false, nil
+		return time.Time{}, nil
 	}
 	current, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.prefix})
 	if err != nil {
 		if endedLauncherPreparation(err) {
-			return false, nil
+			return time.Time{}, nil
 		}
-		return false, err
+		return time.Time{}, err
 	}
 	award, live, err := readLauncherAwardTx(ctx, tx, current.Capability.Prefix, claimant, root)
 	if err != nil {
-		return false, err
+		return time.Time{}, err
 	}
 	if !live || award.Claim.Award.Holder != fence.Holder || award.Claim.Award.Generation != fence.Generation {
-		return false, nil
+		return time.Time{}, nil
 	}
 	if current.Capability.Delivery == capability.DeliveryDirect && current.Capability.Issuance == capability.Exchange {
-		return false, nil
+		return time.Time{}, nil
 	}
 	if current.Capability.Delivery != capability.DeliveryBootstrap || current.Capability.Issuance != capability.Award {
-		return false, bindingRefusal()
+		return time.Time{}, bindingRefusal()
 	}
 	unitRef := UnitRef{Kind: award.Claim.Kind, RunID: award.Claim.RunID, NodeID: award.Claim.NodeID, SourceGeneration: award.Claim.SourceGeneration}
+	if err = lockStateRunTx(ctx, tx, award.Claim.Team, award.Claim.RunID); err != nil {
+		return time.Time{}, err
+	}
 	beat := LeaseBeat{}
-	if err = renewUnitBillingTx(ctx, tx, award.Claim.Team, unitRef, fence.Generation, &beat); err != nil {
-		return false, err
-	}
-	expiry, err := boundedClaimExpiryTx(ctx, tx, Actor{CapabilityPrefix: current.Capability.Prefix}, tx.now())
+	funded, err := renewUnitBillingTx(ctx, tx, award.Claim.Team, unitRef, fence.Generation, &beat)
 	if err != nil {
-		return false, err
+		return time.Time{}, err
 	}
-	if beat.CancelRequested {
-		expiry = tx.now()
+	expiry := tx.now()
+	if !beat.CancelRequested {
+		if expiry, err = leaseBoundTx(ctx, tx, current.Capability.Prefix, tx.now(), funded); err != nil {
+			return time.Time{}, err
+		}
 	}
 	unit := award.Claim
 	var query string
@@ -109,18 +119,18 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		return false, err
+		return time.Time{}, err
 	}
 	if err = requireOneRow(result, "launcher preparation lease"); err != nil {
-		return false, err
+		return time.Time{}, err
 	}
 	if beat.CancelRequested {
-		return false, nil
+		return time.Time{}, nil
 	}
 	if err = renewCapacityTx(ctx, tx, unit.Team, unit.RunID, unit.NodeID, tx.now(), expiry); err != nil {
-		return false, err
+		return time.Time{}, err
 	}
-	return true, observeUnitTx(ctx, tx, current.Capability.Prefix)
+	return expiry, observeUnitTx(ctx, tx, current.Capability.Prefix)
 }
 
 func endedLauncherPreparation(err error) bool {

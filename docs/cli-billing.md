@@ -27,7 +27,7 @@ Inspect Cloud standing, request a higher tier and set automatic refill
 
 Show or change the team's automatic refill
 
-Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the standing caps, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $5,000. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off.
+Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the refill caps its payment history allows, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $5,000. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off.
 
 ### Flags
 

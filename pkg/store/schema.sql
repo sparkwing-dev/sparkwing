@@ -25,8 +25,6 @@ CREATE TABLE teams (
     refill_amount_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_amount_cents = 0 OR refill_amount_cents >= 1000),
     refill_week_limit_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_week_limit_cents >= 0),
     refill_month_limit_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_month_limit_cents >= 0),
-    refill_failed_at BIGINT NOT NULL DEFAULT 0,
-    refill_failure TEXT NOT NULL DEFAULT '',
     next_run_number BIGINT NOT NULL DEFAULT 1 CHECK(next_run_number > 0),
     CHECK((card_payment_method = '') = (card_fingerprint = '') AND (card_payment_method = '') = (card_customer = '')),
     CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_payment_method <> ''))
@@ -715,14 +713,18 @@ CREATE TABLE credit_checkouts (
     three_d_secure TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL DEFAULT 'checkout' CHECK(kind IN ('checkout','refill')),
     customer_id TEXT NOT NULL DEFAULT '',
+    payment_method TEXT NOT NULL DEFAULT '',
+    receipt_email TEXT NOT NULL DEFAULT '',
     failure TEXT NOT NULL DEFAULT '',
+    refill_blocked INTEGER NOT NULL DEFAULT 0 CHECK(refill_blocked IN (0,1)),
     UNIQUE(team,id,payment_mode),
     UNIQUE(payment_mode,session_id),
     FOREIGN KEY(team,grant_id) REFERENCES credit_grants(team,id),
     CHECK((paid_at IS NULL) = (grant_id IS NULL)),
-    CHECK(paid_at IS NULL OR closed_at IS NOT NULL),
+    CHECK(paid_at IS NULL OR (closed_at IS NOT NULL AND payment_id <> '')),
     CHECK(failure = '' OR (closed_at IS NOT NULL AND paid_at IS NULL)),
-    CHECK(kind = 'checkout' OR (session_id = id AND customer_id <> ''))
+    CHECK(refill_blocked = 0 OR (kind = 'refill' AND failure <> '')),
+    CHECK(kind = 'checkout' OR (session_id = id AND customer_id <> '' AND payment_method <> ''))
 );
 
 -- safety: provider-event deduplication and credit settlement survive operational run pruning.
@@ -734,13 +736,14 @@ CREATE TABLE payment_events (
     payment_id TEXT NOT NULL DEFAULT '',
     event_kind TEXT NOT NULL CHECK(event_kind IN ('checkout_paid','checkout_expired','checkout_failed','card_setup','card_paid','card_failed','refund','warning','dispute_opened','dispute_closed','page_completed')),
     event_digest TEXT NOT NULL,
-    grant_id TEXT REFERENCES credit_grants(id),
+    grant_id TEXT,
     processed_at BIGINT NOT NULL,
     object_id TEXT NOT NULL DEFAULT '',
     event_json TEXT,
     settlement_json TEXT,
     PRIMARY KEY(payment_mode,event_id),
     FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode),
+    FOREIGN KEY(team,grant_id) REFERENCES credit_grants(team,id),
     CHECK(team IS NOT NULL OR event_kind IN ('warning','refund')),
     CHECK((event_kind IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NOT NULL AND team IS NOT NULL)
        OR (event_kind NOT IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NULL AND object_id <> '' AND event_json IS NOT NULL AND settlement_json IS NOT NULL))
@@ -1339,8 +1342,10 @@ CREATE TABLE billing_awards (
     unit_kind TEXT NOT NULL CHECK(unit_kind IN ('trigger','plan','eval','node')),
     billing_unit TEXT NOT NULL CHECK(billing_unit IN ('host','job','plan','eval')),
     awarded_at BIGINT NOT NULL,
-    reserved_amount_micro BIGINT NOT NULL,
     settled_at BIGINT,
+    stop_reason TEXT NOT NULL DEFAULT '',
+    drain_deadline_at BIGINT,
+    CHECK((stop_reason = '') = (drain_deadline_at IS NULL)),
     CHECK((unit_kind = 'trigger' AND billing_unit = 'host') OR (unit_kind = 'node' AND billing_unit = 'job') OR (unit_kind IN ('plan','eval') AND billing_unit = unit_kind)),
     PRIMARY KEY(team,reservation_id)
 );

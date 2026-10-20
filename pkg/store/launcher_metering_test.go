@@ -34,7 +34,7 @@ func TestLauncherAwardMetersFromFirstPodRenewal(t *testing.T) {
 			root, fence := launcherFence(t, s, demand, claim, kind)
 			reserved := chargedMicro(t, s)
 			for range 6 {
-				*now = now.Add(limits.DefaultLease * 2 / 3)
+				*now = now.Add(SliceSeconds * time.Second * 2 / 3)
 				if prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil || len(prepared) != 1 {
 					t.Fatalf("preparation: %+v %v", prepared, err)
 				}

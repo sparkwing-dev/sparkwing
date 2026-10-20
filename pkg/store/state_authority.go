@@ -122,7 +122,7 @@ func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, act
 }
 
 func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string, now time.Time) error {
-	if deletionActor(tx, team, actor) {
+	if storeCancelActor(tx, team, actor) {
 		return nil
 	}
 	switch actor.Kind {
@@ -159,7 +159,7 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 		_, err := checkLauncherActorTx(ctx, tx, team, runID, actor)
 		return err
 	}
-	if deletionActor(tx, team, actor) {
+	if storeCancelActor(tx, team, actor) {
 		return nil
 	}
 	if actor.Kind == ActorReaper {
@@ -192,8 +192,9 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 	return nil
 }
 
-func deletionActor(tx *storeTx, team Team, actor Actor) bool {
-	return team != "" && tx.deletingTeam == team && actor == (Actor{Kind: ActorOperator})
+// safety: the store's own cancellation of a team's runs, for a team deletion or a funding stop, needs no credential.
+func storeCancelActor(tx *storeTx, team Team, actor Actor) bool {
+	return team != "" && tx.cancelingTeam == team && actor == (Actor{Kind: ActorOperator})
 }
 
 func planAcceptedTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {

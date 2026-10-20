@@ -27,6 +27,7 @@ func TestStoreBillingRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES (?,'storage-fund','paid',?,1)`, tenant.Team(), 100*rate)
 	if initial, err := op.ChargeRetainedStorage(t.Context(), lease); err != nil || len(initial.Charges) != 0 {
 		t.Fatalf("initial sample: %+v: %v", initial, err)
 	}

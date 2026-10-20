@@ -249,7 +249,7 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail, err := f.member.ReadRun(t.Context(), created.RunID)
-	if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeCreditHold || detail.Notices[0].Reason != store.NoCreditsHold {
+	if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeCreditHold || !strings.HasPrefix(detail.Notices[0].Reason, "out of credits:") {
 		t.Fatalf("unfunded run notice: %+v %v", detail.Notices, err)
 	}
 	tenant, err := f.state.ForTeam(t.Context(), store.DefaultTeam)

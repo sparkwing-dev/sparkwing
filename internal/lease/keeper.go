@@ -13,10 +13,12 @@ import (
 
 // Beat carries cancellation and watch demand on the existing renewal cadence.
 type Beat struct {
-	CancelRequested bool     `json:"cancel_requested"`
-	CancelReason    string   `json:"cancel_reason,omitempty"`
-	Watched         bool     `json:"watched"`
-	WatchedNodes    []string `json:"watched_jobs,omitempty"`
+	// ExpiresAt is the store's lease bound; the keeper never lets the unit outlive it, whatever its own Lease says.
+	ExpiresAt       time.Time `json:"expires_at,omitzero"`
+	CancelRequested bool      `json:"cancel_requested"`
+	CancelReason    string    `json:"cancel_reason,omitempty"`
+	Watched         bool      `json:"watched"`
+	WatchedNodes    []string  `json:"watched_jobs,omitempty"`
 }
 
 // Keeper renews every unit and its bound concurrency under the shared cadence.
@@ -41,6 +43,9 @@ func (e *CancelError) Error() string {
 	return "cancellation requested: " + e.Reason
 }
 
+// perf: a floor keeps a lease bound close to now from turning renewal into a busy loop.
+const minInterval = time.Second
+
 // ErrLeaseLost ends execution after lock_held, unauthenticated or forbidden renewal.
 var ErrLeaseLost = errors.New("lease authority lost")
 
@@ -61,11 +66,13 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 	go func() {
 		defer close(done)
 		defer cancel(context.Canceled)
+		every := k.Interval
 		for unit.Err() == nil {
 			if !time.Now().Before(expires) {
 				cancel(ErrSilent)
 				return
 			}
+			sent := time.Now()
 			beat, err := k.Renew(unit)
 			if unit.Err() != nil {
 				return
@@ -74,7 +81,18 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 				cancel(ErrSilent)
 				return
 			}
-			next := time.Now().Add(max(k.Interval, retryAfter(err)))
+			if err == nil && !beat.CancelRequested {
+				expires = sent.Add(k.Lease)
+				if !beat.ExpiresAt.IsZero() && beat.ExpiresAt.Before(expires) {
+					expires = beat.ExpiresAt
+				}
+				if !expires.After(time.Now()) {
+					cancel(ErrSilent)
+					return
+				}
+				every = min(k.Interval, max(time.Until(expires)/3, minInterval))
+			}
+			next := time.Now().Add(max(every, retryAfter(err)))
 			if err == nil {
 				if beat.CancelRequested {
 					reason := beat.CancelReason
@@ -83,7 +101,6 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 					}
 					cancel(&CancelError{Reason: reason})
 				} else {
-					expires = time.Now().Add(k.Lease)
 					select {
 					case renewed <- expires:
 					case <-unit.Done():

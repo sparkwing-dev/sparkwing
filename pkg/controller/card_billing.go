@@ -73,11 +73,16 @@ func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.Paym
 	case settled.Refused != "":
 		s.logger.Warn("billing alert: a payment was refused and queued for refund",
 			append(attrs, "alert", cardPaymentRefusedAlert, "reason", settled.Refused)...)
+		if settled.RefillFailed != "" {
+			s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill was refused",
+				"We queued a full refund for an automatic refill because the card cannot pay for this team ("+settled.Refused+"). "+
+					"This refill did not add credits. Check your saved card or use Add funds to keep Cloud work funded:")
+		}
 	case settled.RefillFailed != "":
 		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
 		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
 			"We could not charge your card for an automatic refill ("+settled.RefillFailed+"). "+
-				"Refills stop until you update the card or the refill settings; Cloud work stops when the credits run out:")
+				"Refills stop until you save a card or Add funds succeeds; Cloud work stops when the credits run out:")
 	case settled.Granted:
 		s.logger.Info("payment granted", append(attrs, "grant", settled.GrantID, "amount_micro", settled.AmountMicro)...)
 	}
@@ -100,9 +105,10 @@ func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 	}
 }
 
-// safety: the store commits a refill before any Stripe call, the payment is created unconfirmed and its id recorded
-// before it is confirmed, and only the signed webhook moves money; a crash anywhere leaves a refill the next pass
-// finishes by its id.
+// safety: a refill's request is fixed when it opens, so every retry sends Stripe the same one under its key. Its
+// payment id is recorded before the confirm call charges the card, and only the signed webhook grants credit; a
+// crash before the id is recorded leaves a refill the next pass retries, and a recorded one keeps the team's refill
+// slot until its signed outcome arrives.
 func (s *Server) refillPass(ctx context.Context) {
 	due, err := s.store.AsOperator().DueRefills(ctx)
 	if err != nil {

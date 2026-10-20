@@ -83,26 +83,44 @@ func rewritePh(dialect Dialect, q string) string {
 }
 
 func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	if err := refuseLedgerWrite(q); err != nil {
+		return nil, err
+	}
 	return s.db.ExecContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) execNoCtx(q string, args ...any) (sql.Result, error) {
+	if err := refuseLedgerWrite(q); err != nil {
+		return nil, err
+	}
 	return s.db.Exec(rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	if err := refuseLedgerWrite(q); err != nil {
+		return nil, err
+	}
 	return s.db.QueryContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) queryNoCtx(q string, args ...any) (*sql.Rows, error) {
+	if err := refuseLedgerWrite(q); err != nil {
+		return nil, err
+	}
 	return s.db.Query(rewritePh(s.dialect, q), args...)
 }
 
-func (s *Store) queryRow(ctx context.Context, q string, args ...any) *sql.Row {
+func (s *Store) queryRow(ctx context.Context, q string, args ...any) rowScanner {
+	if err := refuseLedgerWrite(q); err != nil {
+		return refusedLedgerRow{err}
+	}
 	return s.db.QueryRowContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
-func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
+func (s *Store) queryRowNoCtx(q string, args ...any) rowScanner {
+	if err := refuseLedgerWrite(q); err != nil {
+		return refusedLedgerRow{err}
+	}
 	return s.db.QueryRow(rewritePh(s.dialect, q), args...)
 }
 
@@ -113,7 +131,7 @@ type storeTx struct {
 	unpricedDemand       *UnitDemand
 	clockErr             error
 	ctx                  context.Context
-	deletingTeam         Team
+	cancelingTeam        Team
 	tx                   *sql.Tx
 	dialect              Dialect
 	store                *Store
@@ -254,26 +272,44 @@ func (t *storeTx) Commit() error {
 func (t *storeTx) Rollback() error { return t.tx.Rollback() }
 
 func (t *storeTx) Exec(q string, args ...any) (sql.Result, error) {
+	if err := refuseLedgerWrite(q); err != nil {
+		return nil, err
+	}
 	return t.tx.Exec(rewritePh(t.dialect, q), args...)
 }
 
 func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	if err := refuseLedgerWrite(q); err != nil {
+		return nil, err
+	}
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
 func (t *storeTx) Query(q string, args ...any) (*sql.Rows, error) {
+	if err := refuseLedgerWrite(q); err != nil {
+		return nil, err
+	}
 	return t.tx.Query(rewritePh(t.dialect, q), args...)
 }
 
 func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	if err := refuseLedgerWrite(q); err != nil {
+		return nil, err
+	}
 	return t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
-func (t *storeTx) QueryRow(q string, args ...any) *sql.Row {
+func (t *storeTx) QueryRow(q string, args ...any) rowScanner {
+	if err := refuseLedgerWrite(q); err != nil {
+		return refusedLedgerRow{err}
+	}
 	return t.tx.QueryRow(rewritePh(t.dialect, q), args...)
 }
 
-func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) rowScanner {
+	if err := refuseLedgerWrite(q); err != nil {
+		return refusedLedgerRow{err}
+	}
 	return t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
 }
 

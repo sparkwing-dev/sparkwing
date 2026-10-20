@@ -252,9 +252,9 @@ func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.T
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
-	previous := tx.deletingTeam
-	tx.deletingTeam = t.team
-	defer func() { tx.deletingTeam = previous }()
+	previous := tx.cancelingTeam
+	tx.cancelingTeam = t.team
+	defer func() { tx.cancelingTeam = previous }()
 	for _, id := range ids {
 		if _, err := transitionRunTx(ctx, tx, t.team, RunTransition{RunID: id, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "team_deleted"}, now); err != nil {
 			return err
@@ -364,12 +364,19 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 // their own statements rather than by a cascade from a very large delete.
 func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 	tables := append([]string{"business_events", "capabilities", "sessions", "payment_events"}, tenantTables...)
+	tables = slices.DeleteFunc(tables, func(t string) bool { return t == "credit_grants" || t == "credit_charges" })
 	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" }), "quota_admission", "runs") {
 		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}
 	}
-	return nil
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		l, err := lockLedgerTx(ctx, tx, team)
+		if err != nil {
+			return err
+		}
+		return l.purge(ctx)
+	})
 }
 
 // PurgeTeam removes every row a team owns in every tenant-owned table, then
@@ -481,7 +488,11 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	if err != nil {
 		return AccountDeletion{}, err
 	}
-	if err := lockOwnedTeamsTx(ctx, tx, s, accountID); err != nil {
+	names, err := accountPrincipalNamesTx(ctx, tx, acct)
+	if err != nil {
+		return AccountDeletion{}, err
+	}
+	if err := lockOwnedTeamsTx(ctx, tx, s, accountID, names); err != nil {
 		return AccountDeletion{}, err
 	}
 	sole, blocked, err := ownedTeamsTx(ctx, tx, accountID)
@@ -515,10 +526,6 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 		return AccountDeletion{}, err
 	}
 	res.RevokedPrefixes = append(res.RevokedPrefixes, minted...)
-	names, err := accountPrincipalNamesTx(ctx, tx, acct)
-	if err != nil {
-		return AccountDeletion{}, err
-	}
 	for _, name := range names {
 		if err := relabelPrincipalTx(ctx, tx, name); err != nil {
 			return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
@@ -587,7 +594,7 @@ func ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Te
 // other as the owner who stays; locking every team the account owns first,
 // in one order, makes the second count see the first's departure without
 // two deletions deadlocking on each other's teams.
-func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID string) error {
+func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID string, names []principalName) error {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT team FROM memberships WHERE account_id = ? AND role = ? ORDER BY team`, accountID, string(RoleOwner))
 	if err != nil {
@@ -597,9 +604,18 @@ func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID stri
 	if err != nil {
 		return err
 	}
-	// safety: every owned team's ledger is locked before any team row, in name order, the order a single team's
-	// settlement takes them in, so deleting an account never deadlocks a payment.
-	for _, team := range teams {
+	ledgerTeams := slices.Clone(teams)
+	for _, name := range names {
+		touched, err := grantCreatorTeamsTx(ctx, tx, name)
+		if err != nil {
+			return err
+		}
+		ledgerTeams = append(ledgerTeams, touched...)
+	}
+	slices.Sort(ledgerTeams)
+	// safety: take all touched ledger locks before any team row, in one order, including teams the account
+	// does not own, so cross-team relabeling cannot invert another account deletion's locks.
+	for _, team := range slices.Compact(ledgerTeams) {
 		if _, err := lockLedgerTx(ctx, tx, Team(team)); err != nil {
 			return err
 		}
@@ -653,7 +669,6 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 		{"approvals", "approver"},
 		{"cron_schedules", "armed_by"},
 		{"debug_pauses", "released_by"},
-		{"credit_grants", "created_by"},
 		{"nodes", "claim_principal"},
 		{"secrets", "principal"},
 	} {
@@ -661,6 +676,9 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 			`UPDATE `+col.table+` SET `+col.column+` = ? WHERE `+col.column+` = ?`+scope, args...); err != nil {
 			return fmt.Errorf("relabel %s.%s: %w", col.table, col.column, err)
 		}
+	}
+	if err := relabelGrantCreatorTx(ctx, tx, n, label); err != nil {
+		return err
 	}
 	eventsSQL := `UPDATE events SET payload = CAST(REPLACE(CAST(payload AS TEXT), ?, ?) AS BLOB)
 		WHERE payload IS NOT NULL AND instr(CAST(payload AS TEXT), ?) > 0`
@@ -677,6 +695,37 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 		return fmt.Errorf("relabel event payloads: %w", err)
 	}
 	return nil
+}
+
+// safety: a relabel can reach grants on teams the account does not own, so it takes each touched team's ledger lock
+// in name order before rewriting that team's grants.
+func relabelGrantCreatorTx(ctx context.Context, tx *storeTx, n principalName, label string) error {
+	teams, err := grantCreatorTeamsTx(ctx, tx, n)
+	if err != nil {
+		return err
+	}
+	for _, team := range teams {
+		l, err := lockLedgerTx(ctx, tx, Team(team))
+		if err != nil {
+			return err
+		}
+		if err := l.relabelCreator(ctx, n.name, label); err != nil {
+			return fmt.Errorf("relabel credit_grants.created_by: %w", err)
+		}
+	}
+	return nil
+}
+
+func grantCreatorTeamsTx(ctx context.Context, tx *storeTx, n principalName) ([]string, error) {
+	query, args := `SELECT DISTINCT team FROM credit_grants WHERE created_by=?`, []any{n.name}
+	if n.team != "" {
+		query, args = query+` AND team=?`, append(args, n.team)
+	}
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY team`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return scanPrefixes(rows)
 }
 
 // MaxInvitationEmailsPerDay bounds how many invitation emails one address

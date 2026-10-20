@@ -262,16 +262,15 @@ func TestBillingModelCloudReclaimCannotRestartJobDeadline(t *testing.T) {
 	}
 }
 
-// Every hold and an unpaid next slice stop running Cloud work at its next renewal, with no grace, and refuse new
-// Cloud work; only a funded, unheld team keeps running. The old code let a held team run to its full deadline (B8).
+// A funding stop cancels the run durably and bounds future renewals even after the balance or hold recovers.
 func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
-	for _, hold := range []struct{ name, id, cause string }{
-		{"dispute", "dp_1", HoldCauseDispute},
-		{"warning", "efw_1", HoldCauseWarning},
-		{"operator", OperatorHoldPrefix + "x", HoldCauseOperator},
-		{"revoked", "", HoldCauseRevoked},
-		{"out of credits", "", "unpaid"},
-		{"no hold", "", "control"},
+	for _, hold := range []struct{ name, id, cause, says string }{
+		{"dispute", "dp_1", HoldCauseDispute, "dispute"},
+		{"warning", "efw_1", HoldCauseWarning, "fraud"},
+		{"operator", OperatorHoldPrefix + "x", HoldCauseOperator, "support"},
+		{"revoked", "", HoldCauseRevoked, "revoked"},
+		{"out of credits", "", "unpaid", "add funds"},
+		{"no hold", "", "control", ""},
 	} {
 		t.Run(hold.name, func(t *testing.T) {
 			s, demand, now := billingModelFixture(t)
@@ -290,19 +289,41 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			case hold.cause == HoldCauseRevoked:
 				rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='revoked' WHERE name='a'`)
 			case hold.cause == "unpaid":
-				rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=600`)
 			}
 			*now = now.Add(30 * time.Second)
-			rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE node_id='job'`, now.Add(time.Minute).UnixNano())
 			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if stopped := hold.cause != "control"; beat.CancelRequested != stopped || stopped && beat.CancelReason != EventKindCreditsExhausted {
+			if stopped := hold.cause != "control"; beat.CancelRequested != stopped || stopped && !strings.Contains(beat.CancelReason, hold.says) {
 				t.Fatalf("cancel requested=%v (%s) with %s", beat.CancelRequested, beat.CancelReason, hold.name)
 			}
 			if hold.cause == "control" {
 				return
+			}
+			if !beat.ExpiresAt.After(*now) || beat.ExpiresAt.After(claim.Award.LeaseExpiresAt) {
+				t.Fatalf("lease runs to %v from %v; want a drain within the funded slice", beat.ExpiresAt, *now)
+			}
+			run, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil || run.CancelRequestedAt == nil || !strings.Contains(run.CancelReason, hold.says) {
+				t.Fatalf("the stop left the run uncancelled: %+v %v", run.CancelRequestedAt, err)
+			}
+			rewriteSchemaExec(t, s.db, `DELETE FROM credit_freezes`)
+			rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='' WHERE name='a'`)
+			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES ('a','late','paid',?,1)`, int64(MaxCreditGrantMicro))
+			*now = now.Add(10 * time.Second)
+			again, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			if err != nil || !again.CancelRequested || !again.ExpiresAt.Equal(beat.ExpiresAt) {
+				t.Fatalf("lifting the hold resumed stopped work: %+v %v", again, err)
+			}
+			*now = beat.ExpiresAt
+			if late, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
+				t.Fatalf("a runner that kept renewing past its drain deadline was renewed: %+v", late)
+			}
+			rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants WHERE id='late'`)
+			if hold.cause != "unpaid" {
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES ('dp_2','a','r',?,'',?)`, HoldCauseDispute, now.UnixNano())
 			}
 			billingModelJob(t, s, "second")
 			demand.Target.NodeID = "second"

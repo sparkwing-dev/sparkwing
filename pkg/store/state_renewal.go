@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // RenewNodeClaim extends only a live exact claim and its continuously retained capacity.
@@ -37,21 +36,11 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref NodeRef,
 	if err = checkHolderTx(ctx, tx, t.team, row, actor, now); err != nil {
 		return err
 	}
-	expiry, err := boundedClaimExpiryTx(ctx, tx, actor, now)
-	if err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at=?,last_heartbeat=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND claimed_by=?`, expiry.UnixNano(), now.UnixNano(), t.team, ref.RunID, ref.NodeID, actor.Generation, actor.Holder); err != nil {
-		return err
-	}
-	if err = renewCapacityTx(ctx, tx, t.team, ref.RunID, ref.NodeID, now, expiry); err != nil {
-		return err
-	}
 	run, err := readRunTx(ctx, tx, t.team, ref.RunID)
 	if err != nil {
 		return err
 	}
-	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: row.CancelRequestedAt != nil || run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
+	*beat = LeaseBeat{CancelRequested: row.CancelRequestedAt != nil || run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
 	if row.CancelRequestedAt != nil {
 		beat.CancelReason = row.CancelReason
 	}
@@ -61,9 +50,21 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref NodeRef,
 			return err
 		}
 	}
-	if err := renewUnitBillingTx(ctx, tx, t.team, unit, row.Generation, beat); err != nil {
+	funded, err := renewUnitBillingTx(ctx, tx, t.team, unit, row.Generation, beat)
+	if err != nil {
 		return err
 	}
+	expiry, err := leaseBoundTx(ctx, tx, actor.CapabilityPrefix, now, funded)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at=?,last_heartbeat=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND claimed_by=?`, expiry.UnixNano(), now.UnixNano(), t.team, ref.RunID, ref.NodeID, actor.Generation, actor.Holder); err != nil {
+		return err
+	}
+	if err = renewCapacityTx(ctx, tx, t.team, ref.RunID, ref.NodeID, now, expiry); err != nil {
+		return err
+	}
+	beat.ExpiresAt = expiry
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 }
 
@@ -105,22 +106,42 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 	if run.FinishedAt != nil {
 		return holderRefusal()
 	}
-	expiry := now.Add(limits.DefaultLease)
 	ownerCancelled := false
+	if actor.Owner.Kind != OwnerController {
+		if err = tx.QueryRowContext(ctx, `SELECT cancel_requested_at IS NOT NULL FROM triggers WHERE team=? AND id=?`, t.team, runID).Scan(&ownerCancelled); err != nil {
+			return err
+		}
+	}
+	*beat = LeaseBeat{CancelRequested: run.CancelRequestedAt != nil || ownerCancelled, CancelReason: run.CancelReason}
+	funded, err := renewOwnedNodesBillingTx(ctx, tx, t.team, actor, now, beat)
+	if err != nil {
+		return err
+	}
+	var unit UnitRef
+	if actor.Owner.Kind == OwnerTrigger {
+		if unit, err = ownerUnitTx(ctx, tx, t.team, runID); err != nil {
+			return err
+		}
+		bound, err := renewUnitBillingTx(ctx, tx, t.team, unit, actor.Owner.Generation, beat)
+		if err != nil {
+			return err
+		}
+		funded = append(funded, bound)
+	}
+	var expiry time.Time
 	if actor.Owner.Kind == OwnerController {
 		var until int64
 		if err = tx.QueryRowContext(ctx, `SELECT until FROM leases WHERE name=?`, actor.Owner.Name).Scan(&until); err != nil {
 			return err
 		}
-		expiry = time.Unix(0, until).UTC()
+		expiry, err = leaseBound(now, append(funded, time.Unix(0, until).UTC())...)
 	} else {
-		if err = tx.QueryRowContext(ctx, `SELECT cancel_requested_at IS NOT NULL FROM triggers WHERE team=? AND id=?`, t.team, runID).Scan(&ownerCancelled); err != nil {
-			return err
-		}
-		expiry, err = boundedClaimExpiryTx(ctx, tx, actor, now)
-		if err != nil {
-			return err
-		}
+		expiry, err = leaseBoundTx(ctx, tx, actor.CapabilityPrefix, now, funded...)
+	}
+	if err != nil {
+		return err
+	}
+	if actor.Owner.Kind != OwnerController {
 		if _, err = tx.ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=? AND generation=? AND claimed_by=?`, expiry.UnixNano(), t.team, runID, actor.Owner.Generation, actor.Owner.Holder); err != nil {
 			return err
 		}
@@ -137,18 +158,8 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 	if err = renewCapacityTx(ctx, tx, t.team, runID, "", now, expiry); err != nil {
 		return err
 	}
-	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil || ownerCancelled, CancelReason: run.CancelReason}
-	if err := renewOwnedNodesBillingTx(ctx, tx, t.team, actor, now, beat); err != nil {
-		return err
-	}
+	beat.ExpiresAt = expiry
 	if actor.Owner.Kind == OwnerTrigger {
-		unit, err := ownerUnitTx(ctx, tx, t.team, runID)
-		if err != nil {
-			return err
-		}
-		if err := renewUnitBillingTx(ctx, tx, t.team, unit, actor.Owner.Generation, beat); err != nil {
-			return err
-		}
 		return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 	}
 	return nil
@@ -159,21 +170,4 @@ func lockActorTx(ctx context.Context, tx *storeTx, actor Actor) error {
 		return nil
 	}
 	return lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority}, actor.CapabilityPrefix)
-}
-
-func boundedClaimExpiryTx(ctx context.Context, tx *storeTx, actor Actor, now time.Time) (time.Time, error) {
-	c, err := loadCapabilityTx(ctx, tx, actor.CapabilityPrefix)
-	if err != nil {
-		return time.Time{}, err
-	}
-	expiry := now.Add(limits.DefaultLease)
-	for _, bound := range []*time.Time{c.ExpiresAt, c.Binding.Deadline} {
-		if bound != nil && bound.Before(expiry) {
-			expiry = *bound
-		}
-	}
-	if !expiry.After(now) {
-		return time.Time{}, holderRefusal()
-	}
-	return expiry, nil
 }

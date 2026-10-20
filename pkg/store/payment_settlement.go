@@ -229,11 +229,11 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	if err := l.insertGrant(ctx, grant); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), three_d_secure = ?, failure = '' WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), id, now.UnixNano(), event.ThreeDS, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), three_d_secure = ?, failure = '', refill_blocked = 0 WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), id, now.UnixNano(), event.ThreeDS, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
-	if checkout.kind == CheckoutKindRefill {
-		if _, err := tx.ExecContext(ctx, "UPDATE teams SET refill_failed_at = 0, refill_failure = '' WHERE name = ?", string(team)); err != nil {
+	if checkout.kind == CheckoutKindCheckout {
+		if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND refill_blocked = 1`, string(team)); err != nil {
 			return err
 		}
 	}
@@ -252,24 +252,32 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	case checkout.kind == CheckoutKindRefill:
 		failure, kind = cmp.Or(event.DeclineCode, "payment_failed"), BusinessEventRefillFailed
 		checkout.result.RefillFailed = failure
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET refill_failed_at = ?, refill_failure = ? WHERE name = ?`, now.UnixNano(), failure, string(team)); err != nil {
-			return err
-		}
 	case event.Kind == capability.PaymentCheckoutExpired:
 		kind = BusinessEventCheckoutExpired
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at = ?, failure = ? WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?,
+	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team) THEN 1 ELSE 0 END
+	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
 	return RecordBusinessEvent(tx, BusinessEvent{At: now, Team: team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID, "failure": failure}})
 }
 
 // safety: a refused Add funds or refill payment closes its row without a grant and is queued for a full refund, whose
-// settlement finds the team through the checkout's payment; a warned card also holds the team.
+// settlement finds the team through the checkout's payment; a warned card also holds the team. Refusal removes the
+// matching saved card, and a refused refill records its failure, so later passes cannot charge it again.
 func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
 	team, now := checkout.result.Team, tx.now()
 	checkout.result.Refused = refusal.reason
-	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?) WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?,
+	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team) THEN 1 ELSE 0 END
+	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), refusal.reason, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+		return err
+	}
+	if checkout.kind == CheckoutKindRefill {
+		checkout.result.RefillFailed = refusal.reason
+	}
+	if err := forgetTeamCardTx(ctx, tx, team, event.Fingerprint, refusal.reason, now); err != nil {
 		return err
 	}
 	if refusal.warning != "" {

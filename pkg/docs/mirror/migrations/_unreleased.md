@@ -22,8 +22,8 @@ Clients reading these fields must stop:
   `limits.spent_today_cents`, `limits.headroom_cents` and `limits.binding`.
   `min_billable_seconds` is renamed `slice_seconds`. `standing.history` drops
   `successful_charges`. The response adds a `refill` object with the team's
-  settings, its standing caps, the counts in the current windows and the
-  `limit`, if any, that stops the next refill.
+  settings, its refill caps, which follow paid history only, the counts in
+  the current windows and the `limit`, if any, that stops the next refill.
 - `POST /api/v1/team/billing/pay` and `PUT /api/v1/team/billing/budget` are
   removed. `PUT /api/v1/team/billing/refill` takes `enabled`,
   `threshold_cents`, `amount_cents`, `week_limit_cents` and
@@ -34,10 +34,21 @@ Clients reading these fields must stop:
   `exhausted_at`.
 
 A Cloud job whose balance cannot pay its next 60-second slice now stops at that
-lease renewal with `credits_exhausted`, with no grace period. A held team's
-running Cloud work stops at its next renewal too. The checkout service drops
-its pay-now page and charge route and adds `POST /internal/refill`; deploy the
-matching sparkwing-platform release with this controller.
+lease renewal, with no grace period: the renewal cancels the run with a reason
+naming the shortfall and its remedy. The job's lease ends at the earlier of
+its funded horizon and a drain deadline at most one slice away. A held team's
+running Cloud work stops the same way, with the hold named. Retained storage no
+longer takes the balance below zero. The checkout service drops its pay-now page
+and charge route and adds `POST /internal/refill`, which charges the amount,
+card and receipt address the controller fixed when the refill opened; deploy
+the matching sparkwing-platform release with this controller.
+
+Go callers of `pkg/store` lose `NoCreditsHold`, `EventKindCreditsExhausted`,
+`PoolHeartbeatInterval` and `DispatchedHeartbeatInterval`. A waiting unit's
+`CreditHold` now carries the refusal's own text.
+`Store.RenewLauncherPreparation` returns `[]LauncherPreparation` containing
+the fence and committed expiry. Launcher sync's `prepared` entries retain
+the fence fields and add `expires_at`, which preparation keepers must honor.
 
 ## Local dashboard sign-in link
 

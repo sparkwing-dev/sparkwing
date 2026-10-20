@@ -23,7 +23,8 @@ const (
 	MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 
 	// SliceSeconds is the metered time paid for ahead: admission reserves the first slice and every lease renewal
-	// the next, so a team's balance never pays for more than one unreserved slice per running job.
+	// the next, and a metered lease ends where that payment does. A refusal grants a drain of at most one slice, so
+	// work runs unpaid for at most one slice per job.
 	SliceSeconds = 60
 
 	// MaxCreditGrantMicro caps the size of one grant at ten million dollars.
@@ -31,14 +32,6 @@ const (
 
 	// MaxCreditRateMicro is the highest price an operator may put on a cloud runner second: ten thousand dollars.
 	MaxCreditRateMicro = 1_000_000_000_000
-)
-
-const (
-	// PoolHeartbeatInterval is how often a pooled runner renews its claim.
-	PoolHeartbeatInterval = 3 * time.Second
-
-	// DispatchedHeartbeatInterval is how often a dispatched node and a warm pool runner renew theirs, which is the longest cadence any metered node renews on.
-	DispatchedHeartbeatInterval = 5 * time.Second
 )
 
 const (
@@ -58,8 +51,6 @@ const (
 const (
 	// EventKindCreditsBlocked records a claim refused for an empty balance, so a run waiting on a metered runner says why.
 	EventKindCreditsBlocked = "credits_blocked"
-	// EventKindCreditsExhausted records metered work stopped because the balance could not pay its next slice.
-	EventKindCreditsExhausted = "credits_exhausted"
 )
 
 // ErrInsufficientCredits is returned when a metered runner's controller has no balance left to pay for the work it asked for.
@@ -97,10 +88,8 @@ func (e *InsufficientCreditsError) Error() string {
 // Unwrap reports [ErrInsufficientCredits], so a caller matches the condition with errors.Is without knowing this type.
 func (e *InsufficientCreditsError) Unwrap() error { return ErrInsufficientCredits }
 
-// safety: each of these is one price or one policy the operator sets for the
-// whole controller, so they stay in the deployment's bag; a per-team rate is a
-// discount the product does not sell, and the charge cap is judged against the
-// heartbeat cadence this binary ships rather than against any customer.
+// safety: each of these is one price the operator sets for the whole controller, so they stay in the deployment's
+// bag; a per-team rate is a discount the product does not sell.
 const (
 	metaKeyCreditRateMicro = "credit_rate_micro_per_second"
 	metaKeyWarmCPUClass    = "warm_cpu_class_cores"

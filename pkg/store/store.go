@@ -55,8 +55,8 @@ const (
 	FailureVerify             = "verify"
 	FailureQueueTimeout       = "queue_timeout"
 	FailureRunnerLeaseExpired = "runner_lease_expired"
-	// FailureCreditsExhausted: the controller's prepaid credit balance ran
-	// out and the node was cancelled after the grace period.
+	// FailureCreditsExhausted: the team's prepaid balance or a hold refused
+	// the node's next slice, and the node stopped within its drain.
 	FailureCreditsExhausted = "credits_exhausted"
 	// FailureUnpricedCPUClass: the node's cpu request is above the largest
 	// class the credit rate table prices, so no claim could be billed.

@@ -107,7 +107,7 @@ func TestRefillLimitsStopTheNextRefill(t *testing.T) {
 		want     string
 	}{
 		{"standing size", false, RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 6_000}, 0, RefillLimitStandingSize},
-		{"standing daily", false, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}, 2, RefillLimitStandingDaily},
+		{"standing daily", false, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}, 1, RefillLimitStandingDaily},
 		{"team weekly", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 1_500}, 1, RefillLimitTeamWeekly},
 		{"team monthly", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, MonthLimitCents: 2_500}, 2, RefillLimitTeamMonthly},
 		{"within limits", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 5_000}, 2, ""},
@@ -139,8 +139,7 @@ func TestRefillLimitsStopTheNextRefill(t *testing.T) {
 	}
 }
 
-// Refill settings keep the $10 minimum, refuse turning refills on without a card, and a failed refill stops refills
-// until the card or the settings change.
+// A failed refill waits for a saved card or successful Add funds; settings cannot recover it.
 func TestRefillSettingsAndFailure(t *testing.T) {
 	s, tenant, now := refillFixture(t, true)
 	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 999}); !errors.Is(err, ErrInvalidInput) {
@@ -189,12 +188,10 @@ func TestRefillExpiresAndAWarnedCardTurnsRefillOff(t *testing.T) {
 	first := dueRefillsFor(t, s, "a")
 	now = now.Add(refillKeyLife + time.Minute)
 	s.clock = func() time.Time { return now }
-	if expired := dueRefillsFor(t, s, "a"); len(expired) != 0 {
-		t.Fatalf("an expired refill was retried: %+v", expired)
-	}
 	if replaced := dueRefillsFor(t, s, "a"); len(replaced) != 1 || replaced[0].ID == first[0].ID {
 		t.Fatalf("expired refill not replaced: %+v", replaced)
 	}
+	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE kind='refill' AND failure='expired' AND payment_id=''", 1)
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "efw", PaymentIntent: "pi_elsewhere", Fingerprint: "fp_1", Actionable: true}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -224,4 +221,335 @@ func TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest(t *testing.T) {
 		t.Fatal(err)
 	}
 	unitBillingTotal(t, s, 900, true)
+}
+
+func addFunds(t *testing.T, s *Store, cents int64, payment string) {
+	t.Helper()
+	rewriteSchemaExec(t, s.db, `UPDATE credit_checkouts SET amount_minor=?, amount_micro=? WHERE id='checkout'`, cents, cents*MicroCreditsPerCent)
+	paid := capability.PaymentEvent{EventID: "add-" + payment, CheckoutID: "provider-session", PaymentID: payment, Currency: "usd", AmountMinor: cents, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid}
+	if got, err := s.settlePaymentFacts(t.Context(), paid); err != nil || !got.Granted {
+		t.Fatalf("add funds = %+v, %v", got, err)
+	}
+}
+
+func TestARefusedRefillStopsRefillsAcrossWorkerPasses(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}); err != nil {
+		t.Fatal(err)
+	}
+	due := dueRefillsFor(t, s, "a")
+	if len(due) != 1 {
+		t.Fatalf("refill = %+v", due)
+	}
+	if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", due[0].ID, "pi_pinned"); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('fp_1','b','pi_b',1)`)
+	got, err := s.settlePaymentFacts(t.Context(), refillPaid(now, "pi_pinned", 1_000))
+	if err != nil || got.Refused != CardRefusedPinned || got.Granted {
+		t.Fatalf("refill on a pinned card = %+v, %v", got, err)
+	}
+	for pass := range 3 {
+		now = now.Add(30 * time.Second)
+		s.clock = func() time.Time { return now }
+		if again := dueRefillsFor(t, s, "a"); len(again) != 0 {
+			t.Fatalf("pass %d charged the refused card again: %+v", pass, again)
+		}
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Card.PaymentMethod != "" || st.Refill.Enabled || st.Refill.Failure != CardRefusedPinned || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 {
+		t.Fatalf("after a refused refill: card %+v refill %+v, %v", st.Card, st.Refill, err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method,card_fingerprint,refill_enabled,refill_threshold_cents,refill_amount_cents) VALUES ('c',1,1,'cus_c','pm_c','fp_1',1,1000000,1000)`)
+	if pinned := dueRefillsFor(t, s, "c"); len(pinned) != 0 {
+		t.Fatalf("a card pinned elsewhere was eligible for a refill: %+v", pinned)
+	}
+}
+
+func TestRefillCapsFollowHistoryNotTheBalance(t *testing.T) {
+	s, tenant, now := refillFixture(t, false)
+	addFunds(t, s, 10_000, "pi_add")
+	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 6_000}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Billing.Tier != "Trusted" || st.Refill.Caps != (RefillCaps{AmountCents: 5_000, PerDay: 1, WeekCents: 10_000}) || st.Refill.Limit != RefillLimitStandingSize {
+		t.Fatalf("after $100 Add funds: tier %s caps %+v limit %q, %v", st.Billing.Tier, st.Refill.Caps, st.Refill.Limit, err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
+		t.Fatalf("a $60 refill passed the New cap: %+v", due)
+	}
+	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 5_000}); err != nil {
+		t.Fatal(err)
+	}
+	due := dueRefillsFor(t, s, "a")
+	if len(due) != 1 {
+		t.Fatalf("refill within the New caps = %+v", due)
+	}
+	payRefill(t, s, due[0], now)
+	if again := dueRefillsFor(t, s, "a"); len(again) != 0 {
+		t.Fatalf("a second refill in one day at New caps: %+v", again)
+	}
+	now = now.Add(refillCleanAge + time.Hour)
+	s.clock = func() time.Time { return now }
+	if st, err = tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Caps.AmountCents != 20_000 {
+		t.Fatalf("a week of clean history kept New caps: %+v, %v", st.Refill.Caps, err)
+	}
+}
+
+func TestABoundRefillKeepsItsSlotUntilItsOutcome(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}); err != nil {
+		t.Fatal(err)
+	}
+	first := dueRefillsFor(t, s, "a")
+	if len(first) != 1 {
+		t.Fatalf("refill = %+v", first)
+	}
+	if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", first[0].ID, "pi_late"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(refillKeyLife + 2*time.Hour)
+	s.clock = func() time.Time { return now }
+	again := dueRefillsFor(t, s, "a")
+	if len(again) != 1 || again[0].ID != first[0].ID || again[0].PaymentIntent != "pi_late" {
+		t.Fatalf("a bound refill gave up its slot: %+v", again)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || !st.Refill.Open || st.Refill.DayCount != 0 || st.Refill.WeekCents != 1_000 {
+		t.Fatalf("bound refill state = %+v, %v", st.Refill, err)
+	}
+	now = now.Add(refillMonth)
+	s.clock = func() time.Time { return now }
+	if st, err = tenant.SpendStanding(t.Context(), now); err != nil || !st.Refill.Open || st.Refill.MonthCents != 0 {
+		t.Fatalf("old bound refill state = %+v, %v", st.Refill, err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 1 || due[0].ID != first[0].ID {
+		t.Fatalf("old bound refill gave up its slot: %+v", due)
+	}
+	payRefill(t, s, again[0], now)
+	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE kind='refill'", 1)
+}
+
+func TestAnUnboundRefillRechecksItsCardsPin(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}); err != nil {
+		t.Fatal(err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 1 {
+		t.Fatalf("refill = %+v", due)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('fp_1','b','pi_b',1)`)
+	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
+		t.Fatalf("an unbound refill retried a newly pinned card: %+v", due)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Card.PaymentMethod != "" || st.Refill.Enabled || st.Refill.Open || st.Refill.DayCount != 0 {
+		t.Fatalf("after the pin refusal: card %+v refill %+v, %v", st.Card, st.Refill, err)
+	}
+}
+
+func TestTurningRefillOffClosesOnlyAnUnboundReservation(t *testing.T) {
+	for _, bound := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unbound", true: "bound"}[bound], func(t *testing.T) {
+			s, tenant, now := refillFixture(t, true)
+			settings := RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}
+			if err := setRefill(t, s, "a", settings); err != nil {
+				t.Fatal(err)
+			}
+			due := dueRefillsFor(t, s, "a")
+			if len(due) != 1 {
+				t.Fatalf("refill = %+v", due)
+			}
+			if bound {
+				if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", due[0].ID, "payment"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			settings.Enabled = false
+			if err := setRefill(t, s, "a", settings); err != nil {
+				t.Fatal(err)
+			}
+			again := dueRefillsFor(t, s, "a")
+			if (len(again) == 1) != bound {
+				t.Fatalf("refill after opt-out = %+v", again)
+			}
+			st, err := tenant.SpendStanding(t.Context(), now)
+			if err != nil || st.Refill.Open != bound || !st.Refill.FailedAt.IsZero() {
+				t.Fatalf("refill after opt-out = %+v, %v", st.Refill, err)
+			}
+		})
+	}
+}
+
+func TestARefillReplaysItsOwnParametersUntilReplaced(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('owner','owner@example.com',1,1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
+	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}); err != nil {
+		t.Fatal(err)
+	}
+	first := dueRefillsFor(t, s, "a")
+	if len(first) != 1 || first[0].PaymentMethod != "pm_1" || first[0].ReceiptEmail != "owner@example.com" {
+		t.Fatalf("refill = %+v", first)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE accounts SET email='new-owner@example.com' WHERE id='owner'`)
+	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 2_000}); err != nil {
+		t.Fatal(err)
+	}
+	if replay := dueRefillsFor(t, s, "a"); len(replay) != 1 || replay[0] != first[0] {
+		t.Fatalf("an unbound refill changed its request: %+v", replay)
+	}
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_1", PaymentMethod: "pm_2", Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	replaced := dueRefillsFor(t, s, "a")
+	if len(replaced) != 1 || replaced[0].ID == first[0].ID || replaced[0].PaymentMethod != "pm_2" {
+		t.Fatalf("an unbound refill was not replaced for the new card: %+v", replaced)
+	}
+	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE kind='refill' AND failure='replaced' AND payment_id=''", 1)
+	if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", replaced[0].ID, "pi_bound"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_1", PaymentMethod: "pm_3", Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	bound := dueRefillsFor(t, s, "a")
+	if len(bound) != 1 || bound[0] != (Refill{Team: "a", ID: replaced[0].ID, AmountCents: 2_000, Customer: "cus_1", PaymentMethod: "pm_2", ReceiptEmail: "new-owner@example.com", PaymentIntent: "pi_bound"}) {
+		t.Fatalf("a bound refill changed its request: %+v", bound)
+	}
+}
+
+func TestAFailedRefillWaitsForANewCardOrAddFunds(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	settings := RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}
+	if err := setRefill(t, s, "a", settings); err != nil {
+		t.Fatal(err)
+	}
+	due := dueRefillsFor(t, s, "a")
+	if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", due[0].ID, "pi_declined"); err != nil {
+		t.Fatal(err)
+	}
+	failed := refillPaid(now, "pi_declined", 1_000)
+	failed.Kind, failed.Status, failed.DeclineCode, failed.Fingerprint = capability.PaymentCardFailed, "requires_payment_method", "insufficient_funds", ""
+	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
+		t.Fatal(err)
+	}
+	settings.WeekLimitCents = 50_000
+	if err := setRefill(t, s, "a", settings); err != nil {
+		t.Fatal(err)
+	}
+	if again := dueRefillsFor(t, s, "a"); len(again) != 0 {
+		t.Fatalf("a settings change lifted a failed refill: %+v", again)
+	}
+	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 {
+		t.Fatalf("a failed refill escaped the windows: %+v, %v", st.Refill, err)
+	}
+	rewriteSchemaCount(t, s.db, "business_events WHERE kind='"+BusinessEventRefillSettings+"'", 2)
+	addFunds(t, s, 100, "pi_manual")
+	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Failure != "" {
+		t.Fatalf("a paid Add funds kept the refill failure: %+v, %v", st.Refill, err)
+	}
+	if again := dueRefillsFor(t, s, "a"); len(again) != 1 {
+		t.Fatalf("refills did not resume after Add funds: %+v", again)
+	}
+	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE failure='insufficient_funds' AND refill_blocked=0", 1)
+}
+
+func TestARefundedRefillStillCountsAgainstEveryWindow(t *testing.T) {
+	s, tenant, now := refillFixture(t, false)
+	r := openRefill(t, s, "a", 1_000, "payment")
+	payRefill(t, s, r, now)
+	refunded := providerPaymentEvent(now, capability.PaymentRefund)
+	refunded.PaymentID, refunded.ObjectID, refunded.Status = "payment", "re_refill", CardRefundSucceeded
+	refunded.AmountMinor = 1_000
+	if _, err := s.settlePaymentFacts(t.Context(), refunded); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 || st.Refill.Limit != RefillLimitStandingDaily {
+		t.Fatalf("a refunded refill escaped the windows: %+v, %v", st.Refill, err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
+		t.Fatalf("refunding a refill freed its daily allowance: %+v", due)
+	}
+}
+
+func TestASavedCardRecoversAFailedRefillWithoutClearingItsWindows(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	r := openRefill(t, s, "a", 1_000, "payment")
+	setupCreated := now.Add(time.Minute)
+	now = now.Add(2 * time.Minute)
+	s.clock = func() time.Time { return now }
+	failed := refillPaid(now, r.PaymentIntent, 1_000)
+	failed.Kind, failed.Status, failed.DeclineCode, failed.Fingerprint = capability.PaymentCardFailed, "requires_payment_method", "insufficient_funds", ""
+	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	s.clock = func() time.Time { return now }
+	stale := Card{Customer: "cus_2", PaymentMethod: "pm_stale", Fingerprint: "fp_2", Brand: "visa", Last4: "4242", AddedAt: setupCreated.Add(-2 * time.Minute)}
+	if err := tenant.TestOnlySaveCard(t.Context(), stale, "billing", now); !errors.Is(err, ErrStaleCardSetup) {
+		t.Fatalf("stale card setup = %v", err)
+	}
+	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Failure != "insufficient_funds" {
+		t.Fatalf("a stale setup recovered the failure: %+v, %v", st.Refill, err)
+	}
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_2", PaymentMethod: "pm_2", Fingerprint: "fp_2", Brand: "visa", Last4: "4242", AddedAt: setupCreated}, "billing", now); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Refill.Failure != "" || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 {
+		t.Fatalf("after saving a replacement card: %+v, %v", st.Refill, err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 1 || due[0].PaymentMethod != "pm_2" {
+		t.Fatalf("refill did not resume on the replacement card: %+v", due)
+	}
+	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE failure='insufficient_funds' AND refill_blocked=0", 1)
+}
+
+func TestALateRefillFailureDoesNotBlockTheReplacementCard(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	r := openRefill(t, s, "a", 1_000, "payment")
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_2", PaymentMethod: "pm_2", Fingerprint: "fp_2", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {
+		t.Fatal(err)
+	}
+	failed := refillPaid(now, r.PaymentIntent, 1_000)
+	failed.Kind, failed.Status, failed.DeclineCode, failed.Fingerprint = capability.PaymentCardFailed, "requires_payment_method", "insufficient_funds", ""
+	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Card.PaymentMethod != "pm_2" || st.Refill.Failure != "" {
+		t.Fatalf("late failure blocked the replacement: card %+v refill %+v, %v", st.Card, st.Refill, err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 1 || due[0].PaymentMethod != "pm_2" {
+		t.Fatalf("refill did not use the replacement card: %+v", due)
+	}
+	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE failure='insufficient_funds' AND refill_blocked=0", 1)
+}
+
+func TestARefusedAddFundsDisablesOnlyItsSavedCard(t *testing.T) {
+	for _, replaced := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same card", true: "replacement card"}[replaced], func(t *testing.T) {
+			s, tenant, now := refillFixture(t, true)
+			if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000, AmountCents: 1_000}); err != nil {
+				t.Fatal(err)
+			}
+			if replaced {
+				if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_2", PaymentMethod: "pm_2", Fingerprint: "fp_2", Brand: "visa", Last4: "4242"}, "billing", now.Add(time.Minute)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('fp_1','b','pi_b',1)`)
+			paid := capability.PaymentEvent{EventID: "manual-paid", CheckoutID: "provider-session", PaymentID: "manual-payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid, Fingerprint: "fp_1"}
+			if got, err := s.settlePaymentFacts(t.Context(), paid); err != nil || got.Refused != CardRefusedPinned {
+				t.Fatalf("Add funds on a pinned card = %+v, %v", got, err)
+			}
+			st, err := tenant.SpendStanding(t.Context(), now)
+			if err != nil || (st.Card.PaymentMethod != "") != replaced || st.Refill.Enabled != replaced {
+				t.Fatalf("after the refused Add funds: card %+v refill %+v, %v", st.Card, st.Refill, err)
+			}
+		})
+	}
 }

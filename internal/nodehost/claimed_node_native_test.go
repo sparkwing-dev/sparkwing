@@ -12,9 +12,11 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -41,8 +43,9 @@ func (r claimEngine) Ensure(_ context.Context, identity engine.Identity, target 
 }
 
 func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
-	for _, lost := range []bool{false, true} {
-		t.Run(map[bool]string{false: "success", true: "lease_lost"}[lost], func(t *testing.T) {
+	for _, outcome := range []string{"success", "lease_lost", "funding_refused", "controller_lost"} {
+		t.Run(outcome, func(t *testing.T) {
+			lost := outcome != "success"
 			input, s, host, _ := claimedNodeFixture(t)
 			host.Mask = func(s string) string { return s }
 			root, sha := hostSourceCheckout(t)
@@ -92,13 +95,17 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(testCtx)
 			defer cancel(nil)
 			var session *ProtocolSession
+			var entered atomic.Bool
 			revoked, cleaned := false, false
 			cfg := ProtocolSessionConfig{
 				Environments: sdkTestEnvironment(s), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
 				RunCleanups: func(context.Context, CleanupScope) error { cleaned = true; return nil },
 				Log: func(_ context.Context, log nodeproto.FrameLog) error {
-					if log.Message == "entered" && lost {
-						cancel(lease.ErrLeaseLost)
+					if log.Message == "entered" {
+						entered.Store(true)
+						if outcome == "lease_lost" {
+							cancel(lease.ErrLeaseLost)
+						}
 					}
 					return nil
 				},
@@ -144,9 +151,42 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if outcome == "funding_refused" || outcome == "controller_lost" {
+				host.Lease = lease.Keeper{Interval: 10 * time.Millisecond, Lease: time.Minute}
+				var bound time.Time
+				s.renew = func(context.Context) (store.LeaseBeat, error) {
+					if !entered.Load() {
+						return store.LeaseBeat{}, nil
+					}
+					if outcome == "funding_refused" {
+						return store.LeaseBeat{CancelRequested: true, CancelReason: "out of credits", ExpiresAt: time.Now().Add(time.Second)}, nil
+					}
+					if bound.IsZero() {
+						bound = time.Now().Add(100 * time.Millisecond)
+						return store.LeaseBeat{ExpiresAt: bound}, nil
+					}
+					return store.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
+				}
+			}
 			err = host.Execute(ctx, input)
-			if lost && !errors.Is(err, lease.ErrLeaseLost) || !lost && err != nil {
-				t.Fatalf("execute = %v", err)
+			var cancelled *lease.CancelError
+			switch outcome {
+			case "success":
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "lease_lost":
+				if !errors.Is(err, lease.ErrLeaseLost) {
+					t.Fatalf("execute = %v", err)
+				}
+			case "funding_refused":
+				if !errors.As(err, &cancelled) || cancelled.Reason != "out of credits" {
+					t.Fatalf("execute = %v", err)
+				}
+			case "controller_lost":
+				if !errors.Is(err, lease.ErrSilent) {
+					t.Fatalf("execute = %v", err)
+				}
 			}
 			if !installed || session == nil || session.cmd.ProcessState == nil || !revoked || !cleaned {
 				t.Fatalf("installed=%t session=%v revoked=%t cleaned=%t", installed, session, revoked, cleaned)
@@ -157,7 +197,11 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 				t.Fatal("host removed the user's checkout:", err)
 			}
-			if lost {
+			if outcome == "funding_refused" {
+				if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != store.NodeCancelled {
+					t.Fatalf("funding cancellation transitions = %+v", s.changes)
+				}
+			} else if lost {
 				for _, change := range s.changes {
 					if change.Cause == store.CauseReport {
 						t.Fatal("lost authority reported a terminal result")
