@@ -187,7 +187,7 @@ func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
-	if res.Status != store.WaiterCancelled {
+	if res.Status != "cancelled" {
 		t.Fatalf("status = %q, want Cancelled", res.Status)
 	}
 }

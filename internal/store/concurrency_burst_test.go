@@ -49,7 +49,7 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 
 	current := "holder-0"
 	for step := 1; step <= N+1; step++ {
-		released, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, key, current, "success", "", "", 0, store.DefaultConcurrencyLease)
+		released, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, key, current, "success", "", "", 0, store.DefaultLeaseDuration)
 		if err != nil {
 			t.Fatalf("release %d: %v", step, err)
 		}
@@ -166,10 +166,10 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 						errs <- fmt.Errorf("arrival %d resolve: %w", i, err)
 						return
 					}
-					if res.Status == store.WaiterPromoted {
+					if res.Status == "promoted" {
 						break
 					}
-					if res.Status == store.WaiterCancelled {
+					if res.Status == "cancelled" {
 						errs <- fmt.Errorf("arrival %d cancelled unexpectedly", i)
 						return
 					}
@@ -183,7 +183,7 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 				errs <- fmt.Errorf("arrival %d release: %w", i, relErr)
 				return
 			}
-			_, _ = tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
+			_, _ = tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", store.DefaultLeaseDuration)
 		}(i)
 	}
 

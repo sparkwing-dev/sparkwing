@@ -25,7 +25,7 @@ func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (b
 // PromoteNextWaiters admits this tenant's queued waiters in arrival order.
 func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error) {
 	if lease <= 0 {
-		lease = DefaultConcurrencyLease
+		lease = defaultConcurrencyLease
 	}
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -61,14 +61,14 @@ func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.
 // HeartbeatConcurrencySlot renews an unexpired tenant holder and reports supersession.
 func (t *Tenant) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error) {
 	if lease <= 0 {
-		lease = DefaultConcurrencyLease
+		lease = defaultConcurrencyLease
 	}
 	return t.heartbeatConcurrencySlotOnce(ctx, key, holderID, lease)
 }
 
 func (t *Tenant) heartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration, sleep func(time.Duration)) (expires time.Time, superseded bool, err error) {
 	if lease <= 0 {
-		lease = DefaultConcurrencyLease
+		lease = defaultConcurrencyLease
 	}
 	err = retryOnBusyWithSleep(func() error {
 		var once error
@@ -153,7 +153,7 @@ func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outc
 // ReleaseAndNotify atomically releases a tenant holder, resolves followers and promotes waiters.
 func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error) {
 	if promoteLease <= 0 {
-		promoteLease = DefaultConcurrencyLease
+		promoteLease = defaultConcurrencyLease
 	}
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -284,7 +284,7 @@ func (t *Tenant) cancelWaiter(ctx context.Context, key, runID, nodeID string, fe
 	}
 	if hn > 0 {
 		now := tx.now()
-		if _, err := txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano()); err != nil {
+		if _, err := txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(defaultConcurrencyLease).UnixNano()); err != nil {
 			return false, err
 		}
 	}

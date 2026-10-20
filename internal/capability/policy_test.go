@@ -202,7 +202,7 @@ func TestPaymentCallbackRequiresProviderProof(t *testing.T) {
 }
 
 func TestPrivateCapacityRoutesRequireLiveTriggerOwner(t *testing.T) {
-	for _, operation := range []string{"adopt", "acquire", "resolve"} {
+	for _, operation := range []string{"acquire"} {
 		path := "/api/v1/runs/{run}/local-host/capacity/" + operation
 		route, ok := capability.LookupRoute("POST", path)
 		if !ok || route.Authentication != capability.AuthCapability || route.Owner != capability.OwnerRun || route.Retry != capability.RetryExactBody || len(route.Access) != 1 {

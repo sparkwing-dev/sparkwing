@@ -19,7 +19,7 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
-	config.Admission = ComposeNativeAdmission(fixture.Tenant, "", nil, true)
+	config.Admission = ComposeNativeAdmission(fixture.Tenant, nil, true)
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestNativeHostBindsRealCapacityPerRun(t *testing.T) {
 	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("queue", 0, "a"), runspec.Options{})
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = first.Tenant, ownerOperationsFixture(first.Host)
-	config.Admission = ComposeNativeAdmission(first.Tenant, "", &LocalAdmission{Daemon: newFakeDaemon()}, false)
+	config.Admission = ComposeNativeAdmission(first.Tenant, &LocalAdmission{Daemon: newFakeDaemon()}, false)
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -112,13 +112,13 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 			if compute {
 				machine = &LocalAdmission{Daemon: daemon}
 			}
-			config.Admission = ComposeNativeAdmission(fixture.Tenant, "box-one", machine, false)
+			config.Admission = ComposeNativeAdmission(fixture.Tenant, machine, false)
 			owner, _, _, err := NewNativeHost(config)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var executed atomic.Int32
-			key := scopedConcurrencyKey("db", test.scope, fixture.Accepted.RunID, "box-one")
+			key := scopedConcurrencyKey("db", test.scope, fixture.Accepted.RunID, fixture.Actor.Owner.Holder)
 			owner.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				executed.Add(1)
 				state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
@@ -163,7 +163,7 @@ func TestNativeClaimedComputeDoesNotReacquireConcurrency(t *testing.T) {
 	capacity, probe, accepted, row := capacityFixture(t)
 	daemon := newFakeDaemon()
 	config, _, _, _ := nativeHostFixture(t)
-	config.Admission = ComposeNativeAdmission(probe, "", &LocalAdmission{Daemon: daemon}, false)
+	config.Admission = ComposeNativeAdmission(probe, &LocalAdmission{Daemon: daemon}, false)
 	_, claimed, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestNativeClaimedComputeDoesNotReacquireConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	requests := daemon.requests()
-	if len(requests) != 1 || len(requests[0].Semaphores) != 0 || len(probe.requests) != 1 {
-		t.Fatalf("claimed compute reacquired concurrency: machine=%+v store=%+v", requests, probe.requests)
+	if len(requests) != 1 || len(requests[0].Semaphores) != 0 || len(probe.bindings) != 1 {
+		t.Fatalf("claimed compute reacquired concurrency: machine=%+v store=%+v", requests, probe.bindings)
 	}
 }

@@ -108,7 +108,7 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		admission.Controller = options.URL
 	}
 	services, err := nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{
-		Admission:    nodehost.ComposeNativeAdmission(state, admission.BoxID, admission, true),
+		Admission:    nodehost.ComposeNativeAdmission(state, admission, true),
 		SubmittedEnv: award.SubmittedEnv, SubmitAccept: procenv.SubmitAcceptAll(),
 		Home: home, Store: state, Parent: private, Bindings: private,
 		Principal: principal, Refresh: refresh, Source: sourceOptions, Local: store.OwnerCanExecute(principal),

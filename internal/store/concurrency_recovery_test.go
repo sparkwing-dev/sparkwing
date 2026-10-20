@@ -110,7 +110,7 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedQueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "w1" {
+	if resolution.Status != "promoted" || resolution.HolderID != "w1" {
 		t.Fatalf("resolution = %+v", resolution)
 	}
 	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
@@ -151,7 +151,7 @@ func TestConcurrency_ResolveWaiterSkipsAbandonedFIFOHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "live" {
+	if resolution.Status != "promoted" || resolution.HolderID != "live" {
 		t.Fatalf("resolution = %+v, want live promoted", resolution)
 	}
 	if holderExists(t, s, "k", "abandoned") {
@@ -185,7 +185,7 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "waiter/-" {
+	if resolution.Status != "promoted" || resolution.HolderID != "waiter/-" {
 		t.Fatalf("resolution = %+v", resolution)
 	}
 	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
@@ -207,7 +207,7 @@ func TestConcurrency_ResolveWaiterSeesAlreadyPromotedHolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "holder" {
+	if resolution.Status != "promoted" || resolution.HolderID != "holder" {
 		t.Fatalf("resolution = %+v", resolution)
 	}
 }

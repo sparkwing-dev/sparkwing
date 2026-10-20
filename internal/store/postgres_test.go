@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-
 	"fmt"
 	"sync"
 	"testing"
@@ -150,7 +149,7 @@ func TestPostgresResolveWaiterPromotesOnceUnderConcurrentPoll(t *testing.T) {
 			t.Fatalf("resolve error: %v", result.err)
 		}
 		switch result.resolution.Status {
-		case store.WaiterPromoted:
+		case "promoted":
 			promoted++
 		case store.WaiterStillWaiting:
 			waiting++

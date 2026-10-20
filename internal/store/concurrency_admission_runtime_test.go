@@ -22,7 +22,7 @@ func TestHolderLivenessUsesStoreClock(t *testing.T) {
 		t.Fatalf("heartbeat revived expired capacity: %v", err)
 	}
 	adopted, err := tenant.AdoptCapacity(t.Context(), "global:key", "holder", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
-	if err != nil || adopted.Kind != AcquireAgain {
+	if err != nil || adopted != acquireAgain {
 		t.Fatalf("adoption revived expired capacity: %+v, %v", adopted, err)
 	}
 	got, err = tenant.AcquireConcurrencySlot(t.Context(), request)

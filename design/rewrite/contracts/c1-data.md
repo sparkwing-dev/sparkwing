@@ -3086,13 +3086,13 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 
 | Export | Purpose |
 |---|---|
-| `CapacityBinding` | CapacityBinding makes capacity follow work across owner loss instead of following a process. |
-| `CapacityHolder` | CapacityHolder retains its own lease as proof that capacity has counted continuously. |
-| `CapacityWaiter` | CapacityWaiter keeps its arrival order only while its own lease remains live. |
-| `AdoptionKind` | AdoptionKind refuses to revive expired capacity; a new arrival goes through normal admission. |
-| `CapacityAdoption` | CapacityAdoption reports the store's liveness decision, never a caller-supplied original arrival time. |
-| `Tenant.AdoptCapacity` | AdoptCapacity checks continuity under the entry lock; expired holders and waiters are removed before a fresh request. |
-| `Tenant.SupersedeCapacity` | SupersedeCapacity marks the holder superseded and requests cancellation on its bound work in the same transaction. |
+| `CapacityBinding` | Captures the run, job and generation whose capacity follows work across owner loss. |
+
+### internal/store/capacity_admission.go
+
+| Export | Purpose |
+|---|---|
+| `Tenant.AdmitCapacity` | Reads all accepted groups and the award's persisted host identity, then adopts, resolves or acquires under one transaction. |
 
 ### internal/store/maintenance_contract.go
 
@@ -4045,9 +4045,9 @@ lead harness.
 
 Open integration points: following a private remote branch needs audited
 controller credentials during revision lookup. Pinned App schedules use the
-existing post-admission source release. HTTP box groups need persisted host
-identity, and memo requests need accepted namespace metadata. Missing authority
-is refused. Native box admission remains available. These gaps remain visible
+existing post-admission source release. Box groups use the persisted machine subject in the authenticated award's ancestry,
+or the persisted local peer identity in a local controller's private store.
+Missing host identity is refused. Memo requests need accepted namespace metadata. These gaps remain visible
 for the lead's launch integration work.
 
 
@@ -4173,7 +4173,7 @@ the original seal. Invocation origin never selects environment storage.
 
 ## Native admission composition
 
-`ComposeNativeAdmission` accepts the placement's capacity store, box identity, optional machine
+`ComposeNativeAdmission` accepts the placement's capacity store and optional machine
 compute service and required-compute policy. `NativeConfig` and `NativeHostConfig`
 carry that value whole. Owner and claimed hosts share its compute service. Store
 concurrency is independent of machine compute. Owners adopt capacity for ready
@@ -4181,11 +4181,27 @@ and claimed remote jobs even when compute admission is disabled. Machine
 requests carry CPU and memory without semaphore groups.
 
 The direct-store scheduling regression runs two jobs with run-scoped and box-scoped
-capacity-one queue groups, with machine compute enabled and disabled. Box identity
-is supplied independently of machine compute. It checks
+capacity-one queue groups, with machine compute enabled and disabled. The store
+derives box identity from persisted award ancestry. It checks
 that each executing job holds the store slot and that terminal completion releases
 it. Machine admission sees resource requests only when enabled.
 
 Remote dispatch tests cover fresh, ready and claimed jobs with run and box
 groups, with compute admission enabled and disabled. Store capacity lasts until
 the job's terminal transition. Remote work reserves no local compute resources.
+
+
+Unit capacity admission takes only `CapacityBinding` and the authenticated actor.
+Its transaction reads every accepted group, derives its complete key and lease
+bound, and locks admission keys, authority, owner, sorted work and group rows in
+that order. It retains live holders, resolves existing waiters and acquires the
+remaining groups in key order. A queued group retains earlier holds until its
+work ends or their leases expire. Repeated admission preserves queue arrival
+and holder continuity. Owner and claim renewal keep capacity live; terminal
+transitions release it. A caller cannot select another machine's namespace,
+replace a policy or omit an accepted group.
+
+The private controller regression covers both queue and accepted
+`cancel_others` declarations. Forged box keys and missing machine identity are
+refused; another machine's holder and work remain unchanged. A binding-only
+request also exercises all global, run and box groups of one accepted job.

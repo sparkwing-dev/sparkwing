@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -20,9 +21,16 @@ func capacityGroupsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 	return run.Spec.Resolved.Settings.Concurrency, nil
 }
 
-func declaredCapacityGroupTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, key string) (runspec.Concurrency, error) {
+func declaredCapacityGroupTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, key string, authority capability.AuthorityRef) (runspec.Concurrency, error) {
 	scope, identity, name, ok := runspec.ParseConcurrencyKey(key)
 	if !ok || scope == "run" && identity != runID || scope == "box" && identity == "" {
+		return runspec.Concurrency{}, bindingRefusal()
+	}
+	derived, err := capacityKeyTx(ctx, tx, authority, runID, scope, name)
+	if err != nil {
+		return runspec.Concurrency{}, err
+	}
+	if derived != key {
 		return runspec.Concurrency{}, bindingRefusal()
 	}
 	run, err := readRunTx(ctx, tx, team, runID)
@@ -44,8 +52,8 @@ func declaredCapacityGroupTx(ctx context.Context, tx *storeTx, team Team, runID,
 	return runspec.Concurrency{}, bindingRefusal()
 }
 
-func sealedCapacityRequestTx(ctx context.Context, tx *storeTx, team Team, req AcquireSlotRequest) (AcquireSlotRequest, error) {
-	group, err := declaredCapacityGroupTx(ctx, tx, team, req.RunID, req.NodeID, req.Key)
+func sealedCapacityRequestTx(ctx context.Context, tx *storeTx, team Team, req AcquireSlotRequest, authority capability.AuthorityRef) (AcquireSlotRequest, error) {
+	group, err := declaredCapacityGroupTx(ctx, tx, team, req.RunID, req.NodeID, req.Key, authority)
 	if err != nil {
 		return AcquireSlotRequest{}, err
 	}

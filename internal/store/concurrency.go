@@ -36,10 +36,10 @@ const (
 	OnLimitCancelOthers = "cancel_others"
 )
 
-// DefaultConcurrencyLease is DefaultLeaseDuration by construction so
+// defaultConcurrencyLease is DefaultLeaseDuration by construction so
 // holder and claim leases can't drift apart; a holder must be silent
 // for the full window to be reaped.
-const DefaultConcurrencyLease = DefaultLeaseDuration
+const defaultConcurrencyLease = DefaultLeaseDuration
 
 // DefaultCancelTimeout bounds CancelOthers eviction.
 const DefaultCancelTimeout = 60 * time.Second
@@ -78,6 +78,7 @@ type AcquireSlotRequest struct {
 
 // AcquireSlotResponse: fields are populated per Kind.
 type AcquireSlotResponse struct {
+	FailureReason    string
 	Kind             AcquireKind
 	HolderID         string
 	LeaseExpiresAt   time.Time
@@ -195,16 +196,16 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 
 func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req AcquireSlotRequest, fence *capacityFence, deadline time.Time) (AcquireSlotResponse, error) {
 	if fence != nil {
-		if err := prepareCapacityAcquisitionTx(ctx, tx, t.team, req.Key, *fence); err != nil {
+		if err := checkCapacityFenceTx(ctx, tx, t.team, req.Key, *fence); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		expires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, tx.now().Add(DefaultConcurrencyLease).UnixNano())
+		expires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, tx.now().Add(defaultConcurrencyLease).UnixNano())
 		if err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		deadline = time.Unix(0, expires)
-		req.Lease = DefaultConcurrencyLease
-		req, err = sealedCapacityRequestTx(ctx, tx, t.team, req)
+		req.Lease = defaultConcurrencyLease
+		req, err = sealedCapacityRequestTx(ctx, tx, t.team, req, fence.actor.Authority)
 		if err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -225,7 +226,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		req.Cost = 1
 	}
 	if req.Lease <= 0 {
-		req.Lease = DefaultConcurrencyLease
+		req.Lease = defaultConcurrencyLease
 	}
 	if req.CancelTimeout <= 0 {
 		req.CancelTimeout = DefaultCancelTimeout
@@ -1139,12 +1140,12 @@ type WaiterStatus string
 
 const (
 	WaiterStillWaiting WaiterStatus = "still_waiting"
-	WaiterPromoted     WaiterStatus = "promoted"
+	waiterPromoted     WaiterStatus = "promoted"
 
 	WaiterLeaderFinished WaiterStatus = "leader_finished"
 
-	WaiterCancelled WaiterStatus = "cancelled"
-	WaiterExpired   WaiterStatus = "expired"
+	waiterCancelled WaiterStatus = "cancelled"
+	waiterExpired   WaiterStatus = "expired"
 )
 
 // WaiterResolution: fields populate per Status.
@@ -1192,7 +1193,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRu
 			return observed, nil
 		}
 	}
-	result, err := t.resolveWaiterTx(ctx, tx, key, runID, nodeID, leaderRunID, leaderNodeID, DefaultConcurrencyLease, fence)
+	result, err := t.resolveWaiterTx(ctx, tx, key, runID, nodeID, leaderRunID, leaderNodeID, defaultConcurrencyLease, fence)
 	if err != nil {
 		return WaiterResolution{}, err
 	}
@@ -1215,7 +1216,7 @@ func (t *Tenant) observeWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		string(t.team), key, runID, nodeID, nowNS,
 	).Scan(&holderID, &leaseNS)
 	if err == nil {
-		return WaiterResolution{Status: WaiterPromoted, HolderID: holderID, HolderLeaseExpires: time.Unix(0, leaseNS)}, true, nil
+		return WaiterResolution{Status: waiterPromoted, HolderID: holderID, HolderLeaseExpires: time.Unix(0, leaseNS)}, true, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return WaiterResolution{}, false, err
@@ -1290,7 +1291,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 	switch {
 	case err == nil && superInt == 0 && leaseNS > nowNS:
 		return WaiterResolution{
-			Status:             WaiterPromoted,
+			Status:             waiterPromoted,
 			HolderID:           holderID,
 			HolderLeaseExpires: time.Unix(0, leaseNS),
 		}, nil
@@ -1312,7 +1313,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
 				return WaiterResolution{}, err
 			}
-			return WaiterResolution{Status: WaiterExpired}, nil
+			return WaiterResolution{Status: waiterExpired}, nil
 		}
 
 		shouldPromote := waiter.Policy == OnLimitQueue
@@ -1336,7 +1337,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 			for _, waiter := range promoted {
 				if waiter.RunID == runID && waiter.NodeID == nodeID {
 					return WaiterResolution{
-						Status:             WaiterPromoted,
+						Status:             waiterPromoted,
 						HolderID:           waiter.HolderID,
 						HolderLeaseExpires: now.Add(lease),
 					}, nil
@@ -1375,7 +1376,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 			return WaiterResolution{}, err
 		}
 		if !found || leaderOutcome != "success" {
-			return WaiterResolution{Status: WaiterCancelled}, nil
+			return WaiterResolution{Status: waiterCancelled}, nil
 		}
 		return WaiterResolution{
 			Status:              WaiterLeaderFinished,
@@ -1386,7 +1387,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		}, nil
 	}
 
-	return WaiterResolution{Status: WaiterCancelled}, nil
+	return WaiterResolution{Status: waiterCancelled}, nil
 }
 
 // GetConcurrencyState returns this tenant's capacity, holders and waiters for a key.

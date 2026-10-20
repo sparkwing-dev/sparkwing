@@ -129,6 +129,16 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 			t.Error("settings inventory differs from source; regenerate with -update-current-contracts")
 		}
 	}
+	data, err = os.ReadFile(root + "design/rewrite/contracts/c1-data.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, capacityInventory, ok := strings.Cut(string(data), "### internal/store/capacity_adoption.go\n")
+	if !ok {
+		t.Fatal("missing capacity inventory")
+	}
+	capacityInventory, _, _ = strings.Cut(capacityInventory, "### internal/store/maintenance_contract.go")
+	checkContractInventory(t, capacityInventory, "store", packages)
 	data, err = os.ReadFile(root + "design/rewrite/contracts/c3-protocol-sdk.md")
 	if err != nil {
 		t.Fatal(err)

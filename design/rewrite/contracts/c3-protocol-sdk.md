@@ -803,8 +803,9 @@ only with `runner.local_admission`; placement eligibility does not decide this
 requirement. `ComposeNativeAdmission` always supplies controller-backed logical
 concurrency to remote owners through `RemoteHostStore`. Its capacity store uses
 the private owner transport, including before a job has an execution award.
-Runner composition resolves the captured `machine.box_id` setting once and
-passes the same box scope with compute admission on or off.
+The capacity store derives box scope from the persisted machine identity bound
+to the award. Compute admission settings do not select a concurrency namespace.
+The private client sends only the unit binding; the store admits all its groups.
 Selection uses the scheduler's dependency closure, including present
 optional dependencies and generator sources. The
 native layer logs timeout indices and proposes a skipped transition only after

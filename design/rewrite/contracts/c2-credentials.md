@@ -2590,8 +2590,9 @@ to the old unfenced methods when it does not.
 
 C1's current BindSlotOfBoundNode checker still refuses missing resolved selectors.
 Tenant consumes SlotKey/SlotHolderID through the concrete transaction interface.
-See C1's scheduled intake and concurrency section for coverage and remaining
-HTTP box and memo declaration gaps.
+See C1's scheduled intake and concurrency section for coverage and the remaining
+memo namespace integration. Public node slot transactions refuse box selectors.
+Private owner unit admission derives box keys from persisted award ancestry.
 The HTTP properties use committed-fact and transaction fakes. They prove target
 transport, policy selection, cancellation classes and safe failure. They do not
 close native group/memo declaration, cross-team leader, lease-continuity or
@@ -3526,7 +3527,7 @@ trust or pool access. Return the first committed result for a repeated instant.
 Tenant implements both interfaces with persisted arming consent and sealed
 intake. The concrete controller proofs cover local registration, Cloud firing,
 replay and current authority. The real api.sock proof remains assigned to the
-lead harness. App and API/local schedules now share W1's sealed intake. C1 records the remaining private-follow, HTTP box and memo integration points.
+lead harness. App and API/local schedules now share W1's sealed intake. C1 records private-follow and memo integration points, plus award-bound box admission through the private owner transport.
 
 
 ## W1b review integration, 2026-10-17

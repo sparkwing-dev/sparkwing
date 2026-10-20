@@ -21,10 +21,10 @@ type ConcurrencyMaintenanceOptions struct {
 
 func (o *ConcurrencyMaintenanceOptions) withDefaults() {
 	if o.Lease <= 0 {
-		o.Lease = DefaultConcurrencyLease
+		o.Lease = defaultConcurrencyLease
 	}
 	if o.WaiterMaxAge <= 0 {
-		o.WaiterMaxAge = 2 * DefaultConcurrencyLease
+		o.WaiterMaxAge = 2 * defaultConcurrencyLease
 	}
 }
 

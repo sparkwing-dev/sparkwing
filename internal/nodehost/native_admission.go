@@ -16,9 +16,9 @@ type NativeAdmission struct {
 	required bool
 }
 
-// ComposeNativeAdmission binds concurrency to the placement's box independently of compute.
+// ComposeNativeAdmission binds store-owned concurrency independently of compute.
 // Required compute is used by requesters; runners may omit it without losing concurrency.
-func ComposeNativeAdmission(capacity CapacityStore, boxID string, compute *LocalAdmission, required bool) NativeAdmission {
+func ComposeNativeAdmission(capacity CapacityStore, compute *LocalAdmission, required bool) NativeAdmission {
 	admission := NativeAdmission{required: required}
 	if compute != nil {
 		copy := *compute
@@ -26,7 +26,7 @@ func ComposeNativeAdmission(capacity CapacityStore, boxID string, compute *Local
 		admission.compute = &copy
 	}
 	if capacity != nil {
-		admission.capacity = &storeAdmission{Store: capacity, BoxID: boxID}
+		admission.capacity = &storeAdmission{Store: capacity}
 	}
 	return admission
 }

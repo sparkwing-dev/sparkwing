@@ -71,6 +71,5 @@ type LocalBindingChecked struct {
 
 // LocalCapacityRequest selects work under the authenticated owner's fence.
 type LocalCapacityRequest struct {
-	Key     string                `json:"key"`
 	Binding store.CapacityBinding `json:"binding"`
 }

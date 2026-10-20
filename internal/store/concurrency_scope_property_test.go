@@ -85,7 +85,7 @@ func TestConcurrencyExpiredCapacityNeverRevivesProperty(t *testing.T) {
 			t.Fatal("heartbeat revived expired capacity")
 		}
 		adopted, err := tenant.AdoptCapacity(t.Context(), "global:key", "holder", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
-		if err != nil || adopted.Kind != AcquireAgain || adopted.Holder != nil {
+		if err != nil || adopted != acquireAgain {
 			t.Fatalf("expired capacity adopted: %+v, %v", adopted, err)
 		}
 		state, err := tenant.GetConcurrencyState(t.Context(), "global:key")

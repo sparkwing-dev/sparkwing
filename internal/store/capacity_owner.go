@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -14,19 +15,6 @@ import (
 type capacityFence struct {
 	binding CapacityBinding
 	actor   Actor
-}
-
-// AcquireCapacity admits capacity under the live owner and captured work binding.
-func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, binding CapacityBinding, actor Actor) (AcquireSlotResponse, error) {
-	if req.RunID != binding.RunID || req.NodeID != binding.NodeID || req.CacheKeyHash != "" {
-		return AcquireSlotResponse{}, holderRefusal()
-	}
-	return t.acquireConcurrencySlot(ctx, req, &capacityFence{binding, actor})
-}
-
-// ResolveCapacityWaiter adjudicates promotion and sealed queue expiry under the captured owner fence.
-func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding CapacityBinding, actor Actor) (WaiterResolution, error) {
-	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", &capacityFence{binding, actor})
 }
 
 func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, key string, fence capacityFence) error {
@@ -61,7 +49,7 @@ func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, key strin
 			return holderRefusal()
 		}
 	}
-	_, err := declaredCapacityGroupTx(ctx, tx, team, b.RunID, b.NodeID, key)
+	_, err := declaredCapacityGroupTx(ctx, tx, team, b.RunID, b.NodeID, key, fence.actor.Authority)
 	return err
 }
 
@@ -179,23 +167,50 @@ func capacityWaiterCurrentTx(ctx context.Context, tx *storeTx, team Team, waiter
 	return generation == waiter.generation, err
 }
 
-func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, key string, fence capacityFence) error {
-	if err := advisoryLockTx(ctx, tx, fmt.Sprintf("capacity-admission:%d:%s:%s", len(team), team, key)); err != nil {
+func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, keys []string, fence capacityFence) error {
+	for _, key := range keys {
+		if err := advisoryLockTx(ctx, tx, fmt.Sprintf("capacity-admission:%d:%s:%s", len(team), team, key)); err != nil {
+			return err
+		}
+	}
+	if err := lockClaimControllerTx(ctx, tx); err != nil {
 		return err
+	}
+	if fence.actor.Authority.Kind != "" {
+		if _, err := authorityChainTx(ctx, tx, fence.actor.Authority, true); err != nil {
+			return err
+		}
 	}
 	if err := checkCapacityOwnerTx(ctx, tx, team, fence); err != nil {
 		return err
 	}
-	if err := lockCapacityWorkTx(ctx, tx, team, key, controllerwire.NodeRef{RunID: fence.binding.RunID, NodeID: fence.binding.NodeID}); err != nil {
+	if err := lockCapacityWorkTx(ctx, tx, team, keys, controllerwire.NodeRef{RunID: fence.binding.RunID, NodeID: fence.binding.NodeID}); err != nil {
 		return err
 	}
-	return checkCapacityFenceTx(ctx, tx, team, key, fence)
+	for _, key := range keys {
+		if err := checkCapacityFenceTx(ctx, tx, team, key, fence); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func lockCapacityWorkTx(ctx context.Context, tx *storeTx, team Team, key string, ref controllerwire.NodeRef) error {
-	rows, err := tx.QueryContext(ctx, `SELECT run_id,node_id FROM concurrency_holders WHERE team=? AND key=?
-UNION SELECT run_id,node_id FROM concurrency_waiters WHERE team=? AND key=?
-UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, ref.RunID, ref.NodeID)
+func lockCapacityWorkTx(ctx context.Context, tx *storeTx, team Team, keys []string, ref controllerwire.NodeRef) error {
+	predicate := "NULL"
+	var args []any
+	if len(keys) > 0 {
+		predicate = strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")
+	}
+	for range 2 {
+		args = append(args, team)
+		for _, key := range keys {
+			args = append(args, key)
+		}
+	}
+	args = append(args, ref.RunID, ref.NodeID)
+	rows, err := tx.QueryContext(ctx, `SELECT run_id,node_id FROM concurrency_holders WHERE team=? AND key IN (`+predicate+`)
+UNION SELECT run_id,node_id FROM concurrency_waiters WHERE team=? AND key IN (`+predicate+`)
+UNION SELECT ?,? ORDER BY run_id,node_id`, args...)
 	if err != nil {
 		return err
 	}

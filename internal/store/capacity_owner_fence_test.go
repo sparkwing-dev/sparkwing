@@ -57,7 +57,7 @@ func TestCapacityExpiredWaiterCannotBePromotedByRelease(t *testing.T) {
 		t.Fatalf("expired waiter promoted on release: %+v, %v", promoted, err)
 	}
 	got, err := tenant.ResolveCapacityWaiter(t.Context(), "global:db", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
-	if err != nil || got.Status != WaiterExpired {
+	if err != nil || got.Status != waiterExpired {
 		t.Fatalf("expiry result lost during release: %+v, %v", got, err)
 	}
 }
@@ -87,7 +87,7 @@ func TestCapacityQueueExpiryUsesPersistedPolicyAndStoreTime(t *testing.T) {
 	}
 	*now = now.Add(time.Minute)
 	got, err = tenant.ResolveCapacityWaiter(t.Context(), "global:db", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
-	if err != nil || got.Status != WaiterExpired {
+	if err != nil || got.Status != waiterExpired {
 		t.Fatalf("store deadline did not expire waiter: %+v, %v", got, err)
 	}
 	state, err := tenant.GetConcurrencyState(t.Context(), "global:db")

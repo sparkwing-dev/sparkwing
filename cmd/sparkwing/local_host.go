@@ -60,7 +60,7 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 	}
 	admission := nodehost.MachineAdmission(home, installedVersion(), boxID)
 	services, err := build(ctx, nodehost.WithClient(nodehost.NativeConfig{
-		Admission: nodehost.ComposeNativeAdmission(binding.Tenant, admission.BoxID, admission, true),
+		Admission: nodehost.ComposeNativeAdmission(binding.Tenant, admission, true),
 		Home:      home, Store: state, Parent: owned.AsOperator(), Bindings: owned.AsOperator(),
 		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.AsOperator().RenewUnit, Source: source, Local: store.OwnerCanExecute(binding.Principal),
 	}, private))

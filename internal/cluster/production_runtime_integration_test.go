@@ -498,7 +498,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 			scheduled := make(chan struct{})
 			var once sync.Once
 			var capacity sync.Mutex
-			var held *store.CapacityHolder
+			var held bool
 			boundary := errors.New("eligible job reached self claim")
 			connection := client.EngineOptions{URL: base.ControllerURL, HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
 				var response any
@@ -516,29 +516,23 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 						return nil, fmt.Errorf("unexpected scheduled transition: %+v", change)
 					}
 					response = store.Applied{}
-				case "POST /api/v1/runs/run/local-host/capacity/adopt", "POST /api/v1/runs/run/local-host/capacity/acquire":
+				case "POST /api/v1/runs/run/local-host/capacity/acquire":
 					var request localhostwire.LocalCapacityRequest
 					decoder := json.NewDecoder(r.Body)
 					decoder.DisallowUnknownFields()
 					if err := decoder.Decode(&request); err != nil {
 						return nil, err
 					}
-					if request.Key != "run:3:run:serial" || request.Binding != (store.CapacityBinding{RunID: unit.RunID, NodeID: "job", Generation: row.Generation}) {
+					if request.Binding != (store.CapacityBinding{RunID: unit.RunID, NodeID: "job", Generation: row.Generation}) {
 						return nil, fmt.Errorf("capacity changed its job or group: %+v", request)
 					}
 					capacity.Lock()
 					defer capacity.Unlock()
-					if strings.HasSuffix(r.URL.Path, "/acquire") {
-						held = &store.CapacityHolder{Key: request.Key, ID: "run/job", Binding: request.Binding, Cost: 1, LeaseExpiresAt: unit.LeaseExpiresAt}
-						response = store.AcquireSlotResponse{Kind: store.AcquireGranted, HolderID: held.ID, LeaseExpiresAt: unit.LeaseExpiresAt}
-					} else if held == nil {
-						response = store.CapacityAdoption{Kind: store.AcquireAgain}
-					} else {
-						response = store.CapacityAdoption{Kind: store.AdoptHolder, Holder: held}
-					}
+					held = true
+					response = store.AcquireSlotResponse{Kind: store.AcquireGranted, HolderID: "run/job", LeaseExpiresAt: unit.LeaseExpiresAt}
 				case "POST /api/v1/runs/run/jobs/job/reconcile":
 					capacity.Lock()
-					admitted := held != nil
+					admitted := held
 					capacity.Unlock()
 					if !admitted {
 						return nil, errors.New("job scheduled without its concurrency lease")

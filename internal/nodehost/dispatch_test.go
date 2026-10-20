@@ -174,7 +174,7 @@ func TestDispatchRetainsStoreConcurrencyUntilRemoteCompletion(t *testing.T) {
 						machine = &LocalAdmission{Daemon: d, BoxID: testBox}
 						machineLeases = 1
 					}
-					configureNativeAdmission(&f.Host, machine, &storeAdmission{Store: f.Tenant, Owner: f.Actor, BoxID: testBox}, false)
+					configureNativeAdmission(&f.Host, machine, &storeAdmission{Store: f.Tenant, Owner: f.Actor}, false)
 					admitted := make(chan string, 3)
 					bind := f.Host.bindAdmission
 					f.Host.bindAdmission = func(bound *OwnerHost, actor store.Actor) {
@@ -223,7 +223,7 @@ func TestDispatchRetainsStoreConcurrencyUntilRemoteCompletion(t *testing.T) {
 								t.Fatal(err)
 							}
 						}
-						key := scopedConcurrencyKey("db", scope, f.Input.RunID, testBox)
+						key := scopedConcurrencyKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder)
 						state, err := f.Tenant.GetConcurrencyState(ctx, key)
 						if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != id || state.UsedCost != 1 {
 							t.Fatalf("ready remote job lost its concurrency: %+v, %v", state, err)
@@ -245,7 +245,7 @@ func TestDispatchRetainsStoreConcurrencyUntilRemoteCompletion(t *testing.T) {
 					if live, granted, released := d.counts(); live != 0 || granted != released || granted != machineLeases {
 						t.Fatalf("leases=%d/%d/%d", live, granted, released)
 					}
-					state, err := f.Tenant.GetConcurrencyState(ctx, scopedConcurrencyKey("db", scope, f.Input.RunID, testBox))
+					state, err := f.Tenant.GetConcurrencyState(ctx, scopedConcurrencyKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder))
 					if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
 						t.Fatalf("remote concurrency leaked: %+v, %v", state, err)
 					}
@@ -267,7 +267,7 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 	f := newStoreHostFixture(t, plan)
 	f.Host.Local = func(store.NodeRow) bool { return false }
 	d := newFakeDaemon()
-	configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &storeAdmission{Store: f.Tenant, Owner: f.Actor, BoxID: testBox}, false)
+	configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &storeAdmission{Store: f.Tenant, Owner: f.Actor}, false)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	done := make(chan error, 1)
 	joined := make(chan struct{})

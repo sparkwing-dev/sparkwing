@@ -43,10 +43,10 @@ func TestPostgresWaiterPollDoesNotQueueBehindEntryWriter(t *testing.T) {
 	if err := writer.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, promoted, err := tenant.ReleaseAndNotify(ctx, "k", "h-r0", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil || len(promoted) != 1 {
+	if _, _, promoted, err := tenant.ReleaseAndNotify(ctx, "k", "h-r0", "success", "", "", 0, store.DefaultLeaseDuration); err != nil || len(promoted) != 1 {
 		t.Fatalf("release: %v %v", promoted, err)
 	}
-	if res, err := tenant.ResolveWaiter(ctx, "k", "r1", "n", "", "", "", false); err != nil || res.Status != store.WaiterPromoted {
+	if res, err := tenant.ResolveWaiter(ctx, "k", "r1", "n", "", "", "", false); err != nil || res.Status != "promoted" {
 		t.Fatalf("poll after release = %+v, %v", res, err)
 	}
 }

@@ -93,8 +93,12 @@ func checkRecoveryCapacity(t *testing.T) error {
 			generation = owner.Owner.Generation
 		}
 		adopted, err := f.tenant.AdoptCapacity(ctx, group.key, "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: group.node, Generation: generation}, owner)
-		if err != nil || adopted.Kind != store.AdoptHolder || adopted.Holder == nil || adopted.Holder.Binding.Generation != generation {
+		if err != nil || adopted != "holder" {
 			return fmt.Errorf("adopt %s: %+v, %v", group.key, adopted, err)
+		}
+		var retainedGeneration int64
+		if err := f.s.DB().QueryRowContext(ctx, `SELECT generation FROM concurrency_holders WHERE team=? AND key=? AND holder_id='original'`, f.tenant.Team(), group.key).Scan(&retainedGeneration); err != nil || retainedGeneration != generation {
+			return fmt.Errorf("retained generation=%d: %v", retainedGeneration, err)
 		}
 		if promoted, err := f.tenant.PromoteNextWaiters(ctx, group.key, time.Hour); err != nil || len(promoted) != 0 {
 			return fmt.Errorf("live %s capacity admitted competitor: %+v, %v", group.key, promoted, err)
@@ -161,7 +165,7 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 		return err
 	}
 	adopted, err := f.tenant.AdoptCapacity(ctx, "global:deploy", "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: "job", Generation: f.holder.Generation}, f.owner)
-	if err != nil || adopted.Kind != store.AcquireAgain {
+	if err != nil || adopted != "new_arrival" {
 		return fmt.Errorf("expired adoption: %+v, %v", adopted, err)
 	}
 	request.HolderID, request.RunID = "original", f.ref.RunID

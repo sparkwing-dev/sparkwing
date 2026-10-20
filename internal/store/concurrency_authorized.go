@@ -20,7 +20,7 @@ func declaredSlotTx(ctx context.Context, tx *storeTx, c capability.Capability, t
 		!(b.Kind == capability.BindingNode && c.Unit == capability.UnitNode || b.Kind == capability.BindingTrigger && c.Unit == capability.UnitTrigger || b.Kind == capability.BindingRun && c.Unit == capability.UnitPlan) {
 		return runspec.Concurrency{}, bindingRefusal()
 	}
-	group, err := declaredCapacityGroupTx(ctx, tx, Team(c.Team), b.RunID, b.NodeID, target.SlotKey)
+	group, err := declaredCapacityGroupTx(ctx, tx, Team(c.Team), b.RunID, b.NodeID, target.SlotKey, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
 	if err != nil {
 		return runspec.Concurrency{}, err
 	}
@@ -153,7 +153,7 @@ func authorizedConcurrency[T any](ctx context.Context, t *Tenant, a capability.A
 				return zero, err
 			}
 		}
-		if err := lockCapacityWorkTx(ctx, tx, t.team, key, controllerwire.NodeRef{RunID: a.Binding.RunID, NodeID: a.Binding.NodeID}); err != nil {
+		if err := lockCapacityWorkTx(ctx, tx, t.team, []string{key}, controllerwire.NodeRef{RunID: a.Binding.RunID, NodeID: a.Binding.NodeID}); err != nil {
 			return zero, err
 		}
 		if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
@@ -178,7 +178,7 @@ func authorizedConcurrency[T any](ctx context.Context, t *Tenant, a capability.A
 
 func slotLease(now, until time.Time, lease time.Duration) time.Duration {
 	if lease <= 0 {
-		lease = DefaultConcurrencyLease
+		lease = defaultConcurrencyLease
 	}
 	if remaining := until.Sub(now); remaining < lease {
 		return remaining
@@ -193,7 +193,7 @@ func (t *Tenant) AcquireAuthorizedSlot(ctx context.Context, a capability.Authori
 			return AcquireSlotResponse{}, bindingRefusal()
 		}
 		var err error
-		req, err = sealedCapacityRequestTx(ctx, tx, t.team, req)
+		req, err = sealedCapacityRequestTx(ctx, tx, t.team, req, current.Principal.Authority)
 		if err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -299,7 +299,7 @@ func (t *Tenant) ReleaseAuthorizedSlot(ctx context.Context, a capability.Authori
 		if err != nil {
 			return false, err
 		}
-		_, err = txPromoteWaiters(ctx, tx, t.team, key, tx.now().UnixNano(), tx.now().Add(DefaultConcurrencyLease).UnixNano())
+		_, err = txPromoteWaiters(ctx, tx, t.team, key, tx.now().UnixNano(), tx.now().Add(defaultConcurrencyLease).UnixNano())
 		return released, err
 	})
 	return err
@@ -348,11 +348,11 @@ func (t *Tenant) ResolveAuthorizedWaiter(ctx context.Context, a capability.Autho
 				return WaiterResolution{}, err
 			}
 		}
-		response, err := t.resolveWaiterTx(ctx, tx, key, run, job, leaderRun, leaderJob, slotLease(tx.now(), until, DefaultConcurrencyLease), nil)
+		response, err := t.resolveWaiterTx(ctx, tx, key, run, job, leaderRun, leaderJob, slotLease(tx.now(), until, defaultConcurrencyLease), nil)
 		if err != nil {
 			return WaiterResolution{}, err
 		}
-		if response.Status == WaiterPromoted {
+		if response.Status == waiterPromoted {
 			var expires int64
 			if err := tx.QueryRowContext(ctx, `SELECT lease_expires_at FROM concurrency_holders WHERE team=? AND key=? AND holder_id=?`, t.team, key, response.HolderID).Scan(&expires); err != nil {
 				return WaiterResolution{}, err
@@ -387,7 +387,7 @@ func (t *Tenant) CancelAuthorizedWaiter(ctx context.Context, a capability.Author
 		if err != nil {
 			return false, err
 		}
-		if _, err := txPromoteWaiters(ctx, tx, t.team, key, tx.now().UnixNano(), tx.now().Add(DefaultConcurrencyLease).UnixNano()); err != nil {
+		if _, err := txPromoteWaiters(ctx, tx, t.team, key, tx.now().UnixNano(), tx.now().Add(defaultConcurrencyLease).UnixNano()); err != nil {
 			return false, err
 		}
 		return removed || count > 0, nil
@@ -411,7 +411,7 @@ func (t *Tenant) ForceReleaseAuthorizedSlots(ctx context.Context, a capability.A
 			}
 			out = append(out, holder)
 		}
-		_, err = txPromoteWaiters(ctx, tx, t.team, key, tx.now().UnixNano(), tx.now().Add(DefaultConcurrencyLease).UnixNano())
+		_, err = txPromoteWaiters(ctx, tx, t.team, key, tx.now().UnixNano(), tx.now().Add(defaultConcurrencyLease).UnixNano())
 		return out, err
 	})
 }

@@ -4328,10 +4328,7 @@ components:
       properties:
         binding:
           $ref: '#/components/schemas/internal.store.CapacityBinding'
-        key:
-          type: string
       required:
-        - key
         - binding
       type: object
       x-sparkwing-go-type: localhostwire.LocalCapacityRequest
@@ -6119,6 +6116,8 @@ components:
       properties:
         DriftNote:
           type: string
+        FailureReason:
+          type: string
         HolderID:
           type: string
         Holders:
@@ -6155,6 +6154,7 @@ components:
               type: array
             - type: "null"
       required:
+        - FailureReason
         - Kind
         - HolderID
         - LeaseExpiresAt
@@ -6205,25 +6205,6 @@ components:
         - Owner
       type: object
       x-sparkwing-go-type: store.Actor
-    internal.store.CapacityAdoption:
-      additionalProperties: true
-      properties:
-        Holder:
-          anyOf:
-            - $ref: '#/components/schemas/internal.store.CapacityHolder'
-            - type: "null"
-        Kind:
-          type: string
-        Waiter:
-          anyOf:
-            - $ref: '#/components/schemas/internal.store.CapacityWaiter'
-            - type: "null"
-      required:
-        - Kind
-        - Holder
-        - Waiter
-      type: object
-      x-sparkwing-go-type: store.CapacityAdoption
     internal.store.CapacityBinding:
       additionalProperties: true
       properties:
@@ -6239,58 +6220,6 @@ components:
         - Generation
       type: object
       x-sparkwing-go-type: store.CapacityBinding
-    internal.store.CapacityHolder:
-      additionalProperties: true
-      properties:
-        AcquiredAt:
-          format: date-time
-          type: string
-        Binding:
-          $ref: '#/components/schemas/internal.store.CapacityBinding'
-        Cost:
-          type: integer
-        ID:
-          type: string
-        Key:
-          type: string
-        LeaseExpiresAt:
-          format: date-time
-          type: string
-        Superseded:
-          type: boolean
-      required:
-        - Key
-        - ID
-        - Binding
-        - Cost
-        - AcquiredAt
-        - LeaseExpiresAt
-        - Superseded
-      type: object
-      x-sparkwing-go-type: store.CapacityHolder
-    internal.store.CapacityWaiter:
-      additionalProperties: true
-      properties:
-        ArrivedAt:
-          format: date-time
-          type: string
-        Binding:
-          $ref: '#/components/schemas/internal.store.CapacityBinding'
-        ID:
-          type: string
-        Key:
-          type: string
-        LeaseExpiresAt:
-          format: date-time
-          type: string
-      required:
-        - Key
-        - ID
-        - Binding
-        - ArrivedAt
-        - LeaseExpiresAt
-      type: object
-      x-sparkwing-go-type: store.CapacityWaiter
     internal.store.ConcurrencyHolder:
       additionalProperties: true
       properties:
@@ -6692,56 +6621,6 @@ components:
         - StateActor
       type: object
       x-sparkwing-go-type: store.RunRow
-    internal.store.WaiterResolution:
-      additionalProperties: true
-      properties:
-        HolderID:
-          type: string
-        HolderLeaseExpires:
-          format: date-time
-          type: string
-        Holders:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.store.ConcurrencyHolder'
-              type: array
-            - type: "null"
-        LeaderFailureReason:
-          type: string
-        LeaderNodeID:
-          type: string
-        LeaderOutcome:
-          type: string
-        LeaderRunID:
-          type: string
-        OriginNodeID:
-          type: string
-        OriginRunID:
-          type: string
-        OutputRef:
-          type: string
-        Position:
-          type: integer
-        QueueLength:
-          type: integer
-        Status:
-          type: string
-      required:
-        - Status
-        - HolderID
-        - HolderLeaseExpires
-        - OutputRef
-        - OriginRunID
-        - OriginNodeID
-        - LeaderRunID
-        - LeaderNodeID
-        - LeaderOutcome
-        - LeaderFailureReason
-        - Position
-        - QueueLength
-        - Holders
-      type: object
-      x-sparkwing-go-type: store.WaiterResolution
     pkg.match.Resources:
       additionalProperties: true
       properties:
@@ -13162,88 +13041,6 @@ paths:
       x-sparkwing-policy:
         method: POST
         path: /api/v1/runs/{run}/local-host/capacity/acquire
-        audience: controller
-        owner: run
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - trigger.host
-            binding: runOfTrigger
-            liveness: sensitive
-        retry: exact_body
-  /api/v1/runs/{run}/local-host/capacity/adopt:
-    post:
-      parameters:
-        - in: path
-          name: run
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/internal.localhostwire.LocalCapacityRequest'
-        required: true
-      responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.store.CapacityAdoption'
-          description: Successful response.
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: Adopt continuously retained capacity under the trigger owner award
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/runs/{run}/local-host/capacity/adopt
-        audience: controller
-        owner: run
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - trigger.host
-            binding: runOfTrigger
-            liveness: sensitive
-        retry: exact_body
-  /api/v1/runs/{run}/local-host/capacity/resolve:
-    post:
-      parameters:
-        - in: path
-          name: run
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/internal.localhostwire.LocalCapacityRequest'
-        required: true
-      responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.store.WaiterResolution'
-          description: Successful response.
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: Resolve a capacity waiter under the trigger owner award
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/runs/{run}/local-host/capacity/resolve
         audience: controller
         owner: run
         authentication: capability

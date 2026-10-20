@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -21,9 +20,9 @@ func scopedConcurrencyKey(name, scope, runID, boxID string) string {
 	case "box":
 		identity = boxID
 	default:
-		return "global:" + name
+		return runspec.ConcurrencyKey("global", "", name)
 	}
-	return scope + ":" + strconv.Itoa(len(identity)) + ":" + identity + ":" + name
+	return runspec.ConcurrencyKey(scope, identity, name)
 }
 
 const memoKeyPrefix = "memo:"

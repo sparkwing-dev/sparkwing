@@ -76,7 +76,6 @@ func createLiveRunT(t *testing.T, s *store.Store, runID string) {
 			}
 		}
 	}
-
 }
 
 func TestConcurrency_GrantedWhenSlotAvailable(t *testing.T) {
@@ -200,7 +199,7 @@ func TestConcurrency_ResolveWaiterReapsTerminalHolderAndPromotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
-	if res.Status != store.WaiterPromoted {
+	if res.Status != "promoted" {
 		t.Fatalf("status = %s, want promoted", res.Status)
 	}
 	if holderExists(t, s, "terminal-promote", "r1/n1") {

@@ -129,7 +129,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	config := NativeHostConfig{
 		Store: f.State, Lease: f.Host.Lease, Snapshots: snapshots, Owner: ownerOperationsFixture(f.Host),
 		Masks: NewMaskRegistry(secrets.NewMasker()), Processes: processes, Router: router,
-		Admission:  ComposeNativeAdmission(f.Tenant, "", &LocalAdmission{Daemon: newFakeDaemon()}, false),
+		Admission:  ComposeNativeAdmission(f.Tenant, &LocalAdmission{Daemon: newFakeDaemon()}, false),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
 		Source: source.Options{
 			Engines: engines, Target: resolved.Target, SDK: engine.GoSDK, Base: procenv.Base{Local: true},

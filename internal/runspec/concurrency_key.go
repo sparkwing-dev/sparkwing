@@ -24,3 +24,11 @@ func ParseConcurrencyKey(key string) (scope, identity, group string, ok bool) {
 	}
 	return scope, rest[:n], rest[n+1:], true
 }
+
+// ConcurrencyKey encodes a resolved group with its authenticated scope identity.
+func ConcurrencyKey(scope, identity, group string) string {
+	if scope == "global" {
+		return scope + ":" + group
+	}
+	return scope + ":" + strconv.Itoa(len(identity)) + ":" + identity + ":" + group
+}

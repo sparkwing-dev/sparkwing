@@ -24,12 +24,16 @@ func TestRewriteCapacityAdoptsOnlyContinuousHolders(t *testing.T) {
 	ctx := context.Background()
 	binding := CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}
 	adopted, err := tenant.AdoptCapacity(ctx, "global:key", "holder", binding, actor)
-	if err != nil || adopted.Kind != AdoptHolder || adopted.Holder.Binding.Generation != 3 {
+	if err != nil || adopted != adoptHolder {
 		t.Fatalf("adoption: %+v %v", adopted, err)
+	}
+	var generation int64
+	if err := tenant.s.db.QueryRowContext(ctx, `SELECT generation FROM concurrency_holders WHERE team='a' AND key='global:key' AND holder_id='holder'`).Scan(&generation); err != nil || generation != 3 {
+		t.Fatalf("retained holder generation=%d: %v", generation, err)
 	}
 	*now = now.Add(time.Minute)
 	adopted, err = tenant.AdoptCapacity(ctx, "global:key", "holder", binding, actor)
-	if err != nil || adopted.Kind != AcquireAgain {
+	if err != nil || adopted != acquireAgain {
 		t.Fatalf("expiry revived holder: %+v %v", adopted, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "concurrency_holders", 0)
@@ -41,12 +45,16 @@ func TestRewriteCapacityWaiterKeepsOnlyLiveArrival(t *testing.T) {
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','global:key','waiter','run','job',?,?,2,'queue')`, arrival.UnixNano(), now.Add(time.Minute).UnixNano())
 	binding := CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}
 	adopted, err := tenant.AdoptCapacity(context.Background(), "global:key", "waiter", binding, actor)
-	if err != nil || adopted.Kind != AdoptWaiter || !adopted.Waiter.ArrivedAt.Equal(arrival) {
+	if err != nil || adopted != adoptWaiter {
 		t.Fatalf("waiter: %+v %v", adopted, err)
+	}
+	var retainedArrival int64
+	if err := tenant.s.db.QueryRowContext(t.Context(), `SELECT arrived_at FROM concurrency_waiters WHERE team='a' AND key='global:key' AND holder_id='waiter'`).Scan(&retainedArrival); err != nil || retainedArrival != arrival.UnixNano() {
+		t.Fatalf("retained arrival=%d: %v", retainedArrival, err)
 	}
 	*now = now.Add(time.Minute)
 	adopted, err = tenant.AdoptCapacity(context.Background(), "global:key", "waiter", binding, actor)
-	if err != nil || adopted.Kind != AcquireAgain {
+	if err != nil || adopted != acquireAgain {
 		t.Fatalf("expired waiter: %+v %v", adopted, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "concurrency_waiters", 0)

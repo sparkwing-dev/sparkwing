@@ -217,9 +217,9 @@ type capacityMutationBoundary struct {
 	beforeAcquire func()
 }
 
-func (s capacityMutationBoundary) AcquireCapacity(ctx context.Context, request store.AcquireSlotRequest, binding store.CapacityBinding, actor store.Actor) (store.AcquireSlotResponse, error) {
+func (s capacityMutationBoundary) AdmitCapacity(ctx context.Context, binding store.CapacityBinding, actor store.Actor) (store.AcquireSlotResponse, error) {
 	s.beforeAcquire()
-	return s.Tenant.AcquireCapacity(ctx, request, binding, actor)
+	return s.Tenant.AdmitCapacity(ctx, binding, actor)
 }
 
 func TestStoreAdmissionSQLiteFencesAcquisitionAfterAdoption(t *testing.T) {

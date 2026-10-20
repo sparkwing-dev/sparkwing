@@ -928,20 +928,19 @@ available while a current holder drains cancellation. Node credentials use
 node-scoped snapshot, authentication and binding endpoints. Their snapshots
 contain only the awarded node.
 
-The private `capacity/adopt`, `capacity/acquire` and `capacity/resolve` POST
-endpoints admit pending jobs with the trigger owner's award credential.
-They require `trigger.host`, the live `runOfTrigger` binding and the selected
-run. Node, plan, root and foreign-team credentials cannot use them. The body
-carries the selected group key and captured work generation. The controller derives
-the actor and holder identity from the bearer and work binding. Capacity, cost,
-policy, cancellation timeout and lease are absent from the request. C1 reads the
-accepted concurrency declaration and unit lease bound inside admission's
-transaction. Adoption and waiter resolution check that declaration in the same
-transaction as their capacity changes. An undeclared group or an altered
-declaration is refused before any semaphore mutation. Claim and owner admission
-use the same declaration reader and existing capacity operations. Terminal
-transitions release capacity in the same transaction. There is no separate
-remote semaphore or release operation.
+The private `capacity/acquire` POST endpoint admits pending jobs with the trigger
+owner's award credential. It requires `trigger.host`, the live `runOfTrigger`
+binding and the selected run. Node, plan, root and foreign-team credentials
+cannot use it. The body contains only the captured work binding: run, job and
+generation. Group keys, capacity, cost, policy, cancellation timeout and lease
+are absent.
+
+`Tenant.AdmitCapacity` reads every accepted concurrency declaration and its lease
+bound inside one transaction. Box keys use the persisted machine identity in
+the award's ancestry. Missing host identity is refused. The same transaction
+adopts live holders, resolves existing waiters and acquires remaining groups
+through the existing semaphore operations. Repeated requests preserve holder
+continuity and queue arrival. Terminal transitions release capacity atomically.
 
 Private reconciliation also preserves `owner_capability_prefix` beside the node
 claim prefix. The local host checks the persisted owner relation before adopting
