@@ -285,6 +285,15 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		if err := private.AdoptClaim(ctx, claim); err != nil {
 			return err
 		}
+		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Claim.CapabilityPrefix, Holder: claim.Claim.Holder, Generation: claim.Claim.Generation}
+		beat, err := state.RenewNodeClaim(ctx, claim.Node.Ref, actor)
+		if err != nil {
+			return fmt.Errorf("renew unstarted local job: %w", err)
+		}
+		row, err := private.ReadNode(ctx, claim.Node.Ref)
+		if err != nil || row.Status != store.StatusPending || row.Attempt != 0 || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.Equal(beat.ExpiresAt) {
+			return fmt.Errorf("unstarted local renewal changed claim: %+v: %w", row, err)
+		}
 		return adopt(ctx, claim)
 	}
 	services.Config.Admission.Daemon = pipelineAdmission{}

@@ -6,8 +6,45 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
+
+func TestUnmeteredNodeRenewalKeepsCapabilityExpiry(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		t.Run(map[bool]string{false: "runner", true: "local"}[local], func(t *testing.T) {
+			s, demand := unitClaimFixture(t)
+			now := s.now()
+			s.clock = func() time.Time { return now }
+			expiry := now.Add(limits.DefaultLease / 2)
+			root := authorityRoot("unmetered", "a")
+			root.ExpiresAt = &expiry
+			if local {
+				root.Subject.Kind = capability.SubjectLocal
+			}
+			authorityPersist(t, s, root)
+			demand.CapabilityPrefix = root.Prefix
+			claim, actor := meteredUnitClaim(t, s, demand)
+			if !claim.Award.LeaseExpiresAt.Equal(expiry) {
+				t.Fatalf("claim expiry = %v, want capability expiry %v", claim.Award.LeaseExpiresAt, expiry)
+			}
+			tenant := &Tenant{s: s, team: "a"}
+			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(time.Second)
+			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			if err != nil || beat.CancelRequested || !beat.ExpiresAt.Equal(expiry) {
+				t.Fatalf("unmetered renewal = %+v, %v; want capability expiry %v", beat, err, expiry)
+			}
+			rewriteSchemaCount(t, s.db, "credit_charges", 0)
+			now = expiry
+			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
+				t.Fatal("unmetered lease renewed past capability expiry")
+			}
+		})
+	}
+}
 
 func TestUnstartedMeteredOwnerRefusalKeepsDurableDrain(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval} {

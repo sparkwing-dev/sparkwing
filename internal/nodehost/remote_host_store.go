@@ -125,7 +125,12 @@ func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref controllerwire
 	if nodes, ok := s.PrivateHostState.(interface {
 		RenewNode(context.Context, controllerwire.NodeRef, store.Actor, bool) (store.LeaseBeat, error)
 	}); ok {
-		return nodes.RenewNode(ctx, ref, actor, s.executing())
+		// The owner can be computing while its node is still acquiring a source.
+		row, err := s.PrivateHostState.ReadNode(ctx, ref)
+		if err != nil {
+			return store.LeaseBeat{}, err
+		}
+		return nodes.RenewNode(ctx, ref, actor, row.Status == store.StatusRunning)
 	}
 	return s.renew(ctx, s.executing())
 }
