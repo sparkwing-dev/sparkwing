@@ -40,7 +40,7 @@ func cancelCapacityNode(t *testing.T, fixture *storeHostFixture, row store.NodeR
 
 func TestStoreAdmissionSQLiteRetainsUntilTerminalTransition(t *testing.T) {
 	fixture := newStoreHostFixture(t, capacityPlan("queue", 0, "a"))
-	admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+	admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 	row := capacityRow(t, fixture, "a")
 	interrupted := errors.New("owner interrupted")
 	for range 2 {
@@ -63,7 +63,7 @@ func TestStoreAdmissionSQLiteCancelOthersCancelsBoundWorkBeforeReplacement(t *te
 	first := newStoreHostFixture(t, capacityPlan("cancel_others", 0, "a"))
 	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("cancel_others", 0, "a"), runspec.Options{})
 	for _, fixture := range []*storeHostFixture{first, second} {
-		admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+		admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 		if err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error {
 			if fixture == second {
 				row := capacityRow(t, first, "a")
@@ -81,7 +81,7 @@ func TestStoreAdmissionSQLiteCancelOthersCancelsBoundWorkBeforeReplacement(t *te
 func TestStoreAdmissionSQLiteCancelOthersReachesRunningUnitRenewal(t *testing.T) {
 	first := newStoreHostFixture(t, capacityPlan("cancel_others", 0, "a"))
 	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("cancel_others", 0, "a"), runspec.Options{})
-	admission := StoreAdmission{Store: first.Tenant, Owner: first.Actor}
+	admission := storeAdmission{Store: first.Tenant, Owner: first.Actor}
 	row := capacityRow(t, first, "a")
 	if err := admission.Node(t.Context(), first.Accepted, row, func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestStoreAdmissionSQLiteCancelOthersReachesRunningUnitRenewal(t *testing.T)
 	if _, err := first.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: row.Ref, To: store.NodeRunning, Actor: actor, Cause: store.CauseStart, SourceAttempt: &award.Node.Attempt}); err != nil {
 		t.Fatal(err)
 	}
-	replacement := StoreAdmission{Store: second.Tenant, Owner: second.Actor}
+	replacement := storeAdmission{Store: second.Tenant, Owner: second.Actor}
 	if err := replacement.Node(t.Context(), second.Accepted, capacityRow(t, second, "a"), func(context.Context) error {
 		beat, err := first.Store.RenewUnit(t.Context(), award.Node.CapabilityPrefix, true)
 		if err != nil || !beat.CancelRequested {
@@ -115,7 +115,7 @@ func TestStoreAdmissionSQLiteCancelOthersReachesRunningUnitRenewal(t *testing.T)
 func TestStoreAdmissionSQLiteCancelOthersStopsOwnerSelfClaimedExecution(t *testing.T) {
 	first := newStoreHostFixture(t, capacityPlan("cancel_others", 0, "a"))
 	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("cancel_others", 0, "a"), runspec.Options{})
-	admission := StoreAdmission{Store: first.Tenant, Owner: first.Actor}
+	admission := storeAdmission{Store: first.Tenant, Owner: first.Actor}
 	first.Host.Admit = admission.Node
 	started := make(chan context.Context, 1)
 	observed := make(chan struct{}, 1)
@@ -164,7 +164,7 @@ func TestStoreAdmissionSQLiteCancelOthersStopsOwnerSelfClaimedExecution(t *testi
 	case <-ctx.Done():
 		t.Fatal(context.Cause(ctx))
 	}
-	replacement := StoreAdmission{Store: second.Tenant, Owner: second.Actor}
+	replacement := storeAdmission{Store: second.Tenant, Owner: second.Actor}
 	if err := replacement.Node(ctx, second.Accepted, capacityRow(t, second, "a"), func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestStoreAdmissionSQLiteCancelOthersReachesPlanUnitRenewal(t *testing.T) {
 	first := newStoreHostFixture(t, planGrouped("global", "cancel_others", "a"))
 	second := newStoreHostFixtureOn(t, first.Store, planGrouped("global", "cancel_others", "a"), runspec.Options{})
 	for _, fixture := range []*storeHostFixture{first, second} {
-		admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+		admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 		if _, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) {
 			if fixture == second {
 				beat, err := first.Store.RenewUnit(t.Context(), first.Actor.CapabilityPrefix, false)
@@ -229,7 +229,7 @@ func TestStoreAdmissionSQLiteFencesAcquisitionAfterAdoption(t *testing.T) {
 			t.Fatal(err)
 		}
 	}}
-	admission := StoreAdmission{Store: boundary, Owner: fixture.Actor}
+	admission := storeAdmission{Store: boundary, Owner: fixture.Actor}
 	err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error { t.Fatal("stale owner ran"); return nil })
 	if err == nil {
 		t.Fatal("stale owner acquired capacity")
@@ -242,7 +242,7 @@ func TestStoreAdmissionSQLiteFencesAcquisitionAfterAdoption(t *testing.T) {
 
 func TestStoreAdmissionSQLitePromotesOnlyAfterTerminalRelease(t *testing.T) {
 	fixture := newStoreHostFixture(t, capacityPlan("queue", 0, "a", "b"))
-	admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+	admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 	first, second := capacityRow(t, fixture, "a"), capacityRow(t, fixture, "b")
 	if err := admission.Node(t.Context(), fixture.Accepted, first, func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestStoreAdmissionSQLiteQueueTimeoutAndLimitPolicies(t *testing.T) {
 	}{{"queue", store.NodeFailed, store.FailureQueueTimeout}, {"skip", store.NodeSkipped, ""}, {"fail", store.NodeFailed, ""}} {
 		t.Run(test.policy, func(t *testing.T) {
 			fixture := newStoreHostFixture(t, capacityPlan(test.policy, 10, "a", "b"))
-			admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+			admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 			if err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
@@ -296,7 +296,7 @@ func TestStoreAdmissionSQLiteQueueTimeoutAndLimitPolicies(t *testing.T) {
 
 func TestStoreAdmissionSQLiteOwnerLossRetainsWaiterUntilWorkEnds(t *testing.T) {
 	fixture := newStoreHostFixture(t, capacityPlan("queue", 0, "a", "b"))
-	admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+	admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 	first, second := capacityRow(t, fixture, "a"), capacityRow(t, fixture, "b")
 	if err := admission.Node(t.Context(), fixture.Accepted, first, func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
@@ -323,7 +323,7 @@ func TestStoreAdmissionSQLiteRejectsForgedOwner(t *testing.T) {
 	for _, mutate := range []func(*store.Actor){func(actor *store.Actor) { actor.Owner.Generation++ }, func(actor *store.Actor) { actor.Owner.Holder += "forged" }, func(actor *store.Actor) { actor.CapabilityPrefix += "forged" }} {
 		actor := fixture.Actor
 		mutate(&actor)
-		admission := StoreAdmission{Store: fixture.Tenant, Owner: actor}
+		admission := storeAdmission{Store: fixture.Tenant, Owner: actor}
 		err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error { t.Error("forged owner ran"); return nil })
 		if err == nil {
 			t.Fatal("forged owner admitted")
@@ -334,7 +334,7 @@ func TestStoreAdmissionSQLiteRejectsForgedOwner(t *testing.T) {
 func TestStoreAdmissionSQLitePlanCapacityRetainedUntilRunFinishes(t *testing.T) {
 	doc := planGrouped("global", "queue", "a")
 	fixture := newStoreHostFixture(t, doc)
-	admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+	admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 	interrupted := errors.New("owner interrupted")
 	for range 2 {
 		_, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, interrupted })
@@ -359,7 +359,7 @@ func TestStoreAdmissionSQLitePlanCapacityRetainedUntilRunFinishes(t *testing.T) 
 func TestStoreAdmissionRequiresCoordinationStore(t *testing.T) {
 	accepted := localAdmissionSeal(t, localAdmissionOptions())
 	row := localAdmissionRow("a")
-	admission := StoreAdmission{Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: accepted.RunID, Holder: "owner", Generation: 1}}}
+	admission := storeAdmission{Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: accepted.RunID, Holder: "owner", Generation: 1}}}
 	if err := admission.Node(t.Context(), accepted, row, func(context.Context) error { t.Error("job ran without store"); return nil }); err == nil {
 		t.Fatal("missing store admitted work")
 	}
@@ -378,7 +378,7 @@ func FuzzStoreAdmissionSQLiteRejectsStaleOwner(f *testing.F) {
 		fixture := newStoreHostFixture(t, capacityPlan("queue", 0, "a"))
 		actor := fixture.Actor
 		actor.Owner.Generation += int64(delta) + 1
-		admission := StoreAdmission{Store: fixture.Tenant, Owner: actor}
+		admission := storeAdmission{Store: fixture.Tenant, Owner: actor}
 		if err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error { t.Error("stale owner ran"); return nil }); err == nil {
 			t.Fatal("stale owner admitted")
 		}
@@ -388,11 +388,11 @@ func FuzzStoreAdmissionSQLiteRejectsStaleOwner(f *testing.F) {
 func TestStoreAdmissionSQLitePlanGroupBoundsTwoRuns(t *testing.T) {
 	first := newStoreHostFixture(t, planGrouped("global", "queue", "a"))
 	second := newStoreHostFixtureOn(t, first.Store, planGrouped("global", "queue", "a"), runspec.Options{})
-	firstAdmission := StoreAdmission{Store: first.Tenant, Owner: first.Actor}
+	firstAdmission := storeAdmission{Store: first.Tenant, Owner: first.Actor}
 	if _, err := firstAdmission.Run(t.Context(), first.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	secondAdmission := StoreAdmission{Store: second.Tenant, Owner: second.Actor}
+	secondAdmission := storeAdmission{Store: second.Tenant, Owner: second.Actor}
 	secondAdmission.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
 		cancelCapacityNode(t, first, capacityRow(t, first, "a"))
 		_, err := first.Tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: first.Actor.Owner, Transition: store.RunTransition{RunID: first.Accepted.RunID, To: store.RunFailed, Actor: first.Actor, Cause: store.RunFinish}})

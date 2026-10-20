@@ -66,14 +66,14 @@ func (s *capacityProbe) ResolveCapacityWaiter(ctx context.Context, _ string, _ s
 	return store.WaiterResolution{Status: store.WaiterStillWaiting}, nil
 }
 
-func capacityFixture(t *testing.T) (*StoreAdmission, *capacityProbe, AcceptedRun, store.NodeRow) {
+func capacityFixture(t *testing.T) (*storeAdmission, *capacityProbe, AcceptedRun, store.NodeRow) {
 	t.Helper()
 	probe := &capacityProbe{}
 	accepted := localAdmissionSeal(t, localAdmissionOptions())
 	row := localAdmissionRow("job")
 	row.Generation = 4
 	row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "global", Capacity: 2, Cost: 1, OnLimit: "queue"}}
-	admission := &StoreAdmission{Store: probe, Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: accepted.RunID, Holder: "owner", Generation: 3}}}
+	admission := &storeAdmission{Store: probe, Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: accepted.RunID, Holder: "owner", Generation: 3}}}
 	return admission, probe, accepted, row
 }
 
@@ -174,7 +174,7 @@ func TestStoreAdmissionOutageBudget(t *testing.T) {
 	}
 }
 
-func TestNativeAdmissionCombinesStoreAndLocalGroups(t *testing.T) {
+func TestNativeAdmissionKeepsConcurrencyInStore(t *testing.T) {
 	admission, probe, accepted, row := capacityFixture(t)
 	daemon := newFakeDaemon()
 	var spec runspec.Spec
@@ -198,11 +198,11 @@ func TestNativeAdmissionCombinesStoreAndLocalGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(probe.requests) != 2 || probe.requests[0].Key != "global:deploy" || probe.requests[0].HolderID != accepted.RunID+"/-" || probe.request.Key != "global:db" || probe.request.HolderID != accepted.RunID+"/job" {
+	if len(probe.requests) != 3 || probe.requests[0].Key != "global:deploy" || probe.requests[0].HolderID != accepted.RunID+"/-" || probe.requests[1].Key != "global:db" || probe.requests[2].Key != scopedConcurrencyKey("local", "run", accepted.RunID, "") || probe.request.HolderID != accepted.RunID+"/job" {
 		t.Fatalf("store groups=%+v", probe.requests)
 	}
 	requests := daemon.requests()
-	if len(requests) != 2 || len(requests[1].Semaphores) != 1 || requests[1].Semaphores[0].Name != scopedConcurrencyKey("local", "run", accepted.RunID, "") {
+	if len(requests) != 2 || len(requests[0].Semaphores) != 0 || len(requests[1].Semaphores) != 0 {
 		t.Fatalf("local groups=%+v", requests)
 	}
 	if live, granted, released := daemon.counts(); live != 0 || granted != released {

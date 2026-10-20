@@ -9,7 +9,32 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity *StoreAdmission, required bool) {
+// NativeAdmission keeps logical concurrency independent of optional machine compute.
+type NativeAdmission struct {
+	capacity *storeAdmission
+	compute  *LocalAdmission
+	required bool
+}
+
+// ComposeNativeAdmission builds admission from the placement's capacity and compute services.
+// Required compute is used by requesters; runners may omit it without losing concurrency.
+func ComposeNativeAdmission(capacity CapacityStore, compute *LocalAdmission, required bool) NativeAdmission {
+	admission := NativeAdmission{required: required}
+	if compute != nil {
+		copy := *compute
+		copy.storeGroups = capacity != nil
+		admission.compute = &copy
+	}
+	if capacity != nil {
+		admission.capacity = &storeAdmission{Store: capacity}
+		if compute != nil {
+			admission.capacity.BoxID = compute.BoxID
+		}
+	}
+	return admission
+}
+
+func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity *storeAdmission, required bool) {
 	owner.retainRemote = local != nil
 	owner.bindAdmission = func(bound *OwnerHost, actor store.Actor) {
 		if capacity == nil {
@@ -23,11 +48,6 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		copy := *local
 		copy.storeGroups = capacity != nil
 		local = &copy
-	}
-	if capacity != nil {
-		copy := *capacity
-		copy.local = local != nil
-		capacity = &copy
 	}
 	check := func(groups []runspec.Concurrency) error {
 		if required && local == nil {
@@ -84,7 +104,7 @@ func hasLocalConcurrency(groups []runspec.Concurrency) bool {
 	return slices.ContainsFunc(groups, func(group runspec.Concurrency) bool { return group.Scope == "run" || group.Scope == "box" })
 }
 
-func requireCapacity(capacity *StoreAdmission, local *LocalAdmission, groups []runspec.Concurrency) error {
+func requireCapacity(capacity *storeAdmission, local *LocalAdmission, groups []runspec.Concurrency) error {
 	if capacity != nil {
 		return nil
 	}

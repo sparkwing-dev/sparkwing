@@ -26,12 +26,11 @@ type CapacityStore interface {
 	ResolveCapacityWaiter(context.Context, string, store.CapacityBinding, store.Actor) (store.WaiterResolution, error)
 }
 
-// StoreAdmission binds sealed concurrency groups to their live run or job.
-type StoreAdmission struct {
+// storeAdmission binds sealed concurrency groups to their live run or job.
+type storeAdmission struct {
 	Store  CapacityStore
 	Owner  store.Actor
 	BoxID  string
-	local  bool
 	Queued func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error
 }
 
@@ -46,7 +45,7 @@ func (e *AdmissionFailure) Error() string { return e.Err.Error() }
 func (e *AdmissionFailure) Unwrap() error { return e.Err }
 
 // Run retains plan capacity under the unit lease, including after an owner exits.
-func (a *StoreAdmission) Run(ctx context.Context, accepted AcceptedRun, body func(context.Context) (RunCompletion, error)) (RunCompletion, error) {
+func (a *storeAdmission) Run(ctx context.Context, accepted AcceptedRun, body func(context.Context) (RunCompletion, error)) (RunCompletion, error) {
 	spec, err := admissionSpec(accepted)
 	if err != nil {
 		return RunCompletion{}, err
@@ -59,7 +58,7 @@ func (a *StoreAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 }
 
 // Node admits before release; terminal transitions release its capacity atomically.
-func (a *StoreAdmission) Node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+func (a *storeAdmission) Node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
 	if _, err := admissionSpec(accepted); err != nil {
 		return err
 	}
@@ -72,7 +71,7 @@ func (a *StoreAdmission) Node(ctx context.Context, accepted AcceptedRun, row sto
 	return body(ctx)
 }
 
-func (a *StoreAdmission) acquire(ctx context.Context, runID, jobID string, generation int64, groups []runspec.Concurrency) error {
+func (a *storeAdmission) acquire(ctx context.Context, runID, jobID string, generation int64, groups []runspec.Concurrency) error {
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
@@ -85,9 +84,6 @@ func (a *StoreAdmission) acquire(ctx context.Context, runID, jobID string, gener
 	}
 	slices.SortFunc(groups, func(a, b runspec.Concurrency) int { return strings.Compare(key(a), key(b)) })
 	for _, group := range groups {
-		if a.local && (group.Scope == "run" || group.Scope == "box") {
-			continue
-		}
 		if group.Group == "" || group.Capacity < 1 || group.Cost < 1 || group.Scope != "global" && group.Scope != "run" && group.Scope != "box" || group.Scope == "box" && a.BoxID == "" {
 			return errors.New("store admission requires sealed concurrency settings")
 		}
@@ -99,7 +95,7 @@ func (a *StoreAdmission) acquire(ctx context.Context, runID, jobID string, gener
 	return context.Cause(ctx)
 }
 
-func (a *StoreAdmission) group(ctx context.Context, key string, binding store.CapacityBinding, group runspec.Concurrency) error {
+func (a *storeAdmission) group(ctx context.Context, key string, binding store.CapacityBinding, group runspec.Concurrency) error {
 	id := binding.RunID + "/" + binding.NodeID
 	if binding.NodeID == "" {
 		id += "-"
@@ -161,7 +157,7 @@ func (a *StoreAdmission) group(ctx context.Context, key string, binding store.Ca
 	}
 }
 
-func (a *StoreAdmission) confirm(ctx context.Context, key, id string, binding store.CapacityBinding, cost int) error {
+func (a *storeAdmission) confirm(ctx context.Context, key, id string, binding store.CapacityBinding, cost int) error {
 	adopted, err := a.Store.AdoptCapacity(ctx, key, id, binding, a.Owner)
 	if err != nil {
 		return err
@@ -179,7 +175,7 @@ func checkCapacityHolder(holder *store.CapacityHolder, key, id string, binding s
 	return nil
 }
 
-func (a *StoreAdmission) wait(ctx context.Context, key, id string, binding store.CapacityBinding, group runspec.Concurrency, arrival time.Time) error {
+func (a *storeAdmission) wait(ctx context.Context, key, id string, binding store.CapacityBinding, group runspec.Concurrency, arrival time.Time) error {
 	if arrival.IsZero() {
 		return errors.New("capacity waiter has no persisted arrival time")
 	}

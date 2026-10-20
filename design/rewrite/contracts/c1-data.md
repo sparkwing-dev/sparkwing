@@ -4136,3 +4136,17 @@ environments without known provenance. Child intake copies its parent's
 environment and provenance in the ancestry transaction. A supplied snapshot or
 provenance that differs from the parent fails with `spec_drift`. Retry retains
 the original seal. Invocation origin never selects environment storage.
+
+
+## Native admission composition
+
+`ComposeNativeAdmission` accepts the placement's capacity store, optional machine
+compute service and required-compute policy. `NativeConfig` and `NativeHostConfig`
+carry that value whole. Owner and claimed hosts share its compute service. Store
+concurrency retains every declared scope when machine compute is present, and
+machine requests then carry CPU and memory without semaphore groups.
+
+The direct-store scheduling regression runs two jobs with a run-scoped,
+capacity-one queue group, with machine compute enabled and disabled. It checks
+that each executing job holds the store slot and that terminal completion releases
+it. Machine admission sees resource requests only when enabled.

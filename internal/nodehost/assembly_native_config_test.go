@@ -76,7 +76,7 @@ func nativeConfigFixture(t testing.TB) (NativeConfig, *nativeState) {
 		Request: runspec.SealedRequest{Request: runspec.Request{Team: string(store.DefaultTeam), Env: seal}},
 	}}}
 	return NativeConfig{
-		Local: func(store.NodeRow) bool { return true }, Home: home, Admission: &LocalAdmission{BoxID: "box"}, Store: state, Parent: authority, Bindings: authority,
+		Local: func(store.NodeRow) bool { return true }, Home: home, Admission: ComposeNativeAdmission(nil, &LocalAdmission{BoxID: "box"}, false), Store: state, Parent: authority, Bindings: authority,
 		Principal: principal, Refresh: func(context.Context) (capability.Principal, error) { return principal, nil },
 		Renew:    func(context.Context, string, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil },
 		Source:   source.Options{Engines: nativeEngine{}, Base: procenv.Base{Local: true}},

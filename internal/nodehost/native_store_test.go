@@ -124,7 +124,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	config := NativeHostConfig{
 		Store: f.State, Lease: f.Host.Lease, Snapshots: snapshots, Owner: ownerOperationsFixture(f.Host),
 		Masks: NewMaskRegistry(secrets.NewMasker()), Processes: processes, Router: router,
-		Admission:  &LocalAdmission{Daemon: newFakeDaemon()},
+		Admission:  ComposeNativeAdmission(f.Tenant, &LocalAdmission{Daemon: newFakeDaemon()}, false),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
 		Source: source.Options{
 			Engines: engines, Target: resolved.Target, SDK: engine.GoSDK, Base: procenv.Base{Local: true},
@@ -197,11 +197,8 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	if processes.Computing(f.Input.RunID) || len(authorities.live) != 0 {
 		t.Fatal("native host returned with active compute or delegated authority")
 	}
-	wantLeases := 1
-	if role == "owner" {
-		wantLeases++
-	}
-	if live, granted, released := config.Admission.Daemon.(*fakeDaemon).counts(); live != 0 || granted != wantLeases || released != wantLeases {
+	wantLeases := 2
+	if live, granted, released := config.Admission.compute.Daemon.(*fakeDaemon).counts(); live != 0 || granted != wantLeases || released != wantLeases {
 		t.Fatalf("admission leases=%d/%d/%d, want 0/%d/%d", live, granted, released, wantLeases, wantLeases)
 	}
 }

@@ -161,10 +161,10 @@ func (a *LocalAdmission) claims(groups []runspec.Concurrency, runID string) ([]w
 	runID = a.holderRunID(runID)
 	claims := make([]wingwire.SemaphoreClaim, 0, len(groups))
 	for _, group := range groups {
+		if a.storeGroups {
+			continue
+		}
 		if group.Scope != "run" && group.Scope != "box" {
-			if a.storeGroups {
-				continue
-			}
 			return nil, errors.New("local admission requires a store adapter for nonlocal concurrency")
 		}
 		if group.Scope == "box" && a.BoxID == "" {

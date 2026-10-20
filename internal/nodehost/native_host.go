@@ -24,23 +24,20 @@ type NativeHostStore interface {
 
 // NativeHostConfig supplies external dependencies once for the shared host.
 type NativeHostConfig struct {
-	Store                   NativeHostStore
-	Lease                   lease.Keeper
-	Source                  source.Options
-	Snapshots               CapturedEnvironmentLoader
-	Masks                   *MaskRegistry
-	Processes               *NativeProcesses
-	Router                  ProcessEndpointRegistrar
-	Validation              nodeproto.ValidationContext
-	Owner                   OwnerOperations
-	Executor                ExecutionOperations
-	Evaluation              EvaluationOperations
-	ReadOutput              func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	PlanningLog             func(context.Context, nodeproto.FrameLog) error
-	RequireMachineAdmission bool
-	Admission               *LocalAdmission
-	ClaimAdmission          *LocalAdmission
-	Capacity                *StoreAdmission
+	Store       NativeHostStore
+	Lease       lease.Keeper
+	Source      source.Options
+	Snapshots   CapturedEnvironmentLoader
+	Masks       *MaskRegistry
+	Processes   *NativeProcesses
+	Router      ProcessEndpointRegistrar
+	Validation  nodeproto.ValidationContext
+	Owner       OwnerOperations
+	Executor    ExecutionOperations
+	Evaluation  EvaluationOperations
+	ReadOutput  func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	PlanningLog func(context.Context, nodeproto.FrameLog) error
+	Admission   NativeAdmission
 }
 
 // NewNativeHost configures its owned transport and returns shared hosts and an evaluator for owner policies.
@@ -96,12 +93,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.Computing = processes.Computing
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
 	owner.Executor, owner.Planner = executor, &planner
-	if config.Capacity == nil {
-		if capacity, ok := config.Store.(CapacityStore); ok {
-			config.Capacity = &StoreAdmission{Store: capacity}
-		}
-	}
-	configureNativeAdmission(&owner, config.Admission, config.Capacity, config.RequireMachineAdmission)
+	configureNativeAdmission(&owner, config.Admission.compute, config.Admission.capacity, config.Admission.required)
 	owner.Planning.Validation = validation
 	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		var spec runspec.Spec
@@ -141,7 +133,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	claimed := &ClaimedNodeHost{
 		Store: config.Store, Lease: config.Lease, Source: config.Source, Snapshots: config.Snapshots,
-		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks, Admission: config.ClaimAdmission,
+		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks, Admission: config.Admission.compute,
 	}
 	if err := RegisterProcessServices(config.Router, processes.Authorities.Resolve); err != nil {
 		return nil, nil, nil, err

@@ -44,7 +44,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 					return nil, errors.New("machine unavailable")
 				})
 			}
-			configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: admitter}, &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
+			configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: admitter}, &storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
 			executed := false
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				executed = true
@@ -142,7 +142,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	}
 	daemon := newFakeDaemon()
 	daemon.hostGate = make(chan struct{})
-	configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: daemon}, &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
+	configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: daemon}, &storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
 	fixture.Host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error { t.Error("saturated host executed work"); return nil })
 	ready := make(chan string, 1)
 	wait := fixture.Host.Wait
@@ -186,8 +186,13 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if err != nil || rowBefore.ClaimedBy != "" || rowBefore.Attempt != 0 {
 		t.Fatalf("waiting for machine capacity consumed the overflow claim: %+v %v", rowBefore, err)
 	}
-	if live, _, _ := daemon.counts(); live != 2 {
-		t.Fatalf("ready burst lost its requester concurrency: live=%d", live)
+	key := scopedConcurrencyKey("db", "run", fixture.Input.RunID, "")
+	capacity, err := fixture.Tenant.GetConcurrencyState(ctx, key)
+	if err != nil || capacity == nil || len(capacity.Holders) != 1 || capacity.Holders[0].NodeID != "job" {
+		t.Fatalf("ready burst lost its controller concurrency: %+v %v", capacity, err)
+	}
+	if live, _, _ := daemon.counts(); live != 1 {
+		t.Fatalf("ready burst retained extra machine admission: live=%d", live)
 	}
 	claim, err := fixture.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: fixture.Input.RunID, NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil || claim.Kind != capability.UnitNode {

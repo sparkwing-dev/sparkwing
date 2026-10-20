@@ -79,7 +79,7 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 				plan.Jobs[1].NeedsGenerated = []string{"children"}
 			}
 			fixture := newStoreHostFixture(t, plan)
-			admission := &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+			admission := &storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 			if _, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
 				t.Fatal(err)
 			}
@@ -106,7 +106,7 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 				t.Fatalf("recovery=%+v error=%v", reaped, err)
 			}
 			competitor := newStoreHostFixtureOn(t, fixture.Store, plan, runspec.Options{})
-			competing := &StoreAdmission{Store: competitor.Tenant, Owner: competitor.Actor}
+			competing := &storeAdmission{Store: competitor.Tenant, Owner: competitor.Actor}
 			if _, err := competing.Run(t.Context(), competitor.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +116,7 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 			}
 			fixture.Actor = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 			fixture.Input.Owner = fixture.Actor
-			fixture.Host.Around = (&StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}).Run
+			fixture.Host.Around = (&storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}).Run
 			completion, err := fixture.Host.Run(t.Context(), fixture.Input)
 			if err != nil || completion.Outcome != "failed" {
 				t.Errorf("resumed refusal=%+v error=%v", completion, err)
@@ -150,7 +150,7 @@ func TestOwnerPersistsStoreAdmissionRefusals(t *testing.T) {
 	for _, policy := range []string{"skip", "fail", "queue"} {
 		t.Run(policy, func(t *testing.T) {
 			f := newStoreHostFixture(t, capacityPlan(policy, 1, "held", "refused"))
-			admission := &StoreAdmission{Store: f.Tenant, Owner: f.Actor}
+			admission := &storeAdmission{Store: f.Tenant, Owner: f.Actor}
 			if err := admission.Node(t.Context(), f.Accepted, capacityRow(t, f, "held"), func(context.Context) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
@@ -237,12 +237,12 @@ func TestOwnerPersistsPlanAdmissionRefusalAndEndsUnit(t *testing.T) {
 			plan.Jobs[0].ContinueOnError = true
 			plan.Jobs[0].Optional = true
 			first := newStoreHostFixture(t, plan)
-			admission := &StoreAdmission{Store: first.Tenant, Owner: first.Actor}
+			admission := &storeAdmission{Store: first.Tenant, Owner: first.Actor}
 			if _, err := admission.Run(t.Context(), first.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
 				t.Fatal(err)
 			}
 			second := newStoreHostFixtureOn(t, first.Store, plan, runspec.Options{})
-			admission = &StoreAdmission{Store: second.Tenant, Owner: second.Actor}
+			admission = &storeAdmission{Store: second.Tenant, Owner: second.Actor}
 			second.Host.Around = admission.Run
 			completion, err := second.Host.Run(t.Context(), second.Input)
 			want := "failed"
