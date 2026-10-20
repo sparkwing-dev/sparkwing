@@ -63,6 +63,9 @@ func TestPoolClaimsLaunchFreshPodsWithoutThePoolCredential(t *testing.T) {
 			t.Fatal("job can reach the launcher's Kubernetes identity")
 		}
 		for _, volume := range pod.Volumes {
+			if volume.Name == "lifetime" && volume.DownwardAPI != nil && len(volume.DownwardAPI.Items) == 1 && volume.DownwardAPI.Items[0].FieldRef != nil && volume.DownwardAPI.Items[0].FieldRef.FieldPath == lifetimeField().FieldPath {
+				continue
+			}
 			if volume.EmptyDir == nil && (volume.Secret == nil || volume.Secret.SecretName != job.Name) {
 				t.Fatalf("job mounted reusable state or pool authority: %+v", volume)
 			}

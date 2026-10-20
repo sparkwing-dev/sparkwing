@@ -162,10 +162,12 @@ and what resolves it. The owner and keeper stop execution when they receive that
 cancellation. The lease ends at the earlier of its paid horizon and a drain deadline at most one slice away. The host kills the SDK
 process tree at that bound, including commands that ignore cancellation.
 It also kills DinD containers and stops their daemon. SDK cancellation and
-cleanup share the time remaining under the bound. Kubernetes Jobs use a
-conservative duration from launch, corrected against the Job's StartTime once
-observed, and zero termination grace. The keeper enforces the absolute bound
-even when the Kubernetes controller starts the Job late or the launcher is lost.
+cleanup share the time remaining under the bound. Every pod container, including
+source checkout and DinD, starts under the same absolute wall-clock deadline.
+Each container kills its private process namespace at that deadline without
+waiting for the SDK, controller or launcher. Only an acknowledged renewal can
+extend it. A delayed renewal projection can stop the pod early. Kubernetes Jobs
+also have a relative deadline and zero termination grace as a backstop.
 Renewals cannot move a funding stop's deadline. There is no grace period,
 and lifting the hold or adding funds does not resume the stopped job.
 Final settlement refunds the unused part of the last slice.

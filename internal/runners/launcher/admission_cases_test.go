@@ -115,7 +115,8 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 	r := f.resources.Reservation
 	cases := []admissionCase{
 		{name: "listener", user: testLauncher, object: f.probes.canary(f.probeCtx, r, "nonce")},
-		{name: "witness", user: testLauncher, object: f.probes.witness(f.probeCtx, r, "nonce", "10.0.0.9", "10.0.0.8")}, {name: "peer", user: testLauncher, object: f.probes.peer(f.probeCtx, r, "nonce")},
+		{name: "witness", user: testLauncher, object: f.probes.witness(f.probeCtx, r, "nonce", "10.0.0.9", "10.0.0.8")},
+		{name: "peer", user: testLauncher, object: f.probes.peer(f.probeCtx, r, "nonce")},
 		{name: "measure", user: testLauncher, object: f.measure()},
 		{name: "capacity", user: testLauncher, object: f.capacity(t)},
 		{name: "job_pod", user: testJobController, object: jobPod(job)},
@@ -328,6 +329,8 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 		return j
 	}
 	cases := []admissionCase{
+		{name: "launcher_renews_lifetime", user: testLauncher, old: created, object: with(func(p *corev1.Pod) { p.Annotations[lifetimeAnnotation] = "2000000000" })},
+		{name: "other_renews_lifetime", user: testIntruder, old: created, object: with(func(p *corev1.Pod) { p.Annotations[lifetimeAnnotation] = "2000000000" }), reason: "funded deadline"},
 		{name: "vpc_annotation", user: testIntruder, old: created, object: with(func(p *corev1.Pod) { p.Annotations["vpc.amazonaws.com/pod-eni"] = "[]" })},
 		{name: "finalizer_removal", user: testJobController, old: created, object: with(func(p *corev1.Pod) { p.Finalizers = nil })},
 		{name: "orphaned_by_collector", user: testCollector, old: created, object: with(func(p *corev1.Pod) { p.OwnerReferences = nil })},
@@ -337,11 +340,14 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 		{name: "ephemeral", user: testIntruder, subresource: "ephemeralcontainers", old: created, object: with(func(p *corev1.Pod) {
 			p.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug", Image: f.l.Config.RunnerImage}}}
 		}), reason: "ephemeral containers"},
-		{name: "launcher_activates_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Suspend = ptr(false) })},
+		{name: "launcher_activates_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) {
+			j.Spec.Suspend = ptr(false)
+			j.Spec.Template.Annotations[lifetimeAnnotation] = "2000000000"
+		})},
 		{name: "collector_marks_job", user: testCollector, old: job, object: jobWith(func(j *batchv1.Job) { j.Finalizers = append(j.Finalizers, "foregroundDeletion") })},
 		{name: "launcher_annotates_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Annotations[rejectedAnnotation] = rejectedPod })},
 		{name: "other_annotates_job", user: testIntruder, old: job, object: jobWith(func(j *batchv1.Job) { j.Annotations[rejectedAnnotation] = rejectedUnadmittable }), reason: "only the launcher changes a Job"},
-		{name: "retemplated_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = labelHash("other-team") }), reason: "never its template"},
+		{name: "retemplated_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = labelHash("other-team") }), reason: "template annotations"},
 		{name: "other_resumes_job", user: testIntruder, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Suspend = ptr(false) }), reason: "only the launcher changes a Job"},
 		{name: "widened_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Parallelism = ptr(int32(3)) }), reason: "exactly one Pod"},
 	}

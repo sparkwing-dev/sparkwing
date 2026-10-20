@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -28,6 +29,15 @@ func TestJobDeadlineFollowsFundedLeaseAcrossRenewalAndOutage(t *testing.T) {
 	if job.Spec.Template.Spec.TerminationGracePeriodSeconds == nil || *job.Spec.Template.Spec.TerminationGracePeriodSeconds != 0 {
 		t.Fatal("pod can run beyond the bound during termination grace")
 	}
+	job.UID = "job-uid"
+	if _, err := jobs.Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	pod := jobPod(job)
+	pod.Name = name + "-pod"
+	if _, err := kube.CoreV1().Pods(l.Config.Namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	start := time.Now().Add(-10 * time.Second)
 	job.Status.StartTime = &metav1.Time{Time: start}
 	if _, err := jobs.UpdateStatus(t.Context(), job, metav1.UpdateOptions{}); err != nil {
@@ -47,6 +57,10 @@ func TestJobDeadlineFollowsFundedLeaseAcrossRenewalAndOutage(t *testing.T) {
 	}
 	if deadline := start.Add(time.Duration(*renewed.Spec.ActiveDeadlineSeconds) * time.Second); deadline.After(second) || second.Sub(deadline) >= time.Second {
 		t.Fatalf("Kubernetes deadline %v differs from funded %v", deadline, second)
+	}
+	renewedPod, err := kube.CoreV1().Pods(l.Config.Namespace).Get(t.Context(), pod.Name, metav1.GetOptions{})
+	if err != nil || renewedPod.Annotations[lifetimeAnnotation] != strconv.FormatInt(second.Unix(), 10) {
+		t.Fatalf("renewal did not reach container watchdogs: %v %v", renewedPod, err)
 	}
 	control.fail = errors.New("controller offline")
 	if err := l.Sync(t.Context()); err == nil {
@@ -96,21 +110,12 @@ func TestJobDeadlineAccountsForDelayedStartTime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		start := launch.Add(10 * time.Second)
-		if deadline := start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second); deadline.After(bound) {
-			t.Fatalf("late Kubernetes StartTime extends provisional deadline to %v beyond %v", deadline, bound)
+		start := launch.Add(45 * time.Second)
+		// Kubernetes's relative backstop can lag; every entrypoint still receives the absolute bound.
+		if got := job.Spec.Template.Annotations[lifetimeAnnotation]; got != strconv.FormatInt(bound.Unix(), 10) {
+			t.Fatalf("delayed startup lost absolute bound: %s", got)
 		}
-		time.Sleep(10 * time.Second)
-		if err := l.Sync(t.Context()); err != nil {
-			t.Fatal(err)
-		}
-		job, err = jobs.Get(t.Context(), job.Name, metav1.GetOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if deadline := start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second); deadline.After(bound) {
-			t.Fatalf("renewal without StartTime extends provisional deadline to %v beyond %v", deadline, bound)
-		}
+		time.Sleep(45 * time.Second)
 		job.Status.StartTime = &metav1.Time{Time: start}
 		if _, err := jobs.UpdateStatus(t.Context(), job, metav1.UpdateOptions{}); err != nil {
 			t.Fatal(err)
@@ -132,17 +137,15 @@ func TestJobDeadlineAccountsForDelayedStartTime(t *testing.T) {
 func TestJobDeadlineDoesNotRoundAnElapsedDurationUp(t *testing.T) {
 	now := time.Now()
 	for _, duration := range []time.Duration{-time.Second, 0, time.Second / 2} {
-		for _, started := range []bool{false, true} {
-			if got := jobDeadlineSeconds(now.Add(duration), now, started); got > 0 {
-				t.Fatalf("%v started=%t rounded to %d seconds", duration, started, got)
-			}
+		if got := jobDeadlineSeconds(now.Add(duration), now); got > 0 {
+			t.Fatalf("%v rounded to %d seconds", duration, got)
 		}
 	}
 }
 
 func TestJobDeadlinePreservesShortPositiveDurations(t *testing.T) {
 	now := time.Now()
-	if got := jobDeadlineSeconds(now.Add(time.Second), now, false); got != 1 {
+	if got := jobDeadlineSeconds(now.Add(time.Second), now); got != 1 {
 		t.Fatalf("one second of execution became %d seconds", got)
 	}
 }

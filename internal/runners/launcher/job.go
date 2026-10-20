@@ -90,7 +90,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, err
 	}
-	seconds := jobDeadlineSeconds(deadline, now, false)
+	seconds := jobDeadlineSeconds(deadline, now)
 	if seconds <= 0 {
 		return CloudJobResources{}, limits.ErrNoTime
 	}
@@ -111,18 +111,14 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
-	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano), launchAnnotation: now.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: map[string]string{doNotDisrupt: "true"}}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano), launchAnnotation: now.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: map[string]string{doNotDisrupt: "true", lifetimeAnnotation: strconv.FormatInt(deadline.Unix(), 10)}}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...), awardFileName: metadata}}
 	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline}, nil
 }
 
-// safety: Kubernetes starts its clock asynchronously; the keeper retains the absolute bound.
-func jobDeadlineSeconds(deadline, start time.Time, started bool) int64 {
-	remaining := deadline.Sub(start)
-	if !started {
-		remaining -= max(0, min(15*time.Second, remaining/2, remaining-time.Second))
-	}
-	return int64(remaining / time.Second)
+// Kubernetes measures this backstop from StartTime; container watchdogs enforce the absolute bound.
+func jobDeadlineSeconds(deadline, start time.Time) int64 {
+	return int64(deadline.Sub(start) / time.Second)
 }
 
 func cloudLeaseDeadline(now time.Time, binding CloudJobBinding, expires time.Time) (time.Time, error) {
@@ -234,7 +230,7 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 		TerminationGracePeriodSeconds: ptr(int64(0)),
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.
 		Resources:      &corev1.ResourceRequirements{Requests: budget, Limits: budget.DeepCopy()},
-		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0o400))}}}},
+		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0o400))}}}, lifetimeVolume()},
 		InitContainers: []corev1.Container{dockerContainer(cfg), hostContainer(cfg, a, "fetch-source")}, Containers: []corev1.Container{main},
 	}
 }
@@ -245,7 +241,7 @@ func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb string) corev1.Cont
 	if b.NodeID != "" {
 		args = append(args, "--job", b.NodeID)
 	}
-	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: workloadSecurity()}
+	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: lifetimeCommand(JobBinary), Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{lifetimeEnv(), {Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{lifetimeMount(), {Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: workloadSecurity()}
 }
 
 // dockerCapabilities are namespaced to the Pod's user namespace. PTRACE lets
@@ -258,24 +254,12 @@ var dockerCapabilities = []corev1.Capability{"SYS_ADMIN", "NET_ADMIN", "SYS_PTRA
 const DockerSeccompProfile = "profiles/sparkwing-dind.json"
 
 var (
-	// safety: given dockerd, the image's entrypoint adds no TCP listener.
-	dockerCommand = []string{"sh", "-c", `
-if [ -e "` + DockerStopPath + `" ] || [ -L "` + DockerStopPath + `" ]; then exec sleep infinity; fi
-dockerd-entrypoint.sh "$@" &
-daemon=$!
-while kill -0 "$daemon" 2>/dev/null; do
-  if [ -e "` + DockerStopPath + `" ] || [ -L "` + DockerStopPath + `" ]; then
-    kill -KILL -1
-    break
-  fi
-  sleep 0.1
-done
-wait "$daemon"`, "sparkwing-docker"}
-	dockerArgs = []string{"dockerd", "--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
+	dockerCommand = lifetimeCommand("dockerd-entrypoint.sh")
+	dockerArgs    = []string{"dockerd", "--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}
 )
 
 func dockerContainer(cfg CloudJobConfig) corev1.Container {
-	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: slices.Clone(dockerCommand), Args: slices.Clone(dockerArgs), SecurityContext: dockerSecurity(), VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}}}
+	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: slices.Clone(dockerCommand), Args: slices.Clone(dockerArgs), Env: []corev1.EnvVar{lifetimeEnv()}, SecurityContext: dockerSecurity(), VolumeMounts: []corev1.VolumeMount{lifetimeMount(), {Name: "scratch", MountPath: "/tmp"}}}
 }
 
 // jobPodSecurity runs every Job container as root of the Pod's user

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // TestOnlyReversePayment exercises the transaction owner with trusted fixture facts.
@@ -60,4 +62,10 @@ func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w PaymentWa
 		return "", err
 	}
 	return team, nil
+}
+
+// TestOnlySettleRefund records trusted provider facts through the settlement transaction.
+func (s *Store) TestOnlySettleRefund(ctx context.Context, event capability.PaymentEvent) error {
+	_, err := s.settleProviderPaymentFacts(ctx, event)
+	return err
 }

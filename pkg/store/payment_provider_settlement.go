@@ -248,6 +248,11 @@ func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.Payme
 		return PaymentSettlement{}, err
 	}
 	result := PaymentSettlement{Team: team, Payment: e.PaymentID}
+	if team != "" {
+		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+			return result, err
+		}
+	}
 	if err := recordPaymentConsequenceTx(ctx, tx, e, "refund"); err != nil {
 		return result, err
 	}

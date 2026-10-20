@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -115,12 +116,12 @@ func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, bindi
 	if job.Status.StartTime != nil {
 		start = job.Status.StartTime.Time
 	}
-	seconds := jobDeadlineSeconds(expires, start, job.Status.StartTime != nil)
+	seconds := jobDeadlineSeconds(expires, start)
 	if seconds <= 0 {
 		return errors.New("Cloud lease deadline has elapsed")
 	}
 	if job.Spec.ActiveDeadlineSeconds != nil && *job.Spec.ActiveDeadlineSeconds == seconds && job.Annotations[deadlineAnnotation] == expires.Format(time.RFC3339Nano) {
-		return nil
+		return l.publishPodLifetime(ctx, job, expires)
 	}
 	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "resourceVersion": job.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: expires.Format(time.RFC3339Nano)}}, "spec": map[string]any{"activeDeadlineSeconds": seconds}})
 	if err != nil {
@@ -137,6 +138,29 @@ func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, bindi
 		return err
 	}
 	*job = *updated
+	return l.publishPodLifetime(ctx, job, expires)
+}
+
+func (l *Launcher) publishPodLifetime(ctx context.Context, job *batchv1.Job, expires time.Time) error {
+	pods := l.Kube.CoreV1().Pods(job.Namespace)
+	owned, err := pods.List(ctx, metav1.ListOptions{LabelSelector: JobLabel + "=" + job.Name})
+	if err != nil {
+		return err
+	}
+	value := strconv.FormatInt(expires.Unix(), 10)
+	for _, pod := range owned.Items {
+		owner := metav1.GetControllerOf(&pod)
+		if owner == nil || owner.UID != job.UID || pod.Annotations[lifetimeAnnotation] == value {
+			continue
+		}
+		patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": pod.UID, "resourceVersion": pod.ResourceVersion, "annotations": map[string]string{lifetimeAnnotation: value}}})
+		if err != nil {
+			return err
+		}
+		if _, err := pods.Patch(ctx, pod.Name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

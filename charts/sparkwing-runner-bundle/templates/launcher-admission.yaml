@@ -56,6 +56,10 @@ spec:
   - expression: request.operation != 'UPDATE' || object.spec == oldObject.spec &&
       variables.labels == oldObject.metadata.?labels.orValue({})
     message: Pod specs and labels are immutable here
+  - expression: request.operation != 'UPDATE' || object.metadata.?annotations.orValue({})[?'sparkwing.dev/funded-unix'].orValue('')
+      == oldObject.metadata.?annotations.orValue({})[?'sparkwing.dev/funded-unix'].orValue('')
+      || request.userInfo.username == variables.launcher
+    message: only the launcher changes the funded deadline
   - expression: request.operation != 'UPDATE' || variables.owners == oldObject.metadata.?ownerReferences.orValue([])
       || request.userInfo.username in ['system:serviceaccount:kube-system:job-controller',
       'system:serviceaccount:kube-system:generic-garbage-collector']
@@ -89,8 +93,12 @@ spec:
     message: Pods cannot share host namespaces or ports
   - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
       == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
-      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')))'
-    message: Pods mount only their scratch emptyDir and own bootstrap Secret
+      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')
+      || v.name == ''lifetime'' && has(v.downwardAPI) && size(v.downwardAPI.items)
+      == 1 && v.downwardAPI.items[0].path == ''deadline'' && v.downwardAPI.items[0].fieldRef.fieldPath
+      == "metadata.annotations[''sparkwing.dev/funded-unix'']"))'
+    message: Pods mount only their scratch emptyDir, own bootstrap Secret and funded
+      deadline
   - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
       == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
       == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
@@ -116,7 +124,16 @@ spec:
     message: Pods keep cluster DNS, the default scheduler, no service links and no
       system priority class
   - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
-      != 2 || variables.inits[1].?command.orValue([]) == ["sparkwing-runner"] && !has(variables.inits[1].restartPolicy)
+      != 2 || variables.inits[1].?command.orValue([]) == ["sh", "-c", "\ndeadline=\"$SPARKWING_FUNDED_DEADLINE\"\nstop()
+      {\n  kill -KILL -1\n  exit 124\n}\nbounded() {\n  if [ -r \"/etc/sparkwing/lifetime/deadline\"
+      ]; then deadline=$(cat \"/etc/sparkwing/lifetime/deadline\") || return 1; fi\n  case
+      \"$deadline\" in ''''|*[!0-9]*) return 1;; esac\n  [ \"$(date +%s)\" -lt \"$deadline\"
+      ]\n}\nbounded || exit 124\nif [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then exit 124; fi\ntrap stop
+      TERM INT\n\"$@\" &\nchild=$!\nwhile kill -0 \"$child\" 2>/dev/null; do\n  bounded
+      || stop\n  if [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then stop; fi\n  sleep 0.1\ndone\nwait
+      \"$child\"\n", "sparkwing-lifetime", "sparkwing-runner"] && !has(variables.inits[1].restartPolicy)
       && (size(variables.inits[1].?args.orValue([])) == 13 || size(variables.inits[1].?args.orValue([]))
       == 15 && variables.inits[1].args[13] == ''--job'') && variables.inits[1].args[0]
       == "fetch-source" && variables.inits[1].args[1] == "--controller" && variables.inits[1].args[3]
@@ -124,16 +141,24 @@ spec:
       == "--source-dir" && variables.inits[1].args[8] == "/tmp/source" && variables.inits[1].args[9]
       == "--module-cache" && variables.inits[1].args[10] == "/tmp/modules" && variables.inits[1].args[11]
       == "--bootstrap-file" && variables.inits[1].args[12] == "/etc/sparkwing/bootstrap/bootstrap"
-      && variables.spec.containers[0].?command.orValue([]) == ["sparkwing-runner"]
-      && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))
-      == 13 || size(variables.spec.containers[0].?args.orValue([])) == 15 && variables.spec.containers[0].args[13]
-      == ''--job'') && variables.spec.containers[0].args[0] == "run-node" && variables.spec.containers[0].args[1]
-      == "--controller" && variables.spec.containers[0].args[3] == "--run" && variables.spec.containers[0].args[5]
-      == "--generation" && variables.spec.containers[0].args[7] == "--source-dir"
-      && variables.spec.containers[0].args[8] == "/tmp/source" && variables.spec.containers[0].args[9]
-      == "--module-cache" && variables.spec.containers[0].args[10] == "/tmp/modules"
-      && variables.spec.containers[0].args[11] == "--bootstrap-file" && variables.spec.containers[0].args[12]
-      == "/etc/sparkwing/bootstrap/bootstrap"'
+      && variables.spec.containers[0].?command.orValue([]) == ["sh", "-c", "\ndeadline=\"$SPARKWING_FUNDED_DEADLINE\"\nstop()
+      {\n  kill -KILL -1\n  exit 124\n}\nbounded() {\n  if [ -r \"/etc/sparkwing/lifetime/deadline\"
+      ]; then deadline=$(cat \"/etc/sparkwing/lifetime/deadline\") || return 1; fi\n  case
+      \"$deadline\" in ''''|*[!0-9]*) return 1;; esac\n  [ \"$(date +%s)\" -lt \"$deadline\"
+      ]\n}\nbounded || exit 124\nif [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then exit 124; fi\ntrap stop
+      TERM INT\n\"$@\" &\nchild=$!\nwhile kill -0 \"$child\" 2>/dev/null; do\n  bounded
+      || stop\n  if [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then stop; fi\n  sleep 0.1\ndone\nwait
+      \"$child\"\n", "sparkwing-lifetime", "sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy)
+      && (size(variables.spec.containers[0].?args.orValue([])) == 13 || size(variables.spec.containers[0].?args.orValue([]))
+      == 15 && variables.spec.containers[0].args[13] == ''--job'') && variables.spec.containers[0].args[0]
+      == "run-node" && variables.spec.containers[0].args[1] == "--controller" && variables.spec.containers[0].args[3]
+      == "--run" && variables.spec.containers[0].args[5] == "--generation" && variables.spec.containers[0].args[7]
+      == "--source-dir" && variables.spec.containers[0].args[8] == "/tmp/source" &&
+      variables.spec.containers[0].args[9] == "--module-cache" && variables.spec.containers[0].args[10]
+      == "/tmp/modules" && variables.spec.containers[0].args[11] == "--bootstrap-file"
+      && variables.spec.containers[0].args[12] == "/etc/sparkwing/bootstrap/bootstrap"'
     message: the workload containers run only the launcher's sparkwing-runner commands
   - expression: '!variables.create || variables.shape == ''job'' ? has(variables.spec.securityContext)
       && (!has(variables.spec.securityContext.seLinuxOptions) && !has(variables.spec.securityContext.windowsOptions)
@@ -216,15 +241,24 @@ spec:
     message: containers run no lifecycle hooks or exec probes beyond the peer listener's
       loopback readiness check
   - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
-      == 0 || variables.inits[0].?command.orValue([]) == ["dockerd-entrypoint.sh"]
-      && variables.inits[0].?args.orValue([]) == ["dockerd", "--host=unix:///tmp/docker.sock",
-      "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid",
-      "--tls=false"]'
+      == 0 || variables.inits[0].?command.orValue([]) == ["sh", "-c", "\ndeadline=\"$SPARKWING_FUNDED_DEADLINE\"\nstop()
+      {\n  kill -KILL -1\n  exit 124\n}\nbounded() {\n  if [ -r \"/etc/sparkwing/lifetime/deadline\"
+      ]; then deadline=$(cat \"/etc/sparkwing/lifetime/deadline\") || return 1; fi\n  case
+      \"$deadline\" in ''''|*[!0-9]*) return 1;; esac\n  [ \"$(date +%s)\" -lt \"$deadline\"
+      ]\n}\nbounded || exit 124\nif [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then exit 124; fi\ntrap stop
+      TERM INT\n\"$@\" &\nchild=$!\nwhile kill -0 \"$child\" 2>/dev/null; do\n  bounded
+      || stop\n  if [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then stop; fi\n  sleep 0.1\ndone\nwait
+      \"$child\"\n", "sparkwing-lifetime", "dockerd-entrypoint.sh"] && variables.inits[0].?args.orValue([])
+      == ["dockerd", "--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker",
+      "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"]'
     message: the Docker sidecar runs only the launcher's dockerd command
   - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
-      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && e.name in [''HOME'',
+      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && (e.name in [''HOME'',
       ''DOCKER_HOST'', ''AWS_REGION'', ''AWS_DEFAULT_REGION'', ''AWS_STS_REGIONAL_ENDPOINTS'']
-      && !has(e.valueFrom)))'
+      && !has(e.valueFrom) || e.name == ''SPARKWING_FUNDED_DEADLINE'' && has(e.valueFrom)
+      && has(e.valueFrom.fieldRef) && e.valueFrom.fieldRef.fieldPath == "metadata.annotations[''sparkwing.dev/funded-unix'']")))'
     message: containers carry only the launcher's environment and EKS region values,
       never AWS credentials
   - expression: '!variables.create || variables.team != '''' && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
@@ -333,10 +367,14 @@ spec:
       && !has(object.spec.successPolicy) && object.spec.?completionMode.orValue('NonIndexed')
       == 'NonIndexed'
     message: Jobs run exactly one Pod without retries
-  - expression: request.operation != 'UPDATE' || object.spec.template == oldObject.spec.template
-      && (request.userInfo.username == variables.launcher || object.spec == oldObject.spec
-      && object.metadata.?annotations.orValue({}) == oldObject.metadata.?annotations.orValue({}))
-    message: only the launcher changes a Job, and never its template
+  - expression: request.operation != 'UPDATE' || (object.spec.template == oldObject.spec.template
+      || request.userInfo.username == variables.launcher && oldObject.spec.?suspend.orValue(false)
+      && object.spec.template.spec == oldObject.spec.template.spec && object.spec.template.metadata.?labels.orValue({})
+      == oldObject.spec.template.metadata.?labels.orValue({})) && (request.userInfo.username
+      == variables.launcher || object.spec == oldObject.spec && object.metadata.?annotations.orValue({})
+      == oldObject.metadata.?annotations.orValue({}))
+    message: only the launcher changes a Job; template annotations can change only
+      before activation
   - expression: '!variables.create || variables.shape != ''other'''
     message: only Cloud Job, capacity and boundary probe Pods run in the Sparkwing
       job namespace
@@ -350,8 +388,12 @@ spec:
     message: Pods cannot share host namespaces or ports
   - expression: '!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape
       == ''job'' && (v.name == ''scratch'' && has(v.emptyDir) || v.name == ''bootstrap''
-      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')))'
-    message: Pods mount only their scratch emptyDir and own bootstrap Secret
+      && has(v.secret) && v.secret.?secretName.orValue('''') == variables.labels[?''sparkwing.dev/job''].orValue('''')
+      || v.name == ''lifetime'' && has(v.downwardAPI) && size(v.downwardAPI.items)
+      == 1 && v.downwardAPI.items[0].path == ''deadline'' && v.downwardAPI.items[0].fieldRef.fieldPath
+      == "metadata.annotations[''sparkwing.dev/funded-unix'']"))'
+    message: Pods mount only their scratch emptyDir, own bootstrap Secret and funded
+      deadline
   - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
       == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
       == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
@@ -377,7 +419,16 @@ spec:
     message: Pods keep cluster DNS, the default scheduler, no service links and no
       system priority class
   - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
-      != 2 || variables.inits[1].?command.orValue([]) == ["sparkwing-runner"] && !has(variables.inits[1].restartPolicy)
+      != 2 || variables.inits[1].?command.orValue([]) == ["sh", "-c", "\ndeadline=\"$SPARKWING_FUNDED_DEADLINE\"\nstop()
+      {\n  kill -KILL -1\n  exit 124\n}\nbounded() {\n  if [ -r \"/etc/sparkwing/lifetime/deadline\"
+      ]; then deadline=$(cat \"/etc/sparkwing/lifetime/deadline\") || return 1; fi\n  case
+      \"$deadline\" in ''''|*[!0-9]*) return 1;; esac\n  [ \"$(date +%s)\" -lt \"$deadline\"
+      ]\n}\nbounded || exit 124\nif [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then exit 124; fi\ntrap stop
+      TERM INT\n\"$@\" &\nchild=$!\nwhile kill -0 \"$child\" 2>/dev/null; do\n  bounded
+      || stop\n  if [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then stop; fi\n  sleep 0.1\ndone\nwait
+      \"$child\"\n", "sparkwing-lifetime", "sparkwing-runner"] && !has(variables.inits[1].restartPolicy)
       && (size(variables.inits[1].?args.orValue([])) == 13 || size(variables.inits[1].?args.orValue([]))
       == 15 && variables.inits[1].args[13] == ''--job'') && variables.inits[1].args[0]
       == "fetch-source" && variables.inits[1].args[1] == "--controller" && variables.inits[1].args[3]
@@ -385,16 +436,24 @@ spec:
       == "--source-dir" && variables.inits[1].args[8] == "/tmp/source" && variables.inits[1].args[9]
       == "--module-cache" && variables.inits[1].args[10] == "/tmp/modules" && variables.inits[1].args[11]
       == "--bootstrap-file" && variables.inits[1].args[12] == "/etc/sparkwing/bootstrap/bootstrap"
-      && variables.spec.containers[0].?command.orValue([]) == ["sparkwing-runner"]
-      && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))
-      == 13 || size(variables.spec.containers[0].?args.orValue([])) == 15 && variables.spec.containers[0].args[13]
-      == ''--job'') && variables.spec.containers[0].args[0] == "run-node" && variables.spec.containers[0].args[1]
-      == "--controller" && variables.spec.containers[0].args[3] == "--run" && variables.spec.containers[0].args[5]
-      == "--generation" && variables.spec.containers[0].args[7] == "--source-dir"
-      && variables.spec.containers[0].args[8] == "/tmp/source" && variables.spec.containers[0].args[9]
-      == "--module-cache" && variables.spec.containers[0].args[10] == "/tmp/modules"
-      && variables.spec.containers[0].args[11] == "--bootstrap-file" && variables.spec.containers[0].args[12]
-      == "/etc/sparkwing/bootstrap/bootstrap"'
+      && variables.spec.containers[0].?command.orValue([]) == ["sh", "-c", "\ndeadline=\"$SPARKWING_FUNDED_DEADLINE\"\nstop()
+      {\n  kill -KILL -1\n  exit 124\n}\nbounded() {\n  if [ -r \"/etc/sparkwing/lifetime/deadline\"
+      ]; then deadline=$(cat \"/etc/sparkwing/lifetime/deadline\") || return 1; fi\n  case
+      \"$deadline\" in ''''|*[!0-9]*) return 1;; esac\n  [ \"$(date +%s)\" -lt \"$deadline\"
+      ]\n}\nbounded || exit 124\nif [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then exit 124; fi\ntrap stop
+      TERM INT\n\"$@\" &\nchild=$!\nwhile kill -0 \"$child\" 2>/dev/null; do\n  bounded
+      || stop\n  if [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then stop; fi\n  sleep 0.1\ndone\nwait
+      \"$child\"\n", "sparkwing-lifetime", "sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy)
+      && (size(variables.spec.containers[0].?args.orValue([])) == 13 || size(variables.spec.containers[0].?args.orValue([]))
+      == 15 && variables.spec.containers[0].args[13] == ''--job'') && variables.spec.containers[0].args[0]
+      == "run-node" && variables.spec.containers[0].args[1] == "--controller" && variables.spec.containers[0].args[3]
+      == "--run" && variables.spec.containers[0].args[5] == "--generation" && variables.spec.containers[0].args[7]
+      == "--source-dir" && variables.spec.containers[0].args[8] == "/tmp/source" &&
+      variables.spec.containers[0].args[9] == "--module-cache" && variables.spec.containers[0].args[10]
+      == "/tmp/modules" && variables.spec.containers[0].args[11] == "--bootstrap-file"
+      && variables.spec.containers[0].args[12] == "/etc/sparkwing/bootstrap/bootstrap"'
     message: the workload containers run only the launcher's sparkwing-runner commands
   - expression: '!variables.create || variables.shape == ''job'' ? has(variables.spec.securityContext)
       && (!has(variables.spec.securityContext.seLinuxOptions) && !has(variables.spec.securityContext.windowsOptions)
@@ -477,15 +536,24 @@ spec:
     message: containers run no lifecycle hooks or exec probes beyond the peer listener's
       loopback readiness check
   - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
-      == 0 || variables.inits[0].?command.orValue([]) == ["dockerd-entrypoint.sh"]
-      && variables.inits[0].?args.orValue([]) == ["dockerd", "--host=unix:///tmp/docker.sock",
-      "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid",
-      "--tls=false"]'
+      == 0 || variables.inits[0].?command.orValue([]) == ["sh", "-c", "\ndeadline=\"$SPARKWING_FUNDED_DEADLINE\"\nstop()
+      {\n  kill -KILL -1\n  exit 124\n}\nbounded() {\n  if [ -r \"/etc/sparkwing/lifetime/deadline\"
+      ]; then deadline=$(cat \"/etc/sparkwing/lifetime/deadline\") || return 1; fi\n  case
+      \"$deadline\" in ''''|*[!0-9]*) return 1;; esac\n  [ \"$(date +%s)\" -lt \"$deadline\"
+      ]\n}\nbounded || exit 124\nif [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then exit 124; fi\ntrap stop
+      TERM INT\n\"$@\" &\nchild=$!\nwhile kill -0 \"$child\" 2>/dev/null; do\n  bounded
+      || stop\n  if [ \"$1\" = dockerd-entrypoint.sh ] && { [ -e \"/tmp/sparkwing-docker-stop\"
+      ] || [ -L \"/tmp/sparkwing-docker-stop\" ]; }; then stop; fi\n  sleep 0.1\ndone\nwait
+      \"$child\"\n", "sparkwing-lifetime", "dockerd-entrypoint.sh"] && variables.inits[0].?args.orValue([])
+      == ["dockerd", "--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker",
+      "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"]'
     message: the Docker sidecar runs only the launcher's dockerd command
   - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
-      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && e.name in [''HOME'',
+      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && (e.name in [''HOME'',
       ''DOCKER_HOST'', ''AWS_REGION'', ''AWS_DEFAULT_REGION'', ''AWS_STS_REGIONAL_ENDPOINTS'']
-      && !has(e.valueFrom)))'
+      && !has(e.valueFrom) || e.name == ''SPARKWING_FUNDED_DEADLINE'' && has(e.valueFrom)
+      && has(e.valueFrom.fieldRef) && e.valueFrom.fieldRef.fieldPath == "metadata.annotations[''sparkwing.dev/funded-unix'']")))'
     message: containers carry only the launcher's environment and EKS region values,
       never AWS credentials
   - expression: '!variables.create || variables.team != '''' && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')

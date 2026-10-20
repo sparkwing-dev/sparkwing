@@ -190,9 +190,10 @@ func TestAdmissionPolicyOnAPIServer(t *testing.T) {
 		retemplated := current.DeepCopy()
 		retemplated.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = labelHash("other-team")
 		_, err = launcher.BatchV1().Jobs("cloud").Update(ctx, retemplated, metav1.UpdateOptions{})
-		refused(t, err, "never its template")
+		refused(t, err, "template annotations")
 		resumed := current.DeepCopy()
 		resumed.Spec.Suspend = ptr(false)
+		resumed.Spec.Template.Annotations[lifetimeAnnotation] = "2000000000"
 		_, err = e.as(t, testIntruder).BatchV1().Jobs("cloud").Update(ctx, resumed, metav1.UpdateOptions{})
 		refused(t, err, "only the launcher changes a Job")
 		widened := current.DeepCopy()
