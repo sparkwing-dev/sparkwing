@@ -46,7 +46,7 @@ func checkBootstrapSourceBundle(t *testing.T, kind capability.UnitKind, attack u
 		t.Fatal(err)
 	}
 	authority := blob.Authority{CapabilityRef: claim.Award.CapabilityPrefix}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef})
 	if err != nil || !slices.Equal(p.Capability.Grants, []capability.Grant{capability.SourceRead, capability.ClaimExchange}) {
 		t.Fatalf("bootstrap authority widened: %+v %v", p.Capability.Grants, err)
 	}
@@ -78,10 +78,10 @@ func checkBootstrapSourceBundle(t *testing.T, kind capability.UnitKind, attack u
 	case 6:
 		*now = claim.Award.LeaseExpiresAt.Add(time.Duration(offset))
 	case 7:
-		if _, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: authority.CapabilityRef}); err != nil {
+		if _, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: authority.CapabilityRef}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: authority.CapabilityRef}); err == nil {
+		if _, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: authority.CapabilityRef}); err == nil {
 			t.Fatal("bootstrap exchanged twice")
 		}
 	case 8:
@@ -98,12 +98,12 @@ func checkBootstrapSourceBundle(t *testing.T, kind capability.UnitKind, attack u
 	if !ok {
 		t.Fatal("source download route missing")
 	}
-	authenticated, accessErr := capability.NewAuthenticator(s).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: string(claim.Bearer)}, route)
+	authenticated, accessErr := capability.NewAuthenticator(s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: string(claim.Bearer)}, route)
 	if accessErr == nil {
 		scope := authenticated.Principal.Capability.Data
 		target := capability.Target{Team: "a", Data: &capability.DataTarget{Operation: capability.DataDownload, Digest: sourceDigest, RunID: scope.RunID, NodeID: scope.NodeID, Generation: scope.Generation, Attempt: scope.Attempt}}
 		var authorized capability.Authorized
-		authorized, accessErr = capability.Authorize(t.Context(), s, route, authenticated, target)
+		authorized, accessErr = capability.Authorize(t.Context(), s.AsOperator(), route, authenticated, target)
 		if accessErr == nil {
 			accessErr = capability.AuthorizeData(t.Context(), tenant, authorized, *target.Data)
 		}
@@ -124,7 +124,7 @@ func checkBootstrapSourceBundle(t *testing.T, kind capability.UnitKind, attack u
 				t.Fatalf("bootstrap acquired %s authority", operation)
 			}
 		}
-		exchanged, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: authority.CapabilityRef})
+		exchanged, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: authority.CapabilityRef})
 		if err != nil {
 			t.Fatal(err)
 		}

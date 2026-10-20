@@ -27,10 +27,7 @@ func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	teams, err := s.AsOperator().ListTeams(ctx)
-	if err != nil {
-		t.Fatalf("list teams: %v", err)
-	}
+	teams := liveTeams(t, s.AsOperator())
 	if len(teams) != 1 || teams[0] != store.DefaultTeam {
 		t.Fatalf("a fresh install lists teams %v, want only %q", teams, store.DefaultTeam)
 	}

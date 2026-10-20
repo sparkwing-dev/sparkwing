@@ -41,7 +41,7 @@ func TestOperatorSettingsDefaultWriterCommitsThroughHTTP(t *testing.T) {
 	if err != nil || limits.GlobalRunners != 7 {
 		t.Fatalf("limits = %+v: %v", limits, err)
 	}
-	gate, err := f.store.SignUpGate(ctx)
+	gate, err := f.store.AsOperator().SignUpGate(ctx)
 	if err != nil || gate.Mode != store.SignUpWaitlist || gate.Limits.HourlyLimit != 12 || gate.SetBy != "settings" {
 		t.Fatalf("gate = %+v: %v", gate, err)
 	}

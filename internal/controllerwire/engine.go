@@ -136,6 +136,7 @@ type LauncherPreparation struct {
 
 // LauncherSyncResponse carries execution inputs and retired award fences without bearers.
 type LauncherSyncResponse struct {
+	Deferred []capability.LeaseRef `json:"deferred,omitempty"`
 	Prepared []LauncherPreparation `json:"prepared,omitempty"`
 	Awards   []ClaimedUnit         `json:"awards"`
 	Retired  []capability.LeaseRef `json:"retired"`

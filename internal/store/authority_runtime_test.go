@@ -36,7 +36,7 @@ func authorityPersist(t *testing.T, s *Store, c capability.Capability) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	if err := persistCapabilityTx(t.Context(), tx, c); err != nil {
+	if err := tx.operator.persistCapabilityTx(t.Context(), tx, c); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -48,11 +48,11 @@ func TestAuthorityEnvelopeRefusesProjectionDrift(t *testing.T) {
 	s := authorityStore(t)
 	authorityPersist(t, s, authorityRoot("root", "a"))
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
-	if _, err := s.ResolveAuthority(t.Context(), ref); err != nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET grants = ? WHERE prefix = 'root'", []byte(`["team.admin"]`))
-	if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
 		t.Fatal("accepted index authority wider than envelope")
 	}
 }
@@ -67,7 +67,7 @@ func TestAuthorityGenerationIncludesCrossTeamAncestor(t *testing.T) {
 	child.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
 	authorityPersist(t, s, child)
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}
-	got, err := s.ResolveAuthority(t.Context(), ref)
+	got, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestAuthorityGenerationIncludesCrossTeamAncestor(t *testing.T) {
 	if err := s.AsOperator().RevokeAuthority(t.Context(), actor, *child.Parent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
 		t.Fatal("revoked ancestor stayed live")
 	}
 }
@@ -105,7 +105,7 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	child.Grants = []capability.Grant{capability.RunsWrite}
 	authorityPersist(t, s, child)
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}
-	before, err := s.ResolveAuthority(t.Context(), ref)
+	before, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member", Role: &role}); err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.ResolveAuthority(t.Context(), ref)
+	after, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
 		t.Fatal("removed member descendant stayed live")
 	}
 }
@@ -151,7 +151,7 @@ func TestAuthorityMissingCycleExpiryAndForgedFenceFailClosed(t *testing.T) {
 				c.ExpiresAt = &expiry
 			}
 			authorityPersist(t, s, c)
-			if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}); err == nil {
+			if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}); err == nil {
 				t.Fatal("accepted invalid authority")
 			}
 		})
@@ -205,7 +205,7 @@ func TestAuthorityAwardDerivesBindingAndBilling(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 1)
-	if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}); err != nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -239,7 +239,7 @@ func TestAuthorityBootstrapExchangeIsAtomicAndSingleUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 1)
-	if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}); err != nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -288,7 +288,7 @@ func TestRemoteCacheReadsNeedTheRoleThatRunsCode(t *testing.T) {
 			child.Repositories = []string{"gh:1"}
 			child.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:1", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
 			authorityPersist(t, s, child)
-			p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix})
+			p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix})
 			if err != nil {
 				t.Fatal(err)
 			}

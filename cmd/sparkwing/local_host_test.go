@@ -58,7 +58,7 @@ func TestLocalQueueReportsHostFailureWhileDraining(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine := &controller.EngineController{Store: owned}
+	engine := controller.NewEngineController(owned, controller.EngineController{})
 	services, err := bindLocalController(t.Context(), localcontroller.Binding{Home: home, Store: owned, Tenant: tenant, Controller: engine})
 	if err != nil {
 		t.Fatal(err)

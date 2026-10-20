@@ -214,7 +214,7 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 	if err != nil {
 		return err
 	}
-	return RecordBusinessEvent(tx, BusinessEvent{
+	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventRefillSettings, SubjectID: change, Actor: actor, At: tx.now(),
 		Attrs: map[string]any{
 			"enabled": s.Enabled, "threshold_cents": s.ThresholdCents, "amount_cents": s.AmountCents,
@@ -246,19 +246,19 @@ func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
 		return nil, err
 	}
 	var due []Refill
-	for _, team := range teams {
+	err = o.EachTeam(ctx, teams, func(t *Tenant) error {
+		var r *Refill
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-			r, err := dueRefillTx(ctx, tx, team)
-			if err == nil && r != nil {
-				due = append(due, *r)
-			}
+			var err error
+			r, err = dueRefillTx(ctx, tx, t.team)
 			return err
 		})
-		if err != nil {
-			return nil, err
+		if err == nil && r != nil {
+			due = append(due, *r)
 		}
-	}
-	return due, nil
+		return err
+	})
+	return due, err
 }
 
 func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
@@ -341,7 +341,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 		now.Add(refillKeyLife).UnixNano(), CheckoutKindRefill, r.Customer, r.PaymentMethod, r.ReceiptEmail); err != nil {
 		return nil, err
 	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
+	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventRefillOpened, SubjectID: r.ID, Actor: "system", At: now,
 		Attrs: map[string]any{"amount_cents": r.AmountCents, "balance_micro": st.BalanceMicro, "threshold_cents": refill.ThresholdCents},
 	}); err != nil {
@@ -377,7 +377,7 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 		var encoded []byte
 		err = tx.QueryRowContext(ctx, `SELECT outcome_json FROM payment_states WHERE payment_mode=? AND payment_id=?`, mode, paymentIntent).Scan(&encoded)
 		if errors.Is(err, sql.ErrNoRows) {
-			return reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})
+			return tx.operator.reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})
 		}
 		if err != nil {
 			return err
@@ -386,7 +386,7 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 		if err := json.Unmarshal(encoded, &event); err != nil {
 			return err
 		}
-		_, err = applyPaymentStateTx(ctx, tx, event, "payment_provider")
+		_, err = tx.operator.applyPaymentStateTx(ctx, tx, event, "payment_provider")
 		return err
 	})
 }

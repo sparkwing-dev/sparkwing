@@ -30,12 +30,12 @@ func TestDeletedSlugIsNeverRegisteredAgain(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	other := signIn(t, st, "x", "other@example.com")
-	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
+	if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
 	deleteAndPurge(t, st, "acme", now)
 	for _, at := range []time.Time{now.Add(time.Hour), now.Add(365 * 24 * time.Hour)} {
-		if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, other.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); !errors.Is(err, store.ErrSlugTaken) {
+		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, other.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); !errors.Is(err, store.ErrSlugTaken) {
 			t.Fatalf("registering a deleted slug at %s = %v, want ErrSlugTaken", at, err)
 		}
 	}
@@ -52,7 +52,7 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 				now := time.Now()
 				a := signIn(t, st, fmt.Sprintf("a%d", i), "a@example.com")
 				b := signIn(t, st, fmt.Sprintf("b%d", i), "b@example.com")
-				if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, a.Account.ID), store.TeamInfo{Slug: "shared", DisplayName: ""}); err != nil {
+				if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, a.Account.ID), store.TeamInfo{Slug: "shared", DisplayName: ""}); err != nil {
 					t.Fatal(err)
 				}
 				shared := tenant(t, st, "shared")
@@ -60,7 +60,7 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, b.Account.ID), inv.ID); err != nil {
+				if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, b.Account.ID), inv.ID); err != nil {
 					t.Fatal(err)
 				}
 				if withEditor {
@@ -69,7 +69,7 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, e.Account.ID), inv.ID); err != nil {
+					if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, e.Account.ID), inv.ID); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -111,14 +111,14 @@ func TestInvitationEmailCapSurvivesTeamDeletion(t *testing.T) {
 	for i, to := range spellings {
 		owner := signIn(t, st, fmt.Sprintf("o%d", i), fmt.Sprintf("owner%d@example.com", i))
 		slug := store.Team(fmt.Sprintf("churn-%d", i))
-		if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: ""}); err != nil {
+		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: ""}); err != nil {
 			t.Fatal(err)
 		}
 		inv, err := tenant(t, st, slug).InviteForTest(t, ctx, owner.Account.ID, to, store.RoleReader, now)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ok, err := st.ClaimInvitationEmail(ctx, inv.ID, now)
+		ok, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestTeamCreationIsCappedOverTheAccountsLifetime(t *testing.T) {
 	created := 1
 	for i := range 30 {
 		slug := store.Team(fmt.Sprintf("churn-%d", i))
-		if _, err = st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: ""}); err != nil {
+		if _, err = st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: ""}); err != nil {
 			break
 		}
 		created++
@@ -159,7 +159,7 @@ func TestTeamPurgeRemovesOnlyItsReplicaStorageUsage(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	for _, team := range []store.Team{"acme", "keep"} {
-		if _, err := st.CreateAccountTeam(t.Context(), storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: team, DisplayName: ""}); err != nil {
+		if _, err := st.AsOperator().CreateAccountTeam(t.Context(), storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: team, DisplayName: ""}); err != nil {
 			t.Fatal(err)
 		}
 		for _, replica := range []string{"one", "two"} {
@@ -196,7 +196,7 @@ func TestTeamDeletionLeaseKeepsOnePurger(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
+	if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
 	op := st.AsOperator()
@@ -232,7 +232,7 @@ func TestTeamRecheckPreservesForeignKeyFenceAfterThePurge(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
+	if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
 	deleteAndPurge(t, st, "acme", now)
@@ -273,7 +273,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := shared.TestOnlySeedTriggerWithRun(ctx,

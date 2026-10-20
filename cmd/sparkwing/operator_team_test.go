@@ -33,7 +33,7 @@ func TestOperatorTeamsCreateCLIThroughStore(t *testing.T) {
 				}
 			})
 			raw := "swk_" + strings.Repeat("A", 43)
-			if _, err := controller.EnsureBootstrapAdminToken(t.Context(), st, raw); err != nil {
+			if _, err := controller.EnsureBootstrapAdminToken(t.Context(), st.AsOperator(), raw); err != nil {
 				t.Fatal(err)
 			}
 			h := controller.New(st, nil).Handler()

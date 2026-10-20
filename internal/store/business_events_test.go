@@ -92,7 +92,7 @@ func TestBusinessEventsFollowAccountAndTeamDeletion(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	leaver := signIn(t, st, "l", "leaver@example.com")
-	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
+	if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.DeleteAccount(ctx, leaver.Account.ID, now); err != nil {
@@ -129,7 +129,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := st.ResolveAuthority(ctx, finish.Transition.Actor.Authority)
+	owner, err := st.AsOperator().ResolveAuthority(ctx, finish.Transition.Actor.Authority)
 	if err != nil || owner.Capability.Parent == nil {
 		t.Fatalf("owner ancestry: %+v, %v", owner, err)
 	}
@@ -151,7 +151,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		claim, err := st.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 8}})
+		claim, err := st.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 8}})
 		if err != nil {
 			t.Fatal(err)
 		}

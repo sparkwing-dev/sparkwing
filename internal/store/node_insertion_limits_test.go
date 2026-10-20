@@ -36,7 +36,7 @@ func TestPlanInsertionLimitsAreAtomicProperty(t *testing.T) {
 		tenant, request, _ := planFixture(t, runspec.DispatchHost)
 		cap, count := int64(rawCap%5), int(rawCount%7)
 		if metered {
-			p, err := tenant.s.ResolveAuthority(t.Context(), request.Actor.Authority)
+			p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), request.Actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -12,19 +12,19 @@ import (
 func AccountAuthority(t testing.TB, st *store.Store, id string) capability.Authorized {
 	t.Helper()
 	ctx := t.Context()
-	memberships, err := st.AccountMemberships(ctx, id)
+	memberships, err := st.AsOperator().AccountMemberships(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var raw string
 	if len(memberships) > 0 {
-		raw, _, _, err = st.CreateAccountSession(ctx, store.Account{ID: id}, memberships[0].Team, time.Hour)
+		raw, _, _, err = st.AsOperator().CreateAccountSession(ctx, store.Account{ID: id}, memberships[0].Team, time.Hour)
 	} else {
-		identities, readErr := st.AccountIdentities(ctx, id)
+		identities, readErr := st.AsOperator().AccountIdentities(ctx, id)
 		if readErr != nil || len(identities) == 0 {
 			t.Fatalf("account %s needs a sign-in identity: %v", id, readErr)
 		}
-		raw, _, _, err = st.CreateIdentityAccountSession(ctx, store.Account{ID: id}, "", identities[0].Provider, identities[0].Subject, time.Hour)
+		raw, _, _, err = st.AsOperator().CreateIdentityAccountSession(ctx, store.Account{ID: id}, "", identities[0].Provider, identities[0].Subject, time.Hour)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -37,11 +37,11 @@ func SessionAuthority(t testing.TB, st *store.Store, raw string) capability.Auth
 	t.Helper()
 	ctx := t.Context()
 	route, _ := capability.LookupRoute("POST", "/api/v1/me/active-team")
-	auth, err := capability.NewAuthenticator(st).Authenticate(ctx, capability.Presentation{Class: capability.CredentialSession, Raw: raw}, route)
+	auth, err := capability.NewAuthenticator(st.AsOperator()).Authenticate(ctx, capability.Presentation{Class: capability.CredentialSession, Raw: raw}, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := capability.Authorize(ctx, st, route, auth, capability.Target{AccountID: auth.Principal.Capability.Subject.ID})
+	a, err := capability.Authorize(ctx, st.AsOperator(), route, auth, capability.Target{AccountID: auth.Principal.Capability.Subject.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

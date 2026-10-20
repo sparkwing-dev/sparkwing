@@ -10,7 +10,7 @@ import (
 func TestMemberIssuanceExpiryAndSessionParent(t *testing.T) {
 	s := authorityStore(t)
 	actor := authorityMember(t, s, "member", RoleEditor)
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &actor.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &actor.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestMemberIssuanceExpiryAndSessionParent(t *testing.T) {
 	if err := (&Tenant{s: s, team: "a"}).RevokeAuthority(t.Context(), actor, actor.Authority); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}); err == nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}); err == nil {
 		t.Fatal("member token survived logout")
 	}
 }
@@ -42,7 +42,7 @@ func TestMemberIssuanceRefusesImplicitAdministrationAndExcessLifetime(t *testing
 			if err := s.db.QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&before); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &actor.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: grants, ExpiresAt: expiry}); err == nil {
+			if _, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &actor.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: grants, ExpiresAt: expiry}); err == nil {
 				t.Fatal("accepted member issuance outside policy")
 			}
 			rewriteSchemaCount(t, s.db, "capabilities", before)
@@ -54,7 +54,7 @@ func TestMembershipEpochPreventsCredentialRevivalAfterRejoin(t *testing.T) {
 	s := authorityStore(t)
 	owner := authorityMember(t, s, "owner", RoleOwner)
 	member := authorityMember(t, s, "member", RoleEditor)
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestMembershipEpochPreventsCredentialRevivalAfterRejoin(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
 	for _, ref := range []capability.AuthorityRef{member.Authority, {Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}} {
-		if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
+		if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
 			t.Fatalf("old authority revived: %+v", ref)
 		}
 	}
@@ -86,7 +86,7 @@ func TestPersonalAuthorityFollowsRequiredSettingAndGrant(t *testing.T) {
 				t.Fatal(err)
 			}
 			origin := &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner", Personal: personal, Requirement: requirement}
-			if err := persistCapabilityTx(t.Context(), tx, c, origin); err != nil {
+			if err := tx.operator.persistCapabilityTx(t.Context(), tx, c, origin); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(); err != nil {
@@ -97,7 +97,7 @@ func TestPersonalAuthorityFollowsRequiredSettingAndGrant(t *testing.T) {
 			} else {
 				rewriteSchemaExec(t, s.db, `DELETE FROM memberships WHERE team='a' AND account_id='registrar'`)
 			}
-			_, err = s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
+			_, err = s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
 			if (err == nil) != (!personal) {
 				t.Fatalf("%s authority: %v (actor=%v)", kind, err, actor)
 			}

@@ -43,7 +43,7 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.st.AcceptAccountInvitation(ctx, fixtureAccountAuthority(t, f.st, erin), inv.ID); err != nil {
+				if _, err := f.st.AsOperator().AcceptAccountInvitation(ctx, fixtureAccountAuthority(t, f.st, erin), inv.ID); err != nil {
 					t.Fatal(err)
 				}
 				erinSess := session(t, f.st, erin, f.teamA.Team())

@@ -23,11 +23,11 @@ func machineEnrollment(t *testing.T) (*Store, capability.ProvisionSpec) {
 
 func TestMachineEnrollmentUsesStoreOrigin(t *testing.T) {
 	s, spec := machineEnrollment(t)
-	issued, err := s.ProvisionCapability(t.Context(), spec)
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil || issued.Raw == "" || issued.Capability.Parent != nil {
 		t.Fatalf("enrollment: %+v, %v", issued.Capability, err)
 	}
-	p, _, err := s.ReadClaimProfile(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+	p, _, err := s.AsOperator().ReadClaimProfile(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
 	if err != nil || p.Name != "machine" || p.Class != "agent" || len(p.ReservedPools) != 1 || p.Accept == nil {
 		t.Fatalf("profile: %+v, %v", p, err)
 	}
@@ -36,7 +36,7 @@ func TestMachineEnrollmentUsesStoreOrigin(t *testing.T) {
 	if !allowed || denied {
 		t.Fatal("profile did not retain repository enrollment")
 	}
-	if again, err := s.ProvisionCapability(t.Context(), spec); !errors.Is(err, ErrAgentNameTaken) || again.Raw != "" {
+	if again, err := s.AsOperator().ProvisionCapability(t.Context(), spec); !errors.Is(err, ErrAgentNameTaken) || again.Raw != "" {
 		t.Fatalf("duplicate: %+v, %v", again.Capability, err)
 	}
 	actor := Actor{Authority: *spec.Authority}
@@ -45,7 +45,7 @@ func TestMachineEnrollmentUsesStoreOrigin(t *testing.T) {
 	if err != nil || !sameRotationScope(issued.Capability, rotation.Issued.Capability) {
 		t.Fatalf("rotation: %+v, %v", rotation, err)
 	}
-	if again, err := s.ProvisionCapability(t.Context(), spec); !errors.Is(err, ErrAgentNameTaken) || again.Raw != "" {
+	if again, err := s.AsOperator().ProvisionCapability(t.Context(), spec); !errors.Is(err, ErrAgentNameTaken) || again.Raw != "" {
 		t.Fatalf("rotation freed active name: %+v, %v", again.Capability, err)
 	}
 }
@@ -77,7 +77,7 @@ func TestMachineEnrollmentAuthorityProperty(t *testing.T) {
 			spec.Subject.ID = "invalid/name"
 			spec.RegistrationID = "runner:a:" + spec.Subject.ID
 		}
-		issued, err := s.ProvisionCapability(t.Context(), spec)
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 		rewriteSchemaExec(t, s.db, `UPDATE memberships SET role='owner' WHERE account_id='owner'`)
 		return err != nil && issued.Raw == ""
 	}
@@ -96,7 +96,7 @@ func TestMachineEnrollmentSerializesNamesAndLimits(t *testing.T) {
 					spec := base
 					spec.Subject.ID = fmt.Sprintf("registered-%d", i)
 					spec.RegistrationID = "runner:a:" + spec.Subject.ID
-					if _, err := s.ProvisionCapability(t.Context(), spec); err != nil {
+					if _, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -110,7 +110,7 @@ func TestMachineEnrollmentSerializesNamesAndLimits(t *testing.T) {
 						spec.Subject.ID = fmt.Sprintf("contender-%d", i)
 						spec.RegistrationID = "runner:a:" + spec.Subject.ID
 					}
-					_, err := s.ProvisionCapability(t.Context(), spec)
+					_, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 					results <- err
 				})
 			}
@@ -134,11 +134,11 @@ func TestMachineEnrollmentSerializesNamesAndLimits(t *testing.T) {
 func TestServiceEnrollmentUsesDeploymentOrigin(t *testing.T) {
 	s, spec := provisionOrigin(t, capability.ProvisionService)
 	spec.RegistrationID = "service:launcher"
-	issued, err := s.ProvisionCapability(t.Context(), spec)
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil || issued.Raw == "" {
 		t.Fatalf("service enrollment: %+v, %v", issued.Capability, err)
 	}
-	if again, err := s.ProvisionCapability(t.Context(), spec); err == nil || again.Raw != "" {
+	if again, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err == nil || again.Raw != "" {
 		t.Fatalf("duplicate service: %+v, %v", again.Capability, err)
 	}
 }
@@ -146,12 +146,12 @@ func TestServiceEnrollmentUsesDeploymentOrigin(t *testing.T) {
 func TestMachineEnrollmentRollbackDoesNotReserveName(t *testing.T) {
 	s, spec := machineEnrollment(t)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_enrollment BEFORE INSERT ON capabilities BEGIN SELECT RAISE(ABORT,'refused'); END`)
-	if issued, err := s.ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
+	if issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
 		t.Fatal("failed enrollment returned a bearer")
 	}
 	rewriteSchemaCount(t, s.db, "capabilities", 0)
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_enrollment`)
-	if _, err := s.ProvisionCapability(t.Context(), spec); err != nil {
+	if _, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -163,7 +163,7 @@ func TestMachineEnrollmentNameReuseProperty(t *testing.T) {
 		s.clock = func() time.Time { return now }
 		deadline := now.Add(time.Hour)
 		spec.ExpiresAt = &deadline
-		old, err := s.ProvisionCapability(t.Context(), spec)
+		old, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,7 +176,7 @@ func TestMachineEnrollmentNameReuseProperty(t *testing.T) {
 			now = deadline.Add(time.Duration(offset % 3))
 		}
 		spec.ExpiresAt = new(now.Add(time.Hour))
-		issued, err := s.ProvisionCapability(t.Context(), spec)
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 		if revoked || !now.Before(deadline) {
 			return err == nil && issued.Raw != "" && issued.Capability.Prefix != old.Capability.Prefix
 		}
@@ -189,12 +189,12 @@ func TestMachineEnrollmentNameReuseProperty(t *testing.T) {
 
 func TestMachineEnrollmentNamesAreTeamScoped(t *testing.T) {
 	s, spec := machineEnrollment(t)
-	if _, err := s.ProvisionCapability(t.Context(), spec); err != nil {
+	if _, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
 	other := authorityMember(t, s, "other", RoleOwner, "b")
 	spec.Authority, spec.Team, spec.RegistrationID = &other.Authority, "b", "runner:b:machine"
-	if _, err := s.ProvisionCapability(t.Context(), spec); err != nil {
+	if _, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -203,11 +203,11 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 	s, spec := machineEnrollment(t)
 	_, demand := unitClaimFixtureStore(t, s)
 	spec.ReservedPools = nil
-	root, err := s.ProvisionCapability(t.Context(), spec)
+	root, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Audience: capability.Controller, Binding: spec.Binding, Grants: spec.Grants, ExpiresAt: spec.ExpiresAt, Repositories: spec.Repositories})
+	child, err := s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Audience: capability.Controller, Binding: spec.Binding, Grants: spec.Grants, ExpiresAt: spec.ExpiresAt, Repositories: spec.Repositories})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 		if delegated {
 			demand.CapabilityPrefix = child.Capability.Prefix
 		}
-		claim, err := s.ClaimUnit(t.Context(), demand)
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if foreign {
 			return err != nil && len(claim.Bearer) == 0
 		}
@@ -244,7 +244,7 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 func TestRotationKeepsTheRunnerTrustClass(t *testing.T) {
 	s, spec := machineEnrollment(t)
 	spec.Trust = capability.TrustAny
-	issued, err := s.ProvisionCapability(t.Context(), spec)
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestRotationKeepsTheRunnerTrustClass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	successor, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: rotation.Issued.Capability.Prefix})
+	successor, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: rotation.Issued.Capability.Prefix})
 	if err != nil || successor.Capability.Trust != capability.TrustAny {
 		t.Fatalf("successor trust = %q, %v", successor.Capability.Trust, err)
 	}

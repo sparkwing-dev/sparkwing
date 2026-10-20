@@ -39,8 +39,8 @@ var (
 
 // AccountIdentities lists the sign-in methods attached to accountID, oldest
 // first.
-func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error) {
-	rows, err := s.query(ctx, `SELECT provider, subject, email, linked, created_at FROM identities
+func (o *Operator) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error) {
+	rows, err := o.s.query(ctx, `SELECT provider, subject, email, linked, created_at FROM identities
 		WHERE account_id = ? ORDER BY created_at, provider`, accountID)
 	if err != nil {
 		return nil, err
@@ -65,8 +65,8 @@ func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Id
 const IdentityChangeSignInWindow = 10 * time.Minute
 
 // ConsumeIdentityLink records the link nonce once, bound to its direct session, account, provider and expiry.
-func (s *Store) ConsumeIdentityLink(ctx context.Context, claim capability.IdentityLink) error {
-	return s.inTx(ctx, func(tx *storeTx) error {
+func (o *Operator) ConsumeIdentityLink(ctx context.Context, claim capability.IdentityLink) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
 		if err := identityLinkAuthorityTx(ctx, tx, claim); err != nil {
 			return err
 		}
@@ -83,10 +83,10 @@ func (s *Store) ConsumeIdentityLink(ctx context.Context, claim capability.Identi
 
 // LinkAccountIdentity attaches the verified provider profile to the claim's account and completes its nonce.
 // The account's email is unchanged; identity uniqueness refusals are the Err* sentinels.
-func (s *Store) LinkAccountIdentity(ctx context.Context, claim capability.IdentityLink, p SignInProfile) (Identity, error) {
+func (o *Operator) LinkAccountIdentity(ctx context.Context, claim capability.IdentityLink, p SignInProfile) (Identity, error) {
 	var out Identity
 	attempt := func() error {
-		return s.inTx(ctx, func(tx *storeTx) error {
+		return o.s.inTx(ctx, func(tx *storeTx) error {
 			var err error
 			out, err = linkAccountIdentityTx(ctx, tx, claim, p)
 			return err
@@ -213,7 +213,7 @@ func linkIdentityTx(ctx context.Context, tx *storeTx, accountID string, p SignIn
 	}, nil
 }
 
-func unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, accountID, provider, keepHash string, now time.Time) (int64, error) {
+func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, accountID, provider, keepHash string, now time.Time) (int64, error) {
 	if err := lockAccountTx(ctx, tx, accountID); err != nil {
 		return 0, err
 	}
@@ -296,8 +296,8 @@ func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, ex
 // IdentityLinkStateKey is the key a controller signs link-flow state with.
 // It derives from the deployment's session key, so every replica agrees on
 // it and rotating that key voids flows in progress along with sessions.
-func (s *Store) IdentityLinkStateKey(ctx context.Context) ([]byte, error) {
-	key, err := s.csrfSigningKey(ctx)
+func (o *Operator) IdentityLinkStateKey(ctx context.Context) ([]byte, error) {
+	key, err := o.csrfSigningKey(ctx)
 	if err != nil {
 		return nil, err
 	}

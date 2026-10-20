@@ -102,7 +102,7 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 }
 
 // Deletion closes existing authority without requiring its former membership to remain live.
-func discoverDeletionAuthorityLocks(ctx context.Context, tx *storeTx, set lockSet, where string, args ...any) lockSet {
+func (op *Operator) discoverDeletionAuthorityLocks(ctx context.Context, tx *storeTx, set lockSet, where string, args ...any) lockSet {
 	rows, err := tx.QueryContext(ctx, `SELECT prefix,COALESCE(team,'') FROM capabilities WHERE `+where, args...)
 	if err != nil {
 		set.err = err
@@ -131,8 +131,8 @@ func discoverDeletionAuthorityLocks(ctx context.Context, tx *storeTx, set lockSe
 	return set
 }
 
-func discoverDeletionAccountLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
-	set = discoverAccountSessionLocks(ctx, tx, set, account)
+func (op *Operator) discoverDeletionAccountLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
+	set = tx.operator.discoverAccountSessionLocks(ctx, tx, set, account)
 	if set.err != nil {
 		return set
 	}
@@ -164,7 +164,7 @@ func discoverTeamDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, te
 		return set
 	}
 	for _, account := range ids {
-		set = discoverDeletionAccountLocks(ctx, tx, set, account)
+		set = tx.operator.discoverDeletionAccountLocks(ctx, tx, set, account)
 		set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{string(team), account}}, write: true, optional: true})
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT hash FROM sessions WHERE team=?`, team)
@@ -180,10 +180,10 @@ func discoverTeamDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, te
 	for _, session := range sessions {
 		set = discoverAuthorityWrite(ctx, tx, set, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: session})
 	}
-	return discoverDeletionAuthorityLocks(ctx, tx, set, `team=?`, team)
+	return tx.operator.discoverDeletionAuthorityLocks(ctx, tx, set, `team=?`, team)
 }
 
-func discoverAccountDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
+func (op *Operator) discoverAccountDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
 	if set.err != nil {
 		return set
 	}
@@ -192,7 +192,7 @@ func discoverAccountDeletionLocks(ctx context.Context, tx *storeTx, set lockSet,
 		set.err = err
 		return set
 	}
-	set = discoverDeletionAccountLocks(ctx, tx, set, account)
+	set = tx.operator.discoverDeletionAccountLocks(ctx, tx, set, account)
 	set.add(lockAccount, true, account)
 	rows, err := tx.QueryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
 	if err != nil {
@@ -208,7 +208,7 @@ func discoverAccountDeletionLocks(ctx context.Context, tx *storeTx, set lockSet,
 		set.add(lockTeam, true, team)
 		set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{team, account}}, write: true, optional: true})
 	}
-	sole, _, err := ownedTeamsTx(ctx, tx, account)
+	sole, _, err := tx.operator.ownedTeamsTx(ctx, tx, account)
 	if err != nil {
 		set.err = err
 		return set
@@ -222,7 +222,7 @@ func discoverAccountDeletionLocks(ctx context.Context, tx *storeTx, set lockSet,
 		return set
 	}
 	for _, name := range names {
-		teams, err := grantCreatorTeamsTx(ctx, tx, name)
+		teams, err := tx.operator.grantCreatorTeamsTx(ctx, tx, name)
 		if err != nil {
 			set.err = err
 			return set
@@ -232,7 +232,7 @@ func discoverAccountDeletionLocks(ctx context.Context, tx *storeTx, set lockSet,
 			set.add(lockTeam, true, team)
 		}
 	}
-	return discoverDeletionAuthorityLocks(ctx, tx, set, `created_by=? OR (subject_kind='account' AND subject_id=?)`, account, account)
+	return tx.operator.discoverDeletionAuthorityLocks(ctx, tx, set, `created_by=? OR (subject_kind='account' AND subject_id=?)`, account, account)
 }
 
 func (t *Tenant) requestTeamDeletionTx(ctx context.Context, tx *storeTx, now time.Time) (TeamDeletion, []string, error) {
@@ -274,8 +274,8 @@ func refuseDeletionWithMoneyInFlightTx(ctx context.Context, tx *storeTx, team Te
 }
 
 // safety: every way into the team closes before any row is removed; the rows go later, in
-// [Operator.PurgeTeam], because they may not fit one transaction. Physical logs and blobs are
-// removed separately by the controller's log cleanup and CAS collection.
+// [Operator.PurgeTeam], because they may not fit one transaction. The controller removes
+// physical logs and the complete team object namespace before purging SQL rows.
 func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy string, now time.Time) ([]string, error) {
 	if t.team == DefaultTeam {
 		return nil, fmt.Errorf("%w: the default team holds every single-team install's rows", ErrInvalidInput)
@@ -311,7 +311,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE team = ?`, string(t.team)); err != nil {
 		return nil, err
 	}
-	revoked, err := revokeSelectedCapabilitiesTx(ctx, tx, `team=?`, t.team)
+	revoked, err := tx.operator.revokeSelectedCapabilitiesTx(ctx, tx, `team=?`, t.team)
 	if err != nil {
 		return nil, err
 	}
@@ -322,6 +322,11 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	}
 	if err := t.cancelActiveRunsTx(ctx, tx, now); err != nil {
 		return nil, err
+	}
+	for _, table := range []string{"cron_schedules", "run_effects"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE team = ?`, t.team); err != nil {
+			return nil, err
+		}
 	}
 	t.s.localSecrets.Range(func(key, _ any) bool {
 		if k := key.(localSecretKey); k.team == t.team {
@@ -349,7 +354,7 @@ func (t *Tenant) memberIDsTx(ctx context.Context, tx *storeTx) (_ []string, err 
 	return ids, rows.Err()
 }
 
-func revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string, args ...any) ([]string, error) {
+func (op *Operator) revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string, args ...any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, tx.now().UnixNano())...)
 	if err != nil {
 		return nil, err
@@ -359,7 +364,7 @@ func revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string
 		return nil, err
 	}
 	for _, prefix := range prefixes {
-		if err := revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+		if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
 			return nil, err
 		}
 	}
@@ -440,11 +445,11 @@ func (s *Store) listTeamDeletions(ctx context.Context, where string, args ...any
 
 // TeamDeletionsRequestedBy lists the deletions an account asked for, so the
 // requester can watch one it no longer has a team to look from.
-func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error) {
+func (o *Operator) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error) {
 	if accountID == "" {
 		return nil, nil
 	}
-	return s.listTeamDeletions(ctx, `requested_by = ?`, accountID)
+	return o.s.listTeamDeletions(ctx, `requested_by = ?`, accountID)
 }
 
 // PendingTeamDeletions lists every deletion with work left: those the purge
@@ -608,14 +613,14 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 	var result AccountDeletion
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = s.deleteAccountTx(ctx, tx, accountID, now)
+		result, err = tx.operator.deleteAccountTx(ctx, tx, accountID, now)
 		return err
 	})
 	return result, err
 }
 
-func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (AccountDeletion, error) {
-	if err := acquireLockSet(ctx, tx, func() lockSet { return discoverAccountDeletionLocks(ctx, tx, lockSet{}, accountID) }); err != nil {
+func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (AccountDeletion, error) {
+	if err := acquireLockSet(ctx, tx, func() lockSet { return tx.operator.discoverAccountDeletionLocks(ctx, tx, lockSet{}, accountID) }); err != nil {
 		return AccountDeletion{}, err
 	}
 	acct, err := accountTx(ctx, tx, accountID)
@@ -626,7 +631,7 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	if err != nil {
 		return AccountDeletion{}, err
 	}
-	sole, blocked, err := ownedTeamsTx(ctx, tx, accountID)
+	sole, blocked, err := tx.operator.ownedTeamsTx(ctx, tx, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
 	}
@@ -635,7 +640,7 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	}
 	res := AccountDeletion{AccountID: accountID}
 	for _, team := range sole {
-		t := &Tenant{s: s, team: team}
+		t := &Tenant{s: o.s, team: team}
 		revoked, err := t.markForDeletionTx(ctx, tx, accountID, now)
 		if err != nil {
 			return AccountDeletion{}, err
@@ -649,13 +654,13 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE account_id = ?`, accountID); err != nil {
 		return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 	}
-	minted, err := revokeSelectedCapabilitiesTx(ctx, tx, `created_by=? OR (subject_kind='account' AND subject_id=?)`, accountID, accountID)
+	minted, err := tx.operator.revokeSelectedCapabilitiesTx(ctx, tx, `created_by=? OR (subject_kind='account' AND subject_id=?)`, accountID, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
 	}
 	res.RevokedPrefixes = append(res.RevokedPrefixes, minted...)
 	for _, name := range names {
-		if err := relabelPrincipalTx(ctx, tx, name); err != nil {
+		if err := tx.operator.relabelPrincipalTx(ctx, tx, name); err != nil {
 			return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 		}
 	}
@@ -689,7 +694,7 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	return res, nil
 }
 
-func ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Team, blocked []TeamInfo, err error) {
+func (op *Operator) ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Team, blocked []TeamInfo, err error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT m.team, t.display_name,
 		       (SELECT COUNT(*) FROM memberships o WHERE o.team = m.team AND o.account_id <> m.account_id AND o.role = ?),
@@ -747,7 +752,7 @@ func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ 
 	return names, rows.Err()
 }
 
-func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error {
+func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error {
 	label := DeletedUserLabel
 	scope, args := "", []any{label, n.name}
 	if n.team != "" {
@@ -790,7 +795,7 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 // safety: a relabel can reach grants on teams the account does not own, so it takes each touched team's ledger lock
 // in name order before rewriting that team's grants.
 func relabelGrantCreatorTx(ctx context.Context, tx *storeTx, n principalName, label string) error {
-	teams, err := grantCreatorTeamsTx(ctx, tx, n)
+	teams, err := tx.operator.grantCreatorTeamsTx(ctx, tx, n)
 	if err != nil {
 		return err
 	}
@@ -806,7 +811,7 @@ func relabelGrantCreatorTx(ctx context.Context, tx *storeTx, n principalName, la
 	return nil
 }
 
-func grantCreatorTeamsTx(ctx context.Context, tx *storeTx, n principalName) ([]string, error) {
+func (op *Operator) grantCreatorTeamsTx(ctx context.Context, tx *storeTx, n principalName) ([]string, error) {
 	query, args := `SELECT DISTINCT team FROM credit_grants WHERE created_by=?`, []any{n.name}
 	if n.team != "" {
 		query, args = query+` AND team=?`, append(args, n.team)
@@ -827,8 +832,8 @@ const MaxInvitationEmailsPerDay = 5
 // reports false instead when its address has already been mailed
 // [MaxInvitationEmailsPerDay] times in the last 24 hours, counting every
 // team. A claimed invitation is never claimed twice.
-func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error) {
-	tx, err := s.beginTx(ctx)
+func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error) {
+	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}

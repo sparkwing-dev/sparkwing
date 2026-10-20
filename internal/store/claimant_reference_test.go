@@ -93,12 +93,12 @@ func TestClaimRankingAndNoticeMatchIndependentClaimantModel(t *testing.T) {
 			if standingEligible != model.eligible() {
 				t.Fatalf("notice %+v; model eligible=%t", view.Waiting, model.eligible())
 			}
-			claim, err := f.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+			claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 			if (err == nil) != model.eligible() {
 				t.Fatalf("claim %+v %v; model eligible=%t", claim, err, model.eligible())
 			}
 			if err == nil {
-				principal, err := f.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+				principal, err := f.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 				if err != nil {
 					t.Fatal(err)
 				}

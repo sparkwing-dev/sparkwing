@@ -37,12 +37,12 @@ func renewalFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitDemand,
 		rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, now.Add(time.Hour).UnixNano())
 		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
 	}
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if kind == capability.UnitPlan || kind == capability.UnitEval {
-		issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+		issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +59,7 @@ func TestRenewUnitRecordsOwnerExecutionForRecovery(t *testing.T) {
 			if kind == capability.UnitEval {
 				query = `SELECT started_at FROM eval_units`
 			}
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 				t.Fatal(err)
 			}
 			var started sql.NullInt64
@@ -71,7 +71,7 @@ func TestRenewUnitRecordsOwnerExecutionForRecovery(t *testing.T) {
 			var beat LeaseBeat
 			for range 2 {
 				var err error
-				beat, err = s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+				beat, err = s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -85,11 +85,11 @@ func TestRenewUnitRecordsOwnerExecutionForRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reaped, err := s.ReapUnits(t.Context(), lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].Disruptions != 1 || reaped[0].Generation != claim.Award.Generation {
 				t.Fatalf("started unit loss: %+v, %v", reaped, err)
 			}
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
 				t.Fatal("reaped owner renewed")
 			}
 		})
@@ -125,7 +125,7 @@ func TestRenewUnitRefusesStaleAndRootAuthority(t *testing.T) {
 				case "holder":
 					rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET claimed_by='successor' WHERE `+predicate)
 				}
-				_, err := s.RenewUnit(t.Context(), prefix, false)
+				_, err := s.AsOperator().RenewUnit(t.Context(), prefix, false)
 				if problem == "revoked" {
 					var refused *apierr.Error
 					if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated {
@@ -151,7 +151,7 @@ func TestRenewUnitDeliversCancellationWithoutStarting(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			s, _, claim, now := renewalFixture(t, kind)
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=? WHERE id='run'`, now.UnixNano())
-			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil || !beat.CancelRequested || !beat.ExpiresAt.After(*now) {
 				t.Fatalf("cancelled renewal: %+v, %v", beat, err)
 			}
@@ -173,7 +173,7 @@ func TestRenewUnitDeliversCancellationWithoutStarting(t *testing.T) {
 func TestRenewUnitSeesOwnerCancellation(t *testing.T) {
 	s, _, claim, now := renewalFixture(t, capability.UnitTrigger)
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET cancel_requested_at=? WHERE id='run'`, now.UnixNano())
-	beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+	beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 	if err != nil || !beat.CancelRequested {
 		t.Fatalf("owner cancellation: %+v, %v", beat, err)
 	}
@@ -185,7 +185,7 @@ func TestRenewUnitSeesOwnerCancellation(t *testing.T) {
 
 func TestRenewUnitNodeRequiresCommittedStart(t *testing.T) {
 	s, _, claim, now := renewalFixture(t, capability.UnitNode)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
 		t.Fatal("renewal invented a job start")
 	}
 	tenant := &Tenant{s: s, team: claim.Team}
@@ -194,7 +194,7 @@ func TestRenewUnitNodeRequiresCommittedStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = now.Add(time.Second)
-	beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+	beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 	if err != nil || !beat.ExpiresAt.After(claim.Award.LeaseExpiresAt) {
 		t.Fatalf("running job renewal: %+v, %v", beat, err)
 	}
@@ -217,7 +217,7 @@ func TestRenewUnitEvalChecksBothGenerations(t *testing.T) {
 			case "controller_expiry":
 				rewriteSchemaExec(t, s.db, `UPDATE leases SET until=? WHERE name='controller.owner'`, now.UnixNano())
 			}
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
 				t.Fatal("ended evaluation renewed")
 			}
 			var started sql.NullInt64
@@ -230,14 +230,14 @@ func TestRenewUnitEvalChecksBothGenerations(t *testing.T) {
 
 func TestRenewUnitRequiresBootstrapExchange(t *testing.T) {
 	s, issued := adapterBootstrap(t)
-	if _, err := s.RenewUnit(t.Context(), issued.Capability.Prefix, false); err == nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, false); err == nil {
 		t.Fatal("bootstrap renewed its unit")
 	}
-	exchanged, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: issued.Capability.Prefix})
+	exchanged, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: issued.Capability.Prefix})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RenewUnit(t.Context(), exchanged.Capability.Prefix, false); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), exchanged.Capability.Prefix, false); err != nil {
 		t.Fatal(err)
 	}
 }

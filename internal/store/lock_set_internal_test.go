@@ -52,11 +52,11 @@ func TestAdministratorProbeHandlesDifferentAncestryDepths(t *testing.T) {
 	child.Subject, child.Grants = root.Subject, root.Grants
 	child.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
 	authorityPersist(t, s, child)
-	if exists, err := s.HasDeploymentAdministrator(t.Context()); err != nil || exists {
+	if exists, err := s.AsOperator().HasDeploymentAdministrator(t.Context()); err != nil || exists {
 		t.Fatalf("snapshot administrator probe: exists=%v err=%v", exists, err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		exists, err := hasDeploymentAdministratorTx(t.Context(), tx)
+		exists, err := tx.operator.hasDeploymentAdministratorTx(t.Context(), tx)
 		if exists && err == nil {
 			return errors.New("unprivileged roots counted as an administrator")
 		}

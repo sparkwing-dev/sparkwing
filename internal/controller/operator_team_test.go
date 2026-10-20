@@ -42,7 +42,7 @@ func TestOperatorCreateTeamHTTP(t *testing.T) {
 	if !slices.Equal(created.Grants, []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsWrite, capability.RunsControl, capability.ApprovalsWrite, capability.TeamAdmin}) {
 		t.Fatalf("first admin grants: %v", created.Grants)
 	}
-	p, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(created.Capability)))
+	p, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(created.Capability)))
 	if err != nil || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectAccount, ID: created.AccountID}) || p.Capability.Parent != nil {
 		t.Fatalf("admin root: %+v %v", p, err)
 	}
@@ -84,7 +84,7 @@ func TestOperatorCreateTeamCloudHTTP(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].Actor != "cloud-support" {
 		t.Fatalf("Cloud operator audit: %+v %v", events, err)
 	}
-	account, err := e.Store.Account(t.Context(), events[0].Account)
+	account, err := e.Store.AsOperator().Account(t.Context(), events[0].Account)
 	if err != nil || account.Email != "" || account.EmailVerified {
 		t.Fatalf("operator-created account: %+v %v", account, err)
 	}
@@ -133,7 +133,7 @@ func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
 	clock := time.Now().UTC()
 	e, _ := engineRuntimeStore(t, teststore.WithClock(func() time.Time { return clock }))
 	raw := reviewSeed(t, e.Store)
-	parent, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	parent, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
 		}
 		binding := capability.Binding{Kind: capability.BindingNone}
 		expires := clock.Add(time.Minute)
-		child, err := e.Store.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: grants, Binding: binding, ExpiresAt: &expires})
+		child, err := e.Store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: grants, Binding: binding, ExpiresAt: &expires})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -233,7 +233,7 @@ func TestOperatorCreateTeamHTTPRechecksBeforeCommit(t *testing.T) {
 	s := New(e.Store, nil)
 	authorization := s.authorization
 	authorization.Bindings = teamCreationRace{BindingChecker: authorization.Bindings, after: func() {
-		p, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+		p, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 		if err != nil {
 			t.Fatal(err)
 		}

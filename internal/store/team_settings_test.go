@@ -23,7 +23,7 @@ func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		spec.Authority, spec.Personal, spec.ReservedPools = &member.Authority, personal, nil
-		issued, err := s.ProvisionCapability(t.Context(), spec)
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 		allowed := role == RoleOwner || personal && enabled && role != RoleReader
 		if !allowed && personal && role != RoleReader && !strings.Contains(fmt.Sprint(err), "members_can_add_machines") {
 			return false
@@ -40,7 +40,7 @@ func TestSharedMachineManagementRequiresCurrentAdministration(t *testing.T) {
 		t.Run(fmt.Sprint(personal), func(t *testing.T) {
 			s, spec := machineEnrollment(t)
 			spec.Personal, spec.ReservedPools = personal, nil
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -16,7 +16,7 @@ import (
 
 func TestRoutes_RejectSimpleRequestContentTypes(t *testing.T) {
 	f := newBrowserFixture(t, nil)
-	principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
+	principal, err := f.st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
 	if err != nil {
 		t.Fatal(err)
 	}

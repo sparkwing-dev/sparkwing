@@ -14,7 +14,7 @@ func (t *Tenant) UnbindAuthorizedGitHubInstallation(ctx context.Context, a capab
 		if err := acquireLockSet(ctx, tx, func() lockSet {
 			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
 			set.add(lockTeam, true, string(t.team))
-			return discoverInstallationLocks(ctx, tx, set, installation)
+			return tx.operator.discoverInstallationLocks(ctx, tx, set, installation)
 		}); err != nil {
 			return err
 		}

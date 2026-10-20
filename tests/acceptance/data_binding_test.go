@@ -407,7 +407,7 @@ func dataControllerFixture(a capability.Authorized) (*controller.DataController,
 		Objects: o, Access: e,
 		ChargeDownload:   func(context.Context, blob.Authority, blob.Blob) error { return nil },
 		ResolveAuthority: func(context.Context, capability.Authorized) (blob.Authority, error) { return dataAuthority(a), nil },
-		ResolveTenant: func(_ context.Context, team store.Team) (controller.DataTransactions, error) {
+		ResolveTenant: func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 			if team != "team" {
 				panic("wrong data tenant")
 			}
@@ -695,3 +695,5 @@ func TestDataCommitLosesAuthorityAfterVerification(t *testing.T) {
 		t.Fatalf("receipt=%+v events=%v", receipt, *events)
 	}
 }
+
+func (f *dataTransactions) Team() store.Team { return "team" }

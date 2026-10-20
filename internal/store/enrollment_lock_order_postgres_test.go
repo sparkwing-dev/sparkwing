@@ -30,7 +30,7 @@ func TestPostgresEnrollmentLocksTeamBeforeAuthorizerMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.start(func() error {
-		issued, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{
+		issued, err := st.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{
 			Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tn.Team()),
 			Subject:        capability.Subject{Kind: capability.SubjectMachine, ID: "runner"},
 			RegistrationID: "runner:" + string(tn.Team()) + ":runner",

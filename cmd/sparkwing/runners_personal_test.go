@@ -31,7 +31,15 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			failService := mode == "rollback"
 			f := newRunnersFixture(t)
-			state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var server *controller.Server
+			state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(state *store.Store) (store.Policies, error) {
+				server = controller.NewDeployment(state, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
+				return server.StorePolicies(), nil
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,12 +62,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-			if err != nil {
-				t.Fatal(err)
-			}
-			server := controller.NewDeployment(state, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
-			session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "personal-test", time.Hour)
+			session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "personal-test", time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -78,7 +81,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				}
 				digest := sha256.Sum256([]byte(session))
 				authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-				issued, err := state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "personal-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
+				issued, err := state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "personal-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
 				if err != nil {
 					t.Fatal(err)
 				}

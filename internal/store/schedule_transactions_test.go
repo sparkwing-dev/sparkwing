@@ -28,9 +28,9 @@ func (p scheduleFixturePolicy) ResolveScheduleSource(_ context.Context, row Cron
 func consentedScheduleFixture(t *testing.T) (*Tenant, capability.Authorized, controllerwire.ScheduleRepoRequest, *time.Time) {
 	tenant, _, now := intakeFixture(t)
 	tenant.s.intake = nil
-	tenant.s.SetIntakePolicy(scheduleFixturePolicy{fakeIntakePolicy(func(_ context.Context, _ capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+	tenant.s.intakePolicy = scheduleFixturePolicy{fakeIntakePolicy(func(_ context.Context, _ capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{Options: &in.Request.Options, SourceLocation: &in.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
-	})})
+	})}
 	actor := authorityMember(t, tenant.s, "schedule-owner", RoleEditor)
 	a := teamAuthorization(t, tenant.s, actor, tenant.team, "PUT", "/api/v1/schedules/repos")
 	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: "https://gitlab.com/acme/repo.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567", Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
@@ -101,7 +101,7 @@ func TestScheduleConsentAndReplayRequireCurrentAuthorityProperty(t *testing.T) {
 		case 0:
 			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM memberships WHERE team=? AND account_id=?`, tenant.team, a.Principal.Capability.Subject.ID)
 		case 1:
-			if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error { return revokeAuthorityTx(t.Context(), tx, a.Principal.Authority) }); err != nil {
+			if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error { return tx.operator.revokeAuthorityTx(t.Context(), tx, a.Principal.Authority) }); err != nil {
 				t.Fatal(err)
 			}
 		case 2:
@@ -191,20 +191,20 @@ func TestScheduledSourceResolutionCannotOutliveConsentProperty(t *testing.T) {
 		}
 		*now = *row.NextDueAt
 		base := tenant.s.intakePolicy.(scheduleFixturePolicy)
-		tenant.s.SetIntakePolicy(scheduleResolutionRace{scheduleFixturePolicy: base, before: func() {
+		tenant.s.intakePolicy = scheduleResolutionRace{scheduleFixturePolicy: base, before: func() {
 			switch variant % 3 {
 			case 0:
 				if _, err := tenant.PauseAuthorizedSchedule(t.Context(), a, row.ID, true); err != nil {
 					t.Fatal(err)
 				}
 			case 1:
-				if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error { return revokeAuthorityTx(t.Context(), tx, a.Principal.Authority) }); err != nil {
+				if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error { return tx.operator.revokeAuthorityTx(t.Context(), tx, a.Principal.Authority) }); err != nil {
 					t.Fatal(err)
 				}
 			case 2:
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET declared=0 WHERE team=? AND id=?`, tenant.team, row.ID)
 			}
-		}})
+		}}
 		_, err = tenant.AdmitScheduledRun(t.Context(), row, *now)
 		rewriteSchemaCount(t, tenant.s.db, "runs", 0)
 		rewriteSchemaCount(t, tenant.s.db, "cron_fires", 0)
@@ -316,7 +316,7 @@ func (p scheduleFollowPolicy) ResolveScheduleSource(ctx context.Context, row Cro
 func TestScheduleReplayKeepsFirstSealAfterFollowedRevisionMoves(t *testing.T) {
 	tenant, a, body, now := consentedScheduleFixture(t)
 	revision := "0123456789abcdef0123456789abcdef01234567"
-	tenant.s.SetIntakePolicy(scheduleFollowPolicy{scheduleFixturePolicy: tenant.s.intakePolicy.(scheduleFixturePolicy), revision: &revision})
+	tenant.s.intakePolicy = scheduleFollowPolicy{scheduleFixturePolicy: tenant.s.intakePolicy.(scheduleFixturePolicy), revision: &revision}
 	body.Follow = true
 	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
 	if err != nil {

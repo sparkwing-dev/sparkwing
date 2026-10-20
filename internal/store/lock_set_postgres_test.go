@@ -22,7 +22,7 @@ func TestPostgresRotationWaitsForDemotionWithoutHoldingAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := membershipActor(t, st, owner.Account.ID, tn.Team())
-	issued, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{
+	issued, err := st.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{
 		Kind: capability.ProvisionMachine, Authority: &actor.Authority, Team: string(tn.Team()),
 		Subject:        capability.Subject{Kind: capability.SubjectMachine, ID: "runner"},
 		RegistrationID: "runner:" + string(tn.Team()) + ":runner",
@@ -32,7 +32,7 @@ func TestPostgresRotationWaitsForDemotionWithoutHoldingAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := st.ResolveAuthority(ctx, actor.Authority)
+	p, err := st.AsOperator().ResolveAuthority(ctx, actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestPostgresReclaimLocksBothTeamsBeforeInstallationAgainstUnbind(t *testing
 	t.Cleanup(cancel)
 	previous, next := teamHandle(t, st, "a"), teamHandle(t, st, "z")
 	oldAuth, nextAuth := githubAppAuthorization(t, st, previous), githubAppAuthorization(t, st, next)
-	p, err := st.ResolveAuthority(ctx, nextAuth.Principal.Authority)
+	p, err := st.AsOperator().ResolveAuthority(ctx, nextAuth.Principal.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}

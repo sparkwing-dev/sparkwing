@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -15,35 +14,8 @@ type CredentialInventoryReader interface {
 	GitCredentials(context.Context) ([]store.GitCredential, error)
 }
 
-// WithCredentialInventoryReader supplies tenant inventory reads before Handler is constructed.
-func (s *Server) WithCredentialInventoryReader(resolve func(context.Context, store.Team) (CredentialInventoryReader, error)) *Server {
-	s.resolveCredentialInventory = resolve
-	return s
-}
-
 func (s *Server) credentialInventory(ctx context.Context, team string) (CredentialInventoryReader, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var reader CredentialInventoryReader
-	var err error
-	if s.resolveCredentialInventory != nil {
-		reader, err = s.resolveCredentialInventory(ctx, store.Team(team))
-	} else if s.store != nil {
-		reader, err = s.store.ForTeam(ctx, store.Team(team))
-	} else {
-		return nil, missingEndpointPolicy()
-	}
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return nil, engineLookupError(store.ErrNotFound)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if reader == nil || reader.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return reader, nil
+	return tenantPort[CredentialInventoryReader](ctx, s, store.Team(team))
 }
 
 func (s *Server) credentialEndpoints() []Endpoint {

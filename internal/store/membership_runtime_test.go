@@ -41,7 +41,7 @@ func TestMembershipRevalidatesOnlyTheAffectedPersonalCredentialsProperty(t *test
 						t.Fatal(err)
 					}
 					origin := &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:mine", Personal: true, Requirement: &authorityRequirement{Account: "member", Grant: capability.RunsWrite, MembersCanAddMachines: true}}
-					if err := persistCapabilityTx(t.Context(), tx, c, origin); err != nil {
+					if err := tx.operator.persistCapabilityTx(t.Context(), tx, c, origin); err != nil {
 						_ = tx.Rollback()
 						t.Fatal(err)
 					}
@@ -73,7 +73,7 @@ func TestMembershipRevalidatesOnlyTheAffectedPersonalCredentialsProperty(t *test
 			}
 			for _, prefix := range []string{"mine", "owners", "foreign", "deployment", "child"} {
 				ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
-				_, err := s.ResolveAuthority(t.Context(), ref)
+				_, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
 				ended := (role == nil || keep == RoleReader) && (prefix == "mine" || prefix == "child")
 				if (err != nil) != ended {
 					t.Fatalf("prefix=%s ended=%v error=%v", prefix, ended, err)
@@ -128,12 +128,12 @@ func TestMembershipDowngradeRechecksInviterAuthority(t *testing.T) {
 	}
 	before := append(purgeRows(t, s, "a", true), purgeRows(t, s, "a", false)...)
 	for account, invitation := range invitations {
-		principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: account})
+		principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: account})
 		if err != nil {
 			t.Fatal(err)
 		}
 		authorized := capability.Authorized{Principal: principal, Target: capability.Target{AccountID: account}, Access: capability.AccessRule{Credential: capability.CredentialAccount, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
-		if _, err := s.AcceptAccountInvitation(t.Context(), authorized, invitation); !errors.Is(err, ErrInvitationClosed) {
+		if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), authorized, invitation); !errors.Is(err, ErrInvitationClosed) {
 			t.Fatalf("%s invitation accepted after inviter demotion: %v", account, err)
 		}
 	}

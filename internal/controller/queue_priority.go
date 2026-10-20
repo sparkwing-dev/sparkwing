@@ -15,12 +15,6 @@ type QueuePriorityWriter interface {
 	SetAuthorizedGroupPriority(context.Context, capability.Authorized, string, controllerwire.QueuePriorityWrite) (controllerwire.QueuePriorityResult, error)
 }
 
-// WithQueuePriorityWriter supplies the tenant queue ordering transaction.
-func (s *Server) WithQueuePriorityWriter(resolve func(context.Context, store.Team) (QueuePriorityWriter, error)) *Server {
-	s.resolveQueuePriorityWriter = resolve
-	return s
-}
-
 func (s *Server) handleQueuePriority(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	group := r.PathValue("group")
 	if err := controllerwire.ValidateQueueGroupName(group); err != nil {
@@ -38,19 +32,9 @@ func (s *Server) handleQueuePriority(w http.ResponseWriter, r *http.Request, a c
 		return err
 	}
 	input.IdempotencyKey = key
-	var writer QueuePriorityWriter
-	if s.resolveQueuePriorityWriter != nil {
-		writer, err = s.resolveQueuePriorityWriter(r.Context(), store.Team(a.Target.Team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
-		writer, _ = any(tenant).(QueuePriorityWriter)
-	}
+	writer, err := tenantPort[QueuePriorityWriter](r.Context(), s, store.Team(a.Target.Team))
 	if err != nil {
-		return engineLookupError(err)
-	}
-	if writer == nil || a.Target.Team == "" || writer.Team() != store.Team(a.Target.Team) {
-		return missingEndpointPolicy()
+		return err
 	}
 	result, err := writer.SetAuthorizedGroupPriority(r.Context(), a, group, input)
 	if err != nil {

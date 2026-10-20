@@ -13,7 +13,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 		t.Run(refusal, func(t *testing.T) {
 			s, claim, _, now := cloudRenewalBillingFixture(t, capability.UnitEval)
 			tenant := &Tenant{s: s, team: "a"}
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
 				t.Fatal(err)
 			}
 			billingModelJob(t, s, "customer")
@@ -29,7 +29,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			} else {
 				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120`)
 			}
-			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil || !beat.CancelRequested {
 				t.Fatalf("funding stop = %+v, %v", beat, err)
 			}
@@ -44,7 +44,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reaped, err := s.ReapUnits(t.Context(), lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil || len(reaped) != 1 || reaped[0].Requeued || !reaped[0].Failed {
 				t.Fatalf("stopped unit recovered = %+v, %v", reaped, err)
 			}
@@ -52,13 +52,13 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			if err != nil || run.CancelRequestedAt != nil || run.FinishedAt != nil {
 				t.Fatalf("funding stop ended independent work = %+v, %v", run, err)
 			}
-			if renewed, err := s.RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true); err != nil || renewed.CancelRequested {
+			if renewed, err := s.AsOperator().RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true); err != nil || renewed.CancelRequested {
 				t.Fatalf("independent job stopped = %+v, %v", renewed, err)
 			}
 			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.ReapUnits(t.Context(), lease, 10); err != nil {
+			if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 				t.Fatal(err)
 			}
 			source, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
@@ -81,7 +81,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 				}
 				owner, _ := meteredUnitClaim(t, s, demand)
 				tenant := &Tenant{s: s, team: "a"}
-				if _, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true); err != nil {
+				if _, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true); err != nil {
 					t.Fatal(err)
 				}
 				billingModelJob(t, s, "customer")
@@ -96,7 +96,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 					}
 				} else {
 					rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120`)
-					if beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true); err != nil || !beat.CancelRequested {
+					if beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true); err != nil || !beat.CancelRequested {
 						t.Fatalf("owner funding refusal = %+v, %v", beat, err)
 					}
 				}
@@ -108,7 +108,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 				if err != nil || ready.Status != StatusDone || ready.Outcome != NodeCancelled {
 					t.Fatalf("owner stop left ready work = %+v, %v", ready, err)
 				}
-				beat, err := s.RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true)
+				beat, err := s.AsOperator().RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true)
 				if err != nil || !beat.CancelRequested {
 					t.Fatalf("owner stop spared customer job = %+v, %v", beat, err)
 				}
@@ -124,7 +124,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := s.ReapUnits(t.Context(), lease, 10); err != nil {
+				if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 					t.Fatal(err)
 				}
 				run, err = tenant.ReadRun(t.Context(), "run")

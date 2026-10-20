@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -22,11 +23,12 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 			mode := scenario.mode
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			original := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+			original := newStoreHostFixtureOn(t, openStore(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+				return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil
+			})), nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 				{ID: "setup", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 				{ID: "broken", Needs: []string{"setup"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-			}})
-			original.Store.SetResultBlobRecords(nil)
+			}}, runspec.Options{})
 			original.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				outcome := store.NodeSuccess
 				if input.NodeID == "broken" {

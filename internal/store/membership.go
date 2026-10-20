@@ -26,7 +26,7 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 			set.add(lockAccount, true, change.AccountID)
 			set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{string(t.team), change.AccountID}}, write: true, optional: true})
 			if change.Role == nil {
-				set = discoverAccountSessionLocks(ctx, tx, set, change.AccountID)
+				set = tx.operator.discoverAccountSessionLocks(ctx, tx, set, change.AccountID)
 			}
 			return set
 		}); err != nil {

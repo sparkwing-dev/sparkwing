@@ -23,32 +23,8 @@ type CredentialWriter interface {
 	RemoveGitCredential(context.Context, capability.Authorized, string, string) error
 }
 
-// WithCredentialWriter supplies tenant credential transactions before Handler is constructed.
-func (s *Server) WithCredentialWriter(resolve func(context.Context, store.Team) (CredentialWriter, error)) *Server {
-	s.resolveCredentialWriter = resolve
-	return s
-}
-
 func (s *Server) credentialWriter(ctx context.Context, team string) (CredentialWriter, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var writer CredentialWriter
-	var err error
-	if s.resolveCredentialWriter != nil {
-		writer, err = s.resolveCredentialWriter(ctx, store.Team(team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		writer, _ = any(tenant).(CredentialWriter)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if writer == nil || writer.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return writer, nil
+	return tenantPort[CredentialWriter](ctx, s, store.Team(team))
 }
 
 func decodeCredentialRequest[T any](r *http.Request) (*T, error) {

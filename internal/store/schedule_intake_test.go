@@ -28,10 +28,10 @@ func scheduleIntakeFixture(t *testing.T, suffix uint32) (*Tenant, CronSchedule, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+	s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		location, err := VerifiedScheduleIntake(ctx, resolver, in)
 		return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
-	}))
+	})
 	rewriteSchemaExec(t, s.db, `UPDATE cron_schedules SET github_installation_id=7,github_repository_id=701`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',1,'acme','Organization',1,1) ON CONFLICT DO NOTHING`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a',?,701,'acme/repo',7,'owner',1)`, sched.RepositoryKey)
@@ -107,19 +107,19 @@ func TestScheduleAdmissionRequiresCurrentTenantAndDeclarationProperty(t *testing
 				case 9:
 					rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET declared=0`)
 				case 10:
-					tenant.s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+					tenant.s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 						_, err := r.(*storeTx).ExecContext(ctx, `UPDATE cron_schedules SET git_branch='changed'`)
 						location := in.Request.Source.Location
 						return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
-					}))
+					})
 				case 11:
 					rewriteSchemaExec(t, tenant.s.db, `INSERT INTO team_deletions(slug,requested_at,state) VALUES ('a',1,'pending')`)
 				case 12:
-					tenant.s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+					tenant.s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 						_, err := r.(*storeTx).ExecContext(ctx, `INSERT INTO team_deletions(slug,requested_at,state) VALUES ('a',1,'pending')`)
 						location := in.Request.Source.Location
 						return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
-					}))
+					})
 				case 13:
 					sched.Paused = !sched.Paused
 				case 14:
@@ -171,11 +171,11 @@ func TestScheduleAdmissionRechecksAppConsentProperty(t *testing.T) {
 			case 2:
 				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_automation`)
 			case 3:
-				tenant.s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+				tenant.s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 					_, err := r.(*storeTx).ExecContext(ctx, `DELETE FROM github_app_automation`)
 					location := in.Request.Source.Location
 					return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
-				}))
+				})
 			}
 			if got, err := tenant.AdmitScheduledRun(t.Context(), sched, now.Add(time.Second)); err == nil || got.RunID != "" {
 				t.Logf("mode %d revoked App consent admitted=%+v err=%v", mode, got, err)

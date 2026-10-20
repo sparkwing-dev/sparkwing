@@ -17,7 +17,7 @@ func (t *Tenant) githubConnectTx(ctx context.Context, a capability.Authorized, u
 			set.add(lockTeam, true, string(t.team))
 			set.add(lockAccount, true, a.Principal.Capability.Subject.ID)
 			for _, installation := range installations {
-				set = discoverInstallationLocks(ctx, tx, set, installation)
+				set = tx.operator.discoverInstallationLocks(ctx, tx, set, installation)
 			}
 			return set
 		}); err != nil {
@@ -76,11 +76,11 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		}
 		var previousTeam Team
 		if row.Reclaim {
-			previous, err := githubInstallationOwnerTx(ctx, tx, row.InstallationID)
+			previous, err := tx.operator.githubInstallationTeamTx(ctx, tx, row.InstallationID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
-			if err == nil && previous != string(t.team) {
+			if err == nil && previous != t.team {
 				previousTeam = Team(previous)
 				prior := &Tenant{s: t.s, team: Team(previous)}
 				if err := prior.unbindGitHubAppInstallationTx(ctx, tx, row.InstallationID); err != nil {
@@ -103,7 +103,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				return err
 			}
 			for _, team := range []Team{previousTeam, t.team} {
-				if err := RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
+				if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
 					return err
 				}
 			}
@@ -115,10 +115,4 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		return GitHubAppInstallation{}, err
 	}
 	return out, nil
-}
-
-func githubInstallationOwnerTx(ctx context.Context, tx *storeTx, installation int64) (string, error) {
-	var owner string
-	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&owner)
-	return owner, err
 }

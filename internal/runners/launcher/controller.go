@@ -170,7 +170,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	if err != nil {
 		return nil, err
 	}
-	if len(response.Awards)+len(response.Retired) != len(observations) {
+	if len(response.Deferred)+len(response.Awards)+len(response.Retired) != len(observations) {
 		return nil, errors.New("controller sync omitted or added Cloud Job decisions")
 	}
 	states := make([]CloudJobState, len(observations))
@@ -188,6 +188,13 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 			return nil, errAwardMismatch
 		}
 		states[i].Binding, states[i].Resources, states[i].LeaseExpiresAt = observations[i].Binding, c.resources(unit), unit.LeaseExpiresAt
+	}
+	for _, fence := range response.Deferred {
+		i, ok := byAward[fence]
+		if !ok || states[i].Binding.UnitID != "" {
+			return nil, errAwardMismatch
+		}
+		states[i] = CloudJobState{Binding: observations[i].Binding, Deferred: true}
 	}
 	for _, fence := range response.Retired {
 		i, ok := byAward[fence]

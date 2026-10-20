@@ -54,9 +54,9 @@ func jobViewServer(t *testing.T, b *credentialBoundary, f *jobViewTransactions) 
 	t.Helper()
 	e := fakeEngine(t, &f.engineTransactions)
 	e.ReadRunStatus = f.ReadStatus
-	e.ResolveTenant = func(_ context.Context, team store.Team) (controller.RunTransactions, error) {
+	e.ResolveTenant = func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 		if team != "team" {
-			t.Fatalf("tenant = %q", team)
+			return nil, store.ErrNotFound
 		}
 		return f, nil
 	}

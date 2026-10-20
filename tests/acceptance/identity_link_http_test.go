@@ -114,7 +114,7 @@ func otherLinkAccount(t *testing.T, f *identityLinkHTTP) (string, string) {
 			t.Fatal(err)
 		}
 	}
-	raw, csrf, _, err := f.store.CreateAccountSession(t.Context(), store.Account{ID: "stranger"}, "team", time.Hour)
+	raw, csrf, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "stranger"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestIdentityLinkHTTPCommitsVerifiedIdentityOnce(t *testing.T) {
 func TestIdentityLinkHTTPProofProperty(t *testing.T) {
 	f := newIdentityLinkHTTP(t)
 	cookie := f.ready(t)
-	other, otherCSRF, _, err := f.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+	other, otherCSRF, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,4 +374,4 @@ func TestIdentityLinkHTTPProviderDiagnosticProperty(t *testing.T) {
 	}
 }
 
-var _ controller.IdentityLinkWriter = (*store.Store)(nil)
+var _ controller.IdentityLinkWriter = (*store.Operator)(nil)

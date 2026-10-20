@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,16 +37,16 @@ func (f *queuePriorityFake) SetAuthorizedGroupPriority(_ context.Context, a capa
 }
 
 func TestQueuePriorityHTTPPreservesTenantAuthorityProperty(t *testing.T) {
-	engine, _ := engineRuntimeStore(t)
-	st := engine.Store
-	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
-	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher)
-	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	engine, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	st := engine.Store
+	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
+	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
+	s := engine.Server
+	raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +54,7 @@ func TestQueuePriorityHTTPPreservesTenantAuthorityProperty(t *testing.T) {
 	property := func(input []byte, phase uint8) bool {
 		engineSQL(t, st, `UPDATE memberships SET role='editor' WHERE account_id='member'`)
 		fake.calls, fake.err, fake.team = 0, nil, "a"
-		s.WithQueuePriorityWriter(func(_ context.Context, team store.Team) (QueuePriorityWriter, error) {
+		testOnlyTenantPort[QueuePriorityWriter](s, func(_ context.Context, team store.Team) (QueuePriorityWriter, error) {
 			if team != "a" {
 				return nil, missingEndpointPolicy()
 			}
@@ -65,7 +64,7 @@ func TestQueuePriorityHTTPPreservesTenantAuthorityProperty(t *testing.T) {
 		want := 200
 		switch phase % 9 {
 		case 1:
-			s.resolveQueuePriorityWriter = nil
+			s.resolveTenant = nil
 			want = 500
 		case 2:
 			fake.team = "b"

@@ -1,14 +1,11 @@
 package crons
 
 import (
-	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
 // NewHealthView converts a [Health] for the wire.
@@ -63,7 +60,7 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 		override.Cron = row.Override.Cron
 		override.TZ = row.Override.TZ
 		override.Overlap = row.Override.Overlap
-		override.Args = ViewArgs(row.Override.Args)
+		override.Args = viewArgs(row.Override.Args)
 		if row.Override.CatchUp != nil {
 			override.CatchUpNS = int64(*row.Override.CatchUp)
 		}
@@ -83,7 +80,7 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 		TZ:           row.TZ,
 		Overlap:      row.Overlap,
 		CatchUpNS:    int64(row.CatchUp),
-		Args:         ViewArgs(row.Args),
+		Args:         viewArgs(row.Args),
 		Lock: controllerwire.LockView{
 			Ref:    row.Lock.Ref,
 			Binary: row.Lock.Binary,
@@ -96,7 +93,7 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 			TZ:        row.Effective.TZ,
 			Overlap:   row.Effective.Overlap,
 			CatchUpNS: int64(row.Effective.CatchUp),
-			Args:      ViewArgs(row.Effective.Args),
+			Args:      viewArgs(row.Effective.Args),
 		},
 		Paused:      row.Paused,
 		Declared:    row.Declared,
@@ -122,14 +119,14 @@ func NewFireView(fire store.CronFire, runStatus string) controllerwire.FireView 
 		Outcome:    fire.Outcome,
 		RunID:      fire.RunID,
 		Detail:     fire.Detail,
-		Args:       ViewArgs(fire.Args),
+		Args:       viewArgs(fire.Args),
 		RunStatus:  runStatus,
 	}
 }
 
-// ViewArgs renders an argument set for a reader that indexes it directly, so a
+// viewArgs renders an argument set for a reader that indexes it directly, so a
 // schedule with no arguments serves an empty object rather than a null.
-func ViewArgs(args map[string]string) map[string]string {
+func viewArgs(args map[string]string) map[string]string {
 	if args == nil {
 		return map[string]string{}
 	}
@@ -150,183 +147,4 @@ func rfc3339Ptr(t *time.Time) *string {
 	}
 	s := RFC3339(*t)
 	return &s
-}
-
-// RowFromView rebuilds the [Row] a renderer reads from the wire shape a remote
-// evaluator served, so one renderer answers for both sides. The fields the
-// wire does not carry -- who armed the schedule, and its cursor -- come back
-// zero.
-func RowFromView(v controllerwire.ScheduleView) Row {
-	row := Row{
-		CronSchedule: store.CronSchedule{
-			ID:           v.ID,
-			RepoPath:     v.RepoPath,
-			Pipeline:     v.Pipeline,
-			Name:         v.ScheduleName,
-			Cron:         v.Cron,
-			TZ:           v.TZ,
-			Overlap:      v.Overlap,
-			CatchUp:      time.Duration(v.CatchUpNS),
-			Where:        v.Where,
-			GitBranch:    v.GitBranch,
-			Args:         emptyToNil(v.Args),
-			LockedRef:    v.Lock.Ref,
-			LockedBinary: v.Lock.Binary,
-			LockedDigest: v.Lock.Digest,
-			Paused:       v.Paused,
-			Declared:     v.Declared,
-			ArmedAt:      parseRFC3339(v.ArmedAt),
-			UpdatedAt:    parseRFC3339(v.UpdatedAt),
-			LastFiredAt:  parseRFC3339Ptr(v.LastFiredAt),
-			LastRunID:    v.LastRunID,
-			LastOutcome:  v.LastOutcome,
-			NextDueAt:    parseRFC3339Ptr(v.NextDueAt),
-		},
-		Display:      v.Name,
-		ScheduleName: v.ScheduleName,
-		State:        v.State,
-		StateDetail:  v.StateDetail,
-		Lock:         Lock{Ref: v.Lock.Ref, Binary: v.Lock.Binary, Digest: v.Lock.Digest, State: v.Lock.State},
-		Effective: store.CronDeclaration{
-			Cron:    v.Effective.Cron,
-			TZ:      v.Effective.TZ,
-			Overlap: v.Effective.Overlap,
-			CatchUp: time.Duration(v.Effective.CatchUpNS),
-			Where:   v.Where,
-			Args:    emptyToNil(v.Effective.Args),
-		},
-		OverrideFields: v.Override.Fields,
-		OverrideStale:  v.Override.Stale,
-		Location:       zoneOrUTC(v.Effective.TZ),
-	}
-	if len(v.Override.Fields) > 0 {
-		row.Override = &store.CronOverride{
-			SetAt:   parseRFC3339(v.Override.SetAt),
-			Cron:    v.Override.Cron,
-			TZ:      v.Override.TZ,
-			TZSet:   slices.Contains(v.Override.Fields, "tz"),
-			Overlap: v.Override.Overlap,
-			Args:    overrideArgsFromView(v.Override),
-		}
-		if v.Override.CatchUpNS != 0 {
-			d := time.Duration(v.Override.CatchUpNS)
-			row.Override.CatchUp = &d
-		}
-	}
-	// safety: the wire carries the window the evaluator settled on, not the
-	// fact that it lowered one, so the marker is the gap between that window
-	// and the declaration the view also carries -- an evaluator that does not
-	// clamp leaves no gap and draws no marker.
-	row.CatchUpClamped = row.Effective.CatchUp != row.CronSchedule.Effective().CatchUp
-	return row
-}
-
-// safety: an override that replaces the declared arguments with none is a set
-// but empty map, which the wire cannot tell from an override that names no
-// arguments at all -- the field list can, so it decides.
-func overrideArgsFromView(v controllerwire.OverrideView) map[string]string {
-	for _, field := range v.Fields {
-		if field == "args" {
-			return ViewArgs(v.Args)
-		}
-	}
-	return nil
-}
-
-// HealthFromView rebuilds the [Health] a renderer reads from the wire shape.
-func HealthFromView(v controllerwire.HealthView) Health {
-	return Health{
-		Timer: crontimer.State{
-			Installed: v.Timer.Installed,
-			Foreign:   v.Timer.Foreign,
-			Enabled:   v.Timer.Enabled,
-			Stale:     v.Timer.Stale,
-			Path:      v.Timer.Path,
-			Binary:    v.Timer.Binary,
-			Detail:    v.Timer.Detail,
-		},
-		LastTick: store.CronTick{
-			At:      parseRFC3339(v.LastTick.At),
-			Host:    v.LastTick.Host,
-			Version: v.LastTick.Version,
-			Error:   v.LastTick.Error,
-		},
-		TickStale:     v.TickStale,
-		Schedules:     v.Schedules,
-		Armed:         v.Armed,
-		Paused:        v.Paused,
-		Undeclared:    v.Undeclared,
-		Locked:        v.Locked,
-		Following:     v.Following,
-		Ahead:         v.Ahead,
-		MissingBinary: v.MissingBinary,
-		StaleOverride: v.StaleOverride,
-		Detail:        v.Detail,
-		Remedy:        v.Remedy,
-	}
-}
-
-// FireFromView rebuilds one stored fire from the wire shape.
-func FireFromView(v controllerwire.FireView) store.CronFire {
-	return store.CronFire{
-		ID:         v.ID,
-		ScheduleID: v.ScheduleID,
-		DueAt:      parseRFC3339(v.DueAt),
-		DecidedAt:  parseRFC3339(v.DecidedAt),
-		Outcome:    v.Outcome,
-		RunID:      v.RunID,
-		Detail:     v.Detail,
-		Args:       emptyToNil(v.Args),
-	}
-}
-
-func emptyToNil(args map[string]string) map[string]string {
-	if len(args) == 0 {
-		return nil
-	}
-	return args
-}
-
-func parseRFC3339(s string) time.Time {
-	at, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}
-	}
-	return at
-}
-
-func parseRFC3339Ptr(s *string) *time.Time {
-	if s == nil {
-		return nil
-	}
-	at := parseRFC3339(*s)
-	if at.IsZero() {
-		return nil
-	}
-	return &at
-}
-
-// safety: a zone the reader's tzdata does not carry renders in UTC rather than
-// failing the listing, which is the same fallback a locally read row takes.
-func zoneOrUTC(tz string) *time.Location {
-	loc, err := (&pipelines.ScheduleTrigger{TZ: tz}).Location()
-	if err != nil || loc == nil {
-		return time.UTC
-	}
-	return loc
-}
-
-// UpcomingAfter returns the next n instants expr matches after now, read in tz.
-// It answers for a schedule a reader holds only the cadence of, such as one a
-// remote evaluator served.
-func UpcomingAfter(expr, tz string, now time.Time, n int) ([]time.Time, error) {
-	parsed, err := cronspec.Parse(expr)
-	if err != nil {
-		return nil, err
-	}
-	loc, err := (&pipelines.ScheduleTrigger{TZ: tz}).Location()
-	if err != nil {
-		return nil, err
-	}
-	return parsed.Upcoming(now, loc, n), nil
 }

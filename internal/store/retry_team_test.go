@@ -21,7 +21,7 @@ type retrySourcePolicy struct {
 }
 
 func (p retrySourcePolicy) ResolveIntake(ctx context.Context, reader capability.AuthorityResolver, in store.IntakeRequest) (store.IntakePolicyFacts, error) {
-	facts, err := (sealIntakePolicy{}).ResolveIntake(ctx, reader, in)
+	facts, err := (storetest.IntakePolicy{}).ResolveIntake(ctx, reader, in)
 	facts.SourceLocation = &p.location
 	if in.VerifiedDeliveryID != "" {
 		facts.Delivery = p.delivery
@@ -30,7 +30,8 @@ func (p retrySourcePolicy) ResolveIntake(ctx context.Context, reader capability.
 }
 
 func TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty(t *testing.T) {
-	s := storetest.Open(t)
+	policy := &retrySourcePolicy{location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/repo", PipelineDir: ".sparkwing"}}
+	s := storetest.Open(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{Intake: policy}))
 	own, plan, err := storePlanSealRequest(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,6 @@ func TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(281, 61))
 	for i := range 12 {
 		location := runspec.SourceLocation{RemoteURL: "https://github.com/acme/repo", PipelineDir: ".sparkwing"}
-		s.SetIntakePolicy(retrySourcePolicy{location: location})
 		request := plan.Seal.Request.Request
 		request.Source = runspec.Source{Ref: fmt.Sprintf("%040x", random.Uint64()), RequestedRef: fmt.Sprintf("pipeline-%x", random.Uint64()), Entrypoint: "Fixture", Location: location}
 		request.Git.SHA = fmt.Sprintf("%040x", random.Uint64())
@@ -72,11 +72,11 @@ func TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty(t *testing.T) {
 			t.Fatalf("foreign retry read: %v", err)
 		}
 		if i == 0 {
-			owner, err := s.ResolveAuthority(t.Context(), plan.Actor.Authority)
+			owner, err := s.AsOperator().ResolveAuthority(t.Context(), plan.Actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}
-			claim, err := s.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: retry.RunID}, Available: match.Resources{Cores: 8}})
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: retry.RunID}, Available: match.Resources{Cores: 8}})
 			if err != nil || claim.Team != own.Team() {
 				t.Fatalf("own retry claim: %+v, %v", claim, err)
 			}
@@ -85,7 +85,7 @@ func TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty(t *testing.T) {
 }
 
 func TestManualRetryRefusesMissingSource(t *testing.T) {
-	s := storetest.Open(t)
+	s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 	own, plan, err := storePlanSealRequest(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,8 @@ func TestManualRetryRefusesMissingSource(t *testing.T) {
 }
 
 func TestManualRetryRetainsVerifiedRepositoryFacts(t *testing.T) {
-	s := storetest.Open(t)
+	policy := &retrySourcePolicy{}
+	s := storetest.Open(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{Intake: policy}))
 	own, plan, err := storePlanSealRequest(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +107,7 @@ func TestManualRetryRetainsVerifiedRepositoryFacts(t *testing.T) {
 	git := request.Git
 	git.Ref, git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
 	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: plan.Seal.Request.AdmittedAt}}
-	s.SetIntakePolicy(retrySourcePolicy{delivery: &store.VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "app-actor"}}})
+	policy.delivery = &store.VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "app-actor"}}
 	source, err := own.AdmitRun(t.Context(), store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request, VerifiedDeliveryID: "verified-delivery"})
 	if err != nil {
 		t.Fatal(err)

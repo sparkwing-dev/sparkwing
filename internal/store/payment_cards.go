@@ -111,7 +111,7 @@ func forgetTeamCardTx(ctx context.Context, tx *storeTx, team Team, fingerprint, 
 	    card_brand = '', card_last4 = '', refill_enabled = 0 WHERE name = ? AND card_fingerprint = ?`, string(team), fingerprint); err != nil {
 		return err
 	}
-	return RecordBusinessEvent(tx, BusinessEvent{
+	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardBlocked, SubjectID: method, Actor: "payment_provider", At: now,
 		Attrs: map[string]any{"reason": reason},
 	})

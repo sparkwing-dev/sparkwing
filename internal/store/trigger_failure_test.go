@@ -10,7 +10,7 @@ import (
 )
 
 func TestFailedRunClosesOwnerAndKeepsVerdict(t *testing.T) {
-	st := storetest.OpenSQLite(t)
+	st := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 	tenant, plan, err := storePlanSealRequest(t.Context(), st)
 	if err != nil {
 		t.Fatal(err)

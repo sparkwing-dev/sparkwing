@@ -47,7 +47,7 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 			if err != nil || view.Waiting == nil || view.Waiting.Kind != kind || !strings.HasPrefix(view.Waiting.CreditHold, "out of credits:") || !strings.Contains(view.Waiting.CreditHold, "add funds") {
 				t.Fatalf("unfunded waiting unit = %+v, %v", view.Waiting, err)
 			}
-			if _, err = s.ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+			if _, err = s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("launcher claimed unfunded work: %v", err)
 			}
 			fundUnitClaim(t, s)
@@ -55,7 +55,7 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 			if err != nil || view.Waiting == nil || view.Waiting.CreditHold != "" {
 				t.Fatalf("funded waiting unit = %+v, %v", view.Waiting, err)
 			}
-			if _, err = s.ClaimUnit(t.Context(), demand); err != nil {
+			if _, err = s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 				t.Fatalf("launcher refused funded work: %v", err)
 			}
 		})
@@ -83,7 +83,7 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 	switch runner {
 	case "metered":
 		meteredRunnerOnly(t, s)
-		if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "paid-runner", Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8, MemoryBytes: 8 << 30}, Available: match.Resources{Cores: 8, MemoryBytes: 8 << 30}}); err != nil {
+		if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "paid-runner", Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8, MemoryBytes: 8 << 30}, Available: match.Resources{Cores: 8, MemoryBytes: 8 << 30}}); err != nil {
 			t.Fatal(err)
 		}
 	case "revoked":
@@ -100,7 +100,7 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 		return
 	}
 	demand.Target, demand.Kinds = nil, []capability.UnitKind{kind}
-	if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 		t.Fatalf("the unmetered runner the notice relied on could not claim the %s: %v", kind, err)
 	}
 }

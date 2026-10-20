@@ -21,7 +21,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(719, 331))
 	for trial := range 12 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {
-			s := storetest.OpenSQLite(t)
+			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 			job := fmt.Sprintf("job-%x", random.Uint64())
 			label := fmt.Sprintf("tool-%x", random.Uint64())
 			cores := float64(1 + random.IntN(4))
@@ -40,7 +40,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 				t.Fatalf("accepted job has no spec hash: %v", err)
 			}
 			authority := plan.Seal.Request.AuthorityRef
-			root, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+			root, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 				Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()),
 				RegistrationID: "runner:planner:worker", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "worker"},
 				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim},
@@ -53,7 +53,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			refuse := func(request store.UnitDemand) {
 				t.Helper()
 				before := readMutationSnapshot(t, tenant, s, plan.RunID)
-				claim, err := s.ClaimUnit(t.Context(), request)
+				claim, err := s.AsOperator().ClaimUnit(t.Context(), request)
 				if err == nil || len(claim.Bearer) != 0 {
 					t.Fatalf("refused claim returned authority: %+v, %v", claim, err)
 				}
@@ -80,13 +80,13 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			bad.Target = &target
 			refuse(bad)
 			foreign := signIn(t, s, "foreign", "foreign@example.test")
-			raw, _, _, err := s.CreateAccountSession(t.Context(), foreign.Account, foreign.Account.ActiveTeam, time.Hour)
+			raw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), foreign.Account, foreign.Account.ActiveTeam, time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
 			digest := sha256.Sum256([]byte(raw))
 			foreignAuthority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-			foreignRoot, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+			foreignRoot, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 				Kind: capability.ProvisionMachine, Authority: &foreignAuthority, Team: string(foreign.Account.ActiveTeam),
 				RegistrationID: "runner:" + string(foreign.Account.ActiveTeam) + ":foreign", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "foreign"},
 				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim},
@@ -100,7 +100,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			bad = demand
 			bad.CapabilityPrefix = foreignRoot.Capability.Prefix
 			refuse(bad)
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}

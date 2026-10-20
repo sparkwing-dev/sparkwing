@@ -15,14 +15,19 @@ import (
 
 const pushedRepoURL = "https://github.com/acme/widgets.git"
 
-func pushedService(t *testing.T) *crons.Service {
+type pushedFixture struct {
+	*crons.Service
+	Store *store.Store
+}
+
+func pushedService(t *testing.T) *pushedFixture {
 	t.Helper()
 	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "operator@laptop"}
+	return &pushedFixture{Service: &crons.Service{Operator: st.AsOperator(), Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "operator@laptop"}, Store: st}
 }
 
 func declaredEntry(pipeline, name, cron string) crons.Declared {
@@ -329,7 +334,7 @@ func TestControllerHealth_ReportsTheLoopAndTheStoredTick(t *testing.T) {
 	}
 
 	at := time.Now().Add(-10 * time.Minute)
-	if err := svc.Store.AsOperator().RecordCronTick(ctx, store.CronTick{At: at, Host: "controller-1"}); err != nil {
+	if err := svc.Operator.RecordCronTick(ctx, store.CronTick{At: at, Host: "controller-1"}); err != nil {
 		t.Fatalf("RecordCronTick: %v", err)
 	}
 	health, err = svc.ControllerHealth(ctx)

@@ -99,4 +99,4 @@ func validateCredentialRequest(request credentialRequest) error {
 	return nil
 }
 
-var _ CredentialIssuer = (*store.Store)(nil)
+var _ CredentialIssuer = (*store.Operator)(nil)

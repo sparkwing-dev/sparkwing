@@ -132,8 +132,12 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 
 // safety: a missing team or membership answers the empty role, which carries no scope.
 func (s *Server) memberRole(ctx context.Context, team store.Team, accountID string) (store.Role, error) {
-	t, err := s.store.ForTeam(ctx, team)
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+	if team == "" {
+		return "", nil
+	}
+	t, err := s.tenantForTeam(ctx, team)
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
 		return "", nil
 	}
 	if err != nil {
@@ -239,7 +243,7 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 		return nil, "", refuse(http.StatusBadGateway, "", name+" could not be reached to finish the sign-in")
 	}
 	now := time.Now().UTC()
-	res, err := s.store.ResolveSignIn(ctx, profile, s.signUpConditions(ctx), now)
+	res, err := s.operator.ResolveSignIn(ctx, profile, s.signUpConditions(ctx), now)
 	if errors.Is(err, store.ErrAccountExists) {
 		return nil, "", refuse(http.StatusConflict, "", errAccountExistsSignIn.Error())
 	}
@@ -248,7 +252,7 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 	}
 	s.observeSignUp(ctx, name, res, now)
 	acct := res.Account
-	raw, _, sess, err := s.store.CreateIdentityAccountSession(ctx, acct, acct.ActiveTeam,
+	raw, _, sess, err := s.operator.CreateIdentityAccountSession(ctx, acct, acct.ActiveTeam,
 		profile.Provider, profile.Subject, s.sessionInitialTTL())
 	if err != nil {
 		if errors.Is(err, store.ErrIdentityUnlinked) {

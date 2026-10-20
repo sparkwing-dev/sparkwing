@@ -49,7 +49,7 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 	if err := acquireLockSet(ctx, tx, func() lockSet {
 		var set lockSet
 		set.add(lockTeam, false, string(in.Installation.Team))
-		return discoverInstallationLocks(ctx, tx, set, in.Installation.InstallationID)
+		return tx.operator.discoverInstallationLocks(ctx, tx, set, in.Installation.InstallationID)
 	}); err != nil {
 		return capability.Principal{}, err
 	}

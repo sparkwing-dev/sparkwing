@@ -24,7 +24,7 @@ func TestStoreDataFreeSlotPolicyPersistsAndRejectsInvalidWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.db = blobAccountingDB(t, path)
-	if taken, limit, err := s.FreeSlots(t.Context()); err != nil || taken != 0 || limit != 3 {
+	if taken, limit, err := s.AsOperator().FreeSlots(t.Context()); err != nil || taken != 0 || limit != 3 {
 		t.Fatalf("reopened slot policy: %d/%d, %v", taken, limit, err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE settings SET sealed=1 WHERE key=?", metaKeyFreeTeamSlots)
@@ -35,7 +35,7 @@ func TestStoreDataFreeSlotPolicyPersistsAndRejectsInvalidWrites(t *testing.T) {
 	if err := s.db.QueryRowContext(t.Context(), "SELECT value FROM settings WHERE key=?", metaKeyFreeTeamSlots).Scan(&raw); err != nil || string(raw) != "3" {
 		t.Fatalf("sealed policy overwritten: %q, %v", raw, err)
 	}
-	if _, _, err := s.FreeSlots(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
+	if _, _, err := s.AsOperator().FreeSlots(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
 		t.Fatalf("sealed policy selected a fallback: %v", err)
 	}
 }

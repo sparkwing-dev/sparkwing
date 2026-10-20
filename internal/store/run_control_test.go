@@ -19,7 +19,7 @@ func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 	property := func(selector uint8, suffix uint64) bool {
 		tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
-		p, err := tenant.s.ResolveAuthority(t.Context(), actor.Authority)
+		p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,12 +67,12 @@ func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *test
 	property := func(seed uint64) bool {
 		tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
-		p, err := tenant.s.ResolveAuthority(t.Context(), actor.Authority)
+		p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {
 			t.Fatal(err)
 		}
 		secret := fmt.Sprintf("private-%016x", seed)
-		tenant.s.SetPlanSecretOpener(fakePlanSecretOpener(func(_ context.Context, _ Team, _ Secret) (string, error) { return secret, nil }))
+		tenant.s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, _ Team, _ Secret) (string, error) { return secret, nil })
 		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES ('a','KEY','sealed','owner','p',1,0,1,1)`)
 		text := "note " + secret + " encoded " + base64.StdEncoding.EncodeToString([]byte(secret)) + " end"
 		a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(tenant.team), RunID: ref.RunID}}
@@ -134,7 +134,7 @@ func TestRunControlRollsBackStateEventsAndReplayTogether(t *testing.T) {
 		t.Run(fmt.Sprint(approval), func(t *testing.T) {
 			tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
 			actor := authorityMember(t, tenant.s, "member", RoleEditor)
-			p, err := tenant.s.ResolveAuthority(t.Context(), actor.Authority)
+			p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -181,7 +181,7 @@ func TestRunControlMasksClassifiedArguments(t *testing.T) {
 				t.Fatal(err)
 			}
 			actor := authorityMember(t, tenant.s, "account", RoleEditor)
-			p, err := tenant.s.ResolveAuthority(t.Context(), actor.Authority)
+			p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func TestAccountDeletionDropsOnlyItsPrivateControlReceiptsProperty(t *testing.T)
 		var survivor capability.Authorized
 		for _, id := range []string{first, "survivor"} {
 			actor := authorityMember(t, tenant.s, id, RoleEditor)
-			p, err := tenant.s.ResolveAuthority(t.Context(), actor.Authority)
+			p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -16,7 +16,7 @@ func TestOwnerRenewalUsesItsSelfClaimsAuthorityBound(t *testing.T) {
 	for _, binding := range []bool{false, true} {
 		t.Run(fmt.Sprint("binding=", binding), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, false)
-			s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+			s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
 			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 			owner, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
@@ -43,7 +43,7 @@ func TestOwnerRenewalUsesItsSelfClaimsAuthorityBound(t *testing.T) {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE capabilities SET authority_json=?,expires_at=? WHERE prefix=?`, body, optionalTime(record.Value.ExpiresAt), self.Claim.CapabilityPrefix)
-			beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
 			if err != nil || !beat.ExpiresAt.Equal(bound) {
 				t.Fatalf("owner renewal = %+v, %v; want child bound %v", beat, err, bound)
 			}
@@ -57,10 +57,10 @@ func TestOwnerRenewalUsesItsSelfClaimsAuthorityBound(t *testing.T) {
 
 func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
-	first, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
+	first, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 	if err != nil || self.Kind != Execute {
 		t.Fatalf("self claim: %+v %v", self, err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 		t.Fatalf("fixture owner lease %v must outlive child %v", first.ExpiresAt, self.Claim.LeaseExpiresAt)
 	}
 	// An unavailable controller can recover while the owner keeper is live but its self-claimed job has lapsed.
-	beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
+	beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
 	var refusal *ErrIllegalTransition
 	if !errors.As(err, &refusal) || refusal.Reason != ReasonHolderRights {
 		t.Fatalf("owner renewed to %v after its executing job expired at %v; want holder refusal, got %v", beat.ExpiresAt, self.Claim.LeaseExpiresAt, err)

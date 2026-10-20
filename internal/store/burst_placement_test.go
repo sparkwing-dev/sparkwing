@@ -28,7 +28,7 @@ func burstFixture(t *testing.T, policy runspec.BurstPlacement) (*Store, UnitDema
 
 func burstPersonalClaimant(t *testing.T, s *Store, authority capability.AuthorityRef, name string) capability.Capability {
 	t.Helper()
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 			if !allowed {
 				authority = other.Authority
 			}
-			issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:mine", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "mine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:mine", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "mine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +65,7 @@ func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 				demand.Target = nil
 				demand.Kinds = []capability.UnitKind{capability.UnitNode}
 			}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if allowed && (err != nil || claim.NodeID != "job") {
 				t.Fatalf("owner claim: %+v %v", claim, err)
 			}
@@ -82,18 +82,18 @@ func TestBurstSealedPreferencesOverrideControllerPlacement(t *testing.T) {
 	root := burstPersonalClaimant(t, s, owner.Authority, "preferred")
 	fallback := burstPersonalClaimant(t, s, owner.Authority, "fallback")
 	demand.CapabilityPrefix = fallback.Prefix
-	if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Capacity: demand.Capacity, Available: demand.Available}); err != nil {
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Capacity: demand.Capacity, Available: demand.Available}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: []PlacementPreference{{Prefers: []string{"name=runner"}}}, Liveness: time.Minute})
-	_, err := s.ClaimUnit(ctx, demand)
+	_, err := s.AsOperator().ClaimUnit(ctx, demand)
 	var denied *apierr.Error
 	if !errors.As(err, &denied) || denied.Code != apierr.LockHeld {
 		t.Fatalf("sealed earlier machine not held: %v", err)
 	}
 	now := s.now().Add(time.Minute)
 	s.clock = func() time.Time { return now }
-	if _, err := s.ClaimUnit(ctx, demand); err != nil {
+	if _, err := s.AsOperator().ClaimUnit(ctx, demand); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -101,12 +101,12 @@ func TestBurstSealedPreferencesOverrideControllerPlacement(t *testing.T) {
 func TestPersonalMachineCannotClaimNonOwnerNonBurstRun(t *testing.T) {
 	s, demand := unitClaimFixture(t)
 	owner := authorityMember(t, s, "owner", RoleOwner)
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &owner.Authority, RegistrationID: "runner:a:mine", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "mine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &owner.Authority, RegistrationID: "runner:a:mine", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "mine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	demand.CapabilityPrefix = issued.Capability.Prefix
-	if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 		t.Fatal("personal root escaped owner scope outside burst")
 	}
 }
@@ -178,14 +178,14 @@ func burstHereOwnerFixture(t *testing.T) (*Store, UnitDemand, capability.Princip
 	}
 	demand.CapabilityPrefix = here.Capability.Prefix
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
-	if err := s.RecordRunnerPoll(t.Context(), demand); err != nil {
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
 		t.Fatal(err)
 	}
-	owner, err := s.ClaimUnit(t.Context(), demand)
+	owner, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Award.CapabilityPrefix})
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
 	owner := authorityMember(t, s, "owner", RoleOwner)
 	fallback.CapabilityPrefix = burstPersonalClaimant(t, s, owner.Authority, "fallback").Prefix
 	fallback.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
-	if _, err := s.ClaimUnit(t.Context(), fallback); err == nil {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), fallback); err == nil {
 		t.Fatal("live here owner did not hold fallback")
 	}
 	node := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
@@ -216,7 +216,7 @@ func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
 	}
 	demand.CapabilityPrefix = principal.Capability.Prefix
 	demand.Available.Cores = 0
-	if err := s.RecordHereAvailability(t.Context(), principal.Authority, demand.Available); err != nil {
+	if err := s.AsOperator().RecordHereAvailability(t.Context(), principal.Authority, demand.Available); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
@@ -233,7 +233,7 @@ func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimUnit(t.Context(), fallback); err != nil {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), fallback); err != nil {
 		t.Fatalf("saturated here owner blocked fallback: %v", err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
@@ -254,17 +254,17 @@ func TestBurstMachinesPreferenceIncludesEveryOwnersRegisteredMachine(t *testing.
 	s, demand := burstFixture(t, runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines", Hold: time.Minute}, {Target: "cloud"}}})
 	owner := authorityMember(t, s, "owner", RoleOwner)
 	for _, name := range []string{"desk-a", "desk-b"} {
-		issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &owner.Authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &owner.Authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if name == "desk-b" {
-			if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Capacity: demand.Capacity, Available: demand.Available}); err != nil {
+			if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Capacity: demand.Capacity, Available: demand.Available}); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 		t.Fatal("second registered machine did not hold fallback")
 	}
 }
@@ -312,7 +312,7 @@ func FuzzBurstReservationKeepsCapacityAndClaimFences(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, attack uint8, amount uint16) {
 		s, _, owner := burstHereOwnerFixture(t)
-		if err := s.RecordHereAvailability(t.Context(), owner.Authority, match.Resources{}); err != nil {
+		if err := s.AsOperator().RecordHereAvailability(t.Context(), owner.Authority, match.Resources{}); err != nil {
 			t.Fatal(err)
 		}
 		reserved := match.Resources{Cores: 4 + float64(amount%17)/4}

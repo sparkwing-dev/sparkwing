@@ -52,7 +52,7 @@ type BusinessEvent struct {
 // change it describes. A zero At is now, and Attrs is stored as JSON of at
 // most 4 KiB. An event whose team, kind and subject are already recorded
 // writes nothing.
-func RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
+func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 	if strings.TrimSpace(ev.Kind) == "" {
 		return fmt.Errorf("%w: a business event names its kind", ErrInvalidInput)
 	}

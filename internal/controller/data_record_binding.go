@@ -137,7 +137,7 @@ func (s *boundData) LookupDepcache(ctx context.Context, request blob.DepcacheLoo
 	return tenant.LookupDepcache(ctx, request)
 }
 
-func (s *boundData) cacheLookup(ctx context.Context, supplied blob.Authority, kind blob.Kind, repo runspec.RepoKey, ref blob.RefScope, job, name string) (blob.Authority, DataTransactions, error) {
+func (s *boundData) cacheLookup(ctx context.Context, supplied blob.Authority, kind blob.Kind, repo runspec.RepoKey, ref blob.RefScope, job, name string) (blob.Authority, dataTransactions, error) {
 	authority, err := s.live(ctx, supplied)
 	if err != nil {
 		return blob.Authority{}, nil, err

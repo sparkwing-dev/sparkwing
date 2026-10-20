@@ -185,3 +185,32 @@ func FuzzControllerSyncRequiresExactlyObservedDecisions(f *testing.F) {
 		}
 	})
 }
+
+func TestControllerSyncDeferredDecisionRequiresExactObservedFence(t *testing.T) {
+	unit := wireAward(capability.UnitNode)
+	binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := CloudJobObservation{Binding: binding, JobNamespace: "cloud", JobName: jobName(binding), JobUID: "job-uid", NodeUID: "node-uid"}
+	for _, foreign := range []bool{false, true} {
+		control, err := NewControllerControl(launcherWireFake{sync: func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+			fence := binding.LeaseRef()
+			if foreign {
+				fence.Generation++
+			}
+			return controllerwire.LauncherSyncResponse{Deferred: []capability.LeaseRef{fence}}, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{unit.Unit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		states, err := control.Sync(t.Context(), []CloudJobObservation{observation})
+		if foreign {
+			if err == nil || len(states) != 0 {
+				t.Fatalf("foreign deferred decision accepted: %+v, %v", states, err)
+			}
+		} else if err != nil || len(states) != 1 || !states[0].Deferred || states[0].Delete || !sameBinding(states[0].Binding, binding) {
+			t.Fatalf("deferred decision=%+v, %v", states, err)
+		}
+	}
+}

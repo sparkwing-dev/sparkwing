@@ -40,7 +40,7 @@ func TestGitHubCommitStatusModeSurvivesReopen(t *testing.T) {
 
 func TestGitHubCommitStatusModeIsScopedProperty(t *testing.T) {
 	property := func(suffix string, foreign bool) bool {
-		st := storetest.Open(t)
+		st := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 		tenant, admitted, err := storePlanSealRequest(t.Context(), st)
 		if err != nil {
 			t.Fatal(err)

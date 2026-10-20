@@ -35,7 +35,7 @@ func composedClaimants(t *testing.T, version string, policy *http.Client) map[st
 	t.Cleanup(func() { _ = st.Close() })
 	seed := sha256.Sum256([]byte("bootstrap"))
 	admin := "swk_" + base64.RawURLEncoding.EncodeToString(seed[:])
-	if _, err := controller.EnsureBootstrapAdminToken(t.Context(), st, admin); err != nil {
+	if _, err := controller.EnsureBootstrapAdminToken(t.Context(), st.AsOperator(), admin); err != nil {
 		t.Fatal(err)
 	}
 	srv, err := newControllerServer(st, deployment.Config{}, root, version, policy)
@@ -64,11 +64,11 @@ func composedClaimants(t *testing.T, version string, policy *http.Client) map[st
 	if err != nil {
 		t.Fatal(err)
 	}
-	operatorPrincipal, err := st.LookupCapability(t.Context(), sha256.Sum256([]byte(admin)))
+	operatorPrincipal, err := st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(admin)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	runnerToken, err := st.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+	runnerToken, err := st.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 		Kind: capability.ProvisionMachine, RegistrationID: "runner:qa-team:runner", Authority: &operatorPrincipal.Authority,
 		Team: team.Team, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Repositories: []string{"github.com/qa/*"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim},

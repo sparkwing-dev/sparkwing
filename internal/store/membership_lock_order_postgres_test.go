@@ -40,7 +40,7 @@ func TestPostgresAccountResolutionLocksMembershipBeforeAuthorityAgainstDemotion(
 	}
 	ownerActor := membershipActor(t, st, owner.Account.ID, tn.Team())
 	session := membershipActor(t, st, member.Account.ID, tn.Team()).Authority
-	issued, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &session, Team: string(tn.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	issued, err := st.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &session, Team: string(tn.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestPostgresAccountResolutionLocksMembershipBeforeAuthorityAgainstDemotion(
 
 	b := blockMembership(t, ctx, st, tn.Team(), member.Account.ID)
 	b.start(func() error {
-		_, err := st.DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, Audience: capability.Controller, Binding: issued.Capability.Binding, Grants: issued.Capability.Grants})
+		_, err := st.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, Audience: capability.Controller, Binding: issued.Capability.Binding, Grants: issued.Capability.Grants})
 		return err
 	})
 	b.waitBlocked(1)
@@ -67,13 +67,13 @@ func TestPostgresSessionRenewalLocksMembershipBeforeSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	t.Cleanup(cancel)
 	owner := signIn(t, st, "owner", "owner@example.com")
-	raw, _, _, err := st.CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
+	raw, _, _, err := st.AsOperator().CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := blockMembership(t, ctx, st, owner.PersonalTeam, owner.Account.ID)
 	b.start(func() error {
-		_, err := st.LookupSessionAndRenew(ctx, raw, 2*time.Hour, 24*time.Hour)
+		_, err := st.AsOperator().LookupSessionAndRenew(ctx, raw, 2*time.Hour, 24*time.Hour)
 		return err
 	})
 	b.waitBlocked(1)
@@ -81,7 +81,7 @@ func TestPostgresSessionRenewalLocksMembershipBeforeSession(t *testing.T) {
 		t.Fatal("session renewal waits for membership while holding its session")
 	}
 	b.release(1)
-	session, err := st.LookupSession(ctx, raw)
+	session, err := st.AsOperator().LookupSession(ctx, raw)
 	if err != nil || session.ExpiresAt.Before(time.Now().Add(time.Hour)) {
 		t.Fatalf("renewal did not commit: session=%+v err=%v", session, err)
 	}

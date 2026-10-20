@@ -44,7 +44,7 @@ func readMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, l
 			return cached
 		}
 	}
-	run := loadMatchingRunTx(ctx, tx, prefix, runID, lock)
+	run := tx.operator.loadMatchingRunTx(ctx, tx, prefix, runID, lock)
 	if memo {
 		if tx.matchingRuns == nil {
 			tx.matchingRuns = map[matchingRunKey]*matchingRun{}
@@ -54,7 +54,7 @@ func readMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, l
 	return run
 }
 
-func loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, lock bool) *matchingRun {
+func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, lock bool) *matchingRun {
 	run := &matchingRun{}
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, lock)
 	if err != nil {
@@ -246,7 +246,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, r
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	claim, err := claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID})
+	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID})
 	if err != nil {
 		return UnitClaim{}, err
 	}

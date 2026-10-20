@@ -15,7 +15,7 @@ func TestMeteredRootPolicyCannotRewriteAwardProperty(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			cloud, metered := i&1 != 0, i&2 != 0
 			s, demand, now := meteredUnitFixture(t, cloud)
-			principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+			principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -31,7 +31,7 @@ func TestMeteredRootPolicyCannotRewriteAwardProperty(t *testing.T) {
 			}
 			setMarker(metered)
 			claim, actor := meteredUnitClaim(t, s, demand)
-			award, err := s.ResolveAuthority(t.Context(), actor.Authority)
+			award, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}

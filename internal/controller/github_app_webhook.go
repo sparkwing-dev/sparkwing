@@ -103,7 +103,7 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 	// safety: GitHub signs the body and not the event header, so a body is
 	// read only as the event it first arrived as.
-	sameEvent, err := s.store.BindGitHubAppDeliveryEvent(r.Context(), githubAppDeliveryDigest(body), event, delivery, time.Now())
+	sameEvent, err := s.operator.BindGitHubAppDeliveryEvent(r.Context(), githubAppDeliveryDigest(body), event, delivery, time.Now())
 	if err != nil {
 		s.writeInternalError(w, r, "github app delivery event", err)
 		return
@@ -189,7 +189,7 @@ func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery, body []byte) {
 	ctx := r.Context()
-	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
+	in, err := s.operator.GitHubAppInstallationTeam(ctx, env.Installation.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		githubAppIgnored(w, "no team holds this installation")
 		return
@@ -316,7 +316,7 @@ func (s *Server) handleGitHubAppInstallationEvent(w http.ResponseWriter, r *http
 		return
 	}
 	id := env.Installation.ID
-	op := s.store.AsOperator()
+	op := s.operator
 	var err error
 	switch env.Action {
 	case "deleted":
@@ -620,7 +620,7 @@ func (s *Server) githubAppBinding(w http.ResponseWriter, r *http.Request, env gi
 		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
 	}
 	repo.ID = env.Repository.ID
-	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
+	in, err := s.operator.GitHubAppInstallationTeam(ctx, env.Installation.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		githubAppIgnored(w, "no team holds this installation")
 		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
@@ -983,7 +983,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 	// a redelivery spends no run budget and a replay after the installation
 	// moves teams starts nothing in the new one.
 	digest := githubAppDeliveryDigest(body)
-	seen, err := s.store.GitHubAppDeliverySeen(ctx, digest)
+	seen, err := s.operator.GitHubAppDeliverySeen(ctx, digest)
 	if err != nil {
 		s.writeInternalError(w, r, "github app delivery", err)
 		return
@@ -1063,7 +1063,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 	// safety: a delivery that shed a run is not recorded, so GitHub's redelivery
 	// can still start it; the runs it did start answer as duplicates.
 	if shed == 0 {
-		if err := s.store.RecordGitHubAppDelivery(ctx, digest, delivery, time.Now()); err != nil {
+		if err := s.operator.RecordGitHubAppDelivery(ctx, digest, delivery, time.Now()); err != nil {
 			s.logger.Warn("github app delivery not recorded", "delivery", delivery, "err", err)
 		}
 	}

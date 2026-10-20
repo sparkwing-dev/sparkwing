@@ -24,13 +24,13 @@ func (t *Tenant) mutationFixtureAuthority(test testing.TB, actor string, grant c
 		if err != nil {
 			test.Fatal(err)
 		}
-		t.s.SetSessionKeyCipher(cipher)
+		t.s.csrfCipher, t.s.csrfKey = cipher, nil
 	}
-	account, err := t.s.Account(test.Context(), actor)
+	account, err := t.s.AsOperator().Account(test.Context(), actor)
 	if err != nil {
 		test.Fatal(err)
 	}
-	raw, _, _, err := t.s.CreateAccountSession(test.Context(), account, t.team, time.Hour)
+	raw, _, _, err := t.s.AsOperator().CreateAccountSession(test.Context(), account, t.team, time.Hour)
 	if err != nil {
 		test.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func (t *Tenant) RemoveRunForTest(ctx context.Context, id string) error {
 func (t *Tenant) MemberCapabilityForTest(test testing.TB, actor string, at time.Time) capability.Issued {
 	test.Helper()
 	a := t.mutationFixtureAuthority(test, actor, capability.RunsWrite, at)
-	issued, err := t.s.ProvisionCapability(test.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &a.Principal.Authority, Team: string(t.team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: actor}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
+	issued, err := t.s.AsOperator().ProvisionCapability(test.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &a.Principal.Authority, Team: string(t.team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: actor}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
 	if err != nil {
 		test.Fatal(err)
 	}

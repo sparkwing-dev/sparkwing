@@ -42,14 +42,14 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 		}
 		in.Subscription = &sub
 	}
-	if _, err := s.BindGitHubAppDeliveryEvent(t.Context(), digest, "push", "delivery", *now); err != nil {
+	if _, err := s.AsOperator().BindGitHubAppDeliveryEvent(t.Context(), digest, "push", "delivery", *now); err != nil {
 		t.Fatal(err)
 	}
-	s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
+	s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
 		delivery, err := VerifiedAppIntake(ctx, resolver, request)
 		location := request.Request.Source.Location
 		return IntakePolicyFacts{Delivery: &delivery, SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
-	}))
+	})
 	return s, tenant, in
 }
 

@@ -118,18 +118,18 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	plan.Jobs[0].Concurrency[0].Scope = new("run")
 	fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, request)
 	if !optimistic {
-		if err := fixture.Store.RecordHereAvailability(t.Context(), fixture.Actor.Authority, match.Resources{}); err != nil {
+		if err := fixture.Store.AsOperator().RecordHereAvailability(t.Context(), fixture.Actor.Authority, match.Resources{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	requester, err := fixture.Store.ResolveAuthority(t.Context(), fixture.Control.Authority)
+	requester, err := fixture.Store.AsOperator().ResolveAuthority(t.Context(), fixture.Control.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if requester.Capability.Parent == nil || requester.Capability.Parent.Kind != capability.AuthoritySession {
 		t.Fatal("burst requester has no account session")
 	}
-	issued, err := fixture.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Repositories: []string{"github.com/acme/*"}, Authority: requester.Capability.Parent, RegistrationID: "runner:default:desktop", Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := fixture.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Repositories: []string{"github.com/acme/*"}, Authority: requester.Capability.Parent, RegistrationID: "runner:default:desktop", Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if live, _, _ := daemon.counts(); live != 2 {
 		t.Fatalf("ready burst lost its requester concurrency: live=%d", live)
 	}
-	claim, err := fixture.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: fixture.Input.RunID, NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := fixture.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: fixture.Input.RunID, NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil || claim.Kind != capability.UnitNode {
 		t.Fatalf("saturated owner's work was not claimable: %+v %v", claim, err)
 	}

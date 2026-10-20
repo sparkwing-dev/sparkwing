@@ -2023,6 +2023,12 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.ClaimedUnit'
               type: array
             - type: "null"
+        deferred:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.capability.LeaseRef'
+              type: array
+            - type: "null"
         prepared:
           anyOf:
             - items:

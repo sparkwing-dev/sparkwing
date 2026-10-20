@@ -40,7 +40,7 @@ func TestProfileCacheCredentialFromOrdinaryMember(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &reader) != nil {
 		t.Fatalf("profile cache reader: %d %s", w.Code, w.Body.String())
 	}
-	p, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(reader.Capability)))
+	p, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(reader.Capability)))
 	if err != nil || p.Capability.Parent == nil || p.Capability.Parent.ID != root.Prefix || p.Capability.Data == nil || !p.Capability.Data.VerifiedDefaultOnly || p.Capability.Data.RepositoryKey != "gh:42" || !slices.Equal(p.Capability.Grants, []capability.Grant{capability.DataRead}) {
 		t.Fatalf("scoped cache credential: %+v %v", p, err)
 	}
@@ -60,7 +60,7 @@ func TestProfileCacheCredentialFromOrdinaryMember(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, s.store, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, root.Prefix)
-	if _, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(reader.Capability))); err == nil {
+	if _, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(reader.Capability))); err == nil {
 		t.Fatal("reader escaped profile revocation")
 	}
 }

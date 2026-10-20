@@ -297,7 +297,7 @@ func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Capability == "" {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
-	p, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(got.Capability)))
+	p, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(got.Capability)))
 	if err != nil || p.Capability.Prefix != got.Prefix || p.Capability.Parent != nil || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectMachine, ID: "builder"}) || p.Capability.Team != "team" || !reflect.DeepEqual(p.Capability.Repositories, []string{"github.com/acme/*"}) || !reflect.DeepEqual(p.Capability.ReservedPools, []string{"trusted"}) || !reflect.DeepEqual(p.Capability.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
 		t.Fatalf("root=%+v err=%v", p, err)
 	}
@@ -349,7 +349,7 @@ func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
 	f := newDeploymentSessionFlow(t, deploymenttest.Cloud(t, "https://controller.test"))
 	secret := sha256.Sum256([]byte(t.Name()))
 	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
-	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), f.store, seed); err != nil || !created {
+	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), f.store.AsOperator(), seed); err != nil || !created {
 		t.Fatalf("bootstrap: %v %v", created, err)
 	}
 	h := f.server.Handler()
@@ -362,7 +362,7 @@ func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Capability == "" || got.Team != "" {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
-	p, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(got.Capability)))
+	p, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(got.Capability)))
 	if err != nil || p.Capability.Prefix != got.Prefix || p.Capability.Parent != nil || p.Capability.Team != "" || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectService, ID: "launcher"}) || !reflect.DeepEqual(p.Capability.Grants, []capability.Grant{capability.ClaimsLaunch}) {
 		t.Fatalf("root=%+v err=%v", p, err)
 	}

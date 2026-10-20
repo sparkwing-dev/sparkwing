@@ -80,7 +80,7 @@ func runStatusFacts(b *credentialBoundary) controller.RunStatusFacts {
 func runStatusEngine(t *testing.T, f *runStatusFixture) *controller.EngineController {
 	t.Helper()
 	e := &controller.EngineController{
-		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "team", f.ownershipErr },
+		ResolveTenant: selectorTenant("team", f.ownershipErr),
 	}
 	if !f.readerMissing {
 		e.ReadRunStatus = func(_ context.Context, team store.Team, run string) (controller.RunStatusFacts, error) {

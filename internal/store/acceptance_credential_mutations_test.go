@@ -15,7 +15,7 @@ func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team sto
 	if err != nil {
 		return err
 	}
-	p, err := s.ResolveAuthority(ctx, owner.Authority)
+	p, err := s.AsOperator().ResolveAuthority(ctx, owner.Authority)
 	if err != nil {
 		return err
 	}

@@ -38,7 +38,7 @@ func (s *Server) localScheduleService(r *http.Request, a capability.Authorized) 
 	if !peer || a.Principal.Capability.Subject.Kind != capability.SubjectLocal || a.Target.Team != string(store.DefaultTeam) {
 		return nil, &apierr.Error{Code: apierr.Forbidden, Message: "schedule operation requires the verified local peer"}
 	}
-	if s.localSchedules == nil || s.localSchedules.Store != s.store || s.localScheduleEnvironments == nil || s.localScheduleProver == nil {
+	if s.localSchedules == nil || s.localSchedules.Operator == nil || s.operator == nil || *s.localSchedules.Operator != *s.operator || s.localScheduleEnvironments == nil || s.localScheduleProver == nil {
 		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "local schedule service is unavailable"}
 	}
 	return s.localSchedules, nil

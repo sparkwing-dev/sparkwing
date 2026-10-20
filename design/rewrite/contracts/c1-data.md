@@ -1,5 +1,28 @@
 # C1 data contract
 
+## Request tenant and fleet maintenance
+
+The controller uses one tenant resolver. Policy routing binds a request handle
+from the authorized team, and narrow handler ports come from that same handle.
+Run selector reads share it with the handler. Embedded claimant requests use the
+registered policy router and carry its scoped context into the claim transaction.
+A `{run}` endpoint without a target resolver fails policy validation.
+
+The serving mux also supplies route discovery. Probing does not rebuild a second
+router. Every call that assembles an HTTP handler installs its serving snapshot.
+
+`Operator.EachTeam` selects live teams with the same predicate as handle
+acquisition. Cron, completion, attention and runner sampling continue after a
+team callback fails. Pending deletion withdraws stored schedules and run effects
+in the deletion transaction. Physical deletion removes the complete team object
+prefix, including CAS and pending uploads, and its logs.
+
+Launcher reconciliation isolates persisted award corruption across preparation
+renewal, rejection, reservation validation and snapshot reads. A failed award
+returns an explicit deferred fence, preserving its Job while healthy awards
+continue. Database failures and invalid claimant authority still fail the request.
+
+
 ## Collection and required blob reads
 
 Integration amendment under the store review ruling: collection rechecks the
@@ -27,8 +50,8 @@ or corrupt values fail before release; no ambient fallback occurs.
 
 Retries and child intake retain the source values and seal identity, encrypting
 them under the new execution ID. Replay cannot replace values. Retention follows
-the run row, including deletion. SetRunEnvironmentCipher is configured with the
-controller's existing credential cipher. ReadSubmittedEnvironment releases only
+the run row, including deletion. `Policies.RunEnvironment` receives the controller's existing credential cipher
+during `Open` through `WithPolicies`. ReadSubmittedEnvironment releases only
 to the run's live direct trigger, plan, eval or node execution award. The persisted
 unit prefix, holder, generation and lease fence the release. Eval also retains
 its source and controller expansion leases. SourceRead is independent of
@@ -786,22 +809,29 @@ own their retained responsibilities. Seeded startup bootstrap uses the gated
 
 ## Launcher award snapshots
 
-`Store.ReadLauncherAwards(ctx, authority, reservations)` validates each observed
-reservation fence against its original bootstrap award, then reads current awards,
-seals, job settings and parent expiry in one snapshot. Root ancestry and the
-service subject determine ownership across teams. The snapshot excludes ended
-leases, cancelled or terminal work, replaced generations and completed evals.
-Eval liveness checks both its source generation and the current controller lease.
-Exchange replaces the stored credential without changing the award fence.
+`Operator.ReconcileLauncherAwards(ctx, authority, observed, reservations,
+preparing, rejected)` correlates observations through unit rows before validating
+capability envelopes and their lookup projections. Root ancestry and service
+subject determine ownership across teams. Exchange replaces the stored credential
+without changing the observed award fence. Current seals, job settings, committed
+resources and parent expiry are read together. Eval liveness checks its source
+generation and the current controller lease.
 
-Root ancestry and service subject must match even after the original award expires
-or is exchanged. An unknown or foreign reservation refuses the entire snapshot.
-The controller's default `LauncherSyncReader` uses this snapshot. It validates
-unique Job and award observations, retains exact matching fences and returns
-only the observed namespace/name/UID for cleanup. A sync response describes the
-original bootstrap award even after exchange. It carries no bearer and performs
-no lifecycle, reservation or billing write. Infrastructure or integrity errors
-discard the complete response.
+One reconciliation owner isolates typed `integrity_failure` errors during
+preparation renewal, rejection, reservation validation and snapshot decoding.
+Each damaged award is deferred under its observed identity while healthy siblings
+proceed. JSON decoding, semantic job state and persisted billing validators use
+this category. Database and launcher-authority failures discard the response.
+
+Preparation renews an exact bootstrap fence. Rejection fails only an exact owned
+award. Reservations must match the original bootstrap's ancestry and subject even
+after expiry or exchange. An unknown or foreign reservation refuses the request.
+
+The default `LauncherSyncReader` validates unique Job and award observations. It
+returns cleanup only after confirming an ended lease, cancelled or terminal unit,
+replaced fence or different launcher owner. Missing snapshot entries are deferred.
+Cleanup names only the observed namespace/name/UID or reservation identity. The
+response carries no bearer material.
 
 `Store.SyncLaunchJobs`, its types and helpers, and `Client.LauncherSync` are
 removed. Unstarted release uses `ReleaseUnit`. The owner redispatches pending
@@ -851,7 +881,7 @@ integration obligations.
 `NodeRow.OutputRecord` and `ManifestRecord` persist the exact selectors committed
 with terminal state. Materialized copies use `blob.MaterializedRecordKey` with
 the destination result sequence. The destination has no synthetic attempt.
-`SetResultBlobRecords` configures both attachment and materialization. Its reader
+`Policies.ResultBlobs` configures both attachment and materialization. Its reader
 also supplies `VerifyBlob(context.Context, blob.Blob)` for copies. The filesystem
 and S3 backends verify every selected object and manifest member before mutation.
 
@@ -1026,8 +1056,9 @@ committed reader verifies stored length and digest before emitting decoded bytes
 
 ## Controller result verification
 
-`Server.WithDataObjects` installs `storage.BlobManifests{Objects: objects}` through
-`Store.SetResultBlobRecords` before serving or sharing the store. Terminal
+`Server.StorePolicies` captures `storage.BlobManifests{Objects: objects}` from
+`WithDataObjects`. The composition root supplies that snapshot through
+`store.WithPolicies` before `Open` returns. Terminal
 output and manifest attachments use that backend inside the live tenant
 transaction. `Tenant.CommitRecord`, `LookupRecord`, `LookupMemo`, `LookupDepcache`
 and `CopyMemo` use the configured verified manifest reader too. An explicit
@@ -1051,7 +1082,7 @@ implement the existing transaction-local copier so W1 can bind it inside its
 state transaction. Calling the public copy method before
 reconciliation would commit the records separately from the terminal state.
 
-`Store.SetResultBlobRecords` also binds the real `CopyMaterializedRecords`
+`Policies.ResultBlobs` also binds the real `CopyMaterializedRecords`
 implementation to reconciliation's transaction. Retry and memo copies retain
 exact selectors, verify physical bytes and commit with terminal state. Coalesced
 copies still require a declared persisted read edge. A source ref and matching
@@ -1404,12 +1435,14 @@ ceiling. The controller preserves those verified grants instead of replacing the
 with the full role. The removed `triggers.read` permission is absent from the role
 map because C2's final grant registry excludes it.
 
-`SessionKeyCipher` and `Store.SetSessionKeyCipher` configure row-bound encryption
+`SessionKeyCipher` and the constructor's `Policies.SessionKeys` configure row-bound encryption
 for `settings.session_csrf_key`. The row must be sealed and open under that cipher.
 A missing key is minted once, atomically invalidating sessions signed by no
 available key. Replicas open the same committed envelope. Wrong keys, malformed
 envelopes and missing cipher configuration refuse session operations. The
-controller's existing `WithSecretsCipher` installs its bound cipher on the store.
+controller's `StorePolicies` captures the bound cipher from `WithSecretsCipher`
+during construction. Changing server configuration after `Open` leaves the
+store's policy dependencies fixed.
 No new key file, environment variable or encryption implementation is introduced.
 
 `CreateCapabilitySession(ctx, prefix, ttl)` replaces `CreateTokenSession`.
@@ -2057,7 +2090,7 @@ or depend on retained event payloads. Selectors grant no data access. W7 readers
 still authorize the selected record and verify its bytes. W3/W9 must carry these
 fields through their execution projections.
 
-`Store.SetResultBlobRecords` configures the blob implementation of
+`Policies.ResultBlobs` configures the blob implementation of
 `nodeResultRecords` before the store is shared. Attachment verifies exact
 destination result keys and all required bytes in the state transaction through
 the existing record reader. It requires `data.write`, rechecks live authority

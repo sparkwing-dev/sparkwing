@@ -331,7 +331,7 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID str
 	if err := lockComputeGuardsTx(ctx, tx); err != nil {
 		return err
 	}
-	owner, present, err := runOwnerTx(ctx, tx, runID)
+	owner, present, err := tx.operator.runOwnerTx(ctx, tx, runID)
 	if err != nil {
 		return err
 	}
@@ -367,12 +367,12 @@ func runsPerHourRefusal(
 	}
 
 	if limits.GlobalRunsPerHour > 0 {
-		return globalRunsPerHourRefusal(ctx, q, limits.GlobalRunsPerHour, since)
+		return q.operator.globalRunsPerHourRefusal(ctx, q, limits.GlobalRunsPerHour, since)
 	}
 	return nil
 }
 
-func globalRunsPerHourRefusal(ctx context.Context, q rowQuerier, limit, since int64) error {
+func (o *Operator) globalRunsPerHourRefusal(ctx context.Context, q rowQuerier, limit, since int64) error {
 	var runs int64
 	if err := q.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM runs WHERE created_at >= ?`, since).Scan(&runs); err != nil {

@@ -19,29 +19,8 @@ type GitHubRunnerRegistry interface {
 	RevokeGitHubRunner(context.Context, capability.Authorized, int64) error
 }
 
-// WithGitHubRunnerRegistry supplies tenant enrollment transactions before Handler is constructed.
-func (s *Server) WithGitHubRunnerRegistry(resolve func(context.Context, store.Team) (GitHubRunnerRegistry, error)) *Server {
-	s.githubRunners.registry = resolve
-	return s
-}
-
 func (s *Server) githubRunnerRegistry(ctx context.Context, team string) (GitHubRunnerRegistry, error) {
-	var registry GitHubRunnerRegistry
-	var err error
-	if s.githubRunners.registry != nil {
-		registry, err = s.githubRunners.registry(ctx, store.Team(team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		registry, _ = any(tenant).(GitHubRunnerRegistry)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if team == "" || registry == nil || registry.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return registry, nil
+	return tenantPort[GitHubRunnerRegistry](ctx, s, store.Team(team))
 }
 
 func (s *Server) githubRunnerEndpoints() []Endpoint {
@@ -53,21 +32,11 @@ func (s *Server) githubRunnerEndpoints() []Endpoint {
 }
 
 func (s *Server) readGitHubRunnerBindings(ctx context.Context, team string) ([]store.GitHubRunnerBinding, error) {
-	if s.githubRunners.registry != nil {
-		registry, err := s.githubRunnerRegistry(ctx, team)
-		if err != nil {
-			return nil, err
-		}
-		return registry.GitHubRunnerBindings(ctx)
-	}
-	if team == "" || s.store == nil {
-		return nil, missingEndpointPolicy()
-	}
-	tenant, err := s.store.ForTeam(ctx, store.Team(team))
+	registry, err := s.githubRunnerRegistry(ctx, team)
 	if err != nil {
 		return nil, err
 	}
-	return tenant.GitHubRunnerBindings(ctx)
+	return registry.GitHubRunnerBindings(ctx)
 }
 
 func (s *Server) handleListGitHubRunnerBindings(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -138,10 +107,10 @@ func (s *Server) resolveGitHubRunnerIdentity(ctx context.Context, team string, r
 	if s.githubApp == nil {
 		return nil
 	}
-	if s.store == nil {
+	if s.operator == nil {
 		return missingEndpointPolicy()
 	}
-	tenant, err := s.store.ForTeam(ctx, store.Team(team))
+	tenant, err := s.tenantForTeam(ctx, store.Team(team))
 	if err != nil {
 		return engineLookupError(err)
 	}

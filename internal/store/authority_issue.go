@@ -82,7 +82,7 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 				return capability.Issued{}, err
 			}
 		}
-		if err := finishBootstrapSetupTx(ctx, tx, c); err != nil {
+		if err := tx.operator.finishBootstrapSetupTx(ctx, tx, c); err != nil {
 			return capability.Issued{}, err
 		}
 	}
@@ -137,12 +137,12 @@ type awardRow struct {
 	request, spec                                  []byte
 }
 
-func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec) (awardRow, error) {
+func (op *Operator) loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec) (awardRow, error) {
 	unit, err := decodeAwardUnit(spec.Unit, spec.UnitID)
 	if err != nil {
 		return awardRow{}, err
 	}
-	if err := lockUnitsTx(ctx, tx, []UnitRef{unit}); err != nil {
+	if err := tx.operator.lockUnitsTx(ctx, tx, []UnitRef{unit}); err != nil {
 		return awardRow{}, err
 	}
 	row := awardRow{run: unit.RunID, node: unit.NodeID}
@@ -179,7 +179,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 
 // safety: owners (triggers, then evaluations), then all runs, then all jobs, each in key order;
 // see STORE-DATA.md lock order.
-func lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRef) error {
+func (op *Operator) lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRef) error {
 	type lock struct {
 		tier       storeLockTier
 		team, run  string
@@ -253,7 +253,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if spec.Delivery == capability.DeliveryBootstrap && (!capability.Launcher(claimant.Capability) || !slices.Contains(capability.BootstrapUnits(), spec.Unit)) {
 		return capability.Capability{}, authorityError(apierr.Forbidden, "bootstrap requires launcher authority")
 	}
-	row, err := loadAwardRowTx(ctx, tx, spec)
+	row, err := tx.operator.loadAwardRowTx(ctx, tx, spec)
 	if err != nil {
 		return capability.Capability{}, err
 	}
@@ -482,7 +482,7 @@ func childAppRepositoriesTx(ctx context.Context, tx *storeTx, team Team) ([]stri
 
 func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ExchangeSpec) (capability.Capability, error) {
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: spec.BootstrapPrefix}
-	if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
+	if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
 		return capability.Capability{}, err
 	}
 	p, err := tx.ResolveAuthority(ctx, ref)
@@ -493,7 +493,7 @@ func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Exch
 	if c.Delivery != capability.DeliveryBootstrap || c.Parent == nil || !slices.Contains(c.Grants, capability.ClaimExchange) {
 		return capability.Capability{}, authorityError(apierr.Forbidden, "authority is not an exchangeable bootstrap")
 	}
-	row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
+	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
 	if err != nil {
 		return capability.Capability{}, err
 	}
@@ -504,7 +504,7 @@ func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Exch
 	if row.prefix != spec.BootstrapPrefix || row.holder != c.Binding.Holder || row.generation != generation || !row.lease.Valid || row.lease.Int64 <= tx.now().UnixNano() {
 		return capability.Capability{}, authorityError(apierr.LockHeld, "bootstrap unit fence has ended")
 	}
-	if err := revokeAuthorityTx(ctx, tx, ref); err != nil {
+	if err := tx.operator.revokeAuthorityTx(ctx, tx, ref); err != nil {
 		return capability.Capability{}, err
 	}
 	policy, ok := awardPolicy(c.Purpose)
@@ -574,7 +574,7 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 			return capability.Issued{}, err
 		}
 	}
-	if err := persistCapabilityTx(ctx, tx, c, origin); err != nil {
+	if err := tx.operator.persistCapabilityTx(ctx, tx, c, origin); err != nil {
 		return capability.Issued{}, err
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE capabilities SET here_proof_public_key=? WHERE prefix=? AND COALESCE(team,'')=?", capability.HereProofPublicKey(raw), c.Prefix, c.Team); err != nil {

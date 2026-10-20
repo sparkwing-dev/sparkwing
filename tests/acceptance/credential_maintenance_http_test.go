@@ -96,14 +96,14 @@ func maintenanceServer(t testing.TB, b *credentialBoundary, f *credentialMainten
 			t.Fatalf("resolved tenant %q", team)
 		}
 	}
-	s.WithCredentialRotator(func(_ context.Context, team store.Team) (controller.CredentialRotator, error) {
+	bindTenantPort[controller.CredentialRotator](s, func(_ context.Context, team store.Team) (controller.CredentialRotator, error) {
 		resolve(team)
 		if f.missing {
 			return nil, f.resolveErr
 		}
 		return f, f.resolveErr
 	})
-	s.WithSourceAuditReader(func(_ context.Context, team store.Team) (controller.SourceAuditReader, error) {
+	bindTenantPort[controller.SourceAuditReader](s, func(_ context.Context, team store.Team) (controller.SourceAuditReader, error) {
 		resolve(team)
 		if f.missing {
 			return nil, f.resolveErr
@@ -345,7 +345,7 @@ func TestCredentialMaintenanceHTTPDependenciesAndTransactionRefusals(t *testing.
 				}
 				s := maintenanceServer(t, b, f).WithSecretsCipher(cipher)
 				if failure == "default" {
-					s.WithCredentialRotator(nil).WithSourceAuditReader(nil)
+					bindTenantPort[controller.SourceAuditReader](bindTenantPort[controller.CredentialRotator](s, nil), nil)
 				}
 				w := authorityHTTP(s.Handler(), b, route.method, route.path, "")
 				assertEngineError(t, w, apierr.Status(code), code)
@@ -536,9 +536,8 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		}
 	}
 	b := authorityMember()
-	h := mutationServerConfig(t, s, cipher, b).
-		WithCredentialRotator(func(context.Context, store.Team) (controller.CredentialRotator, error) { return nil, nil }).
-		WithSourceAuditReader(func(context.Context, store.Team) (controller.SourceAuditReader, error) { return nil, nil }).Handler()
+	h := bindTenantPort[controller.SourceAuditReader](bindTenantPort[controller.CredentialRotator](mutationServerConfig(t, s, cipher, b),
+		func(context.Context, store.Team) (controller.CredentialRotator, error) { return nil, nil }), func(context.Context, store.Team) (controller.SourceAuditReader, error) { return nil, nil }).Handler()
 	for _, route := range []struct{ method, path string }{{"POST", "/api/v1/secrets/rotate"}, {"GET", "/api/v1/team/git-credentials/releases"}} {
 		w := authorityHTTP(h, b, route.method, route.path, "")
 		assertEngineError(t, w, 500, apierr.PolicyMissing)

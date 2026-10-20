@@ -11,9 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// SetRunEnvironmentCipher configures row-bound protection before intake starts.
-func (s *Store) SetRunEnvironmentCipher(cipher SessionKeyCipher) { s.runEnvCipher = cipher }
-
 func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx, result AdmissionResult, input IntakeRequest) error {
 	request := result.Request.Request
 	if request.EnvironmentSource == runspec.EnvironmentCaptured {
@@ -138,7 +135,7 @@ func checkExecutionUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	if err != nil {
 		return err
 	}
-	row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
+	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
 	if err != nil {
 		return err
 	}

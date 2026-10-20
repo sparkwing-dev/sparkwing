@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func seedRetryHistory(t *testing.T, s *Server, secret string) {
+func seedRetryHistory(t *testing.T, s *serverFixture, secret string) {
 	t.Helper()
 	var raw []byte
 	if err := teststore.SQL(t, s.store).QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&raw); err != nil {
@@ -95,8 +95,8 @@ func TestRetryHistoryRechecksEachRunBinding(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 	raw := nativeClaimPresentation(t, e, owner)
-	s := New(e.Store, nil).WithEngineController(e)
-	seedRetryHistory(t, s, "private-retry-value")
+	s := New(e.Store, nil).WithEngineController(e.EngineController)
+	seedRetryHistory(t, &serverFixture{Server: s, store: e.Store, engine: e}, "private-retry-value")
 	engineClaimHTTP(t, s.Handler(), raw, "GET", "/api/v1/runs/run/attempts", "", 403)
 }
 
@@ -171,7 +171,7 @@ func FuzzRetryHistoryKeepsPrivateInputsAndTeams(f *testing.F) {
 		case 2:
 			engineSQL(t, s.store, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
 		case 3:
-			e := &EngineController{Store: s.store}
+			e := newEngineFixture(s.store, EngineController{})
 			owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 			raw = nativeClaimPresentation(t, e, owner)
 		}

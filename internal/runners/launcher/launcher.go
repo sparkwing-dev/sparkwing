@@ -44,6 +44,7 @@ type CloudJobObservation struct {
 
 // CloudJobState carries the controller's teardown decision and committed allocation for one immutable award.
 type CloudJobState struct {
+	Deferred       bool
 	Binding        CloudJobBinding
 	LeaseExpiresAt time.Time
 	Delete         bool

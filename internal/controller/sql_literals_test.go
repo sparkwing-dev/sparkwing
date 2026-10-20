@@ -167,10 +167,12 @@ func sqlLiteralDialects(t *testing.T, run func(*testing.T, *cronsFixture, *store
 	t.Helper()
 	for _, dialect := range []struct {
 		name string
-		open func(*testing.T) *store.Store
+		open func(*testing.T, ...store.Option) *store.Store
 	}{{"sqlite", openSQLiteStore}, {"postgres", openPostgresStore}} {
 		t.Run(dialect.name, func(t *testing.T) {
-			st := dialect.open(t)
+			st := dialect.open(t, store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+				return controller.New(st, nil).WithSecretsCipher(testCipher(t)).StorePolicies(), nil
+			}))
 			if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('literal-a',1,1),('literal-b',1,1)`); err != nil {
 				t.Fatal(err)
 			}

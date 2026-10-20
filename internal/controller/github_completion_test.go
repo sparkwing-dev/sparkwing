@@ -112,7 +112,7 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 
 type githubCompletionFixture struct {
 	t      *testing.T
-	server *Server
+	server *serverFixture
 	tenant *store.Tenant
 	api    *completionGitHub
 	cfg    githubapp.Config
@@ -242,7 +242,7 @@ func TestGitHubCompletionRetriesAfterControllerReplacement(t *testing.T) {
 	if err != nil || run.State != store.RunSuccess || strings.Count(logs.String(), "deliver run effect") != 2 {
 		t.Fatalf("GitHub failure changed run=%s: %v logs=%s", run.State, err, logs.String())
 	}
-	f.server = New(f.server.store, nil).WithGitHubApp(f.cfg)
+	f.server.Server = New(f.server.store, nil).WithGitHubApp(f.cfg)
 	f.now = f.now.Add(2 * time.Second)
 	f.reconcile()
 	_, delivered, attempts, _ = f.revision()
@@ -306,7 +306,7 @@ func TestGitHubCompletionFallbackSurvivesReplacement(t *testing.T) {
 		t.Fatalf("pending fallback=%+v", f.api.statuses)
 	}
 	engineSQL(t, f.server.store, `UPDATE runs SET status='running' WHERE team='a' AND id='run'`)
-	f.server = New(f.server.store, nil).WithGitHubApp(f.cfg)
+	f.server.Server = New(f.server.store, nil).WithGitHubApp(f.cfg)
 	f.api.checksGranted = true
 	f.finish(store.RunSuccess)
 	f.reconcile()
@@ -413,7 +413,7 @@ func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
 		if err != nil || !relevant {
 			t.Fatalf("stale fixture: %v", err)
 		}
-		reporter := githubCheckReporter{client: f.server.githubApp.client, store: f.server.store}
+		reporter := githubCheckReporter{client: f.server.githubApp.client, resolveTenant: f.server.resolveTenant, operator: f.server.operator}
 		if err := reporter.deliver(t.Context(), u); err != nil {
 			t.Fatal(err)
 		}
@@ -530,7 +530,7 @@ func TestGitHubCompletionReaperPreservesTimeoutConclusion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.server.store.ReapUnits(t.Context(), lease, 10); err != nil {
+			if _, err := f.server.store.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 				t.Fatal(err)
 			}
 			if err := f.server.store.AsOperator().ReleaseSingletonLease(t.Context(), lease); err != nil {
@@ -544,7 +544,7 @@ func TestGitHubCompletionReaperPreservesTimeoutConclusion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reporter := githubCheckReporter{client: f.server.githubApp.client, store: f.server.store}
+			reporter := githubCheckReporter{client: f.server.githubApp.client, resolveTenant: f.server.resolveTenant, operator: f.server.operator}
 			if err := reporter.deliver(t.Context(), u); err != nil {
 				t.Fatal(err)
 			}
@@ -566,7 +566,7 @@ func TestGitHubCompletionDelayedPendingLeavesRunningCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reporter := githubCheckReporter{client: f.server.githubApp.client, store: f.server.store}
+	reporter := githubCheckReporter{client: f.server.githubApp.client, resolveTenant: f.server.resolveTenant, operator: f.server.operator}
 	if err := reporter.deliver(t.Context(), u); err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +605,7 @@ func TestGitHubCompletionUnverifiedRunReportsNothing(t *testing.T) {
 func TestGitHubCompletionMissingAppKeepsTerminalDue(t *testing.T) {
 	f := newGitHubCompletion(t)
 	f.finish(store.RunSuccess)
-	f.server = New(f.server.store, nil)
+	f.server.Server = New(f.server.store, nil)
 	f.reconcile()
 	_, delivered, attempts, _ := f.revision()
 	if delivered != 0 || attempts != 1 || len(f.api.paths) != 0 {

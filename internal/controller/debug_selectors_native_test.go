@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func debugSelectorClient(t *testing.T, s *Server, session, grants string) (controllerwire.DebugControl, string) {
+func debugSelectorClient(t *testing.T, s *serverFixture, session, grants string) (controllerwire.DebugControl, string) {
 	t.Helper()
 	options, prefix := selectorClientOptions(t, s, session, grants)
 	c, err := client.NewDebugControl(options)
@@ -23,7 +23,7 @@ func debugSelectorClient(t *testing.T, s *Server, session, grants string) (contr
 	return c, prefix
 }
 
-func selectorClientOptions(t *testing.T, s *Server, session, grants string) (client.EngineOptions, string) {
+func selectorClientOptions(t *testing.T, s *serverFixture, session, grants string) (client.EngineOptions, string) {
 	t.Helper()
 	w := credentialRequestHTTP(t, s.Handler(), session, grants, false)
 	var issued credentialResponse

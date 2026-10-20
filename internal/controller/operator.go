@@ -42,7 +42,7 @@ type operatorTeamMatchJSON struct {
 }
 
 func (s *Server) handleOperatorTeams(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	matches, err := s.store.SearchTeams(r.Context(), r.URL.Query().Get("q"))
+	matches, err := s.operator.SearchTeams(r.Context(), r.URL.Query().Get("q"))
 	if err != nil {
 		return err
 	}
@@ -245,8 +245,8 @@ func (s *Server) handleOperatorWaitlist(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	ctx := r.Context()
-	waiting, err := s.store.NewestWaitlisted(ctx, limit, offset)
-	counts, cerr := s.store.SignUpCounts(ctx, time.Now())
+	waiting, err := s.operator.NewestWaitlisted(ctx, limit, offset)
+	counts, cerr := s.operator.SignUpCounts(ctx, time.Now())
 	if err := errors.Join(err, cerr); err != nil {
 		return err
 	}

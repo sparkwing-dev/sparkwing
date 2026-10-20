@@ -133,6 +133,7 @@ func (s *Store) queryRowNoCtx(q string, args ...any) rowScanner {
 }
 
 type storeTx struct {
+	operator             *Operator
 	authorityLocks       []rowLock
 	insertedAuthorities  []capability.AuthorityRef
 	finishedLocalSecrets []localSecretKey
@@ -217,7 +218,7 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s, snapshotRead: true}, nil
+	return &storeTx{operator: &Operator{s: s}, tx: tx, ctx: ctx, dialect: s.dialect, store: s, snapshotRead: true}, nil
 }
 
 var errControllerFenced = errors.New("controller superseded by promotion")
@@ -240,7 +241,7 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 			return nil, err
 		}
 	}
-	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s}, nil
+	return &storeTx{operator: &Operator{s: s}, tx: tx, ctx: ctx, dialect: s.dialect, store: s}, nil
 }
 
 func (t *storeTx) Commit() error {

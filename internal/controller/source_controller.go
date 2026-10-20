@@ -8,20 +8,20 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// SourceTransactions commits source authorization and its release audit.
-type SourceTransactions interface {
+// sourceTransactions commits source authorization and its release audit.
+type sourceTransactions interface {
 	ReleaseSourceCredential(context.Context, capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error)
 }
 
 // SourceController releases source access only after its store audit commits.
 type SourceController struct {
-	Store         *store.Store
 	GitHub        store.GitHubSourceProvider
 	Cipher        BoundCipher
-	ResolveTenant func(context.Context, store.Team) (SourceTransactions, error)
+	ResolveTenant func(context.Context, store.Team) (TenantHandle, error)
 }
 
 // SourceCredentialResponse carries ephemeral source access for an already sealed checkout.
@@ -34,22 +34,8 @@ type SourceCredentialResponse struct {
 	ExtraRepositories []string `json:"extra_repositories,omitempty"`
 }
 
-func (s *SourceController) transactions(ctx context.Context, team string) (SourceTransactions, error) {
-	if s == nil || team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	if s.ResolveTenant != nil {
-		tenant, err := s.ResolveTenant(ctx, store.Team(team))
-		if err == nil && tenant == nil {
-			return nil, missingEndpointPolicy()
-		}
-		return tenant, engineLookupError(err)
-	}
-	if s.Store == nil {
-		return nil, missingEndpointPolicy()
-	}
-	tenant, err := s.Store.ForTeam(ctx, store.Team(team))
-	return tenant, engineLookupError(err)
+func (s *SourceController) transactions(ctx context.Context, team string) (sourceTransactions, error) {
+	return ScopedTenantPort[sourceTransactions](ctx, store.Team(team), s.ResolveTenant)
 }
 
 // Release returns an App token or opens a stored credential after its audit commits.
@@ -58,8 +44,10 @@ func (s *SourceController) Release(ctx context.Context, a capability.Authorized)
 		return SourceCredentialResponse{}, missingEndpointPolicy()
 	}
 	var appMissing error
-	if s.GitHub != nil && s.Store != nil {
-		appTenant, err := s.Store.ForTeam(ctx, store.Team(a.Target.Team))
+	if s.GitHub != nil {
+		appTenant, err := ScopedTenantPort[interface {
+			ReleaseGitHubSourceCredential(context.Context, capability.Authorized, store.GitHubSourceProvider) (source.Credential, error)
+		}](ctx, store.Team(a.Target.Team), s.ResolveTenant)
 		if err != nil {
 			return SourceCredentialResponse{}, engineLookupError(err)
 		}
@@ -127,7 +115,7 @@ func (s *Server) sourceAdapter() *SourceController {
 		return s.sourceController
 	}
 	cipher, _ := s.secretsCipher.(BoundCipher)
-	source := &SourceController{Store: s.store, Cipher: cipher}
+	source := &SourceController{ResolveTenant: s.resolveTenant, Cipher: cipher}
 	if s.githubApp != nil {
 		source.GitHub = s.githubApp.client
 	}
@@ -157,4 +145,4 @@ func (s *Server) handleSourceRelease(w http.ResponseWriter, r *http.Request, a c
 	return nil
 }
 
-var _ SourceTransactions = (*store.Tenant)(nil)
+var _ sourceTransactions = (*store.Tenant)(nil)

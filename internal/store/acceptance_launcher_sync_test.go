@@ -17,7 +17,7 @@ import (
 func checkStoreLauncherSync(t *testing.T) (err error) {
 	ctx := t.Context()
 	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
+	s, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
@@ -36,13 +36,13 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "alpha"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
 		return err
 	}
-	operator, err := s.ProvisionCapability(ctx, storeNativeBootstrapSpec())
+	operator, err := s.AsOperator().ProvisionCapability(ctx, storeNativeBootstrapSpec())
 	if err != nil {
 		return err
 	}
 	operatorRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
 	until := time.Now().UTC().Add(time.Hour)
-	launcher, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &operatorRef, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: &until})
+	launcher, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &operatorRef, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: &until})
 	if err != nil {
 		return err
 	}
@@ -52,21 +52,20 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 			return err
 		}
 		var err error
-		s, err = target.TryOpen()
+		s, err = target.TryOpen(store.WithPolicies(sealStorePolicies))
 		if err != nil {
 			return err
 		}
-		s.SetClaimProfileResolver(acceptanceClaimProfile{})
 		tenant, err = s.ForTeam(ctx, store.Team(plan.Seal.Request.Request.Team))
 		return err
 	}
 	a := capability.Authorized{Principal: capability.Principal{Authority: ref}}
 	demand := store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "alpha"}, Available: match.Resources{Cores: 8}}
-	first, err := s.ClaimUnit(ctx, demand)
+	first, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		return fmt.Errorf("initial launcher claim: %w", err)
 	}
-	p, err := s.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: first.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: first.Award.CapabilityPrefix})
 	if err != nil {
 		return err
 	}
@@ -75,7 +74,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		if err := reopen(); err != nil {
 			return err
 		}
-		response, err := (&controller.EngineController{Store: s}).SyncLauncher(ctx, a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{old}})
+		response, err := (controller.NewEngineController(s, controller.EngineController{})).SyncLauncher(ctx, a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{old}})
 		if err != nil {
 			return err
 		}
@@ -83,7 +82,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 			return errors.New("reopening or exchange lost the immutable launcher award")
 		}
 		if exchange == 0 {
-			issued, err := s.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: first.Award.CapabilityPrefix})
+			issued, err := s.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: first.Award.CapabilityPrefix})
 			if err != nil {
 				return err
 			}
@@ -96,7 +95,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "alpha"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
 		return fmt.Errorf("owner redispatch: %w", err)
 	}
-	second, err := s.ClaimUnit(ctx, demand)
+	second, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		return fmt.Errorf("claim replacement: %w", err)
 	}
@@ -106,7 +105,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err := reopen(); err != nil {
 		return err
 	}
-	response, err := (&controller.EngineController{Store: s}).SyncLauncher(ctx, a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{old, current}})
+	response, err := (controller.NewEngineController(s, controller.EngineController{})).SyncLauncher(ctx, a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{old, current}})
 	if err != nil {
 		return err
 	}

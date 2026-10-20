@@ -21,11 +21,6 @@ type operatorSettingsStore interface {
 	TopStorageTeams(context.Context, string, int) ([]store.StorageTeamUsage, error)
 }
 
-type storeOperatorSettings struct {
-	*store.Store
-	*store.Operator
-}
-
 func (s *Server) handleOperatorObjectStore(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	settings, err := s.operatorSettings.StorageSettings(r.Context())
 	if err != nil {
@@ -43,7 +38,7 @@ func (s *Server) handleOperatorObjectStore(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-var _ operatorSettingsStore = storeOperatorSettings{}
+var _ operatorSettingsStore = (*store.Operator)(nil)
 
 func operatorSettingsError(err error) error {
 	if errors.Is(err, store.ErrInvalidInput) {

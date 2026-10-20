@@ -53,7 +53,7 @@ func TestStandingRequestOneOpenPerTeamAndDecline(t *testing.T) {
 	if _, err := f.tenant.RequestAuthorizedStanding(ctx, f.owner, "High", "again"); !errors.Is(err, ErrStandingRequestOpen) {
 		t.Fatalf("second open request: %v", err)
 	}
-	open, err := f.s.OpenStandingRequests(ctx, 50)
+	open, err := f.s.AsOperator().OpenStandingRequests(ctx, 50)
 	if err != nil || len(open) != 1 || open[0].ID != req.ID || open[0].RequesterEmail != "owner@example.test" || open[0].Team != "a" {
 		t.Fatalf("queue=%+v: %v", open, err)
 	}
@@ -101,7 +101,7 @@ func TestStandingRequestDecisionsResolveOnlyTheReviewedRequest(t *testing.T) {
 		t.Fatalf("approval: tier=%s state=%s", b.Tier, f.state(t, successor.ID))
 	}
 	more := f.request(t, "We need to make payments larger than $1,000.")
-	if open, err := f.s.OpenStandingRequests(ctx, 50); err != nil || len(open) != 1 || open[0].ID != more.ID || open[0].Message != more.Message {
+	if open, err := f.s.AsOperator().OpenStandingRequests(ctx, 50); err != nil || len(open) != 1 || open[0].ID != more.ID || open[0].Message != more.Message {
 		t.Fatalf("High team payment request queue=%+v: %v", open, err)
 	}
 	standingRequestEvents(t, f.s, map[string]int{BusinessEventStandingRequested: 3, BusinessEventStandingRequestDecided: 2, BusinessEventBillingTrustChanged: 1})

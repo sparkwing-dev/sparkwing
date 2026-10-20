@@ -15,7 +15,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 			path := blobAccountingDiskStore(t, s)
 			awardedAt := *now
 			claim, actor := meteredUnitClaim(t, s, demand)
-			principal, err := s.ResolveAuthority(t.Context(), actor.Authority)
+			principal, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}

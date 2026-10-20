@@ -106,11 +106,11 @@ type TeamSecret struct {
 // SampleSealedSecrets returns up to limit rows, from any team, whose stored
 // value begins with sealedPrefix. A controller opens them to prove its key
 // is the one the table was sealed under before it seals anything more.
-func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error) {
+func (o *Operator) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error) {
 	if sealedPrefix == "" || limit < 1 {
 		return nil, errors.New("secrets: sample needs a prefix and a positive limit")
 	}
-	rows, err := s.query(ctx, `
+	rows, err := o.s.query(ctx, `
         SELECT team, name, value, principal, pipeline, masked, shared, created_at, updated_at
           FROM secrets
          WHERE substr(value, 1, ?) = ?

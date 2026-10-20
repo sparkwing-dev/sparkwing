@@ -27,7 +27,7 @@ func TestStoreQueueOrder(t *testing.T) {
 func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	t.Helper()
 	ctx := t.Context()
-	s := storetest.OpenSQLite(t)
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}}))
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		input.Request.Git.Ref, input.Request.Git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
 		input.Request.Git.Repository.Key = "gh:42"
@@ -58,7 +58,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		t.Fatal(err)
 	}
 	until := time.Now().Add(30 * time.Minute)
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000:1"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
+	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000:1"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,14 +72,13 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	if _, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: authority, Request: foreign}); err != nil {
 		t.Fatal(err)
 	}
-	s.SetClaimProfileResolver(&matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}})
 	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}, Available: match.Resources{Cores: 8}}
 	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateReady: 3})
-	claim, err := s.ClaimUnit(ctx, demand)
+	claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil || claim.RunID != pending.RunID || claim.Kind != capability.UnitTrigger {
 		t.Fatalf("scoped trigger: %s/%s, %v", claim.Kind, claim.RunID, err)
 	}
-	if _, err := s.ClaimUnit(ctx, demand); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.AsOperator().ClaimUnit(ctx, demand); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("foreign push remained claimable: %v", err)
 	}
 	demand.Kinds = []capability.UnitKind{capability.UnitNode}
@@ -89,14 +88,14 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		order[0], order[1] = order[1], order[0]
 	}
 	for _, id := range order {
-		claim, err := s.ClaimUnit(ctx, demand)
+		claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 		if err != nil || claim.NodeID != id {
 			t.Fatalf("job order wants %s, got %s/%s: %v", id, claim.RunID, claim.NodeID, err)
 		}
 	}
 	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateReady: 1, store.QueueStateClaimed: 2})
 	for range 2 {
-		if _, err := s.ClaimUnit(ctx, demand); !errors.Is(err, store.ErrNotFound) {
+		if _, err := s.AsOperator().ClaimUnit(ctx, demand); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("ineligible queue: %v", err)
 		}
 	}
@@ -108,7 +107,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		t.Fatal("mismatch changed blocked job's position or state")
 	}
 	demand.Labels = []string{"unavailable"}
-	claim, err = s.ClaimUnit(ctx, demand)
+	claim, err = s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil || claim.NodeID != "a-blocked" {
 		t.Fatalf("later eligible claimant: %s/%s, %v", claim.RunID, claim.NodeID, err)
 	}

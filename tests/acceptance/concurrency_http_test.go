@@ -53,34 +53,43 @@ func (f *concurrencyTransactions) entered(a capability.Authorized) error {
 	f.auth = a
 	return f.err
 }
+
 func (f *concurrencyTransactions) AcquireAuthorizedSlot(_ context.Context, a capability.Authorized, in store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
 	f.acquire = in
 	return store.AcquireSlotResponse{Kind: f.kind, HolderID: in.HolderID, LeaseExpiresAt: time.Date(2026, 10, 14, 12, 1, 0, 0, time.UTC)}, f.entered(a)
 }
+
 func (f *concurrencyTransactions) HeartbeatAuthorizedSlot(_ context.Context, a capability.Authorized, _, _ string, _ time.Duration) (time.Time, bool, error) {
 	return time.Date(2026, 10, 14, 12, 1, 0, 0, time.UTC), true, f.entered(a)
 }
+
 func (f *concurrencyTransactions) ReadAuthorizedHolder(_ context.Context, a capability.Authorized, _, id string) (store.ConcurrencyHolder, error) {
 	return store.ConcurrencyHolder{HolderID: id, RunID: a.Target.SlotRunID, NodeID: a.Target.SlotNodeID, Cost: 1}, f.entered(a)
 }
+
 func (f *concurrencyTransactions) ReleaseAuthorizedSlot(_ context.Context, a capability.Authorized, _, _, _, _, _ string, _ time.Duration) error {
 	return f.entered(a)
 }
+
 func (f *concurrencyTransactions) ReadAuthorizedGroup(_ context.Context, a capability.Authorized, group string) (*store.ConcurrencyState, error) {
 	if f.group != "" {
 		group = f.group
 	}
-	return &store.ConcurrencyState{Key: group, Capacity: 2, EffectiveCapacity: 1, UsedCost: 1,
+	return &store.ConcurrencyState{
+		Key: group, Capacity: 2, EffectiveCapacity: 1, UsedCost: 1,
 		Holders: []store.ConcurrencyHolder{{HolderID: "other-holder", RunID: "run", NodeID: "sibling", Superseded: true, Cost: 1, ClaimedAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), LeaseExpiresAt: time.Date(2026, 10, 14, 12, 1, 0, 0, time.UTC)}},
 		Waiters: []store.ConcurrencyWaiter{{RunID: "next", NodeID: "next-job", Position: 0, Policy: "queue", ArrivedAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), CancelTimeout: 3 * time.Second}},
 	}, f.entered(a)
 }
+
 func (f *concurrencyTransactions) ResolveAuthorizedWaiter(_ context.Context, a capability.Authorized, _, _, _, _, _, _ string, _ bool) (store.WaiterResolution, error) {
 	return store.WaiterResolution{Status: store.WaiterStillWaiting, LeaderRunID: "leader", LeaderNodeID: "leader-job"}, f.entered(a)
 }
+
 func (f *concurrencyTransactions) CancelAuthorizedWaiter(_ context.Context, a capability.Authorized, _ string, _ controllerwire.NodeRef) (bool, error) {
 	return true, f.entered(a)
 }
+
 func (f *concurrencyTransactions) ForceReleaseAuthorizedSlots(_ context.Context, a capability.Authorized, _ string) ([]store.ConcurrencyHolder, error) {
 	return []store.ConcurrencyHolder{{HolderID: "expired", RunID: "run", NodeID: "job"}}, f.entered(a)
 }
@@ -88,8 +97,8 @@ func (f *concurrencyTransactions) ForceReleaseAuthorizedSlots(_ context.Context,
 func concurrencyServer(b *credentialBoundary, f *concurrencyTransactions, group, holder string) http.Handler {
 	auth := consoleAuthorization(b)
 	auth.Bindings = concurrencyBoundary{b, group, holder}
-	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(auth).
-		WithConcurrencyStore(func(_ context.Context, _ store.Team) (controller.ConcurrencyStore, error) { return f, nil }).Handler()
+	return bindTenantPort[controller.ConcurrencyStore](controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(auth),
+		func(_ context.Context, _ store.Team) (controller.ConcurrencyStore, error) { return f, nil }).Handler()
 }
 
 func concurrencyRequest(h http.Handler, b *credentialBoundary, method, path, body string) *httptest.ResponseRecorder {

@@ -59,7 +59,7 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
 		rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 	}
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,13 +77,13 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
 	setMachineOrigin(t, s, "runner", &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 	rewriteSchemaExec(t, s.db, `INSERT INTO git_credentials(host_wide,id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES (1,'credential','a','github.com','https','encrypted-secret',1,1,1)`)
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "remote"}})
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "remote"}}
 	if kind == capability.UnitPlan {
-		s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "cloud"}})
+		s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "cloud"}}
 	}
 	policy := &sourcePolicyFake{}
 	s.sourcePolicy = policy
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func setMachineOrigin(t *testing.T, s *Store, prefix string, origin *CapabilityO
 		origin.Requirement = &authorityRequirement{Account: "owner", Grant: capability.RunsWrite, MembersCanAddMachines: true}
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		record, err := loadCapabilityRecordTx(t.Context(), tx, prefix)
+		record, err := tx.operator.loadCapabilityRecordTx(t.Context(), tx, prefix)
 		if err != nil {
 			return err
 		}
@@ -186,9 +186,9 @@ func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Accept: accept}})
+				s.claimProfiles = claimProfileFake{profile: match.Profile{Accept: accept}}
 			case "enrollment":
-				s.SetClaimProfileResolver(nil)
+				s.claimProfiles = nil
 			case "policy":
 				policy.err = errors.New("policy refused")
 			case "audit":
@@ -249,7 +249,7 @@ func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
 	tenant, auth, _ := sourceReleaseFixture(t)
 	setMachineOrigin(t, tenant.s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 	auth.Principal.Capability.Billing = &capability.BillingProvenance{ExecutorClass: "cloud"}
-	tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Name: "cloud", Class: match.ClassCloud, Location: "cloud", Labels: []string{"class=cloud", "location=cloud"}}})
+	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Name: "cloud", Class: match.ClassCloud, Location: "cloud", Labels: []string{"class=cloud", "location=cloud"}}}
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 	if err == nil || credential.Secret != "" || audit.ID != "" {
 		t.Fatal("mutable executor facts replaced the awarded executor class")

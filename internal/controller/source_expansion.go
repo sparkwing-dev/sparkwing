@@ -10,14 +10,14 @@ import (
 )
 
 func (s *EngineController) sourceExpansionAuthorization(ctx context.Context, a capability.Authorized, generation int64) (capability.Authorized, error) {
-	if s.Store == nil {
+	if s.authority == nil {
 		return a, missingEndpointPolicy()
 	}
-	parent, err := s.Store.ResolveAuthority(ctx, a.Principal.Authority)
+	parent, err := s.authority.ResolveAuthority(ctx, a.Principal.Authority)
 	if err != nil {
 		return a, err
 	}
-	tenant, err := s.Store.ForTeam(ctx, store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(ctx, store.Team(a.Target.Team))
 	if err != nil {
 		return a, err
 	}
@@ -32,7 +32,7 @@ func (s *EngineController) sourceExpansionAuthorization(ctx context.Context, a c
 	binding.Kind, binding.NodeID, binding.Generation, binding.Attempt = capability.BindingNode, source.Ref.NodeID, source.Generation, source.Attempt
 	binding.Holder = ""
 	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: parent.Capability.UnitID, Holder: parent.Capability.Binding.Holder, Generation: parent.Capability.Binding.Generation}
-	issued, err := s.Store.DelegateCapability(ctx, capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit}, Binding: binding, Repositories: parent.Capability.Repositories, ExpiresAt: parent.Capability.ExpiresAt})
+	issued, err := s.authority.DelegateCapability(ctx, capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit}, Binding: binding, Repositories: parent.Capability.Repositories, ExpiresAt: parent.Capability.ExpiresAt})
 	if err != nil {
 		return a, err
 	}

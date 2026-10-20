@@ -30,7 +30,7 @@ VALUES ('acme','local','job','pending',?,?)`, []byte(`{"id":"job"}`), []byte(`{}
 	if err != nil {
 		t.Fatal(err)
 	}
-	reaped, err := st.ReapUnits(t.Context(), lease, 10)
+	reaped, err := st.AsOperator().ReapUnits(t.Context(), lease, 10)
 	if err != nil || len(reaped) != 1 || reaped[0].Team != "acme" || !reaped[0].Failed {
 		t.Fatalf("reaped owners: %+v, %v", reaped, err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -22,9 +23,25 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func engineRuntimeStore(t *testing.T, opts ...store.Option) (*EngineController, *store.Tenant) {
+type engineFixture struct {
+	*EngineController
+	Store         *store.Store
+	Server        *Server
+	claimProfiles store.ClaimProfileResolver
+}
+
+func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *store.Tenant) {
 	t.Helper()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), opts...)
+	fixture := &engineFixture{claimProfiles: engineProfileFake{}}
+	profiles := store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		fixture.Server = NewDeployment(st, deploymenttest.Metered(t), nil)
+		policies := fixture.Server.StorePolicies()
+		policies.ClaimProfiles = engineEnrollmentFunc(func(ctx context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
+			return fixture.claimProfiles.ResolveClaimProfile(ctx, p)
+		})
+		return policies, nil
+	})
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{profiles}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +50,7 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*EngineController, 
 			t.Error(err)
 		}
 	})
-	engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+	engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at,next_run_number) VALUES ('a',1,1,2)`)
 	request, err := json.Marshal(withProvenance(runspec.SealedRequest{Version: 1, RunID: "run", Hash: "request", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}}}, assertedProvenance(t, "ci", "", "0123456789abcdef0123456789abcdef01234567")))
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +61,9 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*EngineController, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &EngineController{Store: s}, tenant
+	fixture.EngineController, fixture.Store = NewEngineController(s, EngineController{}), s
+	fixture.Server.WithEngineController(fixture.EngineController)
+	return fixture, tenant
 }
 
 func engineSQL(t *testing.T, s *store.Store, query string, args ...any) {
@@ -63,7 +82,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 			engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 			engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('session','account','runs.read,runs.control',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
 			engineSQL(t, s, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('session','a',0)`)
-			principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"})
+			principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -102,7 +121,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 	}
 }
 
-func engineRuntimeClaim(t *testing.T, server *EngineController, kind capability.UnitKind) capability.Authorized {
+func engineRuntimeClaim(t *testing.T, server *engineFixture, kind capability.UnitKind) capability.Authorized {
 	t.Helper()
 	s := server.Store
 	digest := sha256.Sum256([]byte("runner-secret"))
@@ -121,11 +140,11 @@ func engineRuntimeClaim(t *testing.T, server *EngineController, kind capability.
 		target.NodeID = "job"
 		engineSQL(t, s, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	}
-	claim, err := s.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := s.LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+	principal, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +198,7 @@ func (engineProfileFake) ResolveClaimProfile(context.Context, capability.Princip
 func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	server, tenant := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
-	server.Store.SetClaimProfileResolver(engineProfileFake{})
+	server.claimProfiles = engineProfileFake{}
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +224,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	if err != nil || wait.Kind != "wait_holder" || wait.Claim != nil {
 		t.Fatalf("live holder: %+v, %v", wait, err)
 	}
-	principal, err := server.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(response.Claim.Capability)))
+	principal, err := server.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(response.Claim.Capability)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +264,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	}
 }
 
-func engineAcceptedFixturePlan(t *testing.T, e *EngineController, team store.Team, runID string, jobs ...string) {
+func engineAcceptedFixturePlan(t *testing.T, e *engineFixture, team store.Team, runID string, jobs ...string) {
 	t.Helper()
 	tenant, err := e.Store.ForTeam(t.Context(), team)
 	if err != nil {
@@ -292,4 +311,8 @@ func engineAcceptedFixturePlan(t *testing.T, e *EngineController, team store.Tea
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,request_hash=?,spec_json=?,spec_hash=?,sealed_at=1,plan_json=?,plan_hash=? WHERE team=? AND id=?`, rawRequest, run.Request.Hash, rawSpec, spec.Hash, rawPlan, spec.PlanHash, team, runID)
 	engineSQL(t, e.Store, `UPDATE nodes SET queue_started_at=? WHERE team=? AND run_id=? AND ready_at IS NOT NULL AND queue_started_at IS NULL`, time.Now().UnixNano(), team, runID)
+}
+
+func newEngineFixture(st *store.Store, cfg EngineController) *engineFixture {
+	return &engineFixture{EngineController: NewEngineController(st, cfg), Store: st}
 }

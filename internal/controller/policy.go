@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // RouteAuthorization supplies the same checks for HTTP and verified local transports.
@@ -28,6 +29,7 @@ type Endpoint struct {
 
 // PolicyRouter matches a route before authentication and enforces its complete policy.
 type PolicyRouter struct {
+	resolveTenant func(context.Context, store.Team) (TenantHandle, error)
 	mux           *http.ServeMux
 	authorization RouteAuthorization
 	registered    map[string]Endpoint

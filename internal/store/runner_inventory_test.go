@@ -32,7 +32,7 @@ func TestRunnerInventorySeparatesRenewalLivenessFromHeadroom(t *testing.T) {
 	s, demand, claim, now := renewalFixture(t, capability.UnitNode)
 	demand.Labels = []string{"gpu", "name=forged", "class=cloud"}
 	demand.Available = match.Resources{Cores: 3, MemoryBytes: 1024}
-	if err := s.RecordRunnerPoll(t.Context(), demand); err != nil {
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
 		t.Fatal(err)
 	}
 	before := readRunnerInventory(t, s, "a")
@@ -44,7 +44,7 @@ func TestRunnerInventorySeparatesRenewalLivenessFromHeadroom(t *testing.T) {
 		t.Fatalf("runner facts: %+v", runner)
 	}
 	*now = now.Add(time.Second)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
 	after := readRunnerInventory(t, s, "a")
@@ -66,14 +66,14 @@ func TestRunnerInventoryAttributesOnlyCurrentSameTenantAuthorityProperty(t *test
 		switch mutation % 7 {
 		case 1:
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				return revokeAuthorityTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+				return tx.operator.revokeAuthorityTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 			}); err != nil {
 				t.Fatal(err)
 			}
 			expectedRunners, expectedActive = 1, 0
 		case 2:
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				return revokeAuthorityTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+				return tx.operator.revokeAuthorityTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -123,7 +123,7 @@ func TestRunnerInventoryCloudAwardsKeepIdentityAcrossExchangeAndRenewal(t *testi
 				t.Fatalf("cloud identity: %+v", row)
 			}
 			*now = now.Add(time.Second)
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 				t.Fatal(err)
 			}
 			after := readRunnerInventory(t, s, "a")
@@ -150,7 +150,7 @@ func TestRunnerInventoryRefusesCorruptObservationsWithoutPartialRows(t *testing.
 	for _, column := range []string{"advertised_labels_json", "claim_observation_json", "last_used_at"} {
 		t.Run(column, func(t *testing.T) {
 			s, demand, _, now := renewalFixture(t, capability.UnitNode)
-			if err := s.RecordRunnerPoll(t.Context(), demand); err != nil {
+			if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
 				t.Fatal(err)
 			}
 			var value any = []byte(`{`)
@@ -170,7 +170,7 @@ func TestRefusedRenewalDoesNotChangeRunnerLiveness(t *testing.T) {
 	s, _, claim, now := renewalFixture(t, capability.UnitNode)
 	before := readRunnerInventory(t, s, "a")
 	*now = now.Add(time.Second)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
 		t.Fatal("unstarted job renewed as executing")
 	}
 	after := readRunnerInventory(t, s, "a")
@@ -186,7 +186,7 @@ func TestRunnerObservationFailureRollsBackAwardAndRenewal(t *testing.T) {
 			var claim UnitClaim
 			var err error
 			if operation == "renewal" {
-				claim, err = s.ClaimUnit(t.Context(), demand)
+				claim, err = s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -198,14 +198,14 @@ func TestRunnerObservationFailureRollsBackAwardAndRenewal(t *testing.T) {
 			}
 			rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_observation BEFORE UPDATE OF last_used_at ON capabilities BEGIN SELECT RAISE(ABORT,'observation refused'); END`)
 			if operation == "award" {
-				out, err := s.ClaimUnit(t.Context(), demand)
+				out, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err == nil || len(out.Bearer) != 0 {
 					t.Fatalf("refused award: %+v %v", out, err)
 				}
 				rewriteSchemaCount(t, s.db, "billing_awards", 0)
 				rewriteSchemaCount(t, s.db, "capabilities", 1)
 			} else {
-				if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err == nil {
+				if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err == nil {
 					t.Fatal("renewal committed without its observation")
 				}
 			}

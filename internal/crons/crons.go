@@ -240,9 +240,9 @@ type ScheduleStore interface {
 // takes an exclusive lock on that file so two timers, or a timer and a hand-run
 // tick, cannot resolve the same due instant twice. Leave it empty in a caller
 // that already holds exclusion of its own, such as a controller ticking under
-// [store.Store.RunCronTickLeased].
+// [store.Operator.RunCronTickLeased].
 type Service struct {
-	Store    *store.Store
+	Operator *store.Operator
 	Launcher Launcher
 
 	// Schedules is required for tenant operations. Nil lets Tick enumerate every team.

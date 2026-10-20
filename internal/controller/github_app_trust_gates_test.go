@@ -68,7 +68,7 @@ func TestChildCannotPairAnotherRefWithItsOwnCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestChildCannotPairAnotherRefWithItsOwnCommit(t *testing.T) {
 	request := parent.Request.Request
 	request.Pipeline, request.Lineage = "deploy", runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}
 	same := request
-	if err := server.resolveChildRevisions(t.Context(), e, a, &same); err != nil {
+	if err := server.resolveChildRevisions(t.Context(), e.EngineController, a, &same); err != nil {
 		t.Fatalf("child at its parent's revision refused: %v", err)
 	}
 	for name, mutate := range map[string]func(*runspec.Request){
@@ -87,7 +87,7 @@ func TestChildCannotPairAnotherRefWithItsOwnCommit(t *testing.T) {
 		attack := request
 		mutate(&attack)
 		var refusal *apierr.Error
-		if err := server.resolveChildRevisions(t.Context(), e, a, &attack); !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+		if err := server.resolveChildRevisions(t.Context(), e.EngineController, a, &attack); !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
 			t.Fatalf("child with another %s was not refused: %v", name, err)
 		}
 	}

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
@@ -20,7 +22,7 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte(unit.Capability))}
-	initial, err := s.ReadAuthentication(ctx, lookup, capability.RequestEvidence{})
+	initial, err := s.AsOperator().ReadAuthentication(ctx, lookup, capability.RequestEvidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +31,7 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 	if !ok {
 		t.Fatal("missing node data-authority route")
 	}
-	auth := capability.NewAuthenticator(s)
+	auth := capability.NewAuthenticator(s.AsOperator())
 	if _, err := auth.Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: unit.Capability}, route); err != nil {
 		t.Fatal("initial claim:", err)
 	}
@@ -41,7 +43,7 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 	if err != nil {
 		t.Fatal("start:", err)
 	}
-	snapshot, err := s.ReadAuthentication(ctx, lookup, capability.RequestEvidence{})
+	snapshot, err := s.AsOperator().ReadAuthentication(ctx, lookup, capability.RequestEvidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +57,7 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 	s, unit := nativeStoreAwardW8(t, capability.UnitNode)
 	finished := errors.New("binding finished")
 	refreshed, closed := false, false
-	host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 		p := binding.Principal
 		attempt := int64(0)
 		applied, err := binding.Tenant.TransitionNode(ctx, store.NodeTransition{
@@ -92,7 +94,7 @@ func FuzzEmbeddedServiceBearerW9KeepsAwardAndLifetime(f *testing.F) {
 		defer cancelHost()
 		var retained func(context.Context) (string, error)
 		finalized := false
-		host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+		host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 			retained = binding.Bearer
 			if retained == nil {
 				t.Fatal("embedded services have no awarded credential transport")

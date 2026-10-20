@@ -24,7 +24,7 @@ func TestAuthenticationSnapshotReadsAncestryAndCurrentJob(t *testing.T) {
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM capabilities WHERE prefix='claim'`)
 	authorityPersist(t, tenant.s, claim)
 	evidence := capability.RequestEvidence{Target: capability.Target{Team: "b", RunID: "foreign", NodeID: "forged"}}
-	got, err := tenant.s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: claim.Digest, Audience: capability.Controller}, evidence)
+	got, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: claim.Digest, Audience: capability.Controller}, evidence)
 	if err != nil || len(got.Authorities) != 2 || got.Now != *now {
 		t.Fatalf("authentication snapshot: %+v, %v", got, err)
 	}
@@ -42,7 +42,7 @@ func TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState(t *testing.T)
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,prefix,retention_class,sealed_at,created_at,updated_at) VALUES ('a','run','job-stream','job_attempt','job',3,2,'logs','r30',1,1,1)`)
-	got, err := tenant.s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte("claim")), Audience: capability.Controller}, capability.RequestEvidence{})
+	got, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte("claim")), Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil || got.Binding.Current.Generation != 2 || got.Binding.Current.Attempt != 3 || got.Binding.Current.Holder != "runner" || got.Binding.FinishedAt == nil || !got.Binding.LogSealed || !got.Binding.LeaseExpiresAt.IsZero() {
 		t.Fatalf("final binding: %+v, %v", got.Binding, err)
 	}
@@ -75,7 +75,7 @@ func TestAuthenticationSnapshotRechecksAncestryAndMembership(t *testing.T) {
 			case "class":
 				lookup.Class = capability.CredentialSession
 			}
-			_, err := s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
+			_, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.Unauthenticated {
 				t.Fatalf("unavailable %s: %v", problem, err)
@@ -89,7 +89,7 @@ func TestAuthenticationSnapshotLooksUpSessionDigestWithoutBearer(t *testing.T) {
 	digest := sha256.Sum256([]byte("session-presentation"))
 	hash := hex.EncodeToString(digest[:])
 	authorityMember(t, s, hash, RoleEditor)
-	got, err := s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{})
+	got, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil || len(got.Authorities) != 1 || got.Authorities[0].Principal.Authority.ID != hash || got.Authorities[0].Principal.Class != capability.CredentialSession || !capability.CredentialAlive(got.Authorities[0].Principal.Capability, got.Now) {
 		t.Fatalf("session: %+v, %v", got, err)
 	}
@@ -114,7 +114,7 @@ func TestAuthenticationSnapshotSeparatesEvalAndSourceLiveness(t *testing.T) {
 		if owner == "absent" {
 			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM leases WHERE name='controller.owner'`)
 		}
-		got, err := tenant.s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
+		got, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 		if err != nil || got.Binding.Current.Generation != 2 || got.Binding.Expansion == nil || got.Binding.Expansion.Lease.Generation != 8 || got.Binding.Expansion.Lease.Holder != "eval-host" || !got.Binding.Expansion.ExpiresAt.After(*now) {
 			t.Fatalf("eval snapshot %s: %+v, %v", owner, got.Binding, err)
 		}
@@ -127,7 +127,7 @@ func TestAuthenticationSnapshotSeparatesEvalAndSourceLiveness(t *testing.T) {
 func TestAuthenticationSnapshotHereClaimHistorySurvivesRequeue(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
-	got, err := tenant.s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(actor.CapabilityPrefix)), Audience: capability.Controller}, capability.RequestEvidence{})
+	got, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(actor.CapabilityPrefix)), Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil || !got.Binding.HereClaimed || got.Binding.Current.Generation != 1 || got.Binding.Current.Holder != "" || !got.Binding.LeaseExpiresAt.IsZero() {
 		t.Fatalf("requeued owner: %+v, %v", got.Binding, err)
 	}
@@ -144,12 +144,12 @@ func TestAuthenticationSnapshotReadsPlanLeaseAndCancellation(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 	demand.CapabilityPrefix = launcher.Prefix
 	demand.Target = &UnitRef{Kind: capability.UnitPlan, RunID: "run"}
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=1 WHERE id='run'`)
-	got, err := s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256(claim.Bearer), Audience: capability.Controller}, capability.RequestEvidence{})
+	got, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256(claim.Bearer), Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil || !got.Binding.RunCancelled || got.Binding.Current.Kind != capability.BindingRun || got.Binding.Current.Holder != "launcher" || got.Binding.Current.Generation != claim.Award.Generation || got.Binding.LeaseExpiresAt != claim.Award.LeaseExpiresAt {
 		t.Fatalf("plan liveness: %+v, %v", got.Binding, err)
 	}
@@ -174,7 +174,7 @@ func TestAuthenticationCancellationReasonKeepsJobIntentProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, prefix := range []string{"claim", owner.CapabilityPrefix} {
-				got, err := tenant.s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(prefix)), Audience: capability.Controller}, capability.RequestEvidence{Target: capability.Target{RunID: "forged"}})
+				got, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(prefix)), Audience: capability.Controller}, capability.RequestEvidence{Target: capability.Target{RunID: "forged"}})
 				want := "run reason"
 				if prefix == "claim" {
 					want = reason

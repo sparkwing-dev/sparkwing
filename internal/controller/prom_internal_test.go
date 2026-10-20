@@ -22,7 +22,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -398,13 +397,7 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 	}
 
 	srv := NewDeployment(st, deploymenttest.Metered(t), nil)
-	srv.WithRunnerInventory(func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
-		snapshot := capability.RunnerSnapshot{Now: time.Now()}
-		if team == "a" {
-			snapshot.Runners = []capability.RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "pool-a", Type: "runner", Labels: []string{"zone=b"}}, LastSeen: snapshot.Now}}
-		}
-		return &runnerInventoryFake{team: team, snapshot: snapshot}, nil
-	})
+	recordMetricRunner(t, st, "a", "pool-a", []string{"zone=b"})
 
 	srv.sampleCreditLedger(ctx)
 	srv.sampleOperationalSeries(ctx)

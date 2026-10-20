@@ -12,11 +12,11 @@ import (
 
 func TestDeclaredPipelineReferenceProperty(t *testing.T) {
 	s, demand := unitClaimFixture(t)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestDeclaredPipelineReferenceProperty(t *testing.T) {
 		}
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, spec)
 		target := capability.Target{Team: "a", Pipeline: pipeline}
-		if err := s.CheckBinding(t.Context(), p, capability.BindReadSet, target); err != nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, target); err != nil {
 			t.Fatalf("declared reference refused: %v", err)
 		}
 		for _, mutation := range []string{"undeclared", "team", "run", "node", "generation"} {
@@ -46,13 +46,13 @@ func TestDeclaredPipelineReferenceProperty(t *testing.T) {
 			case "generation":
 				forged.SourceGeneration = 1
 			}
-			if err := s.CheckBinding(t.Context(), p, capability.BindReadSet, forged); err == nil {
+			if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, forged); err == nil {
 				t.Fatalf("%s widened the reference", mutation)
 			}
 		}
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=generation+1 WHERE team='a' AND run_id='run' AND node_id='job'`)
-	if err := s.CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", Pipeline: "producer"}); err == nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", Pipeline: "producer"}); err == nil {
 		t.Fatal("replacement job retained old reference authority")
 	}
 }

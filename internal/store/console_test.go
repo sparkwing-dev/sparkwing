@@ -222,7 +222,7 @@ func TestConsoleNativeAccountDeletion(t *testing.T) {
 	if err != nil || result.AccountID != "victim" {
 		t.Fatalf("delete: %+v %v", result, err)
 	}
-	if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}); err == nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}); err == nil {
 		t.Fatal("deleted account's credential survived")
 	}
 }

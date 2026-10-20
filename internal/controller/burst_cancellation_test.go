@@ -15,7 +15,7 @@ import (
 
 func TestBurstCancelledOwnerRenewalRetainsReportingAuthority(t *testing.T) {
 	s, options, input, _ := sourceUploadFixture(t)
-	s.WithEngineController(&EngineController{Store: s.store, RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
+	s.WithEngineController(NewEngineController(s.store, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })}))
 	options.HTTP = &http.Client{Transport: inventoryRoundTrip{s.Handler()}}
 	input.LocalSecretNames = []string{"TOKEN"}
 	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}

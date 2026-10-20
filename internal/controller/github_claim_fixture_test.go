@@ -27,12 +27,11 @@ func (env githubClaimEnvironment) ResolveClaimProfile(context.Context, capabilit
 
 func configureGitHubClaims(t *testing.T, s *controller.Server, st *store.Store) *controller.Server {
 	t.Helper()
-	st.SetClaimProfileResolver(githubClaimEnvironment{})
 	versions, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s.WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: githubClaimEnvironment{}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}})
+	return s.WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: githubClaimEnvironment{}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}}))
 }
 
 func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, sha string, appID int64, dispatch runspec.Dispatch) {
@@ -67,7 +66,7 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `UPDATE runs SET repo_key=?,repo_display=?,request_json=?,dispatch=? WHERE team=? AND id=?`, key, remote, body, dispatch, team, run); err != nil {
 		t.Fatal(err)
 	}
-	controller.EngineAcceptedFixturePlan(t, &controller.EngineController{Store: st}, store.Team(team), run, "compile")
+	controller.EngineAcceptedFixturePlan(t, st, store.Team(team), run, "compile")
 	kind := capability.UnitTrigger
 	if dispatch == runspec.DispatchController {
 		kind = capability.UnitPlan

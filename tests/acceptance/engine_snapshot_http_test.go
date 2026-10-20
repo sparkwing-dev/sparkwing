@@ -60,9 +60,9 @@ func snapshotFixture(b *credentialBoundary) *snapshotTransactions {
 func snapshotServer(t *testing.T, b *credentialBoundary, f *snapshotTransactions) http.Handler {
 	t.Helper()
 	e := fakeEngine(t, &f.engineTransactions)
-	e.ResolveTenant = func(_ context.Context, team store.Team) (controller.RunTransactions, error) {
+	e.ResolveTenant = func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 		if team != "team" {
-			t.Fatalf("tenant = %q", team)
+			return nil, store.ErrNotFound
 		}
 		return f, nil
 	}
@@ -204,11 +204,11 @@ func TestEngineSnapshotHTTPRefusals(t *testing.T) {
 				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "wrong owner"}
 				status, code = 403, apierr.Forbidden
 			case "missing run":
-				f.readErr = store.ErrNotFound
-				status, code, reads = 404, apierr.NotFound, 1
+				f.runReadErr = store.ErrNotFound
+				status, code, reads = 404, apierr.NotFound, 0
 			case "private read":
-				f.readErr = errors.New("private-read")
-				status, code, reads = 500, apierr.Internal, 1
+				f.runReadErr = errors.New("private-read")
+				status, code, reads = 500, apierr.Internal, 0
 			default:
 				status, code, reads = 500, apierr.Internal, 1
 				switch state {
@@ -264,18 +264,18 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 	for _, state := range []string{"no policy", "no tenant", "nil tenant", "tenant error", "lookup error", "dead with lookup error"} {
 		t.Run(state, func(t *testing.T) {
 			b := ownerBoundary()
-			e := &controller.EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "team", nil }}
+			e := &controller.EngineController{}
 			code := apierr.PolicyMissing
 			switch state {
 			case "nil tenant":
-				e.ResolveTenant = func(context.Context, store.Team) (controller.RunTransactions, error) { return nil, nil }
+				e.ResolveTenant = func(context.Context, store.Team) (controller.TenantHandle, error) { return nil, nil }
 			case "tenant error":
-				e.ResolveTenant = func(context.Context, store.Team) (controller.RunTransactions, error) {
+				e.ResolveTenant = func(context.Context, store.Team) (controller.TenantHandle, error) {
 					return nil, errors.New("private-tenant")
 				}
 				code = apierr.Internal
 			case "lookup error", "dead with lookup error":
-				e.ResolveRunTeam = func(context.Context, string) (store.Team, error) { return "", errors.New("private-lookup") }
+				e.ResolveTenant = selectorTenant("team", errors.New("private-lookup"))
 				code = apierr.Internal
 				if state == "dead with lookup error" {
 					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now

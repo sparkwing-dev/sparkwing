@@ -28,7 +28,19 @@ import (
 
 func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 	t.Helper()
-	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "credentials.db"))
+	s, cipher, _ := credentialMutationServer(t, filepath.Join(t.TempDir(), "credentials.db"), func(s *store.Store, cipher *secrets.Cipher) *controller.Server {
+		return controller.New(s, nil).WithSecretsCipher(cipher)
+	})
+	return s, cipher
+}
+
+func credentialMutationServer(t *testing.T, path string, build func(*store.Store, *secrets.Cipher) *controller.Server) (*store.Store, *secrets.Cipher, *controller.Server) {
+	t.Helper()
+	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{34}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, server, err := openControllerFixture(path, func(s *store.Store) *controller.Server { return build(s, cipher) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,11 +52,16 @@ func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 	for _, team := range []store.Team{"team", "foreign"} {
 		teststore.SeedTeam(t, s, team)
 	}
-	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{34}, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s, cipher
+	return s, cipher, server
+}
+
+func openControllerFixture(path string, build func(*store.Store) *controller.Server) (*store.Store, *controller.Server, error) {
+	var server *controller.Server
+	s, err := teststore.OpenExisting(path, store.WithPolicies(func(s *store.Store) (store.Policies, error) {
+		server = build(s)
+		return server.StorePolicies(), nil
+	}))
+	return s, server, err
 }
 
 type credentialMutationFake struct {
@@ -105,7 +122,7 @@ func (f *credentialMutationFake) RemoveGitCredential(ctx context.Context, a capa
 func mutationServerConfig(t testing.TB, s *store.Store, cipher controller.Cipher, b *credentialBoundary) *controller.Server {
 	server := controller.New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithAuthorization(consoleAuthorization(b))
 	if s != nil {
-		server.WithCredentialWriter(func(ctx context.Context, team store.Team) (controller.CredentialWriter, error) {
+		bindTenantPort[controller.CredentialWriter](server, func(ctx context.Context, team store.Team) (controller.CredentialWriter, error) {
 			tenant, err := s.ForTeam(ctx, team)
 			if err != nil {
 				return nil, err
@@ -327,14 +344,16 @@ func TestCredentialMutationsHTTPTransactionBoundary(t *testing.T) {
 				case "default":
 					writer, code, writes = nil, apierr.Unauthenticated, 0
 				}
-				server := mutationServerConfig(t, s, cipher, b).WithCredentialWriter(func(_ context.Context, team store.Team) (controller.CredentialWriter, error) {
+				server := bindTenantPort[controller.CredentialWriter](mutationServerConfig(t, s, cipher, b), func(_ context.Context, team store.Team) (controller.CredentialWriter, error) {
 					if team != "team" {
 						t.Fatalf("resolved tenant %q", team)
 					}
 					return writer, resolveErr
 				})
 				if failure == "default" {
-					server.WithCredentialWriter(nil)
+					server.WithTenantResolver(func(ctx context.Context, team store.Team) (controller.TenantHandle, error) {
+						return s.ForTeam(ctx, team)
+					})
 				}
 				w := authorityHTTP(server.Handler(), b, route.method, route.path, route.body)
 				assertEngineError(t, w, apierr.Status(code), code)
@@ -395,7 +414,7 @@ func TestCredentialMutationsHTTPValidatesBodiesBeforeTransactions(t *testing.T) 
 		for _, body := range []string{"", "null", "[]", "true", `{"team":"foreign"}`, route.body + `{}`, strings.TrimSuffix(route.body, "}") + `,"actor":"forged"}`} {
 			b := authorityMember()
 			f := &credentialMutationFake{Tenant: tenant}
-			server := mutationServerConfig(t, s, cipher, b).WithCredentialWriter(func(context.Context, store.Team) (controller.CredentialWriter, error) { return f, nil })
+			server := bindTenantPort[controller.CredentialWriter](mutationServerConfig(t, s, cipher, b), func(context.Context, store.Team) (controller.CredentialWriter, error) { return f, nil })
 			w := authorityHTTP(server.Handler(), b, route.method, route.path, body)
 			assertEngineError(t, w, 400, apierr.BadRequest)
 			if f.calls != 0 {

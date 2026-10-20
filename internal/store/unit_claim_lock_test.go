@@ -31,7 +31,7 @@ func TestClaimUnitLocksOwnerBeforeRun(t *testing.T) {
 				ownerQuery = "SELECT run_id FROM eval_units WHERE"
 			}
 			recorder.reset()
-			if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 				t.Fatal(err)
 			}
 			ownerAt, runAt := -1, -1

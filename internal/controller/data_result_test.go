@@ -18,22 +18,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 	property := func(payload [16]byte) bool {
-		engine, tenant := engineRuntimeStore(t)
-		authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
-		actor := engineActor(authorized)
-		ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
-		ordinal := int64(0)
-		started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &ordinal})
-		if err != nil {
-			t.Log(err)
-			return false
-		}
 		dir := t.TempDir()
 		objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{42}, 32)})
 		if err != nil {
@@ -45,6 +36,16 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 				t.Error(err)
 			}
 		}()
+		engine, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithDataObjects(objects) })
+		authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
+		actor := engineActor(authorized)
+		ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+		ordinal := int64(0)
+		started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &ordinal})
+		if err != nil {
+			t.Log(err)
+			return false
+		}
 		c := authorized.Principal.Capability
 		identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: c.Team, RunID: c.Binding.RunID, Principal: blob.Principal(c.Subject.ID), CapabilityRef: c.Prefix, Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: c.Team, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Attempt: started.Attempt, Generation: started.Generation}}}
 		authority := blob.Authority{CapabilityRef: c.Prefix, Attempt: identity.Attempt}
@@ -56,7 +57,6 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 			return false
 		}
 		stored := dataResultUpload(t, tenant, objects, authority, identity, "manifest", raw)
-		New(engine.Store, nil).WithDataObjects(objects)
 		run, err := tenant.ReadRun(t.Context(), "run")
 		if err != nil {
 			t.Log(err)

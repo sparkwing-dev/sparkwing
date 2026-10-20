@@ -44,11 +44,11 @@ func TestProvisionOriginsUseNativeVerification(t *testing.T) {
 	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService, capability.ProvisionActions} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, spec := provisionOrigin(t, kind)
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil || issued.Raw == "" || issued.Capability.Parent != nil {
 				t.Fatalf("native origin: %+v, %v", issued.Capability, err)
 			}
-			if _, err := s.LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
+			if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -57,7 +57,7 @@ func TestProvisionOriginsUseNativeVerification(t *testing.T) {
 
 func TestProvisionMachineRecordsAccountOwner(t *testing.T) {
 	s, spec := provisionOrigin(t, capability.ProvisionMachine)
-	issued, err := s.ProvisionCapability(t.Context(), spec)
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestProvisionMachineRecordsAccountOwner(t *testing.T) {
 		t.Fatalf("machine owner = %q: %v", owner, err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, spec.Authority.ID)
-	if _, err := s.LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
 		t.Fatalf("independent enrolled root inherited the authorizer's lifetime: %v", err)
 	}
 }
@@ -83,7 +83,7 @@ func TestProvisionRefusesEndedAuthorizer(t *testing.T) {
 			case "expired":
 				s.clock = func() time.Time { return time.Now().Add(2 * time.Hour) }
 			}
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err == nil || issued.Raw != "" {
 				t.Fatal("ended authorizer minted a bearer")
 			}
@@ -117,7 +117,7 @@ func TestProvisionOriginAuthorityProperty(t *testing.T) {
 		case 7:
 			spec.Authority = nil
 		}
-		issued, err := s.ProvisionCapability(t.Context(), spec)
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 		if err == nil || issued.Raw != "" {
 			t.Fatalf("forged root %d minted authority: %+v", i, spec)
 		}
@@ -150,7 +150,7 @@ func TestProvisionRootCannotAcquireAnExecutionFence(t *testing.T) {
 				case 7:
 					spec.Binding.Deadline = new(s.now().Add(time.Hour))
 				}
-				issued, err := s.ProvisionCapability(t.Context(), spec)
+				issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 				if err == nil || issued.Raw != "" {
 					t.Fatalf("root acquired forged execution fence: %+v", spec.Binding)
 				}
@@ -173,7 +173,7 @@ func TestProvisionRejectsUnregisteredAndDeletingTeams(t *testing.T) {
 			} else {
 				rewriteSchemaExec(t, s.db, `INSERT INTO team_deletions(slug,requested_by,requested_at,state) VALUES ('a','owner',1,?)`, TeamDeletionPending)
 			}
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if !errors.Is(err, ErrUnknownTeam) || issued.Raw != "" {
 				t.Fatalf("provisioned unregistered team: %+v, %v", issued.Capability, err)
 			}

@@ -24,7 +24,7 @@ func FuzzSubmittedEnvironmentStaysPrivateAndClaimBound(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tenant.s.SetRunEnvironmentCipher(cipher)
+		tenant.s.runEnvCipher = cipher
 		value := "submitted-value-" + string(raw)
 		if strings.ContainsRune(value, 0) {
 			return
@@ -91,7 +91,7 @@ func TestSubmittedEnvironmentRetryCopiesEncryptedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tenant.s.SetRunEnvironmentCipher(cipher)
+	tenant.s.runEnvCipher = cipher
 	request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
 	request.SubmittedEnv = map[string][]byte{"BUILD_NOTE": []byte("retained-private-value")}
 	request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": "retained-private-value"}, strings.Repeat("5", 64))
@@ -143,7 +143,7 @@ func TestSubmittedEnvironmentRefusesInvalidIntakeAtomically(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tenant.s.SetRunEnvironmentCipher(cipher)
+			tenant.s.runEnvCipher = cipher
 			name, value := "BUILD_NOTE", "private-value"
 			if problem == "credential" {
 				name = "BUILD_TOKEN"
@@ -169,7 +169,7 @@ func TestSubmittedEnvironmentRefusesInvalidIntakeAtomically(t *testing.T) {
 			case "unlisted":
 				request.Request.Options.SubmitEnvAllow.Value = nil
 			case "no_cipher":
-				tenant.s.SetRunEnvironmentCipher(nil)
+				tenant.s.runEnvCipher = nil
 			}
 			if _, err := tenant.AdmitRun(t.Context(), request); err == nil || strings.Contains(err.Error(), value) {
 				t.Fatal("invalid private environment admitted or disclosed")
@@ -196,7 +196,7 @@ func FuzzExecutionEnvironmentUsesOnlyLiveUnitFence(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.SetRunEnvironmentCipher(cipher)
+		s.runEnvCipher = cipher
 		run, err := tenant.ReadRun(t.Context(), claim.RunID)
 		if err != nil {
 			t.Fatal(err)
@@ -223,7 +223,7 @@ func FuzzExecutionEnvironmentUsesOnlyLiveUnitFence(f *testing.F) {
 		if got, err := tenant.ReadSubmittedEnvironment(t.Context(), bootstrap); err == nil || got != nil {
 			t.Fatal("bootstrap read environment")
 		}
-		issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.ID})
+		issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.ID})
 		if err != nil {
 			t.Fatal(err)
 		}

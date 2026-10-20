@@ -41,14 +41,14 @@ func bytesOrNil(s string) []byte {
 	return []byte(s)
 }
 
-func openControllerStore(ctx context.Context, cfg deployment.Config, sqlitePath string) (*store.Store, error) {
+func openControllerStore(ctx context.Context, cfg deployment.Config, sqlitePath string, opts ...store.Option) (*store.Store, error) {
 	if cfg.Store() == deployment.StorePostgres {
 		return store.OpenControllerPostgres(ctx, cfg.PGURL(), func(err error) {
 			slog.Error("controller must fail-stop", "err", err)
 			os.Exit(1)
-		})
+		}, opts...)
 	}
-	return store.Open(sqlitePath) //nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
+	return store.Open(sqlitePath, opts...) //nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
 }
 
 // deploymentRecord is what a serving controller leaves beside its state for

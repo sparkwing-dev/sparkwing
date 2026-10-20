@@ -13,8 +13,8 @@ import (
 
 // CheckBinding checks committed resource relations against current authority in one snapshot.
 // Mutations must repeat the relation in their committing transaction.
-func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
-	tx, err := s.beginSnapshotReadTx(ctx)
+func (o *Operator) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
+	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -244,6 +244,6 @@ func bindingTokenTx(ctx context.Context, tx *storeTx, c capability.Capability, t
 }
 
 var (
-	_ capability.BindingChecker = (*Store)(nil)
+	_ capability.BindingChecker = (*Operator)(nil)
 	_ capability.BindingChecker = (*storeTx)(nil)
 )

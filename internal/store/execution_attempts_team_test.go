@@ -44,7 +44,7 @@ func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
 			if err != nil || len(finished) != 1 || finished[0].FinishedAt == nil || finished[0].Outcome != "success" {
 				t.Fatalf("finished history=%+v, %v", finished, err)
 			}
-			p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+			p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 			if err != nil || finished[0].HolderID != p.Capability.Subject.ID {
 				t.Fatalf("history lost enrolled identity: %+v, %v", finished, err)
 			}

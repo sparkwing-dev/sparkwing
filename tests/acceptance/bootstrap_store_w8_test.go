@@ -23,13 +23,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func storedCloudClaimantW8(t *testing.T) (*controller.EngineController, capability.Issued) {
+func storedCloudClaimantW8(t *testing.T) (*storedEngineW8, capability.Issued) {
 	t.Helper()
 	expiry := time.Now().UTC().Add(time.Hour)
 	return storedCloudClaimantExpiryW8(t, &expiry)
 }
 
-func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*controller.EngineController, capability.Issued) {
+func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*storedEngineW8, capability.Issued) {
 	t.Helper()
 	server, machine := newStoredRunnerW8(t, capability.UnitNode)
 	claimant, err := storedRunnerClientW8(t.Context(), server, machine.Raw)
@@ -40,8 +40,8 @@ func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*controller.E
 	if err != nil || owner.Claim == nil {
 		t.Fatalf("run owner acquisition: present=%v error=%v", owner.Claim != nil, err)
 	}
-	parent := storedBootstrapAuthorityW8(t, server.Store)
-	root, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &parent, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: expiry})
+	parent := server.Bootstrap
+	root, err := server.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &parent, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: expiry})
 	if err != nil {
 		t.Fatalf("provision launcher: %v", err)
 	}
@@ -66,7 +66,7 @@ func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*controller.E
 	return server, root
 }
 
-func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.CloudJobAward) {
+func storedCloudAwardW8(t *testing.T) (*storedEngineW8, launcher.CloudJobAward) {
 	t.Helper()
 	server, root := storedCloudClaimantW8(t)
 	cloud, err := storedRunnerClientW8(t.Context(), server, root.Raw)
@@ -95,10 +95,10 @@ func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.Cl
 	return server, launcher.CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: unit.CloudResources.Cores, Memory: unit.CloudResources.MemoryBytes, Source: projection}
 }
 
-func cloudStoreClientW8(t *testing.T, server *controller.EngineController) func(client.EngineOptions) (controllerwire.Controller, error) {
+func cloudStoreClientW8(t *testing.T, server *storedEngineW8) func(client.EngineOptions) (controllerwire.Controller, error) {
 	t.Helper()
 	return func(options client.EngineOptions) (controllerwire.Controller, error) {
-		handler := controller.New(server.Store, nil).WithEngineController(server).Handler()
+		handler := controller.New(server.Store, nil).WithEngineController(server.EngineController).Handler()
 		options.HTTP = &http.Client{Transport: surfaceTransport(func(request *http.Request) (*http.Response, error) {
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -132,7 +132,7 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 		if unit.Capability == string(award.Bootstrap) || unit.Delivery != capability.DeliveryDirect || unit.Binding.Attempt != 0 || unit.Runner.Name != "launcher" || unit.Runner.Type != "cloud" {
 			t.Fatal("Cloud exchange lost its awarded authority or identity")
 		}
-		principal, err := server.Store.LookupCapability(ctx, sha256.Sum256([]byte(unit.Capability)))
+		principal, err := server.Store.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(unit.Capability)))
 		if err != nil || principal.Capability.Issuance != capability.Exchange || !reflect.DeepEqual(principal.Capability.Parent, parent) {
 			t.Fatalf("Cloud ancestry: %v", err)
 		}

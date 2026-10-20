@@ -24,8 +24,7 @@ const (
 
 func secretArgRun(t *testing.T, f *browserFixture, private string, classified bool) store.AdmissionResult {
 	t.Helper()
-	f.st.SetIntakePolicy(receiptPolicy{})
-	principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
+	principal, err := f.st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,13 +66,13 @@ func assertRedactedResponse(t *testing.T, surface, body, private string, classif
 }
 
 func TestSecretArgs_ControllerListRunsRedacts(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	secretArgRun(t, f, ctlSecretValue, true)
 	assertRedactedResponse(t, "list", secretArgBody(t, f, "/api/v1/runs"), ctlSecretValue, true)
 }
 
 func TestSecretArgs_ControllerReceiptRedacts(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	admitted := secretArgRun(t, f, ctlSecretValue, true)
 	assertPrivateReceipt(t, secretArgBody(t, f, "/api/v1/runs/"+admitted.RunID+"/receipt"), ctlSecretValue)
 }
@@ -87,7 +86,7 @@ func assertPrivateReceipt(t *testing.T, body, private string) {
 }
 
 func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	w := f.serve(f.cookieRequest(http.MethodPost, "/api/v1/runs", `{"id":"old-writer","pipeline":"deploy","invocation":{"inputs_hash":"sha256:offline-oracle","args":{"token":"s3cr3t-token-value"}}}`))
 	var failure apierr.Envelope
 	if w.Code != http.StatusBadRequest || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error.Code != apierr.BadRequest || strings.Contains(w.Body.String(), ctlSecretValue) || strings.Contains(w.Body.String(), "offline-oracle") {
@@ -100,19 +99,19 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 }
 
 func TestSecretArgs_ControllerPipelineLatestRedacts(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	secretArgRun(t, f, ctlSecretValue, true)
 	assertRedactedResponse(t, "latest", secretArgBody(t, f, "/api/v1/pipelines/deploy/latest"), ctlSecretValue, true)
 }
 
 func TestSecretArgs_ControllerAttemptsRedacts(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	admitted := secretArgRun(t, f, ctlSecretValue, true)
 	assertRedactedResponse(t, "attempts", secretArgBody(t, f, "/api/v1/runs/"+admitted.RunID+"/attempts"), ctlSecretValue, true)
 }
 
 func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	admitted := secretArgRun(t, f, ctlSecretValue, true)
 	w := f.serve(f.cookieRequest(http.MethodPost, "/api/v1/runs/"+admitted.RunID+"/retry", `{"mode":"all","idempotency_key":"private-input-retry"}`))
 	var response controllerwire.CreateRunResponse
@@ -133,7 +132,7 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 }
 
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	admitted := secretArgRun(t, f, ctlSecretValue, true)
 	checkSecretArgViews(t, f, admitted.RunID, ctlSecretValue, true)
 }
@@ -155,7 +154,7 @@ func checkSecretArgViews(t *testing.T, f *browserFixture, run, private string, c
 
 func TestSecretArgsPublicReadsProperty(t *testing.T) {
 	property := func(value []byte, classified bool) bool {
-		f := newBrowserFixture(t, nil)
+		f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 		private := "private-argument-" + hex.EncodeToString(value)
 		admitted := secretArgRun(t, f, private, classified)
 		checkSecretArgViews(t, f, admitted.RunID, private, classified)

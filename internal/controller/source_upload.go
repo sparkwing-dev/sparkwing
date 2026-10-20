@@ -24,10 +24,10 @@ func (s *Server) sourceUploadEndpoints() []Endpoint {
 }
 
 func (s *Server) sourceUploadTenant(r *http.Request, a capability.Authorized) (*store.Tenant, error) {
-	if s.dataController == nil || s.dataController.Objects == nil || s.store == nil {
+	if s.dataController == nil || s.dataController.Objects == nil || s.operator == nil {
 		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "source upload requires shared object storage"}
 	}
-	return s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	return s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 }
 
 func (s *Server) handleSourceUpload(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

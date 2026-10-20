@@ -28,32 +28,8 @@ type ScheduleWriter interface {
 	DeleteAuthorizedSchedule(context.Context, capability.Authorized, string) (string, bool, error)
 }
 
-// WithScheduleWriter supplies tenant schedule transactions before Handler is constructed.
-func (s *Server) WithScheduleWriter(resolve func(context.Context, store.Team) (ScheduleWriter, error)) *Server {
-	s.resolveScheduleWriter = resolve
-	return s
-}
-
 func (s *Server) scheduleWriter(r *http.Request, a capability.Authorized) (ScheduleWriter, error) {
-	if a.Target.Team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var writer ScheduleWriter
-	var err error
-	if s.resolveScheduleWriter != nil {
-		writer, err = s.resolveScheduleWriter(r.Context(), store.Team(a.Target.Team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.reportingTenant(r, a)
-		writer = tenant
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if writer == nil || writer.Team() != store.Team(a.Target.Team) {
-		return nil, missingEndpointPolicy()
-	}
-	return writer, nil
+	return tenantPort[ScheduleWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) scheduleEndpoints() []Endpoint {

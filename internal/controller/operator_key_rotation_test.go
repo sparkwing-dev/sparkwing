@@ -50,17 +50,20 @@ func seal(t *testing.T, c *secrets.Cipher, purpose secrets.Purpose, team store.T
 	return v
 }
 
-func newKeyRotationFixture(t *testing.T, st *store.Store) *keyRotationFixture {
+func newKeyRotationFixture(t *testing.T, open func(*testing.T, ...store.Option) *store.Store) *keyRotationFixture {
 	t.Helper()
 	ctx := context.Background()
-	f := &keyRotationFixture{st: st, old: keyRotationCipher(t, 1), current: keyRotationCipher(t, 2, 1), next: keyRotationCipher(t, 2), stray: keyRotationCipher(t, 9)}
+	f := &keyRotationFixture{old: keyRotationCipher(t, 1), current: keyRotationCipher(t, 2, 1), next: keyRotationCipher(t, 2), stray: keyRotationCipher(t, 9)}
+	st := open(t, store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		return controller.New(st, nil).WithSecretsCipher(f.old).StorePolicies(), nil
+	}))
+	f.st = st
 	raw, _, err := teststore.ProvisionCredential(ctx, st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.operator = "Bearer " + raw
-	controller.New(st, nil).WithSecretsCipher(f.old)
-	if _, err := st.IdentityLinkStateKey(ctx); err != nil {
+	if _, err := st.AsOperator().IdentityLinkStateKey(ctx); err != nil {
 		t.Fatal(err)
 	}
 	alice, teamA := signUp(t, st, "alice")
@@ -150,10 +153,10 @@ func (f *keyRotationFixture) opensUnder(t *testing.T, c *secrets.Cipher) (secret
 func TestOperatorKeyRotationResealsEveryTenantUnderTheCurrentKey(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) *store.Store
+		open func(*testing.T, ...store.Option) *store.Store
 	}{{"sqlite", openSQLiteStore}, {"postgres", openPostgresStore}} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newKeyRotationFixture(t, tc.open(t))
+			f := newKeyRotationFixture(t, tc.open)
 			h := f.server(t, f.current)
 			if code, body := f.rotate(t, h, f.owner); code != http.StatusForbidden && code != http.StatusUnauthorized {
 				t.Fatalf("team owner rotated the deployment key: %d %v", code, body)

@@ -100,7 +100,7 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 		return err
 	}
 	if amount > 0 && refunded >= amount {
-		return closeRefundedQueueTx(ctx, tx, payment)
+		return tx.operator.closeRefundedQueueTx(ctx, tx, payment)
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO card_refunds (payment_mode,payment_intent, team, reason, amount_micro, created_at)
 	    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (payment_mode,team, payment_intent) DO NOTHING`,
@@ -111,7 +111,7 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 	if queued, err := res.RowsAffected(); err != nil || queued == 0 {
 		return err
 	}
-	return RecordBusinessEvent(tx, BusinessEvent{
+	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardRefundDue, SubjectID: payment, Actor: "payment_provider", At: now,
 		Attrs: map[string]any{"reason": reason, "amount_micro": amount},
 	})
@@ -156,7 +156,7 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
 		return err
 	}
-	return RecordBusinessEvent(tx, BusinessEvent{
+	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: freezeID,
 		Attrs: map[string]any{"payment_id": paymentIntent, "cause": HoldCauseWarning, "warning_id": warning},
 	})

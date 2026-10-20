@@ -77,7 +77,7 @@ func (s *Server) handleTeamStandingRequest(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleOperatorStandingRequests(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	ctx := r.Context()
-	open, err := s.store.OpenStandingRequests(ctx, standingQueueLimit)
+	open, err := s.operator.OpenStandingRequests(ctx, standingQueueLimit)
 	if err != nil {
 		return err
 	}

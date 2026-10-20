@@ -15,24 +15,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-type sealIntakePolicy struct{}
-
-func (sealIntakePolicy) ResolveIntake(ctx context.Context, reader capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
-	_, err := reader.ResolveAuthority(ctx, request.Authority)
-	return store.IntakePolicyFacts{Options: &request.Request.Options, LogRetentionClass: "r30", LogRetentionDays: 30}, err
-}
-
 func checkStorePlanSeals(t *testing.T) (err error) {
 	ctx := t.Context()
 	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
+	s, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
@@ -59,7 +51,7 @@ func checkStorePlanSeals(t *testing.T) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := target.TryOpen()
+	reopened, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
@@ -97,27 +89,20 @@ func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, s
 }
 
 func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
-	s.SetIntakePolicy(sealIntakePolicy{})
-	s.SetClaimProfileResolver(acceptanceClaimProfile{})
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		return nil, store.PlanAcceptance{}, err
-	}
-	s.SetSessionKeyCipher(cipher)
-	member, err := s.ResolveSignIn(ctx, googleProfile("planner", "planner@example.test"), store.SignUpConditions{}, time.Now())
+	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile("planner", "planner@example.test"), store.SignUpConditions{}, time.Now())
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
 	if member.PersonalTeam != acceptanceTeam {
 		return nil, store.PlanAcceptance{}, fmt.Errorf("planner team: %s", member.PersonalTeam)
 	}
-	raw, _, _, err := s.CreateAccountSession(ctx, member.Account, acceptanceTeam, time.Hour)
+	raw, _, _, err := s.AsOperator().CreateAccountSession(ctx, member.Account, acceptanceTeam, time.Hour)
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{
+	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{
 		Kind: capability.ProvisionMachine, Authority: &authority, Team: string(acceptanceTeam),
 		RegistrationID: "runner:planner:host", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"},
@@ -140,7 +125,7 @@ func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure fun
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	claim, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: parent.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 8}})
+	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: parent.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
@@ -200,7 +185,7 @@ func (acceptanceClaimProfile) ResolveClaimProfile(context.Context, capability.Pr
 func acceptanceAttempt(attempt int64) *int64 { return &attempt }
 
 func TestStorePlanInsertionLimitUsesCanonicalRefusal(t *testing.T) {
-	s := storetest.Open(t)
+	s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 	tenant, request, err := storePlanSealRequest(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
@@ -230,4 +215,12 @@ func TestStorePlanInsertionLimitUsesCanonicalRefusal(t *testing.T) {
 	if err != nil || !replay.Replayed {
 		t.Fatalf("accepted replay met the lowered ceiling: %+v %v", replay, err)
 	}
+}
+
+func sealStorePolicies(*store.Store) (store.Policies, error) {
+	return store.Policies{ClaimProfiles: acceptanceClaimProfile{}}, nil
+}
+
+func fixturePolicies(policies store.Policies) store.Option {
+	return store.WithPolicies(func(*store.Store) (store.Policies, error) { return policies, nil })
 }

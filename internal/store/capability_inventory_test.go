@@ -18,7 +18,7 @@ import (
 
 func inventoryAuthorization(t *testing.T, s *Store, actor Actor, team, prefix string) capability.Authorized {
 	t.Helper()
-	p, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,11 +220,11 @@ func TestCapabilityInventoryDeploymentIsolation(t *testing.T) {
 
 func inventoryMemberRoot(t *testing.T, s *Store, actor Actor) capability.Issued {
 	t.Helper()
-	p, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &actor.Authority, Team: p.Capability.Team, Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &actor.Authority, Team: p.Capability.Team, Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestCapabilityRotationMemberAndDelegatedAncestry(t *testing.T) {
 			old := root
 			if delegated {
 				var err error
-				old, err = s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Audience: capability.Controller, Binding: root.Capability.Binding, Grants: root.Capability.Grants})
+				old, err = s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Audience: capability.Controller, Binding: root.Capability.Binding, Grants: root.Capability.Grants})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -256,7 +256,7 @@ func TestCapabilityRotationMemberAndDelegatedAncestry(t *testing.T) {
 				t.Fatalf("changed scope or ancestry: %+v -> %+v", old.Capability, next)
 			}
 			for _, digest := range [][32]byte{old.Capability.Digest, next.Digest} {
-				if _, err := s.LookupCapability(t.Context(), digest); err != nil {
+				if _, err := s.AsOperator().LookupCapability(t.Context(), digest); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -267,10 +267,10 @@ func TestCapabilityRotationMemberAndDelegatedAncestry(t *testing.T) {
 			if err := tenant.RevokeAuthority(t.Context(), actor, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.LookupCapability(t.Context(), old.Capability.Digest); err == nil {
+			if _, err := s.AsOperator().LookupCapability(t.Context(), old.Capability.Digest); err == nil {
 				t.Fatal("explicit revocation did not end grace")
 			}
-			if _, err := s.LookupCapability(t.Context(), next.Digest); err != nil {
+			if _, err := s.AsOperator().LookupCapability(t.Context(), next.Digest); err != nil {
 				t.Fatalf("predecessor revoke ended replacement: %v", err)
 			}
 		})
@@ -290,7 +290,7 @@ func TestCapabilityRotationBearerAndRollback(t *testing.T) {
 		t.Fatalf("rollback exposed replacement: %+v %v", rotation, err)
 	}
 	rewriteSchemaCount(t, s.db, "capabilities", 1)
-	if _, err := s.LookupCapability(t.Context(), old.Capability.Digest); err != nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), old.Capability.Digest); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_rotation`)
@@ -298,10 +298,10 @@ func TestCapabilityRotationBearerAndRollback(t *testing.T) {
 	if err != nil || rotation.Issued.Raw == "" {
 		t.Fatalf("bearer rotation: %+v %v", rotation, err)
 	}
-	if _, err := s.LookupCapability(t.Context(), old.Capability.Digest); err == nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), old.Capability.Digest); err == nil {
 		t.Fatal("zero grace did not revoke")
 	}
-	if _, err := s.LookupCapability(t.Context(), rotation.Issued.Capability.Digest); err != nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), rotation.Issued.Capability.Digest); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -353,7 +353,7 @@ func TestCapabilityRotationRegisteredOrigins(t *testing.T) {
 	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, spec := provisionOrigin(t, kind)
-			old, err := s.ProvisionCapability(t.Context(), spec)
+			old, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -370,7 +370,7 @@ func TestCapabilityRotationRegisteredOrigins(t *testing.T) {
 			}
 			var origin *CapabilityOrigin
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				record, err := loadCapabilityRecordTx(t.Context(), tx, rotation.Issued.Capability.Prefix)
+				record, err := tx.operator.loadCapabilityRecordTx(t.Context(), tx, rotation.Issued.Capability.Prefix)
 				origin = record.Origin
 				return err
 			}); err != nil {
@@ -400,7 +400,7 @@ func TestCapabilityRotationDeadlinesAndAncestryProperty(t *testing.T) {
 	for i := range 24 {
 		start := now
 		old := inventoryMemberRoot(t, s, actor)
-		child, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}, Audience: capability.Controller, Grants: old.Capability.Grants, Binding: old.Capability.Binding})
+		child, err := s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}, Audience: capability.Controller, Grants: old.Capability.Grants, Binding: old.Capability.Binding})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -410,14 +410,14 @@ func TestCapabilityRotationDeadlinesAndAncestryProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}); err != nil {
+		if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}); err != nil {
 			t.Fatalf("rotation ended predecessor before grace: %v", err)
 		}
 		end := start.Add(grace)
 		for _, at := range []time.Time{start, end.Add(-time.Nanosecond), end, end.Add(time.Nanosecond)} {
 			now = at
 			for _, c := range []capability.Capability{old.Capability, child.Capability, rotation.Issued.Capability} {
-				_, err := s.LookupCapability(t.Context(), c.Digest)
+				_, err := s.AsOperator().LookupCapability(t.Context(), c.Digest)
 				want := c.Prefix == rotation.Issued.Capability.Prefix || at.Before(end)
 				if (err == nil) != want {
 					t.Fatalf("case %d at %s old=%t: %v", i, at, c.Prefix == old.Capability.Prefix, err)
@@ -431,7 +431,7 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 	for _, problem := range []string{"parent_expiry", "registration", "missing_origin"} {
 		t.Run(problem, func(t *testing.T) {
 			s, spec := provisionOrigin(t, capability.ProvisionMachine)
-			old, err := s.ProvisionCapability(t.Context(), spec)
+			old, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -439,7 +439,7 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 			tenant := &Tenant{s: s, team: "a"}
 			expires := new(s.now().Add(2 * time.Hour))
 			if problem == "parent_expiry" {
-				old, err = s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}, Audience: capability.Controller, Grants: old.Capability.Grants, Binding: old.Capability.Binding, ExpiresAt: old.Capability.ExpiresAt, Repositories: old.Capability.Repositories})
+				old, err = s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}, Audience: capability.Controller, Grants: old.Capability.Grants, Binding: old.Capability.Binding, ExpiresAt: old.Capability.ExpiresAt, Repositories: old.Capability.Repositories})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -448,7 +448,7 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 			}
 			if problem == "missing_origin" || problem == "registration" {
 				if err := s.inTx(t.Context(), func(tx *storeTx) error {
-					record, err := loadCapabilityRecordTx(t.Context(), tx, old.Capability.Prefix)
+					record, err := tx.operator.loadCapabilityRecordTx(t.Context(), tx, old.Capability.Prefix)
 					if err != nil {
 						return err
 					}
@@ -480,7 +480,7 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 				t.Fatalf("invalid rotation: %+v %v", rotation, err)
 			}
 			rewriteSchemaCount(t, s.db, "capabilities", before)
-			if _, err := s.LookupCapability(t.Context(), old.Capability.Digest); err != nil {
+			if _, err := s.AsOperator().LookupCapability(t.Context(), old.Capability.Digest); err != nil {
 				t.Fatalf("failure ended original: %v", err)
 			}
 		})
@@ -500,7 +500,7 @@ func TestCapabilityRotationAdministratorCannotRotateMemberToken(t *testing.T) {
 		t.Fatalf("admin rotated a member token: %+v %v", rotation, err)
 	}
 	rewriteSchemaCount(t, s.db, "capabilities", 1)
-	if _, err := s.LookupCapability(t.Context(), old.Capability.Digest); err != nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), old.Capability.Digest); err != nil {
 		t.Fatalf("refused rotation ended the member token: %v", err)
 	}
 	if err := tenant.RevokeAuthority(t.Context(), owner, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}); err != nil {
@@ -576,7 +576,7 @@ func TestCapabilityRotationCompetingTransactions(t *testing.T) {
 				t.Fatalf("rotations=%d successes=%d revoke=%t", rotations, successes, revoke)
 			}
 			rewriteSchemaCount(t, s.db, "capabilities", 1+rotations)
-			_, err = s.LookupCapability(t.Context(), old.Capability.Digest)
+			_, err = s.AsOperator().LookupCapability(t.Context(), old.Capability.Digest)
 			if revoke && err == nil {
 				t.Fatal("competing rotation undid explicit revocation")
 			}
@@ -592,7 +592,7 @@ func TestCapabilityRotationRetainsMeteredMachine(t *testing.T) {
 	authorityPersist(t, s, operator)
 	spec.Authority = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}
 	spec.Metered = true
-	old, err := s.ProvisionCapability(t.Context(), spec)
+	old, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -621,12 +621,12 @@ func TestCapabilityRevocationRefusesAlreadyEnded(t *testing.T) {
 func TestCapabilityRotationBearerCannotExtendExpiry(t *testing.T) {
 	s := authorityStore(t)
 	member := authorityMember(t, s, "member", RoleEditor)
-	p, err := s.ResolveAuthority(t.Context(), member.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), member.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	expiry := s.now().Add(time.Hour).Truncate(time.Second)
-	old, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
+	old, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,12 +656,12 @@ func TestCapabilityRotationBearerCannotExtendExpiry(t *testing.T) {
 func TestCapabilityRotationSessionMayExtendExpiry(t *testing.T) {
 	s := authorityStore(t)
 	member := authorityMember(t, s, "member", RoleEditor)
-	p, err := s.ResolveAuthority(t.Context(), member.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), member.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	expiry := s.now().Add(time.Hour).Truncate(time.Second)
-	old, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
+	old, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,11 +674,11 @@ func TestCapabilityRotationSessionMayExtendExpiry(t *testing.T) {
 
 func adminRotationToken(t *testing.T, s *Store, owner Actor, expiry time.Time) capability.Issued {
 	t.Helper()
-	p, err := s.ResolveAuthority(t.Context(), owner.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), owner.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &owner.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, ExpiresAt: &expiry})
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &owner.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,7 +695,7 @@ func TestCapabilityRotationBearersNeverExtendExpiry(t *testing.T) {
 			var caller capability.Issued
 			if shape == "child rotates parent" {
 				var err error
-				caller, err = s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: target.Capability.Prefix}, Audience: capability.Controller, Binding: target.Capability.Binding, Grants: target.Capability.Grants, ExpiresAt: &hour})
+				caller, err = s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: target.Capability.Prefix}, Audience: capability.Controller, Binding: target.Capability.Binding, Grants: target.Capability.Grants, ExpiresAt: &hour})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -38,7 +38,7 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 		if generation != claim.Award.Generation {
 			return holderRefusal()
 		}
-		row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
+		row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
 		if err != nil {
 			return err
 		}

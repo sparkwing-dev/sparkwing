@@ -17,27 +17,20 @@ type SessionKeyCipher interface {
 	OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
 
-// SetSessionKeyCipher configures key protection before the store serves sessions.
-func (s *Store) SetSessionKeyCipher(cipher SessionKeyCipher) {
-	s.csrfKeyMu.Lock()
-	defer s.csrfKeyMu.Unlock()
-	s.csrfCipher, s.csrfKey = cipher, nil
-}
-
-func (s *Store) csrfSigningKey(ctx context.Context) ([]byte, error) {
-	s.csrfKeyMu.Lock()
-	defer s.csrfKeyMu.Unlock()
-	if s.csrfCipher == nil {
+func (o *Operator) csrfSigningKey(ctx context.Context) ([]byte, error) {
+	o.s.csrfKeyMu.Lock()
+	defer o.s.csrfKeyMu.Unlock()
+	if o.s.csrfCipher == nil {
 		return nil, errors.New("sessions: key cipher is unavailable")
 	}
-	if len(s.csrfKey) > 0 {
-		return s.csrfKey, nil
+	if len(o.s.csrfKey) > 0 {
+		return o.s.csrfKey, nil
 	}
 	var envelope string
 	var sealed int
-	err := s.queryRow(ctx, `SELECT value,sealed FROM settings WHERE key=?`, metaKeySessionCSRFKey).Scan(&envelope, &sealed)
+	err := o.s.queryRow(ctx, `SELECT value,sealed FROM settings WHERE key=?`, metaKeySessionCSRFKey).Scan(&envelope, &sealed)
 	if errors.Is(err, sql.ErrNoRows) {
-		envelope, err = s.mintCSRFKey(ctx)
+		envelope, err = o.mintCSRFKey(ctx)
 		sealed = 1
 	}
 	if err != nil {
@@ -46,7 +39,7 @@ func (s *Store) csrfSigningKey(ctx context.Context) ([]byte, error) {
 	if sealed != 1 {
 		return nil, errors.New("sessions: signing key is not sealed")
 	}
-	plain, err := s.csrfCipher.OpenBound(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, envelope)
+	plain, err := o.s.csrfCipher.OpenBound(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, envelope)
 	if err != nil {
 		return nil, err
 	}
@@ -54,20 +47,20 @@ func (s *Store) csrfSigningKey(ctx context.Context) ([]byte, error) {
 	if err != nil || len(key) != sha256.Size {
 		return nil, errors.New("sessions: malformed csrf key")
 	}
-	s.csrfKey = key
+	o.s.csrfKey = key
 	return key, nil
 }
 
-func (s *Store) mintCSRFKey(ctx context.Context) (string, error) {
+func (o *Operator) mintCSRFKey(ctx context.Context) (string, error) {
 	minted := make([]byte, sha256.Size)
 	if _, err := rand.Read(minted); err != nil {
 		return "", err
 	}
-	envelope, err := s.csrfCipher.SealBound(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, hex.EncodeToString(minted))
+	envelope, err := o.s.csrfCipher.SealBound(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, hex.EncodeToString(minted))
 	if err != nil {
 		return "", err
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return "", err
 	}

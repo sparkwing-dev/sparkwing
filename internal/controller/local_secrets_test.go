@@ -42,7 +42,7 @@ func FuzzRequesterLocalSecretNeverPersistsOrFallsBackOnAnotherProcess(f *testing
 func requesterLocalSecretRelease(t *testing.T, value string) {
 	t.Helper()
 	s, options, input, _ := sourceUploadFixture(t)
-	s.WithEngineController(&EngineController{Store: s.store, RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
+	s.WithEngineController(NewEngineController(s.store, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })}))
 	options.HTTP = &http.Client{Transport: inventoryRoundTrip{s.Handler()}}
 	input.LocalSecretNames = []string{"TOKEN"}
 	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
@@ -203,12 +203,13 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 			t.Fatalf("requester secret reached SQLite%s: %v", suffix, err)
 		}
 	}
-	other, err := teststore.OpenExisting(databasePath)
+	fixture := &serverFixture{}
+	other, err := teststore.OpenExisting(databasePath, fixture.option(s.deployment, func(server *Server) { server.WithSecretsCipher(s.secretsCipher) }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer other.Close()
-	otherServer := New(other, nil).WithSecretsCipher(s.secretsCipher).WithEngineController(&EngineController{Store: other})
+	otherServer := fixture.Server.WithEngineController(NewEngineController(other, EngineController{}))
 	otherTenant, err := other.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +285,7 @@ func FuzzHTTPIntakeReplayValidatesPrivateInputs(f *testing.F) {
 func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 	t.Helper()
 	s, _, input, bearer := sourceUploadFixture(t)
-	s.WithEngineController(&EngineController{Store: s.store, RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
+	s.WithEngineController(NewEngineController(s.store, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })}))
 	input.LocalSecretNames = []string{"SIGNING_MATERIAL"}
 	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 	input.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}}}
@@ -324,12 +325,13 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 	if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &database, &path); err != nil {
 		t.Fatal(err)
 	}
-	other, err := teststore.OpenExisting(path)
+	fixture := &serverFixture{}
+	other, err := teststore.OpenExisting(path, fixture.option(s.deployment, func(server *Server) { server.WithSecretsCipher(s.secretsCipher) }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer other.Close()
-	server := New(other, nil).WithSecretsCipher(s.secretsCipher).WithEngineController(&EngineController{Store: other})
+	server := fixture.Server.WithEngineController(NewEngineController(other, EngineController{}))
 	send(server.Handler(), request, http.StatusServiceUnavailable)
 	send(server.Handler(), request, http.StatusServiceUnavailable)
 }

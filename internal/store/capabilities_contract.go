@@ -93,6 +93,9 @@ func (r CapabilityRecord) Validate() error {
 		if !ok || p.Unit != c.Unit || c.UnitID == "" || c.Parent == nil || c.Team == "" || c.Billing == nil {
 			return authorityError(apierr.IntegrityFailure, "invalid award identity")
 		}
+		if _, err := decodeAwardUnit(c.Unit, c.UnitID); err != nil {
+			return authorityError(apierr.IntegrityFailure, "invalid persisted award unit identity")
+		}
 		if c.Delivery != capability.DeliveryDirect && c.Delivery != capability.DeliveryBootstrap {
 			return authorityError(apierr.IntegrityFailure, "invalid award delivery")
 		}
@@ -112,6 +115,11 @@ func (r CapabilityRecord) Validate() error {
 		}
 	}
 	return nil
+}
+
+func isIntegrityError(err error) bool {
+	var integrity *apierr.Error
+	return errors.As(err, &integrity) && integrity.Code == apierr.IntegrityFailure
 }
 
 func authorityError(code apierr.Code, message string) error {
@@ -204,7 +212,7 @@ func authorityProjection(c capability.Capability) ([]any, error) {
 	return []any{c.Prefix, optionalString(c.Team), string(c.Subject.Kind), c.Subject.ID, string(c.Audience), grants, string(c.Issuance), int64(1), parentKind, parentID, optionalString(string(c.Purpose)), optionalString(string(c.Delivery)), optionalString(c.UnitID), billingUnit, string(c.Binding.Kind), optionalString(c.Binding.RunID), optionalString(c.Binding.NodeID), generation, optionalString(c.Binding.Holder), optionalTime(c.Binding.ClaimBy), pools, c.IssuedAt.UnixNano(), optionalTime(c.ExpiresAt), optionalTime(c.RevokedAt), metered, payer, executor, reservation, start, optionalString(string(c.Unit)), expansion, repo, repos, ref, sha}, nil
 }
 
-func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, origin ...*CapabilityOrigin) error {
+func (op *Operator) persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, origin ...*CapabilityOrigin) error {
 	record := CapabilityRecord{Version: 1, Value: c}
 	if len(origin) > 0 {
 		record.Origin = origin[0]
@@ -234,11 +242,11 @@ func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capabili
 
 // safety: indexed columns may accelerate lookup but cannot add authority to the envelope.
 func loadCapabilityTx(ctx context.Context, tx *storeTx, prefix string) (capability.Capability, error) {
-	record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
 	return record.Value, err
 }
 
-func loadCapabilityRecordTx(ctx context.Context, tx *storeTx, prefix string) (CapabilityRecord, error) {
+func (op *Operator) loadCapabilityRecordTx(ctx context.Context, tx *storeTx, prefix string) (CapabilityRecord, error) {
 	var digest string
 	var body []byte
 	actual := make([]any, len(authorityColumns))
@@ -292,14 +300,14 @@ type authorityNode struct {
 	requirement *authorityRequirement
 }
 
-func readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, sessionTeam ...string) (authorityNode, error) {
+func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, sessionTeam ...string) (authorityNode, error) {
 	if !validAuthorityRef(ref) {
 		return authorityNode{}, authorityError(apierr.Unauthenticated, "invalid authority reference")
 	}
 	node := authorityNode{principal: capability.Principal{Authority: ref}}
 	if ref.Kind == capability.AuthorityCapability {
 
-		record, err := loadCapabilityRecordTx(ctx, tx, ref.ID)
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, ref.ID)
 		if err != nil {
 			return node, err
 		}
@@ -346,13 +354,13 @@ func readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.Author
 	return node, nil
 }
 
-func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, sessionTeam ...string) (authorityNode, error) {
+func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, sessionTeam ...string) (authorityNode, error) {
 	if lock {
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}); err != nil {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}); err != nil {
 			return authorityNode{}, err
 		}
 	}
-	node, err := readAuthorityNodeTx(ctx, tx, ref, sessionTeam...)
+	node, err := tx.operator.readAuthorityNodeTx(ctx, tx, ref, sessionTeam...)
 	if err != nil {
 		return node, err
 	}
@@ -412,7 +420,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 		if _, err := authorityChainTx(ctx, tx, ref, false); err != nil {
 			return nil, err
 		}
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, writes...); err != nil {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, writes...); err != nil {
 			return nil, err
 		}
 	}
@@ -423,7 +431,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
-		node, err := readAuthorityTx(ctx, tx, ref, false, ancestrySessionTeam(ref, chain)...)
+		node, err := tx.operator.readAuthorityTx(ctx, tx, ref, false, ancestrySessionTeam(ref, chain)...)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
 		}
@@ -468,7 +476,7 @@ func discoverAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.A
 			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
-		node, err := readAuthorityNodeTx(ctx, tx, ref, ancestrySessionTeam(ref, chain)...)
+		node, err := tx.operator.readAuthorityNodeTx(ctx, tx, ref, ancestrySessionTeam(ref, chain)...)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
 		}
@@ -512,7 +520,7 @@ func ancestrySessionTeam(ref capability.AuthorityRef, chain []authorityNode) []s
 	return nil
 }
 
-func lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.AuthorityRef, writes ...string) error {
+func (op *Operator) lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.AuthorityRef, writes ...string) error {
 	return acquireLockSet(ctx, tx, func() lockSet {
 		return discoverAuthorityLocks(ctx, tx, leaves, writes...)
 	})
@@ -543,7 +551,7 @@ func resolveActorTx(ctx context.Context, tx *storeTx, actor Actor) (capability.P
 // RevokeAuthority revokes a member's own authority or a tenant administrator's target.
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority, target}, target.ID); err != nil {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority, target}, target.ID); err != nil {
 			return err
 		}
 		p, err := resolveActorTx(ctx, tx, actor)
@@ -553,7 +561,7 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 		if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone {
 			return authorityError(apierr.Forbidden, "revocation requires unbound tenant authority")
 		}
-		targetNode, err := readAuthorityTx(ctx, tx, target, true)
+		targetNode, err := tx.operator.readAuthorityTx(ctx, tx, target, true)
 		if err != nil {
 			return err
 		}
@@ -571,7 +579,7 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 				return err
 			}
 		}
-		if err := revokeAuthorityTx(ctx, tx, target); err != nil {
+		if err := tx.operator.revokeAuthorityTx(ctx, tx, target); err != nil {
 			return err
 		}
 		return nil
@@ -581,7 +589,7 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 // RevokeAuthority limits deployment revocation to service and operator roots.
 func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority, target}, target.ID); err != nil {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority, target}, target.ID); err != nil {
 			return err
 		}
 		p, err := resolveActorTx(ctx, tx, actor)
@@ -591,7 +599,7 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capa
 		if !(capability.DeploymentAuthority(p) && slices.Contains(p.Capability.Grants, capability.OperatorTokens)) && !(p.Class == capability.CredentialConsole && slices.Contains(p.Capability.Grants, capability.OperatorConsole)) {
 			return authorityError(apierr.Forbidden, "deployment token authority is required")
 		}
-		node, err := readAuthorityTx(ctx, tx, target, true)
+		node, err := tx.operator.readAuthorityTx(ctx, tx, target, true)
 		if err != nil {
 			return err
 		}
@@ -599,14 +607,14 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capa
 		if target.Kind != capability.AuthorityCapability || c.Parent != nil || c.Team != "" || (c.Subject.Kind != capability.SubjectService && c.Subject.Kind != capability.SubjectOperator) {
 			return authorityError(apierr.Forbidden, "target is not a deployment root")
 		}
-		if err := revokeAuthorityTx(ctx, tx, target); err != nil {
+		if err := tx.operator.revokeAuthorityTx(ctx, tx, target); err != nil {
 			return err
 		}
 		return nil
 	})
 }
 
-func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) error {
+func (op *Operator) revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) error {
 	if err := acquireLockSet(ctx, tx, func() lockSet {
 		return discoverAuthorityWrite(ctx, tx, lockSet{}, ref)
 	}); err != nil {
@@ -614,7 +622,7 @@ func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.Authorit
 	}
 	now := tx.now()
 	if ref.Kind == capability.AuthorityCapability {
-		record, err := loadCapabilityRecordTx(ctx, tx, ref.ID)
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, ref.ID)
 		if err != nil {
 			return err
 		}

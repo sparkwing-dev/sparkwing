@@ -107,7 +107,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	initializeScheduleCheckout(t, checkout)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	service := &crons.Service{Store: st, Schedules: tenant, Side: store.CronWhereLocal, PinRoot: filepath.Join(home, "crons"), LockPath: filepath.Join(home, "crons.lock"), Now: func() time.Time { return now }, ArmedBy: "local:0", Host: "fixture", Version: "fixture"}
+	service := &crons.Service{Operator: st.AsOperator(), Schedules: tenant, Side: store.CronWhereLocal, PinRoot: filepath.Join(home, "crons"), LockPath: filepath.Join(home, "crons.lock"), Now: func() time.Time { return now }, ArmedBy: "local:0", Host: "fixture", Version: "fixture"}
 	compiled := filepath.Join(t.TempDir(), "pipeline")
 	if err := os.WriteFile(compiled, []byte("proof"), 0o700); err != nil {
 		t.Fatal(err)
@@ -306,7 +306,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	}
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	clock.pin(func() time.Time { return now })
-	service := &crons.Service{Store: st, Schedules: tenant, Side: store.CronWhereLocal, PinRoot: filepath.Join(home, "crons"), LockPath: filepath.Join(home, "crons.lock"), Now: func() time.Time { return now }, Host: "native", Version: "test"}
+	service := &crons.Service{Operator: st.AsOperator(), Schedules: tenant, Side: store.CronWhereLocal, PinRoot: filepath.Join(home, "crons"), LockPath: filepath.Join(home, "crons.lock"), Now: func() time.Time { return now }, Host: "native", Version: "test"}
 	snapshots := &localScheduleSnapshots{values: map[runspec.Hash][]string{}}
 	server := New(st, nil).WithLocalSchedules(service, func(context.Context, string, string, []string) (crons.Proof, error) {
 		t.Fatal("follow registration unexpectedly compiled")

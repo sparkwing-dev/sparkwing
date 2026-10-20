@@ -115,8 +115,8 @@ func (f *credentialInventory) GitCredentials(context.Context) ([]store.GitCreden
 
 func inventoryServer(t testing.TB, b *credentialBoundary, f *credentialInventory) *controller.Server {
 	t.Helper()
-	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).
-		WithCredentialInventoryReader(func(_ context.Context, team store.Team) (controller.CredentialInventoryReader, error) {
+	return bindTenantPort[controller.CredentialInventoryReader](controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)),
+		func(_ context.Context, team store.Team) (controller.CredentialInventoryReader, error) {
 			f.resolves++
 			if team != "team" {
 				t.Fatalf("resolved foreign tenant %q", team)
@@ -293,7 +293,7 @@ func TestCredentialInventoryHTTPFailuresArePrivate(t *testing.T) {
 				}
 				s := inventoryServer(t, b, f)
 				if failure == "missing dependency" {
-					s.WithCredentialInventoryReader(nil)
+					bindTenantPort[controller.CredentialInventoryReader](s, nil)
 				}
 				w := authorityHTTP(s.Handler(), b, method, path, "")
 				assertEngineError(t, w, apierr.Status(code), code)

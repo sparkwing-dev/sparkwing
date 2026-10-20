@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -9,12 +10,20 @@ import (
 )
 
 // CloudAwardResources reads Cloud's committed allocation or a self-hosted pool's sealed resource pins.
-func (s *Store) CloudAwardResources(ctx context.Context, ref capability.AuthorityRef) (*match.Resources, error) {
-	tx, err := s.beginSnapshotReadTx(ctx)
+func (o *Operator) CloudAwardResources(ctx context.Context, ref capability.AuthorityRef) (*match.Resources, error) {
+	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
+	resources, err := cloudAwardResourcesTx(ctx, tx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return resources, tx.Commit()
+}
+
+func cloudAwardResourcesTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) (*match.Resources, error) {
 	chain, err := authorityChainTx(ctx, tx, ref, false)
 	if err != nil {
 		return nil, err
@@ -30,18 +39,18 @@ func (s *Store) CloudAwardResources(ctx context.Context, ref capability.Authorit
 			return nil, err
 		}
 		allocation := matchingResources(resources)
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
 		return &allocation, nil
 	}
 	if c.Billing == nil || c.Billing.ExecutorClass != TierCloud {
-		return nil, tx.Commit()
+		return nil, nil
 	}
 	if !c.Billing.Metered {
 		return nil, authorityError(apierr.IntegrityFailure, "Cloud award has no metered allocation")
 	}
 	award, err := readBillingAwardTx(ctx, tx, Team(c.Team), c.Billing.ReservationID)
+	if errors.Is(err, ErrNotFound) {
+		err = authorityError(apierr.IntegrityFailure, "Cloud award has no billing record")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -59,9 +68,6 @@ func (s *Store) CloudAwardResources(ctx context.Context, ref capability.Authorit
 	memory := CPUClassMemoryBytes(class)
 	if class <= 0 || memory <= 0 {
 		return nil, authorityError(apierr.IntegrityFailure, "Cloud allocation has no priced resources")
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	return &match.Resources{Cores: float64(class), MemoryBytes: memory}, nil
 }

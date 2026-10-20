@@ -18,7 +18,7 @@ import (
 
 type launcherSyncFunc func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 
-func (f launcherSyncFunc) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
+func (f launcherSyncFunc) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation, _ []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error) {
 	return f(ctx, ref, observed)
 }
 
@@ -30,9 +30,9 @@ func TestEngineLauncherSyncNativeFenceProperty(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	e.Store.SetClaimProfileResolver(engineProfileFake{})
+	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"],"available_cores":1}`, 200)
 	var claim controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &claim); err != nil || claim.Claim == nil {
@@ -88,7 +88,7 @@ func btoi(value bool) int {
 func TestEngineLauncherSyncHTTPUsesAuthenticatedRootAndNeverDeliversBearer(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	body := `{"observed":[{"award":{"kind":"node","id":"unit","holder":"launcher","generation":1}}]}`
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/launcher/sync", body, 401)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", body, 200)
@@ -127,4 +127,28 @@ func FuzzEngineLauncherSyncOmitsBearer(f *testing.F) {
 			t.Fatal("sync leaked bearer material or mutated the stored snapshot")
 		}
 	})
+}
+
+type launcherAwardSnapshot []store.LauncherAward
+
+func (s launcherAwardSnapshot) ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef) ([]store.LauncherAward, []store.LauncherPreparation, error) {
+	return s, nil, nil
+}
+
+func TestLauncherCleanupRequiresPositiveAbsence(t *testing.T) {
+	observed := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 1}}
+	for _, gone := range []bool{false, true} {
+		var snapshot launcherAwardSnapshot
+		if gone {
+			snapshot = append(snapshot, store.LauncherAward{Fence: observed.Award, Gone: true})
+		}
+		reader := storeLauncherSync{store: snapshot}
+		response, err := reader.ReadLauncherSync(t.Context(), capability.AuthorityRef{}, []controllerwire.LauncherObservation{observed}, nil)
+		if err != nil || len(response.Awards) != 0 || len(response.Retired) != btoi(gone) || len(response.Deferred) != btoi(!gone) {
+			t.Fatalf("gone=%v: %+v, %v", gone, response, err)
+		}
+		if !gone && response.Deferred[0] != observed.Award {
+			t.Fatal("deferred another fence")
+		}
+	}
 }

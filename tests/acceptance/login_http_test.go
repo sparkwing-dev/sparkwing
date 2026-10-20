@@ -24,7 +24,7 @@ func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
 	t.Helper()
 	digest := sha256.Sum256([]byte(f.raw))
 	origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := f.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+	issued, err := f.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 		Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &origin, Team: "team",
 		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
@@ -68,7 +68,7 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	if w.Header().Get("X-Request-Id") == "" || !strings.Contains(f.logs.String(), "route=/login") || !strings.Contains(f.logs.String(), "principal_id=member") {
 		t.Fatalf("sign-in audit: %s", f.logs.String())
 	}
-	session, err := f.store.LookupSession(t.Context(), raw)
+	session, err := f.store.AsOperator().LookupSession(t.Context(), raw)
 	if err != nil || session.AccountID != "member" || session.CapabilityPrefix != root.Capability.Prefix || session.Team != "team" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
@@ -94,7 +94,7 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 			t.Fatal("plaintext CSRF column survives")
 		}
 	}
-	if _, err := f.store.LookupSession(t.Context(), f.raw); err != nil {
+	if _, err := f.store.AsOperator().LookupSession(t.Context(), f.raw); err != nil {
 		t.Fatalf("sign-in ended its minting session: %v", err)
 	}
 	r = httptest.NewRequest("GET", "https://controller.test/api/v1/auth/whoami", nil)
@@ -162,7 +162,7 @@ func TestLoginHTTPRefusesDataScopeProperty(t *testing.T) {
 	b := newCredentialBoundary()
 	b.raw = root.Raw
 	var err error
-	b.snapshot, err = f.store.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte(root.Raw))}, capability.RequestEvidence{})
+	b.snapshot, err = f.store.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte(root.Raw))}, capability.RequestEvidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,17 +244,20 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 			switch state {
 			case "unknown":
 				r = loginRequest("swk_"+strings.Repeat("a", 43), "browser-proof", "/")
-			case "machine", "operator":
-				spec := acceptanceBootstrapSpec()
-				if state == "machine" {
-					if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
-						t.Fatal(err)
-					}
-					digest := sha256.Sum256([]byte(f.raw))
-					origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-					spec = capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, Team: "team", Repositories: []string{"github.com/acme/*"}, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}, RegistrationID: "runner:team:runner"}
+			case "operator":
+				raw, _, err := teststore.ProvisionCredential(t.Context(), f.store, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap})
+				if err != nil {
+					t.Fatal(err)
 				}
-				issued, err := f.store.ProvisionCapability(t.Context(), spec)
+				r, code = loginRequest(raw, "browser-proof", "/"), apierr.Forbidden
+			case "machine":
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+					t.Fatal(err)
+				}
+				digest := sha256.Sum256([]byte(f.raw))
+				origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+				spec := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, Team: "team", Repositories: []string{"github.com/acme/*"}, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}, RegistrationID: "runner:team:runner"}
+				issued, err := f.store.AsOperator().ProvisionCapability(t.Context(), spec)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -337,7 +340,7 @@ func TestLoginHTTPReplacesOnlyAnUnrelatedSession(t *testing.T) {
 		prior := f.raw
 		if !ancestor {
 			var err error
-			prior, _, _, err = f.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+			prior, _, _, err = f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -355,10 +358,10 @@ func TestLoginHTTPReplacesOnlyAnUnrelatedSession(t *testing.T) {
 				raw = c.Value
 			}
 		}
-		if _, err := f.store.LookupSession(t.Context(), raw); err != nil {
+		if _, err := f.store.AsOperator().LookupSession(t.Context(), raw); err != nil {
 			t.Fatalf("new session is unavailable: %v", err)
 		}
-		if _, err := f.store.LookupSession(t.Context(), prior); (err == nil) != ancestor {
+		if _, err := f.store.AsOperator().LookupSession(t.Context(), prior); (err == nil) != ancestor {
 			t.Fatalf("prior ancestor=%v: %v", ancestor, err)
 		}
 		logout := httptest.NewRecorder()
@@ -366,10 +369,10 @@ func TestLoginHTTPReplacesOnlyAnUnrelatedSession(t *testing.T) {
 		if logout.Code != http.StatusNoContent {
 			t.Fatalf("minting-session logout: %d %s", logout.Code, logout.Body)
 		}
-		if _, err := f.store.LookupSession(t.Context(), raw); err == nil {
+		if _, err := f.store.AsOperator().LookupSession(t.Context(), raw); err == nil {
 			t.Fatal("minting-session logout left its descendant session live")
 		}
-		if _, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(root.Raw))); err == nil {
+		if _, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(root.Raw))); err == nil {
 			t.Fatal("minting-session logout left its token live")
 		}
 	}

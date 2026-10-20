@@ -32,7 +32,7 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		facts.Tier, facts.ExecutorClass = TierSelfHosted, "local"
 	}
 	if root.Subject.Kind == capability.SubjectMachine && root.Parent == nil {
-		record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
 		if err != nil {
 			return facts, err
 		}

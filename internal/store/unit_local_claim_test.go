@@ -31,11 +31,11 @@ func TestLocalAndHereClaimsDoNotInventAnExecutionDeadline(t *testing.T) {
 				}
 				demand.CapabilityPrefix = here.Capability.Prefix
 			}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
-			principal, err := s.LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+			principal, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
 			if err != nil || principal.Capability.ExpiresAt != nil || principal.Capability.Binding.Deadline != nil {
 				t.Fatalf("invented owner deadline: %+v, %v", principal.Capability.Binding.Deadline, err)
 			}
@@ -44,7 +44,7 @@ func TestLocalAndHereClaimsDoNotInventAnExecutionDeadline(t *testing.T) {
 			}
 			before := s.now()
 			s.clock = func() time.Time { return before.Add(time.Second) }
-			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
 			if err != nil || !beat.ExpiresAt.After(claim.Award.LeaseExpiresAt) {
 				t.Fatalf("local lease cannot renew: %+v, %v", beat, err)
 			}

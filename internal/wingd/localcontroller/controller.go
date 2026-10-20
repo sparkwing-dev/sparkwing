@@ -34,6 +34,7 @@ type Binding struct {
 
 // Services binds shared authorization, host execution and local state to one process.
 type Services struct {
+	Policies store.Policies
 	State    State
 	HTTP     wingd.LocalHTTP
 	Runner   runners.StoreRunnerConfig
@@ -62,45 +63,44 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if err := fssecure.EnsureDir(home); err != nil {
 		return nil, err
 	}
-	s, err := store.Open(filepath.Join(home, "state.db"))
-	if err != nil {
-		return nil, err
-	}
 	var services Services
+	var binding Binding
+	s, err := store.Open(filepath.Join(home, "state.db"), store.WithPolicies(func(s *store.Store) (store.Policies, error) {
+		tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+		if err != nil {
+			return store.Policies{}, err
+		}
+		binding = Binding{Home: home, Store: s, Tenant: tenant, Controller: controller.NewEngineController(s, controller.EngineController{})}
+		services, err = cfg.Bind(ctx, binding)
+		return services.Policies, err
+	}))
+	if err != nil {
+		return nil, errors.Join(err, closeServices(services))
+	}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, closeServices(services), s.Close())
 		}
 	}()
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		return nil, err
-	}
-	binding := Binding{Home: home, Store: s, Tenant: tenant, Controller: &controller.EngineController{Store: s}}
-	services, err = cfg.Bind(ctx, binding)
-	if err != nil {
-		return nil, err
-	}
+
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 	if services.State == nil || services.HTTP.API == nil || services.HTTP.Dashboard == nil {
 		return nil, errors.New("wingd: local services require state and shared HTTP handlers")
 	}
-	if binding.Controller.Store != s {
-		return nil, errors.New("wingd: queue requires the elected controller store")
-	}
 	queue, err := runners.NewStoreRunner(binding.Controller, services.Runner)
 	if err != nil {
 		return nil, err
 	}
-	return &localController{State: services.State, services: services, store: s, tenant: tenant, queue: queue}, nil
+	return &localController{State: services.State, services: services, store: s, operator: s.AsOperator(), tenant: binding.Tenant, queue: queue}, nil
 }
 
 type localController struct {
 	State
 	services Services
 	store    *store.Store
+	operator *store.Operator
 	tenant   *store.Tenant
 	queue    *runners.Loop
 	mu       sync.Mutex
@@ -119,7 +119,7 @@ func (c *localController) Reconcile(ctx context.Context) (wingd.LocalActivity, e
 	if c.closed || c.running || c.lease.Name != "" {
 		return wingd.LocalActivity{}, errors.New("wingd: local reconciliation requires a new controller")
 	}
-	lease, err := c.store.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "wingd", limits.DefaultLease)
+	lease, err := c.operator.AcquireSingletonLease(ctx, "controller.reaper", "wingd", limits.DefaultLease)
 	if err != nil {
 		return wingd.LocalActivity{}, err
 	}
@@ -128,7 +128,7 @@ func (c *localController) Reconcile(ctx context.Context) (wingd.LocalActivity, e
 	}
 	activity, err := c.State.Reconcile(ctx, lease)
 	if err == nil {
-		lease, err = c.store.AsOperator().RenewSingletonLease(ctx, lease, limits.DefaultLease)
+		lease, err = c.operator.RenewSingletonLease(ctx, lease, limits.DefaultLease)
 	}
 	var owner store.SingletonLease
 	if err == nil {
@@ -142,7 +142,7 @@ func (c *localController) Reconcile(ctx context.Context) (wingd.LocalActivity, e
 
 // safety: holding controller.owner is what lets this queue schedule and recover controller-dispatched runs.
 func (c *localController) ownRuns(ctx context.Context, owner store.SingletonLease) (store.SingletonLease, error) {
-	operator := c.store.AsOperator()
+	operator := c.operator
 	var err error
 	if owner.Name == "" {
 		owner, err = operator.AcquireSingletonLease(ctx, "controller.owner", "wingd", limits.DefaultLease)
@@ -211,7 +211,7 @@ func (c *localController) maintain(ctx context.Context, lease, owner store.Singl
 			return nil
 		case <-tick.C:
 			var err error
-			lease, err = c.store.AsOperator().RenewSingletonLease(ctx, lease, limits.DefaultLease)
+			lease, err = c.operator.RenewSingletonLease(ctx, lease, limits.DefaultLease)
 			if err != nil {
 				return err
 			}
@@ -237,7 +237,7 @@ func (c *localController) maintain(ctx context.Context, lease, owner store.Singl
 func (c *localController) sweep(ctx context.Context, lease store.SingletonLease) error {
 	const batch = 100
 	for {
-		units, err := c.store.ReapUnits(ctx, lease, batch)
+		units, err := c.operator.ReapUnits(ctx, lease, batch)
 		if err != nil {
 			return err
 		}
@@ -245,7 +245,7 @@ func (c *localController) sweep(ctx context.Context, lease store.SingletonLease)
 			break
 		}
 	}
-	_, err := c.store.AsOperator().MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
+	_, err := c.operator.MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
 	return err
 }
 

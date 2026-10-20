@@ -110,7 +110,7 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 			if _, err := competing.Run(t.Context(), competitor.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
 				t.Fatal(err)
 			}
-			claim, err := fixture.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: fixture.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: fixture.Input.RunID}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+			claim, err := fixture.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: fixture.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: fixture.Input.RunID}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -256,7 +256,7 @@ func TestOwnerPersistsPlanAdmissionRefusalAndEndsUnit(t *testing.T) {
 			if err != nil || string(row.State) != want || row.FinishedAt == nil {
 				t.Errorf("plan remains active: state=%s finished=%v %v", row.State, row.FinishedAt, err)
 			}
-			if _, err := second.Store.RenewUnit(t.Context(), second.Actor.CapabilityPrefix, false); err == nil {
+			if _, err := second.Store.AsOperator().RenewUnit(t.Context(), second.Actor.CapabilityPrefix, false); err == nil {
 				t.Error("refused plan left live unit")
 			}
 		})

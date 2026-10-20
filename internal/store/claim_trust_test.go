@@ -46,7 +46,7 @@ func TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork(t *testing.T) {
 func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, verified, claims, launcher bool) {
 	t.Helper()
 	ctx := t.Context()
-	s := storetest.OpenSQLite(t)
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}}))
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Jobs = []nodeproto.JobSpec{{ID: "job", Requires: []string{"pool=prod"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 	})
@@ -92,16 +92,15 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 	if launcher {
 		grants = []capability.Grant{capability.ClaimsLaunch}
 	}
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":pool", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pool"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}, Trust: trust})
+	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":pool", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pool"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}, Trust: trust})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetClaimProfileResolver(&matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}})
 	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Available: match.Resources{Cores: 8}}
 	if named {
 		demand.Target = &store.UnitRef{Kind: capability.UnitNode, RunID: plan.RunID, NodeID: "job"}
 	}
-	claim, err := s.ClaimUnit(ctx, demand)
+	claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if !claims {
 		assertMatchingRefusal(t, err, named)
 		return
@@ -113,7 +112,7 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 
 func TestRunnerTrustIsAnAdminSetCredentialFact(t *testing.T) {
 	ctx := t.Context()
-	s := storetest.OpenSQLite(t)
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}}))
 	_, plan, err := storePlanSealRequestWith(ctx, s, func(*store.IntakeRequest, *nodeproto.PlanDoc) {})
 	if err != nil {
 		t.Fatal(err)
@@ -122,14 +121,14 @@ func TestRunnerTrustIsAnAdminSetCredentialFact(t *testing.T) {
 	spec := func(id string, personal bool) capability.ProvisionSpec {
 		return capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: personal, Authority: &authority, Team: plan.Seal.Request.Request.Team, RegistrationID: "runner:" + plan.Seal.Request.Request.Team + ":" + id, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: id}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Trust: capability.TrustAny}
 	}
-	if _, err := s.ProvisionCapability(ctx, spec("personal", true)); err == nil {
+	if _, err := s.AsOperator().ProvisionCapability(ctx, spec("personal", true)); err == nil {
 		t.Fatal("a personal machine registered a trust class")
 	}
-	issued, err := s.ProvisionCapability(ctx, spec("shared", false))
+	issued, err := s.AsOperator().ProvisionCapability(ctx, spec("shared", false))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+	p, err := s.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
 	if err != nil || p.Capability.Trust != capability.TrustAny {
 		t.Fatalf("stored trust = %q, %v", p.Capability.Trust, err)
 	}

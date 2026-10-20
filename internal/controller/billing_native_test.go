@@ -26,17 +26,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func billingNativeServer(t *testing.T) (*Server, string, string) {
+func billingNativeServer(t *testing.T) (*serverFixture, string, string) {
 	t.Helper()
-	e, _ := engineRuntimeStore(t)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
+	fixture := &serverFixture{}
+	e, _ := engineRuntimeStore(t, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
+	fixture.engine = e
+	s := fixture
 	engineSQL(t, s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
 	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
-	session, csrf, _, err := s.store.CreateAccountSession(t.Context(), store.Account{ID: "owner"}, "a", time.Hour)
+	session, csrf, _, err := s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "owner"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +168,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.WithPayments(verifier, s.store).WithPaymentDeployment("Staging.Sparkwing.dev")
+	s.WithPayments(verifier, s.store.AsOperator()).WithPaymentDeployment("Staging.Sparkwing.dev")
 	counts := map[string]int{}
 	s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
 		counts[r.URL.Path]++

@@ -113,7 +113,7 @@ func TestOperatorSettingsConsoleCommitsThroughHTTP(t *testing.T) {
 		reviewSessionRequest(t, s, raw, csrf, "PUT", "/api/v1/operator/"+route[0], route[1], 403)
 		s.WithOperatorAccounts([]string{"member"})
 	}
-	gate, err := s.store.SignUpGate(t.Context())
+	gate, err := s.store.AsOperator().SignUpGate(t.Context())
 	if err != nil || gate.SetBy != "member" || gate.Mode != store.SignUpWaitlist || gate.Limits.HourlyLimit != 12 {
 		t.Fatalf("signup provenance=%+v: %v", gate, err)
 	}

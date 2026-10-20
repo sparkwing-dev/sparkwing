@@ -51,6 +51,7 @@ type engineTransactions struct {
 	writes            int
 	err               error
 	readErr           error
+	runReadErr        error
 	failure           *nodeproto.JobFailure
 	failureRef        controllerwire.NodeRef
 	failureGeneration int64
@@ -148,7 +149,7 @@ func (f *engineTransactions) AdmitRun(_ context.Context, request store.IntakeReq
 }
 
 func (f *engineTransactions) ReadRun(_ context.Context, run string) (store.RunRow, error) {
-	return f.run, f.readErr
+	return f.run, f.runReadErr
 }
 
 func (f *engineTransactions) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
@@ -178,13 +179,12 @@ func fakeEngine(t *testing.T, f *engineTransactions) *controller.EngineControlle
 	t.Helper()
 	return &controller.EngineController{
 		Units: f,
-		ResolveTenant: func(_ context.Context, team store.Team) (controller.RunTransactions, error) {
+		ResolveTenant: func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 			if team != "team" {
-				t.Fatalf("resolved tenant %q", team)
+				return nil, store.ErrNotFound
 			}
 			return f, nil
 		},
-		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "team", nil },
 	}
 }
 
@@ -439,3 +439,5 @@ func TestEngineExpansionHTTPMethodRefusal(t *testing.T) {
 		}
 	}
 }
+
+func (f *engineTransactions) Team() store.Team { return "team" }

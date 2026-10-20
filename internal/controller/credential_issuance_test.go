@@ -17,13 +17,27 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func credentialSessionServer(t *testing.T, opts ...store.Option) (*Server, string) {
+func credentialSessionServer(t *testing.T, opts ...store.Option) (*serverFixture, string) {
 	t.Helper()
-	e, _ := engineRuntimeStore(t, opts...)
+	return credentialSessionServerWith(t, nil, opts...)
+}
+
+func credentialSessionServerWith(t *testing.T, configure func(*Server), opts ...store.Option) (*serverFixture, string) {
+	t.Helper()
+	fixture := &serverFixture{}
+	option := fixture.option(deployment.Config{}, func(s *Server) {
+		s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		if configure != nil {
+			configure(s)
+		}
+	})
+	e, _ := engineRuntimeStore(t, append([]store.Option{option}, opts...)...)
+	fixture.engine = e
 	s := e.Store
 	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
 	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
@@ -31,9 +45,9 @@ func credentialSessionServer(t *testing.T, opts ...store.Option) (*Server, strin
 	digest := sha256.Sum256([]byte(raw))
 	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','runs.read,runs.write',?,?,'a','member')`, hex.EncodeToString(digest[:]), time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano())
 	engineSQL(t, s, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)`, hex.EncodeToString(digest[:]))
-	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := fixture.Server
 	a := server.authorization
-	a.Authenticator = capability.NewAuthenticator(s)
+	a.Authenticator = capability.NewAuthenticator(s.AsOperator())
 	a.CheckCSRF = func(r *http.Request, _ capability.Principal) error {
 		if !validAPIRequestCSRF(r, "session-csrf", true) {
 			return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
@@ -41,7 +55,7 @@ func credentialSessionServer(t *testing.T, opts ...store.Option) (*Server, strin
 		return nil
 	}
 	server.WithAuthorization(a)
-	return server, raw
+	return fixture, raw
 }
 
 func credentialRequestHTTP(t *testing.T, handler http.Handler, raw, body string, bearer bool) *httptest.ResponseRecorder {
@@ -69,7 +83,7 @@ func TestCredentialIssuancePersistsMemberRootAndDelegation(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &root) != nil {
 		t.Fatalf("root HTTP %d %s", w.Code, w.Body.String())
 	}
-	p, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability)))
+	p, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability)))
 	if err != nil || p.Capability.Parent == nil || p.Capability.Parent.Kind != capability.AuthoritySession || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) || p.Capability.Team != "a" || p.Capability.ExpiresAt == nil || p.Capability.ExpiresAt.After(time.Now().Add(90*24*time.Hour)) {
 		t.Fatalf("root=%+v err=%v", p, err)
 	}
@@ -77,7 +91,7 @@ func TestCredentialIssuancePersistsMemberRootAndDelegation(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &child) != nil {
 		t.Fatalf("child HTTP %d %s", w.Code, w.Body.String())
 	}
-	delegated, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(child.Capability)))
+	delegated, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(child.Capability)))
 	if err != nil || delegated.Capability.Parent == nil || *delegated.Capability.Parent != p.Authority || delegated.Capability.ExpiresAt.After(*p.Capability.ExpiresAt) {
 		t.Fatalf("delegate=%+v err=%v", delegated, err)
 	}
@@ -88,7 +102,7 @@ func TestCredentialIssuancePersistsMemberRootAndDelegation(t *testing.T) {
 	}
 	digest := sha256.Sum256([]byte(session))
 	engineSQL(t, s.store, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, hex.EncodeToString(digest[:]))
-	if _, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability))); err == nil {
+	if _, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability))); err == nil {
 		t.Fatal("session revocation left its member credential live")
 	}
 	w = credentialRequestHTTP(t, h, child.Capability, `{"grants":["runs.read"]}`, true)
@@ -98,20 +112,20 @@ func TestCredentialIssuancePersistsMemberRootAndDelegation(t *testing.T) {
 }
 
 type credentialRaceIssuer struct {
-	*store.Store
+	*store.Operator
 	before func()
 }
 
 func (f credentialRaceIssuer) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error) {
 	f.before()
-	return f.Store.ProvisionCapability(ctx, spec)
+	return f.Operator.ProvisionCapability(ctx, spec)
 }
 
 func TestCredentialIssuanceRechecksMembershipInTransaction(t *testing.T) {
 	for _, change := range []string{"removed", "demoted", "session revoked"} {
 		t.Run(change, func(t *testing.T) {
 			s, raw := credentialSessionServer(t)
-			s.WithCredentialIssuer(credentialRaceIssuer{Store: s.store, before: func() {
+			s.WithCredentialIssuer(credentialRaceIssuer{Operator: s.store.AsOperator(), before: func() {
 				switch change {
 				case "removed":
 					engineSQL(t, s.store, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)

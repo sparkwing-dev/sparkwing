@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -61,9 +62,9 @@ func NewSQLite(t *testing.T) *Target {
 }
 
 // OpenSQLite opens a SQLite store whatever the suite's dialect is.
-func OpenSQLite(t *testing.T) *store.Store {
+func OpenSQLite(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
-	return NewSQLite(t).Open(t)
+	return NewSQLite(t).Open(t, opts...)
 }
 
 // NewPostgres reserves a Postgres schema whatever the suite's dialect is,
@@ -88,12 +89,12 @@ func PostgresURL(t *testing.T) string {
 }
 
 // Open opens a store for the test in the suite's dialect.
-func Open(t *testing.T) *store.Store {
+func Open(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
 	if suiteRunsOnPostgres() {
-		return New(t).Open(t)
+		return New(t).Open(t, opts...)
 	}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append(defaultOptions(), opts...)...)
 	if err == nil {
 		err = configure(st)
 	}
@@ -120,9 +121,9 @@ func OpenPostgres(t *testing.T) *store.Store {
 func (tg *Target) DSN() string { return tg.dsn }
 
 // Open opens the target and closes the store when the test ends.
-func (tg *Target) Open(t *testing.T) *store.Store {
+func (tg *Target) Open(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
-	st, err := tg.open()
+	st, err := tg.open(opts...)
 	if err != nil {
 		t.Fatalf("open %s store: %v", tg.dialect, err)
 	}
@@ -136,19 +137,19 @@ func (tg *Target) Open(t *testing.T) *store.Store {
 
 // TryOpen opens the target and hands back the failure instead of ending
 // the test, for the tests whose subject is a refused open.
-func (tg *Target) TryOpen() (*store.Store, error) {
-	return tg.open()
+func (tg *Target) TryOpen(opts ...store.Option) (*store.Store, error) {
+	return tg.open(opts...)
 }
 
-func (tg *Target) open() (*store.Store, error) {
+func (tg *Target) open(opts ...store.Option) (*store.Store, error) {
 	if tg.dialect == store.DialectPostgres {
-		st, err := teststore.OpenPostgres(context.Background(), tg.dsn)
+		st, err := teststore.OpenPostgres(context.Background(), tg.dsn, append(defaultOptions(), opts...)...)
 		if err == nil {
 			err = configure(st)
 		}
 		return st, err
 	}
-	st, err := teststore.OpenExisting(tg.path)
+	st, err := teststore.OpenExisting(tg.path, append(defaultOptions(), opts...)...)
 	if err == nil {
 		err = configure(st)
 	}
@@ -261,11 +262,24 @@ func sanitize(s string) string {
 }
 
 func configure(st *store.Store) error {
+	_, err := teststore.Exec(context.Background(), st, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`))
+	return err
+}
+
+func defaultOptions() []store.Option {
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
-		return err
+		panic(err)
 	}
-	st.SetSessionKeyCipher(cipher)
-	_, err = teststore.Exec(context.Background(), st, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`))
-	return err
+	return []store.Option{store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{Intake: IntakePolicy{}, SessionKeys: cipher}, nil
+	})}
+}
+
+// IntakePolicy supplies external intake facts while keeping the store's canonical sealing.
+type IntakePolicy struct{}
+
+func (IntakePolicy) ResolveIntake(ctx context.Context, reader capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
+	_, err := reader.ResolveAuthority(ctx, request.Authority)
+	return store.IntakePolicyFacts{Options: &request.Request.Options, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 }

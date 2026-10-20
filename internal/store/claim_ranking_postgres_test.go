@@ -33,7 +33,7 @@ func TestPostgresSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testin
 				kind := []capability.UnitKind{capability.UnitPlan, capability.UnitNode}[i/len(contenders)%2]
 				group.Go(func() {
 					<-start
-					claim, err := st.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+					claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 					var illegal *store.ErrIllegalTransition
 					switch {
 					case err == nil:
@@ -69,7 +69,7 @@ func TestPostgresAnAskInFlightHoldsTheLaterAward(t *testing.T) {
 	f.Poll(t, f.Launcher, capability.UnitNode)
 	claimed := make(chan error, 1)
 	go func() {
-		_, err := st.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+		_, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 		claimed <- err
 	}()
 	select {

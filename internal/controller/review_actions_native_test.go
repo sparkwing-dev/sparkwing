@@ -64,7 +64,7 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &issued); err != nil {
 		t.Fatal(err)
 	}
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Token)))
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Token)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 	exchange(strings.Join(parts, "."), 401)
 	engineSQL(t, e.Store, `UPDATE github_runner_bindings SET repository_owner_id=8 WHERE team='a' AND repository_id=42`)
 	exchange(token, 403)
-	_, err = e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: c.Team, RegistrationID: "github:42:7", Subject: c.Subject, Grants: c.Grants, Binding: c.Binding, Repositories: c.Repositories, ExpiresAt: c.ExpiresAt})
+	_, err = e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: c.Team, RegistrationID: "github:42:7", Subject: c.Subject, Grants: c.Grants, Binding: c.Binding, Repositories: c.Repositories, ExpiresAt: c.ExpiresAt})
 	var refused *apierr.Error
 	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
 		t.Fatalf("transaction accepted stale binding facts: %v", err)
@@ -113,13 +113,13 @@ func TestActionsExpiryFitsStoreClockProperty(t *testing.T) {
 			return false
 		}
 		databaseNow = spec.ExpiresAt.Add(-limits.GitHubRunnerCredentialTTL).Truncate(time.Millisecond).Add(time.Duration(input%1000) * time.Millisecond)
-		issued, err := e.Store.ProvisionCapability(t.Context(), spec)
+		issued, err := e.Store.AsOperator().ProvisionCapability(t.Context(), spec)
 		if err != nil || issued.Capability.ExpiresAt == nil || issued.Capability.ExpiresAt.After(databaseNow.Add(limits.GitHubRunnerCredentialTTL)) {
 			t.Logf("valid Actions lifetime refused or exceeded: %v", err)
 			return false
 		}
 		spec.ExpiresAt = new(databaseNow.Add(limits.GitHubRunnerCredentialTTL + time.Nanosecond))
-		_, err = e.Store.ProvisionCapability(t.Context(), spec)
+		_, err = e.Store.AsOperator().ProvisionCapability(t.Context(), spec)
 		var refused *apierr.Error
 		return errors.As(err, &refused) && refused.Code == apierr.Forbidden
 	}

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"time"
 
@@ -26,39 +25,12 @@ type SizingStore interface {
 	RecordWaitObservation(context.Context, capability.Authorized, time.Duration) error
 }
 
-// WithSizingStore supplies tenant sizing persistence before Handler is constructed.
-// A nil resolver leaves writes unavailable. Reads use the server's Store.ForTeam.
-func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (SizingStore, error)) *Server {
-	s.resolveSizingStore = resolve
-	return s
-}
-
 func (s *Server) sizingStore(ctx context.Context, team string) (SizingStore, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	if s.resolveSizingStore != nil {
-		tenant, err := s.resolveSizingStore(ctx, store.Team(team))
-		if err == nil && tenant == nil {
-			return nil, missingEndpointPolicy()
-		}
-		return tenant, err
-	}
-	return nil, missingEndpointPolicy()
+	return tenantPort[SizingStore](ctx, s, store.Team(team))
 }
 
 func (s *Server) sizingReader(ctx context.Context, team string) (SizingReader, error) {
-	if s.resolveSizingStore != nil {
-		return s.sizingStore(ctx, team)
-	}
-	if team == "" || s.store == nil {
-		return nil, missingEndpointPolicy()
-	}
-	tenant, err := s.store.ForTeam(ctx, store.Team(team))
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return nil, engineLookupError(store.ErrNotFound)
-	}
-	return tenant, err
+	return tenantPort[SizingReader](ctx, s, store.Team(team))
 }
 
 func (s *Server) sizingEndpoints() []Endpoint {

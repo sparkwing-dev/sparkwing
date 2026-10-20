@@ -17,13 +17,13 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), row.Request.AuthorityRef)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), row.Request.AuthorityRef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	route, _ := capability.LookupRoute("DELETE", "/api/v1/runs/{run}")
 	target := capability.Target{Team: string(tenant.Team()), RunID: row.ID}
-	a, err := capability.Authorize(t.Context(), s, route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, target)
+	a, err := capability.Authorize(t.Context(), s.AsOperator(), route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, target)
 	if err != nil {
 		t.Fatal(err)
 	}

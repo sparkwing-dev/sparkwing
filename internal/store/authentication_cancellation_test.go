@@ -26,7 +26,7 @@ func TestAuthenticationCancellationIntentPrecedenceProperty(t *testing.T) {
 		}
 		rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=1,cancel_reason=? WHERE team='a' AND id='run'`, runReason)
 		rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET cancel_requested_at=?,cancel_reason=? WHERE team='a' AND run_id='run' AND node_id='job'`, jobAt, jobReason)
-		snapshot, err := tenant.s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(actor.CapabilityPrefix)), Audience: capability.Controller}, capability.RequestEvidence{})
+		snapshot, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(actor.CapabilityPrefix)), Audience: capability.Controller}, capability.RequestEvidence{})
 		if err != nil || !snapshot.Binding.RunCancelled || snapshot.Binding.CancelReason != want || snapshot.Binding.FinishedAt != nil {
 			t.Fatalf("cancellation snapshot: %+v, %v", snapshot.Binding, err)
 		}

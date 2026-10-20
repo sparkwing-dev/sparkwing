@@ -34,12 +34,12 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 		t.Fatal(err)
 	}
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256(award.Bearer)}
-	snapshot, err := f.Store.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
+	snapshot, err := f.Store.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	parent := snapshot.Authorities[0].Principal
-	registry, err := NewProcessAuthorities(ProcessAuthorityDependencies{Parent: f.Store, Bindings: f.Store})
+	registry, err := NewProcessAuthorities(ProcessAuthorityDependencies{Parent: f.Store.AsOperator(), Bindings: f.Store.AsOperator()})
 	if err != nil {
 		t.Fatal(err)
 	}

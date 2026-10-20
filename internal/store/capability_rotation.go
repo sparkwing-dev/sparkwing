@@ -153,7 +153,7 @@ func rotationExpiryCeilingTx(ctx context.Context, tx *storeTx, caller capability
 }
 
 func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal, c capability.Capability, expires *time.Time) (capability.IssueRequest, error) {
-	record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, c.Prefix)
 	if err != nil {
 		return capability.IssueRequest{}, err
 	}
@@ -170,7 +170,7 @@ func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal,
 }
 
 func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capability, deadline time.Time) error {
-	record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, c.Prefix)
 	if err != nil {
 		return err
 	}

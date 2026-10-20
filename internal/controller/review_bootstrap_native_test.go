@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func reviewPodBootstrap(t *testing.T) (*Server, string) {
+func reviewPodBootstrap(t *testing.T) (*serverFixture, string) {
 	t.Helper()
 	e, tenant := engineRuntimeStore(t)
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "bootstrap-fixture", CreatedBy: "fixture"}); err != nil {
@@ -29,18 +29,18 @@ func reviewPodBootstrap(t *testing.T) (*Server, string) {
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
-	issued, err := e.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}})
+	issued, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256(issued.Bearer))
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256(issued.Bearer))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if principal.Capability.Delivery != capability.DeliveryBootstrap {
 		t.Fatalf("delivery=%s", principal.Capability.Delivery)
 	}
-	return s, string(issued.Bearer)
+	return &serverFixture{Server: s, store: e.Store}, string(issued.Bearer)
 }
 
 func TestReviewNativeBootstrapScopeProperty(t *testing.T) {
@@ -74,11 +74,11 @@ func TestReviewBootstrapCannotUseOrdinaryAlternativeProperty(t *testing.T) {
 	for _, credential := range ordinary {
 		route, _ := capability.LookupRoute("GET", "/api/v1/runs/{run}")
 		route.Access = []capability.AccessRule{{Credential: credential, Grants: []capability.Grant{capability.SourceRead}, Binding: capability.BindRun, Liveness: capability.LiveSensitive}}
-		auth, err := capability.NewAuthenticator(s.store).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: bootstrap}, route)
+		auth, err := capability.NewAuthenticator(s.store.AsOperator()).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: bootstrap}, route)
 		if err != nil {
 			t.Fatalf("native bootstrap authentication for %s: %v", credential, err)
 		}
-		if _, err = capability.Authorize(t.Context(), s.store, route, auth, capability.Target{Team: "a", RunID: "run"}); err == nil {
+		if _, err = capability.Authorize(t.Context(), s.store.AsOperator(), route, auth, capability.Target{Team: "a", RunID: "run"}); err == nil {
 			t.Fatalf("bootstrap used ordinary alternative %s", credential)
 		}
 	}

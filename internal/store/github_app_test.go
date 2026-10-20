@@ -186,23 +186,23 @@ func TestGitHubAppDeliveryIsRememberedAcrossTeams(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
-	if seen, err := st.GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
+	if seen, err := st.AsOperator().GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
 		t.Fatalf("unseen delivery = %v, %v", seen, err)
 	}
-	if err := st.RecordGitHubAppDelivery(ctx, "digest-1", "d-1", now); err != nil {
+	if err := st.AsOperator().RecordGitHubAppDelivery(ctx, "digest-1", "d-1", now); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordGitHubAppDelivery(ctx, "digest-1", "d-1", now); err != nil {
+	if err := st.AsOperator().RecordGitHubAppDelivery(ctx, "digest-1", "d-1", now); err != nil {
 		t.Fatalf("recording twice: %v", err)
 	}
-	if seen, err := st.GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || !seen {
+	if seen, err := st.AsOperator().GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || !seen {
 		t.Fatalf("recorded delivery = %v, %v; want seen", seen, err)
 	}
 	later := now.Add(store.GitHubAppDeliveryRetention + time.Hour)
-	if err := st.RecordGitHubAppDelivery(ctx, "digest-2", "d-2", later); err != nil {
+	if err := st.AsOperator().RecordGitHubAppDelivery(ctx, "digest-2", "d-2", later); err != nil {
 		t.Fatal(err)
 	}
-	if seen, _ := st.GitHubAppDeliverySeen(ctx, "digest-1"); seen {
+	if seen, _ := st.AsOperator().GitHubAppDeliverySeen(ctx, "digest-1"); seen {
 		t.Fatal("a digest past its retention was kept")
 	}
 }
@@ -215,15 +215,15 @@ func TestGitHubAppDeliveryKeepsItsFirstEvent(t *testing.T) {
 		event string
 		want  bool
 	}{{"repository", true}, {"repository", true}, {"installation", false}} {
-		if same, err := st.BindGitHubAppDeliveryEvent(ctx, "digest-1", tc.event, "d-1", now); err != nil || same != tc.want {
+		if same, err := st.AsOperator().BindGitHubAppDeliveryEvent(ctx, "digest-1", tc.event, "d-1", now); err != nil || same != tc.want {
 			t.Fatalf("bind as %s = %v, %v; want %v", tc.event, same, err, tc.want)
 		}
 	}
-	if seen, err := st.GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
+	if seen, err := st.AsOperator().GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
 		t.Fatalf("a bound delivery reads as processed: %v, %v", seen, err)
 	}
 	later := now.Add(store.GitHubAppDeliveryRetention + time.Hour)
-	if same, err := st.BindGitHubAppDeliveryEvent(ctx, "digest-1", "installation", "d-1", later); err != nil || !same {
+	if same, err := st.AsOperator().BindGitHubAppDeliveryEvent(ctx, "digest-1", "installation", "d-1", later); err != nil || !same {
 		t.Fatalf("a binding past its retention was kept without any run starting: %v, %v", same, err)
 	}
 }

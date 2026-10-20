@@ -97,7 +97,7 @@ func TestRecoveryFailureReadRequiresTheClaimedJobsDeclaredEdge(t *testing.T) {
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET ready_at=1 WHERE node_id='recover'`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET expires_at=? WHERE id='run'`, tenant.s.now().Add(time.Hour).UnixNano())
-	claim, err := tenant.s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: owner.CapabilityPrefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "recover"}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: owner.CapabilityPrefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "recover"}})
 	if err != nil {
 		t.Fatal(err)
 	}

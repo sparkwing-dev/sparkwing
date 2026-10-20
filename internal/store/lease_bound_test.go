@@ -33,13 +33,13 @@ func TestUnmeteredNodeRenewalKeepsCapabilityExpiry(t *testing.T) {
 				t.Fatal(err)
 			}
 			now = now.Add(time.Second)
-			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil || beat.CancelRequested || !beat.ExpiresAt.Equal(expiry) {
 				t.Fatalf("unmetered renewal = %+v, %v; want capability expiry %v", beat, err, expiry)
 			}
 			rewriteSchemaCount(t, s.db, "credit_charges", 0)
 			now = expiry
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
 				t.Fatal("unmetered lease renewed past capability expiry")
 			}
 		})
@@ -51,7 +51,7 @@ func TestUnstartedMeteredOwnerRefusalKeepsDurableDrain(t *testing.T) {
 		for _, refusal := range []string{"balance", "hold"} {
 			t.Run(string(kind)+"/"+refusal, func(t *testing.T) {
 				s, _, claim, now := launcherSnapshotFixture(t, kind)
-				issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+				issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -61,7 +61,7 @@ func TestUnstartedMeteredOwnerRefusalKeepsDurableDrain(t *testing.T) {
 				} else if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "dispute", "", "dispute opened", *now); err != nil {
 					t.Fatal(err)
 				}
-				beat, err := s.RenewUnit(t.Context(), issued.Capability.Prefix, true)
+				beat, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true)
 				if err != nil || !beat.CancelRequested {
 					t.Fatalf("refused renewal: %+v %v", beat, err)
 				}
@@ -76,13 +76,13 @@ func TestUnstartedMeteredOwnerRefusalKeepsDurableDrain(t *testing.T) {
 				unitBillingTotal(t, s, 0, true)
 				for range 4 {
 					*now = now.Add(10 * time.Second)
-					beat, err = s.RenewUnit(t.Context(), issued.Capability.Prefix, true)
+					beat, err = s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true)
 					if err != nil || !beat.CancelRequested || beat.ExpiresAt.After(deadline) {
 						t.Fatalf("ignored cancellation extended settled award: %+v %v; drain %v", beat, err, deadline)
 					}
 				}
 				*now = deadline
-				if _, err = s.RenewUnit(t.Context(), issued.Capability.Prefix, true); err == nil {
+				if _, err = s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err == nil {
 					t.Fatal("settled unstarted award renewed past its durable drain")
 				}
 				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
@@ -96,7 +96,7 @@ func TestCancelledUnstartedMeteredOwnerCannotRenewRefundedAward(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, _, claim, _ := launcherSnapshotFixture(t, kind)
-			issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -107,7 +107,7 @@ func TestCancelledUnstartedMeteredOwnerCannotRenewRefundedAward(t *testing.T) {
 				t.Fatal(err)
 			}
 			unitBillingTotal(t, s, 0, true)
-			if beat, err := s.RenewUnit(t.Context(), issued.Capability.Prefix, true); err == nil {
+			if beat, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err == nil {
 				t.Fatalf("a refunded unstarted award regained execution authority: %+v", beat)
 			}
 			rewriteSchemaCount(t, s.db, "billable_intervals", 0)
@@ -117,7 +117,7 @@ func TestCancelledUnstartedMeteredOwnerCannotRenewRefundedAward(t *testing.T) {
 
 func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
@@ -125,7 +125,7 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 	if err != nil || self.Kind != Execute || self.Node.OwnerCapabilityPrefix != actor.CapabilityPrefix {
 		t.Fatalf("metered self claim: %+v %v", self, err)
 	}
-	principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = now.Add(10 * time.Second)
-	beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
+	beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
 	if err != nil || !beat.CancelRequested || beat.ExpiresAt.After(self.Claim.LeaseExpiresAt) {
 		t.Fatalf("self claim escaped owner funding stop: %+v %v", beat, err)
 	}
@@ -149,14 +149,14 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 		t.Fatalf("self-claimed job escaped owner cancellation: %+v %v", row, err)
 	}
 	*now = beat.ExpiresAt
-	if _, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true); err == nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true); err == nil {
 		t.Fatal("self-claim owner renewed past the funding stop")
 	}
 }
 
 func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
@@ -164,7 +164,7 @@ func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	if err != nil || self.Kind != Execute {
 		t.Fatalf("self claim: %+v %v", self, err)
 	}
-	principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120+(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`)
 	*now = now.Add(10 * time.Second)
-	beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
+	beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	stoppedExpiry := *row.LeaseExpiresAt
 	for _, at := range []time.Time{now.Add(10 * time.Second), stoppedExpiry.Add(time.Second)} {
 		*now = at
-		beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
+		beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
 		if err != nil || beat.CancelRequested {
 			t.Fatalf("stopped child ended owner renewal: %+v, %v", beat, err)
 		}

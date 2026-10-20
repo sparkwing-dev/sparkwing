@@ -165,13 +165,13 @@ func runAnywhereAdmin(t *testing.T, f cloudDispatch) string {
 	if _, err := teststore.SQL(t, f.state).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','ranking-admin','owner',1)`); err != nil {
 		t.Fatal(err)
 	}
-	session, _, _, err := f.state.CreateAccountSession(t.Context(), store.Account{ID: "ranking-admin"}, "default", time.Hour)
+	session, _, _, err := f.state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "ranking-admin"}, "default", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := f.state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "ranking-admin"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := f.state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "ranking-admin"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

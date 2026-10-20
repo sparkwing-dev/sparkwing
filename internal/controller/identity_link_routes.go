@@ -31,9 +31,7 @@ func (s *Server) identityLinkWriter() (IdentityLinkWriter, error) {
 	if s.identityLinkWrites != nil {
 		return s.identityLinkWrites, nil
 	}
-	if writer, ok := any(s.store).(IdentityLinkWriter); ok && s.store != nil {
-		return writer, nil
-	}
+
 	return nil, missingEndpointPolicy()
 }
 
@@ -127,7 +125,7 @@ func (s *Server) verifyIdentityLinkStart(r *http.Request) error {
 }
 
 func (s *Server) newIdentityLink(ctx context.Context, session *store.Session, name string, provider signInProvider, redirect string) (oauthGrant, error) {
-	key, err := s.store.IdentityLinkStateKey(ctx)
+	key, err := s.operator.IdentityLinkStateKey(ctx)
 	if err != nil {
 		return oauthGrant{}, identityLinkError(err)
 	}
@@ -158,7 +156,7 @@ func (s *Server) verifyIdentityLinkComplete(r *http.Request) error {
 	if !ok || flow.Mode != oauthFlowLink || flow.Provider != r.PathValue("provider") || flow.Code == "" {
 		return invalidIdentityLink()
 	}
-	key, err := s.store.IdentityLinkStateKey(r.Context())
+	key, err := s.operator.IdentityLinkStateKey(r.Context())
 	if err != nil {
 		return identityLinkError(err)
 	}

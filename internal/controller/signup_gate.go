@@ -36,7 +36,7 @@ type FreeTierSource interface {
 // taken, and open while one is left. A slot count it cannot read is an
 // error, never open, so a sign-up gate reading it fails closed.
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error) {
-	taken, limit, err := s.store.FreeSlots(ctx)
+	taken, limit, err := s.operator.FreeSlots(ctx)
 	if err != nil {
 		return FreeTierUnreadable, fmt.Errorf("read free-team slots: %w", err)
 	}
@@ -138,12 +138,12 @@ func (s *Server) observeSignUp(ctx context.Context, provider string, res store.S
 		observeSignUpGateClosed(g.Source)
 		s.logger.Warn("signup.gate_closed", "source", g.Source, "reason", g.Reason)
 	}
-	g, err := s.store.SignUpGate(ctx)
+	g, err := s.operator.SignUpGate(ctx)
 	if err != nil {
 		s.logger.Warn("signup.velocity_unreadable", "error", err.Error())
 		return
 	}
-	counts, err := s.store.SignUpCounts(ctx, now)
+	counts, err := s.operator.SignUpCounts(ctx, now)
 	if err != nil {
 		s.logger.Warn("signup.velocity_unreadable", "error", err.Error())
 		return

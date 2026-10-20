@@ -51,7 +51,7 @@ func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (bo
 			return err
 		}
 		for _, prefix := range prefixes {
-			if err := revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+			if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
 				return err
 			}
 		}

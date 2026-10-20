@@ -42,10 +42,10 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
 			}
 			engineAcceptedFixturePlan(t, e, "a", "run", "one", "two")
-			e.Store.SetClaimProfileResolver(billingCloudProfile{})
+			e.claimProfiles = billingCloudProfile{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			cloud := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-			h := New(e.Store, nil).WithEngineController(e).Handler()
+			h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 			engineClaimHTTP(t, h, cloud, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"one","available_cores":64}`, http.StatusOK)
 			body := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"two","available_cores":64}`
 			status := http.StatusConflict
@@ -68,7 +68,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('personal-session','account','runs.read,runs.write',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
 			engineSQL(t, e.Store, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('personal-session','a',0)`)
 			authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "personal-session"}
-			machine, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:own-machine", Repositories: []string{"github.com/acme/*"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "own-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+			machine, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:own-machine", Repositories: []string{"github.com/acme/*"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "own-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -159,24 +159,24 @@ func TestBurstOverflowClientControlsAuthenticatedAccount(t *testing.T) {
 }
 
 func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
-	e, tenant := engineRuntimeStore(t)
-	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)
-	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithEngineController(e)
-	raw, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
+	e, tenant := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
+	server := e.Server.WithEngineController(e.EngineController)
+	raw, _, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
-	e.Store.SetClaimProfileResolver(billingCloudProfile{})
+	e.claimProfiles = billingCloudProfile{}
 	h := server.Handler()
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	member, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	member, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

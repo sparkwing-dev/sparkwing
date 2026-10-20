@@ -43,7 +43,7 @@ internal/health	3
 internal/installsite	1
 internal/lease	2
 internal/license	4
-internal/limits	116
+internal/limits	115
 internal/localsecrets	8
 internal/logpretty	6
 internal/logutil	2
@@ -80,7 +80,7 @@ internal/sparks	5
 internal/sparkwingruntime	5
 internal/storage/logseg	24
 internal/storage/s3	1
-internal/store	266
+internal/store	265
 internal/store/internal/storetest	1
 internal/store/teststore	5
 internal/tokenpark	3

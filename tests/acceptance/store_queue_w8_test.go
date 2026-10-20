@@ -30,11 +30,11 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 			if mode%8 == 2 {
 				kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitEval}
 			}
-			principal, err := server.Store.LookupCapability(t.Context(), root.Capability.Digest)
+			principal, err := server.Store.AsOperator().LookupCapability(t.Context(), root.Capability.Digest)
 			if err != nil {
 				t.Fatal(err)
 			}
-			issued, err := server.Store.DelegateCapability(t.Context(), capability.DelegateSpec{
+			issued, err := server.Store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
 				Parent: principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.TriggersClaim}, Binding: principal.Capability.Binding, Repositories: principal.Capability.Repositories,
 			})
 			if err != nil {
@@ -55,7 +55,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 			revokeStoredRunnerW8(t, server.Store, ref)
 			want = apierr.Unauthenticated
 		}
-		runner, err := runners.NewStoreRunner(server, runners.StoreRunnerConfig{
+		runner, err := runners.NewStoreRunner(server.EngineController, runners.StoreRunnerConfig{
 			Bearer: func(context.Context) (string, error) { return raw, nil },
 			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
 			Bind: func(context.Context, runners.StoreBinding) (runners.NativeServices, error) {

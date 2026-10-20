@@ -18,17 +18,10 @@ type ClaimProfileResolver interface {
 	ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error)
 }
 
-// SetClaimProfileResolver installs enrollment and self-claim observations before concurrent use.
-// The resolver uses existing authority records and registration facts; no second
-// credential store or caller-selected identity is introduced by this boundary.
-func (s *Store) SetClaimProfileResolver(resolver ClaimProfileResolver) {
-	s.claimProfiles = resolver
-}
-
 // ReadClaimProfile supplies controller claim observations from the same enrollment
 // owner used by transactional matching. Claims re-read registration at award time.
-func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error) {
-	tx, err := s.beginSnapshotReadTx(ctx)
+func (o *Operator) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error) {
+	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return match.Profile{}, match.Resources{}, err
 	}
@@ -40,8 +33,8 @@ func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.Autho
 	principal := chain[0].principal
 	var profile match.Profile
 	var available match.Resources
-	if s.claimProfiles != nil {
-		profile, available, err = s.claimProfiles.ResolveClaimProfile(ctx, principal)
+	if o.s.claimProfiles != nil {
+		profile, available, err = o.s.claimProfiles.ResolveClaimProfile(ctx, principal)
 	} else {
 		profile, err = enrolledClaimProfileTx(ctx, tx, chain)
 	}

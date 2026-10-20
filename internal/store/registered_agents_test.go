@@ -51,7 +51,7 @@ func TestRegisteredAgentsUseLiveCapabilityIdentityAndSavedLabels(t *testing.T) {
 	root.ReservedPools = []string{"prod"}
 	authorityPersist(t, s, root)
 	authorityPersist(t, s, authorityRoot("foreign", "b"))
-	if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu", "name=forged", "class=cloud", "pool=forged", "os=linux", "arch=arm64"}}); err != nil {
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu", "name=forged", "class=cloud", "pool=forged", "os=linux", "arch=arm64"}}); err != nil {
 		t.Fatal(err)
 	}
 	agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
@@ -73,7 +73,7 @@ func TestRegisteredAgentsRetainEnrollmentWithoutReplacingGrantedIdentity(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Name: "impostor", Class: match.ClassCloud, ReservedPools: []string{"forged"}, Location: "local", Accept: accept, Capacity: match.Resources{Cores: 4}}})
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Name: "impostor", Class: match.ClassCloud, ReservedPools: []string{"forged"}, Location: "local", Accept: accept, Capacity: match.Resources{Cores: 4}}}
 	agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("enrolled agents: %+v, %v", agents, err)
@@ -114,7 +114,7 @@ func TestRegisteredAgentsExcludeExpiredRevokedAndNonClaimants(t *testing.T) {
 			if problem != "missing" {
 				authorityPersist(t, s, root)
 			}
-			if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}}); err == nil {
+			if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}}); err == nil {
 				t.Fatal("unavailable agent recorded labels")
 			}
 			agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
@@ -148,7 +148,7 @@ func TestRecordRunnerPollRejectsExpiredParent(t *testing.T) {
 	root := authorityRoot("runner", "a")
 	root.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent.Prefix}
 	authorityPersist(t, s, root)
-	err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}})
+	err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}})
 	var denied *apierr.Error
 	if !errors.As(err, &denied) || denied.Code != apierr.Unauthenticated {
 		t.Fatalf("expired parent: %v", err)

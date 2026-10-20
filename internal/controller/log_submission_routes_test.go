@@ -34,7 +34,7 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 			t.Error(err)
 		}
 	})
-	server := New(e.Store, nil).WithEngineController(e).WithDataController(&DataController{Store: e.Store, Objects: objects})
+	server := New(e.Store, nil).WithEngineController(e.EngineController).WithDataController(NewDataController(e.Store, DataController{Objects: objects}))
 	h := server.Handler()
 	response := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse
@@ -109,7 +109,7 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Capability)))
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Capability)))
 	if err != nil {
 		t.Fatal(err)
 	}

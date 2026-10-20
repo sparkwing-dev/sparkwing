@@ -166,7 +166,7 @@ func acquireLockSet(ctx context.Context, tx *storeTx, discover func() lockSet) e
 				return fmt.Errorf("incomplete authority lock set: %s %v after %s %v", row.key.tier, row.key.keys, held.key.tier, held.key.keys)
 			}
 		}
-		if err := acquireRowLock(ctx, tx, row); err != nil {
+		if err := tx.operator.acquireRowLock(ctx, tx, row); err != nil {
 			return err
 		}
 		tx.authorityLocks = append(tx.authorityLocks, row)
@@ -181,7 +181,7 @@ func acquireLockSet(ctx context.Context, tx *storeTx, discover func() lockSet) e
 	return nil
 }
 
-func acquireRowLock(ctx context.Context, tx *storeTx, row rowLock) error {
+func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock) error {
 	k := row.key
 	var query string
 	args := []any{k.keys[0]}
@@ -234,14 +234,13 @@ func acquireRowLock(ctx context.Context, tx *storeTx, row rowLock) error {
 	return err
 }
 
-func discoverInstallationLocks(ctx context.Context, tx *storeTx, set lockSet, installation int64) lockSet {
+func (op *Operator) discoverInstallationLocks(ctx context.Context, tx *storeTx, set lockSet, installation int64) lockSet {
 	if set.err != nil {
 		return set
 	}
-	var team string
-	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team)
+	team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
 	if err == nil {
-		set.add(lockTeam, true, team)
+		set.add(lockTeam, true, string(team))
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		set.err = err
 	}
@@ -249,7 +248,7 @@ func discoverInstallationLocks(ctx context.Context, tx *storeTx, set lockSet, in
 	return set
 }
 
-func discoverAccountTeams(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
+func (op *Operator) discoverAccountTeams(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
 	if set.err != nil {
 		return set
 	}
@@ -274,8 +273,8 @@ func discoverAccountTeams(ctx context.Context, tx *storeTx, set lockSet, account
 	return set
 }
 
-func discoverAccountSessionLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
-	set = discoverAccountTeams(ctx, tx, set, account)
+func (op *Operator) discoverAccountSessionLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
+	set = tx.operator.discoverAccountTeams(ctx, tx, set, account)
 	if set.err != nil {
 		return set
 	}

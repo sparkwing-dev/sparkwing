@@ -168,9 +168,29 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	defer cancel()
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	var b Binding
+	var claimant *Claimant
 	c := openFixture(t, func(_ context.Context, binding Binding) (Services, error) {
 		b = binding
 		services := serviceFixture(binding)
+		var err error
+		claimant, err = NewClaimant(binding.Store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		services.Close = claimant.Close
+		objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: make([]byte, 32)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := objects.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		server := controller.New(binding.Store, nil).WithEngineController(binding.Controller).WithDataObjects(objects)
+		services.HTTP = server.HTTP()
+		services.Policies = server.StorePolicies()
+		services.Policies.ClaimProfiles = claimant
 		state, err := NewState(binding, stateCipher(t))
 		services.State = state
 		return services, err
@@ -178,28 +198,8 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if _, err := c.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	claimant, err := NewClaimant(b.Store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := claimant.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	b.Store.SetClaimProfileResolver(claimant)
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: make([]byte, 32)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := objects.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithDataObjects(objects)
-	c.services.HTTP = server.HTTP()
-	peer, err := b.Store.ReadAuthentication(ctx, capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: claimant.subject}}, capability.RequestEvidence{})
+
+	peer, err := b.Store.AsOperator().ReadAuthentication(ctx, capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: claimant.subject}}, capability.RequestEvidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,15 +220,15 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := b.Store.LookupCapability(ctx, sha256.Sum256([]byte(raw)))
+	root, err := b.Store.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := b.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}})
+	award, err := b.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := b.Store.LookupCapability(ctx, sha256.Sum256(award.Bearer))
+	principal, err := b.Store.AsOperator().LookupCapability(ctx, sha256.Sum256(award.Bearer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := nativeServices(ctx, WithClient(NativeConfig{Home: b.Home, Version: "v1.2.3", Local: func(store.NodeRow) bool { return true }, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: private.Principal, Renew: b.Store.RenewUnit, Source: source.Options{Engines: pipelineEngine{selected}, Base: procenv.Base{Local: true}}}, private), func(string, string) (net.Listener, error) { return &processListener{closed: make(chan struct{})}, nil })
+	services, err := nativeServices(ctx, WithClient(NativeConfig{Home: b.Home, Version: "v1.2.3", Local: func(store.NodeRow) bool { return true }, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: private.Principal, Renew: b.Store.AsOperator().RenewUnit, Source: source.Options{Engines: pipelineEngine{selected}, Base: procenv.Base{Local: true}}}, private), func(string, string) (net.Listener, error) { return &processListener{closed: make(chan struct{})}, nil })
 	if err != nil {
 		t.Fatal(err)
 	}

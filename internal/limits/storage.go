@@ -39,8 +39,8 @@ const (
 	BlobGCGrace time.Duration = 24 * time.Hour
 	// CapabilityRetention bounds retention after capability expiry or revocation.
 	CapabilityRetention time.Duration = 7 * 24 * time.Hour
-	// CompletionEffectRetention bounds retention after effect delivery.
-	CompletionEffectRetention time.Duration = 7 * 24 * time.Hour
+	// completionEffectRetention bounds retention after effect delivery.
+	completionEffectRetention time.Duration = 7 * 24 * time.Hour
 	// DataDownloadURLTTL bounds signed data download URL lifetime.
 	DataDownloadURLTTL time.Duration = time.Minute
 	// LogUploadURLTTL bounds batch log PUT URL lifetime.

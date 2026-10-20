@@ -156,14 +156,12 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 		intake.Request.Source.Ref = intake.Request.Git.SHA
 	}
 	ctx := t.Context()
-	database.SetIntakePolicy(hostIntakePolicy{})
-	database.SetClaimProfileResolver(hostEnrollment{})
 	tenant, err := database.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := "host-fixture-root"
-	if _, err := database.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}); err != nil {
+	if _, err := database.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}); err != nil {
 		now, until := time.Now(), time.Now().Add(time.Hour)
 		credential := capability.Capability{Prefix: root, Digest: sha256.Sum256([]byte(root)), Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"}, Audience: capability.Controller, Grants: []capability.Grant{capability.RunsWrite, capability.TriggersClaim, capability.NodesClaim, capability.ApprovalsWrite, capability.RunsControl}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, IssuedAt: now, ExpiresAt: &until, Repositories: nil, ReservedPools: []string{}}
 		record := store.CapabilityRecord{Version: 1, Value: credential}
@@ -194,7 +192,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	if admitted.HereCapabilityPrefix != "" {
 		root = admitted.HereCapabilityPrefix
 	}
-	claim, err := database.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Capacity: match.Resources{Cores: 64, MemoryBytes: 64 << 30}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := database.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Capacity: match.Resources{Cores: 64, MemoryBytes: 64 << 30}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,12 +206,12 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 
 	f.State = &hostState{Tenant: tenant}
 	f.Host = OwnerHost{Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(s string) string { return s }, Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
-		return database.RenewUnit(ctx, actor.CapabilityPrefix, executing)
+		return database.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, executing)
 	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }, Layer: func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
 	}}
 	follower := StateFollower{Store: f.State, Subscribe: f.State.subscribe}
 	f.Host.Wait, f.Host.WaitNode = follower.Wait, follower.WaitNode
-	f.Host.Delegator = database
+	f.Host.Delegator = database.AsOperator()
 	return f
 }

@@ -203,7 +203,7 @@ func (k *Keyring) Path() string { return k.path }
 // For returns the cipher the controller serving st seals and opens secrets
 // with. st is what the cipher asks, before it creates a key, whether any
 // value is already sealed under another one; nil skips that question.
-func (k *Keyring) For(st *store.Store) *Cipher {
+func (k *Keyring) For(st *store.Operator) *Cipher {
 	return &Cipher{ring: k, st: st}
 }
 
@@ -228,7 +228,7 @@ func (k *Keyring) loaded() (*secrets.Cipher, error) {
 // safety: the file is written whole under a private name and linked into
 // place, and a link never replaces an existing file, so two processes
 // creating it at once both end up with whichever key linked first.
-func (k *Keyring) ensure(ctx context.Context, st *store.Store) (*secrets.Cipher, error) {
+func (k *Keyring) ensure(ctx context.Context, st *store.Operator) (*secrets.Cipher, error) {
 	if c, err := k.loaded(); c != nil || err != nil {
 		return c, err
 	}
@@ -343,7 +343,7 @@ func syncDir(dir string) error {
 // already holds values sealed under a key it does not have, and a second key
 // would leave some rows only one key opens. It returns nil once a key is
 // known or when st holds nothing sealed.
-func (k *Keyring) MissingKey(ctx context.Context, st *store.Store) error {
+func (k *Keyring) MissingKey(ctx context.Context, st *store.Operator) error {
 	if c, err := k.loaded(); c != nil || err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func (k *Keyring) MissingKey(ctx context.Context, st *store.Store) error {
 	return k.missingLocked(ctx, st)
 }
 
-func (k *Keyring) missingLocked(ctx context.Context, st *store.Store) error {
+func (k *Keyring) missingLocked(ctx context.Context, st *store.Operator) error {
 	if k.cipher != nil || st == nil {
 		return nil
 	}

@@ -18,8 +18,8 @@ func TestCapabilitySessionRefusesDataScopeProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetSessionKeyCipher(cipher)
-	if _, err := s.csrfSigningKey(t.Context()); err != nil {
+	s.csrfCipher, s.csrfKey = cipher, nil
+	if _, err := s.AsOperator().csrfSigningKey(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	random := rand.New(rand.NewPCG(73, 902))
@@ -29,7 +29,7 @@ func TestCapabilitySessionRefusesDataScopeProperty(t *testing.T) {
 		root.Grants = []capability.Grant{capability.RunsRead, capability.DataRead}
 		root.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: fmt.Sprintf("gh:%d", random.Uint64()), ReadRefs: []string{fmt.Sprintf("ref-%x", random.Uint64())}, VerifiedDefaultOnly: true}
 		authorityPersist(t, s, root)
-		raw, session, err := s.CreateCapabilitySession(t.Context(), root.Prefix, time.Hour)
+		raw, session, err := s.AsOperator().CreateCapabilitySession(t.Context(), root.Prefix, time.Hour)
 		var failure *apierr.Error
 		if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || raw != "" || session != nil {
 			t.Fatalf("data-scoped credential signed in: session=%v err=%v", session != nil, err)

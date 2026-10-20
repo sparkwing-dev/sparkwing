@@ -20,7 +20,7 @@ import (
 func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		raw := strings.TrimPrefix(f.runnerB, "Bearer ")
-		principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+		principal, err := f.st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 		if err != nil {
 			t.Fatal(err)
 		}

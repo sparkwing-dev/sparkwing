@@ -23,7 +23,7 @@ func TestMeteredUnpricedClaimFailsWorkWithoutBilling(t *testing.T) {
 			if queued {
 				demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 			}
-			_, err := s.ClaimUnit(t.Context(), demand)
+			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			var unpriced *UnpricedCPUClassError
 			if !errors.As(err, &unpriced) || unpriced.Cores != 4 || unpriced.MaxCores != 1 {
 				t.Fatalf("cloud=%t queued=%t: unpriced claim=%v", cloud, queued, err)
@@ -66,7 +66,7 @@ func TestUnpricedFailureRequiresCurrentClaimScopeProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 		case 3:
-			if err := s.inTx(t.Context(), func(tx *storeTx) error { return revokeAuthorityTx(t.Context(), tx, actor.Authority) }); err != nil {
+			if err := s.inTx(t.Context(), func(tx *storeTx) error { return tx.operator.revokeAuthorityTx(t.Context(), tx, actor.Authority) }); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -91,7 +91,7 @@ func TestUnpricedWorkFailsEvenWhenItDoesNotFitThePoller(t *testing.T) {
 			demand.Target = nil
 			demand.Kinds = []capability.UnitKind{capability.UnitNode}
 		}
-		_, err := s.ClaimUnit(t.Context(), demand)
+		_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		row, readErr := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
 		if !errors.Is(err, ErrUnpricedCPUClass) || readErr != nil || row.Outcome != NodeFailed {
 			t.Fatalf("queued=%t unpriced work stayed pending: %+v %v %v", queued, row, err, readErr)
@@ -107,7 +107,7 @@ func TestUnpricedFailureKeepsThePollersMatchingEvidence(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}},"requires":{"set":true,"value":["tool:terraform"]}}`))
 	demand.Labels = []string{"tool:terraform"}
-	_, err := s.ClaimUnit(t.Context(), demand)
+	_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	row, readErr := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
 	if !errors.Is(err, ErrUnpricedCPUClass) || readErr != nil || row.Outcome != NodeFailed {
 		t.Fatalf("matching poller left unpriced work pending: %+v %v %v", row, err, readErr)
@@ -125,7 +125,7 @@ func TestUnmeteredWorkDoesNotNeedAPricedClass(t *testing.T) {
 			demand.Target = nil
 			demand.Kinds = []capability.UnitKind{capability.UnitNode}
 		}
-		if claim, err := s.ClaimUnit(t.Context(), demand); err != nil || claim.Award.CapabilityPrefix == "" {
+		if claim, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil || claim.Award.CapabilityPrefix == "" {
 			t.Fatalf("unmetered work was priced: %+v %v", claim, err)
 		}
 	}

@@ -13,16 +13,16 @@ import (
 // ReadAuthentication reads presentation identity, full ancestry, membership and
 // target liveness in one committed snapshot with the store clock. Evidence selects
 // records but grants no authority. No reusable presentation enters persistence.
-func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
+func (o *Operator) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
 	if lookup.Class == capability.CredentialPeer {
-		return s.readPeerAuthentication(ctx, lookup, evidence)
+		return o.s.readPeerAuthentication(ctx, lookup, evidence)
 	}
-	tx, err := s.beginSnapshotReadTx(ctx)
+	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
 	defer rollbackOrLog(tx)
-	ref, err := authenticationAuthorityTx(ctx, tx, lookup)
+	ref, err := tx.operator.authenticationAuthorityTx(ctx, tx, lookup)
 	if err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
@@ -95,7 +95,7 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 	return out, tx.Commit()
 }
 
-func authenticationAuthorityTx(ctx context.Context, tx *storeTx, lookup capability.CredentialLookup) (capability.AuthorityRef, error) {
+func (op *Operator) authenticationAuthorityTx(ctx context.Context, tx *storeTx, lookup capability.CredentialLookup) (capability.AuthorityRef, error) {
 	var ref capability.AuthorityRef
 	var query string
 	switch lookup.Class {
@@ -113,4 +113,4 @@ func authenticationAuthorityTx(ctx context.Context, tx *storeTx, lookup capabili
 	return ref, err
 }
 
-var _ capability.AuthenticationReader = (*Store)(nil)
+var _ capability.AuthenticationReader = (*Operator)(nil)

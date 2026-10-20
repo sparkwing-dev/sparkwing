@@ -17,13 +17,13 @@ func TestBindingDataUsesTransactionalPersistence(t *testing.T) {
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	target := capability.Target{Team: "a", RunID: "run", Data: &capability.DataTarget{Operation: capability.DataDownload, Digest: string(intent.Digest)}}
 	for _, rule := range []capability.BindingRule{capability.BindData, capability.BindReadSet} {
-		if err := s.CheckBinding(t.Context(), p, rule, target); err != nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), p, rule, target); err != nil {
 			t.Fatal(err)
 		}
 		rollback := errors.New("keep receipt")
@@ -37,7 +37,7 @@ func TestBindingDataUsesTransactionalPersistence(t *testing.T) {
 		if !errors.Is(err, rollback) {
 			t.Fatal(err)
 		}
-		if err := s.CheckBinding(t.Context(), p, rule, target); err != nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), p, rule, target); err != nil {
 			t.Fatalf("binding check committed receipt deletion: %v", err)
 		}
 	}
@@ -49,7 +49,7 @@ func TestBindingDataCannotWidenPersistedAuthority(t *testing.T) {
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestBindingDataCannotWidenPersistedAuthority(t *testing.T) {
 		input.Capability.Grants = []capability.Grant{capability.TeamAdmin, capability.DataRead, capability.DataWrite}
 		target := capability.Target{Team: "a", RunID: "run", Data: &capability.DataTarget{Operation: capability.DataDownload, Digest: string(intent.Digest)}}
 		for _, rule := range []capability.BindingRule{capability.BindData, capability.BindReadSet} {
-			if err := s.CheckBinding(t.Context(), input, rule, target); err != nil {
+			if err := s.AsOperator().CheckBinding(t.Context(), input, rule, target); err != nil {
 				t.Logf("persisted authority depended on supplied fields: %v", err)
 				return false
 			}

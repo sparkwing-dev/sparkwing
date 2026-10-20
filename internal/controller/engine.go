@@ -6,18 +6,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // EngineController applies authorized operations through store transactions.
 type EngineController struct {
-	Store             *store.Store
+	authority         engineAuthority
+	operator          AuthorityRevoker
+	authorization     RouteAuthorization
 	RunnerPolicy      RunnerAdmissionPolicy
 	LocalRunnerPolicy RunnerAdmissionPolicy
 	VersionPolicy     *SignedEngineVersionPolicy
 	Units             UnitRenewer
 	Launcher          LauncherSyncReader
-	ResolveTenant     func(context.Context, store.Team) (RunTransactions, error)
-	ResolveRunTeam    func(context.Context, string) (store.Team, error)
+	ResolveTenant     func(context.Context, store.Team) (TenantHandle, error)
 	ResolveOperator   func(context.Context) (AuthorityRevoker, error)
 	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
 	ReadRunStatus     func(context.Context, store.Team, string) (RunStatusFacts, error)
@@ -79,4 +81,18 @@ func (s *EngineController) Compatibility(ctx context.Context, engineVersion stri
 		return controllerwire.Compatibility{}, versionPolicyUnavailable()
 	}
 	return s.VersionPolicy.Compatibility(ctx, engineVersion)
+}
+
+// Cross-team claims and credential exchange resolve authority before tenant selection.
+type engineAuthority interface {
+	capability.AuthorityResolver
+	capability.AuthenticationReader
+	ReadClaimProfile(context.Context, capability.AuthorityRef) (match.Profile, match.Resources, error)
+	RecordRunnerPoll(context.Context, store.UnitDemand) error
+	ClaimUnit(context.Context, store.UnitDemand) (store.UnitClaim, error)
+	CloudAwardResources(context.Context, capability.AuthorityRef) (*match.Resources, error)
+	ExchangeCapability(context.Context, capability.ExchangeSpec) (capability.Issued, error)
+	DelegateCapability(context.Context, capability.DelegateSpec) (capability.Issued, error)
+	ResupplyHereSecrets(context.Context, capability.AuthorityRef, map[string]string) error
+	RecordHereAvailability(context.Context, capability.AuthorityRef, match.Resources) error
 }

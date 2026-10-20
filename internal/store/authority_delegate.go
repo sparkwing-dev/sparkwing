@@ -59,14 +59,14 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 }
 
 // DelegateCapability returns the narrowed bearer only after its transaction commits.
-func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error) {
-	return s.commitIssuance(ctx, capability.IssueRequest{Kind: capability.Delegate, Delegate: &spec})
+func (o *Operator) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error) {
+	return o.s.commitIssuance(ctx, capability.IssueRequest{Kind: capability.Delegate, Delegate: &spec})
 }
 
 // ProvisionCapability accepts trusted root-origin facts and rechecks its authorizer.
 // It does not accept ordinary delegation input or omit origin verification.
-func (s *Store) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error) {
-	return s.commitIssuance(ctx, capability.IssueRequest{Kind: capability.Delegate, Provision: &spec})
+func (o *Operator) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error) {
+	return o.s.commitIssuance(ctx, capability.IssueRequest{Kind: capability.Delegate, Provision: &spec})
 }
 
 func (s *Store) commitIssuance(ctx context.Context, request capability.IssueRequest) (capability.Issued, error) {

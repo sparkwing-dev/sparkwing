@@ -37,7 +37,7 @@ type cronsFixture struct {
 	none    string
 }
 
-func newCronsFixture(t *testing.T) *cronsFixture {
+func newCronsFixture(t *testing.T, opts ...store.Option) *cronsFixture {
 	t.Helper()
 	remotes := []string{cronTestRepoURL}
 	for i := range 11 {
@@ -46,7 +46,11 @@ func newCronsFixture(t *testing.T) *cronsFixture {
 	if sha := sourcetest.FixedRemote(t, remotes...); sha != cronTestSHA {
 		t.Fatalf("fixed schedule commit = %s", sha)
 	}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	var s *controller.Server
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		s = controller.New(st, nil)
+		return s.StorePolicies(), nil
+	})}, opts...)...)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -65,7 +69,6 @@ func newCronsFixture(t *testing.T) *cronsFixture {
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}
-	s := controller.New(st, nil)
 	return &cronsFixture{t: t, handler: s.Handler(), store: st, writer: writer, reader: reader, none: none}
 }
 
@@ -198,9 +201,8 @@ func (p *scheduleSourceProbe) ResolveScheduleSource(context.Context, store.CronS
 }
 
 func TestControllerCrons_BoundsEntriesBeforeResolvingSource(t *testing.T) {
-	f := newCronsFixture(t)
 	probe := &scheduleSourceProbe{}
-	f.store.SetIntakePolicy(probe)
+	f := newCronsFixture(t, fixtureStorePolicies(store.Policies{Intake: probe}))
 	body := cronPushBody()
 	entries := make([]map[string]any, 21)
 	for i := range entries {

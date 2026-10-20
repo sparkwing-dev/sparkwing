@@ -69,10 +69,10 @@ func (s *Server) readActionsBinding(ctx context.Context, team store.Team, reposi
 	if s.githubRunners.lookup != nil {
 		return s.githubRunners.lookup(ctx, team, repositoryID)
 	}
-	if s.store == nil {
+	if s.operator == nil {
 		return store.GitHubRunnerBinding{}, missingEndpointPolicy()
 	}
-	tenant, err := s.store.ForTeam(ctx, team)
+	tenant, err := s.tenantForTeam(ctx, team)
 	if err != nil {
 		return store.GitHubRunnerBinding{}, err
 	}

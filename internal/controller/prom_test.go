@@ -135,7 +135,7 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
 		Grants: []capability.Grant{capability.OperatorLimits}, Binding: capability.Binding{Kind: capability.BindingNone},
 	}}
-	srv := controller.New(st, nil).WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{}}).WithMetricsAddr(metricsAddr).WithAuthorization(controller.RouteAuthorization{
+	srv := controller.New(st, nil).WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: &controller.SignedRunnerAdmission{}})).WithMetricsAddr(metricsAddr).WithAuthorization(controller.RouteAuthorization{
 		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 	})
 
@@ -193,7 +193,7 @@ func TestMetricsAddr_FailsStartupWithoutAMetricsListener(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	srv := controller.New(st, nil).WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{}}).WithMetricsAddr("127.0.0.1:9100")
+	srv := controller.New(st, nil).WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: &controller.SignedRunnerAdmission{}})).WithMetricsAddr("127.0.0.1:9100")
 	if err := controller.ServeWith(ctx, srv, controller.Listeners{API: apiListener(t)}); err == nil || !strings.Contains(err.Error(), "127.0.0.1:9100") {
 		t.Fatalf("ServeWith error = %v, want the missing metrics listener", err)
 	}

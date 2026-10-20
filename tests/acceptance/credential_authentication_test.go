@@ -82,6 +82,9 @@ func (b *credentialBoundary) router(t *testing.T) http.Handler {
 	} {
 		if err := router.Register(controller.Endpoint{
 			Method: "POST", Pattern: pattern, Authentication: capability.AuthCapability,
+			ResolveTarget: func(_ context.Context, _ capability.Principal, target capability.Target) (capability.Target, error) {
+				return target, nil
+			},
 			Decode: func(r *http.Request) (capability.RequestEvidence, error) {
 				body, err := io.ReadAll(r.Body)
 				if err != nil {

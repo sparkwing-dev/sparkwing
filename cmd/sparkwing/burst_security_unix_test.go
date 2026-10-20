@@ -224,7 +224,7 @@ func burstCLIClaimantBoundary(t *testing.T, personal, listed, allowed bool, forg
 	if _, err := owner.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeReady), Cause: string(store.CauseRelease)}); err != nil {
 		t.Fatal(err)
 	}
-	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
+	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

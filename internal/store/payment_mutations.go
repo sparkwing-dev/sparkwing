@@ -16,7 +16,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 	if paymentID == "" || reference == "" {
 		return CreditReversal{}, errors.New("credits: a reversal names the payment and its own reference")
 	}
-	paid, found, err := paidGrantForPaymentTx(ctx, tx, paymentID)
+	paid, found, err := tx.operator.paidGrantForPaymentTx(ctx, tx, paymentID)
 	if err != nil {
 		return CreditReversal{}, err
 	}
@@ -112,7 +112,7 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if actor != "" {
 		attrs["reason"] = reason
 	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
+	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: disputeID, Actor: actor, Attrs: attrs,
 	}); err != nil {
 		return false, err
@@ -163,7 +163,7 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 		}
 	}
 	for _, id := range released {
-		if err := RecordBusinessEvent(tx, BusinessEvent{
+		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 			At: now, Team: team, Kind: BusinessEventTeamUnfrozen, SubjectID: id, Actor: actor, Attrs: releaseAttrs,
 		}); err != nil {
 			return 0, err
@@ -184,7 +184,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 		return err
 	}
 	if refusal.reason != "" {
-		return RecordBusinessEvent(tx, BusinessEvent{
+		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 			Team: team, Kind: BusinessEventCardRefused, SubjectID: c.PaymentMethod, Actor: actor, At: now,
 			Attrs: map[string]any{"reason": refusal.reason, "brand": c.Brand, "last4": c.Last4},
 		})
@@ -211,7 +211,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	    WHERE team = ? AND refill_blocked = 1 AND payment_method <> ?`, string(team), c.PaymentMethod); err != nil {
 		return err
 	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
+	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardAdded, SubjectID: c.PaymentMethod, Actor: actor, At: now,
 		Attrs: map[string]any{"brand": c.Brand, "last4": c.Last4},
 	}); err != nil {

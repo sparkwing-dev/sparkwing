@@ -19,6 +19,7 @@ import (
 )
 
 type sourceTransactions struct {
+	engineTransactions
 	authorized capability.Authorized
 	credential store.GitCredential
 	audit      capability.SourceReleaseAudit
@@ -63,12 +64,13 @@ func sourceHTTPFixture(t *testing.T, b *credentialBoundary) (*sourceTransactions
 	}
 	cipher := &sourceCipher{}
 	e := fakeEngine(t, &engineTransactions{})
-	source := &controller.SourceController{Cipher: cipher, ResolveTenant: func(_ context.Context, team store.Team) (controller.SourceTransactions, error) {
+	source := &controller.SourceController{Cipher: cipher, ResolveTenant: func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 		if team != "team" {
 			t.Fatalf("source tenant = %q", team)
 		}
 		return tx, nil
 	}}
+	e.ResolveTenant = source.ResolveTenant
 	h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithEngineController(e).WithSourceController(source).Handler()
 	return tx, cipher, h
 }
@@ -181,3 +183,5 @@ func TestSourceMachineConsentRouteIsGone(t *testing.T) {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 }
+
+func (f *sourceTransactions) Team() store.Team { return "team" }

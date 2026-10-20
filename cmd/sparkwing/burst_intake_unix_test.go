@@ -308,35 +308,7 @@ func burstIntakeController(t *testing.T, endpoint string) (*store.Store, *contro
 
 func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployment.Config) (*store.Store, *controller.Server, string) {
 	t.Helper()
-	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := state.Close(); err != nil {
-			t.Error(err)
-		}
-	})
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")})
-	for _, query := range []string{
-		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('burst-user','burst@example.test',1,1)`,
-		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','burst-user','editor',1)`,
-	} {
-		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), query); err != nil {
-			t.Fatal(err)
-		}
-	}
-	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest := sha256.Sum256([]byte(session))
-	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-user"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,12 +321,42 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 			t.Error(err)
 		}
 	})
-	server.WithDataObjects(objects)
+	var server *controller.Server
+	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"), store.WithPolicies(func(state *store.Store) (store.Policies, error) {
+		server = controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")}).WithDataObjects(objects)
+		return server.StorePolicies(), nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, query := range []string{
+		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('burst-user','burst@example.test',1,1)`,
+		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','burst-user','editor',1)`,
+	} {
+		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(session))
+	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+	issued, err := state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-user"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	versions, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.WithEngineController(&controller.EngineController{Store: state, RunnerPolicy: &controller.SignedRunnerAdmission{Resolver: versions}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}})
+	server.WithEngineController(controller.NewEngineController(state, controller.EngineController{RunnerPolicy: &controller.SignedRunnerAdmission{Resolver: versions}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}}))
 	return state, server, issued.Raw
 }
 
@@ -411,7 +413,7 @@ func main() {
 
 func TestBurstFixtureSupportsPublicSessionEnrollment(t *testing.T) {
 	state, server, _ := burstIntakeController(t, "http://controller.test")
-	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
+	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

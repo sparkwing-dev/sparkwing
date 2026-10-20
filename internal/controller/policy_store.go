@@ -26,7 +26,7 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 	if console {
 		lookup.Class = capability.CredentialSession
 	}
-	snapshot, err := reader.server.store.ReadAuthentication(ctx, lookup, evidence)
+	snapshot, err := reader.server.operator.ReadAuthentication(ctx, lookup, evidence)
 	if err != nil {
 		var failure *apierr.Error
 		if errors.As(err, &failure) {
@@ -93,11 +93,11 @@ func (b policyStoreBindings) CheckBinding(ctx context.Context, p capability.Prin
 	if p.Class == capability.CredentialConsole && rule == capability.BindNone {
 		return nil
 	}
-	return b.server.store.CheckBinding(ctx, p, rule, target)
+	return b.server.operator.CheckBinding(ctx, p, rule, target)
 }
 
 func (s *Server) storeRouteAuthorization() RouteAuthorization {
-	if s.store == nil {
+	if s.operator == nil {
 		return RouteAuthorization{}
 	}
 	return RouteAuthorization{
@@ -119,7 +119,7 @@ func (s *Server) checkSessionCSRF(r *http.Request, p capability.Principal) error
 	if err != nil || (p.Class != capability.CredentialSession && p.Class != capability.CredentialConsole) || p.Authority != (capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}) {
 		return &apierr.Error{Code: apierr.Unauthenticated, Message: "session identity changed"}
 	}
-	session, err := s.store.LookupSession(r.Context(), raw)
+	session, err := s.operator.LookupSession(r.Context(), raw)
 	if errors.Is(err, store.ErrSessionBackend) {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}

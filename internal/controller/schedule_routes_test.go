@@ -2,10 +2,7 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -15,158 +12,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-type scheduleWriterFake struct {
+type scheduleWriterRefusal struct {
 	*store.Tenant
-	s            *Server
-	runs         map[string]string
-	seen         capability.Authorized
-	failure      error
-	lastError    error
-	authority    map[string]capability.AuthorityRef
-	repositories map[string]int64
+	failure error
 }
 
-func (f *scheduleWriterFake) service(a capability.Authorized) *crons.Service {
-	f.seen = a
-	return f.s.cronServiceFor(f.Tenant, a.Principal.Capability.Subject.ID)
-}
-
-func (f *scheduleWriterFake) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Authorized, body controllerwire.ScheduleRepoRequest) ([]string, []string, error) {
-	if f.failure != nil {
-		return nil, nil, f.failure
-	}
-	entries := make([]cronRepoSchedule, 0, len(body.Schedules))
-	for _, entry := range body.Schedules {
-		entries = append(entries, cronRepoSchedule(entry))
-	}
-	declared, err := declaredFromRequest(entries)
-	if err != nil {
-		return nil, nil, err
-	}
-	svc := f.service(a)
-	if f.repositories == nil {
-		f.repositories = map[string]int64{}
-	}
-	if f.repositories[body.RepoURL] == 0 {
-		f.repositories[body.RepoURL] = int64(len(f.repositories) + 1)
-	}
-	repositoryID := f.repositories[body.RepoURL]
-	if status, err := f.s.cronRepoCapRefusal(ctx, svc, body.RepoURL, repositoryID, len(declared)); err != nil {
-		code := apierr.BadRequest
-		if status == 409 {
-			code = apierr.Conflict
-		}
-		return nil, nil, &apierr.Error{Code: code, Message: err.Error()}
-	}
-	limits, err := f.s.store.AsOperator().ComputeLimits(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, entry := range declared {
-		if err := crons.RefuseBelowMinInterval(entry.Trigger.Cron, limits.CronSeconds); err != nil {
-			return nil, nil, errors.Join(err, &apierr.Error{Code: apierr.RateLimited, Message: "schedule cadence exceeds the configured limit", Details: map[string]any{"limit": store.ComputeLimitCronSeconds}})
-		}
-	}
-	report, err := svc.ArmPushed(ctx, crons.ArmPush{RepoURL: body.RepoURL, Branch: body.Branch, SHA: body.SHA, Entries: declared, GitHubInstallationID: 17, GitHubRepositoryID: repositoryID})
-	f.lastError = err
-	ids := make([]string, 0, len(report.Schedules))
-	for _, row := range report.Schedules {
-		ids = append(ids, row.ID)
-	}
-	return ids, report.Withdrawals, err
-}
-
-func (f *scheduleWriterFake) DeleteAuthorizedSchedules(ctx context.Context, a capability.Authorized, repo string) (int, error) {
-	return f.service(a).DisarmRepoURL(ctx, repo)
-}
-
-func (f *scheduleWriterFake) PauseAuthorizedSchedule(ctx context.Context, a capability.Authorized, name string, pause bool) (string, error) {
-	svc := f.service(a)
-	row, err := svc.Resolve(ctx, name)
-	if err != nil {
-		return "", err
-	}
-	if pause {
-		err = svc.Pause(ctx, row.ID)
-	} else {
-		err = svc.Resume(ctx, row.ID)
-	}
-	return row.ID, err
-}
-
-func (f *scheduleWriterFake) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, name string, body *controllerwire.ScheduleOverride) (string, error) {
-	svc := f.service(a)
-	sched, err := svc.Resolve(ctx, name)
-	if err != nil {
-		return "", err
-	}
-	if body == nil {
-		_, err = svc.ClearOverride(ctx, sched.ID)
-	} else {
-		fields := crons.Override{Cron: body.Cron, TZ: body.TZ, Overlap: body.Overlap}
-		if body.CatchUp != nil {
-			d, parseErr := time.ParseDuration(*body.CatchUp)
-			if parseErr != nil {
-				return "", parseErr
-			}
-			fields.CatchUp = &d
-		}
-		if body.Args != nil {
-			fields.Args = *body.Args
-		}
-		_, err = svc.SetOverride(ctx, sched.ID, fields)
-	}
-	return sched.ID, err
-}
-
-func (f *scheduleWriterFake) RunAuthorizedSchedule(ctx context.Context, a capability.Authorized, name, key string) (string, string, bool, error) {
-	sched, err := f.service(a).Resolve(ctx, name)
-	if err != nil {
-		return "", "", false, err
-	}
-	replayKey := string(f.Team()) + "/" + sched.ID + "/" + key
-	admitted, err := f.admit(ctx, sched, replayKey)
-	return sched.ID, admitted.RunID, admitted.Replayed, err
-}
-
-func (f *scheduleWriterFake) AdmitScheduledRun(ctx context.Context, sched store.CronSchedule, due time.Time) (store.AdmissionResult, error) {
-	return f.admit(ctx, sched, sched.ID+"@"+due.UTC().Format(time.RFC3339Nano))
-}
-
-func (f *scheduleWriterFake) admit(ctx context.Context, sched store.CronSchedule, key string) (store.AdmissionResult, error) {
-	if f.authority == nil {
-		f.authority = map[string]capability.AuthorityRef{}
-	}
-	if _, exists := f.authority[sched.ID]; !exists {
-		_, root, err := teststore.ProvisionCredential(ctx, f.s.store, capability.ProvisionSpec{
-			Kind: capability.ProvisionMember, Team: string(f.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: sched.ArmedBy},
-			Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsWrite},
-		})
-		if err != nil {
-			return store.AdmissionResult{}, err
-		}
-		f.authority[sched.ID] = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
-	}
-	admitted, err := f.Tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.authority[sched.ID], IdempotencyKey: key, Request: runspec.Request{
-		Version: 1, Team: string(f.Team()), Pipeline: sched.Pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
-		Origin: runspec.OriginTrigger, RequestedArgs: sched.Effective().Args,
-		Git:    runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey("gh:" + strconv.FormatInt(sched.GitHubRepositoryID, 10))}, Ref: sched.GitBranch, SHA: sched.LockedRef},
-		Source: runspec.Source{Ref: sched.LockedRef, Location: runspec.SourceLocation{RemoteURL: sched.RepoPath}},
-	}})
-	if err == nil {
-		if f.runs == nil {
-			f.runs = map[string]string{}
-		}
-		f.runs[key] = admitted.RunID
-	}
-	return admitted, err
+func (f *scheduleWriterRefusal) ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error) {
+	return nil, nil, f.failure
 }
 
 type scheduleIntakePolicy struct{}
@@ -175,19 +33,16 @@ func (scheduleIntakePolicy) ResolveIntake(_ context.Context, _ capability.Author
 	return store.IntakePolicyFacts{Options: &request.Request.Options, SourceLocation: &request.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 }
 
-func (f *scheduleWriterFake) DeleteAuthorizedSchedule(ctx context.Context, a capability.Authorized, name string) (string, bool, error) {
-	svc := f.service(a)
-	sched, err := svc.Resolve(ctx, name)
-	if err != nil {
-		return "", false, err
-	}
-	err = svc.Disarm(ctx, sched.ID)
-	return sched.ID, err == nil, err
+func (scheduleIntakePolicy) ResolveScheduleSource(_ context.Context, row store.CronSchedule, request runspec.Request) (runspec.Request, error) {
+	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: row.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: true, Value: 1}})
+	request.Git = runspec.Git{Repository: repository, Ref: row.GitBranch, SHA: row.LockedRef}
+	request.Source = runspec.Source{Ref: row.LockedRef, Location: runspec.SourceLocation{RemoteURL: row.RepoPath, PipelineDir: ".sparkwing"}}
+	return request, err
 }
 
 type scheduleHTTPFixture struct {
-	s      *Server
-	writer *scheduleWriterFake
+	s      *serverFixture
+	writer *scheduleWriterRefusal
 	raw    string
 	facts  *reportingFacts
 }
@@ -199,24 +54,24 @@ func newScheduleHTTPFixture(t *testing.T) scheduleHTTPFixture {
 
 func newDeploymentScheduleHTTPFixture(t *testing.T, cfg deployment.Config) scheduleHTTPFixture {
 	t.Helper()
-	s := NewDeployment(newStoreForAuth(t), cfg, nil)
-	s.store.SetIntakePolicy(scheduleIntakePolicy{})
+	s := &serverFixture{}
+	newStoreForAuth(t, s.option(cfg, nil), store.WithPolicies(func(*store.Store) (store.Policies, error) { return store.Policies{Intake: scheduleIntakePolicy{}}, nil }))
 	tenant, err := s.store.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := &scheduleWriterFake{Tenant: tenant, s: s, runs: map[string]string{}}
-	s.WithScheduleWriter(func(context.Context, store.Team) (ScheduleWriter, error) { return writer, nil })
-	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	writer := &scheduleWriterRefusal{Tenant: tenant}
+	raw, issued, err := teststore.ProvisionCredential(t.Context(), s.store, capability.ProvisionSpec{
+		Kind: capability.ProvisionMember, Team: string(tenant.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "pusher"},
+		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	p := capability.Principal{
-		Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"},
-		Capability: capability.Capability{
-			Prefix: "root", Digest: sha256.Sum256([]byte(raw)), Team: string(tenant.Team()),
-			Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "pusher"},
-			Issuance: capability.Delegate, Binding: capability.Binding{Kind: capability.BindingNone},
-			Grants: []capability.Grant{capability.RunsRead, capability.RunsControl},
-		},
+		Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Prefix},
+		Capability: *issued,
 	}
 	facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p}}}}
 	s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
@@ -234,7 +89,7 @@ func (f scheduleHTTPFixture) call(t *testing.T, method, path, body, key string, 
 	w := httptest.NewRecorder()
 	f.s.Handler().ServeHTTP(w, r)
 	if w.Code != want {
-		t.Fatalf("%s %s: HTTP %d %s, want %d; fake error=%v", method, path, w.Code, w.Body, want, f.writer.lastError)
+		t.Fatalf("%s %s: HTTP %d %s, want %d; fake error=%v", method, path, w.Code, w.Body, want, f.writer.failure)
 	}
 	if out != nil {
 		if err := json.Unmarshal(w.Body.Bytes(), out); err != nil {
@@ -253,8 +108,12 @@ func TestScheduleHTTPReadWriteAndReplay(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
 	var pushed controllerwire.ScheduleRepoWritten
 	f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 200, &pushed)
-	if len(pushed.Schedules) != 2 || f.writer.seen.Target.Team != string(store.DefaultTeam) || f.writer.seen.Principal.Capability.Subject.ID != "pusher" {
-		t.Fatalf("push=%+v authority=%+v", pushed, f.writer.seen)
+	if len(pushed.Schedules) != 2 {
+		t.Fatalf("push=%+v", pushed)
+	}
+	stored, err := f.writer.GetCronSchedule(t.Context(), pushed.Schedules[0].ID)
+	if err != nil || stored.Team != store.DefaultTeam || stored.ArmedBy != "pusher" {
+		t.Fatalf("stored=%+v error=%v", stored, err)
 	}
 	var list controllerwire.ScheduleOverview
 	f.call(t, "GET", "/api/v1/schedules?next=2&team=foreign", "", "", 200, &list)
@@ -276,7 +135,8 @@ func TestScheduleHTTPReadWriteAndReplay(t *testing.T) {
 	var first, replay controllerwire.ScheduleRun
 	f.call(t, "POST", scheduleHTTPPath+"/run", "", "same", 200, &first)
 	f.call(t, "POST", scheduleHTTPPath+"/run", "", "same", 200, &replay)
-	if first.Replayed || !replay.Replayed || first.RunID != replay.RunID || first.Schedule.ID != replay.Schedule.ID || len(f.writer.runs) != 1 {
+	runs, err := f.writer.ListRuns(t.Context(), store.RunFilter{})
+	if err != nil || first.Replayed || !replay.Replayed || first.RunID != replay.RunID || first.Schedule.ID != replay.Schedule.ID || len(runs) != 1 {
 		t.Fatalf("first=%+v replay=%+v", first, replay)
 	}
 	f.call(t, "POST", scheduleHTTPPath+"/run", "", "", 400, nil)
@@ -344,12 +204,13 @@ func TestScheduleHTTPInvalidInputAndBackend(t *testing.T) {
 		f.call(t, "PUT", "/api/v1/schedules/repos", body, "", 400, nil)
 	}
 	f.writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "authority changed"}
+	testOnlyTenantPort[ScheduleWriter](f.s, func(context.Context, store.Team) (ScheduleWriter, error) { return f.writer, nil })
 	f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 403, nil)
 	rows, err := f.writer.ListCronSchedules(t.Context())
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("failed transaction leaked schedules: %+v %v", rows, err)
 	}
-	f.s.WithScheduleWriter(func(context.Context, store.Team) (ScheduleWriter, error) { return nil, nil })
+	testOnlyTenantPort[ScheduleWriter](f.s, func(context.Context, store.Team) (ScheduleWriter, error) { return nil, nil })
 	w := f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 500, nil)
 	if !strings.Contains(w.Body.String(), "policy_missing") {
 		t.Fatal(w.Body.String())

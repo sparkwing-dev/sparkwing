@@ -9,7 +9,7 @@ func TestComputeUsageFollowsLiveBillingAwards(t *testing.T) {
 	root.RootMetered = true
 	rewriteSchemaExec(t, s.db, `DELETE FROM capabilities WHERE prefix='runner'`)
 	authorityPersist(t, s, root)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}

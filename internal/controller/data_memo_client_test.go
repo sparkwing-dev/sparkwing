@@ -11,14 +11,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestDataMemoClientUsesRealRecordsAndCopy(t *testing.T) {
-	e, tenant := engineRuntimeStore(t)
-	award := engineRuntimeClaim(t, e, capability.UnitNode)
-	raw := nativeClaimPresentation(t, e, award)
-	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","memo":{}}`))
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +25,11 @@ func TestDataMemoClientUsesRealRecordsAndCopy(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	h := New(e.Store, nil).WithDataObjects(objects).Handler()
+	e, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithDataObjects(objects) })
+	award := engineRuntimeClaim(t, e, capability.UnitNode)
+	raw := nativeClaimPresentation(t, e, award)
+	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","memo":{}}`))
+	h := e.Server.Handler()
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	authority, err := tenant.ResolveBlobAuthority(t.Context(), blob.Authority{CapabilityRef: award.Principal.Capability.Prefix}, capability.DataRead)
 	if err != nil {

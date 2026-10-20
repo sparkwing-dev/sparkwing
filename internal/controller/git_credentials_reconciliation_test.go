@@ -23,14 +23,14 @@ import (
 
 type gitReleaseFixture struct {
 	t                    *testing.T
-	s                    *Server
+	s                    *serverFixture
 	session, csrf, claim string
 }
 
 func newGitReleaseFixture(t *testing.T) *gitReleaseFixture {
 	t.Helper()
 	s, session, csrf := reviewAccount(t, "owner")
-	e := &EngineController{Store: s.store}
+	e := newEngineFixture(s.store, EngineController{})
 	tenant, err := s.store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -47,10 +47,10 @@ func newGitReleaseFixture(t *testing.T) *gitReleaseFixture {
 	}
 	engineSQL(t, s.store, `UPDATE runs SET repo_key='git:gitlab.example.com/acme/tools',request_json=? WHERE team='a' AND id='run'`, encoded)
 	a := engineRuntimeClaim(t, e, capability.UnitNode)
-	s.store.SetClaimProfileResolver(engineProfileFake{})
+	s.engine.claimProfiles = engineProfileFake{}
 	engineSQL(t, s.store, `UPDATE capabilities SET created_by='member' WHERE prefix='runner'`)
 	c := a.Principal.Capability
-	issued, err := s.store.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: a.Principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.SourceRead}, Binding: c.Binding, Repositories: c.Repositories, Data: c.Data, ExpiresAt: c.ExpiresAt})
+	issued, err := s.store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: a.Principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.SourceRead}, Binding: c.Binding, Repositories: c.Repositories, Data: c.Data, ExpiresAt: c.ExpiresAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,9 +235,9 @@ func TestTeamGitCredentialReachesCloudWork(t *testing.T) {
 	engineSQL(t, s.store, `UPDATE runs SET dispatch='controller',repo_key='git:gitlab.example.com/acme/tools',request_json=? WHERE team='a' AND id='run'`, encoded)
 	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	raw := LauncherFixtureClaim(t, s.store, "run", "job")
-	s.store.SetClaimProfileResolver(engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+	s.engine.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
 		return match.Profile{Location: "cloud", Class: "cloud", Capacity: match.Resources{Cores: 1}}, match.Resources{Cores: 1}, nil
-	}))
+	})
 	f := &gitReleaseFixture{t: t, s: s, session: session, csrf: csrf, claim: raw}
 	f.put("private-cloud-git")
 	if got := f.release(200); got.Secret != "private-cloud-git" || got.Host != "gitlab.example.com" {

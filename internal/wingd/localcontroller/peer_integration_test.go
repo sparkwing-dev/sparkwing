@@ -39,11 +39,12 @@ func TestLocalClaimantW8UsesPersistedPeerAuthority(t *testing.T) {
 		t.Fatal("missing shared claim route")
 	}
 	target := capability.Target{Team: string(store.DefaultTeam), ClaimKinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}}
-	verified, err := capability.NewAuthenticator(s).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: raw, Evidence: capability.RequestEvidence{Target: target}}, route)
+	operator := s.AsOperator()
+	verified, err := capability.NewAuthenticator(operator).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: raw, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := capability.Authorize(t.Context(), s, route, verified, target); err != nil {
+	if _, err := capability.Authorize(t.Context(), operator, route, verified, target); err != nil {
 		t.Fatal(err)
 	}
 	if verified.Principal.Authority.ID == "" || verified.Principal.Capability.Subject != (capability.Subject{Kind: capability.SubjectLocal, ID: claimant.subject}) {

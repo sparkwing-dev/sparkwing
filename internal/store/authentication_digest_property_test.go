@@ -19,7 +19,7 @@ func TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty(t *testing.T) {
 		s.clock = func() time.Time { return now }
 		member := authorityMember(t, s, "member", RoleOwner)
 		expires := now.Add(time.Duration(1+random.IntN(3600)) * time.Second)
-		issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 			Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a",
 			Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 			Binding: capability.Binding{Kind: capability.BindingNone},
@@ -47,12 +47,12 @@ func TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty(t *testing.T) {
 				digest = sha256.Sum256([]byte(fmt.Sprint(random.Uint64())))
 			}
 			lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Digest: digest, Audience: capability.Controller}
-			if snapshot, err := s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{}); err == nil || len(snapshot.Authorities) != 0 {
+			if snapshot, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{}); err == nil || len(snapshot.Authorities) != 0 {
 				t.Fatal("changed bearer resolved authority")
 			}
 		}
 		lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Digest: issued.Capability.Digest, Audience: capability.Controller}
-		snapshot, err := s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
+		snapshot, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 		if err != nil || len(snapshot.Authorities) != 2 || snapshot.Authorities[0].Principal.Capability.Prefix != issued.Capability.Prefix {
 			t.Fatalf("complete digest: %+v, %v", snapshot, err)
 		}
@@ -69,7 +69,7 @@ func TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty(t *testing.T) {
 		} else {
 			now = expires
 		}
-		if snapshot, err := s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{}); err == nil || len(snapshot.Authorities) != 0 {
+		if snapshot, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{}); err == nil || len(snapshot.Authorities) != 0 {
 			t.Fatal("ended credential resolved authority")
 		}
 	}

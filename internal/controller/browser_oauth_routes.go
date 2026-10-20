@@ -76,7 +76,7 @@ func (s *Server) verifyOAuthCallback(r *http.Request) error {
 	if flow.Mode == oauthFlowLink {
 		proof.flow.Code = query.Get("code")
 	} else {
-		if s.store == nil {
+		if s.operator == nil {
 			return missingEndpointPolicy()
 		}
 		proof.session, proof.raw, err = s.oauthSignIn(r.Context(), name, query.Get("code"), flow.Verifier, browserURL(r, oauthCallbackPath(name)))

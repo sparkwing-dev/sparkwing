@@ -17,8 +17,11 @@ type LauncherPreparation struct {
 	ExpiresAt time.Time
 }
 
-// RenewLauncherPreparation extends only live unexchanged bootstrap leases owned by this launcher.
-func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]LauncherPreparation, error) {
+// renewLauncherPreparation extends only live unexchanged bootstrap leases owned by this launcher.
+func (s *Store) renewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]LauncherPreparation, error) {
+	if err := validateLauncherPreparationFences(preparing); err != nil {
+		return nil, err
+	}
 	prepared := []LauncherPreparation{}
 	err := s.inLauncherBatchTx(ctx, authority, preparing, true, func(tx *storeTx) error {
 		prepared = prepared[:0]
@@ -31,12 +34,7 @@ func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capabili
 			return bindingRefusal()
 		}
 		root := chain[len(chain)-1].principal
-		seen := map[capability.LeaseRef]bool{}
 		for _, fence := range preparing {
-			if seen[fence] || fence.ID == "" || fence.Holder == "" || fence.Generation <= 0 || !slices.Contains([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, fence.Kind) {
-				return bindingRefusal()
-			}
-			seen[fence] = true
 			expiry, err := renewLauncherPreparationTx(ctx, tx, root, claimant, fence)
 			if err != nil {
 				return err
@@ -54,11 +52,22 @@ func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capabili
 	return prepared, nil
 }
 
+func validateLauncherPreparationFences(preparing []capability.LeaseRef) error {
+	seen := map[capability.LeaseRef]bool{}
+	for _, fence := range preparing {
+		if seen[fence] || fence.ID == "" || fence.Holder == "" || fence.Generation <= 0 || !slices.Contains([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, fence.Kind) {
+			return bindingRefusal()
+		}
+		seen[fence] = true
+	}
+	return nil
+}
+
 func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capability.Principal, claimant capability.Capability, fence capability.LeaseRef) (time.Time, error) {
 	if err := launcherReservationAwardTx(ctx, tx, root.Authority, claimant.Subject, fence); err != nil {
 		return time.Time{}, err
 	}
-	row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
+	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
 	if err != nil {
 		if endedLauncherPreparation(err) {
 			return time.Time{}, nil

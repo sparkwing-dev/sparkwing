@@ -157,7 +157,7 @@ func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
 	if prior == "" || prior == newSessionID {
 		return
 	}
-	snapshot, err := s.store.ReadAuthentication(r.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Audience: capability.Controller, Digest: sha256.Sum256([]byte(newSessionID))}, capability.RequestEvidence{})
+	snapshot, err := s.operator.ReadAuthentication(r.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Audience: capability.Controller, Digest: sha256.Sum256([]byte(newSessionID))}, capability.RequestEvidence{})
 	if err != nil {
 		s.logger.Warn("sign-in could not read the new session's ancestry", "err", err)
 		return
@@ -169,7 +169,7 @@ func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
 			return
 		}
 	}
-	if err := s.store.DeleteSession(prior); err != nil {
+	if err := s.operator.DeleteSession(prior); err != nil {
 		s.logger.Warn("sign-in could not end the browser's earlier session", "err", err)
 	}
 }

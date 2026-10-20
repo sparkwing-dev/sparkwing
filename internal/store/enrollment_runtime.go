@@ -118,7 +118,7 @@ func enrolledClaimProfileTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if root.Authority.Kind != capability.AuthorityCapability {
 		return match.Profile{}, authorityError(apierr.Unavailable, "claim enrollment is unavailable")
 	}
-	record, err := loadCapabilityRecordTx(ctx, tx, root.Authority.ID)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Authority.ID)
 	if err != nil {
 		return match.Profile{}, err
 	}

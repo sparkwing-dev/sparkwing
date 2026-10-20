@@ -46,7 +46,10 @@ func TestStoreReachabilityRetention(t *testing.T) {
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
 	}
-	s.SetResultBlobRecords(records.manifests)
+	{
+		records := &blobRecords{manifests: records.manifests}
+		s.resultRecords, s.materializations = records, records
+	}
 	_, tenant, request := materializationTarget(t, s, records.tenant, change.Ref)
 	copied, err := tenant.ReconcileNode(t.Context(), request)
 	if err != nil || copied.Kind != Materialize {

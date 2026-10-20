@@ -65,8 +65,8 @@ func secretReadFixture(t testing.TB, b *credentialBoundary, value string) (*secr
 		CreatedAt: b.snapshot.Now, UpdatedAt: b.snapshot.Now,
 	}}
 	c := &secretReadCipher{BoundCipher: cipher}
-	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithSecretsCipher(c).
-		WithSecretReader(func(_ context.Context, team store.Team) (controller.SecretReader, error) {
+	s := bindTenantPort[controller.SecretReader](controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithSecretsCipher(c),
+		func(_ context.Context, team store.Team) (controller.SecretReader, error) {
 			if team != "team" {
 				t.Fatalf("read selected tenant %q", team)
 			}
@@ -326,12 +326,12 @@ func TestSecretReadHTTPRequiresTransactionalReader(t *testing.T) {
 			b := secretClaim()
 			_, c, s := secretReadFixture(t, b, "private-value")
 			code := apierr.PolicyMissing
-			s.WithSecretReader(nil)
+			bindTenantPort[controller.SecretReader](s, nil)
 			switch state {
 			case "nil":
-				s.WithSecretReader(func(context.Context, store.Team) (controller.SecretReader, error) { return nil, nil })
+				bindTenantPort[controller.SecretReader](s, func(context.Context, store.Team) (controller.SecretReader, error) { return nil, nil })
 			case "private failure":
-				s.WithSecretReader(func(context.Context, store.Team) (controller.SecretReader, error) {
+				bindTenantPort[controller.SecretReader](s, func(context.Context, store.Team) (controller.SecretReader, error) {
 					return nil, errors.New("private-value")
 				})
 				code = apierr.Internal

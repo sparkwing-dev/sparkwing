@@ -20,32 +20,8 @@ type GitHubConnectWriter interface {
 
 var _ GitHubConnectWriter = (*store.Tenant)(nil)
 
-// WithGitHubConnectWriter supplies tenant installation connection transactions.
-func (s *Server) WithGitHubConnectWriter(resolve func(context.Context, store.Team) (GitHubConnectWriter, error)) *Server {
-	s.resolveGitHubConnectWriter = resolve
-	return s
-}
-
 func (s *Server) githubConnectWriter(ctx context.Context, a capability.Authorized) (GitHubConnectWriter, error) {
-	if a.Target.Team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var writer GitHubConnectWriter
-	var err error
-	if s.resolveGitHubConnectWriter != nil {
-		writer, err = s.resolveGitHubConnectWriter(ctx, store.Team(a.Target.Team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(a.Target.Team))
-		writer = tenant
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if writer == nil || writer.Team() != store.Team(a.Target.Team) {
-		return nil, missingEndpointPolicy()
-	}
-	return writer, nil
+	return tenantPort[GitHubConnectWriter](ctx, s, store.Team(a.Target.Team))
 }
 
 type githubBrowserProofKey struct{}

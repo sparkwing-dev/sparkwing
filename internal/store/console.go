@@ -197,7 +197,7 @@ func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authori
 		if err != nil {
 			return AccountDeletion{}, err
 		}
-		return c.s.deleteAccountTx(ctx, tx, account.ID, tx.now())
+		return tx.operator.deleteAccountTx(ctx, tx, account.ID, tx.now())
 	}, func(tx *storeTx, set lockSet) lockSet {
 		account, err := accountTx(ctx, tx, a.Target.AccountID)
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
@@ -207,7 +207,7 @@ func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authori
 			set.err = err
 			return set
 		}
-		return discoverAccountDeletionLocks(ctx, tx, set, account.ID)
+		return tx.operator.discoverAccountDeletionLocks(ctx, tx, set, account.ID)
 	})
 }
 
@@ -227,8 +227,7 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 		if installation <= 0 {
 			return "", ErrInvalidInput
 		}
-		var team Team
-		err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team)
+		team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}
@@ -238,7 +237,7 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 		t := &Tenant{s: c.s, team: team}
 		return team, t.unbindGitHubAppInstallationTx(ctx, tx, installation)
 	}, func(tx *storeTx, set lockSet) lockSet {
-		return discoverInstallationLocks(ctx, tx, set, installation)
+		return tx.operator.discoverInstallationLocks(ctx, tx, set, installation)
 	})
 }
 
@@ -298,7 +297,7 @@ func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Autho
 		replay = digest
 		out := []Account{}
 		for _, id := range ids {
-			acct, changed, err := approveOneTx(ctx, tx, id, actor, tx.now())
+			acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, tx.now())
 			if err != nil {
 				return nil, err
 			}

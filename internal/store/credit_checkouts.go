@@ -36,7 +36,7 @@ func (t *Tenant) openCreditCheckoutTx(ctx context.Context, tx *storeTx, amountMi
 		VALUES (?, ?, ?, ?, 'usd', ?, ?, ?, ?)`, id, string(t.team), id, string(mode), amountMicro/MicroCreditsPerCent, amountMicro, nowNS, now.Add(hold).UnixNano()); err != nil {
 		return "", fmt.Errorf("credits: record the checkout: %w", err)
 	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
+	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		At: now, Team: t.team, Kind: BusinessEventCheckoutOpened, SubjectID: id,
 		Attrs: map[string]any{"amount_micro": amountMicro},
 	}); err != nil {

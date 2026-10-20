@@ -106,12 +106,12 @@ func TestGitHubConnectRechecksBindingAndStoreClock(t *testing.T) {
 	if err != nil || out.ConnectedBy != a.Principal.Capability.Subject.ID || out.Team != tenant.Team() || !out.CreatedAt.Equal(*now) {
 		t.Fatalf("binding = %+v: %v", out, err)
 	}
-	account, err := s.ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "99", Email: "foreign@example.test", EmailVerified: true}, SignUpConditions{}, *now)
+	account, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "99", Email: "foreign@example.test", EmailVerified: true}, SignUpConditions{}, *now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','99',?,'foreign@example.test',1,1)`, account.Account.ID)
-	raw, _, _, err := s.CreateAccountSession(t.Context(), account.Account, account.Account.ActiveTeam, time.Hour)
+	raw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), account.Account, account.Account.ActiveTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

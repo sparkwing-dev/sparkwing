@@ -73,11 +73,11 @@ func TestRunnerDeletionRevokesOnlyTheSelectedTeamAndIdentity(t *testing.T) {
 		t.Fatalf("deleted=%v: %v", deleted, err)
 	}
 	for _, prefix := range []string{"b-root", "other-root"} {
-		if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+		if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "a-root"}); err == nil {
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "a-root"}); err == nil {
 		t.Fatal("deleted runner authenticates")
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='owner'`)

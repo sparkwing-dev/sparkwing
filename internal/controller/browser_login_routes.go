@@ -52,7 +52,7 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 	if err := s.readLoginForm(r); err != nil {
 		return err
 	}
-	if s.store == nil || s.authorization.Authenticator == nil {
+	if s.operator == nil || s.authorization.Authenticator == nil {
 		return missingEndpointPolicy()
 	}
 	if !s.deployment.MultiTeam() {
@@ -67,7 +67,7 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 	if p.Class != capability.CredentialBearer || c.Subject.Kind != capability.SubjectAccount || c.Audience != capability.Controller || c.Team == "" || c.Unit != "" || c.Purpose != "" || c.Binding.Kind != capability.BindingNone || c.Data != nil {
 		return apierr.Authorization(apierr.ReasonBinding, "sign-in requires an unbound account access token without data scope")
 	}
-	raw, session, err := s.store.CreateCapabilitySession(r.Context(), c.Prefix, s.sessionInitialTTL())
+	raw, session, err := s.operator.CreateCapabilitySession(r.Context(), c.Prefix, s.sessionInitialTTL())
 	if err != nil {
 		var failure *apierr.Error
 		if errors.As(err, &failure) {

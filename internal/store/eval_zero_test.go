@@ -23,11 +23,11 @@ func zeroEvalFixture(t *testing.T) (*Store, *Tenant, UnitClaim, capability.Issue
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=0,status='done',outcome='memoized',finished_at=1,expansion='expected'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, s.now().Add(time.Hour).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',0,'pending',3)`)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+	issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestMemoizedSourceZeroClaimsRenewsAndPublishesEvalLog(t *testing.T) {
 	if issued.Capability.Binding.Generation != 0 || issued.Capability.Binding.Expansion == nil || issued.Capability.Binding.Expansion.Generation != 1 {
 		t.Fatalf("source and independent lease were conflated: %+v", issued.Capability.Binding)
 	}
-	if _, err := s.RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
 		t.Fatal(err)
 	}
 	route, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/expansion")
@@ -47,14 +47,14 @@ func TestMemoizedSourceZeroClaimsRenewsAndPublishesEvalLog(t *testing.T) {
 		t.Fatal("expansion policy unavailable")
 	}
 	target := capability.Target{Team: "a", RunID: "run", NodeID: "job", SourceGeneration: 0}
-	authenticated, err := capability.NewAuthenticator(s).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: issued.Raw, Evidence: capability.RequestEvidence{Target: target}}, route)
+	authenticated, err := capability.NewAuthenticator(s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: issued.Raw, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := capability.Authorize(t.Context(), s, route, authenticated, target); err != nil {
+	if _, err := capability.Authorize(t.Context(), s.AsOperator(), route, authenticated, target); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CheckBinding(t.Context(), authenticated.Principal, capability.BindReadSet, target); err != nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), authenticated.Principal, capability.BindReadSet, target); err != nil {
 		t.Fatal(err)
 	}
 	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: claim.Award.Generation, Source: &blob.LogSource{NodeID: "job", Generation: 0}}}
@@ -107,7 +107,7 @@ func FuzzZeroSourceEvalCannotBorrowAnotherFence(f *testing.F) {
 			t.Fatal("eval log borrowed a distinct source or lease fence")
 		}
 		if field%5 == 3 || field%5 == 4 {
-			if _, err := s.RenewUnit(t.Context(), issued.Capability.Prefix, true); err == nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err == nil {
 				t.Fatal("eval renewal borrowed a distinct source or lease fence")
 			}
 		}

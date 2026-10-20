@@ -14,14 +14,17 @@ import (
 func ExampleNew() {
 	dir, _ := os.MkdirTemp("", "sparkwing-controller-")
 	defer os.RemoveAll(dir)
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	var srv *controller.Server
+	st, err := store.Open(filepath.Join(dir, "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		srv = controller.New(st, nil)
+		return srv.StorePolicies(), nil
+	}))
 	if err != nil {
 		fmt.Println("store:", err)
 		return
 	}
 	defer st.Close()
 
-	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -50,14 +53,17 @@ func (passthroughCipher) Open(envelope string) (string, error) {
 func ExampleServer_WithSecretsCipher() {
 	dir, _ := os.MkdirTemp("", "sparkwing-cipher-")
 	defer os.RemoveAll(dir)
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	var srv *controller.Server
+	st, err := store.Open(filepath.Join(dir, "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		srv = controller.New(st, nil).WithSecretsCipher(passthroughCipher{})
+		return srv.StorePolicies(), nil
+	}))
 	if err != nil {
 		fmt.Println("store:", err)
 		return
 	}
 	defer st.Close()
 
-	srv := controller.New(st, nil).WithSecretsCipher(passthroughCipher{})
 	_ = srv
 	fmt.Println("server has cipher wired")
 	// Output: server has cipher wired

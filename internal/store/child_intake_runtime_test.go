@@ -28,9 +28,9 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, sealWith(t, runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}, assertedProvenance(t, "ci", "", "")))
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET lineage_json=? WHERE id='run'`, []byte(`{"admission_key":"capability:root","admission_subject":{"kind":"account","id":"alice"}}`))
 	tenant.s.intake = fakeIntakeContracts{}
-	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+	tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil
-	}))
+	})
 	return tenant, IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent.Prefix}, IdempotencyKey: "invocation", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "child", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}}}
 }
 
@@ -164,11 +164,11 @@ func TestAppAndScheduleAdmissionRecordTeamBucket(t *testing.T) {
 				admit = func() (AdmissionResult, error) { return tenant.AdmitScheduledRun(t.Context(), schedule, now) }
 			}
 			policy := tenant.s.intakePolicy
-			tenant.s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
+			tenant.s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
 				facts, err := policy.ResolveIntake(ctx, resolver, request)
 				facts.AdmissionKey = "team:a"
 				return facts, err
-			}))
+			})
 			admitted, err := admit()
 			if err != nil {
 				t.Fatal(err)

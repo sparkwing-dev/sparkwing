@@ -14,7 +14,7 @@ import (
 
 func TestClaimBudgetAnAwardDoesNotSpendBudget(t *testing.T) {
 	engine, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	s := New(engine.Store, nil).WithEngineController(engine).WithRequestBudget(RequestBudget{ClaimsPerMinute: 1})
+	s := New(engine.Store, nil).WithEngineController(engine.EngineController).WithRequestBudget(RequestBudget{ClaimsPerMinute: 1})
 	call := func(want int) *httptest.ResponseRecorder {
 		t.Helper()
 		return engineClaimHTTP(t, s.Handler(), raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, want)
