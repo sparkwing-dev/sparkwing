@@ -897,3 +897,8 @@ Assigned to an Opus implementer (env 1087).
 ## 2026-10-19 Korey decision 31: admin-armed default-branch schedules are verified
 
 - A schedule armed by a team admin, on the repository's default branch, with no argument or timing overrides, whose commit is resolved through the GitHub App at fire time, is sealed with verified trust: it can use verified-default-only pools and reads the default branch's cache. Schedules armed by non-admins, any overridden schedule, and manual runs stay unverified.
+
+## 2026-10-19 Korey decision 32: $1,000 maximum per payment
+
+- The largest single payment is $1,000 for now, for both automatic refills and manual Add funds (it will likely rise later). It applies to every standing tier, including High; the per-standing refill caps below it still apply.
+- Anyone wanting a larger payment or higher limits uses the "contact us" request (decision 11's request flow), which reaches Korey as an operator task.
