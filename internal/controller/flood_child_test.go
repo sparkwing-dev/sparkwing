@@ -36,7 +36,7 @@ func TestChildrenSpendTheirRootsFloodBudget(t *testing.T) {
 					t.Fatal(err)
 				}
 				engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, body)
-				s := New(e.Store, nil).WithEngineController(e.EngineController).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
+				s := e.Server.WithEngineController(e.EngineController).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
 				// Spend the root's token through the same accounting used by root admission.
 				principal := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "retrier"}, Capability: capability.Capability{Team: "a"}}
 				intake := store.IntakeRequest{Authority: principal.Authority}
@@ -108,7 +108,7 @@ func TestRetryRecordsAdmissionIdentitySeparatelyFromSource(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s := New(e.Store, nil).WithEngineController(e.EngineController).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
+			s := e.Server.WithEngineController(e.EngineController).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
 			response := engineClaimHTTP(t, s.Handler(), raw, "POST", "/api/v1/runs/run/retry", `{"mode":"all","idempotency_key":"retry"}`, http.StatusOK)
 			var result struct {
 				RunID string `json:"run_id"`
@@ -171,6 +171,6 @@ func TestChildFloodAdmissionRequiresRecordedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, nil).WithEngineController(e.EngineController).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
+	s := e.Server.WithEngineController(e.EngineController).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
 	engineClaimHTTP(t, s.Handler(), claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", root.Request.Request.Git), http.StatusUnprocessableEntity)
 }

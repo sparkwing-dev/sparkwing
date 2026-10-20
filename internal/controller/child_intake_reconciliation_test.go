@@ -22,7 +22,6 @@ func childIntakeFixture(t *testing.T) (*engineFixture, http.Handler, string) {
 func childIntakeFixtureWith(t *testing.T, prepare func(*engineFixture)) (*engineFixture, http.Handler, string) {
 	t.Helper()
 	e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
-	engineSQL(t, e.Store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, []byte(`{"admission_key":"capability:root","admission_subject":{"kind":"account","id":"fixture"}}`))
 	declareChildren(t, e, "deploy", "Deploy", "ci", "root", "fresh")
 	var req runspec.SealedRequest

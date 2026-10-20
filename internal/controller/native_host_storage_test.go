@@ -12,14 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 func TestNativeHostStorageAndLogsUsePublicRecordReaders(t *testing.T) {
-	engine, tenant := engineRuntimeStore(t)
-	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
-	raw := nativeClaimPresentation(t, engine, authorized)
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +27,10 @@ func TestNativeHostStorageAndLogsUsePublicRecordReaders(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	server := New(engine.Store, nil).WithDataObjects(objects)
+	engine, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithDataObjects(objects) })
+	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
+	raw := nativeClaimPresentation(t, engine, authorized)
+	server := engine.Server
 	handler := server.HTTP().API
 	engineClaimHTTP(t, handler, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	options := client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{handler}}, Bearer: func(context.Context) (string, error) { return raw, nil }}

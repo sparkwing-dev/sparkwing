@@ -17,6 +17,7 @@ import (
 )
 
 type runControlWriterFake struct {
+	RunTransactions
 	team     store.Team
 	seen     capability.Authorized
 	decision controllerwire.ApprovalDecision
@@ -28,6 +29,10 @@ type runControlWriterFake struct {
 }
 
 func (f *runControlWriterFake) Team() store.Team { return f.team }
+
+func (f *runControlWriterFake) ReadRun(_ context.Context, id string) (store.RunRow, error) {
+	return store.RunRow{ID: id, Team: f.team}, nil
+}
 
 func (f *runControlWriterFake) ResumeAuthorizedDebugPause(_ context.Context, a capability.Authorized) error {
 	f.seen = a

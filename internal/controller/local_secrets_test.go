@@ -203,12 +203,13 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 			t.Fatalf("requester secret reached SQLite%s: %v", suffix, err)
 		}
 	}
-	other, err := teststore.OpenExisting(databasePath)
+	fixture := &serverFixture{}
+	other, err := teststore.OpenExisting(databasePath, fixture.option(s.deployment, func(server *Server) { server.WithSecretsCipher(s.secretsCipher) }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer other.Close()
-	otherServer := New(other, nil).WithSecretsCipher(s.secretsCipher).WithEngineController(NewEngineController(other, EngineController{}))
+	otherServer := fixture.Server.WithEngineController(NewEngineController(other, EngineController{}))
 	otherTenant, err := other.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -324,12 +325,13 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 	if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &database, &path); err != nil {
 		t.Fatal(err)
 	}
-	other, err := teststore.OpenExisting(path)
+	fixture := &serverFixture{}
+	other, err := teststore.OpenExisting(path, fixture.option(s.deployment, func(server *Server) { server.WithSecretsCipher(s.secretsCipher) }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer other.Close()
-	server := New(other, nil).WithSecretsCipher(s.secretsCipher).WithEngineController(NewEngineController(other, EngineController{}))
+	server := fixture.Server.WithEngineController(NewEngineController(other, EngineController{}))
 	send(server.Handler(), request, http.StatusServiceUnavailable)
 	send(server.Handler(), request, http.StatusServiceUnavailable)
 }

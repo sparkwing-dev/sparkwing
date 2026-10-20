@@ -245,11 +245,16 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 
 type browserRunDeleter struct {
 	controller.TeamWriter
+	controller.RunTransactions
 	tenant *store.Tenant
 	seen   capability.Authorized
 }
 
 func (d *browserRunDeleter) Team() store.Team { return d.tenant.Team() }
+func (d *browserRunDeleter) ReadRun(ctx context.Context, id string) (store.RunRow, error) {
+	return d.tenant.ReadRun(ctx, id)
+}
+
 func (d *browserRunDeleter) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized) error {
 	d.seen = a
 	return nil

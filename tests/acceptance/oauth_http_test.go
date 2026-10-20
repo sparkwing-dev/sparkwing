@@ -257,7 +257,8 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "missing key":
-				f.server.WithSecretsCipher(nil)
+				f.restartWithCipher(t, nil)
+				f.handler = withOAuthGitHub(f.server, f.provider).Handler()
 			}
 			w := f.callback(url.Values{"state": {f.oauthState}, "code": {f.provider.code}}, f.flow)
 			assertEngineError(t, w, apierr.Status(code), code)

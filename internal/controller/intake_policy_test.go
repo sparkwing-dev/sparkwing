@@ -19,7 +19,6 @@ import (
 func TestControllerIntakeSealsPersistedPolicyOnce(t *testing.T) {
 	server, session := credentialSessionServer(t)
 	st := server.store
-	engineSQL(t, st, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	tenant, err := st.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +68,6 @@ func TestControllerIntakeSealsPersistedPolicyOnce(t *testing.T) {
 
 func TestControllerIntakeRefusesUnsafeAcquisitionLocations(t *testing.T) {
 	server, session := credentialSessionServer(t)
-	engineSQL(t, server.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	tenant, err := server.store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +102,6 @@ func TestControllerIntakeRefusesUnsafeAcquisitionLocations(t *testing.T) {
 
 func TestControllerIntakePublishesCapturedLocalHistory(t *testing.T) {
 	server, session := credentialSessionServer(t)
-	engineSQL(t, server.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	tenant, err := server.store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)

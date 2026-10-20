@@ -78,7 +78,7 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 	if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Actor: actor, Subject: subject, Segments: segments, Final: true, RetentionClass: "r30"}); err != nil {
 		t.Fatal(err)
 	}
-	return segmentLogs{records: tenant, actor: actor, live: New(engine.Store, nil).WithDataObjects(objects).liveLogs, objs: objects}, subject, engine.Store
+	return segmentLogs{records: tenant, actor: actor, live: engine.Server.liveLogs, objs: objects}, subject, engine.Store
 }
 
 func TestCommittedDashboardLogsReadRealRecords(t *testing.T) {

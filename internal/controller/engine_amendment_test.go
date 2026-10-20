@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"testing/quick"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -83,9 +85,23 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 }
 
 func TestEngineClaimRequiresTrustedServicesBeforeAward(t *testing.T) {
-	server, _ := engineRuntimeStore(t)
-	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
-	root, err := server.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"})
+	fixture, _ := engineRuntimeStore(t)
+	owner := engineRuntimeClaim(t, fixture, capability.UnitTrigger)
+	connection, err := fixture.Store.Connection(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := teststore.OpenExisting(strings.TrimPrefix(connection.Target, "sqlite:"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := reopened.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	server := NewEngineController(reopened, EngineController{})
+	root, err := reopened.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"})
 	if err != nil {
 		t.Fatal(err)
 	}

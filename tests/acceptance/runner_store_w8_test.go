@@ -155,7 +155,9 @@ VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/t
 			t.Fatal(err)
 		}
 	}
-	return newStoredEngineW8(s, controller.EngineController{RunnerPolicy: runnerStorePolicyW8{}}), root
+	server := newStoredEngineW8(s, controller.EngineController{RunnerPolicy: runnerStorePolicyW8{}})
+	server.Bootstrap = parent
+	return server, root
 }
 
 func storedRunnerClientW8(ctx context.Context, server *storedEngineW8, bearer string) (*storedRunnerW8, error) {
@@ -235,7 +237,8 @@ func runnerStoreOptionsW8() store.Option {
 
 type storedEngineW8 struct {
 	*controller.EngineController
-	Store *store.Store
+	Store     *store.Store
+	Bootstrap capability.AuthorityRef
 }
 
 func newStoredEngineW8(st *store.Store, cfg controller.EngineController) *storedEngineW8 {

@@ -30,6 +30,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -63,8 +64,12 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		Source:        runspec.Source{Ref: sha, WorkingTree: true, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: "."}},
 		RequestedArgs: map[string]string{"set": "output"},
 	}
-	f := newStoreOwnerFixture(t, openStore(t), request)
-	outputs, dataDirectory := nativeStoreOutputRecords(t, ctx, f, request)
+	objects, dataDirectory := nativeStoreObjects(t)
+	database := openStore(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{ResultBlobs: storage.BlobManifests{Objects: objects}}, nil
+	}))
+	f := newStoreOwnerFixture(t, database, request)
+	outputs := nativeStoreOutputRecords(t, ctx, f, request, objects)
 	resolved := engine.Resolved{
 		Identity:   engine.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: sdkVersion}},
 		Executable: bin, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
@@ -206,7 +211,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	}
 }
 
-func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFixture, request runspec.Request) (OutputRecords, string) {
+func nativeStoreObjects(t *testing.T) (*blob.Filesystem, string) {
 	t.Helper()
 	directory := t.TempDir()
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: directory, Endpoint: "http://host", SigningKey: bytes.Repeat([]byte{7}, sha256.Size)})
@@ -218,7 +223,11 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 			t.Error(err)
 		}
 	})
-	controller.New(f.Store, nil).WithDataObjects(objects)
+	return objects, directory
+}
+
+func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFixture, request runspec.Request, objects *blob.Filesystem) OutputRecords {
+	t.Helper()
 	if err := f.Tenant.SetStorageQuota(ctx, store.StorageQuota{}); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +276,7 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 		}
 		authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Repo: request.Git.Repository.Key, Attempt: attempt, Ref: blob.RefFacts{Scope: blob.ScopeFor(run.Request.Provenance), SHA: request.Git.SHA}}
 		return JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt.Value, authority.Repo, authority.Ref.Scope, request.Pipeline, blob.KindOutput)}, nil
-	}}, directory
+	}}
 }
 
 func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, host *OwnerHost, resolved engine.Resolved) (NodeInput, store.ReconciledNode) {

@@ -17,6 +17,7 @@ import (
 )
 
 type metricWriterFake struct {
+	RunTransactions
 	team   store.Team
 	seen   capability.Authorized
 	sample store.MetricSample
@@ -26,6 +27,11 @@ type metricWriterFake struct {
 }
 
 func (f *metricWriterFake) Team() store.Team { return f.team }
+
+func (f *metricWriterFake) ReadRun(_ context.Context, id string) (store.RunRow, error) {
+	return store.RunRow{ID: id, Team: f.team}, nil
+}
+
 func (f *metricWriterFake) WriteMetric(_ context.Context, a capability.Authorized, sample store.MetricSample) error {
 	f.calls++
 	f.seen, f.sample = a, sample

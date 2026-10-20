@@ -337,7 +337,6 @@ func FuzzLocalHostRejectsForeignAuthority(f *testing.F) {
 
 func TestLocalHostChildIntakeResolvesCapturedDefaults(t *testing.T) {
 	server, _, tenant, owner := localHostFixture(t)
-	engineSQL(t, server.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','build','pending',1,?,?)`, []byte(`{"id":"build","children":[{"pipeline":"weather-report"}]}`), []byte(`{}`))
 	a := capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
 	claim, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Actor: engineActor(a), Policy: store.SourceNone})

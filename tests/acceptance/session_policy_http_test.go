@@ -295,7 +295,7 @@ func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 				query = `UPDATE sessions SET revoked_at=1`
 			case "license":
 			case "key":
-				f.server.WithSecretsCipher(nil)
+				f.restartWithCipher(t, nil)
 				code = apierr.Unavailable
 			case "delete":
 				query, code = `CREATE TRIGGER refuse_session_delete BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT,'private deletion fault'); END`, apierr.Unavailable

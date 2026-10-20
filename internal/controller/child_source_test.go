@@ -33,7 +33,7 @@ func (e childSourceEngine) Resolve(_ context.Context, pin engine.Pin, target rel
 
 func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *testing.T) {
 	e, _, _ := childIntakeFixture(t)
-	server := New(e.Store, nil)
+	server := e.Server
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 		engineSQL(t, e.Store, `INSERT INTO repos(team,repo_key,updated_at) VALUES ('a','git:8.8.8.8/team/repo',1)`)
 		engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"deploy","repository":"git:8.8.8.8/team/repo"}]}`))
 	})
-	handler := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
+	handler := e.Server.WithEngineController(e.EngineController).Handler()
 	engineClaimHTTP(t, handler, claim, "POST", "/api/v1/runs/run/source-credential", "", http.StatusForbidden)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {

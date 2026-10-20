@@ -62,7 +62,7 @@ func snapshotServer(t *testing.T, b *credentialBoundary, f *snapshotTransactions
 	e := fakeEngine(t, &f.engineTransactions)
 	e.ResolveTenant = func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 		if team != "team" {
-			t.Fatalf("tenant = %q", team)
+			return nil, store.ErrNotFound
 		}
 		return f, nil
 	}
@@ -204,10 +204,10 @@ func TestEngineSnapshotHTTPRefusals(t *testing.T) {
 				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "wrong owner"}
 				status, code = 403, apierr.Forbidden
 			case "missing run":
-				f.readErr = store.ErrNotFound
+				f.runReadErr = store.ErrNotFound
 				status, code, reads = 404, apierr.NotFound, 0
 			case "private read":
-				f.readErr = errors.New("private-read")
+				f.runReadErr = errors.New("private-read")
 				status, code, reads = 500, apierr.Internal, 0
 			default:
 				status, code, reads = 500, apierr.Internal, 1

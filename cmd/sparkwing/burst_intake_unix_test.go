@@ -308,7 +308,24 @@ func burstIntakeController(t *testing.T, endpoint string) (*store.Store, *contro
 
 func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployment.Config) (*store.Store, *controller.Server, string) {
 	t.Helper()
-	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: endpoint, SigningKey: []byte(strings.Repeat("k", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var server *controller.Server
+	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"), store.WithPolicies(func(state *store.Store) (store.Policies, error) {
+		server = controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")}).WithDataObjects(objects)
+		return server.StorePolicies(), nil
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,11 +334,6 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 			t.Error(err)
 		}
 	})
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")})
 	for _, query := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('burst-user','burst@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','burst-user','editor',1)`,
@@ -340,16 +352,6 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 	if err != nil {
 		t.Fatal(err)
 	}
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: endpoint, SigningKey: []byte(strings.Repeat("k", 32))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := objects.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	server.WithDataObjects(objects)
 	versions, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

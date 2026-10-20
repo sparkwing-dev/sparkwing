@@ -28,7 +28,6 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixtu
 	s, session := credentialSessionServer(t)
 	s.WithEngineController(NewEngineController(s.store, EngineController{VersionPolicy: engineVersionPolicy(&engineVersionFake{})}))
 	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.control'`)
-	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	input := runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Actor:         runspec.Actor{Kind: "account", ID: "original-author"},

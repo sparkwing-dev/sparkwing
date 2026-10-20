@@ -162,12 +162,14 @@ func TestNativeChildBuildToDeployPlansItsOwnSDKEntrypoint(t *testing.T) {
 
 func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	entry, code, sha := w9Entry(t)
-	e, _, _ := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	e, _, _ := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{RunEnvironment: cipher}, nil
+	}))
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}

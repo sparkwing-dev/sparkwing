@@ -180,7 +180,7 @@ func TestCreditHistoryLimitsAndEmptyArrays(t *testing.T) {
 				}
 			} else {
 				assertEngineError(t, w, 400, apierr.BadRequest)
-				if f.resolves != 0 || f.reads != 0 {
+				if f.resolves != 1 || f.reads != 0 {
 					t.Fatal("invalid selector reached ledger")
 				}
 			}

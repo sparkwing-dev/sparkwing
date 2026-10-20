@@ -32,22 +32,6 @@ type intakeGitHubTransport func(*http.Request) (*http.Response, error)
 
 func (f intakeGitHubTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-type intakeSourceTransaction struct {
-	RunTransactions
-	seen  store.IntakeRequest
-	calls int
-}
-
-func (f *intakeSourceTransaction) ReplayRun(context.Context, store.IntakeRequest) (store.AdmissionResult, bool, error) {
-	return store.AdmissionResult{}, false, nil
-}
-
-func (f *intakeSourceTransaction) AdmitRun(_ context.Context, input store.IntakeRequest) (store.AdmissionResult, error) {
-	f.seen = input
-	f.calls++
-	return store.AdmissionResult{RunID: "created", Request: runspec.SealedRequest{Request: input.Request}}, nil
-}
-
 func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -71,9 +55,11 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 		})}}
 		s.WithGitHubApp(cfg)
-		transaction := &intakeSourceTransaction{}
-		s.WithEngineController(NewEngineController(s.store, EngineController{ResolveTenant: func(context.Context, store.Team) (TenantHandle, error) { return transaction, nil }}))
-		request := runspec.Request{Version: 1, Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Display: input}, Ref: "main"}, Source: runspec.Source{Ref: "main", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}}}
+		tenant, err := s.store.ForTeam(t.Context(), "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := runspec.Request{Version: 1, Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Display: input}, Ref: "main", SHA: strings.Repeat("a", 40)}, Source: runspec.Source{Ref: strings.Repeat("a", 40), Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}}}
 		if forged {
 			request.Git.Repository.Key = "gh:43"
 		}
@@ -82,15 +68,30 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := resumeHTTP(s, session, "/api/v1/runs", string(body))
-		if forged {
-			return w.Code == 403 && transaction.calls == 0
+		triggers, err := tenant.ListTriggers(t.Context(), store.TriggerFilter{Pipelines: []string{"p"}})
+		if err != nil {
+			t.Fatal(err)
 		}
-		got := transaction.seen.Request
-		if w.Code != 201 || transaction.calls != 1 || got.Team != "a" || got.Git.Repository.Key != "gh:42" || got.Source.Location.RemoteURL != request.Source.Location.RemoteURL || got.Git.App.Set {
-			t.Logf("HTTP %d: %s request=%+v", w.Code, w.Body, got)
+		if forged {
+			if w.Code != 403 || len(triggers) != 0 {
+				t.Logf("forged HTTP %d: %s triggers=%d", w.Code, w.Body, len(triggers))
+			}
+			return w.Code == 403 && len(triggers) == 0
+		}
+		if w.Code != 201 || len(triggers) != 1 {
+			t.Logf("HTTP %d: %s triggers=%d", w.Code, w.Body, len(triggers))
 			return false
 		}
-		return transaction.seen.Authority.Kind == "session" && transaction.seen.IdempotencyKey == "request"
+		run, err := tenant.ReadRun(t.Context(), triggers[0].ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := run.Request.Request
+		if got.Team != "a" || got.Git.Repository.Key != "gh:42" || got.Source.Location.RemoteURL != request.Source.Location.RemoteURL || got.Git.App.Set {
+			t.Logf("stored request=%+v", got)
+			return false
+		}
+		return run.Request.AuthorityRef.Kind == "session" && triggers[0].IdempotencyKey == "request"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
 		t.Fatal(err)
@@ -104,7 +105,7 @@ func TestIntakeSourceRefusesUnverifiedAndCredentialBearingLocations(t *testing.T
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
 	e, _ := engineRuntimeStore(t)
-	s := New(e.Store, nil)
+	s := e.Server
 	for _, remote := range []string{"https://github.com/acme/app", "https://user:secret@example.com/repo", "https://example.com/repo?token=secret", "https://example.com/repo#secret", "file:///tmp/repo"} {
 		request := runspec.Request{Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: remote}}}
 		if err := s.resolveIntakeSource(t.Context(), "a", &request); err == nil {
@@ -339,5 +340,3 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func (f *intakeSourceTransaction) Team() store.Team { return "a" }

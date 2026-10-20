@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -20,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -98,7 +97,7 @@ func engineClaimHTTPFixture(t *testing.T, grants []capability.Grant, opts ...sto
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	raw := engineHTTPRoot(t, e, "a", "root", grants)
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
+	h := e.Server.WithEngineController(e.EngineController).Handler()
 	return e, h, raw
 }
 
@@ -132,7 +131,7 @@ func TestEngineClaimHTTPLocalFirstUsesPersistedPoll(t *testing.T) {
 	preferred := engineHTTPRoot(t, e, "a", "preferred", []capability.Grant{capability.NodesClaim})
 	now := time.Now().UnixNano()
 	engineSQL(t, e.Store, `UPDATE nodes SET ready_at=?,execution_json=?`, now, []byte(`{"requires":{"set":true,"value":["ready"]}}`))
-	h := New(e.Store, slog.New(slog.DiscardHandler)).WithEngineController(e.EngineController).WithLocalFirstPlacement([]string{"gpu"}, time.Minute, time.Minute).Handler()
+	h := e.Server.WithEngineController(e.EngineController).WithLocalFirstPlacement([]string{"gpu"}, time.Minute, time.Minute).Handler()
 	poll := `{"runner_version":"v1","kinds":["node"],"labels":["gpu"],"available_cores":1}`
 	engineClaimHTTP(t, h, preferred, "POST", "/api/v1/runners/claim", poll, http.StatusOK)
 	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
@@ -181,11 +180,11 @@ func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 }
 
 func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
-	e, tenant := engineRuntimeStore(t)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
+	e, tenant := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
 	values := map[string][]byte{"BUILD_NOTE": []byte("private-cloud-environment")}
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {
@@ -217,7 +216,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithEngineController(e.EngineController).Handler()
+	h := e.Server.WithEngineController(e.EngineController).Handler()
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"],"available_cores":1}`, 200)
 	var response controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
@@ -300,7 +299,7 @@ func TestEngineClaimHTTPAuthenticatesBeforeNamedLookupErrors(t *testing.T) {
 	raw := engineHTTPRoot(t, e, "a", "named", []capability.Grant{capability.TriggersClaim})
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
+	h := e.Server.WithEngineController(e.EngineController).Handler()
 	body := `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/runs/missing/claim", body, 401)
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/missing/claim", body, 404)

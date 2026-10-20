@@ -27,7 +27,7 @@ import (
 
 func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
 	path := filepath.Join(root, "archives.db")
-	s, err := teststore.OpenExisting(path)
+	s, dataController, err := openStorageData(path, objects)
 	if err != nil {
 		return err
 	}
@@ -36,7 +36,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err != nil {
 		return err
 	}
-	binding, err := bindStorageData(ctx, s, objects, identity.CapabilityRef)
+	binding, err := bindStorageData(ctx, s, dataController, identity.CapabilityRef)
 	if err != nil {
 		return err
 	}
@@ -124,12 +124,12 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := teststore.OpenExisting(path)
+	reopened, dataController, err := openStorageData(path, objects)
 	if err != nil {
 		return err
 	}
 	s = reopened
-	binding, err = bindStorageData(ctx, s, objects, identity.CapabilityRef)
+	binding, err = bindStorageData(ctx, s, dataController, identity.CapabilityRef)
 	if err != nil {
 		return err
 	}
@@ -283,9 +283,16 @@ SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_ru
 	return authority, identity, nil
 }
 
-func bindStorageData(ctx context.Context, s *store.Store, objects blob.ObjectBackend, prefix string) (controller.DataBinding, error) {
-	data := controller.NewDataController(s, controller.DataController{Objects: objects})
-	controller.New(s, nil).WithDataController(data)
+func openStorageData(path string, objects blob.ObjectBackend) (*store.Store, *controller.DataController, error) {
+	var data *controller.DataController
+	s, _, err := openControllerFixture(path, func(s *store.Store) *controller.Server {
+		data = controller.NewDataController(s, controller.DataController{Objects: objects})
+		return controller.New(s, nil).WithDataController(data)
+	})
+	return s, data, err
+}
+
+func bindStorageData(ctx context.Context, s *store.Store, data *controller.DataController, prefix string) (controller.DataBinding, error) {
 	p, err := s.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
 	if err != nil {
 		return controller.DataBinding{}, err

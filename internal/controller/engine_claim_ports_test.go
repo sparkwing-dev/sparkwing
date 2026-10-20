@@ -87,7 +87,7 @@ func TestEngineClaimHTTPRepositorySelectionUsesEnrollment(t *testing.T) {
 					if named && !allowed {
 						status = http.StatusForbidden
 					}
-					h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
+					h := e.Server.WithEngineController(e.EngineController).Handler()
 					w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", string(encoded), status)
 					var response controllerwire.ClaimResponse
 					if status == http.StatusOK && (json.Unmarshal(w.Body.Bytes(), &response) != nil || (response.Claim != nil) != allowed) {
@@ -113,7 +113,7 @@ func TestEngineClaimHTTPTriggerQueueKeepsOrder(t *testing.T) {
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
-	h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
+	h := e.Server.WithEngineController(e.EngineController).Handler()
 	for _, id := range []string{"run", "second", "third", ""} {
 		w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`, http.StatusOK)
 		var response controllerwire.ClaimResponse
@@ -135,7 +135,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
-	h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
+	h := e.Server.WithEngineController(e.EngineController).Handler()
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/claim", `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`, http.StatusOK)
 	var claimed controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &claimed); err != nil || claimed.Claim == nil {
@@ -169,7 +169,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 				Actor:  snapshot.Authorities[0].Principal.Authority,
 				Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: "run", Generation: claimed.Claim.Binding.Generation, Digest: hex.EncodeToString(bodyDigest[:]),
 			}
-			server := New(e.Store, nil).WithEngineController(e.EngineController)
+			server := e.Server.WithEngineController(e.EngineController)
 			authorization := server.authorization
 			authorization.Authenticator = capability.NewAuthenticator(&reportingFacts{snapshot: snapshot, digest: digest})
 			h = server.WithAuthorization(authorization).Handler()
@@ -261,7 +261,7 @@ func TestNamedClaimNumericSelectorConvergesAcrossTransports(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				w := engineClaimHTTP(t, New(e.Store, nil).WithEngineController(e.EngineController).Handler(), raw, "POST", "/api/v1/runs/"+selector+"/claim", string(encoded), http.StatusOK)
+				w := engineClaimHTTP(t, e.Server.WithEngineController(e.EngineController).Handler(), raw, "POST", "/api/v1/runs/"+selector+"/claim", string(encoded), http.StatusOK)
 				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 					t.Fatal(err)
 				}

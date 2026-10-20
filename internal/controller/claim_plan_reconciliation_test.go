@@ -21,11 +21,12 @@ import (
 )
 
 func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
-	e, tenant, h, raw, body := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "work"}}}}})
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixture := &serverFixture{}
+	e, tenant, h, raw, body := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "work"}}}}}, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
 	for _, secret := range []store.Secret{{Name: "TEAM_ONLY", Value: "private-team", Masked: true}, {Name: "ELSEWHERE", Value: "private-elsewhere", Pipeline: "release", Masked: true}} {
 		sealed, err := cipher.SealBound(secrets.PurposeSecret, string(tenant.Team()), secret.Name, secret.Pipeline, secret.Shared, secret.Masked, secret.Value)
 		if err != nil {
@@ -90,7 +91,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
+	server := fixture.Server
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('reader','reader@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','reader','reader',1)`)
 	session, csrf, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "reader"}, "a", time.Hour)

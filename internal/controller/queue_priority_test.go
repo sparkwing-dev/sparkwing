@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,15 +37,15 @@ func (f *queuePriorityFake) SetAuthorizedGroupPriority(_ context.Context, a capa
 }
 
 func TestQueuePriorityHTTPPreservesTenantAuthorityProperty(t *testing.T) {
-	engine, _ := engineRuntimeStore(t)
-	st := engine.Store
-	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
-	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher)
+	engine, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	st := engine.Store
+	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
+	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
+	s := engine.Server
 	raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

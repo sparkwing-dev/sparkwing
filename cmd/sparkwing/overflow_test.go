@@ -32,7 +32,15 @@ type overflowManager struct {
 }
 
 func TestOverflowCLIThroughAuthenticatedControllerAndStore(t *testing.T) {
-	state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var server *controller.Server
+	state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(state *store.Store) (store.Policies, error) {
+		server = controller.New(state, nil).WithSecretsCipher(cipher)
+		return server.StorePolicies(), nil
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,11 +58,6 @@ func TestOverflowCLIThroughAuthenticatedControllerAndStore(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := controller.New(state, nil).WithSecretsCipher(cipher)
 	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "overflow-test", time.Hour)
 	if err != nil {
 		t.Fatal(err)

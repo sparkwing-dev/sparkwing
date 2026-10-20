@@ -105,9 +105,6 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 		policies.ClaimProfiles = childOutputCapacity{}
 		return policies, nil
 	}))
-	if _, err := teststore.SQL(t, e.Store).ExecContext(ctx, `UPDATE teams SET next_run_number=2 WHERE name='a'`); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := teststore.SQL(t, e.Store).ExecContext(ctx, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"weather-report"}]}`)); err != nil {
 		t.Fatal(err)
 	}

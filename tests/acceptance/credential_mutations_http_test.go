@@ -28,7 +28,19 @@ import (
 
 func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 	t.Helper()
-	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "credentials.db"))
+	s, cipher, _ := credentialMutationServer(t, filepath.Join(t.TempDir(), "credentials.db"), func(s *store.Store, cipher *secrets.Cipher) *controller.Server {
+		return controller.New(s, nil).WithSecretsCipher(cipher)
+	})
+	return s, cipher
+}
+
+func credentialMutationServer(t *testing.T, path string, build func(*store.Store, *secrets.Cipher) *controller.Server) (*store.Store, *secrets.Cipher, *controller.Server) {
+	t.Helper()
+	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{34}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, server, err := openControllerFixture(path, func(s *store.Store) *controller.Server { return build(s, cipher) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,11 +52,16 @@ func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 	for _, team := range []store.Team{"team", "foreign"} {
 		teststore.SeedTeam(t, s, team)
 	}
-	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{34}, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s, cipher
+	return s, cipher, server
+}
+
+func openControllerFixture(path string, build func(*store.Store) *controller.Server) (*store.Store, *controller.Server, error) {
+	var server *controller.Server
+	s, err := teststore.OpenExisting(path, store.WithPolicies(func(s *store.Store) (store.Policies, error) {
+		server = build(s)
+		return server.StorePolicies(), nil
+	}))
+	return s, server, err
 }
 
 type credentialMutationFake struct {

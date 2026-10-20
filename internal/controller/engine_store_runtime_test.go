@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -23,16 +24,20 @@ import (
 type engineFixture struct {
 	*EngineController
 	Store         *store.Store
+	Server        *Server
 	claimProfiles store.ClaimProfileResolver
 }
 
 func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *store.Tenant) {
 	t.Helper()
 	fixture := &engineFixture{claimProfiles: engineProfileFake{}}
-	profiles := store.WithPolicies(func(*store.Store) (store.Policies, error) {
-		return store.Policies{ClaimProfiles: engineEnrollmentFunc(func(ctx context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
+	profiles := store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		fixture.Server = NewDeployment(st, deploymenttest.Metered(t), nil)
+		policies := fixture.Server.StorePolicies()
+		policies.ClaimProfiles = engineEnrollmentFunc(func(ctx context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
 			return fixture.claimProfiles.ResolveClaimProfile(ctx, p)
-		})}, nil
+		})
+		return policies, nil
 	})
 	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{profiles}, opts...)...)
 	if err != nil {
@@ -43,7 +48,7 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *st
 			t.Error(err)
 		}
 	})
-	engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+	engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at,next_run_number) VALUES ('a',1,1,2)`)
 	request, err := json.Marshal(withProvenance(runspec.SealedRequest{Version: 1, RunID: "run", Hash: "request", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}}}, assertedProvenance(t, "ci", "", "0123456789abcdef0123456789abcdef01234567")))
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +60,7 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *st
 		t.Fatal(err)
 	}
 	fixture.EngineController, fixture.Store = NewEngineController(s, EngineController{}), s
+	fixture.Server.WithEngineController(fixture.EngineController)
 	return fixture, tenant
 }
 

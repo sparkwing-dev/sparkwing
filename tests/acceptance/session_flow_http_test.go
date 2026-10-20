@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -29,6 +30,8 @@ type sessionFlow struct {
 	raw    string
 	csrf   string
 	logs   *bytes.Buffer
+	path   string
+	config deployment.Config
 }
 
 func newSessionFlow(t *testing.T) sessionFlow {
@@ -38,7 +41,8 @@ func newSessionFlow(t *testing.T) sessionFlow {
 
 func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
 	t.Helper()
-	s, cipher := credentialMutationStore(t)
+	f := sessionFlow{logs: &bytes.Buffer{}, path: filepath.Join(t.TempDir(), "sessions.db"), config: cfg}
+	s, _, server := credentialMutationServer(t, f.path, f.newServer)
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','member','editor',1)`,
@@ -47,13 +51,37 @@ func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
 			t.Fatal(err)
 		}
 	}
-	logs := &bytes.Buffer{}
-	server := controller.NewDeployment(s, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher)
 	raw, csrf, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sessionFlow{store: s, server: server, raw: raw, csrf: csrf, logs: logs}
+	f.store, f.server, f.raw, f.csrf = s, server, raw, csrf
+	return f
+}
+
+func (f sessionFlow) newServer(s *store.Store, cipher *secrets.Cipher) *controller.Server {
+	server := controller.NewDeployment(s, f.config, slog.New(slog.NewTextHandler(f.logs, nil)))
+	if cipher != nil {
+		server.WithSecretsCipher(cipher)
+	}
+	return server
+}
+
+func (f *sessionFlow) restartWithCipher(t *testing.T, cipher *secrets.Cipher) {
+	t.Helper()
+	if err := f.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, server, err := openControllerFixture(f.path, func(s *store.Store) *controller.Server { return f.newServer(s, cipher) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	f.store, f.server = s, server
 }
 
 func (f sessionFlow) request(method, path, body string) *http.Request {
@@ -276,14 +304,14 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(time.Hour).UnixNano()
 			case "license":
 			case "missing key":
-				f.server.WithSecretsCipher(nil)
+				f.restartWithCipher(t, nil)
 				code = apierr.Unavailable
 			case "wrong key":
 				cipher, err := secrets.NewCipher(bytes.Repeat([]byte{79}, secrets.KeySize))
 				if err != nil {
 					t.Fatal(err)
 				}
-				f.server.WithSecretsCipher(cipher)
+				f.restartWithCipher(t, cipher)
 				code = apierr.Unavailable
 			case "backend":
 				query = "DROP TABLE sessions"

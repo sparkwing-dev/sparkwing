@@ -28,7 +28,15 @@ import (
 
 func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (func(context.Context, string) (controllerwire.BillingManager, func(), error), *store.Store) {
 	t.Helper()
-	state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var server *controller.Server
+	state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(state *store.Store) (store.Policies, error) {
+		server = controller.NewDeployment(state, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
+		return server.StorePolicies(), nil
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,11 +54,6 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 			t.Fatal(err)
 		}
 	}
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := controller.NewDeployment(state, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "billing-test", time.Hour)
 	if err != nil {
 		t.Fatal(err)

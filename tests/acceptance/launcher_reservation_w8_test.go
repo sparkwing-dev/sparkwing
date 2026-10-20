@@ -161,11 +161,7 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 				t.Fatal(err)
 			}
 		case 8:
-			var parent string
-			if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&parent); err != nil {
-				t.Fatal(err)
-			}
-			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent}
+			ref := server.Bootstrap
 			other, err := server.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:" + foreign, Authority: &ref, Subject: capability.Subject{Kind: capability.SubjectService, ID: foreign}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
 			if err != nil {
 				t.Fatal(err)

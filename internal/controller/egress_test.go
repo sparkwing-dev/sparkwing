@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,14 +51,15 @@ type egressFixture struct {
 
 func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	t.Helper()
-	e, _, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	objects := &egressLogObjects{bytes: map[string][]byte{}}
-	meter := egress.New(cfg)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewDeployment(e.Store, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithEngineController(e.EngineController).WithEgressMeter(meter).WithDataController(NewDataController(e.Store, DataController{Objects: objects}))
+	fixture := &serverFixture{}
+	e, _, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
+	objects := &egressLogObjects{bytes: map[string][]byte{}}
+	meter := egress.New(cfg)
+	s := fixture.Server.WithEngineController(e.EngineController).WithEgressMeter(meter).WithDataController(NewDataController(e.Store, DataController{Objects: objects}))
 	h := s.Handler()
 	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse

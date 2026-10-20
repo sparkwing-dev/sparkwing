@@ -17,9 +17,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc) (*engineFixture, *store.Tenant, http.Handler, string, []byte) {
+func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, opts ...store.Option) (*engineFixture, *store.Tenant, http.Handler, string, []byte) {
 	t.Helper()
-	e, tenant := engineRuntimeStore(t)
+	e, tenant := engineRuntimeStore(t, opts...)
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
 	raw := LauncherFixtureClaim(t, e.Store, "run", store.PlanNodeID)

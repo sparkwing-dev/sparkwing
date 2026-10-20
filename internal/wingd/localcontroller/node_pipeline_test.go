@@ -177,11 +177,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() {
-			if err := claimant.Close(); err != nil {
-				t.Error(err)
-			}
-		})
+		services.Close = claimant.Close
 		objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: make([]byte, 32)})
 		if err != nil {
 			t.Fatal(err)

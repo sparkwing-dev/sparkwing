@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -24,8 +25,23 @@ func TestRegisteredRunnerZeroHeadroomRefusesAward(t *testing.T) {
 
 func registeredRunnerZeroHeadroom(t *testing.T, execution string, available float64) {
 	t.Helper()
-	server, session := credentialSessionServer(t)
-	e := newEngineFixture(server.store, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
+	original, session := credentialSessionServer(t)
+	connection, err := original.store.Connection(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &serverFixture{}
+	st, err := teststore.OpenExisting(strings.TrimPrefix(connection.Target, "sqlite:"), fixture.option(original.deployment, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	server := fixture.Server
+	e := newEngineFixture(st, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
 	engineSQL(t, e.Store, `UPDATE memberships SET role='owner' WHERE account_id='member'`)
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}

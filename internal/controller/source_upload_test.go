@@ -45,7 +45,6 @@ func sourceUploadFixture(t *testing.T, opts ...store.Option) (*serverFixture, cl
 		}
 	})
 	s, session := credentialSessionServerWith(t, func(s *Server) { s.WithSecretsCipher(cipher).WithDataObjects(objects) }, opts...)
-	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	h := s.Handler()
 	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.write","runs.read","runs.control"]}`, false)
 	var credential credentialResponse

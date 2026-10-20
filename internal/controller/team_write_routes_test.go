@@ -20,6 +20,7 @@ import (
 )
 
 type teamWriteFake struct {
+	RunTransactions
 	team  store.Team
 	seen  capability.Authorized
 	value string
@@ -28,6 +29,10 @@ type teamWriteFake struct {
 }
 
 func (f *teamWriteFake) Team() store.Team { return f.team }
+func (f *teamWriteFake) ReadRun(_ context.Context, id string) (store.RunRow, error) {
+	return store.RunRow{ID: id, Team: f.team}, nil
+}
+
 func (f *teamWriteFake) record(a capability.Authorized, value string) error {
 	f.seen, f.value = a, value
 	f.calls++
@@ -87,10 +92,8 @@ func TestTeamWriteHTTPAuthorityProperty(t *testing.T) {
 	f.s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = append(f.facts.snapshot.Authorities[0].Principal.Capability.Grants, capability.TeamAdmin)
 	writer := &teamWriteFake{team: store.DefaultTeam}
-	testOnlyTenantPort[TeamWriter](f.s, func(context.Context, store.Team) (TeamWriter, error) { return writer, nil })
-	testOnlyTenantPort[GitHubAppWriter](f.s, func(context.Context, store.Team) (GitHubAppWriter, error) { return writer, nil })
 	f.s.githubApp = &githubAppState{}
-	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
+	f.s.WithEngineController(&EngineController{ResolveTenant: func(context.Context, store.Team) (TenantHandle, error) { return writer, nil }})
 	cases := []struct {
 		method, path, body string
 		status             int

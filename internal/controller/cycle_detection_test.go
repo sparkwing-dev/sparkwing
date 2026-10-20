@@ -173,7 +173,7 @@ func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
 						}
 						return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 					})}}
-					New(e.Store, nil).WithGitHubApp(cfg)
+					e.Server.WithGitHubApp(cfg)
 				}
 				engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"ci","repository":"gh:2"},{"pipeline":"ci","repository":"gh:3"}]}`))
 			})

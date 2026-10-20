@@ -27,13 +27,16 @@ func (d *DataController) bind(authority *store.Operator, resolve func(context.Co
 	if d.ResolveTenant == nil {
 		d.ResolveTenant = resolve
 	}
-	if d.Access == nil {
+	if d.Access == nil && d.ResolveTenant != nil {
 		d.Access = dataStoreAccess{d.ResolveTenant}
 	}
 }
 
 func (s *Server) configureDataStore(d *DataController) {
 	d.bind(s.operator, s.resolveTenant)
+	if d.authority == nil {
+		return
+	}
 	d.replicaID = s.leaseHolder
 	if d.ReadBlob == nil {
 		d.ReadBlob = func(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error) {

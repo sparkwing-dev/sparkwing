@@ -30,6 +30,7 @@ import (
 )
 
 type oidcFacts struct {
+	selectorTransactions
 	facts capability.OIDCFacts
 	actor capability.Authorized
 	calls int
@@ -46,7 +47,7 @@ func (f *oidcFacts) ReadOIDCFacts(_ context.Context, a capability.Authorized) (c
 func oidcBoundary() (*credentialBoundary, *oidcFacts) {
 	b := newCredentialBoundary()
 	b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.OIDCMint)
-	f := &oidcFacts{facts: capability.OIDCFacts{
+	f := &oidcFacts{selectorTransactions: selectorTransactions{team: "team"}, facts: capability.OIDCFacts{
 		Now: b.snapshot.Now, NotAfter: b.snapshot.Now.Add(5 * time.Minute),
 		Team: "team", RunID: "run", Pipeline: "deploy", Trigger: "push", RunnerKind: "runner", Ref: "refs/heads/main",
 		SHA: strings.Repeat("a", 40), Repository: "github.com/acme/api", RepositoryID: 42,

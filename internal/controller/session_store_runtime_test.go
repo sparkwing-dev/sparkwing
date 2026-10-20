@@ -25,15 +25,15 @@ func (sessionOriginFake) AuthorizeProvision(context.Context, capability.Authorit
 }
 
 func TestSessionRoutePreservesCapabilityScopeProperty(t *testing.T) {
-	engine, _ := engineRuntimeStore(t)
-	s := engine.Store
-	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
-	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','owner',1)`)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewDeployment(s, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
+	engine, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	s := engine.Store
+	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
+	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','owner',1)`)
+	server := engine.Server
 	memberRaw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

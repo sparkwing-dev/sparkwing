@@ -132,8 +132,12 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 
 // safety: a missing team or membership answers the empty role, which carries no scope.
 func (s *Server) memberRole(ctx context.Context, team store.Team, accountID string) (store.Role, error) {
+	if team == "" {
+		return "", nil
+	}
 	t, err := s.tenantForTeam(ctx, team)
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
 		return "", nil
 	}
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -46,7 +47,8 @@ func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 }
 
 func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	fixture := &serverFixture{}
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, nil))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -143,7 +145,8 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 }
 
 func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	fixture := &serverFixture{}
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, nil))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -170,7 +173,8 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 }
 
 func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	fixture := &serverFixture{}
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, nil))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -214,7 +218,8 @@ func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
 // The tick evaluates every team's schedules, and a schedule team B armed
 // launches its run, its trigger and its history in team B.
 func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	fixture := &serverFixture{}
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, nil))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -339,11 +344,14 @@ func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
 	if !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing {
 		t.Fatalf("missing backend: %v", err)
 	}
-	other := &scheduleWriterFake{Tenant: teststore.ForTeam(t, st, store.DefaultTeam), s: &serverFixture{Server: srv, store: st}}
+	other := teststore.ForTeam(t, st, store.DefaultTeam)
 	testOnlyTenantPort[ScheduledRunWriter](srv, func(context.Context, store.Team) (ScheduledRunWriter, error) { return other, nil })
 	sched.Team = "other"
-	if _, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due); !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing || len(other.runs) != 0 {
-		t.Fatalf("wrong-team backend = %v; runs=%v", err, other.runs)
+	if _, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due); !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing {
+		t.Fatalf("wrong-team backend = %v", err)
+	}
+	if runs, err := other.ListRuns(t.Context(), store.RunFilter{}); err != nil || len(runs) != 0 {
+		t.Fatalf("wrong-team backend committed runs=%v: %v", runs, err)
 	}
 }
 
