@@ -225,7 +225,10 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 			p.Spec.Tolerations = append(p.Spec.Tolerations, corev1.Toleration{Operator: corev1.TolerationOpExists})
 		}), reason: "own team's nodes"},
 		{name: "toleration_seconds", user: testJobController, object: pod(func(p *corev1.Pod) {
-			p.Spec.Tolerations[1].TolerationSeconds = ptr(int64(30))
+			toleration := p.Spec.Tolerations[1]
+			toleration.Effect = corev1.TaintEffectNoExecute
+			toleration.TolerationSeconds = ptr(int64(30))
+			p.Spec.Tolerations = append(p.Spec.Tolerations, toleration)
 		}), reason: "own team's nodes"},
 		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "own team's nodes"},
 		{name: "wrong_team_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels[TeamLabel] = labelHash("other-team") }), reason: "own team's nodes"},
