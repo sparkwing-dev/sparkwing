@@ -250,7 +250,7 @@ func (t *Tenant) cancelWaiter(ctx context.Context, key, runID, nodeID string, fe
 	defer func() { _ = tx.Rollback() }()
 
 	if fence != nil {
-		if err := checkCapacityFenceTx(ctx, tx, t.team, *fence); err != nil {
+		if err := checkCapacityFenceTx(ctx, tx, t.team, key, *fence); err != nil {
 			return false, err
 		}
 	}

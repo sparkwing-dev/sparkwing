@@ -1172,7 +1172,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRu
 	}
 	defer rollbackOrLog(tx)
 	if fence != nil {
-		if err := checkCapacityFenceTx(ctx, tx, t.team, *fence); err != nil {
+		if err := checkCapacityFenceTx(ctx, tx, t.team, key, *fence); err != nil {
 			return WaiterResolution{}, err
 		}
 	}
@@ -1258,7 +1258,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 	var err error
 
 	if fence != nil {
-		if err := checkCapacityFenceTx(ctx, tx, t.team, *fence); err != nil {
+		if err := checkCapacityFenceTx(ctx, tx, t.team, key, *fence); err != nil {
 			return WaiterResolution{}, err
 		}
 	}

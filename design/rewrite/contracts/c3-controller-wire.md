@@ -936,9 +936,10 @@ carries the selected group key and captured work generation. The controller deri
 the actor and holder identity from the bearer and work binding. Capacity, cost,
 policy, cancellation timeout and lease are absent from the request. C1 reads the
 accepted concurrency declaration and unit lease bound inside admission's
-transaction. An undeclared group or an altered declaration is refused before
-any semaphore mutation. Claim and owner admission use the same declaration
-reader and existing capacity operations. Terminal
+transaction. Adoption and waiter resolution check that declaration in the same
+transaction as their capacity changes. An undeclared group or an altered
+declaration is refused before any semaphore mutation. Claim and owner admission
+use the same declaration reader and existing capacity operations. Terminal
 transitions release capacity in the same transaction. There is no separate
 remote semaphore or release operation.
 

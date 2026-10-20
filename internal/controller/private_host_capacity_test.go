@@ -146,6 +146,46 @@ func TestPrivateCapacityUsesSealedDeclarationAndOwnerDeadline(t *testing.T) {
 	}
 }
 
+func TestPrivateCapacityRejectsUndeclaredGroupForEveryOperation(t *testing.T) {
+	for _, operation := range []string{"adopt", "acquire", "resolve"} {
+		t.Run(operation, func(t *testing.T) {
+			server, _, tenant, owner, bearer := localHostAwardFixture(t)
+			acceptCapacityPlan(t, server, tenant, owner, "global", 1, 1, "build")
+			if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{ID: "other", Pipeline: "ci", Status: "running"}); err != nil {
+				t.Fatal(err)
+			}
+			key := "global:undeclared"
+			engineSQL(t, server.store, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a',?,1,1)`, key)
+			now := time.Now()
+			engineSQL(t, server.store, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at) VALUES ('a',?,'other/','other','',?,?)`, key, now.UnixNano(), now.Add(time.Hour).UnixNano())
+			before, err := tenant.GetConcurrencyState(t.Context(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(localhostwire.LocalCapacityRequest{Key: key, Binding: store.CapacityBinding{RunID: "run", NodeID: "build"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest("POST", "/api/v1/runs/run/local-host/capacity/"+operation, bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+bearer)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			server.Handler().ServeHTTP(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Errorf("undeclared group accepted: HTTP %d: %s", w.Code, w.Body)
+			}
+			after, err := tenant.GetConcurrencyState(t.Context(), key)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("refused request changed other run's capacity: before=%+v after=%+v error=%v", before, after, err)
+			}
+			other, err := tenant.ReadRun(t.Context(), "other")
+			if err != nil || other.CancelRequestedAt != nil {
+				t.Fatalf("refused request cancelled other run: %+v %v", other, err)
+			}
+		})
+	}
+}
+
 func TestPrivateCapacityAdmitsPendingJobsAndPromotesAfterTerminalRelease(t *testing.T) {
 	server, host, tenant, owner := localHostFixture(t)
 	acceptCapacityPlan(t, server, tenant, owner, "run", 1, 1, "first", "second")

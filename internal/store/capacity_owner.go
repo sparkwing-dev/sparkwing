@@ -29,7 +29,7 @@ func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding 
 	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", &capacityFence{binding, actor})
 }
 
-func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {
+func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, key string, fence capacityFence) error {
 	b := fence.binding
 	if b.RunID == "" || b.Generation < 0 {
 		return holderRefusal()
@@ -52,23 +52,24 @@ func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, fence cap
 		if b.Generation != fence.actor.Owner.Generation {
 			return holderRefusal()
 		}
-		return nil
+	} else {
+		var generation int64
+		if err := tx.QueryRowContext(ctx, `SELECT status,generation,cancel_requested_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`+tx.forUpdate(), team, b.RunID, b.NodeID).Scan(&status, &generation, &cancelled); err != nil {
+			return err
+		}
+		if status == string(StatusDone) || cancelled.Valid || generation != b.Generation {
+			return holderRefusal()
+		}
 	}
-	var generation int64
-	if err := tx.QueryRowContext(ctx, `SELECT status,generation,cancel_requested_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`+tx.forUpdate(), team, b.RunID, b.NodeID).Scan(&status, &generation, &cancelled); err != nil {
-		return err
-	}
-	if status == string(StatusDone) || cancelled.Valid || generation != b.Generation {
-		return holderRefusal()
-	}
-	return nil
+	_, err := declaredCapacityGroupTx(ctx, tx, team, b.RunID, b.NodeID, key)
+	return err
 }
 
 func checkCapacityMutationTx(ctx context.Context, tx *storeTx, team Team, key, id string, fence *capacityFence) error {
 	if fence == nil {
 		return nil
 	}
-	if err := checkCapacityFenceTx(ctx, tx, team, *fence); err != nil {
+	if err := checkCapacityFenceTx(ctx, tx, team, key, *fence); err != nil {
 		return err
 	}
 	b := fence.binding
@@ -188,7 +189,7 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 	if err := lockCapacityWorkTx(ctx, tx, team, key, controllerwire.NodeRef{RunID: fence.binding.RunID, NodeID: fence.binding.NodeID}); err != nil {
 		return err
 	}
-	return checkCapacityFenceTx(ctx, tx, team, fence)
+	return checkCapacityFenceTx(ctx, tx, team, key, fence)
 }
 
 func lockCapacityWorkTx(ctx context.Context, tx *storeTx, team Team, key string, ref controllerwire.NodeRef) error {
