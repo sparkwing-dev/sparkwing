@@ -20,9 +20,9 @@ helm template sparkwing ./charts/sparkwing-runner-bundle \
   --set runner.image.tag=YOUR_BUILD
 ```
 
-Create the controller credential Secret separately. The chart mounts it into the
-runner's credentials directory. Pipeline code on that runner can read its runner
-credential. Limit the credential to the runner's authorized work.
+Create the controller credential Secret separately. Persistent runners mount it
+in their credentials directory, where pipeline code under the same uid can read
+it. Verified pools mount it only in the launcher.
 
 The runs this pool takes come from the trust class an admin set when registering
 its credential (`sparkwing runners add --trust`), never from the chart. Unset, a
@@ -31,6 +31,30 @@ repository's default branch, and any other pool takes any run.
 `runner.submitEnvAllow` lists the
 submitted environment names this pool's jobs receive; empty accepts none. See
 [pool trust](../../docs/self-hosting.md#shared-runners-and-pool-trust).
+
+For a pool with reserved secrets, set `runner.reservedPools` to its enrolled
+pool names. This defaults `runner.trustClass` to `verified-default-only` and
+replaces the persistent runner Deployment and cache PVC with the existing
+launcher. The same class can be set explicitly for a pool without a stored
+secret. `runner.trustClass=any` retains persistent runners for other pools;
+this value must match the credential's admin-set trust class.
+
+Enroll a team runner through `POST /api/v1/runners` with
+`reserved_pools`, `trust: "verified-default"` and `grants: ["claims.launch"]`.
+The launcher grant is exclusive: this credential cannot also run the persistent
+runner claim loop. Its team, repository patterns and reserved pools still
+constrain every claim. Store this credential in `controller.tokenSecret`.
+An existing credential with `nodes.claim` / `triggers.claim` must be replaced
+with a launcher enrollment before switching the chart.
+
+Supply `launcher.image`, digest-pinned `launcher.jobImage` and
+`launcher.dockerImage`, `launcher.cpuCeiling` and `launcher.memoryCeiling`, and
+allowed destinations under `launcher.networkPolicy.egress`, as for Cloud below.
+An unpinned resource dimension uses the operator's ceiling. Pool claims are
+unmetered and use the self-hosted ranking tier. Each claim gets a fresh pod with
+only scratch and its one-time bootstrap mounted. The pool credential stays in
+the launcher, and no local cache survives a claim. The Cloud node, admission,
+quarantine and boundary-probe prerequisites below apply equally to pool Jobs.
 
 Set `runner.repos` to the repository patterns this machine may fetch, such as
 `github.com/your-org/*`. The runner checks this list before hosting each award.

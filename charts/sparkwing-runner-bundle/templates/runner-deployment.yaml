@@ -1,4 +1,4 @@
-{{- if .Values.runner.enabled }}
+{{- if and .Values.runner.enabled (not (include "sparkwing-runner-bundle.poolLauncher" .)) }}
 {{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
 {{- $runnerImage := include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) -}}
 {{- $goCache := .Values.runner.goCache.persistence.enabled -}}

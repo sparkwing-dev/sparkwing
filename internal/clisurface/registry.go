@@ -821,6 +821,7 @@ func Registry() []Command {
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "namespace", Argument: "NAMESPACE"},
 			{Name: "image", Argument: "IMAGE", Required: true},
+			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true, Meaning: "Observed pool label for claim matching"},
 			{Name: "cpu-ceiling", Argument: "CPU", Required: true},
 			{Name: "memory-ceiling", Argument: "BYTES", Required: true},
 			{Name: "docker-image", Argument: "IMAGE", Required: true},

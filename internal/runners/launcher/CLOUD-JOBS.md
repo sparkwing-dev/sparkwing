@@ -580,3 +580,22 @@ The launcher rereads its private agent-token file for every controller request.
 A missing, unreadable or empty rotated file fails the request. The launcher does
 not reuse the previous token or need a restart. The file reader remains in the
 transport and is never passed to Jobs.
+
+## Self-hosted pool mode
+
+The same launcher accepts an enrolled machine root with the exclusive
+`claims.launch` grant and reserved pools. Its awards keep the machine's team,
+repository and pool scope, self-hosted ranking and unmetered billing. Cloud's
+cross-team scope, credit checks and standing limits apply only to deployment
+service launchers. Plan, eval and work still use the same builder, admission
+policies, preparation renewal, bootstrap exchange, quarantine and boundary probe.
+For pool awards, resource pins remain exact; an unpinned dimension uses the
+operator's configured ceiling. The launcher projects that allocation identically
+for claim and capacity-request reconciliation.
+
+The runner chart selects this mode for `runner.trustClass=verified-default-only`,
+which is the default with `runner.reservedPools` configured. It renders the
+launcher in place of the persistent runner and cache PVC. The launcher alone
+mounts `controller.tokenSecret`; each Job mounts only its own bootstrap Secret
+and a fresh emptyDir. Machine runners outside Kubernetes retain their existing
+same-uid execution model, documented in the self-hosting guide.

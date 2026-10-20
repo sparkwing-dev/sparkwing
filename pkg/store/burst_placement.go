@@ -128,7 +128,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 	for _, ancestor := range chain {
 		a := ancestor.principal.Capability
 		here = here || a.Purpose == capability.PurposeHere && a.Binding.RunID == unit.RunID
-		cloud = cloud || launcherClaimant(a)
+		cloud = cloud || capability.CloudLauncher(a)
 	}
 	root := chain[len(chain)-1].principal.Capability
 	eligible := here || cloud

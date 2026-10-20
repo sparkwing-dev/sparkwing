@@ -21,7 +21,7 @@ var updateAdmission = flag.Bool("update", false, "rewrite the generated launcher
 const (
 	admissionTemplate = "sparkwing-runner-bundle/templates/launcher-admission.yaml"
 	admissionHeader   = `{{- /* Generated from launcher.AdmissionPolicies: GOWORK=off go test ./charts -run TestLauncherAdmissionTemplateIsGenerated -update */}}
-{{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
+{{- if or (include "sparkwing-runner-bundle.launcher.enabled" .) .Values.launcher.serviceAccountName }}
 {{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
 {{- $launcher := printf "system:serviceaccount:%s:%s" .Release.Namespace (include "sparkwing-runner-bundle.launcher.serviceAccountName" .) }}
 {{- $runner := include "sparkwing-runner-bundle.digestImage" .Values.launcher.jobImage }}
@@ -84,6 +84,7 @@ func TestChartInstallsTheLaunchersAdmissionPolicies(t *testing.T) {
 		for _, settings := range [][]string{
 			append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher"),
 			append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher", prefix+"launcher.jobNamespace=customer-jobs"),
+			append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher", prefix+"runner.reservedPools[0]=deploy", prefix+"controller.url=https://controller.example", prefix+"launcher.image.repository=registry.example/runner", prefix+"launcher.image.tag=test", prefix+"launcher.cpuCeiling=4", prefix+"launcher.memoryCeiling=8Gi"),
 		} {
 			jobs := "cloud-cloud-jobs"
 			if slices.Contains(settings, prefix+"launcher.jobNamespace=customer-jobs") {

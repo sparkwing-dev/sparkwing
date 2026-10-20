@@ -1,5 +1,5 @@
 {{- /* Generated from launcher.AdmissionPolicies: GOWORK=off go test ./charts -run TestLauncherAdmissionTemplateIsGenerated -update */}}
-{{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
+{{- if or (include "sparkwing-runner-bundle.launcher.enabled" .) .Values.launcher.serviceAccountName }}
 {{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
 {{- $launcher := printf "system:serviceaccount:%s:%s" .Release.Namespace (include "sparkwing-runner-bundle.launcher.serviceAccountName" .) }}
 {{- $runner := include "sparkwing-runner-bundle.digestImage" .Values.launcher.jobImage }}

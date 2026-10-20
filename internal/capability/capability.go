@@ -1,7 +1,10 @@
 // Package capability defines authority shared by the controller, store and node host.
 package capability
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // SubjectKind keeps accountability independent of token spelling and placement.
 type SubjectKind string
@@ -159,3 +162,16 @@ const (
 
 // Valid reports whether t is the controller default or a named class.
 func (t Trust) Valid() bool { return t == "" || t == TrustVerifiedDefault || t == TrustAny }
+
+// Launcher identifies roots that can deliver only per-claim bootstrap authority.
+func Launcher(c Capability) bool {
+	if c.Unit != "" || c.Binding.Kind != BindingNone || !slices.Contains(c.Grants, ClaimsLaunch) {
+		return false
+	}
+	return c.Subject.Kind == SubjectService || c.Subject.Kind == SubjectMachine && c.Team != "" && len(c.ReservedPools) > 0
+}
+
+// CloudLauncher distinguishes deployment capacity from a team's own pool.
+func CloudLauncher(c Capability) bool {
+	return Launcher(c) && c.Subject.Kind == SubjectService
+}

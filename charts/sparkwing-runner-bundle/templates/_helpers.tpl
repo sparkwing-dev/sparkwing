@@ -182,3 +182,12 @@ deployment template stays readable.
 {{- end -}}
 {{- printf "%s@%s" $image $digest -}}
 {{- end }}
+
+{{/* Secret-holding pools use the same per-claim boundary as Cloud. */}}
+{{- define "sparkwing-runner-bundle.poolLauncher" -}}
+{{- if and .Values.runner.enabled (or (eq .Values.runner.trustClass "verified-default-only") (and (not .Values.runner.trustClass) .Values.runner.reservedPools)) -}}true{{- end -}}
+{{- end -}}
+
+{{- define "sparkwing-runner-bundle.launcher.enabled" -}}
+{{- if or .Values.launcher.enabled (include "sparkwing-runner-bundle.poolLauncher" .) -}}true{{- end -}}
+{{- end -}}

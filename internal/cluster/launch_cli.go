@@ -33,6 +33,7 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	if fs.Changed("namespace") {
 		cfg.Namespace = textFlag(fs, "namespace")
 	}
+	cfg.Labels, _ = fs.GetStringSlice("label")
 	var poll time.Duration
 	if fs.Changed("poll") {
 		poll, err = time.ParseDuration(textFlag(fs, "poll"))

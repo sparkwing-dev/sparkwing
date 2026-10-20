@@ -68,8 +68,8 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 			return err
 		}
 		for _, grant := range grants {
-			if grant != capability.NodesClaim && grant != capability.TriggersClaim {
-				return invalidEngineBody("machine grants must be nodes.claim or triggers.claim")
+			if grant != capability.NodesClaim && grant != capability.TriggersClaim && grant != capability.ClaimsLaunch {
+				return invalidEngineBody("machine grants must be nodes.claim, triggers.claim or claims.launch")
 			}
 		}
 	}

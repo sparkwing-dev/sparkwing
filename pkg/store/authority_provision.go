@@ -91,7 +91,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	}
 	bootstrap := spec.Kind == capability.ProvisionBootstrap
 	for _, grant := range spec.Grants {
-		if grant == capability.OperatorConsole || (!bootstrap && !deployment && (grant == capability.ClaimsLaunch || strings.HasPrefix(string(grant), "operator."))) {
+		if grant == capability.OperatorConsole || (!bootstrap && !deployment && ((grant == capability.ClaimsLaunch && spec.Kind != capability.ProvisionMachine) || strings.HasPrefix(string(grant), "operator."))) {
 			return authorityError(apierr.Forbidden, "root origin cannot issue deployment or console authority")
 		}
 	}
@@ -138,7 +138,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 			return bindingRefusal()
 		}
 		for _, grant := range spec.Grants {
-			if grant != capability.NodesClaim && grant != capability.TriggersClaim {
+			if grant != capability.NodesClaim && grant != capability.TriggersClaim && grant != capability.ClaimsLaunch {
 				return authorityError(apierr.Forbidden, "machine roots require claim grants")
 			}
 		}
