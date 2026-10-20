@@ -120,7 +120,8 @@ func TestControllerPostgresFailStopAndStandby(t *testing.T) {
 	}
 	select {
 	case <-first.done:
-		if exit, ok := first.err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(first.log.String(), "controller lock lost") {
+		// Either the watchdog or a fenced write can detect lost ownership first.
+		if exit, ok := first.err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(first.log.String(), "controller must fail-stop") {
 			t.Fatalf("active did not fail-stop: %v\n%s", first.err, first.log)
 		}
 	case <-ctx.Done():
