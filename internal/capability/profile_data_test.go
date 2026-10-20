@@ -19,7 +19,7 @@ func TestProfileDataGrantsFollowLiveAccountAuthority(t *testing.T) {
 			parent.Capability.Repositories = []string{"other"}
 		}
 		child := Capability{Audience: Controller, Binding: Binding{Kind: BindingNone}, Repositories: []string{"repo"}, Grants: []Grant{DataRead}, Data: &DataScope{Use: DataRemoteCache, RepositoryKey: "repo", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}}
-		grant, allowed := DataRead, read && !restricted
+		grant, allowed := DataRead, write && !restricted
 		if publish {
 			child.Binding = Binding{Kind: BindingRun, RunID: "publication"}
 			child.Data = &DataScope{Use: DataPublish, RepositoryKey: "repo", RunID: "publication", WriteRef: "manual:main", ReadRefs: []string{"manual:main"}}

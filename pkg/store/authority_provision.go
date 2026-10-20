@@ -23,7 +23,7 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 	c := capability.Capability{
 		Team: spec.Team, Subject: spec.Subject, Audience: capability.Controller,
 		Grants: slices.Clone(spec.Grants), Binding: spec.Binding, Issuance: capability.Delegate,
-		ExpiresAt: spec.ExpiresAt, ReservedPools: slices.Clone(spec.ReservedPools),
+		ExpiresAt: spec.ExpiresAt, ReservedPools: slices.Clone(spec.ReservedPools), Trust: spec.Trust,
 		Repositories: slices.Clone(spec.Repositories), Data: spec.Data, RootMetered: spec.Metered,
 	}
 	if tx.rotatingRoot != nil && !sameRotationScope(*tx.rotatingRoot, c) {
@@ -144,6 +144,9 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 		if !deployment && len(spec.ReservedPools) != 0 && !slices.Contains(c.Grants, capability.TeamAdmin) {
 			return authorityError(apierr.Forbidden, "reserved pools require team administration")
+		}
+		if !deployment && spec.Trust != "" && (spec.Personal || !slices.Contains(c.Grants, capability.TeamAdmin)) {
+			return authorityError(apierr.Forbidden, "a runner trust class requires team administration of a shared runner")
 		}
 	case capability.ProvisionService:
 		if !deployment || spec.Team != "" || spec.Subject.Kind != capability.SubjectService || spec.Binding.Kind != capability.BindingNone || spec.Data != nil || len(spec.ReservedPools) != 0 || len(spec.Repositories) != 0 {

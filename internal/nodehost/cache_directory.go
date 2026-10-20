@@ -17,12 +17,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-// CacheDirectory resolves package-manager caches using the persisted job environment.
+// CacheDirectory resolves package-manager caches: from the persisted job environment on
+// the run owner's own machine, and from the host's own environment everywhere else.
 func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cache nodeproto.CacheSpec) (string, error) {
 	if cache.Resolver != depcache.ResolverGoModules && cache.Resolver != depcache.ResolverNpm || input.Entry == nil || input.Entry.Directory == "" {
 		return "", errors.New("cache resolution requires a known resolver and workspace")
 	}
-	env, err := e.job(ctx, procenv.StepTool, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+	var env []string
+	var err error
+	// safety: the host archives and restores this directory, so job-declared values and a
+	// job-chosen go binary must not pick it on a host the run's owner does not own.
+	if e.Base.Local {
+		env, err = e.job(ctx, procenv.StepTool, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+	} else {
+		env, err = procenv.Build(procenv.Install, e.Base, procenv.Runtime{})
+	}
 	if err != nil {
 		return "", err
 	}
@@ -43,7 +52,11 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 		return filepath.Clean(dir), nil
 	}
 	lookPath := func(name string) (string, error) {
-		return cacheToolPath(name, lookup("PATH"), lookup("PATHEXT"), sdkWorkingDirectory(input.Entry))
+		workdir := sdkWorkingDirectory(input.Entry)
+		if !e.Base.Local {
+			workdir = ""
+		}
+		return cacheToolPath(name, lookup("PATH"), lookup("PATHEXT"), workdir)
 	}
 	var command *exec.Cmd
 	if cache.Resolver == depcache.ResolverNpm {
@@ -57,6 +70,9 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 	}
 	if err == nil {
 		command.Env, command.Dir = env, sdkWorkingDirectory(input.Entry)
+		if !e.Base.Local {
+			command.Dir = filepath.Dir(command.Path)
+		}
 		var output bytes.Buffer
 		command.Stdout = &output
 		if err := gotoolchain.Run(ctx, command); err == nil {
@@ -81,6 +97,9 @@ func cacheToolPath(name, path, extensions, workdir string) (string, error) {
 	}
 	for _, directory := range filepath.SplitList(path) {
 		if !filepath.IsAbs(directory) {
+			if workdir == "" {
+				continue
+			}
 			directory = filepath.Join(workdir, directory)
 		}
 		for _, suffix := range suffixes {

@@ -11,6 +11,36 @@ link. The session ends after 12 hours without a request, 24 hours after sign-in,
 on Log out, or when the local controller restarts. Tools that call the local API
 should use the private socket, which needs no session.
 
+## Shared runners accept less from the run
+
+A runner runs one job after another in shared host state, so three inputs a run
+supplied no longer reach it unchecked.
+
+- **Pool trust.** A runner that holds a pool with a secret reserved to it takes only
+  runs from a verified push to the repository's default branch. Pull request,
+  feature branch, manual and scheduled runs wait for another runner. To keep the
+  old behavior for such a pool, a team admin re-registers its runners with
+  `sparkwing runners add --profile prod --runner deploy-1 --trust=any`. `--trust=verified-default` applies the
+  restriction to a pool without reserved secrets. The class is stored with the
+  runner's credential and survives rotation.
+- **Submitted environment.** A run's `run.submit_env_allow` values reach a
+  shared runner only under names the runner's operator also lists, in the
+  runner's own machine file `run.submit_env_allow`, `--submit-env-allow`, or the
+  chart's `runner.submitEnvAllow`. Cloud Jobs, here-hosted runs and the requester's own
+  personal machines accept every
+  submittable name. Go toolchain names (`GOFLAGS`, `GOPROXY`, `GOTOOLCHAIN`,
+  and similar) and network base names (`PATH`, `HOME`, `HTTP_PROXY`, and
+  similar) cannot be submitted at all: intake refuses a run that sends one, and
+  the CLI no longer captures them. Set them in the runner's own environment.
+- **Remote cache reads.** A local run's `cache_from` profile needs the editor
+  role. A reader's remote cache credential is refused, because dependency-cache
+  archives are not checked for secrets.
+
+Remote builds on a host the run's owner does not own set `GOENV=off`, so a
+`go env -w` file on that host no longer changes the build. Pipeline binaries
+cached before this release compile once more, because each cached binary now
+carries a digest that is checked before every use.
+
 ## Runs without a runner selector run anywhere
 
 On every controller, Cloud and self-hosted, each trigger, App webhook run,

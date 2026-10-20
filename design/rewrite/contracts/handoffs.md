@@ -881,3 +881,9 @@ Assigned to an Opus implementer (env 1087).
 
 - Korey approved every recommendation in /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/simplicity/PLAN.md §4 (decisions 1-6 and 9-21 as recommended; 7-9 amended by §7 for prepaid), including moving pkg/store and pkg/controller under internal/, Sol's six cuts, GitHub-model provenance and cache trust, withdrawing the pool-runner residual, declared deployment kind, the 5-minute cancel drain deadline, Cloud fair shares, child-run limits (depth 10, 50 per root), CLI token limits, team-owned shared runners, append-only audit, the durable webhook inbox and declared restore.
 - Feature freeze: no new ranking, launcher or billing features beyond the plan until its §5 stop rule is met. Work proceeds in the plan's waves; every workstream deletes the old path and lands with its guard.
+
+## 2026-10-19 Korey decision 29: one active controller per database for v0.68
+
+- A store has exactly one active controller. The controller holds a PostgreSQL session advisory lock on a dedicated connection for its whole life; if that connection drops or the lock is lost, the process exits immediately (fail-stop) and its supervisor restarts it. A second controller blocks waiting for the lock as a standby. SQLite stores are single-process by construction.
+- In-process state (webhook ordering, storage measurement, rate and flood budgets, live log tails) may assume a single active controller. High availability with several active controllers is a later, separately reviewed project.
+- Supersedes the deleted serve lease and the "concurrent controllers are safe" documentation in WS3.

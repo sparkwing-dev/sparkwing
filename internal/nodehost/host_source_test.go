@@ -12,14 +12,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 )
@@ -84,7 +85,7 @@ func (a *sourceAdapters) Ensure(_ context.Context, identity engine.Identity, tar
 
 func (a *sourceAdapters) Install(_ context.Context, resolved engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 	directory, environment := filepath.Join(request.Directory, request.PipelineDir), request.Environment
-	if !reflect.DeepEqual(resolved, a.resolved) || len(environment) != 2 {
+	if !reflect.DeepEqual(resolved, a.resolved) || len(environment) != 3 || !slices.Contains(environment, "GOENV=off") {
 		return engine.SDKCommand{}, errors.New("installer lost engine or explicit environment")
 	}
 	body, err := os.ReadFile(filepath.Join(directory, "pipeline.go"))

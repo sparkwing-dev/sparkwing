@@ -98,6 +98,9 @@ spec:
             {{- range .Values.runner.repos }}
             - {{ printf "--repos=%s" . | quote }}
             {{- end }}
+            {{- range .Values.runner.submitEnvAllow }}
+            - {{ printf "--submit-env-allow=%s" . | quote }}
+            {{- end }}
             {{- include "sparkwing-runner-bundle.runnerLabelArgs" . | nindent 12 }}
             {{- if gt (int .Values.runner.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.runner.metricsPort) | quote }}

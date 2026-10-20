@@ -112,7 +112,7 @@ func TestCacheInfoJSONReportsManagedBytes(t *testing.T) {
 		t.Fatalf("cache info: %v", runErr)
 	}
 	payload := decodeCachePayload(t, out)
-	if payload["total_bytes"] != float64(6) || payload["entries"] != float64(1) {
+	if payload["total_bytes"] != float64(6+65) || payload["entries"] != float64(1) {
 		t.Fatalf("status payload = %#v", payload)
 	}
 }

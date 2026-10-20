@@ -4,6 +4,7 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -32,7 +33,11 @@ func TestQATrustBuildRoutesOnlyQAPinsThroughTheQAProxy(t *testing.T) {
 		{"offline", qa, []string{"GOPROXY=off"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := QAModuleEnvironment(t.Context(), dir, tc.pin, append(goEnvironment(dir), tc.settings...))
+			got, err := QAModuleEnvironment(tc.pin, func(args ...string) ([]byte, error) {
+				command := exec.Command("go", args...)
+				command.Dir, command.Env = dir, append(goEnvironment(dir), tc.settings...)
+				return command.Output()
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

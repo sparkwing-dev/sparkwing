@@ -55,7 +55,7 @@ func TestExtractBoundsDecompression(t *testing.T) {
 			tr := rawTar(t, []*tar.Header{
 				{Name: "cache/big", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(big))},
 			}, map[string][]byte{"cache/big": big})
-			if err := ExtractInRoot(tr, t.TempDir(), policy); err == nil {
+			if err := extractInRoot(tr, t.TempDir(), policy); err == nil {
 				t.Fatal("oversized archive extracted past the cap")
 			}
 		})

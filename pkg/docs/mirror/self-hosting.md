@@ -349,6 +349,34 @@ Windows enrollment prints manual supervision steps rather than
 installing a login service. See [runner reference](cli-runners.md) and
 [machine settings](machine-config.md).
 
+### Shared runners and pool trust
+
+A shared runner runs one job after another under one account, so a job can
+leave files, caches and processes that a later job meets. Trust decides which
+runs may share that state:
+
+- A runner that holds a pool with a secret reserved to it takes only runs from
+  a verified push to the repository's default branch. Pull request, feature
+  branch, manual and scheduled runs wait for another runner.
+- Any other runner takes any run its repository patterns and labels admit.
+- A team admin sets a runner's trust class when registering it:
+  `sparkwing runners add --profile prod --runner deploy-1 --trust=verified-default` applies the restriction to a
+  runner without reserved secrets, and `--trust=any` lifts it from a pool with
+  reserved secrets. The class is stored with the runner's credential, so the
+  runner, or anyone holding its token, cannot change it.
+
+A cached pipeline binary runs only as a private copy whose bytes matched the
+digest recorded when it was compiled. Jobs on a shared runner run under the
+runner's account and can rewrite both the binary and its digest, so the check
+catches corruption, not tampering, until jobs run under a separate account. Builds on a host the run's owner does not own set
+`GOENV=off`. A run's submitted environment reaches the runner only under names
+the runner's own `run.submit_env_allow` lists; see
+[machine settings](machine-config.md).
+
+Pipeline code runs as the runner's own account and can read the runner's
+credential file. Keep runners that serve untrusted branches apart from pools
+that hold deployment secrets.
+
 ### Operate the service
 
 On macOS:

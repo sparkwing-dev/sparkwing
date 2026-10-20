@@ -281,3 +281,9 @@ func TestValidatePlanExpansion(t *testing.T) {
 	initialRaw, _ := json.Marshal(PlanDoc{Jobs: initialJobs})
 	checkPlan(t, string(initialRaw), planContext(), "")
 }
+
+func TestValidatePlanRefusesCachePathsOutsideTheWorkspace(t *testing.T) {
+	for _, path := range []string{"/etc/sparkwing/credentials", "../outside"} {
+		checkPlan(t, `{"jobs":[{"id":"a","caches":[{"name":"deps","path":"`+path+`","key_files":["go.sum"]}],"steps":[{"id":"s"}]}]}`, planContext(), apierr.PlanInvalid)
+	}
+}

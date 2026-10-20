@@ -115,9 +115,12 @@ func TestNativeServicesBindsSubmittedValuesBeforeProcessStartup(t *testing.T) {
 		t.Run(map[bool]string{false: "retained", true: "corrupt"}[corrupt], func(t *testing.T) {
 			cfg, state := nativeConfigFixture(t)
 			const value = "requester-submitted-value"
-			cfg.Source.Base = procenv.Base{Ambient: []string{"BUILD_NOTE=ambient-value", "UNLISTED=ambient-private"}}
+			cfg.Source.Base = procenv.Base{Ambient: []string{"UNLISTED=ambient-private"}}
 			cfg.SubmittedEnv = map[string][]byte{"BUILD_NOTE": []byte(value), "BUILD_EMPTY": {}}
 			var err error
+			if cfg.SubmitAccept, err = procenv.OperatorSubmitAccept([]string{"BUILD_*"}); err != nil {
+				t.Fatal(err)
+			}
 			state.snapshot.Run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": value, "BUILD_EMPTY": ""}, strings.Repeat("5", 64))
 			if err != nil {
 				t.Fatal(err)
@@ -147,7 +150,7 @@ func TestNativeServicesBindsSubmittedValuesBeforeProcessStartup(t *testing.T) {
 			})
 			for _, kind := range []procenv.Kind{procenv.Plan, procenv.Install, procenv.Attempt, procenv.Eval} {
 				env, err := procenv.Build(kind, services.Config.Source.Base, procenv.Runtime{})
-				if err != nil || !slices.Contains(env, "BUILD_NOTE="+value) || !slices.Contains(env, "BUILD_EMPTY=") || slices.Contains(env, "UNLISTED=ambient-private") {
+				if err != nil || slices.Contains(env, "BUILD_NOTE="+value) == (kind == procenv.Install) || slices.Contains(env, "BUILD_EMPTY=") == (kind == procenv.Install) || slices.Contains(env, "UNLISTED=ambient-private") {
 					t.Fatal("native environment lost private input or used unlisted ambient values", err)
 				}
 			}

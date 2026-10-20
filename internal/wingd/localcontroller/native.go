@@ -32,6 +32,7 @@ import (
 // NativeConfig binds one authenticated award to shared state and authority services.
 type NativeConfig struct {
 	SubmittedEnv   map[string][]byte
+	SubmitAccept   procenv.SubmitAccept
 	Local          func(store.NodeRow) bool
 	Home           string
 	Version        string
@@ -119,7 +120,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 				return runners.NativeServices{}, err
 			}
 		}
-		sourceOptions.Base, err = procenv.WithSubmitted(sourceOptions.Base, cfg.SubmittedEnv)
+		sourceOptions.Base, err = procenv.WithSubmitted(sourceOptions.Base, cfg.SubmittedEnv, cfg.SubmitAccept)
 		if err != nil {
 			return runners.NativeServices{}, err
 		}

@@ -48,6 +48,7 @@ type runnerEnrollment struct {
 	profileName  string
 	format       string
 	pools        []string
+	trust        string
 	personal     bool
 	sessionStdin bool
 }
@@ -118,6 +119,10 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 		maxConcurrent = &value
 	}
 	enrollment.pools = inv.Flags["reserved-for"]
+	enrollment.trust = inv.Value("trust")
+	if enrollment.trust != "" && inv.Bool("personal") {
+		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--trust applies to shared runners only"}
+	}
 	enrollment.personal = inv.Bool("personal")
 	enrollment.sessionStdin = inv.Bool("session-stdin")
 	if enrollment.personal && !enrollment.sessionStdin {
@@ -146,7 +151,7 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 }
 
 func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enrollment runnerEnrollment) error {
-	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Personal: enrollment.personal})
+	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal})
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,7 @@ type EnrollRunnerRequest struct {
 	Name          string     `json:"name"`
 	Repos         []string   `json:"repos"`
 	ReservedPools []string   `json:"reserved_pools,omitempty"`
+	Trust         string     `json:"trust,omitempty"`
 	Grants        []string   `json:"grants,omitempty"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 }
