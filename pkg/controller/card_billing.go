@@ -82,7 +82,7 @@ func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.Paym
 		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
 		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
 			"We could not charge your card for an automatic refill ("+settled.RefillFailed+"). "+
-				"Refills stop until you save a card or Add funds succeeds; Cloud work stops when the credits run out:")
+				"Refills stop until you change the saved card or Add funds succeeds; Cloud work stops when the credits run out:")
 	case settled.Granted:
 		s.logger.Info("payment granted", append(attrs, "grant", settled.GrantID, "amount_micro", settled.AmountMicro)...)
 	}

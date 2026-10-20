@@ -78,7 +78,7 @@ type RefillCaps struct {
 type RefillState struct {
 	RefillSettings
 	Caps RefillCaps
-	// FailedAt and Failure name the last refill that failed or was refused; refills wait until a card is saved or an
+	// FailedAt and Failure name the last refill that failed or was refused; refills wait until the card changes or an
 	// Add funds payment succeeds.
 	FailedAt time.Time
 	Failure  string

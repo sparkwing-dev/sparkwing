@@ -664,8 +664,8 @@ function RefillPanel({
         </p>
         <p className="text-[var(--muted)]">
           {capped
-            ? `${billing.standing.tier} standing allows at most ${fmtCents(caps.amount_cents)} per refill, ${caps.per_day} refill${caps.per_day === 1 ? "" : "s"} a day and ${fmtCents(caps.week_cents)} a week.`
-            : `${billing.standing.tier} standing retains the ${fmtCents(r.max_amount_cents)} maximum per payment and the team's weekly and monthly limits.`}{" "}
+            ? `Your payment history allows at most ${fmtCents(caps.amount_cents)} per refill, ${caps.per_day} refill${caps.per_day === 1 ? "" : "s"} a day and ${fmtCents(caps.week_cents)} a week.`
+            : `Each payment is at most ${fmtCents(r.max_amount_cents)}. Your team's weekly and monthly limits also apply.`}{" "}
           A refill a limit stops is not made, and Cloud work stops when the
           credits run out.
         </p>
@@ -719,7 +719,7 @@ function StandingPanel({
   return (
     <Panel
       title="Standing"
-      hint="Payment history and prepaid funds set standing, which limits Cloud concurrency, job length and refills. Contact us for higher tiers, higher limits or larger payments."
+      hint="Payment history and prepaid funds set standing, which limits Cloud concurrency and job length. Payment history alone sets refill caps. Contact us for higher tiers, higher limits or larger payments."
     >
       <div className="p-4 space-y-2 text-sm">
         <p>

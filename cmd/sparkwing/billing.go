@@ -204,7 +204,7 @@ func writeRefill(out io.Writer, format string, r controllerwire.TeamRefill) erro
 		if r.Failure != "" {
 			fmt.Fprintf(&b, " (%s)", r.Failure)
 		}
-		b.WriteString(". Save a card or add funds to start refills again.\n")
+		b.WriteString(". Change the saved card or add funds to start refills again.\n")
 	}
 	if r.Enabled && r.Limit != "" {
 		name := refillLimitNames[r.Limit]

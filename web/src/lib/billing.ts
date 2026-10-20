@@ -165,7 +165,7 @@ export interface Refill {
   min_amount_cents: number;
   max_amount_cents: number;
   caps: RefillCaps;
-  // Unix seconds of the last failed or refused refill; refills wait until a card is saved or Add funds succeeds.
+  // Unix seconds of the last failed or refused refill; refills wait until the card changes or Add funds succeeds.
   failed_at?: number;
   failure?: string;
   open: boolean;
@@ -221,7 +221,7 @@ export function refillLimitReason(r: Refill): string {
 export function refillStatus(r: Refill): string {
   if (!r.enabled) return "";
   if (r.failed_at)
-    return `The last refill failed${r.failure ? ` (${r.failure})` : ""}. Save a card or add funds to start refills again; Cloud work stops when the credits run out.`;
+    return `The last refill failed${r.failure ? ` (${r.failure})` : ""}. Change the saved card or add funds to start refills again; Cloud work stops when the credits run out.`;
   const reason = refillLimitReason(r);
   return reason ? `${reason} No refill is made until it allows one, so Cloud work stops when the credits run out.` : "";
 }

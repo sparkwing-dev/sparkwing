@@ -567,6 +567,28 @@ func TestALateRefillFailureDoesNotBlockTheReplacementCard(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE failure='insufficient_funds' AND refill_blocked=0", 1)
 }
 
+func TestSavingTheSameMethodDoesNotRecoverAFailedRefill(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	r := openRefill(t, s, "a", 1_000, "pi_failed_method")
+	failed := refillPaid(now, r.PaymentIntent, 1_000)
+	failed.Kind, failed.Status, failed.DeclineCode, failed.Fingerprint = capability.PaymentCardFailed, "requires_payment_method", "insufficient_funds", ""
+	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	s.clock = func() time.Time { return now }
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: r.Customer, PaymentMethod: r.PaymentMethod, Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Refill.Failure != "insufficient_funds" {
+		t.Fatalf("unchanged method cleared refill failure: %+v, %v", st.Refill, err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
+		t.Fatalf("unchanged method restarted refills: %+v", due)
+	}
+}
+
 func TestARefusedAddFundsDisablesOnlyItsSavedCard(t *testing.T) {
 	for _, replaced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "same card", true: "replacement card"}[replaced], func(t *testing.T) {

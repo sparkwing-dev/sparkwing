@@ -261,7 +261,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 	}
 }
 
-// A signed failure closes the refill, stops refills until a card is saved or Add funds succeeds, and alerts and mails
+// A signed failure closes the refill, stops refills until the saved card changes or Add funds succeeds, and alerts and mails
 // the owners.
 func TestARefusedRefillStopsRefillsAndAlerts(t *testing.T) {
 	e, tenant := refillFixture(t)
@@ -291,7 +291,7 @@ func TestARefusedRefillStopsRefillsAndAlerts(t *testing.T) {
 		t.Fatalf("a refused refill raised no alert: %s", logs.String())
 	}
 	if due, err := e.Store.AsOperator().DueRefills(t.Context()); err != nil || len(due) != 0 {
-		t.Fatalf("refills after a failure %+v: %v; want none until a card is saved or Add funds succeeds", due, err)
+		t.Fatalf("refills after a failure %+v: %v; want none until the saved card changes or Add funds succeeds", due, err)
 	}
 }
 

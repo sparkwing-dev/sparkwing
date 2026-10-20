@@ -431,8 +431,8 @@ describe("automatic refill", () => {
     assert.match(lib.refillStatus({ ...refill, month_limit_cents: 10_000, limit: "team_monthly" }), /monthly limit of \$100.*Cloud work stops/);
   });
 
-  it("names card saving and Add funds as recovery from a failed refill", () => {
-    assert.match(lib.refillStatus({ ...refill, failed_at: 1, failure: "card_declined" }), /failed \(card_declined\)\. Save a card or add funds/);
+  it("names a replacement card and Add funds as recovery from a failed refill", () => {
+    assert.match(lib.refillStatus({ ...refill, failed_at: 1, failure: "card_declined" }), /failed \(card_declined\)\. Change the saved card or add funds/);
   });
 
   it("defaults a response without refill to off", async () => {

@@ -207,7 +207,8 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	if saved == 0 {
 		return ErrStaleCardSetup
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND refill_blocked = 1`, string(team)); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0
+	    WHERE team = ? AND refill_blocked = 1 AND payment_method <> ?`, string(team), c.PaymentMethod); err != nil {
 		return err
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{

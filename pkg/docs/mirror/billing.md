@@ -138,7 +138,7 @@ A refill the card declines, or that asks for authentication, is recorded with
 its decline code, and the team's owners receive an email asking them to update
 the card. A refill paid with a card pinned to another team is refused, refunded
 in full, and the card is taken off the team, which turns refills off. Either
-way no further refill starts until an owner saves a card or an Add funds payment
+way no further refill starts until an owner changes the saved card or an Add funds payment
 succeeds; changing the refill settings does not restart them. The balance runs
 down as usual. A delayed failure from a refill opened before a successful Add
 funds payment does not block refills again. A failure from a newer refill does.
