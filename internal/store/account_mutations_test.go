@@ -393,6 +393,39 @@ func TestSessionCannotSelectRemovedTeamAfterFreshSessionRejoins(t *testing.T) {
 			if old, err := s.LookupSession(t.Context(), raw); err != nil || old.Team != personal {
 				t.Fatalf("refused selection moved session: %+v %v", old, err)
 			}
+			deletion := teamAuthorization(t, s, Actor{Authority: member.Principal.Authority}, personal, "DELETE", "/api/v1/team")
+			if _, err := (&Tenant{s: s, team: personal}).DeleteAuthorizedTeam(t.Context(), deletion); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.LookupSession(t.Context(), raw); err == nil {
+				t.Fatal("automatic fallback refreshed a removed team's session epoch")
+			}
 		})
+	}
+}
+
+func TestSessionFallsBackToTeamJoinedThroughAnotherSession(t *testing.T) {
+	s, original, raw, _ := accountMutationFixture(t)
+	personal := Team(original.Principal.Capability.Team)
+	freshRaw, _, _, err := s.CreateAccountSession(t.Context(), Account{ID: original.Principal.Capability.Subject.ID}, personal, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := original
+	fresh.Principal, err = s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(freshRaw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := s.CreateAccountTeam(t.Context(), fresh, TeamInfo{Slug: "joined"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletion := teamAuthorization(t, s, Actor{Authority: original.Principal.Authority}, personal, "DELETE", "/api/v1/team")
+	if _, err := (&Tenant{s: s, team: personal}).DeleteAuthorizedTeam(t.Context(), deletion); err != nil {
+		t.Fatal(err)
+	}
+	session, err := s.LookupSession(t.Context(), raw)
+	if err != nil || session.Team != joined.Slug {
+		t.Fatalf("fallback to newly joined team: %+v %v", session, err)
 	}
 }

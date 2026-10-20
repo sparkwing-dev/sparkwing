@@ -81,15 +81,18 @@ func TestAuthorityGenerationIncludesCrossTeamAncestor(t *testing.T) {
 	if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
 		t.Fatal("revoked ancestor stayed live")
 	}
-
 }
 
-func authorityMember(t *testing.T, s *Store, id string, role Role) Actor {
+func authorityMember(t *testing.T, s *Store, id string, role Role, teams ...Team) Actor {
 	t.Helper()
+	team := Team("a")
+	if len(teams) != 0 {
+		team = teams[0]
+	}
 	rewriteSchemaExec(t, s.db, "INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?, ?, 1, 1)", id, id+"@example.test")
-	rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a',?,?,1)", id, role)
-	rewriteSchemaExec(t, s.db, "INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,'a',?)", id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), id)
-	rewriteSchemaExec(t, s.db, "INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)", id)
+	rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,?,1)", team, id, role)
+	rewriteSchemaExec(t, s.db, "INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,?,?)", id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), team, id)
+	rewriteSchemaExec(t, s.db, "INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,?,0)", id, team)
 	return Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
 }
 

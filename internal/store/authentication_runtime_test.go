@@ -86,10 +86,9 @@ func TestAuthenticationSnapshotRechecksAncestryAndMembership(t *testing.T) {
 
 func TestAuthenticationSnapshotLooksUpSessionDigestWithoutBearer(t *testing.T) {
 	s := authorityStore(t)
-	member := authorityMember(t, s, "member", RoleEditor)
 	digest := sha256.Sum256([]byte("session-presentation"))
 	hash := hex.EncodeToString(digest[:])
-	rewriteSchemaExec(t, s.db, `UPDATE sessions SET hash=? WHERE hash=?`, hash, member.Authority.ID)
+	authorityMember(t, s, hash, RoleEditor)
 	got, err := s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil || len(got.Authorities) != 1 || got.Authorities[0].Principal.Authority.ID != hash || got.Authorities[0].Principal.Class != capability.CredentialSession || !capability.CredentialAlive(got.Authorities[0].Principal.Capability, got.Now) {
 		t.Fatalf("session: %+v, %v", got, err)

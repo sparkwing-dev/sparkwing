@@ -141,11 +141,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 				want = ""
 			}
 		case 4:
-			var prefix string
-			if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&prefix); err != nil {
-				t.Fatal(err)
-			}
-			actor := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}}
+			actor := store.Actor{Authority: storedBootstrapAuthorityW8(t, server.Store)}
 			if err := server.Store.AsOperator().RevokeAuthority(t.Context(), actor, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}); err != nil {
 				t.Fatal(err)
 			}

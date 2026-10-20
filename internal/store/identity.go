@@ -934,7 +934,7 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
  VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
 		return "", "", nil, err
 	}
-	if err := authenticateSessionTeamsTx(ctx, tx, sessionDigest(raw)); err != nil {
+	if err := recordSessionMembershipsTx(ctx, tx, sessionDigest(raw), ""); err != nil {
 		return "", "", nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -998,7 +998,20 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 	if active == "" {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx,
+	rows, err := tx.QueryContext(ctx, `SELECT hash FROM sessions WHERE account_id=? AND team=? AND capability_prefix=''`, accountID, t.team)
+	if err != nil {
+		return err
+	}
+	sessions, err := scanPrefixes(rows)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if err := recordSessionMembershipsTx(ctx, tx, session, Team(active)); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx,
 		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
 		active, accountID, string(t.team))
 	return err

@@ -544,6 +544,27 @@ func lockAuthorityWithTeamTx(ctx context.Context, tx *storeTx, team Team, leaves
 			return err
 		}
 	}
+	if err := lockDiscoveredAuthoritiesTx(ctx, tx, set); err != nil {
+		return err
+	}
+	for leaf, discovered := range chains {
+		current, err := discoverAuthorityChainTx(ctx, tx, leaf)
+		if err != nil {
+			return err
+		}
+		if len(current) != len(discovered) || !slices.Equal(authorityMembershipKeys(current), authorityMembershipKeys(discovered)) {
+			return errAuthorityChanged
+		}
+		for i := range current {
+			if current[i].principal.Authority != discovered[i].principal.Authority {
+				return errAuthorityChanged
+			}
+		}
+	}
+	return nil
+}
+
+func lockDiscoveredAuthoritiesTx(ctx context.Context, tx *storeTx, set []authorityLock) error {
 	slices.SortFunc(set, compareAuthorityLocks)
 	for _, h := range set {
 		query := "SELECT prefix FROM capabilities WHERE prefix=?"
@@ -559,20 +580,6 @@ func lockAuthorityWithTeamTx(ctx context.Context, tx *storeTx, team Team, leaves
 			return errAuthorityChanged
 		} else if err != nil {
 			return err
-		}
-	}
-	for leaf, discovered := range chains {
-		current, err := discoverAuthorityChainTx(ctx, tx, leaf)
-		if err != nil {
-			return err
-		}
-		if len(current) != len(discovered) || !slices.Equal(authorityMembershipKeys(current), authorityMembershipKeys(discovered)) {
-			return errAuthorityChanged
-		}
-		for i := range current {
-			if current[i].principal.Authority != discovered[i].principal.Authority {
-				return errAuthorityChanged
-			}
 		}
 	}
 	return nil

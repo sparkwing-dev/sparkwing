@@ -40,11 +40,7 @@ func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*controller.E
 	if err != nil || owner.Claim == nil {
 		t.Fatalf("run owner acquisition: present=%v error=%v", owner.Claim != nil, err)
 	}
-	var prefix string
-	if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator' AND parent_id IS NULL`).Scan(&prefix); err != nil {
-		t.Fatal(err)
-	}
-	parent := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+	parent := storedBootstrapAuthorityW8(t, server.Store)
 	root, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &parent, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: expiry})
 	if err != nil {
 		t.Fatalf("provision launcher: %v", err)

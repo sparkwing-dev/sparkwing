@@ -91,7 +91,7 @@ func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl 
  VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
 		return "", nil, err
 	}
-	if err := authenticateSessionTeamsTx(ctx, tx, sessionDigest(raw)); err != nil {
+	if err := recordSessionMembershipsTx(ctx, tx, sessionDigest(raw), ""); err != nil {
 		return "", nil, err
 	}
 	if err := tx.Commit(); err != nil {

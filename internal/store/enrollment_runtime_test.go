@@ -192,9 +192,7 @@ func TestMachineEnrollmentNamesAreTeamScoped(t *testing.T) {
 	if _, err := s.ProvisionCapability(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
-	other := authorityMember(t, s, "other", RoleOwner)
-	rewriteSchemaExec(t, s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','other','owner',1)`)
-	rewriteSchemaExec(t, s.db, `UPDATE sessions SET team='b' WHERE hash='other'`)
+	other := authorityMember(t, s, "other", RoleOwner, "b")
 	spec.Authority, spec.Team, spec.RegistrationID = &other.Authority, "b", "runner:b:machine"
 	if _, err := s.ProvisionCapability(t.Context(), spec); err != nil {
 		t.Fatal(err)

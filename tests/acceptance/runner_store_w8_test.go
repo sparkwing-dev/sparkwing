@@ -147,6 +147,16 @@ func acceptanceBootstrapSpec() capability.ProvisionSpec {
 	return capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
 }
 
+func storedBootstrapAuthorityW8(t *testing.T, s *store.Store) capability.AuthorityRef {
+	t.Helper()
+	var prefix string
+	err := teststore.SQL(t, s).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_kind='operator' AND subject_id='bootstrap:admin' AND parent_id IS NULL AND revoked_at IS NULL`).Scan(&prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+}
+
 func storedRunnerClientW8(ctx context.Context, server *controller.EngineController, bearer string) (*storedRunnerW8, error) {
 	principal, err := server.Store.LookupCapability(ctx, sha256.Sum256([]byte(bearer)))
 	if err != nil {

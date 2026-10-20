@@ -47,7 +47,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"readAuthorityNodeTx":                 "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
 	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
-	"lockAuthorityTx":                     "globally unique capability prefixes and session hashes are locked before authority resolution reads their teams",
+	"lockDiscoveredAuthoritiesTx":         "an authority chain may cross teams or reach deployment authority; its discovered prefixes and session hashes are globally unique",
 	"lockUnitsTx":                         "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"loadMatchingRunTx":                   "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",

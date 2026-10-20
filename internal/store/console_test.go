@@ -242,9 +242,7 @@ func TestDeletionActorCannotBePresentedByCaller(t *testing.T) {
 func TestConsoleTeamDeletionUsesNativeCancellation(t *testing.T) {
 	tenant, now, _ := stateFixture(t)
 	s := tenant.s
-	owner := authorityMember(t, s, "operator", RoleReader)
-	rewriteSchemaExec(t, s.db, `UPDATE memberships SET team='b' WHERE account_id='operator'`)
-	rewriteSchemaExec(t, s.db, `UPDATE sessions SET team='b' WHERE hash='operator'`)
+	owner := authorityMember(t, s, "operator", RoleReader, "b")
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE team='a'`, now.Add(time.Minute).UnixNano())
 	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
 	c := s.AsConsole(func(id string) bool { return id == "operator" })

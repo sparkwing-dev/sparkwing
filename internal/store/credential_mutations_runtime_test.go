@@ -193,8 +193,8 @@ func TestCredentialMutationsSecretLimitsPreserveExistingValues(t *testing.T) {
 			tenant, a := credentialMaintenanceFixture(t)
 			if team == DefaultTeam {
 				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)`, team)
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE memberships SET team=? WHERE account_id='owner'`, team)
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE sessions SET team=? WHERE hash='owner'`, team)
+				owner := authorityMember(t, tenant.s, "default-owner", RoleOwner, team)
+				a.Principal.Authority = owner.Authority
 				tenant.team, a.Target.Team = team, string(team)
 			}
 			for i := range MaxSecretsPerTeam {
@@ -234,9 +234,7 @@ func TestCredentialMutationsSecretLimitsPreserveExistingValues(t *testing.T) {
 
 func TestCredentialMutationsDeletionPreservesOtherScopesProperty(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
-	foreignActor := authorityMember(t, tenant.s, "foreign", RoleOwner)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE memberships SET team='b' WHERE account_id='foreign'`)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE sessions SET team='b' WHERE hash='foreign'`)
+	foreignActor := authorityMember(t, tenant.s, "foreign", RoleOwner, "b")
 	foreign := &Tenant{s: tenant.s, team: "b"}
 	b := a
 	b.Principal.Authority, b.Target.Team = foreignActor.Authority, "b"

@@ -11,10 +11,12 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -207,20 +209,32 @@ func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
 
 func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
 	s, session := credentialSessionServer(t)
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.store.SetSessionKeyCipher(cipher)
+	session, _, _, err = s.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := s.Handler()
-	mint := func() string {
-		w := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
+	mint := func(raw string) string {
+		w := credentialRequestHTTP(t, h, raw, `{"grants":["runs.read"]}`, false)
 		var issued credentialResponse
 		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &issued) != nil || issued.Capability == "" {
 			t.Fatalf("issuance: %d %s", w.Code, w.Body)
 		}
 		return issued.Capability
 	}
-	own := mint()
+	own := mint(session)
 	engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
 	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','member','reader',1)`)
-	engineSQL(t, s.store, `UPDATE sessions SET team='b'`)
-	foreign := mint()
+	foreignSession, _, _, err := s.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "b", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := mint(foreignSession)
 	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','private-job','pending',?,?)`, []byte(`{"id":"private-job"}`), []byte(`{}`))
 	property := func(encoded uint16, hint []byte) bool {
 		path := "/api/v1/runs/run/jobs"

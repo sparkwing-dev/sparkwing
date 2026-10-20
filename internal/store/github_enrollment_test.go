@@ -285,9 +285,7 @@ func TestGitHubEnrollmentLimitsIgnoreFundingAndExemptDefaultTeam(t *testing.T) {
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)`, DefaultTeam)
 	operator := &Tenant{s: tenant.s, team: DefaultTeam}
-	owner := authorityMember(t, tenant.s, "operator-owner", RoleOwner)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,'owner',1)`, DefaultTeam, "operator-owner")
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE sessions SET team=? WHERE hash=?`, DefaultTeam, owner.Authority.ID)
+	owner := authorityMember(t, tenant.s, "operator-owner", RoleOwner, DefaultTeam)
 	op := a
 	op.Principal.Authority, op.Target.Team = owner.Authority, string(DefaultTeam)
 	for i := range MaxGitHubRunnerBindings + 1 {
