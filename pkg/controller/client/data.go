@@ -209,8 +209,7 @@ func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRe
 }
 
 func decodeDataRecord(r wire.DataRecord, team string) blob.Record {
-	ref, manual := strings.CutPrefix(r.Ref, "manual:")
-	record := blob.Record{Key: blob.RecordKey{Team: team, Kind: r.Kind, Name: r.Name, Scope: blob.Scope{Repo: r.Repo, Ref: blob.RefScope{Ref: ref, Verified: !manual}, Pipeline: r.Pipeline, Job: r.Job, Key: r.Key}}, Digest: r.Digest, Provenance: r.Provenance, CreatedAt: r.CreatedAt}
+	record := blob.Record{Key: blob.RecordKey{Team: team, Kind: r.Kind, Name: r.Name, Scope: blob.Scope{Repo: r.Repo, Ref: blob.ParseCapabilityScope(r.Ref), Pipeline: r.Pipeline, Job: r.Job, Key: r.Key}}, Digest: r.Digest, Provenance: r.Provenance, CreatedAt: r.CreatedAt}
 	if r.ManifestDigest != nil {
 		record.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: *r.ManifestDigest}
 	}

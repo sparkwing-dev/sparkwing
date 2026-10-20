@@ -14,7 +14,7 @@ func stateFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	now := time.Unix(1700000000, 0).UTC()
 	s := &Store{db: rewriteSchemaDB(t), dialect: DialectSQLite, clock: func() time.Time { return now }}
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`), []byte(`[]`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,started_at,lease_expires_at,expansion) VALUES ('a','run','job','running',?,?,'runner','claim',2,3,?,?,'expected')`, []byte(`{"id":"job"}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(-time.Second).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','run','job',3,2,'runner','claim','runner','runner','remote',?)`, now.Add(-time.Minute).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.reaper','replica',?,1)`, now.Add(time.Minute).UnixNano())
@@ -138,7 +138,7 @@ func TestRunOwnerLossPreservesCancellation(t *testing.T) {
 func TestRunQueueTimeoutPreservesLiveOwner(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	maintenanceRun(t, s, "run", 1, RunPending)
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json = ? WHERE team='a' AND id='run'`, []byte(`{"version":1,"admitted_at":"2027-01-01T00:00:00Z","request":{"options":{"claim_wait":{"set":true,"value":1}}}}`))
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json = ? WHERE team='a' AND id='run'`, []byte(`{"version":1,"admitted_at":"2027-01-01T00:00:00Z","request":{"options":{"claim_wait":{"set":true,"value":1}}},"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'owner',1,?,?,?)`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	lease, err := s.AsOperator().AcquireSingletonLease(context.Background(), "controller.reaper", "replica", time.Minute)
 	if err != nil {

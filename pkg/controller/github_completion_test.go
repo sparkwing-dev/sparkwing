@@ -125,7 +125,7 @@ func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
 	f := &githubCompletionFixture{t: t, server: server, tenant: tenant, finish: finish, now: time.Now(), api: &completionGitHub{repository: 42, name: "acme/app", checksGranted: true}}
 	server.store.SetTestClock(t, func() time.Time { return f.now })
 	f.changeRequest(func(input *runspec.Request) {
-		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", VerifiedAt: f.now}}}
+		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", Event: "push", VerifiedAt: f.now}}}
 	})
 	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization"}, f.now); err != nil {
 		t.Fatal(err)
@@ -146,10 +146,7 @@ func (f *githubCompletionFixture) changeRequest(change func(*runspec.Request)) {
 		f.t.Fatal(err)
 	}
 	change(&run.Request.Request)
-	sealed, err := json.Marshal(run.Request)
-	if err != nil {
-		f.t.Fatal(err)
-	}
+	sealed := fixtureReseal(f.t, run.Pipeline, run.Request)
 	engineSQL(f.t, f.server.store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, sealed)
 }
 

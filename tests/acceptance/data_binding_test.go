@@ -19,10 +19,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// fixtureMainRef is the unverified main scope of a run account/fixture submitted.
+var fixtureMainRef = blob.RefScope{Ref: "main", Writer: "account/fixture"}
+
 func dataAuthorized() capability.Authorized {
 	p, _ := policyFixture("awarded_or_delegated_claim", "data", "controller", []capability.Grant{capability.DataRead, capability.DataWrite})
 	p.Capability.Binding.Generation, p.Capability.Binding.Attempt = 4, 2
-	p.Capability.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:12", RunID: "run", NodeID: "job", Generation: 4, Attempt: 2, WriteRef: "manual:main", ReadRefs: []string{"manual:main", "main"}}
+	p.Capability.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:12", RunID: "run", NodeID: "job", Generation: 4, Attempt: 2, WriteRef: fixtureMainRef.CapabilityScope(), ReadRefs: []string{fixtureMainRef.CapabilityScope(), "main"}}
 	return capability.Authorized{
 		Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: "team"},
 		Access: capability.AccessRule{Credential: capability.CredentialClaim, Grants: []capability.Grant{capability.DataRead, capability.DataWrite}, Binding: capability.BindData, Liveness: capability.LiveSensitive},
@@ -77,7 +80,7 @@ func TestDataRecordRequiresEveryReferenceEdge(t *testing.T) {
 			manifest, member := blob.Digest(strings.Repeat("c", 64)), blob.Digest(strings.Repeat("d", 64))
 			request := blob.CommitRecordRequest{
 				Authority: binding.Authority, Source: binding.Authority.Upload.Value,
-				Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "gh:12", Ref: blob.RefScope{Ref: "main"}, Job: "job"}, Name: "output"}, Digest: dataDigest(),
+				Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "gh:12", Ref: fixtureMainRef, Job: "job"}, Name: "output"}, Digest: dataDigest(),
 				ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest}, Members: []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "file", Size: 1}},
 			}
 			switch state {
@@ -116,7 +119,7 @@ func TestDataCacheOperationsPreserveBoundAuthorityAndDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	memo := blob.MemoLookup{Authority: binding.Authority, Key: blob.MemoKey{Repo: "gh:12", Ref: blob.RefScope{Ref: "main"}, Pipeline: "build", Job: "job", Hash: "memo-hash"}, Budget: blob.Budget{Deadline: time.Unix(42, 0)}}
+	memo := blob.MemoLookup{Authority: binding.Authority, Key: blob.MemoKey{Repo: "gh:12", Ref: fixtureMainRef, Pipeline: "build", Job: "job", Hash: "memo-hash"}, Budget: blob.Budget{Deadline: time.Unix(42, 0)}}
 	if _, err := binding.Records.LookupMemo(t.Context(), memo); err != nil || f.memo != memo {
 		t.Fatalf("memo=%+v err=%v", f.memo, err)
 	}
@@ -451,7 +454,7 @@ func dataAuthority(a capability.Authorized) blob.Authority {
 	authority := blob.Authority{
 		CapabilityRef: a.Principal.Authority.ID, Principal: blob.Principal(a.Principal.Capability.Subject.ID),
 		Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: identity}, Repo: "gh:12",
-		Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}, DefaultBranch: "main", SHA: "sealed-sha"},
+		Ref: blob.RefFacts{Scope: fixtureMainRef, DefaultBranch: "main", SHA: "sealed-sha"},
 	}
 	authority.Upload = runspec.Optional[blob.UploadIdentity]{Set: true, Value: blob.UploadIdentity{
 		Kind: blob.UploadJob, Team: "team", RunID: "run", Principal: authority.Principal, CapabilityRef: authority.CapabilityRef, Attempt: authority.Attempt,
@@ -649,7 +652,7 @@ func TestDataBindingRetainsOpaqueSessionAuthority(t *testing.T) {
 	a := dataAuthorized()
 	p, _ := policyFixture("local_run_publisher", "data", "controller", []capability.Grant{capability.DataWrite})
 	p.Class, p.Authority = capability.CredentialSession, sessionReference(p)
-	p.Capability.Data.RepositoryKey, p.Capability.Data.WriteRef = "gh:12", "manual:main"
+	p.Capability.Data.RepositoryKey, p.Capability.Data.WriteRef = "gh:12", fixtureMainRef.CapabilityScope()
 	a.Principal, a.Binding = p, p.Capability.Binding
 	a.Access = capability.AccessRule{Credential: capability.CredentialPublisher, Grants: []capability.Grant{capability.DataWrite}, Binding: capability.BindData, Liveness: capability.LiveCredential}
 	s, f, _, _, _ := dataControllerFixture(a)

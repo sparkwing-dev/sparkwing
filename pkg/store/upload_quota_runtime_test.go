@@ -262,7 +262,7 @@ func TestBlobUploadEmptyDuplicateCannotFundMissingObject(t *testing.T) {
 func TestBlobUploadRecordPointersShareTheObjectBudget(t *testing.T) {
 	s, tenant, request := uploadFixture(t)
 	setBlobRecordRef(t, s, request.Intent.Authority.CapabilityRef)
-	request.Intent.Authority.Ref.Scope.Ref = "main"
+	request.Intent.Authority.Ref.Scope = fixtureRef("main")
 	if err := tenant.SetStorageQuota(t.Context(), StorageQuota{MaxObjectsPerRun: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestBlobUploadRecordPointersShareTheObjectBudget(t *testing.T) {
 		}
 		memo := output
 		memo.Key.Kind, memo.Key.Name = blob.KindMemo, "output"
-		memo.Key.Scope = blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Key: fixtureMemoHash}
+		memo.Key.Scope = blob.Scope{Repo: "gh:1", Ref: fixtureRef("main"), Pipeline: "ci", Job: "job", Key: fixtureMemoHash}
 		if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 			t.Fatal(err)
 		}

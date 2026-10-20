@@ -151,7 +151,11 @@ func cloudResourceStore(t *testing.T) (*controller.EngineController, *store.Tena
 	})
 	cloudResourceSQL(t, s, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
 	cloudResourceSQL(t, s, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000000,1)`)
-	request, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "run", Hash: "request", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}})
+	provenance, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "fixture"), "", "", "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "run", Hash: "request", Provenance: provenance, Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

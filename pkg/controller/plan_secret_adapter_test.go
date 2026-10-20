@@ -173,7 +173,7 @@ func TestPlanSecretOpenerAllowsValidatedPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := runspec.SealRequest(run.Request.Request, runspec.IntakeFacts{RunID: run.ID, AuthorityRef: owner.Principal.Authority})
+	sealed, err := runspec.SealRequest(run.Request.Request, runspec.IntakeFacts{RunID: run.ID, AuthorityRef: owner.Principal.Authority, Provenance: run.Request.Provenance})
 	if err != nil {
 		t.Fatal(err)
 	}

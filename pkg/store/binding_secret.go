@@ -20,14 +20,15 @@ func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	if run.Spec == nil || !slices.Contains(run.Spec.Resolved.SecretNames, target.SecretName) {
 		return &apierr.Error{Code: apierr.Forbidden, Message: "the run's pipeline does not declare this secret", Details: map[string]any{"reason": apierr.ReasonSecretUndeclared}}
 	}
-	if target.Pipeline != "" && target.Pipeline != run.Pipeline {
+	pipeline := run.Request.Provenance.Pipeline()
+	if pipeline == "" || target.Pipeline != "" && target.Pipeline != pipeline {
 		return bindingRefusal()
 	}
 	if slices.Contains(run.Request.Request.LocalSecretNames, target.SecretName) {
 		_, err := tx.store.localSecret(Team(c.Team), run.ID, target.SecretName)
 		return err
 	}
-	_, pool, err := selectedSecretTx(ctx, tx, Team(c.Team), target.SecretName, run.Pipeline, true)
+	_, pool, err := selectedSecretTx(ctx, tx, Team(c.Team), target.SecretName, pipeline, true)
 	if err != nil {
 		return err
 	}

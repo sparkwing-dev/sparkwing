@@ -12,6 +12,8 @@ var (
 	ChildIntakeFixture     = childIntakeFixture
 	EngineSQL              = engineSQL
 	EngineHTTPRoot         = engineHTTPRoot
+	FixtureSeal            = fixtureSeal
+	RequestProvenance      = requestProvenance
 )
 
 // CardBillingPass runs one pass of the payment worker, so a test drives its

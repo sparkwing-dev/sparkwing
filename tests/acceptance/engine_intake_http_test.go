@@ -77,6 +77,12 @@ func TestEngineIntakeHTTP(t *testing.T) {
 			case "child", "wrong parent", "sibling parent job":
 				b = newCredentialBoundary()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.ChildrenStart}
+				// A child runs from its parent's repository location and revision.
+				var from runspec.Request
+				if err := json.Unmarshal([]byte(`{`+sourceFields+`}`), &from); err != nil {
+					t.Fatal(err)
+				}
+				f.run.Request.Request.Git, f.run.Request.Request.Source = from.Git, from.Source
 				parent := "run"
 				job := "job"
 				if name == "wrong parent" {

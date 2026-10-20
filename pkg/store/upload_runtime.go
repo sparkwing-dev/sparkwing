@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -244,7 +243,7 @@ func readBlobUploadTx(ctx context.Context, tx *storeTx, team Team, id string) (U
 		}
 		u.Identity.Unit = runspec.Optional[blob.UploadUnit]{Set: true, Value: unit}
 	}
-	u.RefFacts.Scope = blob.RefScope{Ref: strings.TrimPrefix(ref, "manual:"), Verified: !strings.HasPrefix(ref, "manual:")}
+	u.RefFacts.Scope = blob.ParseCapabilityScope(ref)
 	u.ExpiresAt = time.Unix(0, expires).UTC()
 	if committed != 0 {
 		at := time.Unix(0, committed).UTC()

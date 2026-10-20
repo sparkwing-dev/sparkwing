@@ -37,10 +37,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 	}
 	run.Request.Request.Origin = runspec.OriginLocal
 	run.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "github.com/acme/api"}, Ref: "refs/heads/main", SHA: strings.Repeat("a", 40)}
-	sealed, err := json.Marshal(run.Request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := fixtureReseal(t, "ci", run.Request)
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_key='gh:42' WHERE team='a' AND id='run'`, sealed)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -87,7 +84,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		if json.Unmarshal(raw, &claims) != nil {
 			return false
 		}
-		return claims["team"] == "a" && claims["pipeline"] == "ci" && claims["trigger"] == "manual" && claims["runner_kind"] == "runner" && claims["repository"] == "github.com/acme/api" && claims["sha"] == strings.Repeat("a", 40) && claims["repository_id"] == nil && !token.ExpiresAt.After(time.Unix(0, lease))
+		return claims["team"] == "a" && claims["pipeline"] == "ci" && claims["trigger"] == "manual" && claims["runner_kind"] == "runner" && claims["repository"] == "github.com/acme/api" && claims["sha"] == nil && claims["ref"] == nil && claims["repository_id"] == nil && !token.ExpiresAt.After(time.Unix(0, lease))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
 		t.Fatal(err)
@@ -100,11 +97,11 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		origin                               runspec.Origin
 		wantID                               int64
 	}{
-		{"manual_cannot_claim_app", "push", "refs/heads/main", "manual", "refs/heads/main", true, runspec.OriginLocal, 0},
-		{"unverified_app", "push", "refs/heads/main", "manual", "refs/heads/main", false, runspec.OriginApp, 0},
+		{"manual_cannot_claim_app", "push", "refs/heads/main", "manual", "", true, runspec.OriginLocal, 0},
+		{"unverified_app", "push", "refs/heads/main", "manual", "", false, runspec.OriginApp, 0},
 		{"push", "push", "refs/heads/main", "push", "refs/heads/main", true, runspec.OriginApp, 42},
 		{"tag", "push", "refs/tags/v1", "push", "refs/tags/v1", true, runspec.OriginApp, 42},
-		{"pull_request", "pull_request", "refs/heads/main", "pull_request", "refs/pull/7/head", true, runspec.OriginApp, 42},
+		{"pull_request", "pull_request", "refs/pull/7/head", "pull_request", "refs/pull/7/head", true, runspec.OriginApp, 42},
 		{"release", "release", "refs/tags/v1", "release", "refs/tags/v1", true, runspec.OriginApp, 42},
 		{"create", "create", "refs/heads/topic", "create", "refs/heads/topic", true, runspec.OriginApp, 42},
 		{"delete", "delete", "refs/heads/topic", "delete", "refs/heads/topic", true, runspec.OriginApp, 42},
@@ -118,10 +115,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 				request.Request.Git.App.Value.VerifiedAt = time.Now().UTC()
 			}
 			request.Request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 7}}
-			encoded, err := json.Marshal(request)
-			if err != nil {
-				t.Fatal(err)
-			}
+			encoded := fixtureReseal(t, "ci", request)
 			engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, encoded)
 			engineSQL(t, e.Store, `UPDATE github_app_deliveries SET event=? WHERE digest='verified-delivery'`, tc.event)
 			response := engineClaimHTTP(t, handler, award.Claim.Capability, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`, 200)
@@ -142,7 +136,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 			if tc.wantID > 0 {
 				repositoryID = fmt.Sprint(tc.wantID)
 			}
-			if claims["trigger"] != tc.wantEvent || claims["ref"] != tc.wantRef || !strings.Contains(claims["sub"].(string), "repository_id:"+repositoryID+":pipeline:") {
+			if ref, _ := claims["ref"].(string); claims["trigger"] != tc.wantEvent || ref != tc.wantRef || !strings.Contains(claims["sub"].(string), "repository_id:"+repositoryID+":pipeline:") {
 				t.Fatalf("identity: %s", payload)
 			}
 		})

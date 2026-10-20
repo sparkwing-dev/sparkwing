@@ -23,7 +23,7 @@ func TestReaperRecoversExpiredOwnerAndKeepsLiveOwner(t *testing.T) {
 				}
 			})
 			ctx := t.Context()
-			if _, err := st.DB().ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,'run',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"request":{"origin":"trigger"}}`), []byte(`[]`)); err != nil {
+			if _, err := st.DB().ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,'run',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"request":{"origin":"trigger"},"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`), []byte(`[]`)); err != nil {
 				t.Fatal(err)
 			}
 			until := time.Now().Add(time.Hour).UnixNano()

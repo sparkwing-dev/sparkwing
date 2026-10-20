@@ -29,7 +29,15 @@ func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) 
 	if repository == "" {
 		repository = r.RepoURL
 	}
-	request := runspec.SealedRequest{Version: 1, RunID: r.ID, AdmittedAt: created, Request: runspec.Request{
+	sha := ""
+	if runspec.IsCommitID(r.GitSHA) {
+		sha = r.GitSHA
+	}
+	provenance, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "fixture"), r.GitBranch, sha, r.Pipeline)
+	if err != nil {
+		return err
+	}
+	request := runspec.SealedRequest{Version: 1, RunID: r.ID, AdmittedAt: created, Provenance: provenance, Request: runspec.Request{
 		Version: 1, Team: string(team), Pipeline: r.Pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		RequestedArgs: r.Args, Actor: runspec.Actor{Display: r.TriggerUser},
 		Git:     runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: repository}, Ref: r.GitBranch, SHA: r.GitSHA},

@@ -93,48 +93,6 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	}
 }
 
-func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
-	e, h, claim := childIntakeFixture(t)
-	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
-	expected := runspec.Git{Repository: runspec.Repository{Key: "gh:2", Display: "gh:2"}, Ref: "feature", SHA: "e0c11c1750000000000000000000000000000000"}
-	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", expected), 201)
-	var created struct {
-		RunID string `json:"run_id"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := tenant.ReadRun(t.Context(), created.RunID)
-	if err != nil || run.Request.Request.Git != expected {
-		t.Fatalf("explicit git: %+v: %v", run.Request.Request.Git, err)
-	}
-}
-
-func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
-	e, h, claim := childIntakeFixture(t)
-	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
-	expected := runspec.Git{Repository: runspec.Repository{Key: "gh:2", Display: "gh:2"}, Ref: "main", SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
-	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", expected), 201)
-	var created struct {
-		RunID string `json:"run_id"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := tenant.ReadRun(t.Context(), created.RunID)
-	if err != nil || run.Request.Request.Git != expected || run.Request.Request.Origin != runspec.OriginChild {
-		t.Fatalf("cross-repository git: %+v: %v", run.Request.Request.Git, err)
-	}
-}
-
 func TestCycleDetect_ParentNotFound(t *testing.T) {
 	_, h, claim := childIntakeFixture(t)
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/missing/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), 404)
@@ -175,10 +133,17 @@ func setChildAncestor(t *testing.T, e *EngineController, id, parent string) {
 	engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id=?`, lineage, id)
 }
 
-func TestChildCycleIdentityIncludesRepository(t *testing.T) {
+// 10#1: a child runs in its parent's repository even when the claim's repository
+// scope names another, so it cannot borrow another repository's source token.
+func TestChildRunsOnlyInItsParentRepository(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
 	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
-	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 201)
+	for _, git := range []runspec.Git{
+		{Repository: runspec.Repository{Key: "gh:2"}},
+		{Repository: runspec.Repository{Key: "gh:2", Display: "gh:2"}, Ref: "main", SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+	} {
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", git), 403)
+	}
 }
 
 func TestChildCycleWalkRefusesRepeatedAncestorIDs(t *testing.T) {

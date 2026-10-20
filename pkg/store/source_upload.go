@@ -220,11 +220,12 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 	if err != nil {
 		return err
 	}
-	facts, err := json.Marshal(blob.RefFacts{Scope: blob.RefScope{Ref: input.Git.Ref}, SHA: input.Git.SHA})
+	scope := blob.ScopeFor(result.Request.Provenance)
+	facts, err := json.Marshal(blob.RefFacts{Scope: scope, SHA: input.Git.SHA})
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'source_bundle',?,'source',?,?,?, ?,?,'local',?,'submission',?,0,0,?,?,?,?)`, team, result.RunID, u.Blob.Digest, result.RunID, input.Git.Repository.Key, "manual:"+input.Git.Ref, identity.Principal, source, result.RunID, input.Git.SHA, facts, input.Pipeline, tx.now().UnixNano())
+	_, err = tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'source_bundle',?,'source',?,?,?, ?,?,'local',?,'submission',?,?,0,?,?,?,?)`, team, result.RunID, u.Blob.Digest, result.RunID, input.Git.Repository.Key, scope.CapabilityScope(), identity.Principal, source, result.RunID, boolInt(scope.Verified), input.Git.SHA, facts, input.Pipeline, tx.now().UnixNano())
 	if err != nil {
 		return err
 	}

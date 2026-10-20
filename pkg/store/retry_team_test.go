@@ -105,7 +105,7 @@ func TestManualRetryRetainsVerifiedRepositoryFacts(t *testing.T) {
 	request := plan.Seal.Request.Request
 	git := request.Git
 	git.Ref, git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
-	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: plan.Seal.Request.AdmittedAt}}
+	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: plan.Seal.Request.AdmittedAt}}
 	s.SetIntakePolicy(retrySourcePolicy{delivery: &store.VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "app-actor"}}})
 	source, err := own.AdmitRun(t.Context(), store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request, VerifiedDeliveryID: "verified-delivery"})
 	if err != nil {

@@ -63,7 +63,7 @@ func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
 					record := blob.Record{Key: request.Key, Digest: request.Digest, Source: intent.Identity, Uploader: "machine", Provenance: blob.ProvenanceLocal, RefFacts: authority.authority.Ref}
 					if operation == "copy" {
 						var original blob.Record
-						hit, err := records.lookupMemoTx(t.Context(), tx, authority, blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}, &original)
+						hit, err := records.lookupMemoTx(t.Context(), tx, authority, blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: fixtureRef("main"), Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}, &original)
 						if err != nil || !hit.Found {
 							t.Fatalf("prepare copy: %+v, %v", hit, err)
 						}

@@ -15,9 +15,9 @@ func TestBlobRecordsRemoteCacheResolvesVerifiedDefault(t *testing.T) {
 			s, records, intent := blobRestoreFixture(t)
 			reader := authorityRoot("remote-cache", "a")
 			reader.Grants = []capability.Grant{capability.DataRead}
-			reader.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:1", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
+			reader.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:1", ReadRefs: []string{"refs/heads/main"}, VerifiedDefaultOnly: true}
 			authorityPersist(t, s, reader)
-			key := plantBlobRestore(t, s, records, intent, kind, "main", restoreFacts("main", true), false)
+			key := plantBlobRestore(t, s, records, intent, kind, "refs/heads/main", restoreFacts("refs/heads/main", true), false)
 			request := blob.RecordLookup{Authority: blob.Authority{CapabilityRef: reader.Prefix}, Key: key, VerifiedDefaultOnly: true}
 			request.Key.Scope.Ref = blob.RefScope{}
 			hit, err := records.LookupRecord(t.Context(), request)
@@ -25,7 +25,7 @@ func TestBlobRecordsRemoteCacheResolvesVerifiedDefault(t *testing.T) {
 				t.Fatalf("server-selected default: %+v %v", hit, err)
 			}
 			property := func(value string, field uint8) bool {
-				facts := restoreFacts("main", true)
+				facts := restoreFacts("refs/heads/main", true)
 				switch field % 6 {
 				case 0:
 					facts.DefaultBranchVerified = false
@@ -41,7 +41,7 @@ func TestBlobRecordsRemoteCacheResolvesVerifiedDefault(t *testing.T) {
 				case 5:
 					facts.Scope.Ref = "foreign:" + value
 				}
-				plantBlobRestore(t, s, records, intent, kind, "main", facts, false)
+				plantBlobRestore(t, s, records, intent, kind, "refs/heads/main", facts, false)
 				hit, _ := records.LookupRecord(t.Context(), request)
 				return !hit.Found && !hit.VerifiedDefault
 			}

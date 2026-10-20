@@ -100,7 +100,7 @@ func TestBlobObjectReadsRunOutsideTransactions(t *testing.T) {
 }
 
 func fixtureMemoLookup(intent blob.UploadIntent) blob.MemoLookup {
-	return blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
+	return blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: fixtureRef("main"), Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
 }
 
 // A memo repointed while its manifest is read is reread, never answered with stale members,

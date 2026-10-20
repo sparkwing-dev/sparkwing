@@ -299,7 +299,7 @@ func seedStorageJobClaim(ctx context.Context, s *store.Store, commit store.Segme
 	}
 	c.UnitID = string(unit)
 	c.Billing = &capability.BillingProvenance{PayerTeam: c.Team, Unit: capability.BillingJob, Start: capability.BillingAtStart, ExecutorClass: "runner", ReservationID: "archive-proof"}
-	c.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:1", RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Attempt: 1, Generation: c.Binding.Generation, WriteRef: "manual:main", ReadRefs: []string{"manual:main"}}
+	c.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:1", RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Attempt: 1, Generation: c.Binding.Generation, WriteRef: fixtureMainRef.CapabilityScope(), ReadRefs: []string{fixtureMainRef.CapabilityScope()}}
 	if err := envelope.Validate(); err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
@@ -312,7 +312,7 @@ func seedStorageJobClaim(ctx context.Context, s *store.Store, commit store.Segme
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
 	_, err = s.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,bind_node,bind_generation,bind_holder,reserved_pools,created_at,created_by,repo_scope,parent_kind,parent_id,award_purpose,delivery_purpose,unit_id,billing_unit,payer_team,executor_class,reservation_id,billing_start,unit_kind,repo_key,ref_scope)
-SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_run,bind_node,bind_generation,bind_holder,reserved_pools,created_at,created_by,repo_scope,'capability',prefix,'work','direct',?,'job',team,'runner','archive-proof','at_start','node','gh:1','manual:main' FROM capabilities WHERE prefix=?`, c.Prefix, hex.EncodeToString(c.Digest[:]), grants, raw, c.UnitID, c.Parent.ID)
+SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_run,bind_node,bind_generation,bind_holder,reserved_pools,created_at,created_by,repo_scope,'capability',prefix,'work','direct',?,'job',team,'runner','archive-proof','at_start','node','gh:1','manual:account/fixture:main' FROM capabilities WHERE prefix=?`, c.Prefix, hex.EncodeToString(c.Digest[:]), grants, raw, c.UnitID, c.Parent.ID)
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
@@ -321,7 +321,7 @@ SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_ru
 			return blob.Authority{}, blob.UploadIdentity{}, err
 		}
 	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE runs SET request_json=? WHERE team=? AND id=?", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`), c.Team, c.Binding.RunID); err != nil {
+	if _, err := s.DB().ExecContext(ctx, "UPDATE runs SET request_json=? WHERE team=? AND id=?", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`), c.Team, c.Binding.RunID); err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
 	if _, err := s.DB().ExecContext(ctx, "UPDATE nodes SET spec_json=? WHERE team=? AND run_id=?", []byte(`{"memo":{}}`), c.Team, c.Binding.RunID); err != nil {
@@ -329,7 +329,7 @@ SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_ru
 	}
 	attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: *commit.Subject.Attempt}
 	identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: c.Team, RunID: c.Binding.RunID, Principal: blob.Principal(c.Subject.ID), CapabilityRef: c.Prefix, Attempt: attempt}
-	authority := blob.Authority{CapabilityRef: c.Prefix, Principal: identity.Principal, Attempt: attempt, Repo: "gh:1", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}}}
+	authority := blob.Authority{CapabilityRef: c.Prefix, Principal: identity.Principal, Attempt: attempt, Repo: "gh:1", Ref: blob.RefFacts{Scope: fixtureMainRef}}
 	return authority, identity, nil
 }
 

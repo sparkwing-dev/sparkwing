@@ -67,7 +67,7 @@ func checkBootstrapSourceBundle(t *testing.T, kind capability.UnitKind, attack u
 	case 1:
 		rewriteSchemaExec(t, s.db, `UPDATE blob_records SET run_id=NULL WHERE kind='source_bundle'`)
 	case 2:
-		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, []byte(`{"request":{"git":{"repository":{"key":"gh:1"},"ref":"main"},"source":{"bundle_digest":{"set":true,"value":"foreign"}}}}`))
+		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, []byte(`{"request":{"git":{"repository":{"key":"gh:1"},"ref":"main"},"source":{"bundle_digest":{"set":true,"value":"foreign"}}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`))
 	case 3:
 		rewriteSchemaExec(t, s.db, `UPDATE blob_records SET kind='output' WHERE kind='source_bundle'`)
 	case 4:

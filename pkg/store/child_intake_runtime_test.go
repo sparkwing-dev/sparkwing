@@ -20,6 +20,8 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 	authorityPersist(t, tenant.s, parent)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET capability_prefix='child-parent'`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
+	// Intake seals the parent's repository alongside its repo_key column.
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, fixtureSeal(t, "ci", runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}))
 	tenant.s.intake = fakeIntakeContracts{}
 	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil
@@ -30,7 +32,7 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 func TestChildIntakePersistsLineageAndInvocationReplay(t *testing.T) {
 	tenant, request := childIntakeFixture(t)
 	first, err := tenant.AdmitRun(t.Context(), request)
-	if err != nil || first.Replayed || first.OwnerUnit == nil || first.Request.Request.Origin != runspec.OriginChild || first.Request.Request.Lineage != request.Request.Lineage {
+	if err != nil || first.Replayed || first.OwnerUnit == nil || first.Request.Request.Origin != runspec.OriginChild || first.Request.Request.Lineage != (runspec.Lineage{ParentRunID: "run", ParentJobID: "job", RootRunID: "run"}) {
 		t.Fatalf("child admission %q replayed=%t: %v", first.RunID, first.Replayed, err)
 	}
 	for range 2 {

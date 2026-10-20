@@ -148,7 +148,7 @@ func checkExpansionSecretPoolsTx(ctx context.Context, tx *storeTx, team Team, sp
 			continue
 		}
 		var pool string
-		err := tx.QueryRowContext(ctx, `SELECT only_on FROM secrets WHERE team=? AND name=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY CASE WHEN pipeline='' THEN 1 ELSE 0 END LIMIT 1`+tx.forShare(), team, name, spec.Request.Request.Pipeline).Scan(&pool)
+		err := tx.QueryRowContext(ctx, `SELECT only_on FROM secrets WHERE team=? AND name=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY CASE WHEN pipeline='' THEN 1 ELSE 0 END LIMIT 1`+tx.forShare(), team, name, spec.Request.Provenance.Pipeline()).Scan(&pool)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}

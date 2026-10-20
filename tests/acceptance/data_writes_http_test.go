@@ -62,14 +62,14 @@ func TestDataWriteHTTPRecordEdgesAndLookup(t *testing.T) {
 	body := `{"kind":"output","pipeline":"build","job":"job","name":"out","digest":"` + string(dataDigest()) + `","manifest_digest":"` + manifest + `","members":[{"digest":"` + member + `","path":"file","size":1,"mode":420}]}`
 	h := f.handler()
 	w := authorityHTTP(h, f.boundary, "POST", "/api/v1/data/records?team=foreign", body)
-	if w.Code != http.StatusOK || tx.record.Authority != dataAuthority(a) || tx.record.Source != dataAuthority(a).Upload.Value || tx.record.Key.Team != "team" || tx.record.Key.Scope.Repo != "gh:12" || tx.record.Key.Scope.Ref != (blob.RefScope{Ref: "main"}) || len(tx.record.Members) != 1 || tx.record.Members[0].Team != "team" || tx.record.Members[0].ManifestDigest != blob.Digest(manifest) {
+	if w.Code != http.StatusOK || tx.record.Authority != dataAuthority(a) || tx.record.Source != dataAuthority(a).Upload.Value || tx.record.Key.Team != "team" || tx.record.Key.Scope.Repo != "gh:12" || tx.record.Key.Scope.Ref != fixtureMainRef || len(tx.record.Members) != 1 || tx.record.Members[0].Team != "team" || tx.record.Members[0].ManifestDigest != blob.Digest(manifest) {
 		t.Fatalf("record HTTP %d %s transaction=%+v", w.Code, w.Body.String(), tx.record)
 	}
 	if !reflect.DeepEqual(*events, []string{"authorize", "authorize", "authorize", "commit record"}) {
 		t.Fatalf("events=%v", *events)
 	}
 	tx.lookupResult = blob.RecordLookupResult{Found: true, Record: blob.Record{Key: tx.record.Key, Digest: tx.record.Digest, Source: tx.record.Source, Uploader: "private-uploader"}, Members: tx.record.Members}
-	w = authorityHTTP(h, f.boundary, "GET", "/api/v1/data/records?kind=output&ref=manual%3Amain&pipeline=build&job=job&name=out", "")
+	w = authorityHTTP(h, f.boundary, "GET", "/api/v1/data/records?kind=output&ref=manual%3Aaccount%2Ffixture%3Amain&pipeline=build&job=job&name=out", "")
 	var lookup struct {
 		Found   bool `json:"found"`
 		Members []struct {
@@ -281,7 +281,7 @@ func TestDataRecordHTTPQueryValidationAndMiss(t *testing.T) {
 		})
 	}
 	f := newDataHTTPFixture()
-	w := authorityHTTP(f.handler(), f.boundary, "GET", "/api/v1/data/records?kind=output&name=absent&ref=manual%3Amain", "")
+	w := authorityHTTP(f.handler(), f.boundary, "GET", "/api/v1/data/records?kind=output&name=absent&ref=manual%3Aaccount%2Ffixture%3Amain", "")
 	var response struct {
 		Found   bool  `json:"found"`
 		Members []any `json:"members"`

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -221,10 +220,7 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 		if foreign {
 			owner = fmt.Sprintf("foreign-%d", suffix)
 		}
-		request, err := json.Marshal(runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/" + owner + fmt.Sprintf("/repo-%d", suffix)}}}})
-		if err != nil {
-			t.Fatal(err)
-		}
+		request := fixtureSeal(t, "ci", runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/" + owner + fmt.Sprintf("/repo-%d", suffix)}}}})
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_display=?`, request, "https://github.com/"+owner+fmt.Sprintf("/repo-%d", suffix))
 		demand.CapabilityPrefix = root.Capability.Prefix
 		if delegated {

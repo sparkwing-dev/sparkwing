@@ -129,10 +129,10 @@ func decodeAwardUnit(kind capability.UnitKind, id string) (UnitRef, error) {
 }
 
 type awardRow struct {
-	team, run, node, holder, prefix, repo, display, ref, sha string
-	generation, attempt, created                             int64
-	expiry, lease, cancel                                    sql.NullInt64
-	request                                                  []byte
+	team, run, node, holder, prefix, repo, display string
+	generation, attempt, created                   int64
+	expiry, lease, cancel                          sql.NullInt64
+	request                                        []byte
 }
 
 func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec) (awardRow, error) {
@@ -159,7 +159,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 	}
 	var status string
 	var runCancel sql.NullInt64
-	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,repo_display,git_branch,git_sha,request_json FROM runs WHERE team = ? AND id = ?", row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.display, &row.ref, &row.sha, &row.request)
+	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,repo_display,request_json FROM runs WHERE team = ? AND id = ?", row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.display, &row.request)
 	if err != nil {
 		return row, err
 	}
@@ -255,17 +255,17 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err != nil {
 		return capability.Capability{}, err
 	}
+	var sealed runspec.SealedRequest
+	if err := json.Unmarshal(row.request, &sealed); err != nil {
+		return capability.Capability{}, err
+	}
 	if row.display == "" {
-		var sealed runspec.SealedRequest
-		if err := json.Unmarshal(row.request, &sealed); err != nil {
-			return capability.Capability{}, err
-		}
 		row.display = sealed.Request.Git.Repository.Display
 	}
 	if err := checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: row.repo, Display: row.display}); err != nil {
 		return capability.Capability{}, err
 	}
-	if err := checkPushClaimScope(chain, row.repo, row.ref, row.sha); err != nil {
+	if err := checkPushClaimScope(chain, row.repo, sealed.Provenance.Ref(), sealed.Provenance.SHA()); err != nil {
 		return capability.Capability{}, err
 	}
 	if prospective != nil {
@@ -362,7 +362,9 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 			}
 		}
 	}
-	c.Data = awardDataScope(row, c)
+	if c.Data, err = awardDataScope(row, c); err != nil {
+		return capability.Capability{}, err
+	}
 	if spec.Delivery == capability.DeliveryBootstrap {
 		c.Grants = slices.Clone(capability.BootstrapGrants)
 	}
@@ -387,21 +389,24 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	return c, nil
 }
 
-func awardDataScope(row awardRow, c capability.Capability) *capability.DataScope {
-	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: row.repo, WriteRef: "manual:" + row.ref, RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
+func awardDataScope(row awardRow, c capability.Capability) (*capability.DataScope, error) {
+	var sealed runspec.SealedRequest
+	if err := json.Unmarshal(row.request, &sealed); err != nil {
+		return nil, err
+	}
+	facts, err := provenanceRefFacts(sealed)
+	if err != nil {
+		return nil, err
+	}
+	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: row.repo, WriteRef: facts.Scope.CapabilityScope(), ReadRefs: readScopes(facts), RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
 	if c.Unit == capability.UnitNode {
 		scope.Attempt = 0
 	}
-	var sealed runspec.SealedRequest
-	if json.Unmarshal(row.request, &sealed) == nil && sealed.Request.Git.App.Set && sealed.Request.Git.App.Value.Ref == row.ref && sealed.Request.Git.App.Value.SHA == row.sha {
-		scope.WriteRef = row.ref
-	}
-	scope.ReadRefs = []string{scope.WriteRef}
 	if c.Unit == capability.UnitEval {
 		scope.Use = capability.DataExpansion
 		scope.WriteRef = ""
 	}
-	return scope
+	return scope, nil
 }
 
 func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ExchangeSpec) (capability.Capability, error) {

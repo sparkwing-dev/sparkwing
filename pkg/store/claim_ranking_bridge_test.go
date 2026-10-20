@@ -96,10 +96,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 	t.Helper()
 	request := runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}, Ref: "refs/heads/main", SHA: rankingSHA}}
 	mutate(&request)
-	body, err := json.Marshal(runspec.SealedRequest{Request: request})
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := fixtureSeal(t, request.Pipeline, runspec.SealedRequest{Request: request})
 	f.Store.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch=?,trigger_source=?`, body, string(request.Dispatch), string(request.Origin))
 }
 

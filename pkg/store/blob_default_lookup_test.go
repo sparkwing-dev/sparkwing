@@ -39,10 +39,7 @@ func TestBlobRecordsVerifiedDefaultLookupFiltersPersistedEvidence(t *testing.T) 
 			}
 		})
 	}
-	sealed, err := json.Marshal(runspec.SealedRequest{Version: 1, Request: runspec.Request{Git: runspec.Git{Ref: "main", DefaultBranch: runspec.Optional[string]{Set: true, Value: "trunk"}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := fixtureSeal(t, "ci", runspec.SealedRequest{Version: 1, Request: runspec.Request{Git: runspec.Git{Ref: "main", DefaultBranch: runspec.Optional[string]{Set: true, Value: "trunk"}}}})
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE id='run'", sealed)
 	lookup.Authority.Ref = blob.RefFacts{}
 	if hit, err := records.LookupRecord(t.Context(), lookup); err != nil || hit.Found {

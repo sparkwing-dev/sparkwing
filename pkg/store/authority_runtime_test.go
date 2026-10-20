@@ -170,7 +170,7 @@ func authorityClaimFixture(t *testing.T, s *Store, root capability.Capability) c
 	t.Helper()
 	authorityPersist(t, s, root)
 	future := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'sealed',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'sealed',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"ci","writer":"account/fixture"}}`), []byte(`[]`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','trigger',1,1,?,?,?)`, future, []byte(`[]`), []byte(`[]`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,claimed_by,generation,attempt,lease_expires_at,spec_json,execution_json) VALUES ('a','run','job','running',?,7,2,?,?,?)`, root.Subject.ID, future, []byte(`{}`), []byte(`{}`))
 	unit, err := encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})

@@ -43,7 +43,7 @@ func blobMaterializationFixture(t *testing.T) (*Store, *Tenant, ReconcileRequest
 func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef NodeRef) (*Store, *Tenant, ReconcileRequest) {
 	t.Helper()
 	maintenanceRun(t, s, "target", 2, RunRunning)
-	rewriteSchemaExec(t, s.db, "UPDATE runs SET pipeline='ci',repo_key='gh:1',request_json=? WHERE id='target'", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`))
+	rewriteSchemaExec(t, s.db, "UPDATE runs SET pipeline='ci',repo_key='gh:1',request_json=? WHERE id='target'", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`))
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET lineage_json=? WHERE id='target'", []byte(`{"retry_of":"run","retry":{"mode":"failed","results":{"job":{"Ref":{"run_id":"run","job_id":"job"},"StateSeq":1}}}}`))
 	rewriteSchemaExec(t, s.db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json) VALUES ('a','target','job','pending',?,'same',?)", []byte(`{"id":"job","memo":{}}`), []byte(`{}`))
 	owner := authorityRoot("target-owner", "a")
@@ -54,7 +54,7 @@ func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef Nod
 	owner.Purpose, owner.Delivery, owner.Issuance = capability.PurposeTrigger, capability.DeliveryDirect, capability.Award
 	owner.Billing = &capability.BillingProvenance{PayerTeam: "a", ReservationID: "target-owner", ExecutorClass: "customer", Unit: capability.BillingHost, Start: capability.BillingAtAward}
 	owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: "target", Holder: "host", Generation: 1}
-	owner.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:1", RunID: "target", WriteRef: "manual:main", ReadRefs: []string{"manual:main"}}
+	owner.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:1", RunID: "target", WriteRef: fixtureRef("main").CapabilityScope(), ReadRefs: []string{fixtureRef("main").CapabilityScope()}}
 	expiry := s.now().Add(time.Hour)
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, s, owner)
@@ -145,7 +145,7 @@ func TestBlobMaterializationSourceScopeProperty(t *testing.T) {
 		case 2:
 			rewriteSchemaExec(t, tx, "UPDATE nodes SET state_seq=? WHERE run_id='run'", int64(value)+2)
 		case 3:
-			rewriteSchemaExec(t, tx, "UPDATE runs SET request_json=? WHERE id='run'", []byte(`{"version":1,"request":{"git":{"ref":"other"}}}`))
+			rewriteSchemaExec(t, tx, "UPDATE runs SET request_json=? WHERE id='run'", []byte(`{"version":1,"request":{"git":{"ref":"other"}},"provenance":{"trust":"asserted","ref":"other","pipeline":"ci","writer":"account/fixture"}}`))
 		case 4:
 			rewriteSchemaExec(t, tx, "UPDATE capabilities SET revoked_at=1 WHERE prefix='target-owner'")
 		}

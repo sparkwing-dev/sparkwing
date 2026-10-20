@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // Compute guards use zero for an unlimited operator ceiling.
@@ -352,12 +353,19 @@ func runsPerHourRefusal(
 ) error {
 	since := now.Add(-time.Hour).UnixNano()
 	if limits.RunsPerHour > 0 && principal.ID != "" {
-		kind := `COALESCE(CASE WHEN retry_of<>'' THEN json_extract(lineage_json, '$.retrier.value.kind') ELSE json_extract(request_json, '$.request.actor.kind') END, '')`
+		kind := `COALESCE(CASE WHEN c.retry_of<>'' THEN json_extract(c.lineage_json, '$.retrier.value.kind') ELSE json_extract(c.request_json, '$.request.actor.kind') END, '')`
+		root := `json_extract(c.lineage_json, '$.root_run_id')`
 		if q.dialect == DialectPostgres {
-			kind = `COALESCE(CASE WHEN retry_of<>'' THEN convert_from(lineage_json,'UTF8')::jsonb->'retrier'->'value'->>'kind' ELSE convert_from(request_json,'UTF8')::jsonb->'request'->'actor'->>'kind' END,'')`
+			kind = `COALESCE(CASE WHEN c.retry_of<>'' THEN convert_from(c.lineage_json,'UTF8')::jsonb->'retrier'->'value'->>'kind' ELSE convert_from(c.request_json,'UTF8')::jsonb->'request'->'actor'->>'kind' END,'')`
+			root = `convert_from(c.lineage_json,'UTF8')::jsonb->>'root_run_id'`
 		}
+		// safety: a child spends the budget of whoever created its root, not of the
+		// runner that holds its parent's claim.
 		var runs int64
-		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team = ? AND created_principal = ? AND created_at >= ? AND `+kind+`=?`, team, principal.ID, since, principal.Kind).Scan(&runs); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs c WHERE c.team = ? AND c.created_at >= ? AND (
+			(c.created_principal = ? AND `+kind+` = ? AND (COALESCE(c.parent_run_id,'') = '' OR c.retry_of <> ''))
+			OR (COALESCE(c.parent_run_id,'') <> '' AND c.retry_of = '' AND EXISTS (SELECT 1 FROM runs r WHERE r.team = c.team AND r.id = `+root+` AND r.created_principal = ? AND r.created_subject_kind = ?)))`,
+			team, since, principal.ID, principal.Kind, principal.ID, principal.Kind).Scan(&runs); err != nil {
 			return err
 		}
 		if runs >= limits.RunsPerHour {
@@ -384,6 +392,34 @@ func globalRunsPerHourRefusal(ctx context.Context, q rowQuerier, limit, since in
 		}
 	}
 	return nil
+}
+
+// enforceChildLimitsTx bounds a child's depth and its root's descendants, and returns
+// the subject that created the root, whose hourly budget the child spends.
+func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root string, depth int) (capability.Subject, error) {
+	if depth > limits.MaxChildDepth {
+		return capability.Subject{}, &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("child runs nest at most %d levels deep, counting the root run", limits.MaxChildDepth), Details: map[string]any{"limit": "max_child_depth", "cap": limits.MaxChildDepth}}
+	}
+	if err := lockComputeGuardsTx(ctx, tx); err != nil {
+		return capability.Subject{}, err
+	}
+	var subject capability.Subject
+	var created int64
+	if err := tx.QueryRowContext(ctx, `SELECT created_subject_kind,created_principal,created_at FROM runs WHERE team=? AND id=?`, team, root).Scan(&subject.Kind, &subject.ID, &created); err != nil {
+		return capability.Subject{}, err
+	}
+	expression := `json_extract(lineage_json, '$.root_run_id')`
+	if tx.dialect == DialectPostgres {
+		expression = `convert_from(lineage_json,'UTF8')::jsonb->>'root_run_id'`
+	}
+	var children int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=? AND created_at>=? AND COALESCE(parent_run_id,'')<>'' AND retry_of='' AND `+expression+`=?`, team, created, root).Scan(&children); err != nil {
+		return capability.Subject{}, err
+	}
+	if children >= int64(limits.MaxChildrenPerRoot) {
+		return capability.Subject{}, &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("a root run starts at most %d child runs", limits.MaxChildrenPerRoot), Details: map[string]any{"limit": "max_children_per_root", "cap": limits.MaxChildrenPerRoot, "observed": children}}
+	}
+	return subject, nil
 }
 
 type rowQuerier interface {

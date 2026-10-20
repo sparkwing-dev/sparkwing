@@ -16,8 +16,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// resolveChildRevisions pins a child to its parent's revision, or resolves the branch
+// it names on the server. A child never supplies its own commit: a commit is either
+// the parent's, or the head of a branch the controller read.
 func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineController, a capability.Authorized, request *runspec.Request) error {
-	if request.Lineage.ParentRunID == "" || request.Git.SHA != "" {
+	if request.Lineage.ParentRunID == "" {
 		return nil
 	}
 	if a.Target.RunID != request.Lineage.ParentRunID || a.Target.NodeID != request.Lineage.ParentJobID {
@@ -31,8 +34,15 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if request.Git.Repository.Key != parent.Request.Request.Git.Repository.Key || request.Source.Location != parent.Request.Request.Source.Location {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "fresh child source must use its parent's repository location")
+	from := parent.Request.Request
+	if request.Git.Repository.Key != from.Git.Repository.Key || request.Source.Location != from.Source.Location {
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "a child run uses its parent's repository location")
+	}
+	if request.Git.SHA != "" {
+		if request.Git.SHA != from.Git.SHA || request.Git.Ref != from.Git.Ref || request.Source.Ref != from.Source.Ref {
+			return apierr.Authorization(apierr.ReasonBinding, "a child runs its parent's revision or a branch the controller resolves")
+		}
+		return nil
 	}
 	if request.Git.Ref == "" {
 		return invalidEngineBody("fresh child source requires a branch")

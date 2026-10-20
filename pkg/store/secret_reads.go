@@ -31,14 +31,15 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 			run = p.Capability.Binding.RunID
 		}
 		if run != "" {
-			var selected string
-			if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE team=? AND id=?`, t.team, run).Scan(&selected); err != nil {
+			selected, err := readRunTx(ctx, tx, t.team, run)
+			if err != nil {
 				return err
 			}
-			if pipeline != "" && pipeline != selected {
+			speaksFor := selected.Request.Provenance.Pipeline()
+			if speaksFor == "" || pipeline != "" && pipeline != speaksFor {
 				return bindingRefusal()
 			}
-			pipeline = selected
+			pipeline = speaksFor
 		}
 		if claim {
 			var selected RunRow

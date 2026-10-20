@@ -35,10 +35,7 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 	req.Request.Git.Ref = "main"
 	req.Request.Git.SHA = "0123456789abcdef0123456789abcdef01234567"
 	req.Request.Source.Ref = req.Request.Git.SHA
-	raw, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	raw := fixtureReseal(t, "ci", req)
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, raw)
 	claimed := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse
@@ -51,8 +48,8 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 
 func childIntakeBody(t *testing.T, pipeline string, git runspec.Git) string {
 	t.Helper()
-	if git.SHA == "" {
-		git.SHA = "0123456789abcdef0123456789abcdef01234567"
+	if git.SHA == "" && git.Ref == "" {
+		git.Ref, git.SHA = "main", "0123456789abcdef0123456789abcdef01234567"
 	}
 	body, err := json.Marshal(controllerwire.CreateRunRequest{IdempotencyKey: "child-" + pipeline, Request: runspec.Request{Version: 1, Team: "a", Pipeline: pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Origin: runspec.OriginChild, Git: git, Source: runspec.Source{Ref: git.SHA}, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}}})
 	if err != nil {
@@ -226,10 +223,10 @@ func TestChildIntakeCannotBroadenParentSourceAuthority(t *testing.T) {
 		}
 		setScope()
 		body := childIntakeBody(t, fmt.Sprintf("deploy-%x", seed), git)
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 422)
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 403)
 		record.Repositories = append(record.Repositories, string(git.Repository.Key))
 		setScope()
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 201)
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 403)
 		return true
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
@@ -299,13 +296,9 @@ func TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 422)
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 403)
 		childSourceRepositories(t, e, claim, []string{string(parent.Request.Request.Git.Repository.Key), foreign})
-		status := 201
-		if inherited {
-			status = 400
-		}
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), status)
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 403)
 		return true
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {

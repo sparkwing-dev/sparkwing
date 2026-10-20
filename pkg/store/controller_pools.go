@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // PoolAccessRule is one canonical repository and branch selector persisted for a pool.
@@ -123,6 +124,13 @@ func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, ru
 		var found int64
 		if err := tx.QueryRowContext(ctx, `SELECT installation_id FROM github_app_installations WHERE team=? AND installation_id=? AND suspended=0`+tx.forShare(), t.team, rule.InstallationID).Scan(&found); err != nil {
 			return false, err
+		}
+		if rule.Branch != "" {
+			selector, err := runspec.ParseBranchSelector([]string{rule.Branch})
+			if err != nil {
+				return false, authorityError(apierr.BadRequest, err.Error())
+			}
+			rule.Branch = selector[0]
 		}
 		rule.ID = fmt.Sprintf("%s.%06d", id, i)
 		rule.InstallationID = 0

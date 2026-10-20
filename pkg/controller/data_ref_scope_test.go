@@ -14,10 +14,10 @@ import (
 func TestDataRecordRefGrantPreservesTrustProperty(t *testing.T) {
 	property := func(name [16]byte, verified bool) bool {
 		ref := blob.RefScope{Ref: hex.EncodeToString(name[:]), Verified: verified}
-		grant := ref.Ref
 		if !verified {
-			grant = "manual:" + grant
+			ref.Writer = string(fixtureWriter)
 		}
+		grant := ref.CapabilityScope()
 		scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:1", WriteRef: grant, ReadRefs: []string{grant}}
 		bound := boundData{authorized: capability.Authorized{
 			Principal: capability.Principal{Capability: capability.Capability{Data: scope}},
