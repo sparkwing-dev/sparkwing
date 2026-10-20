@@ -47,9 +47,11 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 							t.Fatalf("delayed duplicate %s: %v", name, err)
 						}
 					}
-					for range 2 {
-						if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", pending.ObjectID, CardRefundPending, now); err != nil {
-							t.Fatal(err)
+					if outcome != CardRefundSucceeded {
+						for range 2 {
+							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", pending.ObjectID); err != nil {
+								t.Fatal(err)
+							}
 						}
 					}
 					var status string
@@ -75,7 +77,7 @@ func TestPaymentStateEveryRefundResponseDeliveryPermutation(t *testing.T) {
 				for _, name := range order {
 					for range 2 {
 						if name == "response" {
-							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", "refund", outcome, now); err != nil {
+							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", "refund"); err != nil {
 								t.Fatal(err)
 							}
 						} else {

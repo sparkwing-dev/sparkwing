@@ -265,7 +265,7 @@ warning policy. Stripe's authentication result does not prove liability
 protection in every case. Neither stored value changes on replay or gets read
 from Stripe again when a warning arrives. A later payment by a blocked card
 holds its team and is refunded. A refused payment raises the
-`card_payment_refused` alert, and each refund made raises `card_refund`.
+`card_payment_refused` alert, and each submitted refund raises `card_refund`.
 
 Refunds, lost disputes and fraud warnings are kept against their payment
 whatever order Stripe delivers them in. A pending payment retains each reversal
@@ -276,5 +276,9 @@ most the original grant. Only actual refunds count toward a queued refund
 already being paid. A replay of a signed event is recognized by what Stripe
 signed, not by the card details read from Stripe afterwards.
 All events and refund responses for one payment serialize before reading its
-payer or outcomes. A terminal refund outcome survives a later pending delivery,
-and a conflicting terminal outcome is refused.
+payer or outcomes. A refund response binds only the provider's refund ID to the
+queued attempt. Verified callbacks supply its amount and outcome, including
+when an earlier partial refund leaves less than the original payment to return.
+A failed or canceled refund becomes retryable under a new attempt key. A
+terminal refund outcome survives a later pending delivery, and a conflicting
+terminal outcome is refused.

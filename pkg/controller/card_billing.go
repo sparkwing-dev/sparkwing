@@ -183,11 +183,11 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 				"payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		if err := operator.MarkCardRefundMade(ctx, d.Team, d.Key, refund, status, time.Now()); err != nil {
+		if err := operator.MarkCardRefundMade(ctx, d.Team, d.Key, refund); err != nil {
 			s.logger.Error("recording a card refund failed", "payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		s.logger.Warn("billing alert: a refused card payment was refunded", "alert", "card_refund",
+		s.logger.Warn("billing alert: a queued card refund was submitted", "alert", "card_refund",
 			"team", string(d.Team), "payment_intent", d.PaymentIntent, "refund", refund, "status", status,
 			"reason", d.Reason)
 	}

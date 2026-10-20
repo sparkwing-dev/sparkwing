@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,12 +39,11 @@ func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardR
 	return out, rows.Err()
 }
 
-// MarkCardRefundMade records the provider response for an exact queued refund attempt.
-func (o *Operator) MarkCardRefundMade(
-	ctx context.Context, team Team, key, refundID, status string, now time.Time,
-) error {
+// MarkCardRefundMade binds the provider refund ID to an exact queued attempt.
+// Only verified callbacks establish the refund's amount and outcome.
+func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, key, refundID string) error {
 	paymentIntent, attempt, ok := parseRefundKey(key)
-	if !ok || refundID == "" || (status != CardRefundPending && status != "requires_action" && status != CardRefundSucceeded && status != "failed" && status != "canceled") {
+	if !ok || refundID == "" {
 		return fmt.Errorf("%w: refund key %q", ErrInvalidInput, key)
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
@@ -57,32 +58,22 @@ func (o *Operator) MarkCardRefundMade(
 		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 			return err
 		}
-		recorded, err := refundOutcomeTx(ctx, tx, paymentIntent, refundID)
-		if err != nil {
+		if found, err := rowPresentTx(ctx, tx, `SELECT 1 FROM card_refunds WHERE payment_mode=? AND team=? AND payment_intent=?`, mode, team, paymentIntent); err != nil {
+			return err
+		} else if !found {
+			return authorityError(apierr.NotFound, "queued refund is unavailable")
+		}
+		var recordedPayment string
+		err = tx.QueryRowContext(ctx, `SELECT payment_intent FROM payment_refunds WHERE payment_mode=? AND kind='refund' AND refund_id=?`, mode, refundID).Scan(&recordedPayment)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		effective := status
-		if recorded != "" {
-			if status == CardRefundSucceeded || status == "failed" || status == "canceled" {
-				if status != recorded {
-					return authorityError(apierr.Conflict, "payment consequence has conflicting terminal outcomes")
-				}
-			}
-			effective = recorded
-		} else {
-			var amount int64
-			if err := tx.QueryRowContext(ctx, `SELECT amount_micro FROM card_refunds WHERE payment_mode=? AND team=? AND payment_intent=?`, mode, team, paymentIntent).Scan(&amount); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE card_refunds SET refund_id=? WHERE payment_mode=? AND team=? AND payment_intent=? AND attempts=? AND status='due'`, refundID, mode, team, paymentIntent, attempt); err != nil {
-				return err
-			}
-			if _, err := applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentRefund, Mode: mode, ObjectID: refundID, PaymentID: paymentIntent, AmountMinor: amount / MicroCreditsPerCent, Status: status}, "payment_provider"); err != nil {
-				return err
-			}
+		if err == nil && recordedPayment != paymentIntent {
+			return authorityError(apierr.Conflict, "refund belongs to another payment")
 		}
-		_, err = applyCardRefundTx(ctx, tx, team, paymentIntent, refundID, effective,
-			`attempts = ? AND status = 'due'`, []any{attempt}, now)
-		return err
+		if _, err := tx.ExecContext(ctx, `UPDATE card_refunds SET refund_id=?, status='pending' WHERE payment_mode=? AND team=? AND payment_intent=? AND attempts=? AND status='due'`, refundID, mode, team, paymentIntent, attempt); err != nil {
+			return err
+		}
+		return reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})
 	})
 }

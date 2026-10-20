@@ -134,23 +134,6 @@ func refundedMicroTx(ctx context.Context, tx *storeTx, paymentIntent string) (in
 	return refunded, err
 }
 
-func refundOutcomeTx(ctx context.Context, tx *storeTx, paymentIntent, refundID string) (string, error) {
-	mode, err := paymentModeTx(ctx, tx)
-	if err != nil {
-		return "", err
-	}
-	var status string
-	err = tx.QueryRowContext(ctx, `SELECT status FROM payment_refunds WHERE payment_mode = ? AND kind = 'refund' AND payment_intent = ? AND refund_id = ?`,
-		mode, paymentIntent, refundID).Scan(&status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil || status != CardRefundSucceeded && status != "failed" && status != "canceled" {
-		return "", err
-	}
-	return status, nil
-}
-
 func reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, payment string, attribution paymentAttribution) error {
 	var team Team
 	var amount int64

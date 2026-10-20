@@ -82,7 +82,7 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].Key != "payment-0" {
 		t.Fatalf("due = %+v, %v", due, err)
 	}
-	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "re_1", "pending", now); err != nil {
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "re_1"); err != nil {
 		t.Fatal(err)
 	}
 	if due, err := s.AsOperator().DueCardRefunds(ctx, now); err != nil || len(due) != 0 {
@@ -100,27 +100,83 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].Key != "payment-1" {
 		t.Fatalf("a failed refund after its backoff = %+v, %v; want it due under a new key", due, err)
 	}
-	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-1", "re_2", "succeeded", now); err != nil {
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-1", "re_2"); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := s.settlePaymentFacts(ctx, event); err != nil || !got.Replayed {
 		t.Fatalf("stale refund replay: %+v, %v", got, err)
+	}
+	event.EventID, event.ObjectID, event.Status = "retry-succeeded", "re_2", "succeeded"
+	if _, err := s.settlePaymentFacts(ctx, event); err != nil {
+		t.Fatal(err)
 	}
 	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
 		t.Fatalf("a succeeded refund = %+v, %v; want done", due, err)
 	}
 }
 
+func TestPartialRefundThenWarningRefundFailureIsRetried(t *testing.T) {
+	s, tenant, now := cardFixture(t)
+	ctx := t.Context()
+	openRefill(t, s, "a", 1_000, "payment")
+	if _, err := s.settlePaymentFacts(ctx, refillPaid(now, "payment", 1_000)); err != nil {
+		t.Fatal(err)
+	}
+	partial := providerPaymentEvent(now, capability.PaymentRefund)
+	partial.EventID, partial.ObjectID, partial.Status, partial.AmountMinor = "partial", "partial-refund", "succeeded", 400
+	if _, err := s.settlePaymentFacts(ctx, partial); err != nil {
+		t.Fatal(err)
+	}
+	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
+	warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+	if _, err := s.settlePaymentFacts(ctx, warning); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "remaining-refund"); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaCount(t, s.db, "payment_refunds WHERE refund_id='remaining-refund'", 0)
+	failed := providerPaymentEvent(now, capability.PaymentRefund)
+	failed.EventID, failed.ObjectID, failed.Status, failed.AmountMinor = "failed", "remaining-refund", "failed", 600
+	if _, err := s.settlePaymentFacts(ctx, failed); err != nil {
+		t.Fatalf("verified $6 failure after a prior $4 refund must settle: %v", err)
+	}
+	due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
+	if err != nil || len(due) != 1 || due[0].Key != "payment-1" {
+		t.Fatalf("failed remainder refund must be retryable: %+v, %v", due, err)
+	}
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", due[0].Key, "retry-refund"); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaCount(t, s.db, "payment_refunds WHERE refund_id='retry-refund'", 0)
+	rewriteSchemaCount(t, s.db, "card_refunds WHERE refund_id='retry-refund' AND status='pending' AND attempts=1", 1)
+	succeeded := failed
+	succeeded.EventID, succeeded.ObjectID, succeeded.Status = "retry-succeeded", "retry-refund", "succeeded"
+	for _, event := range []capability.PaymentEvent{succeeded, failed, succeeded} {
+		if _, err := s.settlePaymentFacts(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
+		t.Fatalf("successful remainder refund remains queued: %+v, %v", due, err)
+	}
+	var refunded int64
+	if err := s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		refunded, err = refundedMicroTx(ctx, tx, "payment")
+		return err
+	}); err != nil || refunded != 1_000*MicroCreditsPerCent {
+		t.Fatalf("verified refunds = %d, want $10: %v", refunded, err)
+	}
+	state, err := tenant.CreditState(ctx, 0)
+	if err != nil || state.ReversedMicro != 1_000*MicroCreditsPerCent || state.BalanceMicro != 0 {
+		t.Fatalf("warning/refund ledger = %+v, %v", state, err)
+	}
+}
+
 func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
-	for _, test := range []struct{ recorded, response string }{
-		{"failed", "pending"},
-		{"canceled", "pending"},
-		{"succeeded", "pending"},
-		{"succeeded", "failed"},
-		{"failed", "succeeded"},
-	} {
-		status := test.recorded
-		t.Run(status+"/"+test.response, func(t *testing.T) {
+	for _, status := range []string{"failed", "canceled", "succeeded"} {
+		t.Run(status, func(t *testing.T) {
 			s, _, now := queuedRefundFixture(t, false)
 			ctx := t.Context()
 			event := providerPaymentEvent(now, capability.PaymentRefund)
@@ -132,13 +188,7 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 				}
 			}
 			for range 2 {
-				err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "re_1", test.response, now)
-				conflict := test.response != "pending" && test.response != status
-				if conflict {
-					if err == nil {
-						t.Fatal("conflicting terminal response was accepted")
-					}
-				} else if err != nil {
+				if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "re_1"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -148,10 +198,7 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantState, wantAttempts := CardRefundDue, 1
-			if test.response != "pending" && test.response != status {
-				wantState, wantAttempts = CardRefundDue, 0
-			}
-			if status == "succeeded" && (test.response == "pending" || test.response == status) {
+			if status == "succeeded" {
 				wantState, wantAttempts = CardRefundSucceeded, 0
 			}
 			if state != wantState || attempts != wantAttempts {
@@ -189,7 +236,7 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund", "pending", now)
+		err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund")
 		if seed%4 == 1 || seed%4 == 2 {
 			if err == nil {
 				t.Fatal("refund response accepted another payment association or provider mode")
@@ -235,10 +282,10 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].Key != "payment-0" {
 		t.Fatalf("operator refund moved the queue: %+v, %v", due, err)
 	}
-	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "queued-refund", "pending", now); err != nil {
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "queued-refund"); err != nil {
 		t.Fatal(err)
 	}
-	event.EventID, event.ObjectID, event.AmountMinor = "queue-result", "queued-refund", 1_000
+	event.EventID, event.ObjectID, event.AmountMinor = "queue-result", "queued-refund", 600
 	for range 2 {
 		if _, err := s.settlePaymentFacts(ctx, event); err != nil {
 			t.Fatal(err)
@@ -262,7 +309,7 @@ func TestRecordedRefundBindingRollsBackWithItsOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_refund_outcome BEFORE UPDATE ON card_refunds WHEN NEW.attempts>OLD.attempts BEGIN SELECT RAISE(ABORT,'outcome unavailable'); END`)
-	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund", "pending", now); err == nil {
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund"); err == nil {
 		t.Fatal("refund binding committed without its recorded outcome")
 	}
 	var status, id string
@@ -274,7 +321,7 @@ func TestRecordedRefundBindingRollsBackWithItsOutcome(t *testing.T) {
 		t.Fatalf("partial refund binding survived rollback: %s/%s/%d", status, id, attempts)
 	}
 	rewriteSchemaExec(t, s.db, "DROP TRIGGER refuse_refund_outcome")
-	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund", "pending", now); err != nil {
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund"); err != nil {
 		t.Fatal(err)
 	}
 	due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))

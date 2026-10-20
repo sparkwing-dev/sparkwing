@@ -26,6 +26,10 @@ func TestPostgresRefundCallbackWaitsForMidflightBinding(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			partial := capability.PaymentEvent{EventID: "partial", ObjectID: "prior-refund", PaymentID: "payment", Mode: capability.PaymentTest, Kind: capability.PaymentRefund, Currency: "usd", AmountMinor: 40, Status: "succeeded", Created: now.Unix()}
+			if err := s.TestOnlySettleRefund(ctx, partial); err != nil {
+				t.Fatal(err)
+			}
 			blocker, err := s.DB().BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -40,7 +44,7 @@ func TestPostgresRefundCallbackWaitsForMidflightBinding(t *testing.T) {
 			}
 			binder := make(chan error, 1)
 			callback := make(chan error, 1)
-			go func() { binder <- s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund", "pending", now) }()
+			go func() { binder <- s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund") }()
 			waitBlocked := func(want int) {
 				t.Helper()
 				for {
@@ -68,7 +72,7 @@ func TestPostgresRefundCallbackWaitsForMidflightBinding(t *testing.T) {
 				}
 			}
 			waitBlocked(1)
-			event := capability.PaymentEvent{EventID: "callback", ObjectID: "refund", PaymentID: "payment", Mode: capability.PaymentTest, Kind: capability.PaymentRefund, Currency: "usd", AmountMinor: 100, Status: outcome, Created: now.Unix()}
+			event := capability.PaymentEvent{EventID: "callback", ObjectID: "refund", PaymentID: "payment", Mode: capability.PaymentTest, Kind: capability.PaymentRefund, Currency: "usd", AmountMinor: 60, Status: outcome, Created: now.Unix()}
 			go func() { callback <- s.TestOnlySettleRefund(ctx, event) }()
 			waitBlocked(2)
 			if err := blocker.Rollback(); err != nil {
@@ -84,7 +88,7 @@ func TestPostgresRefundCallbackWaitsForMidflightBinding(t *testing.T) {
 			if err := s.TestOnlySettleRefund(ctx, event); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund", "pending", now); err != nil {
+			if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund"); err != nil {
 				t.Fatal(err)
 			}
 			due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
