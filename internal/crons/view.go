@@ -60,7 +60,7 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 		override.Cron = row.Override.Cron
 		override.TZ = row.Override.TZ
 		override.Overlap = row.Override.Overlap
-		override.Args = ViewArgs(row.Override.Args)
+		override.Args = viewArgs(row.Override.Args)
 		if row.Override.CatchUp != nil {
 			override.CatchUpNS = int64(*row.Override.CatchUp)
 		}
@@ -80,7 +80,7 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 		TZ:           row.TZ,
 		Overlap:      row.Overlap,
 		CatchUpNS:    int64(row.CatchUp),
-		Args:         ViewArgs(row.Args),
+		Args:         viewArgs(row.Args),
 		Lock: controllerwire.LockView{
 			Ref:    row.Lock.Ref,
 			Binary: row.Lock.Binary,
@@ -93,7 +93,7 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 			TZ:        row.Effective.TZ,
 			Overlap:   row.Effective.Overlap,
 			CatchUpNS: int64(row.Effective.CatchUp),
-			Args:      ViewArgs(row.Effective.Args),
+			Args:      viewArgs(row.Effective.Args),
 		},
 		Paused:      row.Paused,
 		Declared:    row.Declared,
@@ -119,14 +119,14 @@ func NewFireView(fire store.CronFire, runStatus string) controllerwire.FireView 
 		Outcome:    fire.Outcome,
 		RunID:      fire.RunID,
 		Detail:     fire.Detail,
-		Args:       ViewArgs(fire.Args),
+		Args:       viewArgs(fire.Args),
 		RunStatus:  runStatus,
 	}
 }
 
-// ViewArgs renders an argument set for a reader that indexes it directly, so a
+// viewArgs renders an argument set for a reader that indexes it directly, so a
 // schedule with no arguments serves an empty object rather than a null.
-func ViewArgs(args map[string]string) map[string]string {
+func viewArgs(args map[string]string) map[string]string {
 	if args == nil {
 		return map[string]string{}
 	}

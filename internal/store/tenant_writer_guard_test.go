@@ -74,26 +74,14 @@ func tablesInsertedWithTeam(t *testing.T) (map[string]bool, int) {
 	written := map[string]bool{}
 	inserts := 0
 	for _, stmt := range tenantSQLStatements(t) {
-		for _, m := range insertColumnsRe.FindAllStringSubmatch(stmt.text, -1) {
-			table := strings.ToLower(insertTarget(m[0]))
-			if !slices.Contains(tenantTables, table) {
-				continue
-			}
-			inserts++
-			if slices.ContainsFunc(strings.Split(m[1], ","), func(c string) bool {
-				return strings.EqualFold(strings.Trim(strings.TrimSpace(c), `"`), "team")
-			}) {
-				written[table] = true
-			}
+		table, columns, _ := scopeInsert(scopeTokens(stmt.text))
+		if !slices.Contains(tenantTables, table) {
+			continue
+		}
+		inserts++
+		if slices.ContainsFunc(columns, func(column []string) bool { return len(column) == 1 && strings.Trim(column[0], "\"") == "team" }) {
+			written[table] = true
 		}
 	}
 	return written, inserts
-}
-
-func insertTarget(match string) string {
-	fields := strings.Fields(strings.ReplaceAll(match, "(", " ("))
-	if len(fields) < 3 {
-		return ""
-	}
-	return fields[2]
 }

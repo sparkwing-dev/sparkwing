@@ -79,7 +79,7 @@ func TestKeyring_FirstSealCreatesAPrivateKeyFile(t *testing.T) {
 		t.Fatalf("stat %s before any seal = %v, want absent", path, err)
 	}
 
-	sealRow(t, ring.For(st), st, "TOKEN", "abc")
+	sealRow(t, ring.For(st.AsOperator()), st, "TOKEN", "abc")
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -102,7 +102,7 @@ func TestKeyring_FirstSealCreatesAPrivateKeyFile(t *testing.T) {
 	if !secrets.IsBound(sec.Value) {
 		t.Errorf("stored value %q is not a sealed envelope", sec.Value)
 	}
-	if got, err := openRow(t, loadRing(t).For(st), st, "TOKEN"); err != nil || got != "abc" {
+	if got, err := openRow(t, loadRing(t).For(st.AsOperator()), st, "TOKEN"); err != nil || got != "abc" {
 		t.Errorf("a second process opened %q, %v; want abc", got, err)
 	}
 }
@@ -121,7 +121,7 @@ func TestKeyring_ConcurrentCreatorsAgreeOnOneKey(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			sealed, err := rings[i].For(st).Seal("same")
+			sealed, err := rings[i].For(st.AsOperator()).Seal("same")
 			if err != nil {
 				t.Errorf("creator %d: %v", i, err)
 			}
@@ -131,7 +131,7 @@ func TestKeyring_ConcurrentCreatorsAgreeOnOneKey(t *testing.T) {
 	wg.Wait()
 	for i, env := range envelopes {
 		for j, ring := range rings {
-			if got, err := ring.For(st).Open(env); err != nil || got != "same" {
+			if got, err := ring.For(st.AsOperator()).Open(env); err != nil || got != "same" {
 				t.Fatalf("creator %d opened creator %d's envelope as %q, %v; the creators hold different keys", j, i, got, err)
 			}
 		}
@@ -148,11 +148,11 @@ func TestKeyring_ConcurrentCreatorsAgreeOnOneKey(t *testing.T) {
 func TestKeyring_RefusesToCreateAKeyOverRowsSealedUnderAnother(t *testing.T) {
 	st := openStore(t)
 	keyFileIn(t, t.TempDir())
-	sealRow(t, loadRing(t).For(st), st, "TOKEN", "abc")
+	sealRow(t, loadRing(t).For(st.AsOperator()), st, "TOKEN", "abc")
 
 	lost := keyFileIn(t, t.TempDir())
 	ring := loadRing(t)
-	_, err := ring.For(st).Seal("new")
+	_, err := ring.For(st.AsOperator()).Seal("new")
 	if !errors.Is(err, localsecrets.ErrNoKey) || !errors.Is(err, secrets.ErrKeyRefused) {
 		t.Fatalf("seal with the key file gone = %v, want ErrNoKey marked as a key refusal", err)
 	}
@@ -164,7 +164,7 @@ func TestKeyring_RefusesToCreateAKeyOverRowsSealedUnderAnother(t *testing.T) {
 	if _, statErr := os.Stat(lost); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("a key was created at %s despite sealed rows", lost)
 	}
-	if err := ring.MissingKey(context.Background(), st); !errors.Is(err, localsecrets.ErrNoKey) {
+	if err := ring.MissingKey(context.Background(), st.AsOperator()); !errors.Is(err, localsecrets.ErrNoKey) {
 		t.Errorf("MissingKey = %v, want ErrNoKey", err)
 	}
 }
@@ -179,7 +179,7 @@ func TestKeyring_EnvKeyOverridesTheKeyFile(t *testing.T) {
 	st := openStore(t)
 
 	ring := loadRing(t)
-	sealRow(t, ring.For(st), st, "TOKEN", "abc")
+	sealRow(t, ring.For(st.AsOperator()), st, "TOKEN", "abc")
 
 	byEnv, err := secrets.NewCipher(envKey)
 	if err != nil {
@@ -209,7 +209,7 @@ func TestKeyring_PreviousKeyOpensWhatTheOldKeySealed(t *testing.T) {
 
 	t.Setenv(localsecrets.KeyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, secrets.KeySize)))
 	t.Setenv(localsecrets.PreviousKeyEnv, base64.StdEncoding.EncodeToString(oldKey))
-	if got, err := openRow(t, loadRing(t).For(st), st, "TOKEN"); err != nil || got != "abc" {
+	if got, err := openRow(t, loadRing(t).For(st.AsOperator()), st, "TOKEN"); err != nil || got != "abc" {
 		t.Errorf("opened %q, %v under the previous key; want abc", got, err)
 	}
 }
@@ -225,8 +225,8 @@ func TestKeyring_ReadsAKeyAnotherProcessCreatedLater(t *testing.T) {
 	keyFileIn(t, t.TempDir())
 	st := openStore(t)
 	reader := loadRing(t)
-	sealRow(t, loadRing(t).For(st), st, "TOKEN", "abc")
-	if got, err := openRow(t, reader.For(st), st, "TOKEN"); err != nil || got != "abc" {
+	sealRow(t, loadRing(t).For(st.AsOperator()), st, "TOKEN", "abc")
+	if got, err := openRow(t, reader.For(st.AsOperator()), st, "TOKEN"); err != nil || got != "abc" {
 		t.Errorf("a keyring loaded before the key existed opened %q, %v; want abc", got, err)
 	}
 }
@@ -285,7 +285,7 @@ func TestKeyring_OnlyACreatingProcessMakesTheKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ring.For(st).Seal("value")
+	_, err = ring.For(st.AsOperator()).Seal("value")
 	if !errors.Is(err, localsecrets.ErrNoKeyToCreate) || !errors.Is(err, secrets.ErrKeyRefused) || !strings.Contains(err.Error(), localsecrets.KeyEnv) {
 		t.Fatalf("seal in a non-creating process = %v, want ErrNoKeyToCreate naming %s", err, localsecrets.KeyEnv)
 	}
@@ -293,8 +293,8 @@ func TestKeyring_OnlyACreatingProcessMakesTheKey(t *testing.T) {
 		t.Fatalf("a non-creating process created %s", path)
 	}
 
-	sealRow(t, loadRing(t).For(st), st, "TOKEN", "abc")
-	if got, err := openRow(t, ring.For(st), st, "TOKEN"); err != nil || got != "abc" {
+	sealRow(t, loadRing(t).For(st.AsOperator()), st, "TOKEN", "abc")
+	if got, err := openRow(t, ring.For(st.AsOperator()), st, "TOKEN"); err != nil || got != "abc" {
 		t.Fatalf("the non-creating process opened %q, %v once the key existed; want abc", got, err)
 	}
 }

@@ -31,7 +31,7 @@ func TestProvisionCredentialUsesCurrentIssuer(t *testing.T) {
 			if err != nil || raw == "" || c == nil {
 				t.Fatalf("fixture issuance: %v", err)
 			}
-			p, err := s.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+			p, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 			if err != nil || p.Capability.Prefix != c.Prefix {
 				t.Fatalf("fixture authentication: %v", err)
 			}

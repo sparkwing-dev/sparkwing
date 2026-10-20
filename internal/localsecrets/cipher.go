@@ -14,7 +14,7 @@ import (
 // already exists and fails with [ErrNoKey] otherwise.
 type Cipher struct {
 	ring *Keyring
-	st   *store.Store
+	st   *store.Operator
 }
 
 var _ controller.BoundCipher = (*Cipher)(nil)

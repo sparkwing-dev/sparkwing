@@ -100,11 +100,11 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 		blob.Blob{Team: "a", Digest: digest, Size: int64(len(output))},
 		blob.Blob{Team: "a", Digest: manifestDigest, Size: int64(len(manifest))},
 		[]blob.Blob{{Team: "a", Digest: memberDigest, Size: int64(len(artifact))}})
-	principal, err := s.ResolveAuthority(t.Context(), request.Actor.Authority)
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), request.Actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote := &nodehost.RemoteOwnerStore{Controller: materializationController{engine: &controller.EngineController{Store: s}, owner: capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "target", NodeID: "job"}}}}
+	remote := &nodehost.RemoteOwnerStore{Controller: materializationController{engine: controller.NewEngineController(s, controller.EngineController{}), owner: capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "target", NodeID: "job"}}}}
 	if damage != "none" {
 		broken := digest
 		if damage == "corrupt_manifest" {
@@ -157,14 +157,14 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 	if got := rec.Identity.OutputsHash["job"]; got != "sha256:"+string(digest) {
 		t.Fatalf("materialized receipt output = %q", got)
 	}
-	data := &controller.DataController{
-		Store: s, Objects: objects, Access: tenant,
+	data := controller.NewDataController(s, controller.DataController{
+		Objects: objects, Access: tenant,
 		ReadBlob: tenant.ReadBlob,
 		ChargeDownload: func(ctx context.Context, _ blob.Authority, object blob.Blob) error {
 			_, err := tenant.ChargeDownload(ctx, store.DownloadCharge{ReplicaID: "materialization", Bytes: object.Size})
 			return err
 		},
-	}
+	})
 	authorized := capability.Authorized{
 		Principal: principal, Binding: principal.Capability.Binding,
 		Target: capability.Target{Team: "a", RunID: "target"},

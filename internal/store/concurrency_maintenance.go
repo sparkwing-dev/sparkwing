@@ -39,7 +39,7 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.now()); err != nil {
 		return ConcurrencyMaintenanceResult{}, err
 	}
-	keys, err := lockMaintenanceCapacityTx(ctx, tx)
+	keys, err := tx.operator.lockMaintenanceCapacityTx(ctx, tx)
 	if err != nil {
 		return ConcurrencyMaintenanceResult{}, err
 	}
@@ -76,7 +76,7 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 	return result, nil
 }
 
-func lockMaintenanceCapacityTx(ctx context.Context, tx *storeTx) ([]concurrencyKey, error) {
+func (op *Operator) lockMaintenanceCapacityTx(ctx context.Context, tx *storeTx) ([]concurrencyKey, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT team,key FROM concurrency_entries e
 WHERE EXISTS (SELECT 1 FROM concurrency_waiters w WHERE w.team=e.team AND w.key=e.key)
 OR EXISTS (SELECT 1 FROM concurrency_holders h WHERE h.team=e.team AND h.key=e.key AND (h.lease_expires_at<=? OR EXISTS (SELECT 1 FROM runs r WHERE r.team=h.team AND r.id=h.run_id AND r.finished_at IS NOT NULL)))

@@ -100,7 +100,7 @@ func TestPostgresClaimLocksDelegatedClaimantRootBeforeRun(t *testing.T) {
 	st.TestOnlyDelegatedClaimant(t, "delegate")
 	demand.CapabilityPrefix = "delegate"
 	b := blockRun(t, ctx, st)
-	b.start(func() error { _, err := st.ClaimUnit(ctx, demand); return err })
+	b.start(func() error { _, err := st.AsOperator().ClaimUnit(ctx, demand); return err })
 	b.waitBlocked(1)
 	for _, prefix := range []string{"runner", "delegate"} {
 		if !b.held(`SELECT 1 FROM capabilities WHERE prefix='` + prefix + `' FOR SHARE`) {
@@ -112,12 +112,15 @@ func TestPostgresClaimLocksDelegatedClaimantRootBeforeRun(t *testing.T) {
 
 func TestPostgresRenewalLocksObservedAuthorityBeforeRun(t *testing.T) {
 	st, demand, ctx := lockOrderStore(t)
-	claim, err := st.ClaimUnit(ctx, demand)
+	claim, err := st.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := blockRun(t, ctx, st)
-	b.start(func() error { _, err := st.RenewUnit(ctx, claim.Award.CapabilityPrefix, false); return err })
+	b.start(func() error {
+		_, err := st.AsOperator().RenewUnit(ctx, claim.Award.CapabilityPrefix, false)
+		return err
+	})
 	b.waitBlocked(1)
 	for _, prefix := range []string{claim.Award.CapabilityPrefix, "runner"} {
 		if !b.held(`SELECT 1 FROM capabilities WHERE prefix='` + prefix + `' FOR SHARE`) {
@@ -130,30 +133,30 @@ func TestPostgresRenewalLocksObservedAuthorityBeforeRun(t *testing.T) {
 func TestPostgresLauncherPreparationLocksExchangedAuthorityBeforeRun(t *testing.T) {
 	st, demand, ctx := lockOrderStore(t)
 	demand.CapabilityPrefix = st.TestOnlyLauncher(t)
-	claim, err := st.ClaimUnit(ctx, demand)
+	claim, err := st.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-	bootstrap, err := st.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	bootstrap, err := st.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	fence := capability.LeaseRef{Kind: bootstrap.Capability.Unit, ID: bootstrap.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	exchanged, err := st.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+	exchanged, err := st.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := blockRun(t, ctx, st)
 	b.start(func() error {
-		_, err := st.RenewLauncherPreparation(ctx, root, []capability.LeaseRef{fence})
+		_, _, err := st.AsOperator().ReconcileLauncherAwards(ctx, root, nil, nil, []capability.LeaseRef{fence}, nil)
 		return err
 	})
 	b.waitBlocked(1)
 	if !b.held(`SELECT 1 FROM capabilities WHERE prefix='` + exchanged.Capability.Prefix + `' FOR NO KEY UPDATE`) {
 		t.Fatal("preparation waits for the run without locking its current exchanged authority")
 	}
-	b.start(func() error { _, err := st.RenewUnit(ctx, exchanged.Capability.Prefix, false); return err })
+	b.start(func() error { _, err := st.AsOperator().RenewUnit(ctx, exchanged.Capability.Prefix, false); return err })
 	b.waitBlocked(2)
 	b.release(2)
 }
@@ -161,24 +164,24 @@ func TestPostgresLauncherPreparationLocksExchangedAuthorityBeforeRun(t *testing.
 func TestPostgresLauncherPreparationRestartsDiscoveryAfterConcurrentExchange(t *testing.T) {
 	st, demand, ctx := lockOrderStore(t)
 	demand.CapabilityPrefix = st.TestOnlyLauncher(t)
-	claim, err := st.ClaimUnit(ctx, demand)
+	claim, err := st.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-	bootstrap, err := st.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	bootstrap, err := st.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	fence := capability.LeaseRef{Kind: bootstrap.Capability.Unit, ID: bootstrap.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
 	b := blockRun(t, ctx, st)
 	b.start(func() error {
-		_, err := st.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+		_, err := st.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 		return err
 	})
 	b.waitBlocked(1)
 	b.start(func() error {
-		prepared, err := st.RenewLauncherPreparation(ctx, root, []capability.LeaseRef{fence})
+		_, prepared, err := st.AsOperator().ReconcileLauncherAwards(ctx, root, nil, nil, []capability.LeaseRef{fence}, nil)
 		if err == nil && len(prepared) != 0 {
 			return fmt.Errorf("preparation retained exchanged authority: %+v", prepared)
 		}
@@ -191,14 +194,14 @@ func TestPostgresLauncherPreparationRestartsDiscoveryAfterConcurrentExchange(t *
 func TestPostgresExchangeLocksBootstrapAndRunBeforeJob(t *testing.T) {
 	st, demand, ctx := lockOrderStore(t)
 	demand.CapabilityPrefix = st.TestOnlyLauncher(t)
-	claim, err := st.ClaimUnit(ctx, demand)
+	claim, err := st.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bootstrap := claim.Award.CapabilityPrefix
 	b := blockRun(t, ctx, st)
 	b.start(func() error {
-		_, err := st.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: bootstrap})
+		_, err := st.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: bootstrap})
 		return err
 	})
 	b.waitBlocked(1)
@@ -218,7 +221,7 @@ func TestPostgresConcurrentEvaluationReleasesRequestTheRunForWriting(t *testing.
 	var claims []store.UnitClaim
 	for _, job := range []string{"job", "second"} {
 		demand.Target = &store.UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: job, SourceGeneration: 7}
-		claim, err := st.ClaimUnit(ctx, demand)
+		claim, err := st.AsOperator().ClaimUnit(ctx, demand)
 		if err != nil {
 			t.Fatal(err)
 		}

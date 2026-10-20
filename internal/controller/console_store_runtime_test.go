@@ -3,7 +3,6 @@ package controller
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,7 +34,11 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
-			engine, _ := engineRuntimeStore(t)
+			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+			if err != nil {
+				t.Fatal(err)
+			}
+			engine, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
 			st := engine.Store
 			engineSQL(t, st, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
 			engineSQL(t, st, `INSERT INTO team_counters(team) VALUES ('b')`)
@@ -52,13 +55,9 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 				engineSQL(t, st, `INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause,placed_by) VALUES ('held','b','','review',1,'operator','operator')`)
 			}
 			engineSQL(t, st, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (17,'b',17,'owner','User',1,1)`)
-			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-			if err != nil {
-				t.Fatal(err)
-			}
-			s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
+			s := engine.Server.WithOperatorAccounts([]string{"operator"})
 			s.githubApp = &githubAppState{}
-			raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
+			raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}

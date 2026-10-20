@@ -19,7 +19,7 @@ import (
 
 func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
-	owner, err := f.Store.ResolveAuthority(t.Context(), f.Actor.Authority)
+	owner, err := f.Store.AsOperator().ResolveAuthority(t.Context(), f.Actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}

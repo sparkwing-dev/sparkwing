@@ -22,7 +22,7 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=? WHERE id='run'`, now.Add(time.Hour).UnixNano())
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET plan_json=?,plan_hash='plan',spec_json=?,spec_hash='spec',sealed_at=1 WHERE id='run'`, []byte(`{"jobs":[{"id":"job"}]}`), []byte(`{}`))
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE run_id='run'`, now.Add(-time.Nanosecond).UnixNano())
-				reaped, err := s.ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
+				reaped, err := s.AsOperator().ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
 				if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 					t.Fatalf("reap: %+v, %v", reaped, err)
 				}
@@ -38,7 +38,7 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 				if queued {
 					demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 				}
-				claim, err := s.ClaimUnit(t.Context(), demand)
+				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil || claim.RunID != ref.RunID || claim.NodeID != ref.NodeID || claim.Award.Holder != claimant || claim.Award.Generation != 3 {
 					t.Fatalf("reclaim: %+v, %v", claim, err)
 				}

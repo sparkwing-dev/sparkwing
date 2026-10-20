@@ -18,7 +18,7 @@ func ownerPlacementFixture(t *testing.T) (*Tenant, Actor) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,11 +42,11 @@ func TestOwnerSnapshotPlanAndEvalUseTheirOwnLease(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, s.now().Add(time.Hour).UnixNano())
 				rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
 			}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
-			issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -73,10 +73,10 @@ func TestOwnerSnapshotRechecksCapacityAndLivePreferences(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			tenant, actor := ownerPlacementFixture(t)
 			s := tenant.s
-			s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+			s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())
 			ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: []PlacementPreference{{Prefers: []string{"name=preferred"}, Hold: time.Hour}, {}}, Liveness: time.Minute})
-			owner, err := s.ResolveAuthority(ctx, actor.Authority)
+			owner, err := s.AsOperator().ResolveAuthority(ctx, actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,11 +85,11 @@ func TestOwnerSnapshotRechecksCapacityAndLivePreferences(t *testing.T) {
 				t.Fatalf("initial owner eligibility: %v", err)
 			}
 			if change == "capacity" {
-				s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 2}})
+				s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 2}}
 			} else {
 				preferred := authorityRoot("preferred", "a")
 				authorityPersist(t, s, preferred)
-				if err := s.RecordRunnerPoll(ctx, UnitDemand{CapabilityPrefix: preferred.Prefix, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+				if err := s.AsOperator().RecordRunnerPoll(ctx, UnitDemand{CapabilityPrefix: preferred.Prefix, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
 					t.Fatal(err)
 				}
 				if change == "stale_preferred" {
@@ -131,7 +131,7 @@ func TestOwnerSnapshotUsesOnlyAuthenticatedAncestorPollForRemoteSelfClaim(t *tes
 				prefix = "other"
 			}
 			if observation != "missing" {
-				if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+				if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -145,7 +145,7 @@ func TestOwnerSnapshotUsesOnlyAuthenticatedAncestorPollForRemoteSelfClaim(t *tes
 				rewriteSchemaExec(t, s.db, `UPDATE capabilities SET claim_observation_json=? WHERE prefix='runner'`, []byte(`{"observed_at":"2100-01-01T00:00:00Z"}`))
 			}
 			ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Liveness: time.Minute})
-			owner, err := s.ResolveAuthority(ctx, actor.Authority)
+			owner, err := s.AsOperator().ResolveAuthority(ctx, actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -171,7 +171,7 @@ func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration'`)
-	if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "runner", Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "runner", Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Liveness: time.Second})
@@ -181,7 +181,7 @@ func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	owner, err := s.ResolveAuthority(ctx, actor.Authority)
+	owner, err := s.AsOperator().ResolveAuthority(ctx, actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,10 +207,10 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Labels: []string{"tool:git"}, Capacity: match.Resources{Cores: capacity}}, available: match.Resources{Cores: capacity}})
+			tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"tool:git"}, Capacity: match.Resources{Cores: capacity}}, available: match.Resources{Cores: capacity}}
 			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,started_at=NULL,ready_at=1,spec_hash='declaration',execution_json=?`, raw)
-			owner, err := tenant.s.ResolveAuthority(t.Context(), actor.Authority)
+			owner, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -259,9 +259,9 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 func TestOwnerNodeReadsMatchTheSnapshotPlacementDecision(t *testing.T) {
 	tenant, actor := ownerPlacementFixture(t)
 	s := tenant.s
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())
-	owner, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	owner, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,9 +326,9 @@ func TestOwnerNodeReadsRefuseWhatTheSnapshotRefuses(t *testing.T) {
 func TestOwnerNodeReadKeepsARefusedPlacementDecision(t *testing.T) {
 	tenant, actor := ownerPlacementFixture(t)
 	s := tenant.s
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{}})
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{}}
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())
-	owner, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	owner, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}

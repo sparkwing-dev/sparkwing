@@ -39,10 +39,10 @@ func TestAuthorityAndUnitAcquisitionsFollowCanonicalLockOrder(t *testing.T) {
 		random.Shuffle(len(units), func(i, j int) { units[i], units[j] = units[j], units[i] })
 		recorder.reset()
 		err := s.inTx(t.Context(), func(tx *storeTx) error {
-			if err := lockAuthorityTx(t.Context(), tx, refs); err != nil {
+			if err := tx.operator.lockAuthorityTx(t.Context(), tx, refs); err != nil {
 				return err
 			}
-			return lockUnitsTx(t.Context(), tx, units)
+			return tx.operator.lockUnitsTx(t.Context(), tx, units)
 		})
 		if err != nil {
 			t.Fatal(err)

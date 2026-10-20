@@ -97,9 +97,9 @@ func git(t *testing.T, root string, args ...string) string {
 
 func TestDeclaredSchedulesReadsEveryEntryWithItsNameWhereAndArgs(t *testing.T) {
 	root := writeRepo(t, "svc", twoSidedRepo)
-	declared, err := DeclaredSchedules(root)
+	declared, err := declaredSchedules(root)
 	if err != nil {
-		t.Fatalf("DeclaredSchedules: %v", err)
+		t.Fatalf("declaredSchedules: %v", err)
 	}
 	if len(declared) != 3 {
 		t.Fatalf("declared %d entries, want 3: %+v", len(declared), declared)
@@ -155,7 +155,7 @@ func TestArmPinsTheCompiledBinaryAndSkipsControllerEntries(t *testing.T) {
 	if quick.LockedBinary != wantBinary {
 		t.Errorf("locked binary = %q, want %q", quick.LockedBinary, wantBinary)
 	}
-	wantDigest, derr := FileDigest(wantBinary)
+	wantDigest, derr := fileDigest(wantBinary)
 	if derr != nil {
 		t.Fatalf("digest the pinned binary: %v", derr)
 	}
@@ -198,7 +198,7 @@ func TestArmPinsTheCompiledBinaryAndSkipsControllerEntries(t *testing.T) {
 	if repinned.LockedDigest == quick.LockedDigest {
 		t.Errorf("re-arming did not re-pin: digest is still %q", repinned.LockedDigest)
 	}
-	if again, derr := FileDigest(repinned.LockedBinary); derr != nil || again != repinned.LockedDigest {
+	if again, derr := fileDigest(repinned.LockedBinary); derr != nil || again != repinned.LockedDigest {
 		t.Errorf("re-pinned digest = %q, want the new file's sha256 %q (err %v)",
 			repinned.LockedDigest, again, derr)
 	}

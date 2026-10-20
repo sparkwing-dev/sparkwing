@@ -27,7 +27,7 @@ func TestRepositoryClaimScopeProperty(t *testing.T) {
 						display = fmt.Sprintf("github.com/acme-evil/project-%d", i)
 					}
 					rewriteSchemaExec(t, s.db, "UPDATE runs SET repo_display=? WHERE id='run'", display)
-					_, err := s.ClaimUnit(t.Context(), demand)
+					_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 					if scope != nil && (len(scope) == 0 || outside && scope[0] == "github.com/acme/*") {
 						if err == nil {
 							t.Fatal("empty ancestor scope authorized work")
@@ -46,7 +46,7 @@ func TestRepositoryDelegationCannotDropRestriction(t *testing.T) {
 	root := authorityRoot("restricted", "a")
 	root.Repositories = []string{"gh:1"}
 	authorityPersist(t, s, root)
-	_, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Audience: capability.Controller, Grants: root.Grants, Binding: root.Binding})
+	_, err := s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Audience: capability.Controller, Grants: root.Grants, Binding: root.Binding})
 	if err == nil {
 		t.Fatal("delegated unrestricted scope from restricted parent")
 	}

@@ -269,6 +269,7 @@ func TestProductionLocalQueueChecksVersionWithoutNetwork(t *testing.T) {
 		}
 		binding.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: strict}
 		binding.Controller.LocalRunnerPolicy = &controller.SignedEngineVersionPolicy{Resolver: local}
+		services.Runner.Loop.Kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
 		queue, err = runners.NewStoreRunner(binding.Controller, services.Runner)
 		return services, err
 	}}).Open(t.Context(), home)

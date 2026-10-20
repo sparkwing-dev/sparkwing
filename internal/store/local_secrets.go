@@ -86,11 +86,11 @@ func localSecretDeclared(specNames, localNames []string) bool {
 }
 
 // ResupplyHereSecrets restores volatile inputs only from their live requester host.
-func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.AuthorityRef, values map[string]string) error {
+func (o *Operator) ResupplyHereSecrets(ctx context.Context, authority capability.AuthorityRef, values map[string]string) error {
 	var installed *localRunSecrets
 	var key localSecretKey
-	err := s.inTx(ctx, func(tx *storeTx) error {
-		s.uninstallLocalSecrets(key, &installed)
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		o.s.uninstallLocalSecrets(key, &installed)
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
@@ -109,7 +109,7 @@ func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.Au
 		if !here {
 			return bindingRefusal()
 		}
-		tenant := &Tenant{s: s, team: Team(c.Team)}
+		tenant := &Tenant{s: o.s, team: Team(c.Team)}
 		if err := lockClaimOwnerTx(ctx, tx, tenant.team, UnitRef{Kind: c.Unit, RunID: c.Binding.RunID}); err != nil {
 			return err
 		}
@@ -133,11 +133,11 @@ func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.Au
 			return err
 		}
 		key = localSecretKey{tenant.team, run.ID}
-		installed, err = s.installLocalSecrets(tenant.team, AdmissionResult{RunID: run.ID, Request: run.Request}, values)
+		installed, err = o.s.installLocalSecrets(tenant.team, AdmissionResult{RunID: run.ID, Request: run.Request}, values)
 		return err
 	})
 	if err != nil {
-		s.uninstallLocalSecrets(key, &installed)
+		o.s.uninstallLocalSecrets(key, &installed)
 	}
 	return err
 }

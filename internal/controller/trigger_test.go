@@ -145,8 +145,7 @@ func (p triggerSourcePolicy) ResolveIntake(ctx context.Context, authority capabi
 }
 
 func TestTrigger_ValidatesRepoURL(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{})
-	f.st.SetIntakePolicy(triggerSourcePolicy{})
+	f := newFloodServer(t, controller.FloodPolicy{}, fixtureStorePolicies(store.Policies{Intake: triggerSourcePolicy{}}))
 	for _, tc := range []struct {
 		remote string
 		want   int
@@ -205,8 +204,7 @@ func TestTriggerAndCreateRunRejectAGitSHAThatIsNotAnObjectID(t *testing.T) {
 }
 
 func TestTrigger_RefusesATriggerThatNamesTwoRepositories(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{})
-	f.st.SetIntakePolicy(triggerSourcePolicy{})
+	f := newFloodServer(t, controller.FloodPolicy{}, fixtureStorePolicies(store.Policies{Intake: triggerSourcePolicy{}}))
 	property := func(value uint32) bool {
 		body := computeIntake("demo")
 		body.Request.Source.Location.RemoteURL = "https://example.com/acme/app.git"
@@ -265,8 +263,7 @@ func TestRunIntakeRejectsUntrustedRevisionSelectorsProperty(t *testing.T) {
 }
 
 func TestRunIntakeSourceBoundaryProperty(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{})
-	f.st.SetIntakePolicy(triggerSourcePolicy{})
+	f := newFloodServer(t, controller.FloodPolicy{}, fixtureStorePolicies(store.Policies{Intake: triggerSourcePolicy{}}))
 	property := func(a, b, c uint8) bool {
 		body := computeIntake("demo")
 		body.Request.Git.Repository = runspec.Repository{}

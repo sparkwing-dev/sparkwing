@@ -45,7 +45,7 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 			if err != nil || node.CreditCPUClassCores != pin.class {
 				t.Fatalf("price projection: %+v, %v", node, err)
 			}
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 				t.Fatal(err)
 			}
 			for i := range rates {
@@ -56,7 +56,7 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 			}
 			for range 7 {
 				*now = now.Add(10 * time.Second)
-				if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+				if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -86,7 +86,7 @@ func TestMeteredAwardRefusesUnpricedResourcesAtomically(t *testing.T) {
 			s, demand, _ := meteredUnitFixture(t, true)
 			rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%d}}}}`, cores)))
 			demand.Available, demand.Capacity = match.Resources{Cores: 128}, match.Resources{Cores: 128}
-			_, err := s.ClaimUnit(t.Context(), demand)
+			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if !errors.Is(err, ErrUnpricedCPUClass) {
 				t.Fatalf("unpriced claim: %v", err)
 			}

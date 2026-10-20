@@ -120,11 +120,11 @@ func TestOperatorPageServesOnlyTheOperatorsSession(t *testing.T) {
 	if rec := f.get("/operator", session); rec.Code != http.StatusOK {
 		t.Fatalf("listed account = %d %s", rec.Code, rec.Body)
 	}
-	principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
+	principal, err := f.st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _, err := f.st.CreateCapabilitySession(t.Context(), principal.Capability.Prefix, time.Hour)
+	raw, _, err := f.st.AsOperator().CreateCapabilitySession(t.Context(), principal.Capability.Prefix, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,11 +245,16 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 
 type browserRunDeleter struct {
 	controller.TeamWriter
+	controller.RunTransactions
 	tenant *store.Tenant
 	seen   capability.Authorized
 }
 
 func (d *browserRunDeleter) Team() store.Team { return d.tenant.Team() }
+func (d *browserRunDeleter) ReadRun(ctx context.Context, id string) (store.RunRow, error) {
+	return d.tenant.ReadRun(ctx, id)
+}
+
 func (d *browserRunDeleter) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized) error {
 	d.seen = a
 	return nil
@@ -264,7 +269,7 @@ func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	writer := &browserRunDeleter{tenant: tenant}
-	f.srv.WithTeamWriter(func(context.Context, store.Team) (controller.TeamWriter, error) { return writer, nil })
+	controller.BindTenantPortForTest[controller.TeamWriter](f.srv, func(context.Context, store.Team) (controller.TeamWriter, error) { return writer, nil })
 	f.h = f.srv.Handler()
 	for i, id := range []string{"r1", "r2", `a\b`} {
 		if _, err := teststore.SQL(t, f.st).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default',?,?,'demo','success',?,'request',1,'github.com/acme/app','host','execute',?,'alice',1,2,'r30',30)`, id, i+1, []byte(`{}`), []byte(`[]`)); err != nil {

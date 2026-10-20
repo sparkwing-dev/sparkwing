@@ -82,6 +82,9 @@ func (l *Launcher) sync(ctx context.Context) error {
 			return errors.Join(append(errs, err)...)
 		}
 		for _, observation := range observations {
+			if retirements[observation.JobName].Deferred {
+				continue
+			}
 			job := &jobs.Items[live[observation.JobName]]
 			_, reservation, err := jobOwnership(*job)
 			if err == nil && !retirements[observation.JobName].Delete {

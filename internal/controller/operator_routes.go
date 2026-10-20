@@ -61,34 +61,27 @@ func (s *Server) operatorEndpoints() []Endpoint {
 
 func (s *Server) registerPolicyEndpoints(mux *registeredMux, endpoints []Endpoint) {
 	router := NewPolicyRouter(s.authorization)
-	var registrationError error
+	router.mux = mux.ServeMux
+	router.resolveTenant = s.resolveTenant
 	for _, endpoint := range endpoints {
-		if err := router.Register(endpoint); err != nil {
-			registrationError = err
-			break
+		if err := router.Register(s.tenantEndpoint(endpoint)); err != nil {
+			panic(err)
 		}
 	}
-	var handler http.Handler = router
-	if registrationError != nil {
-		handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, registrationError) })
-	}
+	mux.registrations = append(mux.registrations, router.Registrations()...)
 	paths := make(map[string]bool)
 	for _, endpoint := range endpoints {
-		pathHandler := handler
-		if endpoint.Authentication != capability.AuthPublic {
-			pathHandler = noStore(handler)
-		}
-		mux.Handle(endpoint.Method+" "+endpoint.Pattern, pathHandler)
 		if !paths[endpoint.Pattern] {
-			// safety: unsupported methods must reach the policy router's JSON 405, not legacy fallback.
-			mux.Handle(endpoint.Pattern, pathHandler)
+			mux.HandleFunc(endpoint.Pattern, func(w http.ResponseWriter, r *http.Request) {
+				writeRouteMiss(w, router.allowedMethods(r))
+			})
 			paths[endpoint.Pattern] = true
 		}
 	}
 }
 
 func (s *Server) consoleTenant(ctx context.Context, team string) (*store.Tenant, error) {
-	tenant, err := s.store.ForTeam(ctx, store.Team(team))
+	tenant, err := s.tenantForTeam(ctx, store.Team(team))
 	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
 		return nil, &apierr.Error{Code: apierr.NotFound, Message: "team is not registered"}
 	}

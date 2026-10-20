@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -64,7 +63,7 @@ func (f *githubConnectFake) BindAuthorizedGitHubInstallation(_ context.Context, 
 }
 
 type githubBrowserFixture struct {
-	s             *Server
+	s             *serverFixture
 	writer        *githubConnectFake
 	h             http.Handler
 	raw, csrf     string
@@ -73,15 +72,15 @@ type githubBrowserFixture struct {
 
 func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	t.Helper()
-	e, _ := engineRuntimeStore(t)
-	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
-	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','owner',1)`)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewDeployment(e.Store, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithDashboard(Dashboard{})
-	raw, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','owner',1)`)
+	s := e.Server.WithDashboard(Dashboard{})
+	raw, csrf, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +88,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &githubBrowserFixture{s: s, raw: raw, csrf: csrf, writer: &githubConnectFake{team: "a", subject: "42", consumed: make(map[string]bool)}}
+	f := &githubBrowserFixture{s: &serverFixture{Server: s, store: e.Store, engine: e}, raw: raw, csrf: csrf, writer: &githubConnectFake{team: "a", subject: "42", consumed: make(map[string]bool)}}
 	cfg := githubapp.Config{AppID: 1, Slug: "test", ClientID: "client", ClientSecret: "private-provider-secret", PrivateKey: key, HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 		f.providerCalls++
 		var body string
@@ -111,7 +110,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	client := githubapp.New(cfg)
 	s.githubApp = &githubAppState{client: client, stateKey: client.StateKey()}
 	s.identity.redirectURIs = []string{"https://controller.test/github/app/callback"}
-	s.WithGitHubConnectWriter(func(context.Context, store.Team) (GitHubConnectWriter, error) { return f.writer, nil })
+	testOnlyTenantPort[GitHubConnectWriter](s, func(context.Context, store.Team) (GitHubConnectWriter, error) { return f.writer, nil })
 	f.h = s.Handler()
 	return f
 }
@@ -259,7 +258,7 @@ func TestGitHubBrowserConnectionProviderAndReplay(t *testing.T) {
 func TestGitHubBrowserConnectionRealStore(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
 	engineSQL(t, f.s.store, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','42','member','member@example.test',1,1)`)
-	f.s.WithGitHubConnectWriter(nil)
+	f.s.WithTenantResolver(storeTenantResolver(f.s.store))
 	f.h = f.s.Handler()
 	flow := f.start(t, false)
 	flow.Code, flow.InstallationID = "code", 7
@@ -346,7 +345,8 @@ func TestGitHubBrowserConnectionCommitRefusal(t *testing.T) {
 
 func TestGitHubBrowserConnectionRequiresTransaction(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
-	f.s.WithGitHubConnectWriter(func(context.Context, store.Team) (GitHubConnectWriter, error) { return nil, nil })
+	testOnlyTenantPort[GitHubConnectWriter](f.s, func(context.Context, store.Team) (GitHubConnectWriter, error) { return nil, nil })
+	f.h = f.s.Handler()
 	w := f.request("POST", "/github/app/connect", url.Values{"csrf_token": {f.csrf}}, nil, nil)
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "policy_missing") || f.providerCalls != 0 {
 		t.Fatalf("missing writer = %d %s", w.Code, w.Body)
@@ -355,7 +355,8 @@ func TestGitHubBrowserConnectionRequiresTransaction(t *testing.T) {
 
 func TestGitHubBrowserConnectionUsesStoreTransactions(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
-	f.s.resolveGitHubConnectWriter = nil
+	f.s.WithTenantResolver(storeTenantResolver(f.s.store))
+	f.h = f.s.Handler()
 	w := f.request("POST", "/github/app/connect", url.Values{"csrf_token": {f.csrf}}, nil, nil)
 	if w.Code != http.StatusForbidden || f.providerCalls != 0 {
 		t.Fatalf("unlinked account = %d %s", w.Code, w.Body)

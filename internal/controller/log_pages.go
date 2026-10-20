@@ -223,7 +223,7 @@ func (s *Server) readLogPage(ctx context.Context, tenant *store.Tenant, reader s
 		if run != a.Target.RunID {
 			target := a.Target
 			target.RunID = run
-			if err := s.store.CheckBinding(ctx, a.Principal, a.Access.Binding, target); err != nil {
+			if err := s.operator.CheckBinding(ctx, a.Principal, a.Access.Binding, target); err != nil {
 				return page, err
 			}
 		}

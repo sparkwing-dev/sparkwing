@@ -102,7 +102,19 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 
 func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.Resolved) {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	var claimant *localcontroller.Claimant
+	var server *controller.Server
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		var err error
+		claimant, err = localcontroller.NewClaimant(st)
+		if err != nil {
+			return store.Policies{}, err
+		}
+		server = controller.New(st, nil)
+		policies := server.StorePolicies()
+		policies.ClaimProfiles = claimant
+		return policies, nil
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,22 +123,17 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 			t.Error(err)
 		}
 	})
-	claimant, err := localcontroller.NewClaimant(st)
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		if err := claimant.Close(); err != nil {
 			t.Error(err)
 		}
 	})
-	st.SetClaimProfileResolver(claimant)
 	resolver, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{Resolver: resolver}}
-	server := controller.New(st, nil).WithEngineController(e).WithPeerIdentity(func(*http.Request) capability.Subject {
+	e := controller.NewEngineController(st, controller.EngineController{RunnerPolicy: &controller.SignedRunnerAdmission{Resolver: resolver}})
+	server.WithEngineController(e).WithPeerIdentity(func(*http.Request) capability.Subject {
 		return capability.Subject{Kind: capability.SubjectLocal, ID: fmt.Sprintf("local:%d", os.Getuid())}
 	})
 	handler := server.Handler()

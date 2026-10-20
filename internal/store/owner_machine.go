@@ -34,7 +34,7 @@ func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Prin
 			if err != nil || account == "" {
 				return err
 			}
-			record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+			record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
 			if err != nil || record.Origin == nil || !record.Origin.Personal {
 				return err
 			}
@@ -82,7 +82,7 @@ func personalMachineOwnerTx(ctx context.Context, tx *storeTx, team Team, machine
 	}
 	var owner string
 	for prefix, by := range enrolled {
-		record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
 		if err != nil {
 			return "", err
 		}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"sort"
+	"strings"
 )
 
 // GetRun fetches one of t's runs by id. A run of another team reads as
@@ -26,12 +27,31 @@ SELECT `+runColumns+`
 
 // ListRuns returns t's runs, newest first, filtered by f.
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
-	return t.s.listRuns(ctx, oneTeam(t.team), f)
+	if t.team == "" {
+		return nil, ErrNoTeam
+	}
+	where, args, err := runFilterWhere(t.s.dialect, f)
+	if err != nil {
+		return nil, err
+	}
+	where = strings.Replace(where, " WHERE ", " AND ", 1)
+	return t.s.listRuns(ctx, `SELECT `+runColumns+` FROM runs WHERE team = ?`+where, append([]any{t.team}, args...), f)
 }
 
 // CountRuns returns how many of t's runs match f, ignoring its Limit.
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error) {
-	return t.s.countRuns(ctx, oneTeam(t.team), f)
+	if t.team == "" {
+		return 0, ErrNoTeam
+	}
+	where, args, err := runFilterWhere(t.s.dialect, f)
+	if err != nil {
+		return 0, err
+	}
+	where = strings.Replace(where, " WHERE ", " AND ", 1)
+	row := t.s.queryRow(ctx, `SELECT COUNT(*) FROM runs WHERE team = ?`+where, append([]any{t.team}, args...)...)
+	var count int
+	err = row.Scan(&count)
+	return count, err
 }
 
 // ListRunRetryTree returns every run of t's team in the retry tree runID

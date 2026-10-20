@@ -101,7 +101,7 @@ func TestPostgresAdminTransactionsRetryDeadlockVictims(t *testing.T) {
 				table, event = "identities", "UPDATE"
 				lockQuery, lockArgs = `SELECT account_id FROM identities WHERE account_id=$1 FOR UPDATE`, []any{owner.Account.ID}
 				action = func(ctx context.Context) error {
-					result, err := st.ResolveSignIn(ctx, googleProfile("owner", "changed@example.com"), store.SignUpConditions{}, now)
+					result, err := st.AsOperator().ResolveSignIn(ctx, googleProfile("owner", "changed@example.com"), store.SignUpConditions{}, now)
 					if err == nil && (result.NewAccount || result.Account.ID != owner.Account.ID || result.Account.Email != "changed@example.com") {
 						return fmt.Errorf("sign-in result = %+v", result)
 					}

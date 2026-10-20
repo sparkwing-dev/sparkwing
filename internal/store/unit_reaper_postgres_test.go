@@ -35,7 +35,7 @@ func TestPostgresUnitReaperLocksRunBeforeNode(t *testing.T) {
 	done := make(chan struct{})
 	var reapErr error
 	go func() {
-		_, reapErr = st.ReapUnits(ctx, lease, 1)
+		_, reapErr = st.AsOperator().ReapUnits(ctx, lease, 1)
 		close(done)
 	}()
 	defer func() { cancel(); _ = report.Rollback(); <-done }()

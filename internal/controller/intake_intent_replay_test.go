@@ -22,7 +22,7 @@ func TestFreshChildReplayIgnoresBranchMovementAndSourceOutage(t *testing.T) {
 	sourcetest.Git(t, repo, "commit", "-qm", "child")
 	selected := sourcetest.Git(t, repo, "rev-parse", "HEAD")
 	key := runspec.RepoKey("git:8.8.8.8/team/repo")
-	e, h, claim := childIntakeFixtureWith(t, func(e *EngineController) {
+	e, h, claim := childIntakeFixtureWith(t, func(e *engineFixture) {
 		tenant, err := e.Store.ForTeam(t.Context(), "a")
 		if err != nil {
 			t.Fatal(err)

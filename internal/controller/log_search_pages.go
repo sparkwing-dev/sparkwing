@@ -132,7 +132,7 @@ func (s *Server) readLogSearchPage(ctx context.Context, tenant *store.Tenant, a 
 			run := view.Snapshot.Run
 			target := a.Target
 			target.RunID = run.ID
-			if err := s.store.CheckBinding(ctx, a.Principal, a.Access.Binding, target); err != nil {
+			if err := s.operator.CheckBinding(ctx, a.Principal, a.Access.Binding, target); err != nil {
 				return controllerwire.LogSearchPage{}, err
 			}
 			cursor.Through = run.Number

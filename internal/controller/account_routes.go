@@ -27,10 +27,7 @@ func (s *Server) accountReader() (AccountReader, error) {
 	if s.accountReads != nil {
 		return s.accountReads, nil
 	}
-	if s.store == nil {
-		return nil, missingEndpointPolicy()
-	}
-	return s.store, nil
+	return nil, missingEndpointPolicy()
 }
 
 func (s *Server) accountEndpoints() []Endpoint {
@@ -45,4 +42,4 @@ func (s *Server) accountEndpoints() []Endpoint {
 	}
 }
 
-var _ AccountReader = (*store.Store)(nil)
+var _ AccountReader = (*store.Operator)(nil)

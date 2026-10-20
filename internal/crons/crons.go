@@ -46,13 +46,13 @@ const scheduleIDHexLen = 12
 // sha256(repoPath + NUL + pipeline + NUL + name) for any other. The lone
 // schedule of a pipeline keeps the id it had before entries carried names.
 func ScheduleID(repoPath, pipeline, name string) string {
-	return TeamScheduleID(store.DefaultTeam, repoPath, pipeline, name)
+	return teamScheduleID(store.DefaultTeam, repoPath, pipeline, name)
 }
 
-// TeamScheduleID is [ScheduleID] for a schedule armed in team. The operator's
+// teamScheduleID is [ScheduleID] for a schedule armed in team. The operator's
 // team keeps the ids [ScheduleID] names; any other team's seed also carries the
 // team. The store keys schedules by team and id, so no team's id can block another's.
-func TeamScheduleID(team store.Team, repoPath, pipeline, name string) string {
+func teamScheduleID(team store.Team, repoPath, pipeline, name string) string {
 	seed := repoPath + "\x00" + pipeline
 	if name != "" && name != store.CronScheduleDefaultName {
 		seed += "\x00" + name
@@ -147,7 +147,7 @@ type Declared struct {
 }
 
 // ID is the schedule id this entry arms under.
-func (d Declared) ID() string { return TeamScheduleID(d.Team, d.RepoPath, d.Pipeline, d.Name) }
+func (d Declared) ID() string { return teamScheduleID(d.Team, d.RepoPath, d.Pipeline, d.Name) }
 
 // DisplayName is what an operator types and reads for this entry.
 func (d Declared) DisplayName() string { return displayName(d.RepoPath, d.Pipeline, d.Name) }
@@ -159,7 +159,7 @@ func (d Declared) Local() bool { return d.Trigger.Where == pipelines.ScheduleWhe
 // Selector is the "pipeline/name" form an operator restricts an arm with.
 func (d Declared) Selector() string { return d.Pipeline + "/" + d.Name }
 
-// DeclaredSchedules reads <repoRoot>/.sparkwing/sparkwing.yaml and returns one
+// declaredSchedules reads <repoRoot>/.sparkwing/sparkwing.yaml and returns one
 // entry per declared cadence, in declaration order. A readable config that
 // declares no cadence yields no schedules and no error; the config's own
 // validation rejects a malformed cron before it gets here.
@@ -168,7 +168,7 @@ func (d Declared) Selector() string { return d.Pipeline + "/" + d.Name }
 // than an empty answer. The two are indistinguishable to a caller that only
 // counts schedules, and reading the second as the first silently disarms
 // everything the host had armed.
-func DeclaredSchedules(repoRoot string) ([]Declared, error) {
+func declaredSchedules(repoRoot string) ([]Declared, error) {
 	root, err := filepath.Abs(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", repoRoot, err)
@@ -240,9 +240,9 @@ type ScheduleStore interface {
 // takes an exclusive lock on that file so two timers, or a timer and a hand-run
 // tick, cannot resolve the same due instant twice. Leave it empty in a caller
 // that already holds exclusion of its own, such as a controller ticking under
-// [store.Store.RunCronTickLeased].
+// [store.Operator.RunCronTickLeased].
 type Service struct {
-	Store    *store.Store
+	Operator *store.Operator
 	Launcher Launcher
 
 	// Schedules is required for tenant operations. Nil lets Tick enumerate every team.
@@ -387,7 +387,7 @@ func newRow(ctx context.Context, s store.CronSchedule, ck checkouts) Row {
 	lock := lockOf(ctx, s, ck)
 	eff := s.Effective()
 	declared := eff.CatchUp
-	eff.CatchUp = ClampCatchUp(declared)
+	eff.CatchUp = clampCatchUp(declared)
 	return Row{
 		CronSchedule:   s,
 		Display:        DisplayName(s),
@@ -528,14 +528,14 @@ func prepare(s store.CronSchedule) (evaluable, error) {
 	if err != nil {
 		return evaluable{}, err
 	}
-	return evaluable{schedule: parsed, loc: loc, catchUp: ClampCatchUp(catchUp), args: t.Args}, nil
+	return evaluable{schedule: parsed, loc: loc, catchUp: clampCatchUp(catchUp), args: t.Args}, nil
 }
 
-// ClampCatchUp lowers a declared catch-up window to [cronspec.MaxCatchUp]. Both
+// clampCatchUp lowers a declared catch-up window to [cronspec.MaxCatchUp]. Both
 // the miss decision and the overlap check read the window this returns, so a
 // schedule can never declare a window long enough to hold a run that nothing
 // will claim active for ever.
-func ClampCatchUp(d time.Duration) time.Duration {
+func clampCatchUp(d time.Duration) time.Duration {
 	if d > cronspec.MaxCatchUp {
 		return cronspec.MaxCatchUp
 	}

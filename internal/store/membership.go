@@ -78,7 +78,7 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 				return err
 			}
 		}
-		if err := advanceAuthGenerationsTx(ctx, tx, nil, &t.team); err != nil {
+		if err := tx.operator.advanceAuthGenerationsTx(ctx, tx, nil, &t.team); err != nil {
 			return err
 		}
 		return nil
@@ -116,7 +116,7 @@ func (t *Tenant) revokeCapabilitiesMintedByTx(ctx context.Context, tx *storeTx, 
 		return err
 	}
 	for _, prefix := range prefixes {
-		if err := revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+		if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
 			return err
 		}
 	}

@@ -27,10 +27,10 @@ func TestNativeServicesRefusesUnknownAuthorityBeforeOpeningResources(t *testing.
 		Capability: capability.Capability{Team: string(binding.Tenant.Team()), Binding: capability.Binding{RunID: "unavailable"}},
 	}
 	refreshed := false
-	services, err := nodehost.NewNativeServices(t.Context(), nodehost.NativeConfig{Local: func(store.NodeRow) bool { return true }, Home: home, Store: binding.Tenant, Parent: c.store, Bindings: c.store, Renew: c.store.RenewUnit, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
+	services, err := nodehost.NewNativeServices(t.Context(), nodehost.NativeConfig{Local: func(store.NodeRow) bool { return true }, Home: home, Store: binding.Tenant, Parent: c.store.AsOperator(), Bindings: c.store.AsOperator(), Renew: c.store.AsOperator().RenewUnit, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
 		refreshed = true
 		route, _ := capability.LookupRoute("POST", "/api/v1/runs/{run}/heartbeat")
-		_, err := capability.NewAuthenticator(c.store).Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))}, route)
+		_, err := capability.NewAuthenticator(c.store.AsOperator()).Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))}, route)
 		return capability.Principal{}, err
 	}})
 	if err == nil || services.Config.Store != nil || services.Close != nil {

@@ -268,7 +268,7 @@ func recordGrantEventTx(tx *storeTx, g CreditGrant, extra map[string]any) error 
 			attrs[k] = v
 		}
 	}
-	return RecordBusinessEvent(tx, BusinessEvent{
+	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		At: g.CreatedAt, Team: g.Team, Kind: kind, SubjectID: g.ID, Actor: g.CreatedBy, Attrs: attrs,
 	})
 }
@@ -309,8 +309,8 @@ func creditGrantByReferenceTx(
 	var created int64
 	var owner string
 	err := tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, created_by, created_at
-	  FROM credit_grants WHERE (? = '' OR team = ?) AND kind = ? AND reference = ?
-	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), string(team), kind, reference).
+	  FROM credit_grants WHERE team = ? AND kind = ? AND reference = ?
+	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), kind, reference).
 		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreditGrant{}, false, nil

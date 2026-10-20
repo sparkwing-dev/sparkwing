@@ -341,7 +341,10 @@ func TestBlobRecordsAuthorizeManifestBeforeReadingBytes(t *testing.T) {
 
 func finishBlobRecordJob(t *testing.T, records *blobRecords, intent blob.UploadIntent) {
 	t.Helper()
-	records.tenant.s.SetResultBlobRecords(records.manifests)
+	{
+		template := &blobRecords{manifests: records.manifests}
+		records.tenant.s.resultRecords, records.tenant.s.materializations = template, template
+	}
 	id := intent.Identity.Attempt.Value
 	key := blobOutputRequest(intent).Key
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: id.Generation}

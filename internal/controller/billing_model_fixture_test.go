@@ -15,7 +15,7 @@ func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, pr
 	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1) ON CONFLICT DO NOTHING`, owner, owner+"@example.test")
 	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,'owner',1) ON CONFLICT DO NOTHING`, tenant.Team(), owner)
 	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,'team.admin',1,?,?,?) ON CONFLICT DO NOTHING`, session, owner, time.Now().Add(time.Hour).UnixNano(), tenant.Team(), owner)
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: session})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: session})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, pr
 	if !ok {
 		t.Fatal("checkout route is missing")
 	}
-	a, err := capability.Authorize(t.Context(), s, route, capability.Authenticated{Principal: p, Method: "POST", Pattern: "/api/v1/team/billing/checkout", Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: string(tenant.Team())})
+	a, err := capability.Authorize(t.Context(), s.AsOperator(), route, capability.Authenticated{Principal: p, Method: "POST", Pattern: "/api/v1/team/billing/checkout", Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: string(tenant.Team())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func PaidCreditsFixture(t *testing.T, s *store.Store, tenant *store.Tenant, cent
 	t.Helper()
 	engineSQL(t, s, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
 	reservation := billingModelCheckout(t, s, tenant, "credit-fixture", cents)
-	_, webhook := billingModelPaymentHandler(t, &EngineController{Store: s})
+	_, webhook := billingModelPaymentHandler(t, newEngineFixture(s, EngineController{}))
 	webhook("paid-fixture", "checkout.session.completed", fmt.Sprintf(`{"id":"credit-fixture","object":"checkout.session","mode":"payment","livemode":false,"payment_status":"paid","payment_intent":"pi_fixture","amount_total":%d,"currency":"usd"}`, cents))
 	return "payment:test:" + reservation
 }

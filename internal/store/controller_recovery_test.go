@@ -42,7 +42,7 @@ func controllerJobActor(t *testing.T, tenant *Tenant, runID string) Actor {
 	authorityPersist(t, tenant.s, root)
 	demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "job"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
 	fundUnitClaim(t, tenant.s)
-	claim, err := tenant.s.ClaimUnit(t.Context(), demand)
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,16 +224,16 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			authorityPersist(t, tenant.s, root)
 			demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: retry.RunID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
 			fundUnitClaim(t, tenant.s)
-			claim, err := tenant.s.ClaimUnit(t.Context(), demand)
+			claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if started {
-				issued, err := tenant.s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+				issued, err := tenant.s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := tenant.s.RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
+				if _, err := tenant.s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
 					t.Fatal(err)
 				}
 				rewriteSchemaExec(t, tenant.s.db, "UPDATE triggers SET disruptions=2 WHERE team=? AND id=?", tenant.team, retry.RunID)
@@ -243,7 +243,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reaped, err := tenant.s.ReapUnits(t.Context(), reaper, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), reaper, 10)
 			if err != nil || len(reaped) != 1 || reaped[0].RunID != retry.RunID || reaped[0].Requeued == started || reaped[0].Failed != started {
 				t.Fatalf("retry planner loss: %+v, %v", reaped, err)
 			}
@@ -258,11 +258,11 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			if started {
 				return
 			}
-			claim, err = tenant.s.ClaimUnit(t.Context(), demand)
+			claim, err = tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
-			issued, err := tenant.s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			issued, err := tenant.s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -297,7 +297,7 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reaped, err := tenant.s.ReapUnits(t.Context(), reaper, 10); err != nil || len(reaped) != 0 {
+	if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), reaper, 10); err != nil || len(reaped) != 0 {
 		t.Fatalf("owner lapse failed waiting work: %+v, %v", reaped, err)
 	}
 	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "successor", time.Minute)
@@ -319,11 +319,11 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 	root.Grants = []capability.Grant{capability.ClaimsLaunch}
 	authorityPersist(t, tenant.s, root)
 	fundUnitClaim(t, tenant.s)
-	claim, err := tenant.s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: request.RunID, NodeID: "job", SourceGeneration: 1}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: request.RunID, NodeID: "job", SourceGeneration: 1}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := tenant.s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+	issued, err := tenant.s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}

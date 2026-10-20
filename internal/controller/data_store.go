@@ -8,36 +8,39 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-type dataStoreAccess struct{ store *store.Store }
+type dataStoreAccess struct {
+	resolveTenant func(context.Context, store.Team) (TenantHandle, error)
+}
 
 func (d dataStoreAccess) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error {
-	tenant, err := d.store.ForTeam(ctx, store.Team(authorized.Principal.Capability.Team))
+	tenant, err := ScopedTenantPort[capability.DataAccessChecker](ctx, store.Team(authorized.Principal.Capability.Team), d.resolveTenant)
 	if err != nil {
 		return err
 	}
 	return tenant.CheckDataAccess(ctx, authorized, target)
 }
 
+func (d *DataController) bind(authority *store.Operator, resolve func(context.Context, store.Team) (TenantHandle, error)) {
+	if d.authority == nil && authority != nil {
+		d.authority = authority
+	}
+	if d.ResolveTenant == nil {
+		d.ResolveTenant = resolve
+	}
+	if d.Access == nil && d.ResolveTenant != nil {
+		d.Access = dataStoreAccess{d.ResolveTenant}
+	}
+}
+
 func (s *Server) configureDataStore(d *DataController) {
-	if d.Store == nil {
+	d.bind(s.operator, s.resolveTenant)
+	if d.authority == nil {
 		return
 	}
 	d.replicaID = s.leaseHolder
-	if d.Access == nil {
-		d.Access = dataStoreAccess{d.Store}
-	}
-	if d.ResolveAuthority == nil {
-		d.ResolveAuthority = func(ctx context.Context, authorized capability.Authorized) (blob.Authority, error) {
-			tenant, err := d.Store.ForTeam(ctx, store.Team(authorized.Target.Team))
-			if err != nil {
-				return blob.Authority{}, err
-			}
-			return tenant.ResolveDataAuthority(ctx, authorized)
-		}
-	}
 	if d.ReadBlob == nil {
 		d.ReadBlob = func(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error) {
-			tenant, err := dataAuthorityTenant(ctx, d.Store, authority)
+			tenant, err := d.authorityTenant(ctx, authority)
 			if err != nil {
 				return blob.Blob{}, err
 			}
@@ -46,7 +49,7 @@ func (s *Server) configureDataStore(d *DataController) {
 	}
 	if d.ChargeDownload == nil {
 		d.ChargeDownload = func(ctx context.Context, authority blob.Authority, metadata blob.Blob) error {
-			tenant, err := dataAuthorityTenant(ctx, d.Store, authority)
+			tenant, err := d.authorityTenant(ctx, authority)
 			if err != nil {
 				return err
 			}
@@ -56,12 +59,13 @@ func (s *Server) configureDataStore(d *DataController) {
 	}
 }
 
-func dataAuthorityTenant(ctx context.Context, st *store.Store, authority blob.Authority) (*store.Tenant, error) {
-	p, err := st.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef})
+func (d *DataController) authorityTenant(ctx context.Context, authority blob.Authority) (*store.Tenant, error) {
+	if d.authority == nil {
+		return nil, missingEndpointPolicy()
+	}
+	p, err := d.authority.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef})
 	if err != nil {
 		return nil, err
 	}
-	return st.ForTeam(ctx, store.Team(p.Capability.Team))
+	return ScopedTenantPort[*store.Tenant](ctx, store.Team(p.Capability.Team), d.ResolveTenant)
 }
-
-var _ capability.DataAccessChecker = dataStoreAccess{}

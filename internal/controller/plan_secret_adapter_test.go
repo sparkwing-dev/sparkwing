@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -37,13 +38,13 @@ func (p *planSecretProbe) OpenBound(purpose secrets.Purpose, team, name, scope s
 
 func TestPlanSecretOpenerUsesStoreSelectedBinding(t *testing.T) {
 	for _, configured := range []bool{false, true} {
-		e, tenant := engineRuntimeStore(t)
-		engineSQL(t, e.Store, `INSERT INTO secrets(team,name,pipeline,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN','ci','sealed-value',1,'account',1,1)`)
 		probe := &planSecretProbe{t: t}
-		server := New(e.Store, nil).WithSecretsCipher(probe)
-		if !configured {
-			server.WithSecretsCipher(nil)
-		}
+		e, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) {
+			if configured {
+				s.WithSecretsCipher(probe)
+			}
+		})
+		engineSQL(t, e.Store, `INSERT INTO secrets(team,name,pipeline,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN','ci','sealed-value',1,'account',1,1)`)
 		owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 		_, err := e.AcceptPlan(t.Context(), owner, controllerwire.PlanSubmission{Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{SecretArgs: []string{}}})
 		var failure *apierr.Error
@@ -113,9 +114,8 @@ func FuzzPlanSecretOpenerCannotOpenRelocatedEnvelope(f *testing.F) {
 }
 
 func TestPlanSecretOpenerRejectsSecretIdentifiersInAcceptance(t *testing.T) {
-	e, tenant := engineRuntimeStore(t)
 	opener, secret := planSecretCipherFixture(t)
-	New(e.Store, nil).WithSecretsCipher(opener.cipher)
+	e, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithSecretsCipher(opener.cipher) })
 	engineSQL(t, e.Store, `INSERT INTO secrets(team,name,pipeline,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN','ci',?,1,'account',1,1)`, secret.Value)
 	owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 	property := func(input []byte, field uint8) bool {
@@ -165,9 +165,8 @@ func TestPlanSecretOpenerRejectsSecretIdentifiersInAcceptance(t *testing.T) {
 }
 
 func TestPlanSecretOpenerAllowsValidatedPlan(t *testing.T) {
-	e, tenant := engineRuntimeStore(t)
 	opener, secret := planSecretCipherFixture(t)
-	New(e.Store, nil).WithSecretsCipher(opener.cipher)
+	e, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithSecretsCipher(opener.cipher) })
 	engineSQL(t, e.Store, `INSERT INTO secrets(team,name,pipeline,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN','ci',?,1,'account',1,1)`, secret.Value)
 	owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 	run, err := tenant.ReadRun(t.Context(), "run")

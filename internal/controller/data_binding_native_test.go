@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 )
 
 func TestEveryDataEndpointDecodesBinding(t *testing.T) {
@@ -58,12 +59,21 @@ func TestEveryDataEndpointDecodesBinding(t *testing.T) {
 }
 
 func TestNativeDataReaderRoutesAndSelectorIsolation(t *testing.T) {
-	e, _ := engineRuntimeStore(t)
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test", SigningKey: []byte(strings.Repeat("k", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	e, _ := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithDataObjects(objects) })
 	st := e.Store
 	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('data-reader','data@example.test',1,1)`)
 	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','data-reader','editor',1)`)
 	raw := engineHTTPRoot(t, e, "a", "data-reader", []capability.Grant{capability.DataRead})
-	p, err := st.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	p, err := st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,16 +85,7 @@ func TestNativeDataReaderRoutesAndSelectorIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, st, `UPDATE capabilities SET subject_kind='account',subject_id='data-reader',repo_key='gh:1',authority_json=? WHERE prefix='data-reader'`, envelope)
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test", SigningKey: []byte(strings.Repeat("k", 32))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := objects.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	h := New(st, nil).WithDataObjects(objects).Handler()
+	h := e.Server.Handler()
 	for _, request := range []struct{ method, path, body string }{
 		{"POST", "/api/v1/data/has-many", `{"digests":[]}`},
 		{"GET", "/api/v1/data/records?kind=memo&name=output&key=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&ref=main&pipeline=ci&job=build", ""},
@@ -120,7 +121,16 @@ func TestNativeDataReaderRoutesAndSelectorIsolation(t *testing.T) {
 }
 
 func TestNativeDataWritesBindTicketsAndRecords(t *testing.T) {
-	e, tenant := engineRuntimeStore(t)
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test", SigningKey: []byte(strings.Repeat("k", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	e, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithDataObjects(objects) })
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
@@ -131,16 +141,7 @@ func TestNativeDataWritesBindTicketsAndRecords(t *testing.T) {
 	a := engineRuntimeClaim(t, e, capability.UnitNode)
 	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","memo":{}}`))
 	raw := nativeClaimPresentation(t, e, a)
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test", SigningKey: []byte(strings.Repeat("k", 32))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := objects.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	h := New(e.Store, nil).WithDataObjects(objects).Handler()
+	h := e.Server.Handler()
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	digest := fmt.Sprintf("%x", sha256.Sum256(nil))
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/data/upload", `{"digest":"`+digest+`","size":0}`, 200)

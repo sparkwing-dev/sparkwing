@@ -28,12 +28,12 @@ func launcherQueueFixture(t *testing.T, unpaid, funded int) (*Store, UnitDemand)
 func TestLauncherQueueReachesFundedWorkBehindLargeUnpaidQueue(t *testing.T) {
 	s, demand := launcherQueueFixture(t, 257, 2)
 	for _, expected := range []string{"job", "paid-001"} {
-		claim, err := s.ClaimUnit(t.Context(), demand)
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if err != nil || claim.Team != "a" || claim.NodeID != expected {
 			t.Fatalf("funded queue: %+v, %v; want %s", claim, err, expected)
 		}
 	}
-	if _, err := s.ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unfunded-only queue: %v", err)
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 2)
@@ -49,7 +49,7 @@ func TestLauncherConcurrentQueueClaimsEachAwardOnce(t *testing.T) {
 	results := make(chan UnitClaim, 4)
 	for range 4 {
 		group.Go(func() {
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if errors.Is(err, ErrNotFound) {
 				return
 			}
@@ -85,13 +85,13 @@ func TestMeteredPlanRenewalExcludesSchedulingWait(t *testing.T) {
 	unitBillingTotal(t, s, 120, false)
 	rewriteSchemaCount(t, s.db, "billable_intervals", 0)
 	*now = now.Add(40 * time.Second)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
 		t.Fatal(err)
 	}
 	unitBillingTotal(t, s, 120, false)
 	for range 7 {
 		*now = now.Add(10 * time.Second)
-		if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
+		if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
 			t.Fatal(err)
 		}
 	}

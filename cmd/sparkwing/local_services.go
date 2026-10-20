@@ -134,7 +134,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
-	cipher := keyring.For(b.Store)
+	cipher := keyring.For(b.Store.AsOperator())
 	state, err := localcontroller.NewState(b)
 	if err != nil {
 		return localcontroller.Services{}, err
@@ -172,7 +172,6 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 			err = errors.Join(err, claimant.Close())
 		}
 	}()
-	b.Store.SetClaimProfileResolver(claimant)
 	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithSecretsCipher(cipher).WithDataObjects(objects).
 		WithDashboard(controller.Dashboard{Local: true, Version: installedVersion(), Paths: paths.PathsAt(b.Home), Bundle: web.BundleFS()})
 	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(b.Home, "environments"))
@@ -192,8 +191,11 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 		return localcontroller.Services{}, err
 	}
 	transport := wingdclient.NewAPIClient(socket)
+	policies := server.StorePolicies()
+	policies.ClaimProfiles = claimant
 	return localcontroller.Services{
-		State: state, HTTP: server.HTTP(), Close: func() error {
+		Policies: policies,
+		State:    state, HTTP: server.HTTP(), Close: func() error {
 			transport.CloseIdleConnections()
 			return errors.Join(claimant.Close(), objects.Close())
 		},

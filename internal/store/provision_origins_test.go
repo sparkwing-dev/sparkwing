@@ -53,12 +53,12 @@ func TestProvisionOriginsRequireTrustedPolicy(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			s, spec := provisionOrigin(t, kind)
 			if kind == capability.ProvisionBootstrap || kind == capability.ProvisionActions {
-				if issued, err := s.ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
+				if issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
 					t.Fatal("unverified origin minted a bearer")
 				}
 			}
 			calls := 0
-			s.SetProvisionPolicy(provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, got capability.ProvisionSpec) error {
+			s.provisions = provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, got capability.ProvisionSpec) error {
 				calls++
 				if got.Kind != kind || got.RegistrationID != spec.RegistrationID {
 					t.Fatal("origin policy lost registration identity")
@@ -68,12 +68,12 @@ func TestProvisionOriginsRequireTrustedPolicy(t *testing.T) {
 					return err
 				}
 				return nil
-			}))
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			})
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil || issued.Raw == "" || issued.Capability.Parent != nil || calls != 1 {
 				t.Fatalf("provision: %+v, %v, policy calls %d", issued.Capability, err, calls)
 			}
-			if _, err := s.LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
+			if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -82,8 +82,8 @@ func TestProvisionOriginsRequireTrustedPolicy(t *testing.T) {
 
 func TestProvisionMachineRecordsAccountOwner(t *testing.T) {
 	s, spec := provisionOrigin(t, capability.ProvisionMachine)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
-	issued, err := s.ProvisionCapability(t.Context(), spec)
+	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestProvisionMachineRecordsAccountOwner(t *testing.T) {
 		t.Fatalf("machine owner = %q: %v", owner, err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, spec.Authority.ID)
-	if _, err := s.LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
 		t.Fatalf("independent enrolled root inherited the authorizer's lifetime: %v", err)
 	}
 }
@@ -103,7 +103,7 @@ func TestProvisionRechecksAuthorityAfterOriginPolicy(t *testing.T) {
 			s, spec := provisionOrigin(t, capability.ProvisionMachine)
 			now := s.now()
 			s.clock = func() time.Time { return now }
-			s.SetProvisionPolicy(provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, _ capability.ProvisionSpec) error {
+			s.provisions = provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, _ capability.ProvisionSpec) error {
 				tx := resolver.(*storeTx)
 				switch problem {
 				case "revoked":
@@ -121,8 +121,8 @@ func TestProvisionRechecksAuthorityAfterOriginPolicy(t *testing.T) {
 					return err
 				}
 				return nil
-			}))
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			})
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err == nil || issued.Raw != "" {
 				t.Fatal("failed verification or persistence returned a bearer")
 			}
@@ -133,7 +133,7 @@ func TestProvisionRechecksAuthorityAfterOriginPolicy(t *testing.T) {
 
 func TestProvisionOriginAuthorityProperty(t *testing.T) {
 	s, base := provisionOrigin(t, capability.ProvisionMachine)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 	random := rand.New(rand.NewPCG(42, 91))
 	for i := range 128 {
 		spec := base
@@ -157,7 +157,7 @@ func TestProvisionOriginAuthorityProperty(t *testing.T) {
 		case 7:
 			spec.Authority = nil
 		}
-		issued, err := s.ProvisionCapability(t.Context(), spec)
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 		if err == nil || issued.Raw != "" {
 			t.Fatalf("forged root %d minted authority: %+v", i, spec)
 		}
@@ -169,7 +169,7 @@ func TestProvisionRootCannotAcquireAnExecutionFence(t *testing.T) {
 	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService, capability.ProvisionActions} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, base := provisionOrigin(t, kind)
-			s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+			s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 			random := rand.New(rand.NewPCG(17, 83))
 			for range 64 {
 				spec := base
@@ -191,7 +191,7 @@ func TestProvisionRootCannotAcquireAnExecutionFence(t *testing.T) {
 				case 7:
 					spec.Binding.Deadline = new(s.now().Add(time.Hour))
 				}
-				issued, err := s.ProvisionCapability(t.Context(), spec)
+				issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 				if err == nil || issued.Raw != "" {
 					t.Fatalf("root acquired forged execution fence: %+v", spec.Binding)
 				}
@@ -209,13 +209,13 @@ func TestProvisionRejectsUnregisteredAndDeletingTeams(t *testing.T) {
 	for _, problem := range []string{"missing", "deleting"} {
 		t.Run(problem, func(t *testing.T) {
 			s, spec := provisionOrigin(t, capability.ProvisionActions)
-			s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+			s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 			if problem == "missing" {
 				spec.Team = "missing"
 			} else {
 				rewriteSchemaExec(t, s.db, `INSERT INTO team_deletions(slug,requested_by,requested_at,state) VALUES ('a','owner',1,?)`, TeamDeletionPending)
 			}
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if !errors.Is(err, ErrUnknownTeam) || issued.Raw != "" {
 				t.Fatalf("provisioned unregistered team: %+v, %v", issued.Capability, err)
 			}

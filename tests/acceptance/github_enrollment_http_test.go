@@ -26,7 +26,6 @@ func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 		Audience: "https://controller.test", Issuer: "https://actions.test", JWKSURL: "https://actions.test/keys",
 		HTTP: &http.Client{Transport: reportTransport{http.HandlerFunc(actions.signer.ServeKeys)}},
 	})
-	f.store.SetProvisionPolicy(actionsProvisionPolicy(func(capability.ProvisionSpec) error { return nil }))
 	call := func(method, path, body string, want int) {
 		t.Helper()
 		w := httptest.NewRecorder()
@@ -55,11 +54,11 @@ func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &issued) != nil || issued.Token == "" {
 		t.Fatalf("exchange: %d %s", w.Code, w.Body.String())
 	}
-	root, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Token)))
+	root, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Token)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := f.store.DelegateCapability(t.Context(), capability.DelegateSpec{
+	child, err := f.store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
 		Parent: root.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim},
 		Binding: root.Capability.Binding, Repositories: root.Capability.Repositories, ExpiresAt: new(time.Now().Add(time.Minute)),
 	})
@@ -68,7 +67,7 @@ func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 	}
 	call("DELETE", "/api/v1/runners/github/42?team=foreign", "", 204)
 	for _, digest := range [][32]byte{root.Capability.Digest, child.Capability.Digest} {
-		if _, err := f.store.LookupCapability(t.Context(), digest); err == nil {
+		if _, err := f.store.AsOperator().LookupCapability(t.Context(), digest); err == nil {
 			t.Fatal("HTTP revocation left root or descendant usable")
 		}
 	}

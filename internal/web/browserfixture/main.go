@@ -122,7 +122,18 @@ func main() {
 	if err := home.EnsureRoot(); err != nil {
 		log.Fatal(err)
 	}
-	st, err := store.Open(home.StateDB())
+	var srv *controller.Server
+	st, err := store.Open(home.StateDB(), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		srv = controller.New(st, nil).WithDashboard(controller.Dashboard{
+			Bundle:  os.DirFS(config.webOut),
+			Version: "auth-browser-fixture",
+			Paths:   home,
+			// safety: the fixture serves plain HTTP on loopback, so its cookies drop Secure.
+			InsecureCookies: true,
+		})
+
+		return srv.StorePolicies(), nil
+	}))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -136,19 +147,11 @@ func main() {
 		log.Fatal(err)
 	}
 	token := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(entropy)
-	if _, err := st.EnsureBootstrapCapability(context.Background(), capability.ProvisionSpec{
+	if _, err := st.AsOperator().EnsureBootstrapCapability(context.Background(), capability.ProvisionSpec{
 		Kind: capability.ProvisionBootstrap, Seed: token, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore},
 	}); err != nil {
 		log.Fatal(err)
 	}
-
-	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{
-		Bundle:  os.DirFS(config.webOut),
-		Version: "auth-browser-fixture",
-		Paths:   home,
-		// safety: the fixture serves plain HTTP on loopback, so its cookies drop Secure.
-		InsecureCookies: true,
-	})
 
 	dashboardListener, dashboardServer, err := listen(srv.Handler())
 	if err != nil {

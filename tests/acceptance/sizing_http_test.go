@@ -73,7 +73,7 @@ func (f *sizingStore) RecordWaitObservation(_ context.Context, a capability.Auth
 func sizingServer(t *testing.T, b *credentialBoundary, f *sizingStore) http.Handler {
 	t.Helper()
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
-	s.WithSizingStore(func(_ context.Context, team store.Team) (controller.SizingStore, error) {
+	bindTenantPort[controller.SizingStore](s, func(_ context.Context, team store.Team) (controller.SizingStore, error) {
 		if team != "team" {
 			t.Fatalf("sizing team = %q", team)
 		}
@@ -329,9 +329,9 @@ func TestSizingHTTPMissingStoreAndMethods(t *testing.T) {
 			code := apierr.PolicyMissing
 			switch state {
 			case "nil store":
-				s.WithSizingStore(func(context.Context, store.Team) (controller.SizingStore, error) { return nil, nil })
+				bindTenantPort[controller.SizingStore](s, func(context.Context, store.Team) (controller.SizingStore, error) { return nil, nil })
 			case "store error":
-				s.WithSizingStore(func(context.Context, store.Team) (controller.SizingStore, error) {
+				bindTenantPort[controller.SizingStore](s, func(context.Context, store.Team) (controller.SizingStore, error) {
 					return nil, errors.New("private resolver")
 				})
 				code = apierr.Internal
@@ -380,3 +380,5 @@ func TestSizingHTTPMissingStoreAndMethods(t *testing.T) {
 		}
 	}
 }
+
+func (*sizingStore) Team() store.Team { return "team" }

@@ -48,12 +48,11 @@ func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request
 
 func (s *Server) dataUploadsAvailable() bool {
 	d := s.dataController
-	return d != nil && d.ResolveAuthority != nil && d.Access != nil && d.Objects != nil && (d.Store != nil || d.ResolveTenant != nil)
+	return d != nil && d.Access != nil && d.Objects != nil && d.ResolveTenant != nil
 }
 
 func (s *Server) dataDownloadURL() string {
-	if s.dataController == nil || s.dataController.ResolveAuthority == nil || s.dataController.ReadBlob == nil ||
-		s.dataController.Access == nil || s.dataController.Objects == nil || s.dataController.ChargeDownload == nil {
+	if !s.dataUploadsAvailable() || s.dataController.ReadBlob == nil || s.dataController.ChargeDownload == nil {
 		return ""
 	}
 	return "/api/v1/data/download"

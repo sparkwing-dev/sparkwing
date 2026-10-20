@@ -30,18 +30,18 @@ func TestUnstartedNodeRequeuesKeepQueueDeadline(t *testing.T) {
 		if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
 			t.Fatal(err)
 		}
-		claim, err := tenant.s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+		claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		*now = claim.Award.LeaseExpiresAt
-		reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+		reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 		if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].Disruptions != 0 || reaped[0].Generation != int64(i+1) {
 			t.Fatalf("unstarted loss %d: %+v, %v", i+1, reaped, err)
 		}
 	}
 	*now = initial.Add(20 * time.Minute)
-	reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 	if err != nil || len(reaped) != 1 || !reaped[0].Failed || reaped[0].Disruptions != 0 {
 		t.Fatalf("original queue deadline: %+v, %v", reaped, err)
 	}
@@ -71,7 +71,7 @@ func TestStartedNodeDisruptionGetsNewQueueInterval(t *testing.T) {
 	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := tenant.s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestStartedNodeDisruptionGetsNewQueueInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = claim.Award.LeaseExpiresAt
-	if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil {
+	if _, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 		t.Fatal(err)
 	}
 	requeued := *now
@@ -88,11 +88,11 @@ func TestStartedNodeDisruptionGetsNewQueueInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = initial.Add(20 * time.Minute)
-	if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+	if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
 		t.Fatalf("previous queue charged execution time: %+v, %v", reaped, err)
 	}
 	*now = requeued.Add(20 * time.Minute)
-	if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Failed {
+	if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Failed {
 		t.Fatalf("new queue deadline: %+v, %v", reaped, err)
 	}
 }

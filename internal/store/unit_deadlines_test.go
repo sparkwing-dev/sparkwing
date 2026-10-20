@@ -16,12 +16,12 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 	s, demand := unitClaimFixture(t)
 	now := s.now()
 	s.clock = func() time.Time { return now }
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: claim.RunID}
-	if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 		t.Fatal(err)
 	}
 	request, err := json.Marshal(runspec.SealedRequest{Request: runspec.Request{Options: runspec.Options{ClaimWait: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Minute}}}}})
@@ -41,7 +41,7 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reaped, err := s.ReapUnits(t.Context(), lease, 10)
+	reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
 	if err != nil || len(reaped) != 1 || reaped[0].NodeID != "old" || !reaped[0].Failed {
 		t.Fatalf("queue expiry: %+v, %v", reaped, err)
 	}
@@ -80,7 +80,7 @@ func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 	if err != nil || len(reaped) != 1 || !reaped[0].Failed {
 		t.Fatalf("accepted claim wait: %+v, %v", reaped, err)
 	}
@@ -106,11 +106,11 @@ func TestReaperExpiresUnclaimedOwnerAndJobQueues(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,ready_at,queue_started_at) VALUES ('a','run','queued','pending',?, ?,?,?)`, []byte(`{"id":"queued"}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(-time.Minute).UnixNano())
 			}
 			*now = now.Add(-time.Nanosecond)
-			if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+			if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
 				t.Fatalf("early expiry = %+v, %v", reaped, err)
 			}
 			*now = now.Add(time.Nanosecond)
-			reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Failed || reaped[0].Disruptions != 0 {
 				t.Fatalf("queue expiry = %+v, %v", reaped, err)
 			}
@@ -134,7 +134,7 @@ func TestReaperApprovalDeadlineAndCancellation(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=? WHERE id='run'`, now.UnixNano())
 			}
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO approvals(team,run_id,node_id,requested_at,timeout_ms,on_timeout) VALUES ('a','run','approval',?,?,?)`, now.Add(-time.Minute).UnixNano(), timeout, storedPolicy)
-			reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -173,7 +173,7 @@ func TestReaperRetryQueueStartsAtNewRunCreation(t *testing.T) {
 	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunFailed, Cause: RunQueueTimeout, Actor: actor}); err == nil {
 		t.Fatal("old seal expired the new queue")
 	}
-	if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
+	if got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
 		t.Fatalf("early reaping: %+v, %v", got, err)
 	}
 	*now = now.Add(time.Minute)
@@ -181,7 +181,7 @@ func TestReaperRetryQueueStartsAtNewRunCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+	got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 	if err != nil || len(got) != 1 || !got[0].Failed {
 		t.Fatalf("queue deadline: %+v, %v", got, err)
 	}

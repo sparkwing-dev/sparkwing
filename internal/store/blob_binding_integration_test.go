@@ -21,7 +21,7 @@ func TestBlobDataBindingUsesTransactionalReadSet(t *testing.T) {
 	target := capability.Target{Team: "a", RunID: "run", Data: &data}
 	rollback := errors.New("rollback receipt removal")
 	for _, rule := range []capability.BindingRule{capability.BindData, capability.BindReadSet} {
-		if err := s.CheckBinding(t.Context(), principal, rule, target); err != nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), principal, rule, target); err != nil {
 			t.Fatal(err)
 		}
 		err := s.inTx(t.Context(), func(tx *storeTx) error {
@@ -34,7 +34,7 @@ func TestBlobDataBindingUsesTransactionalReadSet(t *testing.T) {
 		if !errors.Is(err, rollback) {
 			t.Fatalf("binding did not return control to its transaction owner: %v", err)
 		}
-		if err := s.CheckBinding(t.Context(), principal, rule, target); err != nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), principal, rule, target); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -45,14 +45,14 @@ func TestBlobDataBindingUsesTransactionalReadSet(t *testing.T) {
 		supplied.Capability.Grants = []capability.Grant{capability.DataRead, capability.DataWrite}
 		supplied.Capability.Binding = capability.Binding{Kind: capability.BindingNone}
 		for _, rule := range []capability.BindingRule{capability.BindData, capability.BindReadSet} {
-			if err := s.CheckBinding(t.Context(), supplied, rule, target); err != nil {
+			if err := s.AsOperator().CheckBinding(t.Context(), supplied, rule, target); err != nil {
 				return false
 			}
 			unknown := data
 			unknown.Digest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 			selected := target
 			selected.Data = &unknown
-			if err := s.CheckBinding(t.Context(), supplied, rule, selected); !errors.Is(err, blob.ErrDigestNotReadable) {
+			if err := s.AsOperator().CheckBinding(t.Context(), supplied, rule, selected); !errors.Is(err, blob.ErrDigestNotReadable) {
 				return false
 			}
 		}

@@ -43,7 +43,7 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 	var subject blob.LogSubject
 	var retired func(context.Context) (string, error)
 	var cleanupErr error
-	host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
 		retired, principal = binding.Bearer, binding.Principal
 		private, err := client.NewLocalHostClient(client.EngineOptions{URL: "http://local", HTTP: transport, Bearer: binding.Bearer}, unit.RunID)
 		if err != nil {

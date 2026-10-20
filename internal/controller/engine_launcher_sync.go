@@ -9,9 +9,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// LauncherSyncReader rechecks launcher ancestry and resolves current awards in one transaction.
+// LauncherSyncReader rechecks launcher ancestry while isolating damaged persisted awards.
 type LauncherSyncReader interface {
-	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
+	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation, []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error)
 }
 
 var _ LauncherSyncReader = storeLauncherSync{}
@@ -21,30 +21,12 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 		return controllerwire.LauncherSyncResponse{}, err
 	}
 	reader := s.Launcher
-	if reader == nil && s.Store != nil {
-		reader = storeLauncherSync{s.Store}
-	}
 	if reader == nil {
 		return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
 	}
-	var prepared []store.LauncherPreparation
-	if len(body.Preparing) > 0 {
-		if s.Store == nil {
-			return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
-		}
-		var err error
-		prepared, err = s.Store.RenewLauncherPreparation(ctx, a.Principal.Authority, slices.Clone(body.Preparing))
-		if err != nil {
-			return controllerwire.LauncherSyncResponse{}, err
-		}
-	}
-	response, err := reader.ReadLauncherSync(ctx, a.Principal.Authority, slices.Clone(body.Observed))
+	response, err := reader.ReadLauncherSync(ctx, a.Principal.Authority, slices.Clone(body.Observed), slices.Clone(body.Preparing))
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
-	}
-	response.Prepared = make([]controllerwire.LauncherPreparation, 0, len(prepared))
-	for _, preparation := range prepared {
-		response.Prepared = append(response.Prepared, controllerwire.LauncherPreparation{LeaseRef: preparation.Fence, ExpiresAt: preparation.ExpiresAt})
 	}
 	response.Awards = append([]controllerwire.ClaimedUnit{}, response.Awards...)
 	for i := range response.Awards {
@@ -55,14 +37,20 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	return response, nil
 }
 
-type storeLauncherSync struct{ store *store.Store }
+type storeLauncherSync struct {
+	store interface {
+		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef) ([]store.LauncherAward, []store.LauncherPreparation, error)
+	}
+}
 
-func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
+func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation, preparing []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error) {
 	if err := validateLauncherObservations(observed); err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
+	observations := make([]capability.LeaseRef, 0, len(observed))
 	var reservations []capability.LeaseRef
 	for _, observation := range observed {
+		observations = append(observations, observation.Award)
 		if observation.ReservationID != "" {
 			reservations = append(reservations, observation.Award)
 		}
@@ -73,29 +61,30 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 			rejected = append(rejected, observation.Award)
 		}
 	}
-	if len(rejected) > 0 {
-		if err := s.store.RejectLauncherAwards(ctx, ref, rejected); err != nil {
-			return controllerwire.LauncherSyncResponse{}, err
-		}
-	}
-	awards, err := s.store.ReadLauncherAwards(ctx, ref, reservations)
+	awards, prepared, err := s.store.ReconcileLauncherAwards(ctx, ref, observations, reservations, preparing, rejected)
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
 	current := make(map[capability.LeaseRef]store.LauncherAward, len(awards))
 	for _, award := range awards {
-		fence := capability.LeaseRef{Kind: award.Claim.Kind, ID: award.Capability.UnitID, Holder: award.Claim.Award.Holder, Generation: award.Claim.Award.Generation}
-		current[fence] = award
+		current[award.Fence] = award
 	}
 	response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []controllerwire.LauncherJobRef{}, RemoveReservations: []controllerwire.LauncherReservationRef{}}
+	for _, preparation := range prepared {
+		response.Prepared = append(response.Prepared, controllerwire.LauncherPreparation{LeaseRef: preparation.Fence, ExpiresAt: preparation.ExpiresAt})
+	}
 	for _, observation := range observed {
 		award, found := current[observation.Award]
-		if !found {
+		if found && award.Gone {
 			if observation.ReservationID != "" {
 				response.RemoveReservations = append(response.RemoveReservations, controllerwire.LauncherReservationRef{Award: observation.Award, NodeUID: observation.NodeUID, ReservationID: observation.ReservationID})
 			} else {
 				response.Remove = append(response.Remove, observation.Job)
 			}
+			continue
+		}
+		if !found || award.Failure != nil {
+			response.Deferred = append(response.Deferred, observation.Award)
 			continue
 		}
 		unit := engineReconciledClaim(award.Capability, store.ReconciledNode{Node: award.Node, Claim: &award.Claim.Award}, award.Run)
@@ -105,12 +94,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 		if award.Claim.Kind != capability.UnitNode {
 			unit.Execution = nil
 		}
-		if observation.ReservationID != "" {
-			unit.CloudResources, err = s.store.CloudAwardResources(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Capability.Prefix})
-			if err != nil {
-				return controllerwire.LauncherSyncResponse{}, err
-			}
-		}
+		unit.CloudResources = award.CloudResources
 		response.Awards = append(response.Awards, *unit)
 	}
 	return response, nil

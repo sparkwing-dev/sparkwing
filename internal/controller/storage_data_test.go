@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func storeDataServer(t *testing.T) *Server {
+func storeDataServer(t *testing.T) *serverFixture {
 	t.Helper()
 	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -28,10 +28,10 @@ func storeDataServer(t *testing.T) *Server {
 	for _, team := range []store.Team{"a", "b"} {
 		teststore.SeedTeam(t, s, team)
 	}
-	return New(s, nil).WithOperatorSettingsWriter(storeSettingsWriterFake{store: s})
+	return &serverFixture{Server: New(s, nil).WithOperatorSettingsWriter(storeSettingsWriterFake{store: s}), store: s}
 }
 
-func storeDataRequest(t *testing.T, s *Server, method, path, body string, operator bool) *http.Request {
+func storeDataRequest(t *testing.T, s *serverFixture, method, path, body string, operator bool) *http.Request {
 	t.Helper()
 	_, _, authority := newOperatorSettingsFixture(t)
 	if !operator {

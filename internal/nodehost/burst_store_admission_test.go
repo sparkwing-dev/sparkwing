@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -121,22 +120,17 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	plan.Jobs[0].Concurrency[0].Scope = new("run")
 	fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, request)
 	if !optimistic {
-		if err := fixture.Store.RecordHereAvailability(t.Context(), fixture.Actor.Authority, match.Resources{}); err != nil {
+		if err := fixture.Store.AsOperator().RecordHereAvailability(t.Context(), fixture.Actor.Authority, match.Resources{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture.Store.SetSessionKeyCipher(cipher)
-	session, _, _, err := fixture.Store.CreateAccountSession(t.Context(), store.Account{ID: "burst-requester"}, store.DefaultTeam, time.Hour)
+	session, _, _, err := fixture.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "burst-requester"}, store.DefaultTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := fixture.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Repositories: []string{"github.com/acme/*"}, Authority: &authority, RegistrationID: "runner:default:desktop", Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := fixture.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Repositories: []string{"github.com/acme/*"}, Authority: &authority, RegistrationID: "runner:default:desktop", Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +188,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if live, _, _ := daemon.counts(); live != 1 {
 		t.Fatalf("ready burst retained extra machine admission: live=%d", live)
 	}
-	claim, err := fixture.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: fixture.Input.RunID, NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := fixture.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: fixture.Input.RunID, NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil || claim.Kind != capability.UnitNode {
 		t.Fatalf("saturated owner's work was not claimable: %+v %v", claim, err)
 	}

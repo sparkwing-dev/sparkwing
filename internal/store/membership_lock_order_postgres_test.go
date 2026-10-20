@@ -42,7 +42,7 @@ func TestPostgresAccountResolutionLocksMembershipBeforeAuthorityAgainstDemotion(
 	}
 	ownerActor := membershipActor(t, st, owner.Account.ID, tn.Team())
 	session := membershipActor(t, st, member.Account.ID, tn.Team()).Authority
-	issued, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &session, Team: string(tn.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	issued, err := st.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &session, Team: string(tn.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestPostgresAccountResolutionLocksMembershipBeforeAuthorityAgainstDemotion(
 
 	b := blockMembership(t, ctx, st, tn.Team(), member.Account.ID)
 	b.start(func() error {
-		_, err := st.DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, Audience: capability.Controller, Binding: issued.Capability.Binding, Grants: issued.Capability.Grants})
+		_, err := st.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, Audience: capability.Controller, Binding: issued.Capability.Binding, Grants: issued.Capability.Grants})
 		return err
 	})
 	b.waitBlocked(1)

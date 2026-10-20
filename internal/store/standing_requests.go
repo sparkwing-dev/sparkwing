@@ -92,7 +92,7 @@ func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Aut
 		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES (?,?,?,?,?,?,?)`, id, t.team, tier, message, actor, now.UnixNano(), StandingRequestOpen); err != nil {
 			return err
 		}
-		if err := RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequested, Team: t.team, SubjectID: id, Actor: actor, At: now, Attrs: map[string]any{"tier": tier, "message": message, "standing": standing.Tier, "history_tier": standing.History.Tier}}); err != nil {
+		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequested, Team: t.team, SubjectID: id, Actor: actor, At: now, Attrs: map[string]any{"tier": tier, "message": message, "standing": standing.Tier, "history_tier": standing.History.Tier}}); err != nil {
 			return err
 		}
 		out, err = scanStandingRequest(tx.QueryRowContext(ctx, `SELECT `+standingRequestColumns+` WHERE r.team=? AND r.id=?`, t.team, id))
@@ -111,8 +111,8 @@ func (t *Tenant) LatestStandingRequest(ctx context.Context) (StandingRequest, bo
 }
 
 // OpenStandingRequests lists every team's open standing requests, oldest first.
-func (s *Store) OpenStandingRequests(ctx context.Context, limit int) (_ []StandingRequest, err error) {
-	rows, err := s.query(ctx, `SELECT `+standingRequestColumns+` WHERE r.state=? ORDER BY r.requested_at, r.id LIMIT ?`, StandingRequestOpen, limit)
+func (o *Operator) OpenStandingRequests(ctx context.Context, limit int) (_ []StandingRequest, err error) {
+	rows, err := o.s.query(ctx, `SELECT `+standingRequestColumns+` WHERE r.state=? ORDER BY r.requested_at, r.id LIMIT ?`, StandingRequestOpen, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, id, st
 		return r, err
 	}
 	r.State, r.DecidedBy, r.DecidedAt, r.DecisionReason = state, actor, now, reason
-	return r, RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequestDecided, Team: team, SubjectID: id, Actor: actor, At: now, Attrs: map[string]any{"tier": r.Tier, "state": state, "reason": reason}})
+	return r, tx.operator.RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequestDecided, Team: team, SubjectID: id, Actor: actor, At: now, Attrs: map[string]any{"tier": r.Tier, "state": state, "reason": reason}})
 }
 
 // ConsoleDeclineStandingRequest declines the named open standing request under current operator authority.

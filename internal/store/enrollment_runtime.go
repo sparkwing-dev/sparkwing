@@ -28,7 +28,7 @@ func machineAdministrationTx(ctx context.Context, tx *storeTx, p capability.Prin
 	if c.Subject.Kind != capability.SubjectMachine || c.Binding.Kind != capability.BindingNone || c.Unit != "" || slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
 		return nil
 	}
-	record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, c.Prefix)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func enrolledClaimProfileTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if root.Authority.Kind != capability.AuthorityCapability {
 		return match.Profile{}, authorityError(apierr.Unavailable, "claim enrollment is unavailable")
 	}
-	record, err := loadCapabilityRecordTx(ctx, tx, root.Authority.ID)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Authority.ID)
 	if err != nil {
 		return match.Profile{}, err
 	}

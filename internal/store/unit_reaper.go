@@ -14,16 +14,16 @@ import (
 )
 
 // ReapUnits recovers expired work under the elected reaper fence.
-func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error) {
+func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error) {
 	if limit <= 0 {
 		return nil, errors.New("reaper limit must be positive")
 	}
-	if err := s.inTx(ctx, func(tx *storeTx) error {
+	if err := o.s.inTx(ctx, func(tx *storeTx) error {
 		return assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.now())
 	}); err != nil {
 		return nil, err
 	}
-	targets, err := s.expiredUnits(ctx, limit)
+	targets, err := o.expiredUnits(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) 
 	var failures error
 	for _, target := range targets {
 		var result *ReapedUnit
-		err := s.inTx(ctx, func(tx *storeTx) error {
+		err := o.s.inTx(ctx, func(tx *storeTx) error {
 			now := tx.now()
 			var holder string
 			if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -69,13 +69,13 @@ type expiredUnit struct {
 	sourceGeneration int64
 }
 
-func (s *Store) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, error) {
-	current, err := s.databaseNow(ctx)
+func (o *Operator) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, error) {
+	current, err := o.s.databaseNow(ctx)
 	if err != nil {
 		return nil, err
 	}
 	now := current.UnixNano()
-	rows, err := s.query(ctx, `SELECT team,run_id,node_id,kind,source_generation FROM (
+	rows, err := o.s.query(ctx, `SELECT team,run_id,node_id,kind,source_generation FROM (
 	 SELECT team,run_id,node_id,'node' AS kind,0 AS source_generation,lease_expires_at AS due FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at<=? AND status<>'done'
  UNION ALL

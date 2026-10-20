@@ -25,7 +25,7 @@ func (o *Operator) TestOnlyReversePayment(ctx context.Context, paymentID, refere
 func (o *Operator) TestOnlyPaymentTeam(ctx context.Context, paymentID string) (Team, error) {
 	var team Team
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		grant, found, err := paidGrantForPaymentTx(ctx, tx, strings.TrimSpace(paymentID))
+		grant, found, err := tx.operator.paidGrantForPaymentTx(ctx, tx, strings.TrimSpace(paymentID))
 		if err != nil {
 			return err
 		}
@@ -62,7 +62,7 @@ func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w PaymentWa
 		if err := lockPaymentTx(ctx, tx, mode, w.PaymentIntent); err != nil {
 			return err
 		}
-		result, applyErr := applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: mode, ObjectID: w.WarningID, PaymentID: w.PaymentIntent, Fingerprint: w.Fingerprint, Actionable: w.Actionable}, "payment_provider")
+		result, applyErr := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: mode, ObjectID: w.WarningID, PaymentID: w.PaymentIntent, Fingerprint: w.Fingerprint, Actionable: w.Actionable}, "payment_provider")
 		team, err = result.Team, applyErr
 		return err
 	})

@@ -113,7 +113,7 @@ func TestPersistedRunPagesFilterBeforeLimitAndPreserveCurrentNotices(t *testing.
 	}
 	engineSQL(t, server.Store, `UPDATE runs SET spec_json=?,spec_hash='spec',sealed_at=1,plan_json=?,plan_hash='plan' WHERE team='a' AND id='run'`, spec, []byte(`{"jobs":[]}`))
 	policy := &engineVersionFake{notices: []engine.Notice{{Kind: engine.NoticeSupportEnding, Version: "v1.2.3", Reason: "signed warning"}}}
-	api.WithEngineController(&EngineController{Store: server.Store, VersionPolicy: engineVersionPolicy(policy)})
+	api.WithEngineController(NewEngineController(server.Store, EngineController{VersionPolicy: engineVersionPolicy(policy)}))
 	page, err := reader.ListRuns(t.Context(), controllerwire.RunQuery{Limit: 1, Pipeline: "ci"})
 	if err != nil || len(page.Runs) != 1 || !reflect.DeepEqual(page.Runs[0].Notices, policy.notices) {
 		t.Fatalf("read-time notice: %+v %v", page, err)

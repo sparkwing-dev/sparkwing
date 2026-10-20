@@ -52,7 +52,7 @@ func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
 			t.Logf("issuance: %d %s", w.Code, w.Body)
 			return false
 		}
-		principal, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Capability)))
+		principal, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Capability)))
 		return err == nil && principal.Capability.Parent == nil && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) && principal.Capability.Team == "a"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 42}); err != nil {
@@ -106,10 +106,10 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 		body := `{"runner_version":"v1","kinds":["node"],"available_cores":1}`
 		if trigger {
 			e, _ = engineRuntimeStore(t)
-			e.Store.SetClaimProfileResolver(engineProfileFake{})
+			e.claimProfiles = engineProfileFake{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			root = engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
-			h = New(e.Store, nil).WithEngineController(e).Handler()
+			h = New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 			body = `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`
 		}
 		w := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", body, 200)
@@ -174,7 +174,7 @@ func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
 		e, _ := engineRuntimeStore(t)
 		grant := []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsWrite, capability.RunsControl}[grantIndex%4]
 		raw := engineHTTPRoot(t, e, "a", "machine", []capability.Grant{grant})
-		h := New(e.Store, nil).WithEngineController(e).Handler()
+		h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 		for _, request := range []struct{ path, body string }{
 			{"/api/v1/runs", `{"request":{"version":1,"team":"a","pipeline":"victim","git":{"repository":{"key":"gh:1"}}}}`},
 			{"/api/v1/runs/run/retry", `{"idempotency_key":"retry-once"}`},
@@ -292,13 +292,13 @@ func TestCredentialStartedClaimHTTPConsumesContractAttempt(t *testing.T) {
 		t.Fatal("missing committed attempt")
 	}
 	digest := sha256.Sum256([]byte(raw))
-	snapshot, err := e.Store.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{})
+	snapshot, err := e.Store.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil || snapshot.Binding.Current.Attempt != started.Attempt {
 		t.Fatalf("started snapshot: %+v %v", snapshot, err)
 	}
 	snapshot.Authorities[0].Principal.Capability.Binding.Attempt = started.Attempt
 	facts := &reportingFacts{digest: digest, snapshot: snapshot}
-	s := New(e.Store, nil).WithEngineController(e)
+	s := New(e.Store, nil).WithEngineController(e.EngineController)
 	a := s.authorization
 	a.Authenticator = capability.NewAuthenticator(facts)
 	s.WithAuthorization(a)

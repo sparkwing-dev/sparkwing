@@ -80,7 +80,7 @@ func checkStorePresenceAccess(t *testing.T, s *Store, tenant *Tenant, authority 
 			}
 			for _, rule := range []capability.BindingRule{capability.BindData, capability.BindReadSet} {
 				selected := capability.Target{Team: a.Team, RunID: a.RunID, NodeID: a.NodeID, Data: &target}
-				if err := checkStorePresenceVerdict(s.CheckBinding(t.Context(), principal, rule, selected), slices.Contains(present, digest)); err != nil {
+				if err := checkStorePresenceVerdict(s.AsOperator().CheckBinding(t.Context(), principal, rule, selected), slices.Contains(present, digest)); err != nil {
 					t.Fatal(err)
 				}
 			}

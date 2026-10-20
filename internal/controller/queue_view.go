@@ -18,36 +18,8 @@ type QueueReader interface {
 	ListConcurrencyStates(context.Context) ([]*store.ConcurrencyState, error)
 }
 
-// WithQueueReader supplies tenant queue reads before Handler is constructed.
-// A nil resolver uses Store.ForTeam. The reader must belong to the authorized team.
-func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server {
-	s.resolveQueueReader = resolve
-	return s
-}
-
 func (s *Server) queueReader(ctx context.Context, team string) (QueueReader, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var reader QueueReader
-	var err error
-	if s.resolveQueueReader != nil {
-		reader, err = s.resolveQueueReader(ctx, store.Team(team))
-	} else if s.store != nil {
-		reader, err = s.store.ForTeam(ctx, store.Team(team))
-	} else {
-		return nil, missingEndpointPolicy()
-	}
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return nil, engineLookupError(store.ErrNotFound)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if reader == nil || reader.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return reader, nil
+	return tenantPort[QueueReader](ctx, s, store.Team(team))
 }
 
 func (s *Server) queueEndpoints() []Endpoint {

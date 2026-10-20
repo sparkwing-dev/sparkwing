@@ -36,12 +36,6 @@ type PlanSecretOpener interface {
 	OpenPlanSecret(context.Context, Team, Secret) (string, error)
 }
 
-// SetPlanSecretOpener configures server-side identifier validation before the store is shared.
-// Acceptance refuses encrypted secret validation when no opener is configured.
-func (s *Store) SetPlanSecretOpener(opener PlanSecretOpener) {
-	s.planSecretOpener = opener
-}
-
 type planSecretValues []string
 
 func (values planSecretValues) ContainsSecret(identifier string) bool {

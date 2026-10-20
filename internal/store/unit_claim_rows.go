@@ -155,7 +155,7 @@ type queuedClaim struct {
 func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
 	var candidates []queuedClaim
 	for _, kind := range kinds {
-		query, args := queuedClaimQuery(c, kind, tx.now().UnixNano())
+		query, args := tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return UnitRef{}, err
@@ -227,7 +227,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 	return eligible[0].unit, nil
 }
 
-func queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int64) (string, []any) {
+func (o *Operator) queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int64) (string, []any) {
 	var query string
 	args := []any{}
 	switch kind {

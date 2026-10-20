@@ -10,13 +10,12 @@ import (
 )
 
 func TestCacheGrantRouteIsAbsent(t *testing.T) {
-	server := &Server{}
-	public := server.routers()
+	server := New(nil, nil)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/cache-grant", nil)
-	for _, mux := range []*http.ServeMux{public} {
-		if _, pattern := mux.Handler(request); pattern != "" {
-			t.Errorf("removed cache grant route resolves to %s", pattern)
-		}
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || server.RegisteredRoute(request) {
+		t.Fatalf("removed cache grant route = %d %s", response.Code, response.Body)
 	}
 }
 

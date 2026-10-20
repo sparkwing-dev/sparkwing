@@ -28,8 +28,8 @@ func TestFlowNoncesAreOneUseAndKindScopedProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetSessionKeyCipher(cipher)
-	key, err := s.IdentityLinkStateKey(t.Context())
+	s.csrfCipher, s.csrfKey = cipher, nil
+	key, err := s.AsOperator().IdentityLinkStateKey(t.Context())
 	if err != nil || len(key) == 0 {
 		t.Fatalf("identity link key: %v", err)
 	}
@@ -63,8 +63,8 @@ func TestFlowNoncesAreOneUseAndKindScopedProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.clock = func() time.Time { return now }
-	s.SetSessionKeyCipher(cipher)
-	reopenedKey, err := s.IdentityLinkStateKey(t.Context())
+	s.csrfCipher, s.csrfKey = cipher, nil
+	reopenedKey, err := s.AsOperator().IdentityLinkStateKey(t.Context())
 	if err != nil || !bytes.Equal(key, reopenedKey) {
 		t.Fatalf("identity link key changed after reopening: %v", err)
 	}

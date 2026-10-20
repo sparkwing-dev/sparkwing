@@ -372,38 +372,38 @@ func nodeState(row NodeRow) (NodeState, error) {
 	switch row.Status {
 	case StatusDone:
 		if !slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, row.Outcome) || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" || row.FinishedAt == nil {
-			return "", errors.New("invalid terminal job state")
+			return "", authorityError(apierr.IntegrityFailure, "invalid terminal job state")
 		}
 		return row.Outcome, nil
 	case StatusRunning:
 		if row.ClaimedBy == "" || row.LeaseExpiresAt == nil || row.CapabilityPrefix == "" || row.Generation <= 0 || row.Attempt <= 0 {
-			return "", errors.New("running job has no claim or attempt")
+			return "", authorityError(apierr.IntegrityFailure, "running job has no claim or attempt")
 		}
 		return NodeRunning, nil
 	case StatusApprovalPending:
 		if row.ClaimedBy != "" || row.Outcome != "" {
-			return "", errors.New("invalid approval state")
+			return "", authorityError(apierr.IntegrityFailure, "invalid approval state")
 		}
 		return NodeApprovalPending, nil
 	case StatusPending:
 		if row.Outcome != "" || row.FinishedAt != nil {
-			return "", errors.New("invalid pending job")
+			return "", authorityError(apierr.IntegrityFailure, "invalid pending job")
 		}
 		if row.ClaimedBy != "" {
 			if row.LeaseExpiresAt == nil || row.CapabilityPrefix == "" || row.Generation <= 0 {
-				return "", errors.New("incomplete job claim")
+				return "", authorityError(apierr.IntegrityFailure, "incomplete job claim")
 			}
 			return NodeClaimed, nil
 		}
 		if row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" {
-			return "", errors.New("orphan job claim fields")
+			return "", authorityError(apierr.IntegrityFailure, "orphan job claim fields")
 		}
 		if row.ReadyAt != nil {
 			return NodeReady, nil
 		}
 		return NodePending, nil
 	default:
-		return "", errors.New("unknown job status")
+		return "", authorityError(apierr.IntegrityFailure, "unknown job status")
 	}
 }
 

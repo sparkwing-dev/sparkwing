@@ -11,7 +11,7 @@ func TestCloudClaimMetersAwardFromUnmeteredLauncher(t *testing.T) {
 	s, spec := provisionOrigin(t, capability.ProvisionService)
 	s, demand := unitClaimFixtureStore(t, s)
 	spec.Metered = false
-	root, err := s.ProvisionCapability(t.Context(), spec)
+	root, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,11 +20,11 @@ func TestCloudClaimMetersAwardFromUnmeteredLauncher(t *testing.T) {
 	}
 	fundUnitClaim(t, s)
 	demand.CapabilityPrefix = root.Capability.Prefix
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	award, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,12 +51,12 @@ func TestPlacementMeteringUsesEnrolledOriginProperty(t *testing.T) {
 			authorityPersist(t, s, operator)
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}
 			spec.Authority, spec.Metered = &ref, metered
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if delegated {
-				issued, err = s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, Audience: capability.Controller, Grants: issued.Capability.Grants, Binding: issued.Capability.Binding, Repositories: issued.Capability.Repositories, ExpiresAt: issued.Capability.ExpiresAt})
+				issued, err = s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, Audience: capability.Controller, Grants: issued.Capability.Grants, Binding: issued.Capability.Binding, Repositories: issued.Capability.Repositories, ExpiresAt: issued.Capability.ExpiresAt})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -68,7 +68,7 @@ func TestPlacementMeteringUsesEnrolledOriginProperty(t *testing.T) {
 			if funded {
 				fundUnitClaim(t, s)
 			}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			wantMetered := cloud || metered
 			if wantMetered && !funded {
 				if err == nil || len(claim.Bearer) != 0 {
@@ -83,13 +83,13 @@ func TestPlacementMeteringUsesEnrolledOriginProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			if cloud && exchanged {
-				issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+				issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 				if err != nil {
 					t.Fatal(err)
 				}
 				claim.Award.CapabilityPrefix = issued.Capability.Prefix
 			}
-			p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+			p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 			if err != nil || p.Capability.Billing == nil || p.Capability.Billing.Metered != wantMetered || p.Capability.RootMetered != wantMetered || cloud && p.Capability.Billing.ExecutorClass != "cloud" {
 				t.Fatalf("placement root_metered=%t, billing=%+v, %v; want metered=%t", p.Capability.RootMetered, p.Capability.Billing, err, wantMetered)
 			}

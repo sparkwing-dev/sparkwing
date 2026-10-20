@@ -28,7 +28,7 @@ func (s *Server) handleJobOutput(w http.ResponseWriter, r *http.Request, a capab
 }
 
 func (s *Server) handleOutput(w http.ResponseWriter, r *http.Request, a capability.Authorized, child bool) error {
-	if s.store == nil || s.dataController == nil {
+	if s.operator == nil || s.dataController == nil {
 		return missingEndpointPolicy()
 	}
 	objects, ok := s.dataController.Objects.(interface {
@@ -37,7 +37,7 @@ func (s *Server) handleOutput(w http.ResponseWriter, r *http.Request, a capabili
 	if !ok {
 		return missingEndpointPolicy()
 	}
-	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return engineLookupError(err)
 	}

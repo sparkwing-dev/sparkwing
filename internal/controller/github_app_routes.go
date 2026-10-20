@@ -23,32 +23,8 @@ type GitHubAppWriter interface {
 
 var _ GitHubAppWriter = (*store.Tenant)(nil)
 
-// WithGitHubAppWriter supplies tenant App transactions before Handler is constructed.
-func (s *Server) WithGitHubAppWriter(resolve func(context.Context, store.Team) (GitHubAppWriter, error)) *Server {
-	s.resolveGitHubAppWriter = resolve
-	return s
-}
-
 func (s *Server) githubAppWriter(r *http.Request, a capability.Authorized) (GitHubAppWriter, error) {
-	if a.Target.Team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var writer GitHubAppWriter
-	var err error
-	if s.resolveGitHubAppWriter != nil {
-		writer, err = s.resolveGitHubAppWriter(r.Context(), store.Team(a.Target.Team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.reportingTenant(r, a)
-		writer, _ = any(tenant).(GitHubAppWriter)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if writer == nil || writer.Team() != store.Team(a.Target.Team) {
-		return nil, missingEndpointPolicy()
-	}
-	return writer, nil
+	return tenantPort[GitHubAppWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) githubAppEndpoints() []Endpoint {

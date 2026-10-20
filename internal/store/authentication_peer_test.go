@@ -25,7 +25,7 @@ func TestPeerAuthorityPersistsAndRevocationEndsDelegation(t *testing.T) {
 		}
 	})
 	lookup := capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}}
-	first, err := s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
+	first, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,18 +40,18 @@ func TestPeerAuthorityPersistsAndRevocationEndsDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
+	second, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 	if err != nil || second.Authorities[0].Principal.Authority != p.Authority {
 		t.Fatalf("reopened peer authority: %+v, %v", second, err)
 	}
 	spec := capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}}
-	child, err := s.DelegateCapability(t.Context(), spec)
+	child, err := s.AsOperator().DelegateCapability(t.Context(), spec)
 	if err != nil || child.Capability.Parent == nil || *child.Capability.Parent != p.Authority {
 		t.Fatalf("peer delegation: %+v, %v", child, err)
 	}
 	route, _ := capability.LookupRoute("POST", "/api/v1/runners/claim")
 	presentation := capability.Presentation{Class: capability.CredentialBearer, Raw: child.Raw}
-	if _, err := capability.NewAuthenticator(s).Authenticate(t.Context(), presentation, route); err != nil {
+	if _, err := capability.NewAuthenticator(s.AsOperator()).Authenticate(t.Context(), presentation, route); err != nil {
 		t.Fatal(err)
 	}
 	tenant, err := s.ForTeam(t.Context(), DefaultTeam)
@@ -61,16 +61,16 @@ func TestPeerAuthorityPersistsAndRevocationEndsDelegation(t *testing.T) {
 	if err := tenant.RevokeAuthority(t.Context(), Actor{Authority: p.Authority}, p.Authority); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := capability.NewAuthenticator(s).Authenticate(t.Context(), presentation, route); err == nil {
+	if _, err := capability.NewAuthenticator(s.AsOperator()).Authenticate(t.Context(), presentation, route); err == nil {
 		t.Fatal("revoked peer ancestor authenticated a descendant")
 	}
-	if _, err := s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{}); err == nil {
+	if _, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{}); err == nil {
 		t.Fatal("peer authentication replaced its revoked root")
 	}
-	if _, err := s.DelegateCapability(t.Context(), spec); err == nil {
+	if _, err := s.AsOperator().DelegateCapability(t.Context(), spec); err == nil {
 		t.Fatal("revoked peer delegated new authority")
 	}
-	if err := s.CheckBinding(t.Context(), p, capability.BindNone, capability.Target{Team: string(DefaultTeam)}); err == nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindNone, capability.Target{Team: string(DefaultTeam)}); err == nil {
 		t.Fatal("revoked peer retained resource access")
 	}
 }
@@ -100,7 +100,7 @@ func TestPeerAuthorityRejectsForgedSelectorsProperty(t *testing.T) {
 		case 4:
 			evidence.Target.Team = "foreign:" + hex.EncodeToString(value)
 		}
-		if _, err := s.ReadAuthentication(t.Context(), lookup, evidence); err == nil {
+		if _, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, evidence); err == nil {
 			return false
 		}
 		var count int
@@ -144,17 +144,17 @@ func TestPeerIntakeAndClaimUseSharedRelations(t *testing.T) {
 				}
 			}
 			presentation := capability.Presentation{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "local:1000"}, Evidence: capability.RequestEvidence{Target: target}}
-			auth, err := capability.NewAuthenticator(s).Authenticate(t.Context(), presentation, route)
+			auth, err := capability.NewAuthenticator(s.AsOperator()).Authenticate(t.Context(), presentation, route)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := capability.Authorize(t.Context(), s, route, auth, target); err != nil {
+			if _, err := capability.Authorize(t.Context(), s.AsOperator(), route, auth, target); err != nil {
 				t.Fatal("verified local operation refused:", err)
 			}
 			property := func(forged string) bool {
 				foreign := target
 				foreign.Team = "foreign:" + forged
-				_, err := capability.Authorize(t.Context(), s, route, auth, foreign)
+				_, err := capability.Authorize(t.Context(), s.AsOperator(), route, auth, foreign)
 				return err != nil
 			}
 			if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {

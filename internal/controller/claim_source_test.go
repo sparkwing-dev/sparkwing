@@ -18,11 +18,11 @@ func (f *appFixture) launchedRun(who signedIn, runID, owner, name string) string
 	f.t.Helper()
 	id := map[string]int64{"acme/widgets": 701, "acme/plans": 702}[owner+"/"+name]
 	seedSourceRun(f.t, f.store, who.team, runID, "https://github.com/"+owner+"/"+name+".git", githubFixtureKey(id), "refs/heads/main", headSHA, id, runspec.DispatchController)
-	root, err := f.store.LookupCapability(f.t.Context(), sha256.Sum256([]byte(f.admin)))
+	root, err := f.store.AsOperator().LookupCapability(f.t.Context(), sha256.Sum256([]byte(f.admin)))
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	launcher, err := f.store.ProvisionCapability(f.t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, Authority: &root.Authority, RegistrationID: "service:launcher-" + runID, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher-" + runID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
+	launcher, err := f.store.AsOperator().ProvisionCapability(f.t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, Authority: &root.Authority, RegistrationID: "service:launcher-" + runID, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher-" + runID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -33,8 +33,7 @@ func (f *appFixture) launchedRun(who signedIn, runID, owner, name string) string
 	if _, err := tenant.RecordCreditGrant(f.t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "fixture:" + runID, CreatedBy: "fixture"}); err != nil {
 		f.t.Fatal(err)
 	}
-	f.store.SetClaimProfileResolver(githubClaimEnvironment{location: "cloud"})
-	claim, err := f.store.ClaimUnit(f.t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runID}})
+	claim, err := f.store.AsOperator().ClaimUnit(f.t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runID}})
 	if err != nil {
 		f.t.Fatal(err)
 	}

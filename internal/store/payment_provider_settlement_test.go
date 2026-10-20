@@ -422,11 +422,11 @@ func TestProviderRefundUsesOpaqueVerifiedEvent(t *testing.T) {
 		if _, err := fmt.Fprintf(mac, "%d.%s", now, body); err != nil {
 			t.Fatal(err)
 		}
-		proof, err := verifier.VerifyPaymentEvent(t.Context(), capability.PaymentPresentation{Body: []byte(body), Signature: fmt.Sprintf("t=%d,v1=%s", now, hex.EncodeToString(mac.Sum(nil)))}, capability.PaymentScope{Records: s})
+		proof, err := verifier.VerifyPaymentEvent(t.Context(), capability.PaymentPresentation{Body: []byte(body), Signature: fmt.Sprintf("t=%d,v1=%s", now, hex.EncodeToString(mac.Sum(nil)))}, capability.PaymentScope{Records: s.AsOperator()})
 		if err != nil || proof == nil {
 			t.Fatalf("verified refund: %+v: %v", proof, err)
 		}
-		got, err := s.SettlePayment(t.Context(), *proof)
+		got, err := s.AsOperator().SettlePayment(t.Context(), *proof)
 		if err != nil || got.Team != "a" || got.AmountMicro != -25*MicroCreditsPerCent {
 			t.Fatalf("settlement trusted metadata: %+v: %v", got, err)
 		}
@@ -485,7 +485,7 @@ func TestRecordsPaymentParentResolvesOnlyCommittedObjects(t *testing.T) {
 		{capability.PaymentRoute{Mode: capability.PaymentLive, PaymentID: "payment"}, false},
 		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: "cs_foreign", PaymentID: "pi_foreign", ObjectID: "re_foreign"}, false},
 	} {
-		got, err := s.RecordsPaymentParent(t.Context(), tc.route)
+		got, err := s.AsOperator().RecordsPaymentParent(t.Context(), tc.route)
 		if err != nil || got != tc.want {
 			t.Fatalf("%+v: %v %v", tc.route, got, err)
 		}

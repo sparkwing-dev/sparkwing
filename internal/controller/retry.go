@@ -23,7 +23,7 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request, auth
 	for _, run := range runs {
 		a := authorized
 		a.Target.RunID = run.ID
-		if err := s.store.CheckBinding(r.Context(), a.Principal, a.Access.Binding, a.Target); err != nil {
+		if err := s.operator.CheckBinding(r.Context(), a.Principal, a.Access.Binding, a.Target); err != nil {
 			return engineLookupError(err)
 		}
 		detail, err := engine.RunDetail(r.Context(), a)

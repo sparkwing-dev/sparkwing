@@ -240,6 +240,14 @@ linters:
         text: "F1: widening"
         linters:
           - forbidigo
+      - path: ^internal/controller/composition\.go$
+        text: "F1: widening"
+        linters:
+          - forbidigo
+      - path: ^internal/web/browserfixture/main\.go$
+        text: "F1: widening"
+        linters:
+          - forbidigo
       - path: ^(internal/runspec/|internal/store/intake_provenance\.go$|internal/store/teststore/)
         text: "F2: only the intake"
         linters:
@@ -262,7 +270,7 @@ linters:
         linters:
           - forbidigo
       # teststore contains only internal fixture code.
-      - path: ^internal/store/teststore/
+      - path: ^internal/store/(teststore|internal/storetest)/
         text: "F1: widening"
         linters:
           - forbidigo

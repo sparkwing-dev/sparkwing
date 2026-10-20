@@ -34,7 +34,7 @@ func checkBootstrapGateTx(ctx context.Context, tx *storeTx) error {
 	if prefix != "" {
 		return authorityError(apierr.Conflict, "bootstrap has already been consumed")
 	}
-	exists, err := hasDeploymentAdministratorTx(ctx, tx)
+	exists, err := tx.operator.hasDeploymentAdministratorTx(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -45,8 +45,8 @@ func checkBootstrapGateTx(ctx context.Context, tx *storeTx) error {
 }
 
 // EnsureBootstrapCapability commits the supplied first-administrator seed once.
-func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.ProvisionSpec) (bool, error) {
-	if s == nil {
+func (o *Operator) EnsureBootstrapCapability(ctx context.Context, spec capability.ProvisionSpec) (bool, error) {
+	if o.s == nil {
 		return false, authorityError(apierr.PolicyMissing, "bootstrap issuer is unavailable")
 	}
 	if err := capability.ValidateProvisionSeed(spec); err != nil {
@@ -56,7 +56,7 @@ func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.P
 		return false, bindingRefusal()
 	}
 	created := false
-	err := s.inTx(ctx, func(tx *storeTx) error {
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		created = false
 		prefix, err := lockBootstrapGateTx(ctx, tx)
 		if err != nil {
@@ -79,7 +79,7 @@ func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.P
 			}
 			return nil
 		}
-		_, err = s.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &spec})
+		_, err = o.s.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &spec})
 		created = err == nil
 		return err
 	})
@@ -87,20 +87,21 @@ func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.P
 }
 
 // HasDeploymentAdministrator checks current unbound deployment administration authority.
-func (s *Store) HasDeploymentAdministrator(ctx context.Context) (bool, error) {
+func (o *Operator) HasDeploymentAdministrator(ctx context.Context) (bool, error) {
+	s := o.s
 	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackOrLog(tx)
-	exists, err := hasDeploymentAdministratorTx(ctx, tx)
+	exists, err := tx.operator.hasDeploymentAdministratorTx(ctx, tx)
 	if err != nil {
 		return false, err
 	}
 	return exists, tx.Commit()
 }
 
-func hasDeploymentAdministratorTx(ctx context.Context, tx *storeTx) (bool, error) {
+func (op *Operator) hasDeploymentAdministratorTx(ctx context.Context, tx *storeTx) (bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team IS NULL AND audience='controller' AND bind_kind='none' AND subject_kind IN ('operator','service') ORDER BY prefix`)
 	if err != nil {
 		return false, err
@@ -140,7 +141,7 @@ func hasDeploymentAdministratorTx(ctx context.Context, tx *storeTx) (bool, error
 	return false, nil
 }
 
-func finishBootstrapSetupTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
+func (op *Operator) finishBootstrapSetupTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
 	p := capability.Principal{Capability: c, Class: capability.CredentialBearer}
 	if !capability.DeploymentAuthority(p) || c.Subject == (capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}) || !slices.Contains(c.Grants, capability.OperatorTokens) {
 		return nil
@@ -165,14 +166,14 @@ func finishBootstrapSetupTx(ctx context.Context, tx *storeTx, c capability.Capab
 		return err
 	}
 	for _, prefix := range prefixes {
-		if err := revokeSetupAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+		if err := tx.operator.revokeSetupAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func revokeSetupAuthorityTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef) error {
+func (op *Operator) revokeSetupAuthorityTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef) error {
 	var prefix string
 	if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=?`+tx.forUpdate(), root.ID).Scan(&prefix); err != nil {
 		return err
@@ -224,7 +225,7 @@ func revokeSetupAuthorityTx(ctx context.Context, tx *storeTx, root capability.Au
 		}
 	}
 	for _, ref := range refs {
-		if err := revokeAuthorityTx(ctx, tx, ref); err != nil {
+		if err := tx.operator.revokeAuthorityTx(ctx, tx, ref); err != nil {
 			return err
 		}
 	}

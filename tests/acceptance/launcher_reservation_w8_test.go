@@ -14,7 +14,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
@@ -71,7 +70,7 @@ func TestStoreLauncherReservationW8(t *testing.T) {
 	}
 }
 
-func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *controller.EngineController, launcher.CloudJobResources, *int) {
+func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *storedEngineW8, launcher.CloudJobResources, *int) {
 	t.Helper()
 	server, root := storedCloudClaimantExpiryW8(t, nil)
 	_, cfg, _ := cloudFixture(launcher.CloudWork)
@@ -162,12 +161,8 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 				t.Fatal(err)
 			}
 		case 8:
-			var parent string
-			if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&parent); err != nil {
-				t.Fatal(err)
-			}
-			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent}
-			other, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:" + foreign, Authority: &ref, Subject: capability.Subject{Kind: capability.SubjectService, ID: foreign}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
+			ref := server.Bootstrap
+			other, err := server.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:" + foreign, Authority: &ref, Subject: capability.Subject{Kind: capability.SubjectService, ID: foreign}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +181,7 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 				t.Fatal(err)
 			}
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
-			result, err := server.Store.ReadLauncherAwards(t.Context(), ref, []capability.LeaseRef{held.Award})
+			result, _, err := server.Store.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, []capability.LeaseRef{held.Award}, nil, nil)
 			if err == nil || len(result) != 0 {
 				t.Fatalf("store authorized a fabricated award: mode=%d result=%+v: %v", mode, result, err)
 			}

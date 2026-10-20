@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -33,7 +33,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	}{{request, &v.Request}, {spec, &v.Spec}, {lineage, &execution}, {pools, &v.AllowedPools}, {actor, &v.StateActor}} {
 		if len(item.raw) > 0 {
 			if err := json.Unmarshal(item.raw, item.dst); err != nil {
-				return v, fmt.Errorf("decode run %s: %w", id, err)
+				return v, authorityError(apierr.IntegrityFailure, "invalid persisted run: "+err.Error())
 			}
 		}
 	}
@@ -92,17 +92,17 @@ func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.
 	}{{output, &v.OutputRecord}, {manifest, &v.ManifestRecord}} {
 		if len(part.raw) > 0 {
 			if err := json.Unmarshal(part.raw, part.key); err != nil {
-				return v, err
+				return v, authorityError(apierr.IntegrityFailure, "invalid persisted job record: "+err.Error())
 			}
 		}
 	}
 	if len(actor) > 0 {
 		if err = json.Unmarshal(actor, &v.StateActor); err != nil {
-			return v, err
+			return v, authorityError(apierr.IntegrityFailure, "invalid persisted job actor: "+err.Error())
 		}
 	}
 	if err = json.Unmarshal(execution, &v.Execution); err != nil {
-		return v, err
+		return v, authorityError(apierr.IntegrityFailure, "invalid persisted execution: "+err.Error())
 	}
 	// safety: application retry is node-wide; counting attempts within each generation excludes lease-loss attempts.
 	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(n-1),0) FROM (SELECT COUNT(*) AS n FROM node_attempts WHERE team=? AND run_id=? AND node_id=? GROUP BY generation) AS attempts`, team, ref.RunID, ref.NodeID).Scan(&v.ApplicationRetries)

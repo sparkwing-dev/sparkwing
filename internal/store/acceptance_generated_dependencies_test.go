@@ -20,7 +20,7 @@ import (
 func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 	ctx := t.Context()
 	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
+	s, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
@@ -46,14 +46,14 @@ func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 			return errors.New("dependent released before expansion")
 		}
 	}
-	owner, err := s.ResolveAuthority(ctx, plan.Actor.Authority)
+	owner, err := s.AsOperator().ResolveAuthority(ctx, plan.Actor.Authority)
 	if err != nil {
 		return err
 	}
 	binding := owner.Capability.Binding
 	binding.Kind, binding.NodeID, binding.Generation = capability.BindingNode, "alpha", source.Generation
 	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: plan.RunID, Holder: plan.Actor.Owner.Holder, Generation: plan.Actor.Owner.Generation}
-	expander, err := s.DelegateCapability(ctx, capability.DelegateSpec{
+	expander, err := s.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{
 		Parent: plan.Actor.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit},
 		Binding: binding, ExpiresAt: owner.Capability.ExpiresAt, Repositories: owner.Capability.Repositories,
 	})
@@ -68,12 +68,11 @@ func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := target.TryOpen()
+	reopened, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
 	s = reopened
-	s.SetClaimProfileResolver(acceptanceClaimProfile{})
 	return checkStoreGeneratedMembership(ctx, s, plan, before, request)
 }
 
@@ -145,7 +144,7 @@ func finishGeneratedDependencyJob(ctx context.Context, s *store.Store, tenant *s
 	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
 		return store.NodeRow{}, err
 	}
-	claim, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 8}})
+	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		return store.NodeRow{}, err
 	}

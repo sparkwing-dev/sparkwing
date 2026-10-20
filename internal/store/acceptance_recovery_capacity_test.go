@@ -15,11 +15,11 @@ import (
 
 func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name string) (store.Actor, error) {
 	authority := f.plan.Seal.Request.AuthorityRef
-	issued, err := f.s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(f.tenant.Team()), RegistrationID: "runner:planner:" + name, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+	issued, err := f.s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(f.tenant.Team()), RegistrationID: "runner:planner:" + name, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		return store.Actor{}, err
 	}
-	claim, err := f.s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runID}, Available: match.Resources{Cores: 8}})
+	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runID}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		return store.Actor{}, err
 	}
@@ -64,7 +64,7 @@ func checkRecoveryCapacity(t *testing.T) error {
 	if _, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder); err != nil {
 		return err
 	}
-	if units, err := f.s.ReapUnits(ctx, f.lease, 10); err != nil || len(units) != 1 || !units[0].Requeued || units[0].RunID != f.ref.RunID {
+	if units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10); err != nil || len(units) != 1 || !units[0].Requeued || units[0].RunID != f.ref.RunID {
 		return fmt.Errorf("owner recovery: %+v, %v", units, err)
 	}
 	if err := f.reopen(ctx); err != nil {
@@ -170,6 +170,7 @@ func TestStoreRecoveryCapacityAdoption(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestStoreRecoveryCapacityMaintenance(t *testing.T) {
 	if err := checkRecoveryCapacityMaintenance(t); err != nil {
 		t.Fatal(err)

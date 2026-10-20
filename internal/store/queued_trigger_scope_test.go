@@ -23,7 +23,7 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(323, 911))
 	for trial := range 4 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {
-			s := storetest.OpenSQLite(t)
+			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 			tenant, plan, err := storePlanSealRequest(t.Context(), s)
 			if err != nil {
 				t.Fatal(err)
@@ -33,7 +33,7 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 			if trial%2 != 0 {
 				repositories = []string{"github.com/acme/*", "github.com/acme/allowed"}
 			}
-			root, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+			root, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 				Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()),
 				RegistrationID: "runner:planner:queued", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "queued"},
 				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: repositories, Grants: []capability.Grant{capability.TriggersClaim},
@@ -41,7 +41,7 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{
+			child, err := s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
 				Parent:   capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix},
 				Audience: capability.Controller, Grants: []capability.Grant{capability.TriggersClaim},
 				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/allowed"},
@@ -73,12 +73,12 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 			}
 			demand := store.UnitDemand{CapabilityPrefix: child.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}, Available: match.Resources{Cores: 8}}
 			for _, id := range eligible {
-				claim, err := s.ClaimUnit(t.Context(), demand)
+				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil || claim.RunID != id || claim.Team != tenant.Team() || len(claim.Bearer) == 0 {
 					t.Fatalf("eligible tail claim: %s/%s, %v", claim.Team, claim.RunID, err)
 				}
 			}
-			if _, err := s.ClaimUnit(t.Context(), demand); !errors.Is(err, store.ErrNotFound) {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("excluded queue: %v", err)
 			}
 			for i, id := range runIDs {
@@ -110,16 +110,16 @@ func queuedOwnerState(t *testing.T, tenant *store.Tenant, s *store.Store, run st
 
 func TestQueuedTriggerClaimsNeverCrossTeamsProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(511, 827))
-	s := storetest.OpenSQLite(t)
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 	planner, plan, err := storePlanSealRequest(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	member, err := s.ResolveSignIn(t.Context(), googleProfile("other", "other@example.test"), store.SignUpConditions{}, time.Now())
+	member, err := s.AsOperator().ResolveSignIn(t.Context(), googleProfile("other", "other@example.test"), store.SignUpConditions{}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _, _, err := s.CreateAccountSession(t.Context(), member.Account, member.PersonalTeam, time.Hour)
+	raw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), member.Account, member.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestQueuedTriggerClaimsNeverCrossTeamsProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		root, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		root, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 			Kind: capability.ProvisionMachine, Authority: &authority, Team: string(team),
 			RegistrationID: "runner:" + string(team) + ":queued", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "queued"},
 			Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.TriggersClaim},
@@ -163,7 +163,7 @@ func TestQueuedTriggerClaimsNeverCrossTeamsProperty(t *testing.T) {
 			workers.Go(func() {
 				<-start
 				for {
-					claim, err := s.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}, Available: match.Resources{Cores: 8}})
+					claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}, Available: match.Resources{Cores: 8}})
 					if errors.Is(err, store.ErrNotFound) {
 						return
 					}

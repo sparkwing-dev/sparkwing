@@ -88,8 +88,8 @@ func (s *EngineController) handleRevokeAuthority(w http.ResponseWriter, r *http.
 		revoker, err = s.runTransactions(r.Context(), a.Target.Team)
 	} else if s.ResolveOperator != nil {
 		revoker, err = s.ResolveOperator(r.Context())
-	} else if s.Store != nil {
-		revoker = s.Store.AsOperator()
+	} else {
+		revoker = s.operator
 	}
 	if err != nil {
 		return authorityMutationError(err)

@@ -19,7 +19,7 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
-	config.Admission = ComposeNativeAdmission(fixture.Tenant, nil, true)
+	config.Admission = ComposeNativeAdmission(fixture.Tenant, "", nil, true)
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestNativeHostBindsRealCapacityPerRun(t *testing.T) {
 	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("queue", 0, "a"), runspec.Options{})
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = first.Tenant, ownerOperationsFixture(first.Host)
-	config.Admission = ComposeNativeAdmission(first.Tenant, &LocalAdmission{Daemon: newFakeDaemon()}, false)
+	config.Admission = ComposeNativeAdmission(first.Tenant, "", &LocalAdmission{Daemon: newFakeDaemon()}, false)
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -93,11 +93,15 @@ func TestNativeHostRejectsGroupsWithoutCapacityStore(t *testing.T) {
 }
 
 func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
-	for _, compute := range []bool{false, true} {
-		t.Run(fmt.Sprintf("local_admission=%t", compute), func(t *testing.T) {
+	for _, test := range []struct {
+		compute bool
+		scope   string
+	}{{false, "run"}, {true, "run"}, {false, "box"}, {true, "box"}} {
+		compute := test.compute
+		t.Run(fmt.Sprintf("local_admission=%t/scope=%s", compute, test.scope), func(t *testing.T) {
 			plan := capacityPlan("queue", 0, "a", "b")
 			for i := range plan.Jobs {
-				plan.Jobs[i].Concurrency[0].Scope = new("run")
+				plan.Jobs[i].Concurrency[0].Scope = new(test.scope)
 				plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(0.25), MemoryBytes: new(int64(1024))}
 			}
 			fixture := newStoreHostFixture(t, plan)
@@ -108,13 +112,13 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 			if compute {
 				machine = &LocalAdmission{Daemon: daemon}
 			}
-			config.Admission = ComposeNativeAdmission(fixture.Tenant, machine, false)
+			config.Admission = ComposeNativeAdmission(fixture.Tenant, "box-one", machine, false)
 			owner, _, _, err := NewNativeHost(config)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var executed atomic.Int32
-			key := scopedConcurrencyKey("db", "run", fixture.Accepted.RunID, "")
+			key := scopedConcurrencyKey("db", test.scope, fixture.Accepted.RunID, "box-one")
 			owner.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				executed.Add(1)
 				state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
@@ -159,7 +163,7 @@ func TestNativeClaimedComputeDoesNotReacquireConcurrency(t *testing.T) {
 	capacity, probe, accepted, row := capacityFixture(t)
 	daemon := newFakeDaemon()
 	config, _, _, _ := nativeHostFixture(t)
-	config.Admission = ComposeNativeAdmission(probe, &LocalAdmission{Daemon: daemon}, false)
+	config.Admission = ComposeNativeAdmission(probe, "", &LocalAdmission{Daemon: daemon}, false)
 	_, claimed, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)

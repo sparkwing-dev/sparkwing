@@ -9,17 +9,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func (s *Store) failUnpricedClaim(ctx context.Context, demand UnitDemand, refusal *UnpricedCPUClassError) error {
-	team, err := s.runTeam(ctx, refusal.RunID)
+func (o *Operator) failUnpricedClaim(ctx context.Context, demand UnitDemand, refusal *UnpricedCPUClassError) error {
+	team, err := o.RunTeam(ctx, refusal.RunID)
 	if err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(tx *storeTx) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
 		tx.unpricedDemand = &demand
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}}); err != nil {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}}); err != nil {
 			return err
 		}
 		change := NodeTransition{Ref: controllerwire.NodeRef{RunID: refusal.RunID, NodeID: refusal.NodeID}, To: NodeFailed, Cause: CauseUnpriced, Actor: Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass, MaskedError: refusal.Error()}}}

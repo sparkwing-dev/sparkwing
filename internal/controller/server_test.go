@@ -105,7 +105,7 @@ func checkQueueArrival(t *testing.T, arrival int64) {
 		Holders []map[string]json.RawMessage `json:"holders"`
 	}
 	reader := &queueGroupReaderFake{tenant: teststore.ForTeam(t, f.store, store.DefaultTeam)}
-	f.handler = controller.New(f.store, nil).WithConcurrencyStore(func(_ context.Context, team store.Team) (controller.ConcurrencyStore, error) {
+	f.handler = controller.BindTenantPortForTest[controller.ConcurrencyStore](controller.New(f.store, nil), func(_ context.Context, team store.Team) (controller.ConcurrencyStore, error) {
 		if team != reader.tenant.Team() {
 			t.Fatalf("resolved foreign tenant %s", team)
 		}

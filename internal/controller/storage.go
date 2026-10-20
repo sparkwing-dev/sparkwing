@@ -78,13 +78,13 @@ func (s *Server) runStorageMaintenance(ctx context.Context, interval time.Durati
 
 func (s *Server) maintainStorage(ctx context.Context) {
 	s.seedCloudRetention(ctx)
-	settings, err := s.store.AsOperator().StorageSettings(ctx)
+	settings, err := s.operator.StorageSettings(ctx)
 	if err != nil {
 		s.logger.Error("storage settings read failed", "err", err)
 		return
 	}
 	s.maintainRetainedData(ctx)
-	size, err := s.store.AsOperator().DatabaseSize(ctx)
+	size, err := s.operator.DatabaseSize(ctx)
 	if err != nil {
 		s.logger.Error("database size probe failed", "err", err)
 		return
@@ -99,7 +99,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 }
 
 func (s *Server) maintainRetainedData(ctx context.Context) {
-	operator := s.store.AsOperator()
+	operator := s.operator
 	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", s.measureHolder(), StorageMaintenanceInterval)
 	if errors.Is(err, store.ErrLockHeld) {
 		return
@@ -144,7 +144,7 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 
 func (s *Server) reportLargestTeams(ctx context.Context, settings store.StorageSettings) {
 	if settings.DefaultTier == "" {
-		quotas, err := s.store.AsOperator().ListStorageQuotas(ctx)
+		quotas, err := s.operator.ListStorageQuotas(ctx)
 		if err != nil {
 			s.logger.Error("storage quota list failed", "err", err)
 			return
@@ -154,7 +154,7 @@ func (s *Server) reportLargestTeams(ctx context.Context, settings store.StorageS
 		}
 	}
 	month := store.StorageMonth(time.Now().UTC())
-	top, err := s.store.AsOperator().TopStorageTeams(ctx, month, storageReportTeams)
+	top, err := s.operator.TopStorageTeams(ctx, month, storageReportTeams)
 	if err != nil {
 		s.logger.Error("largest-teams report failed", "err", err)
 		return
@@ -223,7 +223,7 @@ type storageStateJSON struct {
 
 func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	ctx := r.Context()
-	settings, err := s.store.AsOperator().StorageSettings(ctx)
+	settings, err := s.operator.StorageSettings(ctx)
 	if err != nil {
 		return engineLookupError(err)
 	}

@@ -78,10 +78,10 @@ type intakeRevisionAccess struct {
 
 func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error) {
 	s := a.server
-	if s.store == nil {
+	if s.operator == nil {
 		return source.Credential{}, missingEndpointPolicy()
 	}
-	tenant, err := s.store.ForTeam(ctx, a.team)
+	tenant, err := s.tenantForTeam(ctx, a.team)
 	if err != nil {
 		return source.Credential{}, err
 	}
@@ -113,7 +113,7 @@ func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Sp
 }
 
 func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, host, kind string) (source.Credential, error) {
-	tenant, err := s.store.ForTeam(ctx, team)
+	tenant, err := s.tenantForTeam(ctx, team)
 	if err != nil {
 		return source.Credential{}, engineLookupError(err)
 	}

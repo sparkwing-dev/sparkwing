@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestServerPolicyUsesCurrentPersistedAuthority(t *testing.T) {
@@ -96,20 +97,20 @@ func TestServerPolicyNeverInfersAuthorityFromRequestHints(t *testing.T) {
 }
 
 func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
-	e, _ := engineRuntimeStore(t)
-	s := e.Store
-	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
-	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewDeployment(s, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher)
-	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	s := e.Store
+	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
+	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
+	server := e.Server
+	raw, csrf, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, otherCSRF, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	other, otherCSRF, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,8 +155,12 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 		}
 	}
 
+	connection, err := s.Connection(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, key := range []string{"missing", "wrong"} {
-		server.WithSecretsCipher(nil)
+		var keyCipher BoundCipher
 		if key == "wrong" {
 			bytes := make([]byte, secrets.KeySize)
 			bytes[0] = 1
@@ -163,13 +168,24 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			server.WithSecretsCipher(wrong)
+			keyCipher = wrong
 		}
+		fixture := &serverFixture{}
+		reopened, err := teststore.OpenExisting(strings.TrimPrefix(connection.Target, "sqlite:"), fixture.option(server.deployment, func(s *Server) { s.WithSecretsCipher(keyCipher) }))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := reopened.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		h = fixture.Server.Handler()
 		if w := request("POST", "/api/v1/runs/run/cancel", raw, csrf, csrf, "https://controller.test"); w.Code != 503 || strings.Contains(w.Body.String(), raw) || strings.Contains(w.Body.String(), csrf) {
 			t.Fatalf("%s key response = %d %s", key, w.Code, w.Body.String())
 		}
 	}
-	server.WithSecretsCipher(cipher)
+	h = server.Handler()
 	engineSQL(t, s, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='member'`)
 	if w := request("POST", "/api/v1/runs/run/cancel", raw, csrf, csrf, "https://controller.test"); w.Code != 403 {
 		t.Fatalf("demoted session = %d %s", w.Code, w.Body.String())
@@ -181,16 +197,16 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 }
 
 func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
-	engine, _ := engineRuntimeStore(t)
-	st := engine.Store
-	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator','operator@example.test',1,1)`)
-	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','operator','reader',1)`)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
-	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
+	engine, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	st := engine.Store
+	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator','operator@example.test',1,1)`)
+	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','operator','reader',1)`)
+	s := engine.Server.WithOperatorAccounts([]string{"operator"})
+	raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

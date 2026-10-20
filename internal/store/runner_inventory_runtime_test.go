@@ -11,11 +11,11 @@ import (
 func TestRunnerInventoryWithSealedAdmissionAndEnrollment(t *testing.T) {
 	f := newStoreRecoveryFixture(t, false)
 	ctx := t.Context()
-	claim, err := f.s.ResolveAuthority(ctx, f.holder.Authority)
+	claim, err := f.s.AsOperator().ResolveAuthority(ctx, f.holder.Authority)
 	if err != nil || claim.Capability.Parent == nil {
 		t.Fatalf("claim authority: %+v %v", claim, err)
 	}
-	if err := f.s.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: claim.Capability.Parent.ID, Labels: []string{"gpu", "name=host", "pool=prod"}, Available: match.Resources{Cores: 2.5, MemoryBytes: 2048}}); err != nil {
+	if err := f.s.AsOperator().RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: claim.Capability.Parent.ID, Labels: []string{"gpu", "name=host", "pool=prod"}, Available: match.Resources{Cores: 2.5, MemoryBytes: 2048}}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := f.tenant.ReadRunners(ctx)

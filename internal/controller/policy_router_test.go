@@ -65,6 +65,9 @@ func TestPolicyRouterOrderingAndErrorBoundary(t *testing.T) {
 			mux := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: policyAuth{p, tc.authErr, &order}, Bindings: policyBindings{order: &order}})
 			err := mux.Register(controller.Endpoint{
 				Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
+				ResolveTarget: func(_ context.Context, _ capability.Principal, target capability.Target) (capability.Target, error) {
+					return target, nil
+				},
 				Decode: func(r *http.Request) (capability.RequestEvidence, error) {
 					order = append(order, "decode")
 					if r.PathValue("run") != "run-1" {
@@ -293,6 +296,9 @@ func TestPolicyRouterDeadCredentialHidesDecoderError(t *testing.T) {
 	})
 	if err := mux.Register(controller.Endpoint{
 		Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
+		ResolveTarget: func(_ context.Context, _ capability.Principal, target capability.Target) (capability.Target, error) {
+			return target, nil
+		},
 		Decode: func(*http.Request) (capability.RequestEvidence, error) {
 			return capability.RequestEvidence{}, &apierr.Error{Code: apierr.NotFound, Message: "missing resource"}
 		},
@@ -321,5 +327,67 @@ func assertPolicyError(t *testing.T, w *httptest.ResponseRecorder, code apierr.C
 	}
 	if code == apierr.Internal && envelope.Error.Message != "request failed" {
 		t.Fatalf("internal details escaped: %s", w.Body.String())
+	}
+}
+
+func TestPolicyRouterRunSelectorsRequireResolver(t *testing.T) {
+	var order []string
+	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: policyAuth{order: &order}, Bindings: policyBindings{order: &order}})
+	endpoint := controller.Endpoint{
+		Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
+		Decode: func(*http.Request) (capability.RequestEvidence, error) { return capability.RequestEvidence{}, nil },
+		Handle: func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+			t.Fatal("unresolved selector reached handler")
+			return nil
+		},
+	}
+	if err := router.Register(endpoint); err != nil {
+		t.Fatal(err)
+	}
+	if router.Validate() == nil {
+		t.Fatal("run selector accepted without resolver")
+	}
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/runs/foreign", nil))
+	assertPolicyError(t, w, apierr.PolicyMissing)
+	if len(order) != 0 {
+		t.Fatalf("incomplete wiring ran policy: %v", order)
+	}
+}
+
+func TestPolicyRouterEmbeddedUsesRunResolver(t *testing.T) {
+	var order []string
+	p := capability.Principal{Class: capability.CredentialBearer, Capability: capability.Capability{
+		Team: "team", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Audience: capability.Controller,
+		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
+	}}
+	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: policyAuth{p, nil, &order}, Bindings: policyBindings{order: &order}})
+	if err := router.Register(controller.Endpoint{
+		Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
+		Decode: func(*http.Request) (capability.RequestEvidence, error) { return capability.RequestEvidence{}, nil },
+		ResolveTarget: func(_ context.Context, principal capability.Principal, target capability.Target) (capability.Target, error) {
+			if target.Team != "" || principal.Capability.Team != "team" {
+				t.Fatal("resolver lost active tenant")
+			}
+			order = append(order, "resolve")
+			return target, &apierr.Error{Code: apierr.NotFound, Message: "run not found"}
+		}, Handle: func(http.ResponseWriter, *http.Request, capability.Authorized) error { return nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := router.Authorize(t.Context(), "GET", "/api/v1/runs/{run}", capability.Presentation{Raw: "synthetic", Class: capability.CredentialSession})
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.PolicyMissing || len(order) != 0 {
+		t.Fatalf("embedded session bypassed HTTP proof: %v, order=%v", err, order)
+	}
+	for _, run := range []string{"foreign", "missing"} {
+		_, _, err := router.Authorize(t.Context(), "GET", "/api/v1/runs/{run}", capability.Presentation{Raw: "synthetic", Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: capability.Target{RunID: run}}})
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.NotFound {
+			t.Fatalf("%s: %v", run, err)
+		}
+	}
+	if !reflect.DeepEqual(order, []string{"authenticate", "resolve", "authenticate", "resolve"}) {
+		t.Fatalf("order=%v", order)
 	}
 }

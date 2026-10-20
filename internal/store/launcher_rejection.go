@@ -8,8 +8,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-// RejectLauncherAwards fails only exact awards issued under the authenticated launcher's ancestry.
-func (s *Store) RejectLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef) error {
+// rejectLauncherAwards fails only exact awards issued under the authenticated launcher's ancestry.
+func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef) error {
 	return s.inLauncherBatchTx(ctx, authority, fences, false, func(tx *storeTx) error {
 		chain, err := authorityChainTx(ctx, tx, authority, true)
 		if err != nil {
@@ -24,7 +24,7 @@ func (s *Store) RejectLauncherAwards(ctx context.Context, authority capability.A
 			if err := launcherReservationAwardTx(ctx, tx, root.Authority, claimant.Subject, fence); err != nil {
 				return err
 			}
-			row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
+			row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
 			if endedLauncherPreparation(err) {
 				continue
 			}

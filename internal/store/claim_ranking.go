@@ -119,7 +119,7 @@ func personalRootTx(ctx context.Context, tx *storeTx, chain []authorityNode) (bo
 	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
 		return false, nil
 	}
-	record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
 	return err == nil && record.Origin != nil && record.Origin.Personal, err
 }
 

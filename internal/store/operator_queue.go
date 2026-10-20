@@ -36,7 +36,7 @@ func (o *Operator) CountNodesByQueueState(ctx context.Context) (map[string]int, 
                     COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
                     COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
                    FROM nodes
-                  WHERE `+nodeNotDone+` AND `+nodeRunActiveSQL("nodes."),
+                  WHERE `+nodeNotDone+` AND `+o.nodeRunActiveSQL("nodes."),
 		nodeStatusPending, nodeStatusPending, nodeStatusPending,
 		nodeStatusRunning, NodeStatusApprovalPending,
 	).Scan(&waiting, &ready, &claimed, &running, &approval)

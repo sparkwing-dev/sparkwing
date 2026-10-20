@@ -15,16 +15,14 @@ import (
 )
 
 func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
-	srv := New(nil, nil).WithQueueReader(func(_ context.Context, team store.Team) (QueueReader, error) {
-		return queueTeamReader{team: team}, nil
-	})
+	srv := New(nil, nil)
 	now := time.Now()
-	srv.WithRunnerInventory(func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
+	srv.WithTenantResolver(func(_ context.Context, team store.Team) (TenantHandle, error) {
 		name, cores := "operator-box", 4.0
 		if team == "team-b" {
 			name, cores = "team-b-box", 2.0
 		}
-		return &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: string(team), Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: cores, ObservedAt: now}}}}}, nil
+		return queueRunnerTenant{queueTeamReader: queueTeamReader{team: team}, runnerInventoryFake: &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: string(team), Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: cores, ObservedAt: now}}}}}}, nil
 	})
 
 	view := func(team store.Team) []string {
@@ -62,3 +60,10 @@ func (f queueTeamReader) Team() store.Team { return f.team }
 func (queueTeamReader) ListConcurrencyStates(context.Context) ([]*store.ConcurrencyState, error) {
 	return nil, nil
 }
+
+type queueRunnerTenant struct {
+	queueTeamReader
+	*runnerInventoryFake
+}
+
+func (q queueRunnerTenant) Team() store.Team { return q.queueTeamReader.Team() }

@@ -45,7 +45,7 @@ func TestTickRefusesAScheduleBelowTheMinInterval(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ArmPushed: %v", err)
 	}
-	if _, err := svc.Store.AsOperator().SetComputeLimits(ctx, map[string]int64{store.ComputeLimitCronSeconds: 900}); err != nil {
+	if _, err := svc.Operator.SetComputeLimits(ctx, map[string]int64{store.ComputeLimitCronSeconds: 900}); err != nil {
 		t.Fatalf("set the guard: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestTickRefusesAScheduleBelowTheMinInterval(t *testing.T) {
 		t.Fatalf("errors = %v, want the guard named", report.Errors)
 	}
 
-	if _, err := svc.Store.AsOperator().SetComputeLimits(ctx, map[string]int64{store.ComputeLimitCronSeconds: 0}); err != nil {
+	if _, err := svc.Operator.SetComputeLimits(ctx, map[string]int64{store.ComputeLimitCronSeconds: 0}); err != nil {
 		t.Fatalf("clear the guard: %v", err)
 	}
 	report, err = svc.Tick(ctx, true)

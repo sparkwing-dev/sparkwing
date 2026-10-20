@@ -27,7 +27,7 @@ func TestSampleSealedSecrets_ReturnsOnlySealedRowsWithTheirTeam(t *testing.T) {
 	if err := teststore.SeedSecret(s, acme.Team(), store.Secret{Name: "SEALED", Value: "enc:v3:abc", Principal: "seed"}, now); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.SampleSealedSecrets(ctx, "enc:", 5)
+	got, err := s.AsOperator().SampleSealedSecrets(ctx, "enc:", 5)
 	if err != nil {
 		t.Fatalf("SampleSealedSecrets: %v", err)
 	}

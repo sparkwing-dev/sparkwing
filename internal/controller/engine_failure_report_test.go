@@ -15,14 +15,14 @@ import (
 func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 	server, _ := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
-	server.Store.SetClaimProfileResolver(engineProfileFake{})
+	server.claimProfiles = engineProfileFake{}
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','recovery','pending',?,?)`, []byte(`{"id":"recovery","on_failure_of":"job"}`), []byte(`{}`))
 	claim, err := server.ReconcileJob(t.Context(), owner, controllerwire.ReconcileRequest{Policy: "none"})
 	if err != nil || claim.Claim == nil {
 		t.Fatalf("claim: %+v, %v", claim, err)
 	}
-	principal, err := server.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Claim.Capability)))
+	principal, err := server.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Claim.Capability)))
 	if err != nil {
 		t.Fatal(err)
 	}

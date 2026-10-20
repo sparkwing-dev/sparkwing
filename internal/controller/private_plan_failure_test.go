@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func privatePlanFailureFixture(t *testing.T) (*EngineController, *store.Tenant, string) {
+func privatePlanFailureFixture(t *testing.T) (*engineFixture, *store.Tenant, string) {
 	t.Helper()
 	e, tenant := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
@@ -84,7 +84,7 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+		principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 		if err != nil || principal.Capability.Unit != capability.UnitPlan {
 			t.Fatalf("test did not use a persisted plan: %v", err)
 		}

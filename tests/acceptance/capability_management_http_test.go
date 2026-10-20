@@ -82,8 +82,8 @@ func managementFixture(operator bool) (*credentialBoundary, *capabilityManagemen
 }
 
 func managementServer(b *credentialBoundary, f *capabilityManagement) http.Handler {
-	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).
-		WithCapabilityManager(func(_ context.Context, team store.Team) (controller.CapabilityManager, error) {
+	return bindTenantPort[controller.CapabilityManager](controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithOperatorCapabilityManager(f),
+		func(_ context.Context, team store.Team) (controller.CapabilityManager, error) {
 			if team != f.team {
 				return nil, errors.New("wrong resolver scope")
 			}
@@ -343,7 +343,7 @@ func TestCapabilityManagementHTTPMissingAdaptersAndCSRF(t *testing.T) {
 			path := managementPath(operator) + action
 			w := authorityHTTP(s.Handler(), b, method, path, `{}`)
 			assertEngineError(t, w, 500, apierr.PolicyMissing)
-			s.WithCapabilityManager(func(context.Context, store.Team) (controller.CapabilityManager, error) { return f, nil })
+			bindTenantPort[controller.CapabilityManager](s, func(context.Context, store.Team) (controller.CapabilityManager, error) { return f, nil })
 			f.team = "foreign"
 			w = authorityHTTP(s.Handler(), b, method, path, `{}`)
 			assertEngineError(t, w, 500, apierr.PolicyMissing)
@@ -387,8 +387,8 @@ func TestCapabilityManagementHTTPAuditProperty(t *testing.T) {
 		raw := "swk_" + base64.RawURLEncoding.EncodeToString(digest[:])
 		f.rows[0].Prefix = raw[:16]
 		logs := &bytes.Buffer{}
-		s := controller.New(nil, slog.New(slog.NewTextHandler(logs, nil))).WithAuthorization(consoleAuthorization(b)).
-			WithCapabilityManager(func(context.Context, store.Team) (controller.CapabilityManager, error) { return f, nil })
+		s := bindTenantPort[controller.CapabilityManager](controller.New(nil, slog.New(slog.NewTextHandler(logs, nil))).WithAuthorization(consoleAuthorization(b)).WithOperatorCapabilityManager(f),
+			func(context.Context, store.Team) (controller.CapabilityManager, error) { return f, nil })
 		selector := raw[:16]
 		if complete {
 			selector = raw

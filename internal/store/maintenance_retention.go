@@ -12,7 +12,7 @@ func (o *Operator) maintainRetention(ctx context.Context, request RetentionReque
 	var result RetentionResult
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = maintainRetentionTx(ctx, tx, request)
+		result, err = tx.operator.maintainRetentionTx(ctx, tx, request)
 		return err
 	})
 	if err != nil {
@@ -21,7 +21,7 @@ func (o *Operator) maintainRetention(ctx context.Context, request RetentionReque
 	return result, nil
 }
 
-func maintainRetentionTx(ctx context.Context, tx *storeTx, request RetentionRequest) (RetentionResult, error) {
+func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, request RetentionRequest) (RetentionResult, error) {
 	if request.Limit <= 0 {
 		return RetentionResult{}, fmt.Errorf("retention limit must be positive")
 	}
@@ -49,7 +49,7 @@ func maintainRetentionTx(ctx context.Context, tx *storeTx, request RetentionRequ
 		if err != nil {
 			return RetentionResult{}, err
 		}
-		result.Metrics, err = deleteRetentionMetricsTx(ctx, tx, cutoff, request.Limit)
+		result.Metrics, err = tx.operator.deleteRetentionMetricsTx(ctx, tx, cutoff, request.Limit)
 		if err != nil {
 			return RetentionResult{}, err
 		}
@@ -59,24 +59,24 @@ func maintainRetentionTx(ctx context.Context, tx *storeTx, request RetentionRequ
 		if err != nil {
 			return RetentionResult{}, err
 		}
-		result.Runs, result.ReleasedBytes, err = deleteRetentionRunsTx(ctx, tx, cutoff, request.Limit)
+		result.Runs, result.ReleasedBytes, err = tx.operator.deleteRetentionRunsTx(ctx, tx, cutoff, request.Limit)
 		if err != nil {
 			return RetentionResult{}, err
 		}
 	}
-	result.Records, err = deleteRetentionRecordsTx(ctx, tx, now, request.Limit)
+	result.Records, err = tx.operator.deleteRetentionRecordsTx(ctx, tx, now, request.Limit)
 	if err != nil {
 		return RetentionResult{}, err
 	}
-	result.Capabilities, err = deleteRetentionCapabilitiesTx(ctx, tx, now.Add(-7*24*time.Hour), request.Limit)
+	result.Capabilities, err = tx.operator.deleteRetentionCapabilitiesTx(ctx, tx, now.Add(-7*24*time.Hour), request.Limit)
 	if err != nil {
 		return RetentionResult{}, err
 	}
-	result.Effects, err = deleteRetentionEffectsTx(ctx, tx, now.Add(-7*24*time.Hour), request.Limit)
+	result.Effects, err = tx.operator.deleteRetentionEffectsTx(ctx, tx, now.Add(-7*24*time.Hour), request.Limit)
 	if err != nil {
 		return RetentionResult{}, err
 	}
-	if err := deleteRetentionIdentityTx(ctx, tx, now, request.Limit, &result); err != nil {
+	if err := tx.operator.deleteRetentionIdentityTx(ctx, tx, now, request.Limit, &result); err != nil {
 		return RetentionResult{}, err
 	}
 	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance", tx.now()); err != nil {
@@ -98,7 +98,7 @@ type retentionRun struct {
 	bytes int64
 }
 
-func deleteRetentionRunsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, int64, error) {
+func (op *Operator) deleteRetentionRunsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, int64, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT r.team,r.id,r.event_bytes FROM runs r WHERE r.finished_at < ?
 AND NOT EXISTS (SELECT 1 FROM pipeline_success_pins p WHERE p.team = r.team AND p.run_id = r.id)
 AND NOT EXISTS (SELECT 1 FROM run_effects e WHERE e.team = r.team AND e.run_id = r.id AND e.delivered_rev < e.desired_rev)
@@ -133,7 +133,7 @@ ORDER BY r.finished_at,r.team,r.id LIMIT ?`, cutoff.UnixNano(), limit)
 	return count, released, nil
 }
 
-func deleteRetentionMetricsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, error) {
+func (op *Operator) deleteRetentionMetricsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, error) {
 	res, err := tx.ExecContext(ctx, `DELETE FROM node_metrics WHERE (team,run_id,node_id,ts) IN
 (SELECT team,run_id,node_id,ts FROM node_metrics WHERE ts < ? ORDER BY ts,team,run_id,node_id LIMIT ?)`, cutoff.UnixNano(), limit)
 	if err != nil {
@@ -142,7 +142,7 @@ func deleteRetentionMetricsTx(ctx context.Context, tx *storeTx, cutoff time.Time
 	return res.RowsAffected()
 }
 
-func deleteRetentionRecordsTx(ctx context.Context, tx *storeTx, now time.Time, limit int) (int64, error) {
+func (op *Operator) deleteRetentionRecordsTx(ctx context.Context, tx *storeTx, now time.Time, limit int) (int64, error) {
 	res, err := tx.ExecContext(ctx, `DELETE FROM blob_records WHERE (team,kind,scope,name) IN
 (SELECT b.team,b.kind,b.scope,b.name FROM blob_records b WHERE
 ((b.expires_at IS NOT NULL AND b.expires_at <= ?) OR (b.kind = 'output' AND b.created_at < ?))
@@ -154,7 +154,7 @@ ORDER BY b.created_at,b.team,b.kind,b.scope,b.name LIMIT ?)`, now.UnixNano(), no
 	return res.RowsAffected()
 }
 
-func deleteRetentionCapabilitiesTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, error) {
+func (op *Operator) deleteRetentionCapabilitiesTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, error) {
 	res, err := tx.ExecContext(ctx, `DELETE FROM capabilities WHERE prefix IN (SELECT c.prefix FROM capabilities c
 WHERE ((c.expires_at IS NOT NULL AND c.expires_at <= ?) OR (c.revoked_at IS NOT NULL AND c.revoked_at <= ?))
 AND NOT EXISTS (SELECT 1 FROM capabilities child WHERE child.parent_kind = 'capability' AND child.parent_id = c.prefix)
@@ -165,7 +165,7 @@ ORDER BY c.prefix LIMIT ?)`, cutoff.UnixNano(), cutoff.UnixNano(), limit)
 	return res.RowsAffected()
 }
 
-func deleteRetentionEffectsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, error) {
+func (op *Operator) deleteRetentionEffectsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, error) {
 	res, err := tx.ExecContext(ctx, `DELETE FROM run_effects WHERE (team,run_id,effect) IN
 (SELECT e.team,e.run_id,e.effect FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
 WHERE r.finished_at IS NOT NULL AND e.delivered_rev = e.desired_rev AND e.delivered_at <= ?

@@ -10,9 +10,9 @@ import (
 )
 
 // CreateOperatorTeam commits a new team, its first administrator and the operator audit together.
-func (s *Store) CreateOperatorTeam(ctx context.Context, a capability.Authorized, slug, displayName string) (capability.Issued, error) {
+func (o *Operator) CreateOperatorTeam(ctx context.Context, a capability.Authorized, slug, displayName string) (capability.Issued, error) {
 	var issued capability.Issued
-	err := s.inTx(ctx, func(tx *storeTx) error {
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		p, err := resolveProvisionAuthorityTx(ctx, tx, a.Principal.Authority, capability.ProofForConsole(a.Principal))
 		if err != nil {
 			return err
@@ -46,7 +46,7 @@ func (s *Store) CreateOperatorTeam(ctx context.Context, a capability.Authorized,
 		for _, scope := range ScopesForRole(RoleOwner) {
 			grants = append(grants, capability.Grant(scope))
 		}
-		issued, err = s.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &capability.ProvisionSpec{
+		issued, err = o.s.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &capability.ProvisionSpec{
 			Kind: capability.ProvisionTeamAdmin, Authority: &p.Authority, ConsoleProof: capability.ProofForConsole(p),
 			Team: slug, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: account},
 			Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},

@@ -54,7 +54,7 @@ func secretMember(t *testing.T, f *browserFixture, id string, role store.Role) *
 	if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default',?,?,1)`, id, role); err != nil {
 		t.Fatal(err)
 	}
-	raw, csrf, _, err := f.st.CreateAccountSession(t.Context(), store.Account{ID: id, Email: id + "@example.test"}, store.DefaultTeam, time.Hour)
+	raw, csrf, _, err := f.st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: id, Email: id + "@example.test"}, store.DefaultTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,7 +37,7 @@ func (f *runnerInventoryFake) ReadRunners(context.Context) (capability.RunnerSna
 func runnerInventoryFixture(t *testing.T, f *runnerInventoryFake) (http.Handler, string) {
 	t.Helper()
 	s, session := credentialSessionServer(t)
-	s.WithRunnerInventory(func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
+	testOnlyTenantPort[RunnerInventoryReader](s, func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
 		if team != "a" {
 			t.Fatalf("selected team %q", team)
 		}
@@ -147,14 +147,14 @@ func TestRunnerInventoryHTTPNameProperty(t *testing.T) {
 func TestRunnerInventoryHTTPRequiresMemberCredential(t *testing.T) {
 	s, session := credentialSessionServer(t)
 	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: time.Now()}}
-	s.WithRunnerInventory(func(context.Context, store.Team) (RunnerInventoryReader, error) { return f, nil })
+	testOnlyTenantPort[RunnerInventoryReader](s, func(context.Context, store.Team) (RunnerInventoryReader, error) { return f, nil })
 	h := s.Handler()
 	issued := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
 	var member credentialResponse
 	if issued.Code != 201 || json.Unmarshal(issued.Body.Bytes(), &member) != nil {
 		t.Fatalf("member issuance: %d %s", issued.Code, issued.Body.String())
 	}
-	e := &EngineController{Store: s.store}
+	e := newEngineFixture(s.store, EngineController{})
 	machine := engineHTTPRoot(t, e, "a", "machine", []capability.Grant{capability.RunsRead})
 	operator := engineHTTPRoot(t, e, "", "operator", []capability.Grant{capability.OperatorTokens, capability.RunsRead})
 	for _, raw := range []string{machine, operator} {
@@ -196,13 +196,14 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 		}
 	}
 	s, session := credentialSessionServer(t)
-	s.WithRunnerInventory(func(context.Context, store.Team) (RunnerInventoryReader, error) { return nil, nil })
 	h = s.Handler()
 	issued := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
 	var credential credentialResponse
 	if issued.Code != 201 || json.Unmarshal(issued.Body.Bytes(), &credential) != nil {
 		t.Fatalf("member issuance: %d %s", issued.Code, issued.Body.String())
 	}
+	testOnlyTenantPort[RunnerInventoryReader](s, func(context.Context, store.Team) (RunnerInventoryReader, error) { return nil, nil })
+	h = s.Handler()
 	w = engineClaimHTTP(t, h, credential.Capability, "GET", "/api/v1/runners", "", 500)
 	if !strings.Contains(w.Body.String(), `"code":"policy_missing"`) {
 		t.Fatalf("missing adapter: %s", w.Body.String())
@@ -211,13 +212,13 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 
 func TestRunnerInventoryHTTPUsesStoreSnapshot(t *testing.T) {
 	s, session := credentialSessionServer(t)
-	e := &EngineController{Store: s.store}
+	e := newEngineFixture(s.store, EngineController{})
 	raw := engineHTTPRoot(t, e, "a", "observed", []capability.Grant{capability.NodesClaim})
-	p, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	p, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: p.Capability.Prefix, Labels: []string{"gpu", "name=forged"}}); err != nil {
+	if err := s.store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: p.Capability.Prefix, Labels: []string{"gpu", "name=forged"}}); err != nil {
 		t.Fatal(err)
 	}
 	h := s.Handler()
@@ -246,22 +247,25 @@ func TestRunnerInventoryHTTPUsesStoreSnapshot(t *testing.T) {
 	}
 }
 
+func recordMetricRunner(t *testing.T, st *store.Store, team store.Team, name string, labels []string) {
+	t.Helper()
+	raw := engineHTTPRoot(t, newEngineFixture(st, EngineController{}), string(team), name, []capability.Grant{capability.NodesClaim})
+	principal, err := st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Labels: labels}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunnerInventoryMetricsPreservesSamplesOnReadFailure(t *testing.T) {
 	restoreGlobals(t)
 	t.Cleanup(func() { setActiveRunners(0) })
 	s, _ := credentialSessionServer(t)
-	now := time.Unix(1800000000, 0).UTC()
-	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{
-		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, LastSeen: now},
-		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, LastSeen: now},
-		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "offline", Type: "runner"}, LastSeen: now.Add(-time.Hour)},
-	}}}
-	s.WithRunnerInventory(func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
-		if team == "a" {
-			return f, nil
-		}
-		return &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: now}}, nil
-	})
+	for _, name := range []string{"one", "two"} {
+		recordMetricRunner(t, s.store, "a", name, []string{"gpu"})
+	}
 	s.sampleRunners(t.Context())
 	if got := mustSample(t, scrapeRegistry(t), "sparkwing_active_runners"); got != 2 {
 		t.Fatalf("distinct live credentials = %v, want 2", got)
@@ -269,7 +273,7 @@ func TestRunnerInventoryMetricsPreservesSamplesOnReadFailure(t *testing.T) {
 	if got := mustSample(t, scrapeRegistry(t), `sparkwing_runners_live{label_set="gpu"}`); got != 2 {
 		t.Fatalf("observed runner labels = %v, want 2", got)
 	}
-	f.err = errors.New("private runner inventory")
+	engineSQL(t, s.store, `DROP TABLE capabilities`)
 	s.sampleRunners(t.Context())
 	if got := mustSample(t, scrapeRegistry(t), "sparkwing_active_runners"); got != 2 {
 		t.Fatalf("failed snapshot replaced the last sample: %v", got)
@@ -306,7 +310,7 @@ func (tr inventoryRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) 
 
 func TestProfileIdentityProbeAcceptsDeploymentAndTeamCredentials(t *testing.T) {
 	s, session := credentialSessionServer(t)
-	e := &EngineController{Store: s.store}
+	e := newEngineFixture(s.store, EngineController{})
 	deployment := engineHTTPRoot(t, e, "", "deployment", []capability.Grant{capability.OperatorTokens})
 	machine := engineHTTPRoot(t, e, "a", "machine", []capability.Grant{capability.NodesClaim})
 	h := s.Handler()

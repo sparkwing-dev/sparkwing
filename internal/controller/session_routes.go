@@ -67,7 +67,7 @@ func (s *Server) verifySessionFlow(r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		session, err = s.store.LookupSessionAndRenew(r.Context(), raw, sessionTTL, s.sessionMaxLifetime)
+		session, err = s.operator.LookupSessionAndRenew(r.Context(), raw, sessionTTL, s.sessionMaxLifetime)
 		if err != nil {
 			return sessionFlowError(err)
 		}
@@ -88,13 +88,13 @@ func (s *Server) readSessionFlow(r *http.Request) (*store.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.store == nil {
+	if s.operator == nil {
 		return nil, missingEndpointPolicy()
 	}
 	if !s.deployment.MultiTeam() {
 		return nil, sessionUnavailable()
 	}
-	session, err := s.store.LookupSession(r.Context(), raw)
+	session, err := s.operator.LookupSession(r.Context(), raw)
 	if err != nil {
 		return nil, sessionFlowError(err)
 	}
@@ -109,7 +109,7 @@ func (s *Server) validateSessionFlow(session *store.Session) error {
 		return sessionUnavailable()
 	}
 	if s.sessionExpired(session.CreatedAt, time.Now().UTC()) {
-		if err := s.store.DeleteSession(session.ID); err != nil {
+		if err := s.operator.DeleteSession(session.ID); err != nil {
 			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 		}
 		return &apierr.Error{Code: apierr.Unauthenticated, Message: errSessionLifetimeExceeded.Error()}
@@ -150,7 +150,7 @@ func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) erro
 	if !ok || proof.session == nil {
 		return missingEndpointPolicy()
 	}
-	if err := s.store.DeleteSession(proof.session.ID); err != nil {
+	if err := s.operator.DeleteSession(proof.session.ID); err != nil {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	clearSessionCookies(w, s.cookiesSecure())

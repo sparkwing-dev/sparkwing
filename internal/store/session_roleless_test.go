@@ -18,12 +18,12 @@ func TestRolelessSessionsHaveNoTeamAuthorityProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetSessionKeyCipher(cipher)
+	s.csrfCipher, s.csrfKey = cipher, nil
 	for i := range 16 {
 		id := fmt.Sprintf("waitlisted-%d", i)
 		rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at,waitlist_reason) VALUES (?,?,1,1,1,'signup_gate')`, id, id+"@example.test")
 		rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email_verified,created_at) VALUES ('github',?,?,1,1)`, id, id)
-		raw, csrf, session, err := s.CreateIdentityAccountSession(t.Context(), Account{ID: id}, "", "github", id, time.Hour)
+		raw, csrf, session, err := s.AsOperator().CreateIdentityAccountSession(t.Context(), Account{ID: id}, "", "github", id, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -31,12 +31,12 @@ func TestRolelessSessionsHaveNoTeamAuthorityProperty(t *testing.T) {
 			t.Fatalf("roleless creation: %+v", session)
 		}
 		rewriteSchemaExec(t, s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a',?,'owner',1)`, id)
-		got, err := s.LookupSessionAndRenew(t.Context(), raw, 2*time.Hour, 24*time.Hour)
+		got, err := s.AsOperator().LookupSessionAndRenew(t.Context(), raw, 2*time.Hour, 24*time.Hour)
 		if err != nil || got.Team != "" || len(got.Scopes) != 0 || got.CSRFToken != csrf || !got.ExpiresAt.Equal(now.Add(2*time.Hour)) {
 			t.Fatalf("roleless renewal: %+v, %v", got, err)
 		}
 		lookup := capability.CredentialLookup{Class: capability.CredentialSession, Digest: sha256.Sum256([]byte(raw)), Audience: capability.Controller}
-		snap, err := s.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{Target: capability.Target{Team: "a"}})
+		snap, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{Target: capability.Target{Team: "a"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +49,7 @@ func TestRolelessSessionsHaveNoTeamAuthorityProperty(t *testing.T) {
 			if !ok {
 				t.Fatalf("missing policy %s", path)
 			}
-			auth, err := capability.NewAuthenticator(s).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialSession, Raw: raw}, route)
+			auth, err := capability.NewAuthenticator(s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialSession, Raw: raw}, route)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -57,17 +57,17 @@ func TestRolelessSessionsHaveNoTeamAuthorityProperty(t *testing.T) {
 			if path == "/api/v1/runs" {
 				target.Team = "a"
 			}
-			_, err = capability.Authorize(t.Context(), s, route, auth, target)
+			_, err = capability.Authorize(t.Context(), s.AsOperator(), route, auth, target)
 			if (err == nil) != (path == "/api/v1/me") {
 				t.Fatalf("roleless access %s: %v", path, err)
 			}
 		}
 		rewriteSchemaRefuses(t, s.db, `UPDATE sessions SET capability_prefix='forged' WHERE hash=?`, sessionDigest(raw))
 		rewriteSchemaRefuses(t, s.db, `UPDATE sessions SET account_id='' WHERE hash=?`, sessionDigest(raw))
-		if err := s.SelectAccountTeam(t.Context(), teamAuthorization(t, s, Actor{Authority: principal.Authority}, "", "POST", "/api/v1/me/active-team"), "a"); err != nil {
+		if err := s.AsOperator().SelectAccountTeam(t.Context(), teamAuthorization(t, s, Actor{Authority: principal.Authority}, "", "POST", "/api/v1/me/active-team"), "a"); err != nil {
 			t.Fatal(err)
 		}
-		got, err = s.LookupSession(t.Context(), raw)
+		got, err = s.AsOperator().LookupSession(t.Context(), raw)
 		if err != nil || got.Team != "a" || len(got.Scopes) == 0 {
 			t.Fatalf("explicit team switch: %+v, %v", got, err)
 		}

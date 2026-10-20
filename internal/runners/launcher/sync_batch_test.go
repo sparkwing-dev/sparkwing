@@ -107,3 +107,34 @@ func FuzzSyncRejectsUnboundCleanup(f *testing.F) {
 		}
 	})
 }
+
+func TestSyncDefersOneCorruptAwardAndRetiresItsSibling(t *testing.T) {
+	l, kube, boundary, control := fixture()
+	for _, id := range []string{"broken", "finished"} {
+		control.award.Binding.UnitID, control.award.Binding.NodeID = id, id
+		if _, err := l.LaunchOne(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.Control = syncControl{control, func(observations []CloudJobObservation) ([]CloudJobState, error) {
+		states := make([]CloudJobState, 0, len(observations))
+		for _, observation := range observations {
+			states = append(states, CloudJobState{Binding: observation.Binding, Deferred: observation.Binding.UnitID == "broken", Delete: observation.Binding.UnitID == "finished"})
+		}
+		return states, nil
+	}}
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := kube.BatchV1().Jobs("cloud").List(t.Context(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boundary.releases != 1 || len(jobs.Items) != 1 {
+		t.Fatalf("releases=%d remaining=%d", boundary.releases, len(jobs.Items))
+	}
+	binding, _, err := jobOwnership(jobs.Items[0])
+	if err != nil || binding.UnitID != "broken" {
+		t.Fatalf("corrupt award job removed: %v", err)
+	}
+}

@@ -71,7 +71,7 @@ func rankingMember(t *testing.T, s *Store, id string, role Role) Actor {
 
 func (f *RankingFixture) personalMachine(t *testing.T, owner Actor, name string) string {
 	t.Helper()
-	issued, err := f.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &owner.Authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+	issued, err := f.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &owner.Authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 // Poll records the claimant's live observation at the current clock; only a held claim records an ask.
 func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.UnitKind) {
 	t.Helper()
-	if err := f.Store.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -112,18 +112,18 @@ func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.U
 func (f *RankingFixture) Claim(t *testing.T, prefix string, kind capability.UnitKind) (UnitClaim, error) {
 	t.Helper()
 	f.Poll(t, prefix, kind)
-	return f.Store.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 }
 
 // Rank changes the team's claim ranking as the given member.
 func (f *RankingFixture) Rank(t *testing.T, actor Actor, tiers ...string) error {
 	t.Helper()
-	p, err := f.Store.ResolveAuthority(t.Context(), actor.Authority)
+	p, err := f.Store.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
 		return err
 	}
 	route, _ := capability.LookupRoute("PUT", "/api/v1/team/settings")
-	a, err := capability.Authorize(t.Context(), f.Store, route, capability.Authenticated{Principal: p, Method: "PUT", Pattern: "/api/v1/team/settings", Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: "a"})
+	a, err := capability.Authorize(t.Context(), f.Store.AsOperator(), route, capability.Authenticated{Principal: p, Method: "PUT", Pattern: "/api/v1/team/settings", Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: "a"})
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func (f *RankingFixture) RequireOnJobs(t *testing.T, terms ...string) {
 func (f *RankingFixture) ClaimKinds(t *testing.T, prefix string, kinds ...capability.UnitKind) (UnitClaim, error) {
 	t.Helper()
 	f.Poll(t, prefix, kinds...)
-	return f.Store.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 }
 
 // LocalQueue registers a local controller queue claimant of the team.

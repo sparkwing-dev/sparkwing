@@ -17,7 +17,10 @@ func TestLocalPublicationReadsTenDistinctManifests(t *testing.T) {
 	}
 	manifests := fakeBlobManifests{}
 	records.manifests = manifests
-	s.SetResultBlobRecords(manifests)
+	{
+		records := &blobRecords{manifests: manifests}
+		s.resultRecords, s.materializations = records, records
+	}
 	for i, intent := range intents {
 		intent.Digest = blob.Digest(fmt.Sprintf("%064x", i+1))
 		if _, err := commitTestBlob(t, records.tenant, intent); err != nil {
@@ -38,11 +41,14 @@ func TestLocalPublicationReadsTenDistinctManifests(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET status='success',finished_at=? WHERE team='a' AND id='run'", s.now().UnixNano())
 	calls := map[blob.Digest]int{}
-	s.SetResultBlobRecords(probingManifests{manifests, func(kind string, digest blob.Digest) {
-		if kind == "read" {
-			calls[digest]++
-		}
-	}})
+	{
+		records := &blobRecords{manifests: probingManifests{manifests, func(kind string, digest blob.Digest) {
+			if kind == "read" {
+				calls[digest]++
+			}
+		}}}
+		s.resultRecords, s.materializations = records, records
+	}
 	publication, err := records.tenant.ReadLocalPublication(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)

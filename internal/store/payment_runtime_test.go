@@ -52,7 +52,7 @@ func TestPaymentSettlementRefusesUnverifiedOrConflictingFacts(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			s, event := paymentFixture(t, capability.PaymentTest)
 			if kind == "zero" {
-				if _, err := s.SettlePayment(t.Context(), capability.VerifiedPaymentEvent{}); err == nil {
+				if _, err := s.AsOperator().SettlePayment(t.Context(), capability.VerifiedPaymentEvent{}); err == nil {
 					t.Fatal("zero proof accepted")
 				}
 				return

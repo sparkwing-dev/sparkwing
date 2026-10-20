@@ -93,7 +93,7 @@ func (t *Tenant) hold(ctx context.Context, disputeID, paymentID, reason, actor s
 }
 
 func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, team Team, paymentID string) (bool, error) {
-	heldTeam, heldPayment, found, err := disputeHoldTx(ctx, tx, disputeID)
+	heldTeam, heldPayment, found, err := tx.operator.disputeHoldTx(ctx, tx, disputeID)
 	if err != nil || !found {
 		return false, err
 	}
@@ -104,7 +104,7 @@ func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, te
 	return true, nil
 }
 
-func disputeHoldTx(ctx context.Context, tx *storeTx, disputeID string) (Team, string, bool, error) {
+func (op *Operator) disputeHoldTx(ctx context.Context, tx *storeTx, disputeID string) (Team, string, bool, error) {
 	var team, payment string
 	err := tx.QueryRowContext(ctx, `SELECT team, payment_id FROM credit_freezes WHERE dispute_id = ?`,
 		disputeID).Scan(&team, &payment)

@@ -27,11 +27,11 @@ func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,generation,attempt,finished_at,spec_json,execution_json,manifest_record) VALUES ('a','run','producer','done','success',3,2,1,?,?,?)`, []byte(`{"id":"producer","env":{"PRIVATE":{"value":"private-source-value"}}}`), []byte(`{}`), raw)
-	claim, err := e.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "reader-machine", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "reader"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "reader-machine", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "reader"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := New(e.Store, nil).WithEngineController(e).Handler()
+	handler := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 	host, err := client.NewNodeHostClient(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{handler}}, Bearer: func(context.Context) (string, error) { return string(claim.Bearer), nil }}, "run", "reader")
 	if err != nil {
 		t.Fatal(err)

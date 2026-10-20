@@ -13,11 +13,11 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 	s.clock = func() time.Time { return now }
 	rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
-	first, err := s.ClaimUnit(t.Context(), demand)
+	first, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RenewUnit(t.Context(), first.Award.CapabilityPrefix, true); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), first.Award.CapabilityPrefix, true); err != nil {
 		t.Fatal(err)
 	}
 	now = first.Award.LeaseExpiresAt
@@ -25,10 +25,10 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reaped, err := s.ReapUnits(t.Context(), lease, 1); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+	if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 1); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 		t.Fatalf("recovery: %+v, %v", reaped, err)
 	}
-	second, err := s.ClaimUnit(t.Context(), demand)
+	second, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || second.Award.Generation != first.Award.Generation+1 || second.RunID != first.RunID {
 		t.Fatalf("reclaim: %+v, %v", second, err)
 	}
@@ -46,10 +46,10 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 	if _, err := finish(second); err != nil {
 		t.Fatal(err)
 	}
-	if reaped, err := s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+	if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
 		t.Fatalf("finished owner recovered: %+v, %v", reaped, err)
 	}
-	if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 		t.Fatal("terminal run was claimed again")
 	}
 	run, err := tenant.ReadRun(t.Context(), first.RunID)
@@ -72,13 +72,13 @@ func TestOwnerReaperLimitRecoversUnstartedWorkAcrossTeams(t *testing.T) {
 	}
 	seen := map[Team]bool{}
 	for range 2 {
-		page, err := s.ReapUnits(t.Context(), lease, 1)
+		page, err := s.AsOperator().ReapUnits(t.Context(), lease, 1)
 		if err != nil || len(page) != 1 || !page[0].Requeued || page[0].Disruptions != 0 || seen[page[0].Team] {
 			t.Fatalf("bounded recovery: %+v, %v", page, err)
 		}
 		seen[page[0].Team] = true
 	}
-	if page, err := s.ReapUnits(t.Context(), lease, 1); err != nil || len(page) != 0 {
+	if page, err := s.AsOperator().ReapUnits(t.Context(), lease, 1); err != nil || len(page) != 0 {
 		t.Fatalf("completed recovery: %+v, %v", page, err)
 	}
 	for team := range seen {

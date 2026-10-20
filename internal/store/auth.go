@@ -45,8 +45,8 @@ func sessionDigest(rawSession string) string {
 // so a browser keeps cookies a working backend would still resolve.
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 
-func (s *Store) deriveCSRFToken(ctx context.Context, rawSession string) (string, error) {
-	key, err := s.csrfSigningKey(ctx)
+func (o *Operator) deriveCSRFToken(ctx context.Context, rawSession string) (string, error) {
+	key, err := o.csrfSigningKey(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -56,7 +56,7 @@ func (s *Store) deriveCSRFToken(ctx context.Context, rawSession string) (string,
 }
 
 // CreateCapabilitySession opens a session with an account capability as its revocation parent.
-func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error) {
+func (o *Operator) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error) {
 	if prefix == "" || ttl <= 0 {
 		return "", nil, fmt.Errorf("%w: capability and positive ttl required", ErrInvalidInput)
 	}
@@ -64,11 +64,11 @@ func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl 
 	if err != nil {
 		return "", nil, err
 	}
-	csrf, err := s.deriveCSRFToken(ctx, raw)
+	csrf, err := o.deriveCSRFToken(ctx, raw)
 	if err != nil {
 		return "", nil, err
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return "", nil, err
 	}
@@ -110,29 +110,29 @@ func newSessionID() (string, error) {
 }
 
 // LookupSession resolves a raw session id; bumps last_used_at on hit.
-func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session, error) {
-	return s.lookupSession(ctx, rawSession, 0, 0)
+func (o *Operator) LookupSession(ctx context.Context, rawSession string) (*Session, error) {
+	return o.lookupSession(ctx, rawSession, 0, 0)
 }
 
 // LookupSessionAndRenew resolves a live session and extends its expiry from
 // this use. A row past maxLifetime is returned without renewal for its caller
 // to revoke.
-func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error) {
+func (o *Operator) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error) {
 	if ttl <= 0 {
 		return nil, errors.New("sessions: ttl must be positive")
 	}
-	return s.lookupSession(ctx, rawSession, ttl, maxLifetime)
+	return o.lookupSession(ctx, rawSession, ttl, maxLifetime)
 }
 
-func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error) {
+func (o *Operator) lookupSession(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error) {
 	if rawSession == "" {
 		return nil, errors.New("empty session")
 	}
-	csrfToken, err := s.deriveCSRFToken(ctx, rawSession)
+	csrfToken, err := o.deriveCSRFToken(ctx, rawSession)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
@@ -195,7 +195,7 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLi
 }
 
 // DeleteSession removes the session by its raw id. Idempotent.
-func (s *Store) DeleteSession(rawSession string) error {
-	_, err := s.execNoCtx(`DELETE FROM sessions WHERE hash = ?`, sessionDigest(rawSession))
+func (o *Operator) DeleteSession(rawSession string) error {
+	_, err := o.s.execNoCtx(`DELETE FROM sessions WHERE hash = ?`, sessionDigest(rawSession))
 	return err
 }

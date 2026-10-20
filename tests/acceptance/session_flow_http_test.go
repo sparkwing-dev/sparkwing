@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -29,6 +30,8 @@ type sessionFlow struct {
 	raw    string
 	csrf   string
 	logs   *bytes.Buffer
+	path   string
+	config deployment.Config
 }
 
 func newSessionFlow(t *testing.T) sessionFlow {
@@ -38,7 +41,8 @@ func newSessionFlow(t *testing.T) sessionFlow {
 
 func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
 	t.Helper()
-	s, cipher := credentialMutationStore(t)
+	f := sessionFlow{logs: &bytes.Buffer{}, path: filepath.Join(t.TempDir(), "sessions.db"), config: cfg}
+	s, _, server := credentialMutationServer(t, f.path, f.newServer)
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','member','editor',1)`,
@@ -47,13 +51,37 @@ func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
 			t.Fatal(err)
 		}
 	}
-	logs := &bytes.Buffer{}
-	server := controller.NewDeployment(s, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher)
-	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+	raw, csrf, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sessionFlow{store: s, server: server, raw: raw, csrf: csrf, logs: logs}
+	f.store, f.server, f.raw, f.csrf = s, server, raw, csrf
+	return f
+}
+
+func (f sessionFlow) newServer(s *store.Store, cipher *secrets.Cipher) *controller.Server {
+	server := controller.NewDeployment(s, f.config, slog.New(slog.NewTextHandler(f.logs, nil)))
+	if cipher != nil {
+		server.WithSecretsCipher(cipher)
+	}
+	return server
+}
+
+func (f *sessionFlow) restartWithCipher(t *testing.T, cipher *secrets.Cipher) {
+	t.Helper()
+	if err := f.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, server, err := openControllerFixture(f.path, func(s *store.Store) *controller.Server { return f.newServer(s, cipher) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	f.store, f.server = s, server
 }
 
 func (f sessionFlow) request(method, path, body string) *http.Request {
@@ -107,7 +135,7 @@ func TestSessionFlowHTTPRenewsWithNamedProof(t *testing.T) {
 func TestSessionFlowHTTPLogoutUsesVerifiedSession(t *testing.T) {
 	for _, header := range []bool{false, true} {
 		f := newSessionFlow(t)
-		other, _, _, err := f.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+		other, _, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -121,7 +149,7 @@ func TestSessionFlowHTTPLogoutUsesVerifiedSession(t *testing.T) {
 		if w.Code != 204 || w.Body.Len() != 0 || count != 1 || w.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("HTTP %d %s count=%d", w.Code, w.Body.String(), count)
 		}
-		if _, err := f.store.LookupSession(t.Context(), other); err != nil {
+		if _, err := f.store.AsOperator().LookupSession(t.Context(), other); err != nil {
 			t.Fatalf("logout ended unrelated session: %v", err)
 		}
 	}
@@ -182,10 +210,10 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 	const maximum = 48 * time.Hour
 	h := f.server.WithSessionMaxLifetime(maximum).Handler()
 	property := func(age uint8) bool {
-		if err := f.store.DeleteSession(f.raw); err != nil {
+		if err := f.store.AsOperator().DeleteSession(f.raw); err != nil {
 			t.Fatal(err)
 		}
-		raw, csrf, _, err := f.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+		raw, csrf, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +244,7 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 	for _, method := range []string{"GET", "POST"} {
 		f := newSessionFlow(t)
 		digest := sha256.Sum256([]byte(f.raw))
-		parent, err := f.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		parent, err := f.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 			Kind: capability.ProvisionMember, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
 			Team: "team", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 			Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone},
@@ -224,7 +252,7 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, session, err := f.store.CreateCapabilitySession(t.Context(), parent.Capability.Prefix, time.Hour)
+		raw, session, err := f.store.AsOperator().CreateCapabilitySession(t.Context(), parent.Capability.Prefix, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -276,14 +304,14 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(time.Hour).UnixNano()
 			case "license":
 			case "missing key":
-				f.server.WithSecretsCipher(nil)
+				f.restartWithCipher(t, nil)
 				code = apierr.Unavailable
 			case "wrong key":
 				cipher, err := secrets.NewCipher(bytes.Repeat([]byte{79}, secrets.KeySize))
 				if err != nil {
 					t.Fatal(err)
 				}
-				f.server.WithSecretsCipher(cipher)
+				f.restartWithCipher(t, cipher)
 				code = apierr.Unavailable
 			case "backend":
 				query = "DROP TABLE sessions"
@@ -324,7 +352,7 @@ func TestSessionFlowHTTPRolelessAccountHasNoTeamAuthority(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, csrf, _, err := f.store.CreateIdentityAccountSession(t.Context(), store.Account{ID: "waitlisted"}, "", "github", "waitlisted", time.Hour)
+	raw, csrf, _, err := f.store.AsOperator().CreateIdentityAccountSession(t.Context(), store.Account{ID: "waitlisted"}, "", "github", "waitlisted", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +379,7 @@ func TestSessionFlowHTTPRolelessAccountHasNoTeamAuthority(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("roleless logout: %d %s", w.Code, w.Body.String())
 	}
-	if _, err := f.store.LookupSession(t.Context(), raw); err == nil {
+	if _, err := f.store.AsOperator().LookupSession(t.Context(), raw); err == nil {
 		t.Fatal("roleless logout kept session live")
 	}
 }

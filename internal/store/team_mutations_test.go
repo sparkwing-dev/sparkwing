@@ -15,7 +15,7 @@ import (
 
 func teamAuthorization(t *testing.T, s *Store, actor Actor, team Team, method, path string) capability.Authorized {
 	t.Helper()
-	p, err := s.ResolveAuthority(t.Context(), actor.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func teamAuthorization(t *testing.T, s *Store, actor Actor, team Team, method, p
 		t.Fatal("missing route", path)
 	}
 	target := capability.Target{Team: string(team)}
-	a, err := capability.Authorize(t.Context(), s, route, capability.Authenticated{Principal: p, Method: method, Pattern: path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, target)
+	a, err := capability.Authorize(t.Context(), s.AsOperator(), route, capability.Authenticated{Principal: p, Method: method, Pattern: path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestTeamDeletionUsesCurrentOwnerAndLastTeamGuards(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT requested_by FROM team_deletions WHERE slug='a'`).Scan(&requested); err != nil || requested != "owner" {
 		t.Fatalf("requested=%q: %v", requested, err)
 	}
-	if p, err := s.ResolveAuthority(t.Context(), actor.Authority); err != nil || p.Capability.Team != "b" {
+	if p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority); err != nil || p.Capability.Team != "b" {
 		t.Fatalf("session did not leave deleted team: %+v: %v", p.Capability.Team, err)
 	}
 	var members int

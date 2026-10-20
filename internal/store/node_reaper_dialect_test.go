@@ -23,7 +23,7 @@ func TestUnitReaperContinuesAfterTargetFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := st.ReapUnits(t.Context(), lease, 10)
+	page, err := st.AsOperator().ReapUnits(t.Context(), lease, 10)
 	if err == nil || !strings.Contains(err.Error(), "target refused") || len(page) != 1 || page[0].RunID != "good" {
 		t.Fatalf("reap results=%+v, error=%v", page, err)
 	}
@@ -62,7 +62,7 @@ func TestUnitReaperBoundsNodeRecovery(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, size := range []int{2, 1, 0} {
-		page, err := st.ReapUnits(t.Context(), lease, 2)
+		page, err := st.AsOperator().ReapUnits(t.Context(), lease, 2)
 		if err != nil || len(page) != size {
 			t.Fatalf("page: %+v, %v, expected %d units", page, err, size)
 		}
@@ -89,7 +89,7 @@ func TestUnitReaperPreservesAgentLostAttempt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			page, err := st.ReapUnits(t.Context(), lease, 1)
+			page, err := st.AsOperator().ReapUnits(t.Context(), lease, 1)
 			if err != nil || len(page) != 1 || page[0].Failed != (disruptions == 2) || page[0].Disruptions != disruptions+1 {
 				t.Fatalf("loss policy: %+v, %v", page, err)
 			}

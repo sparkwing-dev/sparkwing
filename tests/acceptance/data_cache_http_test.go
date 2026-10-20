@@ -53,7 +53,7 @@ func newCacheHTTPFixture(t testing.TB) (*dataHTTPFixture, *cacheHTTPTransactions
 		t.Fatal(err)
 	}
 	tx := &cacheHTTPTransactions{dataTransactions: tenant.(*dataTransactions)}
-	f.data.ResolveTenant = func(_ context.Context, team store.Team) (controller.DataTransactions, error) {
+	f.data.ResolveTenant = func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 		if team != "team" {
 			t.Fatalf("foreign tenant %s", team)
 		}

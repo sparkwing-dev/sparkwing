@@ -376,13 +376,6 @@ func discardStaged(path string) {
 	}
 }
 
-// FileDigest is the sha256 of one file, hex encoded. Arming records it for the
-// binary it pinned, and the fire recomputes it before executing that file, so
-// a pin replaced in place is caught rather than run.
-func FileDigest(path string) (string, error) {
-	return fileDigest(path)
-}
-
 func fileDigest(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -661,7 +654,7 @@ func (s *Service) refreshOne(
 }
 
 func (s *Service) declaredSchedules(root string) ([]Declared, error) {
-	declared, err := DeclaredSchedules(root)
+	declared, err := declaredSchedules(root)
 	for i := range declared {
 		declared[i].Team = s.team()
 	}

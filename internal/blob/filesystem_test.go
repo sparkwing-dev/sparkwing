@@ -173,3 +173,33 @@ func TestFilesystemSigningRejectsPathsAndLogs(t *testing.T) {
 		t.Fatal("deleted outside object namespace")
 	}
 }
+
+func TestFilesystemTeamDeletionRemovesCASAndPendingOnlyForThatTeam(t *testing.T) {
+	dir := t.TempDir()
+	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	for _, key := range []string{"teams/acme/cas/blob", "teams/acme/pending/upload", "teams/acme-other/cas/blob"} {
+		path := filepath.Join(dir, key)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := backend.DeleteTeamObjects(t.Context(), "acme"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "teams/acme")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted namespace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "teams/acme-other/cas/blob")); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.DeleteTeamObjects(t.Context(), "../acme-other"); err == nil {
+		t.Fatal("accepted invalid scope")
+	}
+}

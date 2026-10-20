@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func preparedProfileRun(t *testing.T, opts ...store.Option) (*Server, *store.Tenant, func(store.RunState)) {
+func preparedProfileRun(t *testing.T, opts ...store.Option) (*serverFixture, *store.Tenant, func(store.RunState)) {
 	t.Helper()
 	server, host, tenant, owner := localHostFixture(t, opts...)
 	start := time.Now().Add(-time.Minute)
@@ -52,7 +52,7 @@ func preparedProfileRun(t *testing.T, opts ...store.Option) (*Server, *store.Ten
 	return server, tenant, finish
 }
 
-func completedProfileRun(t *testing.T, opts ...store.Option) (*Server, *store.Tenant) {
+func completedProfileRun(t *testing.T, opts ...store.Option) (*serverFixture, *store.Tenant) {
 	t.Helper()
 	server, tenant, finish := preparedProfileRun(t, opts...)
 	finish(store.RunSuccess)

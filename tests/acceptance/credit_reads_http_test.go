@@ -62,8 +62,8 @@ func licensedCreditServer(t *testing.T, b *credentialBoundary) *controller.Serve
 
 func creditReadServer(t *testing.T, b *credentialBoundary, f *creditReads) http.Handler {
 	t.Helper()
-	return licensedCreditServer(t, b).
-		WithCreditReader(func(_ context.Context, team store.Team) (controller.CreditReader, error) {
+	return bindTenantPort[controller.CreditReader](licensedCreditServer(t, b),
+		func(_ context.Context, team store.Team) (controller.CreditReader, error) {
 			f.resolves++
 			if team != "team" {
 				t.Fatalf("selected tenant = %q", team)
@@ -180,7 +180,7 @@ func TestCreditHistoryLimitsAndEmptyArrays(t *testing.T) {
 				}
 			} else {
 				assertEngineError(t, w, 400, apierr.BadRequest)
-				if f.resolves != 0 || f.reads != 0 {
+				if f.resolves != 1 || f.reads != 0 {
 					t.Fatal("invalid selector reached ledger")
 				}
 			}

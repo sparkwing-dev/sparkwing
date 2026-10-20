@@ -113,7 +113,7 @@ func rotationOwnerTx(ctx context.Context, tx *storeTx, p capability.Principal, c
 		return nil
 	}
 	if c.Subject.Kind == capability.SubjectMachine && slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
-		record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, c.Prefix)
 		if err != nil {
 			return err
 		}
@@ -143,7 +143,7 @@ func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal,
 		spec := capability.DelegateSpec{Parent: *c.Parent, Audience: c.Audience, Grants: slices.Clone(c.Grants), Binding: c.Binding, Repositories: slices.Clone(c.Repositories), Data: c.Data, ExpiresAt: expires}
 		return capability.IssueRequest{Kind: capability.Delegate, Delegate: &spec}, nil
 	}
-	record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, c.Prefix)
 	if err != nil {
 		return capability.IssueRequest{}, err
 	}
@@ -156,7 +156,7 @@ func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal,
 }
 
 func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capability, deadline time.Time) error {
-	record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, c.Prefix)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if err := credentialRowChanged(result, err); err != nil {
 		return err
 	}
-	return advanceAuthGenerationsTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: c.Prefix}}, nil)
+	return tx.operator.advanceAuthGenerationsTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: c.Prefix}}, nil)
 }
 
 func validCapabilityOrigin(c capability.Capability, origin CapabilityOrigin) bool {

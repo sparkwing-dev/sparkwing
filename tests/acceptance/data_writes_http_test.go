@@ -171,7 +171,7 @@ func TestDataWriteHTTPAuthenticationAndFailures(t *testing.T) {
 			f := newDataHTTPFixture()
 			var tx *dataTransactions
 			resolve := f.data.ResolveTenant
-			f.data.ResolveTenant = func(ctx context.Context, team store.Team) (controller.DataTransactions, error) {
+			f.data.ResolveTenant = func(ctx context.Context, team store.Team) (controller.TenantHandle, error) {
 				result, err := resolve(ctx, team)
 				tx = result.(*dataTransactions)
 				if state == "quota" {

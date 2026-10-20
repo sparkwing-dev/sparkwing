@@ -214,7 +214,7 @@ func browserLogoutRequest(f sessionFlow, token string) *http.Request {
 
 func TestBrowserLogoutHTTPUsesNamedProof(t *testing.T) {
 	f := newSessionFlow(t)
-	other, _, _, err := f.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+	other, _, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestBrowserLogoutHTTPUsesNamedProof(t *testing.T) {
 	if !cleared["__Host-sw_session"] || !cleared["__Host-sw_csrf"] {
 		t.Fatalf("logout cookies: %v", w.Result().Cookies())
 	}
-	if _, err := f.store.LookupSession(t.Context(), other); err != nil {
+	if _, err := f.store.AsOperator().LookupSession(t.Context(), other); err != nil {
 		t.Fatal(err)
 	}
 	if logs := f.logs.String(); !strings.Contains(logs, "route=/logout") || !strings.Contains(logs, "principal_id=member") || strings.Contains(logs, f.raw) || strings.Contains(logs, f.csrf) {
@@ -295,7 +295,7 @@ func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 				query = `UPDATE sessions SET revoked_at=1`
 			case "license":
 			case "key":
-				f.server.WithSecretsCipher(nil)
+				f.restartWithCipher(t, nil)
 				code = apierr.Unavailable
 			case "delete":
 				query, code = `CREATE TRIGGER refuse_session_delete BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT,'private deletion fault'); END`, apierr.Unavailable

@@ -36,7 +36,7 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
 		rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 	}
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,12 +54,12 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
 	setMachineOrigin(t, s, "runner", &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 	rewriteSchemaExec(t, s.db, `INSERT INTO git_credentials(id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES ('credential','a','github.com','https','encrypted-secret',1,1,1)`)
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "remote"}})
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "remote"}}
 	if kind == capability.UnitPlan {
-		s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "cloud"}})
+		s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "cloud"}}
 	}
 
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 func setMachineOrigin(t *testing.T, s *Store, prefix string, origin *CapabilityOrigin) {
 	t.Helper()
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		record, err := loadCapabilityRecordTx(t.Context(), tx, prefix)
+		record, err := tx.operator.loadCapabilityRecordTx(t.Context(), tx, prefix)
 		if err != nil {
 			return err
 		}
@@ -154,9 +154,9 @@ func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Accept: accept}})
+				s.claimProfiles = claimProfileFake{profile: match.Profile{Accept: accept}}
 			case "enrollment":
-				s.SetClaimProfileResolver(nil)
+				s.claimProfiles = nil
 			case "audit":
 				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_source_audit BEFORE INSERT ON git_credential_releases BEGIN SELECT RAISE(ABORT,'audit refused'); END`)
 			case "commit":
@@ -201,9 +201,9 @@ func TestSourceReleaseRechecksLeaseAfterEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "remote"}, before: func() {
+	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "remote"}, before: func() {
 		tenant.s.clock = func() time.Time { return *row.LeaseExpiresAt }
-	}})
+	}}
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 	if err == nil || credential.Secret != "" || audit.ID != "" {
 		t.Fatal("release outlived the locked lease")
@@ -215,7 +215,7 @@ func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
 	tenant, auth := sourceReleaseFixture(t)
 	setMachineOrigin(t, tenant.s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 	auth.Principal.Capability.Billing = &capability.BillingProvenance{ExecutorClass: "cloud"}
-	tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Name: "cloud", Class: match.ClassCloud, Location: "cloud", Labels: []string{"class=cloud", "location=cloud"}}})
+	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Name: "cloud", Class: match.ClassCloud, Location: "cloud", Labels: []string{"class=cloud", "location=cloud"}}}
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 	if err == nil || credential.Secret != "" || audit.ID != "" {
 		t.Fatal("mutable executor facts replaced the awarded executor class")

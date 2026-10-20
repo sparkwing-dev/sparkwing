@@ -9,7 +9,7 @@ import (
 )
 
 func TestAPendingRunCarriesNoFinishTime(t *testing.T) {
-	s := storetest.Open(t)
+	s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 	tenant, plan, err := storePlanSealRequest(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
 				}
 				finish = store.FinishRunRequest{Unit: f.owner.Owner, Transition: store.RunTransition{RunID: f.ref.RunID, Actor: f.owner, To: status, Cause: store.RunFinish}}
 			} else {
-				s = storetest.Open(t)
+				s = storetest.Open(t, store.WithPolicies(sealStorePolicies))
 				tenant, finish = runCompletionFixture(t, s)
 				if status == store.RunCancelled {
 					run, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)

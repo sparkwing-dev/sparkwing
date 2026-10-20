@@ -148,3 +148,16 @@ func (s *EngineController) handleSyncLauncher(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, response)
 	return nil
 }
+
+// ClaimPolicyRouter shares the HTTP claim inventory with embedded claimants.
+func (s *EngineController) ClaimPolicyRouter() (*PolicyRouter, error) {
+	router := NewPolicyRouter(s.authorization)
+	router.resolveTenant = s.ResolveTenant
+	server := &Server{engineController: s}
+	for _, endpoint := range server.claimEndpoints() {
+		if err := router.Register(endpoint); err != nil {
+			return nil, err
+		}
+	}
+	return router, router.Validate()
+}

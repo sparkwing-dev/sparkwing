@@ -46,8 +46,8 @@ func queueReadFixture() (*credentialBoundary, *queueReads) {
 
 func queueReadServer(t *testing.T, b *credentialBoundary, f *queueReads) http.Handler {
 	t.Helper()
-	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).
-		WithQueueReader(func(_ context.Context, team store.Team) (controller.QueueReader, error) {
+	return bindTenantPort[controller.QueueReader](controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)),
+		func(_ context.Context, team store.Team) (controller.QueueReader, error) {
 			f.resolves++
 			if team != "team" {
 				t.Fatalf("selected tenant=%q", team)
@@ -56,7 +56,7 @@ func queueReadServer(t *testing.T, b *credentialBoundary, f *queueReads) http.Ha
 				return nil, f.resolveErr
 			}
 			return f, f.resolveErr
-		}).WithRunnerInventory(func(_ context.Context, team store.Team) (controller.RunnerInventoryReader, error) { return f, nil }).Handler()
+		}).Handler()
 }
 
 func TestQueueReadAuthenticatesBeforePersistence(t *testing.T) {

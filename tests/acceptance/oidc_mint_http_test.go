@@ -30,6 +30,7 @@ import (
 )
 
 type oidcFacts struct {
+	selectorTransactions
 	facts capability.OIDCFacts
 	actor capability.Authorized
 	calls int
@@ -46,7 +47,7 @@ func (f *oidcFacts) ReadOIDCFacts(_ context.Context, a capability.Authorized) (c
 func oidcBoundary() (*credentialBoundary, *oidcFacts) {
 	b := newCredentialBoundary()
 	b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.OIDCMint)
-	f := &oidcFacts{facts: capability.OIDCFacts{
+	f := &oidcFacts{selectorTransactions: selectorTransactions{team: "team"}, facts: capability.OIDCFacts{
 		Now: b.snapshot.Now, NotAfter: b.snapshot.Now.Add(5 * time.Minute),
 		Team: "team", RunID: "run", Pipeline: "deploy", Trigger: "push", RunnerKind: "runner", Ref: "refs/heads/main",
 		SHA: strings.Repeat("a", 40), Repository: "github.com/acme/api", RepositoryID: 42,
@@ -66,7 +67,7 @@ func oidcPrivate(t *testing.T) (*rsa.PrivateKey, []byte) {
 func oidcServer(t *testing.T, b *credentialBoundary, f *oidcFacts, private, published []byte) *controller.Server {
 	t.Helper()
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithEngineController(&controller.EngineController{
-		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "team", nil },
+		ResolveTenant: selectorTenant("team", nil),
 	})
 	if private != nil {
 		issuer, err := oidcissuer.New("https://issuer.example", private, published, 0)
@@ -76,7 +77,7 @@ func oidcServer(t *testing.T, b *credentialBoundary, f *oidcFacts, private, publ
 		s.WithOIDCIssuer(issuer)
 	}
 	if f != nil {
-		s.WithOIDCReader(func(context.Context, store.Team) (controller.OIDCReader, error) { return f, nil })
+		bindTenantPort[controller.OIDCReader](s, func(context.Context, store.Team) (controller.OIDCReader, error) { return f, nil })
 	}
 	return s
 }

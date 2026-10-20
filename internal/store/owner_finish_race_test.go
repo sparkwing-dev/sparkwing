@@ -18,14 +18,14 @@ func TestOwnerFinishRaceRejectsStaleAwardProperty(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET generation=?`, random.Int64N(1000))
 			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
-			first, err := s.ClaimUnit(t.Context(), demand)
+			first, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err := s.ReleaseUnit(t.Context(), first, first.Award.CapabilityPrefix); err != nil {
 				t.Fatal(err)
 			}
-			second, err := s.ClaimUnit(t.Context(), demand)
+			second, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil || second.Award.Generation != first.Award.Generation+1 {
 				t.Fatalf("successor: %+v, %v", second, err)
 			}

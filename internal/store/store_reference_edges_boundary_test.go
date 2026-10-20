@@ -99,7 +99,10 @@ func seedStoreReferenceBoundary(t *testing.T) (*Store, *Tenant, blob.Authority, 
 	}
 	source := intent.Identity.Attempt.Value
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: source.Generation}
-	s.SetResultBlobRecords(records.manifests)
+	{
+		records := &blobRecords{manifests: records.manifests}
+		s.resultRecords, s.materializations = records, records
+	}
 	if _, err := records.tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: source.RunID, NodeID: source.NodeID}, Actor: actor, Cause: CauseReport, To: NodeSuccess, SourceAttempt: sourceAttempt(source.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key}}}); err != nil {
 		t.Fatal(err)
 	}

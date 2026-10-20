@@ -226,7 +226,7 @@ func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T
 			tenant, auth, provider := githubSourceFixture(t, int64(value)+10)
 			switch mode {
 			case 0:
-				tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "remote", Accept: deniedSource(t)}})
+				tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "remote", Accept: deniedSource(t)}}
 			case 1:
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET subject_kind='service' WHERE prefix='runner'`)
 			case 2:

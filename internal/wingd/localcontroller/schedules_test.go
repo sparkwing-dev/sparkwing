@@ -35,7 +35,7 @@ func TestScheduleFactoryUsesOwnedStoreForPinsAndTicks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if service.Store != binding.Store || service.Schedules != binding.Tenant || service.Side != store.CronWhereLocal || service.PinRoot != filepath.Join(binding.Home, "crons") || service.LockPath != filepath.Join(binding.Home, "crons.lock") {
+	if *service.Operator != *binding.Store.AsOperator() || service.Schedules != binding.Tenant || service.Side != store.CronWhereLocal || service.PinRoot != filepath.Join(binding.Home, "crons") || service.LockPath != filepath.Join(binding.Home, "crons.lock") {
 		t.Fatal("schedule factory replaced the elected store or its home")
 	}
 	root := t.TempDir()

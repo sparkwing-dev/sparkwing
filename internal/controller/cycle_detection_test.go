@@ -127,7 +127,7 @@ func (c childRecorderTransport) RoundTrip(r *http.Request) (*http.Response, erro
 	return w.Result(), nil
 }
 
-func setChildAncestor(t *testing.T, e *EngineController, id, parent string) {
+func setChildAncestor(t *testing.T, e *engineFixture, id, parent string) {
 	t.Helper()
 	var body []byte
 	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT lineage_json FROM runs WHERE team='a' AND id=?`, id).Scan(&body); err != nil {
@@ -156,7 +156,7 @@ func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
 	}
 	for _, source := range []string{"registration", "app_coverage"} {
 		t.Run(source, func(t *testing.T) {
-			e, h, claim := childIntakeFixtureWith(t, func(e *EngineController) {
+			e, h, claim := childIntakeFixtureWith(t, func(e *engineFixture) {
 				if source == "registration" {
 					registerChildRepository(t, e, 2)
 				} else {
@@ -173,11 +173,11 @@ func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
 						}
 						return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 					})}}
-					New(e.Store, nil).WithGitHubApp(cfg)
+					e.Server.WithGitHubApp(cfg)
 				}
 				engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"ci","repository":"gh:2"},{"pipeline":"ci","repository":"gh:3"}]}`))
 			})
-			issued, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
+			issued, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -216,7 +216,7 @@ func TestChildCycleWalkRefusesRepeatedAncestorIDs(t *testing.T) {
 	}
 }
 
-func registerChildRepository(t *testing.T, e *EngineController, id int64) {
+func registerChildRepository(t *testing.T, e *engineFixture, id int64) {
 	t.Helper()
 	_, owner, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "child-owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TeamAdmin}})
 	if err != nil {

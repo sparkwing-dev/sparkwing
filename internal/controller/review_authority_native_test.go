@@ -24,7 +24,7 @@ func reviewSeed(t *testing.T, st *store.Store) string {
 	t.Helper()
 	key := sha256.Sum256([]byte(t.Name()))
 	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(key[:])
-	if created, err := EnsureBootstrapAdminToken(t.Context(), st, raw); err != nil || !created {
+	if created, err := EnsureBootstrapAdminToken(t.Context(), st.AsOperator(), raw); err != nil || !created {
 		t.Fatalf("seed: %v %v", created, err)
 	}
 	return raw
@@ -33,11 +33,11 @@ func reviewSeed(t *testing.T, st *store.Store) string {
 func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	raw := reviewSeed(t, e.Store)
-	parent, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	parent, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := e.Store.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.OperatorTokens}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	child, err := e.Store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.OperatorTokens}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineClaimHTTP(t, h, issued.Capability, "GET", "/api/v1/operator/tokens", "", 200)
-	if ready, err := e.Store.HasDeploymentAdministrator(t.Context()); err != nil || !ready {
+	if ready, err := e.Store.AsOperator().HasDeploymentAdministrator(t.Context()); err != nil || !ready {
 		t.Fatalf("service administrator readiness: %v %v", ready, err)
 	}
 	var ended int
@@ -62,7 +62,7 @@ func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 	for _, secret := range []string{raw, child.Raw} {
 		engineClaimHTTP(t, h, secret, "GET", "/api/v1/operator/tokens", "", 401)
 	}
-	if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, raw); err == nil || created {
+	if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store.AsOperator(), raw); err == nil || created {
 		t.Fatalf("used seed accepted: %v %v", created, err)
 	}
 	var generation int64
@@ -71,24 +71,30 @@ func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 	}
 }
 
-func reviewAccount(t *testing.T, role string) (*Server, string, string) {
+func reviewAccount(t *testing.T, role string) (*serverFixture, string, string) {
 	t.Helper()
-	e, _ := engineRuntimeStore(t)
-	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
-	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member',?,1)`, role)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
-	raw, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	fixture := &serverFixture{}
+	e, _ := engineRuntimeStore(t, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
+	fixture.engine = e
+	s := fixture
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member',?,1)`, role)
+	raw, csrf, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s, raw, csrf
 }
 
-func reviewSessionRequest(t *testing.T, s *Server, raw, csrf, method, path, body string, status int) *httptest.ResponseRecorder {
+func reviewSessionRequest(t *testing.T, s interface {
+	Handler() http.Handler
+	cookiesSecure() bool
+}, raw, csrf, method, path, body string, status int,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(method, "https://controller.test"+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -209,7 +215,7 @@ func TestReviewConsoleCommitRevalidatesProofProperty(t *testing.T) {
 			proof = nil
 		}
 		spec := capability.ProvisionSpec{Kind: capability.ProvisionService, Authority: &auth.Principal.Authority, ConsoleProof: proof, RegistrationID: fmt.Sprintf("service:property-%d", ordinal), Subject: capability.Subject{Kind: capability.SubjectService, ID: fmt.Sprintf("property-%d", ordinal)}, Grants: []capability.Grant{capability.OperatorTokens}, Binding: capability.Binding{Kind: capability.BindingNone}}
-		issued, err := s.store.ProvisionCapability(t.Context(), spec)
+		issued, err := s.store.AsOperator().ProvisionCapability(t.Context(), spec)
 		return (err == nil && issued.Raw != "") == (configured && !derived && !foreign)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
@@ -266,7 +272,7 @@ func TestNativeTokenOwnershipRelationProperty(t *testing.T) {
 	s, raw, csrf := reviewAccount(t, "reader")
 	engineSQL(t, s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('other','other@example.test',1,1)`)
 	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','other','owner',1)`)
-	other, otherCSRF, _, err := s.store.CreateAccountSession(t.Context(), store.Account{ID: "other"}, "a", time.Hour)
+	other, otherCSRF, _, err := s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "other"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +299,7 @@ func TestNativeTokenOwnershipRelationProperty(t *testing.T) {
 			expected = 204
 		}
 		reviewSessionRequest(t, s, raw, csrf, "DELETE", fmt.Sprintf("/api/v1/tokens/%s?owner=member&team=%d", token.Prefix, hint), "", expected)
-		_, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(token.Capability)))
+		_, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(token.Capability)))
 		return (err != nil) == allowed
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {

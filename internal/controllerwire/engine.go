@@ -138,6 +138,7 @@ type LauncherPreparation struct {
 
 // LauncherSyncResponse carries immutable execution inputs and cleanup identities without bearers.
 type LauncherSyncResponse struct {
+	Deferred           []capability.LeaseRef    `json:"deferred,omitempty"`
 	Prepared           []LauncherPreparation    `json:"prepared,omitempty"`
 	Awards             []ClaimedUnit            `json:"awards"`
 	Remove             []LauncherJobRef         `json:"remove"`

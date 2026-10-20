@@ -22,7 +22,7 @@ func (s *Server) teamStorageStanding(r *http.Request, team store.Team) (*teamSta
 	if !s.deployment.MultiTeam() || team == "" || team == store.DefaultTeam {
 		return nil, nil
 	}
-	tenant, err := s.store.ForTeam(r.Context(), team)
+	tenant, err := s.tenantForTeam(r.Context(), team)
 	if err != nil {
 		return nil, err
 	}

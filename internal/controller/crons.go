@@ -42,29 +42,14 @@ type ScheduledRunWriter interface {
 	AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)
 }
 
-// WithScheduledRunWriter supplies tenant scheduled-intake transactions before serving.
-func (s *Server) WithScheduledRunWriter(resolve func(context.Context, store.Team) (ScheduledRunWriter, error)) *Server {
-	s.resolveScheduledRunWriter = resolve
-	return s
-}
-
 // Launch records one run for a due schedule instant.
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error) {
 	if s.Team == "" || s.ID == "" || due.IsZero() {
 		return "", invalidEngineBody("schedule team, id and due instant are required")
 	}
-	var writer ScheduledRunWriter
-	var err error
-	if l.server.resolveScheduledRunWriter != nil {
-		writer, err = l.server.resolveScheduledRunWriter(ctx, s.Team)
-	} else {
-		writer, err = l.server.tenantForTeam(ctx, s.Team)
-	}
+	writer, err := tenantPort[ScheduledRunWriter](ctx, l.server, s.Team)
 	if err != nil {
 		return "", err
-	}
-	if writer == nil || writer.Team() != s.Team {
-		return "", missingEndpointPolicy()
 	}
 	admitted, err := writer.AdmitScheduledRun(ctx, s, due)
 	if err != nil {
@@ -122,7 +107,7 @@ func (s *Server) cronServiceFor(tenant *store.Tenant, principal string) *crons.S
 	}
 
 	svc := &crons.Service{
-		Store:    s.store,
+		Operator: s.operator,
 		Launcher: cronLauncher{server: s},
 		Now:      s.cronNow,
 		Host:     s.cronHolder,
@@ -162,7 +147,7 @@ func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 
 func (s *Server) cronTickOnce(ctx context.Context) {
 	var report crons.TickReport
-	ran, err := s.store.AsOperator().RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
+	ran, err := s.operator.RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
 		// safety: a tick that outlives the lease is a tick running beside
 		// whoever claimed the next minute, so it is cut at the lease instead.
 		deadline, cancel := context.WithTimeout(tickCtx, cronTickLeaseTTL)

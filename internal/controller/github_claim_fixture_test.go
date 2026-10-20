@@ -25,8 +25,7 @@ func (env githubClaimEnvironment) ResolveClaimProfile(context.Context, capabilit
 }
 
 func configureGitHubClaims(s *controller.Server, st *store.Store) *controller.Server {
-	st.SetClaimProfileResolver(githubClaimEnvironment{})
-	return s.WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: githubClaimEnvironment{}})
+	return s.WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: githubClaimEnvironment{}}))
 }
 
 func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, sha string, appID int64, dispatch runspec.Dispatch) {

@@ -38,7 +38,7 @@ func TestRenewUnitCannotMutateAStaleJobProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, executing := range []bool{false, true} {
-				if _, err := s.RenewUnit(t.Context(), prefix, executing); err == nil {
+				if _, err := s.AsOperator().RenewUnit(t.Context(), prefix, executing); err == nil {
 					t.Fatal("stale authority renewed a job")
 				}
 				after, err := tenant.ReadNode(t.Context(), ref)

@@ -23,7 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func nativeClaimPresentation(t *testing.T, e *EngineController, a capability.Authorized) string {
+func nativeClaimPresentation(t *testing.T, e *engineFixture, a capability.Authorized) string {
 	t.Helper()
 	secret := sha256.Sum256([]byte("native-" + a.Principal.Capability.Prefix))
 	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
@@ -147,7 +147,7 @@ func TestNativePlanAndFinishReplayKeepDistinctProofs(t *testing.T) {
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/plan", string(body)+" ", 401)
 }
 
-func nativePlanBody(t *testing.T, e *EngineController, tenant *store.Tenant, a capability.Authorized) []byte {
+func nativePlanBody(t *testing.T, e *engineFixture, tenant *store.Tenant, a capability.Authorized) []byte {
 	t.Helper()
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {
@@ -189,7 +189,7 @@ func TestNativeControllerPlanReplayAfterOwnerHandoff(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan' WHERE team='a' AND id='run'`)
 	engineSQL(t, e.Store, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,1)`, time.Now().Add(time.Hour).UnixNano())
 	launcher := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	p, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(launcher)))
+	p, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(launcher)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,15 +199,15 @@ func TestNativeControllerPlanReplayAfterOwnerHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `UPDATE capabilities SET repo_scope=?,authority_json=? WHERE prefix='launcher'`, []byte(`["gh:1"]`), envelope)
-	claim, err := e.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := e.Store.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+	issued, err := e.Store.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err = e.Store.LookupCapability(t.Context(), issued.Capability.Digest)
+	p, err = e.Store.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest)
 	if err != nil {
 		t.Fatal(err)
 	}

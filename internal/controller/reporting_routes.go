@@ -65,8 +65,8 @@ func reportingPipelineTarget(r *http.Request) (capability.RequestEvidence, error
 }
 
 func (s *Server) reportingTenant(r *http.Request, a capability.Authorized) (*store.Tenant, error) {
-	if a.Target.Team == "" || s.store == nil {
+	if a.Target.Team == "" || s.operator == nil {
 		return nil, missingEndpointPolicy()
 	}
-	return s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	return s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 }

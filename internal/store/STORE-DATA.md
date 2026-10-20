@@ -5,7 +5,7 @@ Record writes, reads and memo copies call `blob.RecordNamespace` and
 implementation are removed. Store tests use the shared rules with valid sealed
 refs and memo hashes. The tests keep a manifest-reader fake for byte I/O.
 
-`SetResultBlobRecords` supplies verified manifests to tenant record commits,
+`WithPolicies` supplies verified manifests through `Policies.ResultBlobs` to tenant record commits,
 lookups, memo copies and terminal result attachment. `BlobRecords` uses that
 configured reader when its caller omits one. The controller's `WithDataObjects`
 installs it before sharing the store. Physical manifest corruption refuses a
@@ -235,7 +235,7 @@ expiry and manifest fields. Equivalent metadata replays after reopening, includi
 an expiry expressed in another timezone. Changing the expiry instant still
 conflicts with an immutable output or manifest record.
 
-`SetResultBlobRecords(manifestReader)` configures result attachment before the
+`WithPolicies` configures `Policies.ResultBlobs` during store construction before the
 store is shared. The result transaction verifies each output or manifest key
 against the current tenant, run, job, attempt and generation. It reads existing
 records, verified manifest members, reference authority and existence through

@@ -157,7 +157,7 @@ func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
 	if prior == "" || prior == newSessionID {
 		return
 	}
-	if err := s.store.DeleteSession(prior); err != nil {
+	if err := s.operator.DeleteSession(prior); err != nil {
 		s.logger.Warn("sign-in could not end the browser's earlier session", "err", err)
 	}
 }

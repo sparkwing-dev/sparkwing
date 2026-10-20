@@ -31,7 +31,7 @@ func TestProvisionMemberCurrentScopesProperty(t *testing.T) {
 			}
 			original := slices.Clone(requested)
 			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: requested}
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			permitted := []capability.Grant{capability.RunsRead, capability.LogsRead}
 			if role == RoleEditor || role == RoleOwner {
 				permitted = append(permitted, capability.RunsWrite)
@@ -71,16 +71,16 @@ func TestProvisionedMemberRootUsesMembershipWithoutSessionAncestry(t *testing.T)
 				at := s.now().Add(24 * time.Hour)
 				spec.ExpiresAt = &at
 			}
-			root, err := s.ProvisionCapability(t.Context(), spec)
+			root, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil || root.Raw == "" || root.Capability.Parent != nil || root.Capability.Subject != spec.Subject || !reflect.DeepEqual(root.Capability.ExpiresAt, spec.ExpiresAt) {
 				t.Fatalf("provisioned root: %+v, %v", root.Capability, err)
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, member.Authority.ID)
-			if _, err := s.LookupCapability(t.Context(), root.Capability.Digest); err != nil {
+			if _, err := s.AsOperator().LookupCapability(t.Context(), root.Capability.Digest); err != nil {
 				t.Fatalf("session revoke ended independent root: %v", err)
 			}
 			rewriteSchemaExec(t, s.db, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
-			if _, err := s.LookupCapability(t.Context(), root.Capability.Digest); err == nil {
+			if _, err := s.AsOperator().LookupCapability(t.Context(), root.Capability.Digest); err == nil {
 				t.Fatal("removed membership retained root authority")
 			}
 		})

@@ -38,7 +38,7 @@ func TestOwnerReaperRecoversSameRun(t *testing.T) {
 	for _, started := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unstarted", true: "started"}[started], func(t *testing.T) {
 			tenant, _, lease := ownerReaperFixture(t, started, 1, runspec.OriginTrigger)
-			reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].Generation != 7 {
 				t.Fatalf("reap = %+v, %v", reaped, err)
 			}
@@ -58,7 +58,7 @@ func TestOwnerReaperRecoversSameRun(t *testing.T) {
 			if err != nil || run.State != RunRunning || run.CancelRequestedAt != nil {
 				t.Fatalf("run = %+v, %v", run, err)
 			}
-			repeated, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+			repeated, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil || len(repeated) != 0 {
 				t.Fatalf("repeat reap = %+v, %v", repeated, err)
 			}
@@ -83,7 +83,7 @@ func TestOwnerReaperTerminalPolicies(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller' WHERE id='run'`)
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET unit_kind='plan'`)
 			}
-			reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil || len(reaped) != 1 || reaped[0].Requeued {
 				t.Fatalf("reap = %+v, %v", reaped, err)
 			}
@@ -109,7 +109,7 @@ func TestOwnerReaperPreservesRemoteClaimAndDrainsBeforeFailure(t *testing.T) {
 			tenant, now, lease := ownerReaperFixture(t, true, disruptions, runspec.OriginTrigger)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation,attempt,claimed_by,capability_prefix,lease_expires_at,started_at) VALUES ('a','run','remote','running',?, ?,4,1,'remote-runner','remote-cap',?,?)`, []byte(`{"id":"remote"}`), []byte(`{}`), now.Add(time.Minute).UnixNano(), now.Add(-time.Minute).UnixNano())
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','run','remote',1,4,'remote-runner','remote-cap','runner','remote','remote',?)`, now.Add(-time.Minute).UnixNano())
-			if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil {
+			if _, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 				t.Fatal(err)
 			}
 			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "remote"})
@@ -122,7 +122,7 @@ func TestOwnerReaperPreservesRemoteClaimAndDrainsBeforeFailure(t *testing.T) {
 			}
 			if disruptions == 2 {
 				*now = now.Add(time.Minute)
-				if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil {
+				if _, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 					t.Fatal(err)
 				}
 				run, err = tenant.ReadRun(t.Context(), "run")
@@ -164,7 +164,7 @@ func TestOwnerReaperEvalRecoveryAndBarrier(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil || len(reaped) != 1 || reaped[0].Kind != "eval" {
 				t.Fatalf("reap = %+v, %v", reaped, err)
 			}
@@ -218,7 +218,7 @@ func TestOwnerReaperLeavesControllerOwnershipToElection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 	if err != nil || len(reaped) != 0 {
 		t.Fatalf("controller-owned reap = %+v, %v", reaped, err)
 	}
@@ -227,7 +227,7 @@ func TestOwnerReaperLeavesControllerOwnershipToElection(t *testing.T) {
 		t.Fatalf("controller run = %s, %v", run.State, err)
 	}
 	*now = now.Add(time.Minute)
-	if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err == nil {
+	if _, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err == nil {
 		t.Fatal("expired reaper accepted an empty sweep")
 	}
 }
@@ -238,7 +238,7 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			tenant, request, now := planFixture(t, runspec.DispatchController)
 			s := tenant.s
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET lease_expires_at=? WHERE id=?`, now.UnixNano(), request.RunID)
-			stale, err := s.expiredUnits(t.Context(), 10)
+			stale, err := s.AsOperator().expiredUnits(t.Context(), 10)
 			if err != nil || len(stale) != 1 {
 				t.Fatalf("expired planner: %+v, %v", stale, err)
 			}
@@ -246,7 +246,7 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if reaped, err := s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+			if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 				t.Fatalf("recover planner: %+v, %v", reaped, err)
 			}
 			launcher := authorityRoot("launcher", "")
@@ -254,11 +254,11 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
 			authorityPersist(t, s, launcher)
 			fundUnitClaim(t, s)
-			claim, err := s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: launcher.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: request.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: launcher.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: request.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -310,7 +310,7 @@ func TestRunOwnerLostRefusesUnstartedLocalOwner(t *testing.T) {
 	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunFailed, Cause: RunOwnerLost, Actor: actor}); err == nil {
 		t.Fatal("unstarted local owner failed as an orphan")
 	}
-	if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+	if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 		t.Fatalf("unstarted local recovery = %+v, %v", reaped, err)
 	}
 }
@@ -318,7 +318,7 @@ func TestRunOwnerLostRefusesUnstartedLocalOwner(t *testing.T) {
 func TestOwnerRequeueEmitsOneCommittedEvent(t *testing.T) {
 	tenant, _, lease := ownerReaperFixture(t, true, 0, runspec.OriginTrigger)
 	for range 2 {
-		if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil {
+		if _, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -335,7 +335,7 @@ func TestOwnerRequeueEmitsOneCommittedEvent(t *testing.T) {
 func TestOwnerRequeueRollsBackWhenEventCannotCommit(t *testing.T) {
 	tenant, _, lease := ownerReaperFixture(t, true, 0, runspec.OriginTrigger)
 	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_requeue BEFORE INSERT ON events WHEN NEW.kind='run_requeued' BEGIN SELECT RAISE(ABORT,'event unavailable'); END`)
-	if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err == nil {
+	if _, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err == nil {
 		t.Fatal("owner recovery ignored failed event write")
 	}
 	var status, holder string
@@ -349,7 +349,7 @@ func TestOwnerRequeueRollsBackWhenEventCannotCommit(t *testing.T) {
 	}
 	rewriteSchemaCount(t, tenant.s.db, "events", 0)
 	rewriteSchemaExec(t, tenant.s.db, `DROP TRIGGER refuse_requeue`)
-	if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+	if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 		t.Fatalf("recovery retry: %+v, %v", reaped, err)
 	}
 }
@@ -370,7 +370,7 @@ func TestOwnerReaperRecoversEveryTeamWithoutFailingRemoteRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reaped, err := s.ReapUnits(t.Context(), lease, 10)
+	reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
 	if err != nil || len(reaped) != 2 {
 		t.Fatalf("all-team recovery: %+v, %v", reaped, err)
 	}

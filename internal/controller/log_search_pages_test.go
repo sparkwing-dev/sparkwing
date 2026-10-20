@@ -38,7 +38,7 @@ func memberObservationOptions(t *testing.T, st *store.Store, objects blob.Object
 	engineSQL(t, st, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','logs.read,runs.read',1,?,'a','member')`, hex.EncodeToString(digest[:]), time.Now().Add(time.Hour).UnixNano())
 	server := New(st, nil).WithDataObjects(objects)
 	authorization := server.authorization
-	authorization.Authenticator = capability.NewAuthenticator(st)
+	authorization.Authenticator = capability.NewAuthenticator(st.AsOperator())
 	authorization.CheckCSRF = func(*http.Request, capability.Principal) error { return nil }
 	server.WithAuthorization(authorization)
 	w := credentialRequestHTTP(t, server.Handler(), session, `{"grants":["logs.read","runs.read"]}`, false)

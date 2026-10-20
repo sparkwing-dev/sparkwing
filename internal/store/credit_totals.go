@@ -41,7 +41,7 @@ func (o *Operator) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals
 		return CreditLedgerTotals{}, err
 	}
 
-	refundable, err := refundableBillingSecondsTx(ctx, tx)
+	refundable, err := tx.operator.refundableBillingSecondsTx(ctx, tx)
 	if err != nil {
 		return CreditLedgerTotals{}, err
 	}
@@ -59,7 +59,7 @@ type pendingBillingSeconds struct {
 	paid  int64
 }
 
-func refundableBillingSecondsTx(ctx context.Context, tx *storeTx) (int64, error) {
+func (op *Operator) refundableBillingSecondsTx(ctx context.Context, tx *storeTx) (int64, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT a.team,a.reservation_id,a.capability_prefix,a.run_id,a.node_id,
 	 a.payer_team,a.executor_class,a.billing_start,a.billing_unit,
 	 (SELECT COALESCE(SUM(c.seconds),0) FROM credit_charges c WHERE c.team=a.team

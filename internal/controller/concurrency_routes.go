@@ -25,34 +25,8 @@ type ConcurrencyStore interface {
 	ForceReleaseAuthorizedSlots(context.Context, capability.Authorized, string) ([]store.ConcurrencyHolder, error)
 }
 
-// WithConcurrencyStore supplies tenant concurrency transactions before Handler is constructed.
-func (s *Server) WithConcurrencyStore(resolve func(context.Context, store.Team) (ConcurrencyStore, error)) *Server {
-	s.resolveConcurrencyStore = resolve
-	return s
-}
-
 func (s *Server) concurrencyStore(ctx context.Context, team string) (ConcurrencyStore, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var transactions ConcurrencyStore
-	var err error
-	if s.resolveConcurrencyStore != nil {
-		transactions, err = s.resolveConcurrencyStore(ctx, store.Team(team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		if tenant != nil {
-			transactions = tenant
-		}
-	}
-	if err != nil {
-		return nil, concurrencyError(err)
-	}
-	if transactions == nil || transactions.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return transactions, nil
+	return tenantPort[ConcurrencyStore](ctx, s, store.Team(team))
 }
 
 func (s *Server) concurrencyEndpoints() []Endpoint {

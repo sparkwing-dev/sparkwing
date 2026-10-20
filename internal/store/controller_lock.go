@@ -13,7 +13,7 @@ import (
 // OpenControllerPostgres waits for the store's single-controller lock before
 // migrations. failStop must terminate the process immediately, without draining.
 // Promotion fences writes even before the former process detects session loss.
-func OpenControllerPostgres(ctx context.Context, dsn string, failStop func(error)) (*Store, error) {
+func OpenControllerPostgres(ctx context.Context, dsn string, failStop func(error), opts ...Option) (*Store, error) {
 	cfg, err := postgresConfig(dsn)
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func OpenControllerPostgres(ctx context.Context, dsn string, failStop func(error
 	cfg.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return dial(ctx, endpoint.Network(), endpoint.String())
 	}
-	st, err := openPostgresConfig(ctx, cfg)
+	st, err := openPostgresConfig(ctx, cfg, opts...)
 	if err == nil {
 		// Row locks held by writes make promotion wait for their commits.
 		err = promotion.QueryRow(ctx, `INSERT INTO settings(key,value) VALUES ('controller_epoch',convert_to('1','UTF8'))

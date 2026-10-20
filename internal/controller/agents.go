@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"math"
 	"net/http"
 	"slices"
@@ -24,33 +23,10 @@ type RunnerInventoryReader interface {
 
 var _ RunnerInventoryReader = (*store.Tenant)(nil)
 
-// WithRunnerInventory supplies tenant snapshots before Handler is constructed.
-func (s *Server) WithRunnerInventory(resolve func(context.Context, store.Team) (RunnerInventoryReader, error)) *Server {
-	s.resolveRunnerInventory = resolve
-	return s
-}
-
 func (s *Server) runnerInventory(ctx context.Context, team string) (capability.RunnerSnapshot, error) {
-	if team == "" {
-		return capability.RunnerSnapshot{}, missingEndpointPolicy()
-	}
-	var reader RunnerInventoryReader
-	var err error
-	if s.resolveRunnerInventory != nil {
-		reader, err = s.resolveRunnerInventory(ctx, store.Team(team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		reader, _ = any(tenant).(RunnerInventoryReader)
-	}
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return capability.RunnerSnapshot{}, engineLookupError(store.ErrNotFound)
-	}
+	reader, err := tenantPort[RunnerInventoryReader](ctx, s, store.Team(team))
 	if err != nil {
-		return capability.RunnerSnapshot{}, engineLookupError(err)
-	}
-	if reader == nil || reader.Team() != store.Team(team) {
-		return capability.RunnerSnapshot{}, missingEndpointPolicy()
+		return capability.RunnerSnapshot{}, err
 	}
 	snapshot, err := reader.ReadRunners(ctx)
 	if err != nil {
@@ -108,23 +84,28 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request, a capabili
 }
 
 func (s *Server) sampleRunners(ctx context.Context) {
-	teams, err := s.store.AsOperator().ListTeams(ctx)
-	if err != nil {
-		s.logger.Error("runner sample failed", "err", err)
-		return
-	}
 	var labels [][]string
-	for _, team := range teams {
-		snapshot, err := s.runnerInventory(ctx, string(team))
+	attempted, sampled := 0, 0
+	err := s.operator.EachTeam(ctx, nil, func(tenant *store.Tenant) error {
+		attempted++
+		snapshot, err := tenant.ReadRunners(ctx)
 		if err != nil {
-			s.logger.Error("runner sample failed", "err", err)
-			return
+			return err
 		}
+		sampled++
 		for _, row := range snapshot.Runners {
 			if !row.LastSeen.IsZero() && snapshot.Now.Sub(row.LastSeen) <= runnerLivenessWindow {
 				labels = append(labels, row.Runner.Labels)
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		s.logger.Error("runner sample failed", "err", err)
+		return
+	}
+	if attempted > 0 && sampled == 0 {
+		return
 	}
 	setActiveRunners(len(labels))
 	liveRunners.sample(labels)

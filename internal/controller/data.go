@@ -10,9 +10,9 @@ import (
 
 // DataController joins authorized data routes to transactional records and physical objects.
 type DataController struct {
-	Store            *store.Store
+	authority        capability.AuthorityResolver
 	Objects          blob.ObjectBackend
-	ResolveTenant    func(context.Context, store.Team) (DataTransactions, error)
+	ResolveTenant    func(context.Context, store.Team) (TenantHandle, error)
 	ResolveAuthority func(context.Context, capability.Authorized) (blob.Authority, error)
 	ReadBlob         func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error)
 	ChargeDownload   func(context.Context, blob.Authority, blob.Blob) error
@@ -20,8 +20,8 @@ type DataController struct {
 	replicaID        string
 }
 
-// DataTransactions preserves C1's upload lifecycle and atomic record operations.
-type DataTransactions interface {
+// dataTransactions preserves C1's upload lifecycle and atomic record operations.
+type dataTransactions interface {
 	blob.RecordStore
 	ReserveBlobUpload(context.Context, store.UploadReservationRequest) (store.UploadReservation, error)
 	LookupBlobUpload(context.Context, blob.Authority, string) (store.UploadReservation, error)
@@ -71,4 +71,4 @@ func (s *DataController) BindData(ctx context.Context, authorized capability.Aut
 	return DataBinding{Authority: authority, Signer: bound, Records: bound}, nil
 }
 
-var _ DataTransactions = (*store.Tenant)(nil)
+var _ dataTransactions = (*store.Tenant)(nil)

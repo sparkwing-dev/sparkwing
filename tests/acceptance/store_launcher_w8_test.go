@@ -23,7 +23,7 @@ import (
 
 type storeLauncherSyncW8 func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 
-func (f storeLauncherSyncW8) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
+func (f storeLauncherSyncW8) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation, _ []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error) {
 	return f(ctx, ref, observed)
 }
 
@@ -31,7 +31,7 @@ func TestStoreLauncherW8(t *testing.T) {
 	server, root := storedCloudClaimantW8(t)
 	kube, boundary := cloudKubeW8(), &cloudBoundaryFake{}
 	_, cfg, _ := cloudFixture(launcher.CloudWork)
-	handler := controller.New(server.Store, nil).WithEngineController(server).Handler()
+	handler := controller.New(server.Store, nil).WithEngineController(server.EngineController).Handler()
 	var paths []string
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
 		Kube: kube, Boundary: boundary, Jobs: cfg,
@@ -126,11 +126,11 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 			raw += mutation
 			want = apierr.Unauthenticated
 		case 2:
-			principal, err := server.Store.LookupCapability(t.Context(), root.Capability.Digest)
+			principal, err := server.Store.AsOperator().LookupCapability(t.Context(), root.Capability.Digest)
 			if err != nil {
 				t.Fatal(err)
 			}
-			issued, err := server.Store.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{}, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: root.Capability.ExpiresAt})
+			issued, err := server.Store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{}, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: root.Capability.ExpiresAt})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -141,11 +141,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 				want = ""
 			}
 		case 4:
-			var prefix string
-			if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&prefix); err != nil {
-				t.Fatal(err)
-			}
-			actor := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}}
+			actor := store.Actor{Authority: server.Bootstrap}
 			if err := server.Store.AsOperator().RevokeAuthority(t.Context(), actor, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}); err != nil {
 				t.Fatal(err)
 			}

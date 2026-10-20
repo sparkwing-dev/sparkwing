@@ -12,7 +12,7 @@ func TestExecutionActivityKeepsTenantAndStoreClockProperty(t *testing.T) {
 		s, demand := unitClaimFixture(t)
 		now := s.now()
 		s.clock = func() time.Time { return now }
-		claim, err := s.ClaimUnit(t.Context(), demand)
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if err != nil {
 			t.Fatal(err)
 		}

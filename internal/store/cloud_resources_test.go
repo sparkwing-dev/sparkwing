@@ -12,12 +12,12 @@ func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *test
 	property := func(rate uint16, additional uint8) bool {
 		s, demand, _ := meteredUnitFixture(t, true)
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json='{}'`)
-		claim, err := s.ClaimUnit(t.Context(), demand)
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if err != nil {
 			t.Fatal(err)
 		}
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}
-		before, err := s.CloudAwardResources(t.Context(), ref)
+		before, err := s.AsOperator().CloudAwardResources(t.Context(), ref)
 		if err != nil || before == nil || before.Cores != 1 || before.MemoryBytes != CPUClassMemoryBytes(1) {
 			t.Fatalf("implicit demand lost priced class: %+v %v", before, err)
 		}
@@ -25,19 +25,19 @@ func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *test
 		if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 			t.Fatal(err)
 		}
-		changed, err := s.CloudAwardResources(t.Context(), ref)
+		changed, err := s.AsOperator().CloudAwardResources(t.Context(), ref)
 		if err != nil || !reflect.DeepEqual(before, changed) {
 			t.Fatalf("price change resized a committed award: %+v %v", changed, err)
 		}
-		exchanged, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: ref.ID})
+		exchanged, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: ref.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
-		direct, err := s.CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix})
+		direct, err := s.AsOperator().CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix})
 		if err != nil || !reflect.DeepEqual(before, direct) {
 			t.Fatalf("exchange resized a committed award: %+v %v", direct, err)
 		}
-		if _, err := s.CloudAwardResources(t.Context(), ref); err == nil {
+		if _, err := s.AsOperator().CloudAwardResources(t.Context(), ref); err == nil {
 			t.Fatal("consumed bootstrap retained allocation lookup")
 		}
 		return true
@@ -49,11 +49,11 @@ func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *test
 
 func TestCustomerMachineAwardHasNoCloudAllocation(t *testing.T) {
 	s, demand, _ := meteredUnitFixture(t, false)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	allocation, err := s.CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	allocation, err := s.AsOperator().CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil || allocation != nil {
 		t.Fatalf("customer machine received Cloud allocation: %+v %v", allocation, err)
 	}

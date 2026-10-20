@@ -96,13 +96,10 @@ func TestTeamNamesNormalizeToOneTenant(t *testing.T) {
 			t.Errorf("ForTeam(%q).Team() = %q, want acme", spelling, tn.Team())
 		}
 	}
-	teams, err := st.AsOperator().ListTeams(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	teams := liveTeams(t, st.AsOperator())
 	for _, team := range teams {
 		if team != store.DefaultTeam && team != "acme" {
-			t.Errorf("ListTeams has %q; the spellings should have registered one team", team)
+			t.Errorf("EachTeam has %q; the spellings should have registered one team", team)
 		}
 	}
 
@@ -151,12 +148,9 @@ func TestTenantRunsAreInvisibleToAnotherTeam(t *testing.T) {
 		t.Errorf("alpha.CountRuns = %d, %v; want 1", n, err)
 	}
 
-	teams, err := op.ListTeams(ctx)
-	if err != nil {
-		t.Fatalf("ListTeams: %v", err)
-	}
+	teams := liveTeams(t, op)
 	if len(teams) != 3 {
-		t.Errorf("ListTeams = %v, want default, alpha and beta", teams)
+		t.Errorf("EachTeam = %v, want default, alpha and beta", teams)
 	}
 }
 
@@ -226,4 +220,37 @@ func runIDs(runs []*store.Run) []string {
 		out[i] = r.ID
 	}
 	return out
+}
+
+func TestEachTeamSkipsDeletionAndContinuesAfterTenantFailure(t *testing.T) {
+	st := storetest.Open(t)
+	for _, team := range []store.Team{"aaa", "deleted", "zzz"} {
+		tenantFor(t, st, team)
+	}
+	if _, _, err := st.AsOperator().RequestTeamDeletion(t.Context(), "deleted", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var visited []store.Team
+	err := st.AsOperator().EachTeam(t.Context(), []store.Team{"aaa", "deleted", "zzz"}, func(tn *store.Tenant) error {
+		visited = append(visited, tn.Team())
+		if tn.Team() == "aaa" {
+			return errors.New("broken tenant")
+		}
+		return nil
+	})
+	if err != nil || len(visited) != 2 || visited[0] != "aaa" || visited[1] != "zzz" {
+		t.Fatalf("visited %v, error %v", visited, err)
+	}
+}
+
+func liveTeams(t *testing.T, op *store.Operator) []store.Team {
+	t.Helper()
+	var teams []store.Team
+	if err := op.EachTeam(t.Context(), nil, func(tenant *store.Tenant) error {
+		teams = append(teams, tenant.Team())
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return teams
 }

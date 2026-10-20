@@ -455,7 +455,107 @@ func run(args []string) error {
 		}
 		defer func() { _ = lock.Close() }()
 	}
-	st, serr := openControllerStore(ctx, cfg, p.StateDB())
+	var srv *controller.Server
+	var closeObjects func() error
+	st, serr := openControllerStore(ctx, cfg, p.StateDB(), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		var err error
+		srv, err = newControllerServer(st, cfg, p.Root, readProvenance().Version, nil)
+		if err != nil {
+			return store.Policies{}, err
+		}
+		srv = srv.
+			WithTrustedProxyCIDRs(proxyCIDRs).
+			WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
+			WithDashboardURL(*dashboardURL).
+			WithBillingCheckout(*billingURL, creds.BillingToken).
+			WithPayments(paymentVerifier, st.AsOperator()).
+			WithOperatorAccounts(splitCSV(*operatorAccounts)).
+			WithMetricsAddr(*metricsAddr).
+			WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
+			WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness).
+			WithFloodPolicy(controller.FloodPolicy{
+				RunsPerPrincipalHour: guards.RunsPerPrincipalHour,
+				ShedQueueDepth:       guards.ShedQueueDepth,
+			}).
+			WithRequestBudget(controller.RequestBudget{
+				ClaimsPerMinute:     guards.ClaimsPerRunnerMinute,
+				HeartbeatsPerMinute: guards.HeartbeatsPerRunnerMinute,
+				RunnersPerToken:     *runnersPerToken,
+			}).
+			WithTokenRequestBudget(controller.TokenRequestBudget{
+				PerTokenMinute: guards.RequestsPerTokenMinute,
+				AlarmPerMinute: guards.RequestsPerMinuteAlarm,
+			}).
+			WithIdleClaimPoll(*idleClaimPoll).
+			WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
+			WithEgressMeter(egress.New(egressCfg))
+		if err := configureIdentity(srv, identityFlags{
+			MultiTeam:          cfg.MultiTeam(),
+			GoogleClientID:     *googleClientID,
+			GoogleClientSecret: creds.GoogleClientSecret,
+			GitHubClientID:     *githubClientID,
+			GitHubClientSecret: creds.GitHubClientSecret,
+			RedirectURIs:       *oauthRedirectURIs,
+			SignUpGate:         *signUpGate,
+		}, slog.Default()); err != nil {
+			return store.Policies{}, err
+		}
+		if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
+			return store.Policies{}, err
+		}
+		if err := configureGitHubApp(srv, githubAppFlags{
+			AppID:        *githubAppID,
+			Slug:         *githubAppSlug,
+			ClientID:     *githubClientID,
+			ClientSecret: creds.GitHubClientSecret,
+			PrivateKey:   creds.GitHubAppKey,
+		}, cfg.WebhookSecret()); err != nil {
+			return store.Policies{}, err
+		}
+		oidcIssuer, oerr := loadOIDCIssuer(cfg, *oidcTokenTTL, os.Stderr)
+		if oerr != nil {
+			return store.Policies{}, fmt.Errorf("oidc issuer: %w", oerr)
+		}
+		srv = srv.WithOIDCIssuer(oidcIssuer)
+		if err := configureSecrets(ctx, srv, st, cfg, generatedKeyPath(p.StateDB())); err != nil {
+			return store.Policies{}, err
+		}
+		if *bucketStoreURL != "" {
+			bucketStore, berr := storeurl.OpenMeasurementStore(ctx, *bucketStoreURL, *bucketMeasurePages)
+			if berr != nil {
+				return store.Policies{}, fmt.Errorf("--bucket-store: %w", berr)
+			}
+			srv = srv.WithBucketUsage(bucketStore)
+		}
+		srv = srv.WithLogRetention(retention)
+		if strings.HasPrefix(*cacheBlobStore, "s3://") {
+			objects, err := openS3Data(ctx, *cacheBlobStore)
+			if err != nil {
+				return store.Policies{}, fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
+			}
+			var backend blob.ObjectBackend = objects
+			if *cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "" {
+				backend, err = controller.NewCloudFrontDataBackend(objects, *cloudFrontDomain, *cloudFrontKeyPairID, creds.CloudFrontKey)
+				if err != nil {
+					return store.Policies{}, err
+				}
+			}
+			srv = srv.WithDataObjects(backend)
+		} else {
+			objects, err := openFilesystemData(p.Root, *externalURL, listeners.API.Addr().String())
+			if err != nil {
+				return store.Policies{}, fmt.Errorf("filesystem data: %w", err)
+			}
+			closeObjects = objects.Close
+			srv = srv.WithDataObjects(objects)
+		}
+		srv.WithDashboard(dashboard(p, *hsts, *insecureCookies))
+
+		return srv.StorePolicies(), nil
+	}))
+	if closeObjects != nil {
+		defer func() { _ = closeObjects() }()
+	}
 	if serr != nil {
 		return fmt.Errorf("open state db: %w", serr)
 	}
@@ -466,102 +566,6 @@ func run(args []string) error {
 		return err
 	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
-
-	srv, err := newControllerServer(st, cfg, p.Root, readProvenance().Version, nil)
-	if err != nil {
-		return err
-	}
-	srv = srv.
-		WithTrustedProxyCIDRs(proxyCIDRs).
-		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
-		WithDashboardURL(*dashboardURL).
-		WithBillingCheckout(*billingURL, creds.BillingToken).
-		WithPayments(paymentVerifier, st).
-		WithOperatorAccounts(splitCSV(*operatorAccounts)).
-		WithMetricsAddr(*metricsAddr).
-		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
-		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness).
-		WithFloodPolicy(controller.FloodPolicy{
-			RunsPerPrincipalHour: guards.RunsPerPrincipalHour,
-			ShedQueueDepth:       guards.ShedQueueDepth,
-		}).
-		WithRequestBudget(controller.RequestBudget{
-			ClaimsPerMinute:     guards.ClaimsPerRunnerMinute,
-			HeartbeatsPerMinute: guards.HeartbeatsPerRunnerMinute,
-			RunnersPerToken:     *runnersPerToken,
-		}).
-		WithTokenRequestBudget(controller.TokenRequestBudget{
-			PerTokenMinute: guards.RequestsPerTokenMinute,
-			AlarmPerMinute: guards.RequestsPerMinuteAlarm,
-		}).
-		WithIdleClaimPoll(*idleClaimPoll).
-		WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
-		WithEgressMeter(egress.New(egressCfg))
-	if err := configureIdentity(srv, identityFlags{
-		MultiTeam:          cfg.MultiTeam(),
-		GoogleClientID:     *googleClientID,
-		GoogleClientSecret: creds.GoogleClientSecret,
-		GitHubClientID:     *githubClientID,
-		GitHubClientSecret: creds.GitHubClientSecret,
-		RedirectURIs:       *oauthRedirectURIs,
-		SignUpGate:         *signUpGate,
-	}, slog.Default()); err != nil {
-		return err
-	}
-	if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
-		return err
-	}
-	if err := configureGitHubApp(srv, githubAppFlags{
-		AppID:        *githubAppID,
-		Slug:         *githubAppSlug,
-		ClientID:     *githubClientID,
-		ClientSecret: creds.GitHubClientSecret,
-		PrivateKey:   creds.GitHubAppKey,
-	}, cfg.WebhookSecret()); err != nil {
-		return err
-	}
-	oidcIssuer, oerr := loadOIDCIssuer(cfg, *oidcTokenTTL, os.Stderr)
-	if oerr != nil {
-		return fmt.Errorf("oidc issuer: %w", oerr)
-	}
-	srv = srv.WithOIDCIssuer(oidcIssuer)
-	if err := configureSecrets(ctx, srv, st, cfg, generatedKeyPath(p.StateDB())); err != nil {
-		return err
-	}
-	if *bucketStoreURL != "" {
-		bucketStore, berr := storeurl.OpenMeasurementStore(ctx, *bucketStoreURL, *bucketMeasurePages)
-		if berr != nil {
-			return fmt.Errorf("--bucket-store: %w", berr)
-		}
-		srv = srv.WithBucketUsage(bucketStore)
-	}
-	srv = srv.WithLogRetention(retention)
-	if strings.HasPrefix(*cacheBlobStore, "s3://") {
-		objects, err := openS3Data(ctx, *cacheBlobStore)
-		if err != nil {
-			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
-		}
-		var backend blob.ObjectBackend = objects
-		if *cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "" {
-			backend, err = controller.NewCloudFrontDataBackend(objects, *cloudFrontDomain, *cloudFrontKeyPairID, creds.CloudFrontKey)
-			if err != nil {
-				return err
-			}
-		}
-		srv = srv.WithDataObjects(backend)
-	} else {
-		objects, err := openFilesystemData(p.Root, *externalURL, listeners.API.Addr().String())
-		if err != nil {
-			return fmt.Errorf("filesystem data: %w", err)
-		}
-		defer func() {
-			if err := objects.Close(); err != nil {
-				slog.Error("close filesystem data", "err", err)
-			}
-		}()
-		srv = srv.WithDataObjects(objects)
-	}
-	srv.WithDashboard(dashboard(p, *hsts, *insecureCookies))
 
 	// safety: these are the only database writes startup makes, and they come
 	// after every check above and after every listener is bound, so a start
@@ -577,8 +581,7 @@ func run(args []string) error {
 	if err := ensureBootstrapAdmin(ctx, st, creds.BootstrapAdminToken, slog.Default()); err != nil {
 		return err
 	}
-	adminReader, _ := any(st).(deploymentAdminReader)
-	if err := checkRequireAuth(ctx, adminReader, *requireAuth); err != nil {
+	if err := checkRequireAuth(ctx, st.AsOperator(), *requireAuth); err != nil {
 		return err
 	}
 	if paymentVerifier != nil {
@@ -640,7 +643,7 @@ func ensureBootstrapAdmin(ctx context.Context, st *store.Store, seed string, log
 	if seed == "" {
 		return nil
 	}
-	created, err := controller.EnsureBootstrapAdminToken(ctx, st, seed)
+	created, err := controller.EnsureBootstrapAdminToken(ctx, st.AsOperator(), seed)
 	switch {
 	case errors.Is(err, store.ErrBootstrapSeedConsumed):
 		logger.Warn("the " + credBootstrapAdminToken + " credential already bootstrapped this store; remove it from the credentials directory")
@@ -838,10 +841,10 @@ func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Sto
 		if err != nil {
 			return fmt.Errorf("secrets key %s: %w", keyPath, err)
 		}
-		if err := ring.MissingKey(ctx, st); err != nil {
+		if err := ring.MissingKey(ctx, st.AsOperator()); err != nil {
 			return err
 		}
-		srv.WithSecretsCipher(ring.For(st))
+		srv.WithSecretsCipher(ring.For(st.AsOperator()))
 	default:
 		srv.WithSecretsCipher(keylessCipher{})
 		return nil

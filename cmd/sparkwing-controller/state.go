@@ -16,9 +16,8 @@ func newControllerServer(st *store.Store, cfg deployment.Config, root, version s
 	if err != nil {
 		return nil, fmt.Errorf("engine version policy: %w", err)
 	}
-	return controller.NewDeployment(st, cfg, nil).WithEngineController(&controller.EngineController{
-		Store:         st,
+	return controller.NewDeployment(st, cfg, nil).WithEngineController(controller.NewEngineController(st, controller.EngineController{
 		RunnerPolicy:  &controller.SignedRunnerAdmission{Resolver: engines},
 		VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: engines},
-	}), nil
+	})), nil
 }

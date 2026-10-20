@@ -23,7 +23,7 @@ func (p creditClaimProfile) ResolveClaimProfile(context.Context, capability.Prin
 	return match.Profile{Capacity: capacity}, capacity, nil
 }
 
-func creditClaimFixture(t *testing.T, cores float64, rates store.CreditRateTable) (*EngineController, *store.Tenant, http.Handler, string) {
+func creditClaimFixture(t *testing.T, cores float64, rates store.CreditRateTable) (*engineFixture, *store.Tenant, http.Handler, string) {
 	t.Helper()
 	e, tenant := engineRuntimeStore(t)
 	PaidCreditsFixture(t, e.Store, tenant, 2000)
@@ -34,10 +34,10 @@ func creditClaimFixture(t *testing.T, cores float64, rates store.CreditRateTable
 			t.Fatal(err)
 		}
 	}
-	e.Store.SetClaimProfileResolver(creditClaimProfile{128})
+	e.claimProfiles = creditClaimProfile{128}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	h := New(e.Store, nil).WithEngineController(e).Handler()
+	h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 	return e, tenant, h, root
 }
 
@@ -93,7 +93,7 @@ func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 
 func TestCredits_InsufficientCapacityCannotClaimByNameOrQueue(t *testing.T) {
 	e, tenant, h, root := creditClaimFixture(t, 8, nil)
-	e.Store.SetClaimProfileResolver(creditClaimProfile{2})
+	e.claimProfiles = creditClaimProfile{2}
 	for _, target := range []string{`"run_id":"run","job_id":"job",`, ""} {
 		status := http.StatusOK
 		if target != "" {
@@ -109,7 +109,7 @@ func TestCredits_InsufficientCapacityCannotClaimByNameOrQueue(t *testing.T) {
 	if err != nil || node.ClaimedBy != "" || node.Status != store.StatusPending {
 		t.Fatalf("capacity refusal mutated node=%+v: %v", node, err)
 	}
-	e.Store.SetClaimProfileResolver(creditClaimProfile{8})
+	e.claimProfiles = creditClaimProfile{8}
 	engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job","available_cores":8}`, http.StatusOK)
 	charges, err := tenant.ListCreditCharges(t.Context(), 10)
 	if err != nil || len(charges) != 1 || charges[0].CPUClassCores != 8 {

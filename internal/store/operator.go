@@ -16,9 +16,9 @@ const maxTeamMatches = 20
 
 // SearchTeams finds up to 20 teams whose slug, display name or owner's email
 // contains q, ignoring case.
-func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error) {
+func (o *Operator) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error) {
 	like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.ToLower(strings.TrimSpace(q))) + "%"
-	rows, err := s.query(ctx, `
+	rows, err := o.s.query(ctx, `
 		SELECT t.name, t.display_name, COALESCE(a.email, '') FROM teams t
 		LEFT JOIN memberships m ON m.team = t.name AND m.role = 'owner'
 		LEFT JOIN accounts a ON a.id = m.account_id

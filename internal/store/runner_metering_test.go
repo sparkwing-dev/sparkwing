@@ -16,9 +16,9 @@ func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authori
 	t.Helper()
 	s, demand, _ := meteredUnitFixture(t, false)
 	owner := authorityMember(t, s, "owner", RoleOwner)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 	expiry := s.now().Add(time.Hour)
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 		Kind: capability.ProvisionMachine, Authority: &owner.Authority, Team: "a",
 		RegistrationID: "runner:a:worker", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "worker"},
 		Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone},
@@ -28,7 +28,7 @@ func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authori
 		t.Fatal(err)
 	}
 	demand.CapabilityPrefix = issued.Capability.Prefix
-	p, err := s.ResolveAuthority(t.Context(), owner.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), owner.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authori
 	if !ok {
 		t.Fatal("missing metering policy")
 	}
-	s.SetConsolePolicy(func(p capability.Principal, _ time.Time) bool { return p.Capability.Subject.ID == "owner" })
+	s.consolePolicy = func(p capability.Principal, _ time.Time) bool { return p.Capability.Subject.ID == "owner" }
 	return s, demand, capability.Authorized{Principal: p, Access: route.Access[0]}
 }
 
@@ -47,19 +47,19 @@ func TestRunnerMeteringChangesOnlyFutureAwards(t *testing.T) {
 	ownerDemand := demand
 	ownerDemand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	_, owner := meteredUnitClaim(t, s, ownerDemand)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}
-	before, err := s.ResolveAuthority(t.Context(), ref)
+	before, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
 	if err != nil || before.Capability.Billing.Metered {
 		t.Fatalf("initial award: %+v, %v", before, err)
 	}
 	if err := s.AsOperator().SetRunnerMetered(t.Context(), authorized, demand.CapabilityPrefix, true); err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.ResolveAuthority(t.Context(), ref)
+	after, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("existing award changed: %+v, %v", after, err)
 	}
@@ -69,18 +69,18 @@ func TestRunnerMeteringChangesOnlyFutureAwards(t *testing.T) {
 	if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: owner}); err != nil {
 		t.Fatal(err)
 	}
-	next, err := s.ClaimUnit(t.Context(), demand)
+	next, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Award.CapabilityPrefix})
 	if err != nil || !p.Capability.Billing.Metered {
 		t.Fatalf("future award did not use root metering: %+v, %v", p, err)
 	}
 	if err := s.AsOperator().SetRunnerMetered(t.Context(), authorized, demand.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
-	current, err := s.ResolveAuthority(t.Context(), p.Authority)
+	current, err := s.AsOperator().ResolveAuthority(t.Context(), p.Authority)
 	if err != nil || !reflect.DeepEqual(p, current) {
 		t.Fatalf("metered award changed: %+v, %v", current, err)
 	}
@@ -112,9 +112,9 @@ func TestRunnerMeteringRequiresCurrentConsoleAuthorityProperty(t *testing.T) {
 			case 6:
 				authorized.Access.Credential = capability.CredentialMember
 			case 7:
-				s.SetConsolePolicy(func(capability.Principal, time.Time) bool { return false })
+				s.consolePolicy = func(capability.Principal, time.Time) bool { return false }
 			case 8:
-				s.SetConsolePolicy(nil)
+				s.consolePolicy = nil
 			case 9:
 				parent := authorityRoot(fmt.Sprint("parent-", random.Uint64()), "a")
 				parent.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}
@@ -137,14 +137,14 @@ func TestRunnerMeteringRequiresCurrentConsoleAuthorityProperty(t *testing.T) {
 func TestRunnerMeteringRechecksSessionAfterTargetLock(t *testing.T) {
 	s, demand, authorized := runnerMeteringFixture(t)
 	calls := 0
-	s.SetConsolePolicy(func(capability.Principal, time.Time) bool {
+	s.consolePolicy = func(capability.Principal, time.Time) bool {
 		calls++
 		return calls == 1
-	})
+	}
 	if err := s.AsOperator().SetRunnerMetered(t.Context(), authorized, demand.CapabilityPrefix, true); err == nil || calls != 2 {
 		t.Fatalf("console policy was not rechecked: calls=%d, %v", calls, err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 	if err != nil || p.Capability.RootMetered {
 		t.Fatalf("failed console recheck changed metering: %+v, %v", p, err)
 	}

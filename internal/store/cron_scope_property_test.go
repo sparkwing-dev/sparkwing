@@ -141,7 +141,7 @@ func TestArmCronScheduleUsesTrustedPolicyIdentityWithoutAppConsent(t *testing.T)
 	for _, refused := range []bool{false, true} {
 		s := authorityStore(t)
 		tenant := &Tenant{s: s, team: "a"}
-		s.SetIntakePolicy(scheduleIdentityPolicy{resolve: func(_ context.Context, team Team, remote string) (runspec.Repository, error) {
+		s.intakePolicy = scheduleIdentityPolicy{resolve: func(_ context.Context, team Team, remote string) (runspec.Repository, error) {
 			if team != "a" || remote != "https://github.com/acme/repo.git" {
 				t.Fatalf("lookup = %s %s", team, remote)
 			}
@@ -149,7 +149,7 @@ func TestArmCronScheduleUsesTrustedPolicyIdentityWithoutAppConsent(t *testing.T)
 				return runspec.Repository{}, errors.New("lookup failed")
 			}
 			return runspec.Repository{Key: "gh:701"}, nil
-		}})
+		}}
 		row, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "manual", RepoPath: "https://github.com/acme/repo.git", RepositoryKey: "gh:999", Pipeline: "ci", Cron: "* * * * *", TZ: "UTC"}, time.Now())
 		if refused {
 			if err == nil {

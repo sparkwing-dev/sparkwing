@@ -37,11 +37,11 @@ func TestDocumentedBootstrapCommandsProvisionController(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			created, err := controller.EnsureBootstrapAdminToken(t.Context(), st, string(raw))
+			created, err := controller.EnsureBootstrapAdminToken(t.Context(), st.AsOperator(), string(raw))
 			if err != nil || !created {
 				t.Fatalf("documented credential refused by controller: created=%v err=%v", created, err)
 			}
-			if ready, err := st.HasDeploymentAdministrator(t.Context()); err != nil || !ready {
+			if ready, err := st.AsOperator().HasDeploymentAdministrator(t.Context()); err != nil || !ready {
 				t.Fatalf("documented bootstrap did not provision administrator: ready=%v err=%v", ready, err)
 			}
 		})

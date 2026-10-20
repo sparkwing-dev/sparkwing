@@ -13,12 +13,12 @@ func TestChangedRevisionChildRequiredSecretSelection(t *testing.T) {
 	parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
 	tenant, id := childReference(t, s, parent, git, childRequest("deploy", "refs/heads/feature", referenceFeature))
 	s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at,only_on) VALUES ('a','TOKEN','excluded','owner','',1,0,1,1,'prod')`)
-	s.SetPlanSecretOpener(fakePlanSecretOpener(func(_ context.Context, _ Team, secret Secret) (string, error) {
+	s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, _ Team, secret Secret) (string, error) {
 		if secret.Name == "TOKEN" {
 			t.Fatal("excluded row reached plan decryption")
 		}
 		return secret.Value, nil
-	}))
+	})
 	run, err := tenant.ReadRun(t.Context(), id)
 	if err != nil {
 		t.Fatal(err)

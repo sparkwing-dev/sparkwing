@@ -30,7 +30,7 @@ func TestPlanTopologyStrangerLearnsNothingProperty(t *testing.T) {
 		if resultGrant {
 			grants = append(grants, capability.NodeResult)
 		}
-		raw := engineHTTPRoot(t, &EngineController{Store: s.store}, "a", "stranger", grants)
+		raw := engineHTTPRoot(t, newEngineFixture(s.store, EngineController{}), "a", "stranger", grants)
 		tenant, err := s.store.ForTeam(t.Context(), "a")
 		if err != nil {
 			t.Fatal(err)

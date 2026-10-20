@@ -95,7 +95,7 @@ func waitForAdvisoryWaiter(t *testing.T, st *store.Store, key string, entered <-
 // A holder whose context ends after it created a check run records nothing,
 // so the next holder sees no id rather than one recorded after it let go.
 func TestReportGitHubCheckRecordsNothingPastTheHoldersDeadline(t *testing.T) {
-	st := storetest.Open(t)
+	st := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 	ctx := context.Background()
 	tenant, accepted, err := storePlanSealRequest(ctx, st)
 	if err != nil {

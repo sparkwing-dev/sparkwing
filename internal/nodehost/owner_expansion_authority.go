@@ -55,4 +55,4 @@ func (h *OwnerHost) expansionActor(ctx context.Context, input RunInput, row stor
 	return store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: credential.Prefix}, CapabilityPrefix: credential.Prefix, Owner: owner.Owner}, nil
 }
 
-var _ OwnerDelegator = (*store.Store)(nil)
+var _ OwnerDelegator = (*store.Operator)(nil)

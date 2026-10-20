@@ -99,7 +99,7 @@ func TestStoreAdmissionSQLiteCancelOthersReachesRunningUnitRenewal(t *testing.T)
 	}
 	replacement := storeAdmission{Store: second.Tenant, Owner: second.Actor}
 	if err := replacement.Node(t.Context(), second.Accepted, capacityRow(t, second, "a"), func(context.Context) error {
-		beat, err := first.Store.RenewUnit(t.Context(), award.Node.CapabilityPrefix, true)
+		beat, err := first.Store.AsOperator().RenewUnit(t.Context(), award.Node.CapabilityPrefix, true)
 		if err != nil || !beat.CancelRequested {
 			t.Fatalf("superseded running unit renewed without cancellation: %+v, %v", beat, err)
 		}
@@ -200,7 +200,7 @@ func TestStoreAdmissionSQLiteCancelOthersReachesPlanUnitRenewal(t *testing.T) {
 		admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
 		if _, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) {
 			if fixture == second {
-				beat, err := first.Store.RenewUnit(t.Context(), first.Actor.CapabilityPrefix, false)
+				beat, err := first.Store.AsOperator().RenewUnit(t.Context(), first.Actor.CapabilityPrefix, false)
 				if err != nil || !beat.CancelRequested {
 					t.Fatalf("superseded plan renewed without cancellation: %+v, %v", beat, err)
 				}

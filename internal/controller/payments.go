@@ -101,4 +101,4 @@ func (s *Server) settlePaymentRequest(w http.ResponseWriter, r *http.Request, _ 
 	return nil
 }
 
-var _ PaymentSettler = (*store.Store)(nil)
+var _ PaymentSettler = (*store.Operator)(nil)

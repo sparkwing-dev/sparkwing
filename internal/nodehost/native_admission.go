@@ -16,9 +16,9 @@ type NativeAdmission struct {
 	required bool
 }
 
-// ComposeNativeAdmission builds admission from the placement's capacity and compute services.
+// ComposeNativeAdmission binds concurrency to the placement's box independently of compute.
 // Required compute is used by requesters; runners may omit it without losing concurrency.
-func ComposeNativeAdmission(capacity CapacityStore, compute *LocalAdmission, required bool) NativeAdmission {
+func ComposeNativeAdmission(capacity CapacityStore, boxID string, compute *LocalAdmission, required bool) NativeAdmission {
 	admission := NativeAdmission{required: required}
 	if compute != nil {
 		copy := *compute
@@ -26,10 +26,7 @@ func ComposeNativeAdmission(capacity CapacityStore, compute *LocalAdmission, req
 		admission.compute = &copy
 	}
 	if capacity != nil {
-		admission.capacity = &storeAdmission{Store: capacity}
-		if compute != nil {
-			admission.capacity.BoxID = compute.BoxID
-		}
+		admission.capacity = &storeAdmission{Store: capacity, BoxID: boxID}
 	}
 	return admission
 }

@@ -15,7 +15,7 @@ import (
 // renewal takes the authority before the run, so the two deadlocked.
 func TestPostgresLogPreparationLocksAuthorityBeforeRunAgainstRenewal(t *testing.T) {
 	st, demand, ctx := lockOrderStore(t)
-	claim, err := st.ClaimUnit(ctx, demand)
+	claim, err := st.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestPostgresLogPreparationLocksAuthorityBeforeRunAgainstRenewal(t *testing.
 	if !b.held(`SELECT 1 FROM capabilities WHERE prefix='` + prefix + `' FOR UPDATE`) {
 		t.Fatal("log preparation waits for the run before locking its writer's authority")
 	}
-	b.start(func() error { _, err := st.RenewUnit(ctx, prefix, false); return err })
+	b.start(func() error { _, err := st.AsOperator().RenewUnit(ctx, prefix, false); return err })
 	// safety: renewal waits behind preparation's authority lock, not behind the
 	// run, which is the ordering that rules out the cycle.
 	b.waitBlocked(2)

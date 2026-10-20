@@ -59,9 +59,9 @@ func TestCredentialSSHWritePinsHostAndKeepsKeyPrivate(t *testing.T) {
 				Capability: capability.Capability{Audience: capability.Controller, Team: "team", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TeamAdmin}},
 			}
 			writer := &credentialPutCapture{}
-			server := controller.New(nil, nil).WithSecretsCipher(cipher).WithAuthorization(controller.RouteAuthorization{
+			server := controller.BindTenantPortForTest[controller.CredentialWriter](controller.New(nil, nil).WithSecretsCipher(cipher).WithAuthorization(controller.RouteAuthorization{
 				Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
-			}).WithCredentialWriter(func(context.Context, store.Team) (controller.CredentialWriter, error) { return writer, nil })
+			}), func(context.Context, store.Team) (controller.CredentialWriter, error) { return writer, nil })
 			port, scans := 22, 0
 			body := map[string]any{"host": "Git.Invalid", "kind": "ssh", "private_key": key}
 			status, code := 200, apierr.Code("")

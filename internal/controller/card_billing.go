@@ -109,7 +109,7 @@ func (s *Server) refillPass(ctx context.Context) {
 	if !s.deployment.Metering() {
 		return
 	}
-	operator := s.store.AsOperator()
+	operator := s.operator
 	due, err := operator.DueRefills(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -170,7 +170,7 @@ func (s *Server) refillPass(ctx context.Context) {
 // repeated pass repeats the same refund and a retry after a failed one makes a
 // new one; the refund's success reverses any grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
-	operator := s.store.AsOperator()
+	operator := s.operator
 	due, err := operator.DueCardRefunds(ctx, time.Now())
 	if err != nil {
 		s.logger.Error("listing queued card refunds", "err", err)
@@ -196,7 +196,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 // safety: a failed send loses only the email; the dashboard shows the same
 // state, so billing never waits on the mail service.
 func (s *Server) mailOwners(ctx context.Context, team store.Team, subject, text string) {
-	t, err := s.store.ForTeam(ctx, team)
+	t, err := s.tenantForTeam(ctx, team)
 	if err != nil {
 		s.logger.Warn("billing mail: team", "team", string(team), "err", err)
 		return

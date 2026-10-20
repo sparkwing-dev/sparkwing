@@ -14,17 +14,17 @@ import (
 
 func TestBindingUsesPersistedAuthorityAndTenantRelations(t *testing.T) {
 	s, _ := unitClaimFixture(t)
-	claim, err := s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: "runner", Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: "runner", Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	target := capability.Target{Team: "a", RunID: "run", NodeID: "job"}
 	for _, rule := range []capability.BindingRule{capability.BindRun, capability.BindRunOfTrigger, capability.BindPlanOwner} {
-		if err := s.CheckBinding(t.Context(), principal, rule, target); err != nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), principal, rule, target); err != nil {
 			t.Fatalf("%s: %v", rule, err)
 		}
 	}
@@ -47,7 +47,7 @@ func TestBindingUsesPersistedAuthorityAndTenantRelations(t *testing.T) {
 			case "revoked":
 				rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, principal.Authority.ID)
 			}
-			if err := s.CheckBinding(t.Context(), p, rule, selected); err == nil {
+			if err := s.AsOperator().CheckBinding(t.Context(), p, rule, selected); err == nil {
 				t.Fatal("uncommitted authority widened a binding")
 			}
 		})
@@ -61,46 +61,46 @@ func TestBindingSecretRequiresTheSealedDeclarationAndGrantedPool(t *testing.T) {
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	p, err := tenant.s.ResolveAuthority(t.Context(), request.Actor.Authority)
+	p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), request.Actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"TOKEN", "UNDECLARED"} {
-		err := tenant.s.CheckBinding(t.Context(), p, capability.BindDeclaredSecret, capability.Target{Team: "a", SecretName: name})
+		err := tenant.s.AsOperator().CheckBinding(t.Context(), p, capability.BindDeclaredSecret, capability.Target{Team: "a", SecretName: name})
 		if (err == nil) != (name == "TOKEN") {
 			t.Fatalf("secret %q: %v", name, err)
 		}
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE secrets SET only_on='trusted' WHERE team='a' AND name='TOKEN'`)
-	if err := tenant.s.CheckBinding(t.Context(), p, capability.BindDeclaredSecret, capability.Target{Team: "a", SecretName: "TOKEN"}); err == nil {
+	if err := tenant.s.AsOperator().CheckBinding(t.Context(), p, capability.BindDeclaredSecret, capability.Target{Team: "a", SecretName: "TOKEN"}); err == nil {
 		t.Fatal("declaration granted a restricted secret without its awarded pool")
 	}
 }
 
 func TestBindingNamedSelectionAndPipelineUseStoredRun(t *testing.T) {
 	s, demand := unitClaimFixture(t)
-	root, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	root, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CheckBinding(t.Context(), root, capability.BindClaimSelection, capability.Target{Team: "a", RunID: "run", NodeID: "job", ClaimKinds: []capability.UnitKind{capability.UnitNode}}); err != nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), root, capability.BindClaimSelection, capability.Target{Team: "a", RunID: "run", NodeID: "job", ClaimKinds: []capability.UnitKind{capability.UnitNode}}); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, pipeline := range []string{"ci", "unrelated", ""} {
-		err := s.CheckBinding(t.Context(), p, capability.BindPipelineOfBoundRun, capability.Target{Team: "a", Pipeline: pipeline})
+		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindPipelineOfBoundRun, capability.Target{Team: "a", Pipeline: pipeline})
 		if (err == nil) != (pipeline == "ci") {
 			t.Fatalf("pipeline %q: %v", pipeline, err)
 		}
 	}
-	if err := s.CheckBinding(t.Context(), root, capability.BindPipelineOfBoundRun, capability.Target{Team: "a", Pipeline: "ci"}); err == nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), root, capability.BindPipelineOfBoundRun, capability.Target{Team: "a", Pipeline: "ci"}); err == nil {
 		t.Fatal("bare machine read claim sizing")
 	}
 }
@@ -109,21 +109,21 @@ func TestBindingDeclaredReadsDoNotGrantTheWholeRun(t *testing.T) {
 	s, demand := unitClaimFixture(t)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE node_id='job'`, []byte(`{"id":"job","deps":["producer"]}`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,generation,finished_at,spec_json,execution_json) VALUES ('a','run','producer','done','success',3,1,?,?),('a','run','sibling','done','success',2,1,?,?)`, []byte(`{"id":"producer"}`), []byte(`{}`), []byte(`{"id":"sibling"}`), []byte(`{}`))
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, node := range []string{"producer", "sibling", "missing"} {
-		err := s.CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: node})
+		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: node})
 		if (err == nil) != (node == "producer") {
 			t.Fatalf("read %q: %v", node, err)
 		}
 	}
-	if err := s.CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: "producer", SourceGeneration: 4}); err == nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: "producer", SourceGeneration: 4}); err == nil {
 		t.Fatal("source generation was ignored")
 	}
 }
@@ -132,11 +132,11 @@ func TestBindingSourceRequiresTheLiveUnstartedAward(t *testing.T) {
 	for _, problem := range []string{"none", "started", "cancelled", "stale", "expired"} {
 		t.Run(problem, func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
-			p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+			p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -150,7 +150,7 @@ func TestBindingSourceRequiresTheLiveUnstartedAward(t *testing.T) {
 			case "expired":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=1 WHERE node_id='job'`)
 			}
-			err = s.CheckBinding(t.Context(), p, capability.BindSource, capability.Target{Team: "a", RunID: "run"})
+			err = s.AsOperator().CheckBinding(t.Context(), p, capability.BindSource, capability.Target{Team: "a", RunID: "run"})
 			if (err == nil) != (problem == "none") {
 				t.Fatalf("source %s: %v", problem, err)
 			}
@@ -165,12 +165,12 @@ func TestBindingChildRequiresItsCreatingJobGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := tenant.s
-	p, err := s.ResolveAuthority(t.Context(), request.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), request.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{child.RunID, "unrelated", ""} {
-		err := s.CheckBinding(t.Context(), p, capability.BindChildOfBoundNode, capability.Target{Team: "a", RunID: "run", ChildRunID: id})
+		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindChildOfBoundNode, capability.Target{Team: "a", RunID: "run", ChildRunID: id})
 		if (err == nil) != (id == child.RunID) {
 			t.Fatalf("child %q: %v", id, err)
 		}
@@ -180,11 +180,11 @@ func TestBindingChildRequiresItsCreatingJobGeneration(t *testing.T) {
 	foreign.Digest = sha256.Sum256([]byte("next-generation"))
 	foreign.Binding.Generation++
 	authorityPersist(t, s, foreign)
-	other, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: foreign.Prefix})
+	other, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: foreign.Prefix})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CheckBinding(t.Context(), other, capability.BindChildOfBoundNode, capability.Target{Team: "a", RunID: "run", ChildRunID: child.RunID}); err == nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), other, capability.BindChildOfBoundNode, capability.Target{Team: "a", RunID: "run", ChildRunID: child.RunID}); err == nil {
 		t.Fatal("child from another generation was readable")
 	}
 	serial := 0
@@ -211,11 +211,11 @@ func TestBindingChildRequiresItsCreatingJobGeneration(t *testing.T) {
 			target.ChildRunID += noise + "x"
 		}
 		authorityPersist(t, s, forged)
-		principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: forged.Prefix})
+		principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: forged.Prefix})
 		if err != nil {
 			return true
 		}
-		return s.CheckBinding(t.Context(), principal, capability.BindChildOfBoundNode, target) != nil
+		return s.AsOperator().CheckBinding(t.Context(), principal, capability.BindChildOfBoundNode, target) != nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
 		t.Fatal(err)
@@ -224,12 +224,12 @@ func TestBindingChildRequiresItsCreatingJobGeneration(t *testing.T) {
 
 func TestBindingClaimKindsShareStoreGrantValidation(t *testing.T) {
 	s, demand := unitClaimFixture(t)
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, kinds := range [][]capability.UnitKind{{capability.UnitTrigger, capability.UnitNode}, {capability.UnitPlan, capability.UnitEval}, nil, {capability.UnitNode, capability.UnitNode}, {"unknown"}} {
-		err := s.CheckBinding(t.Context(), p, capability.BindClaimSelection, capability.Target{Team: "a", ClaimKinds: kinds})
+		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindClaimSelection, capability.Target{Team: "a", ClaimKinds: kinds})
 		if len(kinds) == 2 && kinds[0] != kinds[1] {
 			if err != nil {
 				t.Fatal(err)
@@ -247,7 +247,7 @@ func TestBindingUnknownRuleAndNodehostCleanupRefuse(t *testing.T) {
 	p := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}}
 	for _, rule := range []capability.BindingRule{"unknown", capability.BindOwnCleanup} {
 		var failure *apierr.Error
-		if err := s.CheckBinding(t.Context(), p, rule, capability.Target{Team: "a"}); !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
+		if err := s.AsOperator().CheckBinding(t.Context(), p, rule, capability.Target{Team: "a"}); !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
 			t.Fatalf("%s: %v", rule, err)
 		}
 	}
@@ -262,12 +262,12 @@ func TestBindingTokenRequiresTheAccountOwner(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='mine'`)
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='other' WHERE prefix='theirs'`)
-	p, err := s.ResolveAuthority(t.Context(), owner.Authority)
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), owner.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, prefix := range []string{"mine", "theirs", "missing"} {
-		err := s.CheckBinding(t.Context(), p, capability.BindOwnToken, capability.Target{Team: "a", TokenPrefix: prefix})
+		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindOwnToken, capability.Target{Team: "a", TokenPrefix: prefix})
 		if (err == nil) != (prefix == "mine") {
 			t.Fatalf("%s: %v", prefix, err)
 		}

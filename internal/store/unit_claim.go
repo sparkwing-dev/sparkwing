@@ -14,15 +14,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
+func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	var out UnitClaim
 	var waiting error
-	err := s.inTx(ctx, func(tx *storeTx) error {
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
 		claimant := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{claimant}); err != nil {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{claimant}); err != nil {
 			return err
 		}
 		p, err := tx.ResolveAuthority(ctx, claimant)
@@ -48,7 +48,7 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 			}
 			unit = &queued
 		}
-		out, err = claimUnitTx(ctx, tx, demand, *unit)
+		out, err = tx.operator.claimUnitTx(ctx, tx, demand, *unit)
 		if err == errRankingHold {
 			waiting, err = err, nil
 		}
@@ -60,7 +60,7 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 	if err != nil {
 		var unpriced *UnpricedCPUClassError
 		if errors.As(err, &unpriced) && unpriced.RunID != "" && unpriced.NodeID != "" {
-			err = errors.Join(err, s.failUnpricedClaim(ctx, demand, unpriced))
+			err = errors.Join(err, o.failUnpricedClaim(ctx, demand, unpriced))
 		}
 		return UnitClaim{}, err
 	}
@@ -120,7 +120,7 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 	return kinds, nil
 }
 
-func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) (_ UnitClaim, err error) {
+func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) (_ UnitClaim, err error) {
 	defer func() {
 		var unpriced *UnpricedCPUClassError
 		if errors.As(err, &unpriced) {
@@ -185,7 +185,7 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if launcherClaimant(p.Capability) {
 		spec.Delivery = capability.DeliveryBootstrap
 	}
-	row, err := loadAwardRowTx(ctx, tx, spec)
+	row, err := tx.operator.loadAwardRowTx(ctx, tx, spec)
 	if err != nil {
 		return UnitClaim{}, err
 	}

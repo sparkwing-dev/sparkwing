@@ -20,11 +20,11 @@ func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {
 		t.Fatal(err)
 	}
 	req.Seal.Resolved.SecretNames = []string{"KEY"}
-	tenant.s.SetPlanSecretOpener(fakePlanSecretOpener(func(_ context.Context, _ Team, row Secret) (string, error) { return row.Value, nil }))
+	tenant.s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, _ Team, row Secret) (string, error) { return row.Value, nil })
 	if _, err := tenant.AcceptPlan(t.Context(), req); err != nil {
 		t.Fatal(err)
 	}
-	p, err := tenant.s.ResolveAuthority(t.Context(), req.Actor.Authority)
+	p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), req.Actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {
 	c.Grants = append(c.Grants, capability.NodesClaim)
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM capabilities WHERE prefix=?`, c.Prefix)
 	authorityPersist(t, tenant.s, c)
-	p, err = tenant.s.ResolveAuthority(t.Context(), req.Actor.Authority)
+	p, err = tenant.s.AsOperator().ResolveAuthority(t.Context(), req.Actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestSecretReadMemberScopesAndMaskedRefusal(t *testing.T) {
 
 func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	tenant, owner := secretReadStoreFixture(t)
-	tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
 	b := owner.Binding
 	actor := Actor{Kind: ActorRunHost, Authority: owner.Principal.Authority, CapabilityPrefix: owner.Principal.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: b.RunID, Holder: b.Holder, Generation: b.Generation}}
 	ref := controllerwire.NodeRef{RunID: b.RunID, NodeID: "job"}
@@ -202,7 +202,7 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 		t.Fatalf("job claim: %+v %v", reconciled, err)
 	}
 	claim := reconciled.Claim
-	p, err := tenant.s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix})
+	p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	}
 	bound := p.Capability.Binding
 	bound.Attempt = 1
-	child, err := tenant.s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Binding: bound, Grants: []capability.Grant{capability.SecretsRelease}, ExpiresAt: p.Capability.ExpiresAt, Repositories: p.Capability.Repositories})
+	child, err := tenant.s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Binding: bound, Grants: []capability.Grant{capability.SecretsRelease}, ExpiresAt: p.Capability.ExpiresAt, Repositories: p.Capability.Repositories})
 	if err != nil {
 		t.Fatal(err)
 	}

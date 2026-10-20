@@ -125,7 +125,7 @@ func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
 	for _, r := range rows {
 		health.count(r)
 	}
-	tick, err := s.Store.AsOperator().GetCronTick(ctx)
+	tick, err := s.Operator.GetCronTick(ctx)
 	if err != nil {
 		return health, err
 	}

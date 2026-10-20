@@ -1,6 +1,7 @@
 package acceptance_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -17,12 +18,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
+
+func discoveryDataController() *controller.DataController {
+	return &controller.DataController{
+		Objects: &dataObjects{}, Access: &dataEdges{},
+		ResolveTenant:  func(context.Context, store.Team) (controller.TenantHandle, error) { return nil, nil },
+		ChargeDownload: func(context.Context, blob.Authority, blob.Blob) error { return nil },
+	}
+}
 
 func discoveryServer(b *credentialBoundary, configured bool) http.Handler {
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
 	if configured {
-		data, _, _, _, _ := dataControllerFixture(dataAuthorized())
+		data := discoveryDataController()
 		s.WithDashboardURL("https://dashboard.example").WithDataController(data)
 	}
 	return s.Handler()
@@ -157,7 +167,7 @@ func TestDiscoveryHTTPAnnouncesMultiTeamWithoutURLs(t *testing.T) {
 }
 
 func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
-	for _, service := range []string{"dashboard", "uploads"} {
+	for _, service := range []string{"dashboard", "uploads", "downloads"} {
 		t.Run(service, func(t *testing.T) {
 			b := authorityMember()
 			s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
@@ -166,8 +176,12 @@ func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
 			case "dashboard":
 				s.WithDashboardURL("https://dashboard.example")
 				want.Dashboard = "https://dashboard.example"
-			case "uploads":
-				data, _, _, _, _ := dataControllerFixture(dataAuthorized())
+			case "uploads", "downloads":
+				data := discoveryDataController()
+				if service == "downloads" {
+					data.ReadBlob = func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error) { return blob.Blob{}, nil }
+					want.DataDownloadURL = "/api/v1/data/download"
+				}
 				s.WithDataController(data)
 				want.DirectData = true
 			}
@@ -181,6 +195,13 @@ func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
 			}
 			if got != want {
 				t.Fatalf("services = %+v, want %+v", got, want)
+			}
+			if service != "dashboard" {
+				capabilities := discoveryRequest(s.Handler(), b, "GET", "/api/v1/data/capabilities")
+				var flags map[string]bool
+				if err := json.Unmarshal(capabilities.Body.Bytes(), &flags); err != nil || capabilities.Code != 200 || !flags["upload"] || flags["download"] != (service == "downloads") || flags["source"] != (service == "downloads") {
+					t.Fatalf("capabilities=%s, %v", capabilities.Body.String(), err)
+				}
 			}
 		})
 	}

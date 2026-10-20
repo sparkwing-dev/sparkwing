@@ -39,8 +39,8 @@ func TestStoreClaimMatching(t *testing.T) {
 func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	t.Helper()
 	ctx := t.Context()
-	s := storetest.OpenSQLite(t)
 	enrollment := &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: enrollment}))
 	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	labels := []string(nil)
 	pools := []string(nil)
@@ -65,12 +65,15 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	case "pool_toleration":
 		job.Requires, pools = []string{"pool=prod"}, []string{"prod"}
 	}
+	expectedProfile := enrollment.profile
+	enrollment.profile = match.Profile{Capacity: match.Resources{Cores: 8}}
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Jobs = []nodeproto.JobSpec{job}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	enrollment.profile = expectedProfile
 	runID := plan.RunID
 	unit := store.UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "job"}
 	if scenario == "trigger_requirements" {
@@ -91,25 +94,22 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	}
 	authority := plan.Seal.Request.AuthorityRef
 	if scenario == "metered_runner" {
-		s.SetProvisionPolicy(storeProvisionPolicy{})
-		operator, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "acceptance", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
+		operator, err := acceptanceBootstrap(ctx, s)
 		if err != nil {
 			t.Fatal(err)
 		}
 		authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
-		s.SetProvisionPolicy(nil)
 	}
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":enrolled", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "enrolled"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: pools, Metered: scenario == "metered_runner"})
+	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":enrolled", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "enrolled"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: pools, Metered: scenario == "metered_runner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetClaimProfileResolver(enrollment)
 	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{unit.Kind}, Available: match.Resources{Cores: 8}, Labels: labels}
 	if named {
 		demand.Target = &unit
 	}
 	before := readMutationSnapshot(t, tenant, s, plan.RunID)
-	_, refused := s.ClaimUnit(ctx, demand)
+	_, refused := s.AsOperator().ClaimUnit(ctx, demand)
 	assertMatchingRefusal(t, refused, named)
 	if after := readMutationSnapshot(t, tenant, s, plan.RunID); !reflect.DeepEqual(before, after) {
 		t.Fatal("mismatched claim mutated queue, events or billing")
@@ -118,7 +118,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	case "capacity":
 		enrollment.profile.Capacity.Cores = 8
 	case "name":
-		replacement, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":other", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "other"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+		replacement, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":other", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "other"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +131,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 			t.Fatal(err)
 		}
 		demand.Labels = nil
-		_, refused = s.ClaimUnit(ctx, demand)
+		_, refused = s.AsOperator().ClaimUnit(ctx, demand)
 		assertMatchingRefusal(t, refused, named)
 		demand.Labels = []string{"gpu"}
 	case "pool_toleration":
@@ -141,7 +141,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	case "metered_runner", "pool_label":
 		return
 	}
-	claim, err := s.ClaimUnit(ctx, demand)
+	claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		t.Fatal(err)
 	}

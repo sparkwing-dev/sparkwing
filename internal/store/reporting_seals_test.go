@@ -21,7 +21,7 @@ func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(423, 173))
 	for i := range 16 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			s := storetest.Open(t)
+			s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 			secret := fmt.Sprintf("private-%x", random.Uint64())
 			public := fmt.Sprintf("visible-%x", random.Uint64())
 			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(in *store.IntakeRequest, _ *nodeproto.PlanDoc) {
@@ -101,7 +101,7 @@ func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
 }
 
 func TestReportingPagesUnstartedRunsAndFiltersQueueState(t *testing.T) {
-	s := storetest.Open(t)
+	s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 	tenant, plan, err := storePlanSealRequest(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestReportingPagesUnstartedRunsAndFiltersQueueState(t *testing.T) {
 }
 
 func TestReportingRefusesMalformedSeals(t *testing.T) {
-	s := storetest.Open(t)
+	s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 	tenant, plan, err := storePlanSealRequest(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +212,7 @@ func TestReportingDistinguishesUnknownAndEmptyClassification(t *testing.T) {
 		{name: "invalid", set: true, names: []string{""}},
 	} {
 		t.Run(classification.name, func(t *testing.T) {
-			s := storetest.Open(t)
+			s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
 			tenant, request, err := storePlanSealRequestWith(t.Context(), s, func(in *store.IntakeRequest, _ *nodeproto.PlanDoc) {
 				in.Request.RequestedArgs = map[string]string{"value": "public-when-classified"}
 				in.Request.SecretArgs = runspec.Optional[[]string]{Set: classification.set, Value: classification.names}

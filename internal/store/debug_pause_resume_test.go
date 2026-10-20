@@ -13,7 +13,7 @@ func TestResumeDebugPauseCurrentAuthorityProperty(t *testing.T) {
 	property := func(selector uint8, suffix string) bool {
 		tenant, now, _ := liveHolderFixture(t)
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
-		principal, err := tenant.s.ResolveAuthority(t.Context(), actor.Authority)
+		principal, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {
 			t.Fatal(err)
 		}

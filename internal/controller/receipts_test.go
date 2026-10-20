@@ -18,9 +18,8 @@ import (
 )
 
 func TestReceiptEndpoint_RoundTrip(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	st := f.st
-	st.SetIntakePolicy(receiptPolicy{})
 	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +98,7 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 }
 
 func TestReceiptEndpoint_NotFound(t *testing.T) {
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/runs/missing/receipt", nil)
 	request.Header.Set("Authorization", "Bearer "+f.token)
 	response := f.serve(request)

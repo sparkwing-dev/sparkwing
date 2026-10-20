@@ -56,8 +56,8 @@ func selectAccountTeamTx(ctx context.Context, tx *storeTx, p capability.Principa
 }
 
 // SelectAccountTeam commits the account and direct session's current team together.
-func (s *Store) SelectAccountTeam(ctx context.Context, a capability.Authorized, team Team) error {
-	return s.inTx(ctx, func(tx *storeTx) error {
+func (o *Operator) SelectAccountTeam(ctx context.Context, a capability.Authorized, team Team) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
 		p, err := accountSessionTx(ctx, tx, a, team)
 		if err != nil {
 			return err
@@ -67,9 +67,9 @@ func (s *Store) SelectAccountTeam(ctx context.Context, a capability.Authorized, 
 }
 
 // CreateAccountTeam commits a new owner's team and session selection under live account authority.
-func (s *Store) CreateAccountTeam(ctx context.Context, a capability.Authorized, input TeamInfo) (TeamInfo, error) {
+func (o *Operator) CreateAccountTeam(ctx context.Context, a capability.Authorized, input TeamInfo) (TeamInfo, error) {
 	var out TeamInfo
-	err := s.inTx(ctx, func(tx *storeTx) error {
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		p, err := accountSessionTx(ctx, tx, a)
 		if err != nil {
 			return err
@@ -90,9 +90,9 @@ func (s *Store) CreateAccountTeam(ctx context.Context, a capability.Authorized, 
 }
 
 // AcceptAccountInvitation commits verified invitation membership and session selection together.
-func (s *Store) AcceptAccountInvitation(ctx context.Context, a capability.Authorized, id string) (InvitationAcceptance, error) {
+func (o *Operator) AcceptAccountInvitation(ctx context.Context, a capability.Authorized, id string) (InvitationAcceptance, error) {
 	var out InvitationAcceptance
-	err := s.inTx(ctx, func(tx *storeTx) error {
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		var team Team
 		lookupErr := tx.QueryRowContext(ctx, `SELECT team FROM invitations WHERE id=?`, id).Scan(&team)
 		p, err := accountSessionTx(ctx, tx, a, team)
@@ -105,7 +105,7 @@ func (s *Store) AcceptAccountInvitation(ctx context.Context, a capability.Author
 		if lookupErr != nil {
 			return lookupErr
 		}
-		out, err = acceptAccountInvitationTx(ctx, tx, p.Capability.Subject.ID, id, tx.now())
+		out, err = tx.operator.acceptAccountInvitationTx(ctx, tx, p.Capability.Subject.ID, id, tx.now())
 		if err != nil {
 			return err
 		}
@@ -118,9 +118,9 @@ func (s *Store) AcceptAccountInvitation(ctx context.Context, a capability.Author
 }
 
 // UnlinkAccountIdentity retains the selected recent direct session and the last sign-in method.
-func (s *Store) UnlinkAccountIdentity(ctx context.Context, a capability.Authorized, provider string) (int64, error) {
+func (o *Operator) UnlinkAccountIdentity(ctx context.Context, a capability.Authorized, provider string) (int64, error) {
 	var ended int64
-	err := s.inTx(ctx, func(tx *storeTx) error {
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		p, err := accountSessionTx(ctx, tx, a)
 		if err != nil {
 			return err
@@ -128,7 +128,7 @@ func (s *Store) UnlinkAccountIdentity(ctx context.Context, a capability.Authoriz
 		if tx.now().Before(p.Capability.IssuedAt) || tx.now().Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
 			return apierr.Authorization(apierr.ReasonReauthRequired, "sign in again before changing sign-in methods")
 		}
-		ended, err = unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now())
+		ended, err = tx.operator.unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now())
 		return err
 	})
 	if err != nil {

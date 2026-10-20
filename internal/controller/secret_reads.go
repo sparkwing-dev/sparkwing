@@ -19,32 +19,8 @@ type SecretReader interface {
 	ReadSecret(context.Context, capability.Authorized) (*store.Secret, error)
 }
 
-// WithSecretReader supplies tenant secret-read transactions before Handler is constructed.
-func (s *Server) WithSecretReader(resolve func(context.Context, store.Team) (SecretReader, error)) *Server {
-	s.resolveSecretReader = resolve
-	return s
-}
-
 func (s *Server) secretReader(ctx context.Context, team string) (SecretReader, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var reader SecretReader
-	var err error
-	if s.resolveSecretReader != nil {
-		reader, err = s.resolveSecretReader(ctx, store.Team(team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		reader, _ = any(tenant).(SecretReader)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if reader == nil || reader.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return reader, nil
+	return tenantPort[SecretReader](ctx, s, store.Team(team))
 }
 
 func secretReadTarget(r *http.Request) (capability.RequestEvidence, error) {

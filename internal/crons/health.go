@@ -72,7 +72,7 @@ func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, err
 		health.count(r)
 	}
 
-	tick, err := s.Store.AsOperator().GetCronTick(ctx)
+	tick, err := s.Operator.GetCronTick(ctx)
 	if err != nil {
 		return health, err
 	}

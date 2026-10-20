@@ -13,5 +13,5 @@ func ReapUnits(ctx context.Context, s *store.Store) ([]store.ReapedUnit, error) 
 	if err != nil {
 		return nil, err
 	}
-	return s.ReapUnits(ctx, lease, 1000)
+	return s.AsOperator().ReapUnits(ctx, lease, 1000)
 }

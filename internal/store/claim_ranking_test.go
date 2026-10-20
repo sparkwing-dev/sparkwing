@@ -275,7 +275,7 @@ func TestRankingReplacesPreferenceHolds(t *testing.T) {
 	f.At(time.Second)
 	f.Poll(t, f.Launcher, capability.UnitNode)
 	ctx := store.WithClaimPlacement(t.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: []string{"name=runner"}, Hold: time.Hour}, {}}, Liveness: time.Hour})
-	claim, err := f.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	claim, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 	if err != nil || claim.NodeID != "job" {
 		t.Fatalf("first-come ranking still applied a preference hold: %+v %v", claim, err)
 	}

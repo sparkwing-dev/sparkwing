@@ -208,7 +208,7 @@ func TestEnginePlanHTTP(t *testing.T) {
 				f.err = &apierr.Error{Code: apierr.SpecDrift, Message: "declarations changed"}
 				status, code = 409, apierr.SpecDrift
 			case "first seal removed":
-				f.readErr = store.ErrNotFound
+				f.runReadErr = store.ErrNotFound
 				status, code, writes = 404, apierr.NotFound, 0
 			}
 			w := engineHTTP(t, b, f, path, body)

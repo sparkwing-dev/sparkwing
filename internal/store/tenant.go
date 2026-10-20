@@ -3,9 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 	"strings"
+
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // Team is a tenant key. It is a defined type rather than a bare string
@@ -50,10 +55,7 @@ func (s *Store) forTeam(ctx context.Context, team Team) (*Tenant, error) {
 		return nil, ErrNoTeam
 	}
 	var name string
-	err := s.queryRow(ctx, `
-		SELECT name FROM teams WHERE name = ?
-		AND NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name AND d.state = ?)`,
-		string(team), TeamDeletionPending).Scan(&name)
+	err := s.queryRow(ctx, liveTeamsSQL+` AND name = ?`, string(team)).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTeam, team)
 	}
@@ -85,29 +87,13 @@ func (s *Store) AsOperator() *Operator { return &Operator{s: s} }
 // id across teams and has to act on it through that team's handle.
 // [ErrNotFound] when no run carries the id.
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
-	return o.s.runTeam(ctx, runID)
-}
-
-func (s *Store) runTeam(ctx context.Context, runID string) (Team, error) {
 	var team string
-	err := s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)
+	err := o.s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", notFound("run", runID)
 	}
 	return Team(team), err
 }
-
-// safety: a type rather than an empty team meaning "all", because that
-// sentinel cannot be told from a team a caller failed to set; the zero
-// value here scopes to the empty team, which matches nothing.
-type teamScope struct {
-	team Team
-	all  bool
-}
-
-func oneTeam(team Team) teamScope { return teamScope{team: team} }
-
-func allTeams() teamScope { return teamScope{all: true} }
 
 var (
 	tenantTables   = schemaTableNames(SchemaTenant)
@@ -142,24 +128,53 @@ func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 	return err
 }
 
-// ListTeams returns every registered team, name order.
-func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error) {
-	rows, err := o.s.query(ctx, `SELECT name FROM teams ORDER BY name`)
+// liveTeamsSQL is shared by handle acquisition and fleet maintenance.
+const liveTeamsSQL = `SELECT name FROM teams WHERE NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name AND d.state = 'pending')`
+
+// EachTeam visits selected live tenants, or all live tenants when query is nil.
+// Tenant failures are logged; database failures and loss of the maintenance lease stop the sweep.
+func (o *Operator) EachTeam(ctx context.Context, query []Team, fn func(*Tenant) error) error {
+	rows, err := o.s.query(ctx, liveTeamsSQL+` ORDER BY name`)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-	var out []Team
+	var teams []Team
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
+		var team Team
+		if err := rows.Scan(&team); err != nil {
+			return errors.Join(err, rows.Close())
 		}
-		out = append(out, Team(name))
+		if query == nil || slices.Contains(query, team) {
+			teams = append(teams, team)
+		}
 	}
-	return out, rows.Err()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, team := range teams {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := fn(&Tenant{s: o.s, team: team}); err != nil {
+			var sqlite interface{ Code() int }
+			var postgres interface{ SQLState() string }
+			global := errors.Is(err, ErrLockHeld) || errors.Is(err, driver.ErrBadConn) || errors.Is(err, sql.ErrConnDone)
+			if errors.As(err, &sqlite) {
+				code := sqlite.Code() & 0xff
+				global = global || code != sqlite3.SQLITE_CONSTRAINT && code != sqlite3.SQLITE_MISMATCH
+			}
+			if errors.As(err, &postgres) {
+				state := postgres.SQLState()
+				global = global || !strings.HasPrefix(state, "22") && !strings.HasPrefix(state, "23")
+			}
+			if global {
+				return err
+			}
+			if dbErr := o.Ping(ctx); dbErr != nil {
+				return errors.Join(err, dbErr)
+			}
+			slog.ErrorContext(ctx, "tenant maintenance failed", "team", team, "err", err)
+		}
+	}
+	return ctx.Err()
 }

@@ -16,21 +16,8 @@ type boundData struct {
 	authority  blob.Authority
 }
 
-func (s *DataController) dataTransactions(ctx context.Context, team string) (DataTransactions, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	if s.ResolveTenant != nil {
-		tenant, err := s.ResolveTenant(ctx, store.Team(team))
-		if err == nil && tenant == nil {
-			return nil, missingEndpointPolicy()
-		}
-		return tenant, err
-	}
-	if s.Store == nil {
-		return nil, missingEndpointPolicy()
-	}
-	return s.Store.ForTeam(ctx, store.Team(team))
+func (s *DataController) dataTransactions(ctx context.Context, team string) (dataTransactions, error) {
+	return ScopedTenantPort[dataTransactions](ctx, store.Team(team), s.ResolveTenant)
 }
 
 func (s *boundData) live(ctx context.Context, supplied blob.Authority) (blob.Authority, error) {

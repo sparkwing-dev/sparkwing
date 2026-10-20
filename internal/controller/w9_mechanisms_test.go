@@ -162,12 +162,14 @@ func TestNativeChildBuildToDeployPlansItsOwnSDKEntrypoint(t *testing.T) {
 
 func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	entry, code, sha := w9Entry(t)
-	e, _, _ := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	e, _, _ := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{RunEnvironment: cipher}, nil
+	}))
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +241,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 		t.Fatal(err)
 	}
 	launcher := controller.EngineHTTPRoot(t, e, "", "eval-launcher", []capability.Grant{capability.ClaimsLaunch})
-	handler := controller.New(e.Store, nil).WithSecretsCipher(cipher).WithEngineController(e).Handler()
+	handler := controller.New(e.Store, nil).WithSecretsCipher(cipher).WithEngineController(e.EngineController).Handler()
 	response := controller.EngineClaimHTTP(t, handler, launcher, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1.2.3","kinds":["eval"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
@@ -257,7 +259,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if string(claim.SubmittedEnv["BUILD_NOTE"]) != string(values["BUILD_NOTE"]) {
 		t.Fatal("eval lost submitted environment")
 	}
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Capability)))
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Capability)))
 	if err != nil {
 		t.Fatal(err)
 	}

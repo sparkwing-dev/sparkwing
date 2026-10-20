@@ -91,7 +91,7 @@ func TestConsoleSessionHTTPProofProperty(t *testing.T) {
 func TestConsoleSessionHTTPRejectsCapabilityAncestry(t *testing.T) {
 	f := newSessionFlow(t)
 	root := loginCapability(t, f)
-	raw, _, err := f.store.CreateCapabilitySession(t.Context(), root.Capability.Prefix, time.Hour)
+	raw, _, err := f.store.AsOperator().CreateCapabilitySession(t.Context(), root.Capability.Prefix, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

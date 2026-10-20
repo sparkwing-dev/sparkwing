@@ -163,7 +163,7 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, t.team, root.Prefix).Scan(&executor.OwnerAccountID); err != nil {
 		return capability.SourceExecutor{}, err
 	}
-	record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
 	if err != nil {
 		return capability.SourceExecutor{}, err
 	}

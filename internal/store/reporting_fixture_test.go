@@ -101,7 +101,7 @@ func (t *Tenant) TestOnlySettlePaidCredit(ctx context.Context, req CreditGrantRe
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		var found bool
 		var err error
-		grant, found, err = paidGrantForPaymentTx(ctx, tx, req.Reference)
+		grant, found, err = tx.operator.paidGrantForPaymentTx(ctx, tx, req.Reference)
 		if err == nil && !found {
 			return ErrUnknownPayment
 		}

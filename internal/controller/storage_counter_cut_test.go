@@ -7,14 +7,14 @@ import (
 )
 
 func TestCacheCounterRoutesAreAbsent(t *testing.T) {
-	server := &Server{}
-	public := server.routers()
+	server := New(nil, nil)
+	handler := server.Handler()
 	for _, path := range []string{"/internal/storage/reserve", "/internal/storage/commit", "/internal/storage/release", "/internal/downloads/charge", "/internal/egress/totals"} {
 		request := httptest.NewRequest(http.MethodPost, path, nil)
-		for _, mux := range []*http.ServeMux{public} {
-			if _, pattern := mux.Handler(request); pattern != "" {
-				t.Errorf("removed counter path %s still resolves to %s", path, pattern)
-			}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound || server.RegisteredRoute(request) {
+			t.Errorf("removed counter path %s = %d %s", path, response.Code, response.Body)
 		}
 	}
 }

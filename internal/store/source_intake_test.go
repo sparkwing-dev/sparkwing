@@ -26,12 +26,12 @@ func TestAdmissionSourceLocationRequiresServerVerification(t *testing.T) {
 func TestAdmissionAndRetryPreserveVerifiedAcquisitionLocation(t *testing.T) {
 	tenant, in, _ := intakeFixture(t)
 	want := runspec.SourceLocation{RemoteURL: "https://github.com/acme/repo.git", PipelineDir: "ci"}
-	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+	tenant.s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		if _, err := resolver.ResolveAuthority(ctx, in.Authority); err != nil {
 			return IntakePolicyFacts{}, err
 		}
 		return IntakePolicyFacts{SourceLocation: &want, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
-	}))
+	})
 	in.Request.Source.Location = runspec.SourceLocation{LocalCheckout: "/untrusted", PipelineDir: "elsewhere"}
 	admitted, err := tenant.AdmitRun(t.Context(), in)
 	if err != nil || admitted.Request.Request.Source.Location != want {

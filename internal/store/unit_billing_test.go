@@ -36,16 +36,16 @@ func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Tim
 
 func meteredUnitClaim(t *testing.T, s *Store, demand UnitDemand) (UnitClaim, Actor) {
 	t.Helper()
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if principal.Capability.Delivery == capability.DeliveryBootstrap {
-		issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+		issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func unitBillingTotal(t *testing.T, s *Store, want int64, settled bool) {
 func TestMeteredUnitClaimAndReservationCommitTogether(t *testing.T) {
 	s, demand, _ := meteredUnitFixture(t, false)
 	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err == nil || len(claim.Bearer) != 0 {
 		t.Fatalf("unfunded award: %+v, %v", claim, err)
 	}
@@ -96,7 +96,7 @@ func TestMeteredUnitConcurrentClaimsCannotSpendTheSameCredit(t *testing.T) {
 		group.Go(func() {
 			request := demand
 			request.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: node}
-			_, err := s.ClaimUnit(t.Context(), request)
+			_, err := s.AsOperator().ClaimUnit(t.Context(), request)
 			results <- err
 		})
 	}
@@ -123,7 +123,7 @@ func TestMeteredUnitQueuePassesOverUnaffordableWork(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('b','older','trigger',1,1,?,?,?)`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','older',node_id,status,ready_at,spec_json,execution_json FROM nodes WHERE run_id='run'`)
 	demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || claim.Team != "a" || claim.RunID != "run" {
 		t.Fatalf("unfunded queue head blocked funded work: %+v, %v", claim, err)
 	}
@@ -159,7 +159,7 @@ func TestMeteredUnitEvalSettlementUsesPersistedLease(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Hour).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation) VALUES ('a','run','job',2,'claimed',8,'eval-host','evaluation',?,4)`, now.Add(time.Minute).UnixNano())
-	if _, err := s.RenewUnit(t.Context(), c.Prefix, true); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), c.Prefix, true); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(11 * time.Second)
@@ -236,7 +236,7 @@ func TestMeteredUnitCloudRenewalStartsComputeWithoutAnAttempt(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, true)
 	claim, _ := meteredUnitClaim(t, s, demand)
 	*now = now.Add(20 * time.Second)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
 	row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
@@ -262,7 +262,7 @@ func TestMeteredUnitRenewalCheckpointsAfterComputeStarts(t *testing.T) {
 		return base.Add(elapsed)
 	}
 	claim, _ := meteredUnitClaim(t, s, demand)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
 	unitBillingTotal(t, s, 1200, false)
@@ -282,7 +282,7 @@ func TestMeteredUnitIssuanceCannotOutliveClaimAuthorityProperty(t *testing.T) {
 			*now = now.Add(time.Microsecond)
 			return *now
 		}
-		claim, err := s.ClaimUnit(t.Context(), demand)
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if err == nil && !claim.Award.LeaseExpiresAt.After(*now) {
 			t.Fatalf("award outlived authority with %d remaining clock steps: %+v, now=%s", remaining, claim.Award, *now)
 		}
@@ -305,7 +305,7 @@ func TestMeteredUnitOwnerWaitBillingFollowsPlacement(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 			claim, actor := meteredUnitClaim(t, s, demand)
 			for _, computing := range []bool{true, false, false, false, true, false} {
-				if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, computing); err != nil {
+				if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, computing); err != nil {
 					t.Fatal(err)
 				}
 				*now = now.Add(10 * time.Second)
@@ -342,7 +342,7 @@ func TestMeteredUnitReaperSettlesAtLeaseLapse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReapUnits(t.Context(), lease, 10); err != nil {
+	if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 		t.Fatal(err)
 	}
 	unitBillingTotal(t, s, max(60, int64(claim.Award.LeaseExpiresAt.Sub(start)/time.Second))*10, true)
@@ -419,7 +419,7 @@ func TestMeteredLeaseNeverOutrunsWhatWasPaid(t *testing.T) {
 	var lease time.Time
 	for range 3 {
 		*now = now.Add(20 * time.Second)
-		beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+		beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -438,7 +438,7 @@ func TestMeteredLeaseNeverOutrunsWhatWasPaid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReapUnits(t.Context(), reaper, 10); err != nil {
+	if _, err := s.AsOperator().ReapUnits(t.Context(), reaper, 10); err != nil {
 		t.Fatal(err)
 	}
 	if settled := paid(); settled > before {

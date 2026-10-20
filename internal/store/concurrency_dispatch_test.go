@@ -31,7 +31,7 @@ func TestConcurrencyControllerDispatchedRunUsesBoundUnitKind(t *testing.T) {
 	claim.Billing = &capability.BillingProvenance{PayerTeam: "a", ReservationID: "award:node-holder", ExecutorClass: "runner", Start: capability.BillingAtStart, Unit: capability.BillingJob}
 	authorityPersist(t, tenant.s, claim)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET claimed_by='node',capability_prefix='node-holder',generation=1,lease_expires_at=? WHERE team='a' AND run_id=? AND node_id='job'`, now.Add(DefaultConcurrencyLease).UnixNano(), plan.RunID)
-	p, err := tenant.s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix})
+	p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix})
 	if err != nil {
 		t.Fatal(err)
 	}

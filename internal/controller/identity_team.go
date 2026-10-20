@@ -125,7 +125,7 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 		}
 		return false
 	}
-	ok, err := s.store.ClaimInvitationEmail(ctx, inv.ID, time.Now())
+	ok, err := s.operator.ClaimInvitationEmail(ctx, inv.ID, time.Now())
 	if err != nil {
 		s.logger.Warn("invitation email: claim", "invitation", inv.ID, "err", err)
 		return false
@@ -135,11 +135,11 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 		return false
 	}
 	inviter := a.Principal.Capability.Subject.ID
-	if acct, err := s.store.Account(ctx, a.Principal.Capability.Subject.ID); err == nil && strings.TrimSpace(acct.Name) != "" {
+	if acct, err := s.operator.Account(ctx, a.Principal.Capability.Subject.ID); err == nil && strings.TrimSpace(acct.Name) != "" {
 		inviter = acct.Name
 	}
 	team := string(inv.Team)
-	if tenant, err := s.store.ForTeam(ctx, inv.Team); err == nil {
+	if tenant, err := s.tenantForTeam(ctx, inv.Team); err == nil {
 		if info, err := tenant.Info(ctx); err == nil {
 			team = info.Label()
 		}
