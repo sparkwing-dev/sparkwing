@@ -86,8 +86,9 @@ credentials. Working-tree snapshots travel as signed source bundles.
 
 Package managers use their upstream registries. To use a separate registry
 mirror, set its tool configuration and list the required environment names
-in the operator's `run.submit_env_allow`. Network proxy and CA settings remain
-available to pipeline processes. Sparkwing provides no Git mirror service
+in the operator's `run.submit_env_allow`; Go toolchain and network base names
+cannot be submitted, so set them in the runner's own environment. Network proxy
+and CA settings remain available to pipeline processes. Sparkwing provides no Git mirror service
 or package proxy.
 
 Direct source fetches create a separate repository per checkout, with its own

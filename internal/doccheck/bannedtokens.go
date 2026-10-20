@@ -24,6 +24,10 @@ var bannedGuideRecipes = []bannedPattern{
 
 var banned = []bannedPattern{
 	{
+		regexp.MustCompile(`(?i)a child always uses (?:its|the) parent's repository`),
+		"explicit child repositories are authorized separately and sealed asserted; only the same repository and revision inherit identity",
+	},
+	{
 		regexp.MustCompile(`\bRetryAuto\b`),
 		"removed; application retries retain the claim and advance the attempt, while lease lapses use a separate disruption count",
 	},

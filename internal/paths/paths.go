@@ -15,28 +15,9 @@ type Paths struct {
 	Root string
 }
 
-func UnderTest() bool {
-	base := filepath.Base(os.Args[0])
-	return strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe")
-}
-
-func TestSandbox() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("sparkwing-test-home-%d", os.Getpid()))
-}
-
 func DefaultPaths() (Paths, error) {
 	if root := os.Getenv("SPARKWING_HOME"); root != "" {
-		if UnderTest() && isOperatorHome(root) {
-			return Paths{}, fmt.Errorf("refusing to open the operator's sparkwing home %s from a test binary: "+
-				"a run started here would write the real runs store and spawn the real daemon. "+
-				"Give the test a home it owns with t.Setenv(\"SPARKWING_HOME\", t.TempDir()), "+
-				"or clear it with t.Setenv(\"SPARKWING_HOME\", \"\") to take the sandbox under %s",
-				root, TestSandbox())
-		}
 		return PathsAt(root), nil
-	}
-	if UnderTest() {
-		return PathsAt(filepath.Join(TestSandbox(), ".sparkwing")), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -47,7 +28,7 @@ func DefaultPaths() (Paths, error) {
 
 // StateDirs lists every directory that may hold runtime state: the home in
 // use and the default ~/.sparkwing, which keeps an earlier home's state after
-// SPARKWING_HOME or the test sandbox moves the home elsewhere.
+// SPARKWING_HOME moves the home elsewhere.
 func StateDirs() []string {
 	var dirs []string
 	if p, err := DefaultPaths(); err == nil {
@@ -59,29 +40,18 @@ func StateDirs() []string {
 	return dirs
 }
 
-// safety: bound before any test can redirect HOME, so a suite that fakes a home
-// directory cannot move the home this refuses.
-var operatorHome = resolveOperatorHome()
-
-func resolveOperatorHome() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return home
-}
-
 func isOperatorHome(root string) bool {
-	if operatorHome == "" {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
 		return false
 	}
-	return filepath.Clean(root) == filepath.Join(operatorHome, ".sparkwing")
+	return filepath.Clean(root) == filepath.Join(home, ".sparkwing")
 }
 
 // SandboxHome reports the sparkwing home in use when it is not the operator's
-// own ~/.sparkwing, so a caller can refuse to write outside it. Both a
-// SPARKWING_HOME redirect and the test-binary sandbox answer true, because
-// neither is the home whose state the operator keeps.
+// own ~/.sparkwing, so a caller can refuse to write outside it. A
+// SPARKWING_HOME redirect answers true, because it is not the home whose state
+// the operator keeps.
 func SandboxHome() (string, bool) {
 	p, err := DefaultPaths()
 	if err != nil || p.Root == "" || isOperatorHome(p.Root) {

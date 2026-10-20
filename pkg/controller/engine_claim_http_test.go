@@ -122,7 +122,7 @@ func TestEngineClaimHTTPDeliversPrivateAwardOnce(t *testing.T) {
 		t.Fatal("held claim returned another bearer")
 	}
 	var count int
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("awards=%d: %v", count, err)
 	}
 }
@@ -175,7 +175,7 @@ func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 	})
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 401)
 	var holder string
-	if err := e.Store.DB().QueryRow(`SELECT COALESCE(claimed_by,'') FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&holder); err != nil || holder != "" {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COALESCE(claimed_by,'') FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&holder); err != nil || holder != "" {
 		t.Fatalf("refused request mutated holder %q: %v", holder, err)
 	}
 }
@@ -289,7 +289,7 @@ func FuzzEngineClaimHTTPKindsNeverWidenGrants(f *testing.F) {
 			t.Fatal("invalid kind selection disclosed an award")
 		}
 		var count int
-		if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || !allowed && count != 0 {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || !allowed && count != 0 {
 			t.Fatalf("invalid selection persisted %d awards: %v", count, err)
 		}
 	})
@@ -329,7 +329,7 @@ func TestEngineClaimHTTPDeadCredentialProperty(t *testing.T) {
 	revokeEngineMachine(t, e.Store, "root")
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", body, 401)
 	var count int
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("dead roots persisted %d awards: %v", count, err)
 	}
 }

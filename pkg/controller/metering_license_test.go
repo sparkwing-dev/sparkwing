@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/license"
 )
 
 func TestLegacyMultiTeamLicenseAdvertisesBilling(t *testing.T) {
-	f := newCreditsFixtureWithLicense(t, license.FeatureMultiTeam)
+	f := newCreditsFixture(t)
 	status, body := f.request(t, http.MethodGet, "/api/v1/capabilities", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("capabilities = %d", status)

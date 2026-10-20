@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -79,8 +80,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).
-		WithLicense(accountSessionTestLicense(t)).WithDashboard(Dashboard{})
+	s := NewDeployment(e.Store, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithDashboard(Dashboard{})
 	raw, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

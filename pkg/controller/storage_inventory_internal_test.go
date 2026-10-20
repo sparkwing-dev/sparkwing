@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,11 +31,11 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 	now := time.Now()
 	old := now.Add(-24 * time.Hour).UnixNano()
 	const size = 2 * store.StorageBytesPerGB
-	if _, err := s.DB().ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", store.DefaultTeam, strings.Repeat("a", 64), size, old); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", store.DefaultTeam, strings.Repeat("a", 64), size, old); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
-		if _, err := s.DB().ExecContext(t.Context(), "INSERT INTO team_storage(team,store,used_bytes,committed_bytes,storage_charged_through,updated_at) VALUES (?,?,999999,999999,?,?)", store.DefaultTeam, kind, old, old); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,used_bytes,committed_bytes,storage_charged_through,updated_at) VALUES (?,?,999999,999999,?,?)", store.DefaultTeam, kind, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -48,13 +48,8 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	lic := license.Resolve(licensetest.Sign(t, priv, licensetest.Terms{
-		Features: []string{license.FeatureMetering}, IssuedTo: "test",
-		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
-	}), pub, now, nil)
 	var logs bytes.Buffer
-	server := New(s, slog.New(slog.NewJSONHandler(&logs, nil))).WithLicense(lic)
+	server := NewDeployment(s, deploymenttest.Metered(t), slog.New(slog.NewJSONHandler(&logs, nil)))
 	server.MaintainStorage(t.Context())
 	decoder := json.NewDecoder(&logs)
 	for decoder.More() {

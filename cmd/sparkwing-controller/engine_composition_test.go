@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -27,7 +28,7 @@ import (
 func composedClaimants(t *testing.T, version string, policy *http.Client) map[string]controllerwire.Controller {
 	t.Helper()
 	root := t.TempDir()
-	st, err := openControllerStore(t.Context(), filepath.Join(root, "state.db"), "")
+	st, err := openControllerStore(t.Context(), deployment.Config{}, filepath.Join(root, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +38,7 @@ func composedClaimants(t *testing.T, version string, policy *http.Client) map[st
 	if _, err := controller.EnsureBootstrapAdminToken(t.Context(), st, admin); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := newControllerServer(st, root, version, policy)
+	srv, err := newControllerServer(st, deployment.Config{}, root, version, policy)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -215,6 +215,9 @@ linters:
           msg: "F2: only the intake transaction (pkg/store/intake_provenance.go) seals the identity a run speaks for; a child or retry copies its parent's sealed value."
         - pattern: ^runspec\.(Git\.(Ref|SHA|App)|Request\.Pipeline)$
           msg: "F3: the store decides trust from runspec.SealedRequest.Provenance, never from the submitted ref, commit, pipeline or App facts."
+        - pattern: ^license\.\*?License\.Allows$
+          pkg: ^github\.com/sparkwing-dev/sparkwing/internal/license$
+          msg: "F2: only internal/deployment asks what a license allows, once at startup, so the kind stays declared and fixed; read deployment.Config instead."
   exclusions:
     paths:
       - web/node_modules/
@@ -231,7 +234,7 @@ linters:
         linters:
           - forbidigo
       - path: ^(internal/runspec/|pkg/store/intake_provenance\.go$|pkg/store/teststore/)
-        text: "F2:"
+        text: "F2: only the intake"
         linters:
           - forbidigo
       # F3 guards the store's trust decisions. The controller still reads Git.App to route
@@ -245,6 +248,15 @@ linters:
       # github_source_release route to the App installation that delivered the run.
       - path: ^pkg/store/(intake_runtime|intake_provenance|app_intake|schedule_intake|schedule_transactions|run_spec|plan_seal|source_upload|github_app_runner|github_source_release|latest_run|binding_execution)\.go$
         text: "F3:"
+        linters:
+          - forbidigo
+      - path: ^internal/deployment/
+        text: "F2: only internal/deployment"
+        linters:
+          - forbidigo
+      # teststore is test-only fixture code; it moves under internal/ with the store.
+      - path: ^pkg/store/teststore/
+        text: "F1: widening"
         linters:
           - forbidigo
 

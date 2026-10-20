@@ -19,6 +19,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
 	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
 	"(*Operator).DeleteExpiredBlobStaging":  "leased maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
+	"(*Store).EnsureBootstrapCapability":    "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
 	"revokeSetupAuthorityTx":                "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
 	"launcherAwardPrefixTx":                 "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
@@ -105,7 +106,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
 
-	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
+	"(*Store).runTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +

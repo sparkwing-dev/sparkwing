@@ -84,6 +84,7 @@ func TestChartInstallsTheLaunchersAdmissionPolicies(t *testing.T) {
 		for _, settings := range [][]string{
 			append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher"),
 			append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher", prefix+"launcher.jobNamespace=customer-jobs"),
+			append(launcherImages(prefix), prefix+"launcher.serviceAccountName=cloud-launcher", prefix+"launcher.enabled=true", prefix+"launcher.tokenSecret.name=pool-token", prefix+"controller.url=https://controller.example", prefix+"launcher.image.repository=registry.example/runner", prefix+"launcher.image.tag=test", prefix+"launcher.cpuCeiling=4", prefix+"launcher.memoryCeiling=8Gi"),
 		} {
 			jobs := "cloud-cloud-jobs"
 			if slices.Contains(settings, prefix+"launcher.jobNamespace=customer-jobs") {

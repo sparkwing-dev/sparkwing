@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -149,7 +148,7 @@ func TestDepCacheArchiveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteArchive(f, src); err != nil {
+	if err := writeArchive(f, src); err != nil {
 		t.Fatalf("write archive: %v", err)
 	}
 	if err := f.Close(); err != nil {
@@ -371,147 +370,12 @@ func TestDirKeyIncludesPath(t *testing.T) {
 func TestStagedExtractLeavesDirCleanOnFailure(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "target")
 	truncated := bytes.NewReader([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00})
-	if err := ExtractArchiveStaged(t.Context(), truncated, dir); err == nil {
+	if err := extractArchiveStaged(t.Context(), truncated, dir); err == nil {
 		t.Fatal("truncated archive extracted without error")
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("target directory exists after failed restore (err=%v)", err)
 	}
-}
-
-func TestLocalDepCacheMissSaveHitCycle(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv("SPARKWING_CACHE_URL", "")
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
-
-	backend := selectBackend(context.Background())
-	if _, ok := backend.(*localBackend); !ok {
-		t.Fatalf("expected local backend, got %T", backend)
-	}
-
-	ctx := context.Background()
-	const key = "dep-go-modules-test-amd64-0011223344556677"
-
-	hit, err := backend.Exists(ctx, key)
-	if err != nil {
-		t.Fatalf("exists on empty store: %v", err)
-	}
-	if hit {
-		t.Fatal("phantom hit on empty store")
-	}
-
-	src := t.TempDir()
-	populateDepCacheFixture(t, src)
-	size, err := backend.Store(ctx, key, src)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if size <= 0 {
-		t.Fatalf("stored size %d", size)
-	}
-
-	hit, err = backend.Exists(ctx, key)
-	if err != nil || !hit {
-		t.Fatalf("exists after store: hit=%v err=%v", hit, err)
-	}
-
-	dest := t.TempDir()
-	got, err := backend.Fetch(ctx, key, dest)
-	if err != nil {
-		t.Fatalf("fetch: %v", err)
-	}
-	if got != size {
-		t.Fatalf("fetch size %d != stored size %d", got, size)
-	}
-	assertDepCacheFixture(t, dest)
-}
-
-func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv("SPARKWING_CACHE_URL", "")
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
-
-	work := t.TempDir()
-	if err := os.WriteFile(filepath.Join(work, "Gemfile.lock"), []byte("GEM\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	depDir := filepath.Join(work, "vendor", "bundle")
-
-	bundle := Spec{Name: "bundle", Path: "vendor/bundle", KeyScope: "vendor/bundle", KeyFiles: []string{"Gemfile.lock"}}
-	st := Restore(context.Background(), bundle, "t", work)
-	if !st.missed {
-		t.Fatal("expected a miss on an empty store")
-	}
-
-	if err := os.MkdirAll(depDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(depDir, "gem.rb"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	st.Save(context.Background(), fmt.Errorf("node exploded"))
-
-	backend := selectBackend(context.Background())
-	hit, err := backend.Exists(context.Background(), st.key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hit {
-		t.Fatal("cache saved despite node failure")
-	}
-
-	st.Save(context.Background(), nil)
-	hit, err = backend.Exists(context.Background(), st.key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hit {
-		t.Fatal("cache not saved after success")
-	}
-}
-
-func TestDirCacheRunNpmStoreMissSaveHitCycle(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv("SPARKWING_CACHE_URL", "")
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
-
-	work := t.TempDir()
-	if err := os.WriteFile(filepath.Join(work, "package-lock.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	store1 := filepath.Join(t.TempDir(), "npm-cache-1")
-	t.Setenv("npm_config_cache", store1)
-
-	npm := Spec{Name: "npm", Resolver: ResolverNpm, KeyFiles: []string{"package-lock.json"}}
-	first := Restore(context.Background(), npm, "t", work)
-	if !first.missed {
-		t.Fatal("expected first-run miss")
-	}
-
-	populateDepCacheFixture(t, store1)
-	first.Save(context.Background(), nil)
-
-	store2 := filepath.Join(t.TempDir(), "npm-cache")
-	t.Setenv("npm_config_cache", store2)
-	second := Restore(context.Background(), npm, "t", work)
-	if second.missed {
-		t.Fatal("expected second-run hit")
-	}
-	assertDepCacheFixture(t, store2)
-}
-
-func TestDirCacheRunMissingLockfileDisables(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	work := t.TempDir()
-
-	gomod := Spec{Name: "go-modules", Resolver: ResolverGoModules, KeyFiles: []string{"go.sum"}}
-	st := Restore(context.Background(), gomod, "t", work)
-	if !st.disabled {
-		t.Fatal("missing lockfile did not disable the cache")
-	}
-	st.Save(context.Background(), nil)
 }
 
 func TestExtractClampsWideDirectoryModes(t *testing.T) {

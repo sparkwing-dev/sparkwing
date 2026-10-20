@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type floodFixture struct{ *browserFixture }
@@ -154,7 +155,7 @@ func TestFloodPolicyConcurrentIdenticalIntakeCommitsOneRun(t *testing.T) {
 		t.Fatalf("created = %d", created)
 	}
 	var count int
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, f.st).QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("stored runs = %d: %v", count, err)
 	}
 }
@@ -223,13 +224,13 @@ func TestFloodPolicyReplaysNeverConsumeOrExhaustTheBucket(t *testing.T) {
 
 func TestFloodPolicyDedupeRetryAfterStoreRefusal(t *testing.T) {
 	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
-	if _, err := f.st.DB().Exec(`CREATE TRIGGER refuse_intake BEFORE INSERT ON runs BEGIN SELECT RAISE(ABORT,'intake refused'); END`); err != nil {
+	if _, err := teststore.SQL(t, f.st).Exec(`CREATE TRIGGER refuse_intake BEFORE INSERT ON runs BEGIN SELECT RAISE(ABORT,'intake refused'); END`); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.submit(f.token, "build", fortyHex(1)); got.Code != 500 {
 		t.Fatalf("store refusal: %d %s", got.Code, got.Body)
 	}
-	if _, err := f.st.DB().Exec(`DROP TRIGGER refuse_intake`); err != nil {
+	if _, err := teststore.SQL(t, f.st).Exec(`DROP TRIGGER refuse_intake`); err != nil {
 		t.Fatal(err)
 	}
 	first := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)

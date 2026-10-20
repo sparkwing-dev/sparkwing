@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -85,7 +86,11 @@ func TestSecretsKeyCredentials(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return secretsCipher(creds.SecretsKey, creds.SecretsPreviousKey)
+		cfg, err := parseDeployment(deploymentFlags{}, creds, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		return secretsCipher(cfg.SecretsKey())
 	}
 
 	t.Run("no keys", func(t *testing.T) {

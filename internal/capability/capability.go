@@ -1,7 +1,10 @@
 // Package capability defines authority shared by the controller, store and node host.
 package capability
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // SubjectKind keeps accountability independent of token spelling and placement.
 type SubjectKind string
@@ -104,6 +107,7 @@ type Capability struct {
 	Delivery      DeliveryPurpose    `json:"delivery,omitempty"`
 	Parent        *AuthorityRef      `json:"parent,omitempty"`
 	ReservedPools []string           `json:"reserved_pools"`
+	Trust         Trust              `json:"trust,omitempty"`
 	Repositories  []string           `json:"repositories"`
 	Data          *DataScope         `json:"data,omitempty"`
 	Billing       *BillingProvenance `json:"billing,omitempty"`
@@ -144,4 +148,30 @@ func (p Principal) DirectAccountSession() bool {
 type Issued struct {
 	Raw        string     `json:"capability"`
 	Capability Capability `json:"-"`
+}
+
+// Trust is the runs a machine root accepts work from, set by a team admin at registration.
+// The empty value takes the controller default: verified default-branch work only when the
+// root holds a pool that a secret is reserved to, and any run otherwise.
+type Trust string
+
+const (
+	TrustVerifiedDefault Trust = "verified-default"
+	TrustAny             Trust = "any"
+)
+
+// Valid reports whether t is the controller default or a named class.
+func (t Trust) Valid() bool { return t == "" || t == TrustVerifiedDefault || t == TrustAny }
+
+// Launcher identifies roots that can deliver only per-claim bootstrap authority.
+func Launcher(c Capability) bool {
+	if c.Unit != "" || c.Binding.Kind != BindingNone || !slices.Contains(c.Grants, ClaimsLaunch) {
+		return false
+	}
+	return c.Subject.Kind == SubjectService || c.Subject.Kind == SubjectMachine && c.Team != "" && len(c.ReservedPools) > 0
+}
+
+// CloudLauncher distinguishes deployment capacity from a team's own pool.
+func CloudLauncher(c Capability) bool {
+	return Launcher(c) && c.Subject.Kind == SubjectService
 }

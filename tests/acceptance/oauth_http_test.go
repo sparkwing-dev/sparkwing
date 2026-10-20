@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const (
@@ -102,17 +104,12 @@ func newOAuthHTTP(t *testing.T) oauthHTTP {
 		`UPDATE accounts SET active_team='team' WHERE id='member'`,
 		`INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','123','member','member@example.test',1,1)`,
 	} {
-		if _, err := f.store.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}
 	p := &oauthProvider{code: "private-provider-code", diagnostic: "private-provider-diagnostic"}
-	f.server.WithDashboard(controller.Dashboard{}).WithGitHubSignIn(githubauth.New(githubauth.Config{
-		ClientID: "client", ClientSecret: "private-client-secret", AuthURL: "https://provider.test/authorize",
-		TokenURL: "https://provider.test/token", UserURL: "https://provider.test/user", EmailsURL: "https://provider.test/emails",
-		HTTP: &http.Client{Transport: p},
-	}), []string{oauthRedirect})
-	h := f.server.Handler()
+	h := withOAuthGitHub(f.server, p).Handler()
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/github/start?next=%2Fruns%3Frun%3Dr1", nil))
 	authorize, err := url.Parse(w.Header().Get("Location"))
@@ -128,6 +125,14 @@ func newOAuthHTTP(t *testing.T) oauthHTTP {
 		t.Fatalf("flow cookie=%+v", flow)
 	}
 	return oauthHTTP{sessionFlow: f, provider: p, handler: h, flow: flow, oauthState: authorize.Query().Get("state")}
+}
+
+func withOAuthGitHub(s *controller.Server, p *oauthProvider) *controller.Server {
+	return s.WithDashboard(controller.Dashboard{}).WithGitHubSignIn(githubauth.New(githubauth.Config{
+		ClientID: "client", ClientSecret: "private-client-secret", AuthURL: "https://provider.test/authorize",
+		TokenURL: "https://provider.test/token", UserURL: "https://provider.test/user", EmailsURL: "https://provider.test/emails",
+		HTTP: &http.Client{Transport: p},
+	}), []string{oauthRedirect})
 }
 
 func oauthCookie(w *httptest.ResponseRecorder, name string) *http.Cookie {
@@ -245,7 +250,7 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 				assertEngineError(t, w, 400, apierr.BadRequest)
 				return
 			case "license":
-				f.server.WithLicense(nil)
+				f.handler = withOAuthGitHub(controller.New(f.store, slog.New(slog.NewTextHandler(f.logs, nil))), f.provider).Handler()
 				code = apierr.NotFound
 			case "missing store":
 				if err := f.store.Close(); err != nil {
@@ -266,7 +271,7 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 func TestOAuthHTTPWaitlistedSessionHasNoTeamAuthority(t *testing.T) {
 	f := newOAuthHTTP(t)
 	for _, query := range []string{`DELETE FROM memberships`, `UPDATE accounts SET active_team='',waitlisted_at=1,waitlist_reason='manual'`} {
-		if _, err := f.store.DB().ExecContext(t.Context(), query); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -1,5 +1,21 @@
 # Migrating to the next release
 
+## Store raw handle, test hooks and dead readers removed
+
+`Store.DB` is removed; use `Store.Ping` for readiness. No caller can reach the
+store's connection, so every write goes through a transaction owner. Test
+fixtures open their own connection with `teststore.SQL`, `teststore.Exec` or
+`teststore.SQLite`. `Operator.CreateTeam`, `Store.SetTestClock`,
+`SetTestBusyTimeout`, `Tenant.TestOnlySeedGitHubInstallation`, `OpenReadOnly`,
+`OpenReadOnlySnapshot` and `logseg.SubjectUploader` are removed. Fixtures use
+`teststore.SeedTeam` and `teststore.SeedGitHubInstallation`, and pass
+`teststore.WithClock` when they open a store. A concurrency invariant
+violation now fails its transaction instead of committing with a log line.
+
+`capability.Grants`, `Routes`, `BillingRules` and the other policy tables are
+functions returning copies. `LookupRoute` returns a copy too, so reading a
+policy cannot change it.
+
 ## Local dashboard sign-in link
 
 The local dashboard's TCP listener now answers 401 to every API request without
@@ -10,6 +26,38 @@ lives in that browser tab's `sessionStorage`, so a separately opened tab needs a
 link. The session ends after 12 hours without a request, 24 hours after sign-in,
 on Log out, or when the local controller restarts. Tools that call the local API
 should use the private socket, which needs no session.
+
+## Shared runners accept less from the run
+
+A runner runs one job after another in shared host state, so three inputs a run
+supplied no longer reach it unchecked.
+
+- **Pool trust.** A pool with reserved secrets defaults to `verified-default`.
+  It requires verified default-branch work and a launcher-only credential.
+  Enroll with `sparkwing runners add --profile prod --runner deploy-1 --repos github.com/acme/* --reserved-for deploy --trust verified-default --launcher`.
+  In the runner chart, use `launcher.enabled=true` and `launcher.tokenSecret`.
+  Remove `runner.trustClass` and `runner.reservedPools`; the credential supplies
+  both facts. Enabling the launcher replaces the persistent runner and cache
+  PVC. A run-level pool pin now uses controller dispatch. A team admin can
+  register a persistent pool with `--trust=any`, which retains the same-uid
+  credential and cross-claim state exposure described in the self-hosting guide.
+- **Submitted environment.** A run's `run.submit_env_allow` values reach a
+  shared runner only under names the runner's operator also lists, in the
+  runner's own machine file `run.submit_env_allow`, `--submit-env-allow`, or the
+  chart's `runner.submitEnvAllow`. Cloud Jobs, here-hosted runs and the requester's own
+  personal machines accept every
+  submittable name. Go toolchain names (`GOFLAGS`, `GOPROXY`, `GOTOOLCHAIN`,
+  and similar) and network base names (`PATH`, `HOME`, `HTTP_PROXY`, and
+  similar) cannot be submitted at all: intake refuses a run that sends one, and
+  the CLI no longer captures them. Set them in the runner's own environment.
+- **Remote cache reads.** A local run's `cache_from` profile needs the editor
+  role. A reader's remote cache credential is refused, because dependency-cache
+  archives are not checked for secrets.
+
+Remote builds on a host the run's owner does not own set `GOENV=off`, so a
+`go env -w` file on that host no longer changes the build. Pipeline binaries
+cached before this release compile once more, because each cached binary now
+carries a digest that is checked before every use.
 
 ## Runs without a runner selector run anywhere
 
@@ -909,8 +957,8 @@ structured inputs.
 
 ## Filesystem logs use tagged segments
 
-`fs.LogStore` and `fs.NewLogStore` are removed. Log writers use a tagged
-`logseg.Sink` with the host's bound `logseg.SubjectUploader`. Filesystem and S3
+`fs.LogStore` and `fs.NewLogStore` are removed. Log writers use
+a tagged `logseg.Sink` bound by the host. Filesystem and S3
 storage use the same immutable segment format.
 
 `conformance.TestLogStore` is removed.
@@ -2827,8 +2875,9 @@ upgrading:
   `pipeline` claim and pipeline-scoped secrets. Any other child is asserted
   under its own pipeline name and reads only team-wide shared secrets, like a
   GitHub reusable workflow called without `secrets: inherit`. Pairing another
-  ref or code commit with an explicit commit, or naming another repository,
-  answers `403`. Children nest at most 10 levels deep counting the root and one
+  ref or code commit with an explicit commit in the inherited repository
+  answers `403`. An explicit child repository must be authorized by the parent's
+  live claim and always runs as asserted. Children nest at most 10 levels deep counting the root and one
   root starts at most 50 children, retries excluded; past either bound intake
   answers `409` with `limit` `max_child_depth` or `max_children_per_root`. A
   child spends the hourly, flood and queue-depth budgets of whoever created its
@@ -2870,3 +2919,69 @@ A run admitted before the upgrade has no sealed provenance, so its OIDC mints,
 data grants, children and pipeline-scoped secret reads are refused. A retry
 copies that missing identity, so let in-flight runs finish before upgrading and
 start any that fail this way as new runs.
+
+## The controller declares its deployment
+
+`sparkwing-controller` no longer works out what kind of deployment it is from
+which credential files exist. Declare it:
+
+- `--deployment=local|team|cloud` (default `local`). A controller with a
+  multi-team license must pass `--deployment=team`; the hosted service passes
+  `cloud`. `team` and `cloud` refuse to start without a license that verifies
+  and grants multi-team. A `cloud` or `cloud-free` limits profile needs
+  `--deployment=cloud`, which also needs `--external-url`.
+- `--store=sqlite|postgres` (default `sqlite`). A controller with a `pg-url`
+  credential must pass `--store=postgres`; `cloud` requires it.
+
+A license that expires while the controller runs no longer turns metering, the
+free tier and sign-in off. Health reports `degraded` with a `license: expired`
+problem, and the next start refuses until the license is renewed.
+
+The credentials directory now refuses any file whose name the controller does
+not read, so a Secret key such as `pg_url` stops startup instead of leaving the
+controller on an empty SQLite store. Move unrelated keys out of the Secret named
+by `controller.credentialsSecret`. A `.previous` or `.published` key without its
+current key, including `github-app-webhook-secret.previous` on its own, stops
+startup.
+
+Startup binds every listener before it opens the store, and writes the
+bootstrap seed, `--payment-mode` and `--free-team-slots` only after every other
+check passes. Controllers sharing a store must declare the same payment mode
+and free team slots. `--external-url` follows the runners' rule:
+`https`, or `http` only on loopback or a Kubernetes Service. Without
+`--external-url`, the GitHub runner binding routes answer
+`capability_unsupported` rather than a workflow built from the request's host.
+
+`sparkwing-controller admin` drops `--credentials-dir`. It opens the store the
+serving controller recorded in `$SPARKWING_HOME/deployment.json`, checks that
+it is the same store, and refuses otherwise, instead of creating a SQLite store.
+
+Runners and the launcher refuse a plain `http://` controller URL unless its host
+is loopback or a Kubernetes Service (`*.svc`, `*.svc.cluster.local`); use
+`https://`.
+
+The `sparkwing-full` chart (0.3.0) adds `controller.deployment` and
+`controller.store`, validates mode values against `values.schema.json`, and
+always passes `--require-auth`. `controller.requireAuth` and
+`controller.allowOpenBootstrap` are removed: unset them. A bootstrap seed left
+mounted after its handoff now only logs a warning, so you can remove it from
+the Secret whenever convenient. Charts that set
+`controller.databaseSecret.name` must also set `controller.store=postgres`.
+
+### Single active controller
+
+PostgreSQL controllers take a dedicated session advisory lock before migrations
+or startup writes. A second controller waits as a standby. Loss of the lock or
+its connection causes an immediate non-zero exit without draining. Promotion
+bumps a `controller_epoch` row in the lock transaction. Every write transaction
+locks and checks that epoch, so promotion waits for in-flight writes and the
+former controller's later writes abort and fail-stop. SQLite controllers and
+wingd share the home's `wingd/d.lock` OS file lock. A second owner fails fast,
+while admin remains available. Webhook ordering and bucket write guards use the active
+process's state, so cross-controller ordering and storage-state propagation do
+not apply. `--payment-mode` and `--free-team-slots` remain matching shared
+settings.
+
+Break-glass admin checks the actual table schema and transport endpoint,
+including Unix sockets, and keeps verification and writes on that connection.
+Schema-validation and connection-configuration errors omit credentials. An empty `--addr` refuses startup before opening the store.

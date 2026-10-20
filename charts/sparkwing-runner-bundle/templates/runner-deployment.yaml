@@ -1,4 +1,4 @@
-{{- if .Values.runner.enabled }}
+{{- if and .Values.runner.enabled (not .Values.launcher.enabled) }}
 {{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
 {{- $runnerImage := include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) -}}
 {{- $goCache := .Values.runner.goCache.persistence.enabled -}}
@@ -97,6 +97,9 @@ spec:
             - {{ printf "--poll=%s" .Values.runner.pollInterval | quote }}
             {{- range .Values.runner.repos }}
             - {{ printf "--repos=%s" . | quote }}
+            {{- end }}
+            {{- range .Values.runner.submitEnvAllow }}
+            - {{ printf "--submit-env-allow=%s" . | quote }}
             {{- end }}
             {{- include "sparkwing-runner-bundle.runnerLabelArgs" . | nindent 12 }}
             {{- if gt (int .Values.runner.metricsPort) 0 }}

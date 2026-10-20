@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestPeerIntakeNativeCommitProperty(t *testing.T) {
@@ -113,7 +114,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 			return false
 		}
 		var count int
-		if err := st.DB().QueryRowContext(t.Context(), "SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != iteration {
+		if err := teststore.SQL(t, st).QueryRowContext(t.Context(), "SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != iteration {
 			t.Logf("committed runs %d, expected %d: %v", count, iteration, err)
 			return false
 		}

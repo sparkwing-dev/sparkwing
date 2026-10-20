@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -25,10 +24,7 @@ func TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	terms := licensetest.Terms{Features: []string{license.FeatureMultiTeam, license.FeatureMetering}, IssuedTo: "test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
-	s := New(st, nil).WithSecretsCipher(cipher).WithLicense(license.Resolve(licensetest.Sign(t, priv, terms), pub, now, nil)).WithOperatorAccounts([]string{"operator"})
+	s := NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
 	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

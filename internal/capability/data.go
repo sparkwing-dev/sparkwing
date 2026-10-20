@@ -54,7 +54,7 @@ type DataPolicy struct {
 }
 
 // DataPolicies covers all object operations; logs use their separate signed PUT path.
-var DataPolicies = []DataPolicy{
+var dataPolicies = []DataPolicy{
 	{DataDownload, DataRead, true, false, false},
 	{DataUpload, DataWrite, false, true, false},
 	{DataCommit, DataWrite, false, true, false},
@@ -91,9 +91,9 @@ func AuthorizeData(ctx context.Context, edges DataAccessChecker, authorized Auth
 		return policyFailure()
 	}
 	var policy *DataPolicy
-	for i := range DataPolicies {
-		if DataPolicies[i].Operation == target.Operation {
-			policy = &DataPolicies[i]
+	for i := range dataPolicies {
+		if dataPolicies[i].Operation == target.Operation {
+			policy = &dataPolicies[i]
 			break
 		}
 	}

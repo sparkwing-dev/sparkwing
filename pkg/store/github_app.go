@@ -65,25 +65,9 @@ type GitHubAppTrigger struct {
 // installation another team already holds.
 var ErrInstallationBoundElsewhere = errors.New("store: this GitHub App installation is connected to another team")
 
-const (
-	maxGitHubTagPatterns      = 10
-	maxGitHubTagPatternLength = 128
-)
-
 // ValidateGitHubTagPatterns checks the limits and glob syntax of a subscription's tag patterns.
 func ValidateGitHubTagPatterns(patterns []string) error {
-	if len(patterns) > maxGitHubTagPatterns {
-		return fmt.Errorf("%w: at most %d tag patterns are allowed", ErrInvalidInput, maxGitHubTagPatterns)
-	}
-	for _, pattern := range patterns {
-		if pattern == "" || len(pattern) > maxGitHubTagPatternLength {
-			return fmt.Errorf("%w: tag patterns must have 1 to %d bytes", ErrInvalidInput, maxGitHubTagPatternLength)
-		}
-		if _, err := path.Match(pattern, ""); err != nil {
-			return fmt.Errorf("%w: invalid tag pattern %q: %w", ErrInvalidInput, pattern, err)
-		}
-	}
-	return nil
+	return validateGitHubPatterns("tag", patterns)
 }
 
 const githubAppInstallationCols = `installation_id, team, account_id, account_login, account_type, suspended,
@@ -101,20 +85,6 @@ func scanGitHubAppInstallation(row interface{ Scan(...any) error }) (GitHubAppIn
 	in.Team, in.Suspended = Team(team), suspended != 0
 	in.CreatedAt, in.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 	return in, nil
-}
-
-// TestOnlySeedGitHubInstallation inserts an installation for fixtures.
-func (t *Tenant) TestOnlySeedGitHubInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
-	var out GitHubAppInstallation
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		out, err = t.bindGitHubInstallationTx(ctx, tx, in, now)
-		return err
-	})
-	if err != nil {
-		return GitHubAppInstallation{}, err
-	}
-	return out, nil
 }
 
 func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
@@ -201,7 +171,7 @@ func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation
 	if err != nil {
 		return "", err
 	}
-	t, err := o.s.ForTeam(ctx, in.Team)
+	t, err := o.s.forTeam(ctx, in.Team)
 	if err != nil {
 		return "", err
 	}
@@ -309,10 +279,10 @@ func (t *Tenant) putGitHubAppTriggerTx(ctx context.Context, tx *storeTx, tr GitH
 		return GitHubAppTrigger{}, err
 	}
 	tr.Runner = runner
-	if err := validateGitHubBranchPatterns("branches", tr.Branches); err != nil {
+	if err := validateGitHubPatterns("branches", tr.Branches); err != nil {
 		return GitHubAppTrigger{}, err
 	}
-	if err := validateGitHubBranchPatterns("base_branches", tr.BaseBranches); err != nil {
+	if err := validateGitHubPatterns("base_branches", tr.BaseBranches); err != nil {
 		return GitHubAppTrigger{}, err
 	}
 	if tr.Branches == nil {
@@ -380,7 +350,7 @@ func (t *Tenant) putGitHubAppTriggerTx(ctx context.Context, tx *storeTx, tr GitH
 	return tr, nil
 }
 
-func validateGitHubBranchPatterns(field string, patterns []string) error {
+func validateGitHubPatterns(field string, patterns []string) error {
 	if len(patterns) > 10 {
 		return fmt.Errorf("%w: %s has more than 10 patterns", ErrInvalidInput, field)
 	}

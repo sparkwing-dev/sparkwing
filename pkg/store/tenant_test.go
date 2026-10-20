@@ -19,8 +19,8 @@ func defaultTenant(t *testing.T, st *store.Store) *store.Tenant {
 func tenantFor(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	ctx := context.Background()
-	if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
-		t.Fatalf("CreateTeam(%q): %v", team, err)
+	if err := st.AsOperator().TestOnlyCreateTeam(ctx, team); err != nil {
+		t.Fatalf("TestOnlyCreateTeam(%q): %v", team, err)
 	}
 	tn, err := st.ForTeam(ctx, team)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestForTeamRefusesAnUnregisteredTeam(t *testing.T) {
 	if _, err := st.ForTeam(ctx, "ghost"); !errors.Is(err, store.ErrUnknownTeam) {
 		t.Fatalf("ForTeam(ghost) = %v, want ErrUnknownTeam", err)
 	}
-	if err := st.AsOperator().CreateTeam(ctx, "ghost"); err != nil {
+	if err := st.AsOperator().TestOnlyCreateTeam(ctx, "ghost"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.ForTeam(ctx, "ghost"); err != nil {
@@ -84,7 +84,7 @@ func TestForTeamRefusesAnUnregisteredTeam(t *testing.T) {
 func TestTeamNamesNormalizeToOneTenant(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
-	if err := st.AsOperator().CreateTeam(ctx, "  Acme  "); err != nil {
+	if err := st.AsOperator().TestOnlyCreateTeam(ctx, "  Acme  "); err != nil {
 		t.Fatal(err)
 	}
 	for _, spelling := range []store.Team{"acme", "ACME", " acme", "Acme "} {

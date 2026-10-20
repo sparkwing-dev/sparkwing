@@ -10,6 +10,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testleak"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -31,7 +33,7 @@ func TestMain(m *testing.M) {
 			return
 		}
 	}
-	os.Exit(m.Run())
+	testleak.Main(m)
 }
 
 func TestSharedMemoEntryVectors(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestEngineClaimHTTPRemovedSelectorsNeverAwardProperty(t *testing.T) {
@@ -26,7 +27,7 @@ func TestEngineClaimHTTPRemovedSelectorsNeverAwardProperty(t *testing.T) {
 		}
 		w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", string(body), http.StatusBadRequest)
 		var count int
-		if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 0 || strings.Contains(w.Body.String(), `"capability"`) {
@@ -92,7 +93,7 @@ func TestEngineClaimHTTPRepositorySelectionUsesEnrollment(t *testing.T) {
 						t.Fatalf("scope=%s: %s", scope, w.Body)
 					}
 					var awards int
-					if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&awards); err != nil || awards != map[bool]int{false: 0, true: 1}[allowed] {
+					if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&awards); err != nil || awards != map[bool]int{false: 0, true: 1}[allowed] {
 						t.Fatalf("awards=%d: %v", awards, err)
 					}
 				})
@@ -163,8 +164,10 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 				t.Fatal(err)
 			}
 			bodyDigest := sha256.Sum256([]byte(`{"outcome":"success"}`))
-			snapshot.Binding.Result = &capability.RecordedResult{Actor: snapshot.Authorities[0].Principal.Authority,
-				Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: "run", Generation: claimed.Claim.Binding.Generation, Digest: hex.EncodeToString(bodyDigest[:])}
+			snapshot.Binding.Result = &capability.RecordedResult{
+				Actor:  snapshot.Authorities[0].Principal.Authority,
+				Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: "run", Generation: claimed.Claim.Binding.Generation, Digest: hex.EncodeToString(bodyDigest[:]),
+			}
 			server := New(e.Store, nil).WithEngineController(e)
 			authorization := server.authorization
 			authorization.Authenticator = capability.NewAuthenticator(&reportingFacts{snapshot: snapshot, digest: digest})
@@ -224,7 +227,7 @@ func TestEngineNamedClaimHTTPRequiresReadyMatchingWork(t *testing.T) {
 			}
 			w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", body, status)
 			var count int
-			if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil {
+			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			want := 0

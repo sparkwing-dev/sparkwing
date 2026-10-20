@@ -20,9 +20,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func engineRuntimeStore(t *testing.T) (*EngineController, *store.Tenant) {
+func engineRuntimeStore(t *testing.T, opts ...store.Option) (*EngineController, *store.Tenant) {
 	t.Helper()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func engineRuntimeStore(t *testing.T) (*EngineController, *store.Tenant) {
 
 func engineSQL(t *testing.T, s *store.Store, query string, args ...any) {
 	t.Helper()
-	if _, err := s.DB().ExecContext(t.Context(), query, args...); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), query, args...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -92,7 +92,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 				t.Fatalf("events: %+v, %v", events, err)
 			}
 			var effects int
-			if err := s.DB().QueryRow(`SELECT COUNT(*) FROM run_effects WHERE team='a' AND run_id='run'`).Scan(&effects); err != nil || current && effects != 1 || !current && effects != 0 {
+			if err := teststore.SQL(t, s).QueryRow(`SELECT COUNT(*) FROM run_effects WHERE team='a' AND run_id='run'`).Scan(&effects); err != nil || current && effects != 1 || !current && effects != 0 {
 				t.Fatalf("effects: %d, %v", effects, err)
 			}
 		})
@@ -237,7 +237,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 		t.Fatalf("finished state=%s at %v, %v", run.State, run.FinishedAt, err)
 	}
 	var status string
-	if err := server.Store.DB().QueryRow(`SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "done" {
+	if err := teststore.SQL(t, server.Store).QueryRow(`SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "done" {
 		t.Fatalf("owner status=%s, %v", status, err)
 	}
 }

@@ -16,10 +16,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,9 +28,7 @@ func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
 	server := New(s, nil).WithDashboard(Dashboard{Local: true})
 	random := rand.New(rand.NewPCG(37, 19))
 	for _, team := range []store.Team{store.DefaultTeam, "alpha", "beta"} {
-		if err := s.AsOperator().CreateTeam(t.Context(), team); err != nil {
-			t.Fatal(err)
-		}
+		teststore.SeedTeam(t, s, team)
 		tenant, err := s.ForTeam(t.Context(), team)
 		if err != nil {
 			t.Fatal(err)

@@ -16,8 +16,10 @@ type apiRouteReference struct {
 	line         int
 }
 
-var apiRouteExample = regexp.MustCompile("\\b(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE)\\s+(/(?:api/v1|node/v1)(?:/[^\\s`\"'<>)]*)?)")
-var apiRouteParameter = regexp.MustCompile(`\{[^{}]+\}`)
+var (
+	apiRouteExample   = regexp.MustCompile("\\b(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE)\\s+(/(?:api/v1|node/v1)(?:/[^\\s`\"'<>)]*)?)")
+	apiRouteParameter = regexp.MustCompile(`\{[^{}]+\}`)
+)
 
 func documentedAPIRoutes(doc string) []apiRouteReference {
 	var result []apiRouteReference
@@ -33,7 +35,7 @@ func documentedAPIRoutes(doc string) []apiRouteReference {
 
 func knownAPIRoute(method, path string) bool {
 	path = apiRouteParameter.ReplaceAllString(path, "{}")
-	for _, route := range capability.Routes {
+	for _, route := range capability.Routes() {
 		if route.Method == method && apiRouteParameter.ReplaceAllString(route.Path, "{}") == path {
 			return true
 		}

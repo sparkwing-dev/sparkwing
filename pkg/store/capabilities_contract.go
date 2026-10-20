@@ -47,7 +47,7 @@ func (r CapabilityRecord) Validate() error {
 	}
 	seen := map[capability.Grant]bool{}
 	for _, g := range c.Grants {
-		if !slices.Contains(capability.Grants, g) || seen[g] {
+		if !slices.Contains(capability.Grants(), g) || seen[g] {
 			return authorityError(apierr.IntegrityFailure, "invalid capability grants")
 		}
 		seen[g] = true
@@ -95,7 +95,7 @@ func (r CapabilityRecord) Validate() error {
 		if c.Delivery != capability.DeliveryDirect && c.Delivery != capability.DeliveryBootstrap {
 			return authorityError(apierr.IntegrityFailure, "invalid award delivery")
 		}
-		if c.Delivery == capability.DeliveryBootstrap && !slices.Contains(capability.BootstrapUnits, c.Unit) {
+		if c.Delivery == capability.DeliveryBootstrap && !slices.Contains(capability.BootstrapUnits(), c.Unit) {
 			return authorityError(apierr.IntegrityFailure, "invalid bootstrap unit")
 		}
 		b := c.Billing
@@ -125,7 +125,7 @@ func validAuthorityRef(ref capability.AuthorityRef) bool {
 }
 
 func awardPolicy(purpose capability.AwardPurpose) (capability.AwardPolicy, bool) {
-	for _, p := range capability.AwardPolicies {
+	for _, p := range capability.AwardPolicies() {
 		if p.Purpose == purpose {
 			return p, true
 		}
@@ -340,7 +340,7 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		return node, authorityError(apierr.Unauthenticated, "authority has ended")
 	}
 	if c.Subject.Kind == capability.SubjectAccount {
-		if c.Team == "" && node.principal.Class == capability.CredentialSession && c.Parent == nil {
+		if !node.readsMembership() {
 			var account string
 			err := tx.QueryRowContext(ctx, "SELECT id FROM accounts WHERE id=?"+suffix, c.Subject.ID).Scan(&account)
 			return node, err
@@ -355,7 +355,7 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		if c.Unit == "" {
 			allowed := ScopesForRole(role)
 			if c.Data != nil {
-				if c.Data.Use == capability.DataRemoteCache && slices.Contains(allowed, ScopeRunsRead) {
+				if c.Data.Use == capability.DataRemoteCache && slices.Contains(allowed, ScopeRunsWrite) {
 					allowed = append(allowed, string(capability.DataRead))
 				}
 				if c.Data.Use == capability.DataPublish && slices.Contains(allowed, ScopeRunsWrite) {
@@ -373,7 +373,54 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 	return node, nil
 }
 
+// readsMembership reports whether an account node's authority depends on
+// its team membership rather than on the account alone.
+func (node authorityNode) readsMembership() bool {
+	c := node.principal.Capability
+	return c.Subject.Kind == capability.SubjectAccount && !(c.Team == "" && node.principal.Class == capability.CredentialSession && c.Parent == nil)
+}
+
+// lockChainMembershipsTx share-locks the memberships an authority chain reads
+// before any of its authority rows, in store lock order. Demotion holds the
+// membership while it revokes the capabilities its account minted, so
+// locking a capability first deadlocks against it. A chain that changes
+// between this walk and the locked one may still read an unlisted
+// membership, which PostgreSQL reports as a deadlock that inTx retries.
+func lockChainMembershipsTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) error {
+	chain, err := authorityChainTx(ctx, tx, ref, false)
+	var refused *apierr.Error
+	if errors.As(err, &refused) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var keys []storeLockKey
+	for _, node := range chain {
+		if !node.readsMembership() {
+			continue
+		}
+		key := storeLockKey{tier: lockMembership, keys: [3]string{node.principal.Capability.Team, node.principal.Capability.Subject.ID}}
+		if !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	slices.SortFunc(keys, compareStoreLocks)
+	for _, key := range keys {
+		var account string
+		if err := tx.QueryRowContext(ctx, "SELECT account_id FROM memberships WHERE team = ? AND account_id = ?"+tx.forShare(), key.keys[0], key.keys[1]).Scan(&account); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
+}
+
 func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool) ([]authorityNode, error) {
+	if lock && tx.forShare() != "" {
+		if err := lockChainMembershipsTx(ctx, tx, ref); err != nil {
+			return nil, err
+		}
+	}
 	seen := map[capability.AuthorityRef]bool{}
 	var chain []authorityNode
 	for {

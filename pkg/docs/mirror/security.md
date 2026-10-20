@@ -114,7 +114,9 @@ pipeline-scoped secrets, or names a branch that the controller resolves and is
 sealed `asserted` under its own pipeline name. An asserted child reads only
 team-wide shared secrets, like a GitHub reusable workflow called without
 `secrets: inherit`. A request that pairs another ref or code commit with its
-own commit is refused with `403`, as is a child naming another repository. A
+own commit in the inherited repository is refused with `403`. An explicit
+child repository requires authorization from the parent's live claim and always
+runs as asserted. Cycle checks compare repository and pipeline together. A
 retry copies its source run's identity whole.
 
 A `source:` code pin that is a full commit ID keeps the run's class. A branch or
@@ -292,7 +294,8 @@ unverified writer keeps its own data scope, so a member's manual run cannot feed
 memo or cache entries to another member or to App, schedule or Actions builds;
 see [caching](caching.md#who-shares-a-cache). A remote
 cache profile permits only the user's authorized verified-default-branch memo,
-artifact and dependency-cache reads. It exposes no write or binary-fetch method.
+artifact and dependency-cache reads, and needs the editor role, because
+dependency-cache archives are not checked for secrets. It exposes no write or binary-fetch method.
 Publication is separate, labels provenance as local and creates no execution
 claim. A publication failure does not change the completed local verdict.
 

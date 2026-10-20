@@ -75,6 +75,7 @@ func validName(name string) bool { return name != "" && !strings.ContainsAny(nam
 // Git also drops inherited GIT_* except GIT_SSL_CAINFO and GIT_SSL_CAPATH, plus
 // SSH_ASKPASS and SSH_AUTH_SOCK. Source acquisition selects private credential/config files through argv.
 // Git never inherits a repository/index/config override or a credential helper from a caller.
+// Remote installs on a host the run's owner does not own set GOENV=off.
 func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 	if k > Git {
 		return nil, errors.New("unknown process environment kind")
@@ -122,6 +123,10 @@ func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 	}
 	if k == Git {
 		env[envKey("GIT_NO_REPLACE_OBJECTS")] = "GIT_NO_REPLACE_OBJECTS=1"
+	}
+	// safety: a shared host's go env file is writable by earlier jobs, so remote compiles ignore it.
+	if k == Install && !b.Local && !b.OwnerMachine {
+		env[envKey("GOENV")] = "GOENV=off"
 	}
 	result := make([]string, 0, len(env))
 	for _, entry := range env {
@@ -189,6 +194,9 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 		}
 		if row.RemoteBase {
 			return true
+		}
+		if slices.ContainsFunc(b.Submitted, func(submitted string) bool { return envKey(submitted) == envKey(name) }) {
+			return k != Install
 		}
 		return submitAllowed(name, b.SubmitEnvAllow)
 	}

@@ -12,6 +12,7 @@ import (
 
 const (
 	stepKinds    = "kinds"
+	stepTrust    = "trust"
 	stepTier     = "tier"
 	stepAccess   = "access"
 	stepMatch    = "match"
@@ -56,6 +57,10 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil || len(claimant.Kinds) > 0 && !slices.Contains(claimant.Kinds, unit.Kind) {
 		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(apierr.Forbidden, "claimant does not take this kind of unit"))
 		return e, nil
+	}
+	if trusted, err := claimantTrustsRunTx(ctx, tx, team, unit.RunID, chain[len(chain)-1].principal.Capability, e.launcher); err != nil || !trusted {
+		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, "claimant trust requires verified default-branch work and launcher mode for reserved pools")
+		return e, err
 	}
 	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, checks.lock)
 	switch {
@@ -119,4 +124,38 @@ func rankedObservable(c capability.Capability) bool {
 
 func localClaimant(c capability.Capability) bool {
 	return c.Subject.Kind == capability.SubjectLocal && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
+}
+
+// safety: a claimant that runs one job after another shares host state between them,
+// so work from a run anyone can push must not reach a host that later holds a pool's
+// reserved secrets.
+func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, launcher bool) (bool, error) {
+	if root.Trust == capability.TrustAny {
+		return true, nil
+	}
+	if root.Trust == "" {
+		reserved, err := poolsHoldSecretsTx(ctx, tx, team, root.ReservedPools)
+		if err != nil || !reserved {
+			return true, err
+		}
+	}
+	if len(root.ReservedPools) > 0 && !launcher {
+		return false, nil
+	}
+	seal, err := sealedRequestTx(ctx, tx, team, run)
+	if err != nil {
+		return false, err
+	}
+	return seal.Provenance.TrustedDefault(), nil
+}
+
+func poolsHoldSecretsTx(ctx context.Context, tx *storeTx, team Team, pools []string) (bool, error) {
+	for _, pool := range pools {
+		var held int
+		err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM secrets WHERE team=? AND only_on=?`, team, pool).Scan(&held)
+		if err != nil || held > 0 {
+			return held > 0, err
+		}
+	}
+	return false, nil
 }

@@ -17,8 +17,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type rootIssuer struct {
@@ -251,7 +253,7 @@ func TestRootProvisioningHTTPEnrollmentConflicts(t *testing.T) {
 
 func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 	for _, service := range []bool{false, true} {
-		for _, grant := range capability.Grants {
+		for _, grant := range capability.Grants() {
 			b, path, body := rootFixture(service)
 			var request map[string]any
 			if err := json.Unmarshal([]byte(body), &request); err != nil {
@@ -264,7 +266,7 @@ func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 			}
 			f := &rootIssuer{}
 			w := authorityHTTP(rootServer(b, f), b, "POST", path, string(raw))
-			allowed := grant == capability.NodesClaim || grant == capability.TriggersClaim
+			allowed := grant == capability.NodesClaim || grant == capability.TriggersClaim || grant == capability.ClaimsLaunch
 			if service {
 				allowed = grant == capability.ClaimsLaunch || grant == capability.OperatorLimits || grant == capability.OperatorObjectStore || grant == capability.OperatorTokens
 			}
@@ -284,7 +286,7 @@ func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 
 func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 	f := newSessionFlow(t)
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
 		t.Fatal(err)
 	}
 	h := f.server.Handler()
@@ -304,7 +306,7 @@ func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		if status == 201 {
 			role = "owner"
 		}
-		if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role=?`, role); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role=?`, role); err != nil {
 			t.Fatal(err)
 		}
 		w = httptest.NewRecorder()
@@ -312,7 +314,7 @@ func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		if status == 403 {
 			assertEngineError(t, w, 403, apierr.Forbidden)
 			var count int
-			if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
+			if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("count=%d err=%v", count, err)
 			}
 			continue
@@ -344,8 +346,7 @@ func TestRootProvisioningHTTPMethodsAndRetry(t *testing.T) {
 }
 
 func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
-	f := newSessionFlow(t)
-	f.server.WithCloudDeployment(true)
+	f := newDeploymentSessionFlow(t, deploymenttest.Cloud(t, "https://controller.test"))
 	secret := sha256.Sum256([]byte(t.Name()))
 	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
 	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), f.store, seed); err != nil || !created {

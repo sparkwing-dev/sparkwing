@@ -6011,6 +6011,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        trust:
+          type: string
       required:
         - name
         - repos

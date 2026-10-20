@@ -59,9 +59,14 @@ Cloud Jobs use root and privileged Docker-in-Docker on exclusive team-dedicated
 nodes. Default-deny network enforcement and complete teardown require deployment
 proof. Aggregate scratch includes DinD and remains bounded by the shared limit.
 
-The supported controller topology is one replica. Persistent state and singleton
-leases retain the planned replica-safe boundaries. Cross-replica live-log fan-out
-and coordinated request limiting remain separate work.
+A database has one active controller. PostgreSQL standbys wait on a dedicated
+session advisory lock. Losing the lock or its connection exits the active
+process immediately without draining. Promotion also bumps a `controller_epoch`
+row. Every write transaction locks and checks that epoch, so promotion waits for
+in-flight writes and fences later writes from the former controller. SQLite
+controllers and wingd share one OS file lock per home. Admin remains available.
+Webhook ordering, bucket write guards, request budgets and live log tails use
+the active process's state.
 
 ## Version policy
 

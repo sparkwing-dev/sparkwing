@@ -23,9 +23,8 @@ type teamDownloadFixture struct {
 
 func newTeamDownloadFixture(t *testing.T, freeCap int64) teamDownloadFixture {
 	t.Helper()
-	raw, pub := multiTeamLicense(t)
 	meter := egress.New(egress.Config{})
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
 		s.WithTeamDownloadCaps(freeCap, 0).WithEgressMeter(meter)
 	}})
 	return teamDownloadFixture{identityFixture: f, meter: meter}
@@ -90,9 +89,7 @@ func TestTeamLogReadsAreNotRefusedPastTheDownloadCap(t *testing.T) {
 func freeTeamToken(t *testing.T, st *store.Store, team store.Team) string {
 	t.Helper()
 	ctx := context.Background()
-	if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, st, team)
 	tenant, err := st.ForTeam(ctx, team)
 	if err != nil {
 		t.Fatal(err)

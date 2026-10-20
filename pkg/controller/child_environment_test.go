@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestNativeChildIntakeInheritsCapturedEnvironment(t *testing.T) {
@@ -75,7 +76,7 @@ func TestNativeChildIntakeInheritsCapturedEnvironment(t *testing.T) {
 			t.Fatal("child lost environment provenance")
 		}
 		var encrypted string
-		if err := e.Store.DB().QueryRow(`SELECT submitted_env FROM runs WHERE team='a' AND id=?`, id).Scan(&encrypted); err != nil {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT submitted_env FROM runs WHERE team='a' AND id=?`, id).Scan(&encrypted); err != nil {
 			t.Fatal(err)
 		}
 		forged := parent.Request.Request

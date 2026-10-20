@@ -5,7 +5,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -94,9 +93,6 @@ func teamLimitsBody(st store.SpendStanding) teamLimitsJSON {
 }
 
 func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if !s.Metering() {
-		return &apierr.Error{Code: apierr.NotFound, Message: "billing is not enabled"}
-	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
 		return engineLookupError(err)

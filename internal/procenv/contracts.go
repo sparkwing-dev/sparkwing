@@ -58,7 +58,9 @@ type Base struct {
 	Captured       []string
 	Ambient        []string
 	SubmitEnvAllow []string
-	Masker         *secrets.Masker
+	// Submitted names the requester's values in Ambient; pipeline processes receive them, installs do not.
+	Submitted []string
+	Masker    *secrets.Masker
 }
 
 // RunnerInfo carries the claim's granted identity rather than the host process's ambient identity.

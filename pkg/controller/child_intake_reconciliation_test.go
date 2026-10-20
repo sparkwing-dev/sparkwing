@@ -115,7 +115,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 		t.Fatalf("sibling: %s: %v", response.Body, err)
 	}
 	var kind string
-	if err := e.Store.DB().QueryRow(`SELECT unit_kind FROM triggers WHERE team='a' AND id=?`, created.RunID).Scan(&kind); err != nil || kind != "plan" {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT unit_kind FROM triggers WHERE team='a' AND id=?`, created.RunID).Scan(&kind); err != nil || kind != "plan" {
 		t.Fatalf("child owner unit=%q: %v", kind, err)
 	}
 	path := "/api/v1/runs/run/children/" + created.RunID
@@ -152,7 +152,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("runs=%d: %v", count, err)
 	}
 	engineSQL(t, e.Store, `UPDATE nodes SET generation=generation+1 WHERE team='a' AND run_id='run' AND node_id='job'`)
@@ -170,9 +170,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := e.Store.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
-			t.Fatal(err)
-		}
+		teststore.SeedTeam(t, e.Store, "foreign")
 		private := fmt.Sprintf("private-pipeline-%x", seed)
 		ancestor := fmt.Sprintf("ancestor-%x", seed)
 		if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{ID: ancestor, Pipeline: private, Status: "running"}); err != nil {
@@ -193,7 +191,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 			replies = append(replies, response.Body.String())
 		}
 		var count int
-		if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		return replies[0] == replies[1] && !strings.Contains(replies[0], private) && count == 1
@@ -234,11 +232,12 @@ func TestChildIntakeCannotBroadenParentSourceAuthority(t *testing.T) {
 			engineSQL(t, e.Store, `UPDATE capabilities SET authority_json=?,repo_scope=? WHERE prefix=?`, encoded, scope, record.Prefix)
 		}
 		setScope()
+		declareChildren(t, e, fmt.Sprintf("deploy-%x", seed))
 		body := childIntakeBody(t, fmt.Sprintf("deploy-%x", seed), git)
 		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 403)
 		record.Repositories = append(record.Repositories, string(git.Repository.Key))
 		setScope()
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 403)
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 201)
 		return true
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
@@ -310,7 +309,7 @@ func TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority(t
 		}
 		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 403)
 		childSourceRepositories(t, e, claim, []string{string(parent.Request.Request.Git.Repository.Key), foreign})
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 403)
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 201)
 		return true
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {

@@ -28,7 +28,7 @@ func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 		if f.st.Dialect() == store.DialectPostgres {
 			query = `UPDATE capabilities SET team=NULL WHERE prefix=$1`
 		}
-		if _, err := f.st.DB().ExecContext(t.Context(), query, principal.Capability.Prefix); err == nil {
+		if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), query, principal.Capability.Prefix); err == nil {
 			t.Fatal("schema accepted a teamless machine root")
 		}
 		principal.Capability.Team = ""
@@ -41,7 +41,7 @@ func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 		if f.st.Dialect() == store.DialectPostgres {
 			query = `UPDATE capabilities SET team=NULL,subject_kind='service',authority_json=$1 WHERE prefix=$2`
 		}
-		changed, err := f.st.DB().ExecContext(t.Context(), query, encoded, principal.Capability.Prefix)
+		changed, err := teststore.SQL(t, f.st).ExecContext(t.Context(), query, encoded, principal.Capability.Prefix)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,7 +66,7 @@ func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 				t.Fatalf("teamless claim = %d: %s", code, bodyText)
 			}
 			var awards int
-			if err := f.st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE issuance='award'`).Scan(&awards); err != nil {
+			if err := teststore.SQL(t, f.st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE issuance='award'`).Scan(&awards); err != nil {
 				t.Fatal(err)
 			}
 			return awards == 0

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -27,17 +27,11 @@ func TestControllerRefusesAnonymousBeforeBootstrapProperty(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = st.Close() })
 			var logs bytes.Buffer
-			s := controller.New(st, slog.New(slog.NewTextHandler(&logs, nil)))
+			var cfg deployment.Config
 			if licensing != "single_team" {
-				raw, key := multiTeamLicense(t)
-				lic := license.Resolve(raw, key, time.Now(), nil)
-				if licensing == "license_before" {
-					s.WithLicense(lic)
-				} else {
-					s.WithLicense(lic)
-				}
-			} else {
+				cfg = deploymenttest.Team(t)
 			}
+			s := controller.NewDeployment(st, cfg, slog.New(slog.NewTextHandler(&logs, nil)))
 			h := s.Handler()
 			property := func(selector []byte) bool {
 				forged := hex.EncodeToString(selector)

@@ -14,36 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func seedStoreLogReader(ctx context.Context, db *sql.DB, writer string) (store.Actor, error) {
-	var body []byte
-	if err := db.QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", writer).Scan(&body); err != nil {
-		return store.Actor{}, err
-	}
-	var record store.CapabilityRecord
-	if err := json.Unmarshal(body, &record); err != nil {
-		return store.Actor{}, err
-	}
-	c := &record.Value
-	c.Prefix, c.Digest, c.Binding = "log-reader", sha256.Sum256([]byte("log-reader")), capability.Binding{Kind: capability.BindingNone}
-	c.Grants = []capability.Grant{capability.LogsRead}
-	c.Data = nil
-	if err := record.Validate(); err != nil {
-		return store.Actor{}, err
-	}
-	body, err := json.Marshal(record)
-	if err != nil {
-		return store.Actor{}, err
-	}
-	grants, err := json.Marshal(c.Grants)
-	if err != nil {
-		return store.Actor{}, err
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,created_at,created_by,repo_scope) VALUES (?,?,?,?,?,'controller',?,'delegate',1,?,'none',?,?,'logger',?)`, c.Prefix, hex.EncodeToString(c.Digest[:]), store.DefaultTeam, c.Subject.Kind, c.Subject.ID, grants, body, []byte(`[]`), c.IssuedAt.UnixNano(), []byte(`[]`)); err != nil {
-		return store.Actor{}, err
-	}
-	return store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}}, nil
-}
-
 // safety: seeded authority isolates log persistence from claim issuance and byte transport.
 func seedStoreLogBoundary(ctx context.Context, db *sql.DB) (store.SegmentCommit, error) {
 	now := time.Now().UTC()

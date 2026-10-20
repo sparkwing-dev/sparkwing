@@ -7,12 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"slices"
 	"sync"
 	"time"
-
-	"golang.org/x/sync/singleflight"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -69,7 +66,6 @@ type floodControl struct {
 	policy    FloodPolicy
 	runs      *ratelimit.Limiter
 	dedupe    *dedupeWindow
-	depth     *queueDepthCache
 	depthWarn *warnEvery
 }
 
@@ -81,43 +77,15 @@ func newFloodControl(p FloodPolicy) *floodControl {
 	if p.DedupeWindow > 0 {
 		f.dedupe = &dedupeWindow{window: p.DedupeWindow, seen: make(map[string]dedupeEntry)}
 	}
-	if p.ShedQueueDepth > 0 {
-		f.depth = &queueDepthCache{teams: make(map[store.Team]queueDepth)}
-	}
 	return f
 }
 
-type floodRefusal struct {
-	status int
-	wait   time.Duration
-	msg    string
-}
-
-func (f *floodRefusal) write(w http.ResponseWriter) {
-	if f.status == http.StatusServiceUnavailable {
-		writeRetryAfterStatus(w, f.status, f.wait, f.msg)
-		return
-	}
-	writeRetryAfter(w, f.wait, f.msg)
-}
-
-func (s *Server) triggerFloodRefusal(ctx context.Context, tenant *store.Tenant, key, source string) *floodRefusal {
-	return s.floodRefusal(tenant.Team(), key, source, func() (int, error) { return s.flood.depth.read(ctx, tenant, time.Now()) })
-}
-
-func (s *Server) floodRefusal(team store.Team, key, source string, readDepth func() (int, error)) *floodRefusal {
-	if refusal := s.depthRefusal(team, key, source, readDepth); refusal != nil {
-		return refusal
-	}
-	return s.runCapRefusal(key, source)
-}
-
-func (s *Server) depthRefusal(team store.Team, key, source string, readDepth func() (int, error)) *floodRefusal {
+func (s *Server) depthRefusal(team store.Team, key, source string, readDepth func() (int, error)) error {
 	f := s.flood
 	if f == nil {
 		return nil
 	}
-	if f.depth != nil {
+	if f.policy.ShedQueueDepth > 0 {
 		depth, err := readDepth()
 		if err != nil {
 			// safety: a depth this controller cannot read is not grounds to
@@ -131,16 +99,13 @@ func (s *Server) depthRefusal(team store.Team, key, source string, readDepth fun
 				"principal", key, "team", team, "source", source,
 				"reason", "team queue depth above the shed threshold",
 				"queue_depth", depth, "threshold", f.policy.ShedQueueDepth)
-			return &floodRefusal{
-				status: http.StatusServiceUnavailable, wait: shedRetryAfter,
-				msg: "this team's queue is above its shed threshold",
-			}
+			return &apierr.Error{Code: apierr.Unavailable, Message: "this team's queue is above its shed threshold", Details: map[string]any{"retry_after_ms": shedRetryAfter.Milliseconds()}}
 		}
 	}
 	return nil
 }
 
-func (s *Server) runCapRefusal(key, source string) *floodRefusal {
+func (s *Server) runCapRefusal(key, source string) error {
 	f := s.flood
 	if f == nil {
 		return nil
@@ -153,10 +118,7 @@ func (s *Server) runCapRefusal(key, source string) *floodRefusal {
 			s.logger.Warn("trigger shed",
 				"principal", key, "source", source, "reason", "hourly run cap reached",
 				"cap_per_hour", f.policy.RunsPerPrincipalHour, "retry_after", wait)
-			return &floodRefusal{
-				status: http.StatusTooManyRequests, wait: wait,
-				msg: "hourly run cap reached for this principal",
-			}
+			return &apierr.Error{Code: apierr.RateLimited, Message: "hourly run cap reached for this principal", Details: map[string]any{"retry_after_ms": wait.Milliseconds()}}
 		}
 	}
 	return nil
@@ -215,65 +177,6 @@ func (d *dedupeWindow) evictLocked(now time.Time) {
 	}
 }
 
-// perf: a flood asks for the depth far faster than it changes, and each answer
-// is a scan, so one read serves every submission of a team in the same second.
-const queueDepthTTL = time.Second
-
-// safety: the count must not ride one requester's context, or a client that
-// hangs up decides what every other submission sees.
-const queueDepthTimeout = 2 * time.Second
-
-// safety: keyed by team, so one team's backlog never sheds another team's
-// submissions. The map holds one entry per team that submitted, which the
-// team count bounds.
-type queueDepthCache struct {
-	mu    sync.Mutex
-	teams map[store.Team]queueDepth
-	// perf: a burst misses the cache together, so one count serves every
-	// submission of a team that arrives while it runs.
-	counts singleflight.Group
-}
-
-type queueDepth struct {
-	depth int
-	at    time.Time
-}
-
-// safety: the depth is read from one team's queue ([store.Tenant] is one), so
-// one team's backlog never sheds another team's submissions.
-type pendingTriggerCounter interface {
-	Team() store.Team
-	CountPendingTriggers(ctx context.Context) (int, error)
-}
-
-func (q *queueDepthCache) read(parent context.Context, tenant pendingTriggerCounter, now time.Time) (int, error) {
-	team := tenant.Team()
-	q.mu.Lock()
-	cached, ok := q.teams[team]
-	q.mu.Unlock()
-	if ok && now.Sub(cached.at) < queueDepthTTL {
-		return cached.depth, nil
-	}
-	counted, err, _ := q.counts.Do(string(team), func() (any, error) {
-		// safety: the count outlives one requester, so the caller's cancel is
-		// dropped while its values and tracing are kept.
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), queueDepthTimeout)
-		defer cancel()
-		n, err := tenant.CountPendingTriggers(ctx)
-		if err != nil {
-			return 0, err
-		}
-		q.mu.Lock()
-		q.teams[team] = queueDepth{depth: n, at: now}
-		q.mu.Unlock()
-		return n, nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	return counted.(int), nil
-}
-
 // safety: a depth that cannot be read fails on every submission of a flood,
 // so the line that says so is worth one a window rather than one a request.
 type warnEvery struct {
@@ -301,14 +204,15 @@ func (e *intakeRunToken) Error() string { return "intake requires a run-cap toke
 
 type intakeRunTokenKey struct{}
 
-func (s *Server) admitWithFlood(ctx context.Context, admit func(context.Context) (controllerwire.CreateRunResponse, error)) (controllerwire.CreateRunResponse, error) {
+func admitWithFlood[T any](ctx context.Context, s *Server, admit func(context.Context) (T, error)) (T, error) {
 	response, err := admit(ctx)
 	var pending *intakeRunToken
 	if !errors.As(err, &pending) {
 		return response, err
 	}
-	if err := floodRefusalError(s.runCapRefusal(pending.key, "api")); err != nil {
-		return controllerwire.CreateRunResponse{}, err
+	if err := s.runCapRefusal(pending.key, "intake"); err != nil {
+		var zero T
+		return zero, err
 	}
 	return admit(context.WithValue(ctx, intakeRunTokenKey{}, pending.key))
 }
@@ -318,8 +222,8 @@ func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.
 		return nil
 	}
 	authority, delivered := p.Authority, request.VerifiedDeliveryID != ""
-	// safety: a child spends the budget its root was admitted under, not the
-	// runner holding the parent's claim, so a run cannot fan out past its creator's budget.
+	// A child's submitting runner does not own its admission budget. Resolve
+	// the root before choosing the key so App roots and their descendants share it.
 	if parent := request.Request.Lineage.ParentRunID; parent != "" {
 		root, err := store.ChildRootRequest(ctx, resolver, store.Team(p.Capability.Team), parent)
 		if err != nil {
@@ -327,13 +231,16 @@ func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.
 		}
 		authority, delivered = root.AuthorityRef, root.Request.Origin == runspec.OriginApp
 	}
-	if authority.Kind == "schedule" || delivered {
+	if authority.Kind == "schedule" {
 		return nil
 	}
 	key := string(authority.Kind) + ":" + authority.ID
-	if s.flood.depth != nil {
+	if delivered {
+		key = "team:" + p.Capability.Team
+	}
+	if s.flood.policy.ShedQueueDepth > 0 {
 		team := store.Team(p.Capability.Team)
-		if err := floodRefusalError(s.depthRefusal(team, key, "api", func() (int, error) { return store.IntakeQueueDepth(ctx, resolver, team) })); err != nil {
+		if err := s.depthRefusal(team, key, "intake", func() (int, error) { return store.IntakeQueueDepth(ctx, resolver, team) }); err != nil {
 			return err
 		}
 	}
@@ -341,17 +248,6 @@ func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.
 		return &intakeRunToken{key: key}
 	}
 	return nil
-}
-
-func floodRefusalError(refusal *floodRefusal) error {
-	if refusal == nil {
-		return nil
-	}
-	code := apierr.RateLimited
-	if refusal.status == http.StatusServiceUnavailable {
-		code = apierr.Unavailable
-	}
-	return &apierr.Error{Code: code, Message: refusal.msg, Details: map[string]any{"retry_after_ms": refusal.wait.Milliseconds()}}
 }
 
 func (s *Server) dedupeIntake(a capability.Authorized, body *controllerwire.CreateRunRequest) error {

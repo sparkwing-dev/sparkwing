@@ -43,7 +43,7 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 	if terminal, err := owner.IsRunTerminal("run"); terminal || err != nil {
 		t.Fatalf("live run: terminal=%t error=%v", terminal, err)
 	}
-	if _, err := binding.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET status='claimed',claimed_by='owner',capability_prefix='owner',lease_expires_at=?,started_at=1 WHERE id='run'`, time.Now().Add(limits.DefaultLease).UnixNano()); err != nil {
+	if _, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE triggers SET status='claimed',claimed_by='owner',capability_prefix='owner',lease_expires_at=?,started_at=1 WHERE id='run'`, time.Now().Add(limits.DefaultLease).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -67,7 +67,7 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 	if terminal, err := owner.IsRunTerminal("run"); terminal || err != nil {
 		t.Fatalf("cancellation ended a live owner: terminal=%t error=%v", terminal, err)
 	}
-	if _, err := binding.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=1 WHERE id='run'`); err != nil {
+	if _, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=1 WHERE id='run'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.sweep(t.Context(), c.lease); err != nil {
@@ -106,7 +106,7 @@ func FuzzAdmissionCancellationKeepsTenantAndFence(f *testing.F) {
 		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
 			binding = b
 			seedOwner(t, b, own, false)
-			_, err := b.Store.DB().ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
+			_, err := stateSQL(t, b).ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -130,12 +130,12 @@ func FuzzAdmissionCancellationKeepsTenantAndFence(f *testing.F) {
 		}
 		switch mode % 3 {
 		case 1:
-			_, err := binding.Store.DB().ExecContext(t.Context(), `UPDATE leases SET until=1 WHERE name='controller.reaper'`)
+			_, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE leases SET until=1 WHERE name='controller.reaper'`)
 			if err != nil {
 				t.Fatal(err)
 			}
 		case 2:
-			_, err := binding.Store.DB().ExecContext(t.Context(), `UPDATE leases SET generation=generation+?,holder='successor' WHERE name='controller.reaper'`, int64(suffix)+1)
+			_, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE leases SET generation=generation+?,holder='successor' WHERE name='controller.reaper'`, int64(suffix)+1)
 			if err != nil {
 				t.Fatal(err)
 			}

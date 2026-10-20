@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
@@ -14,18 +15,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func checkBlobRemoteCacheEdges(ctx context.Context, root string) (err error) {
-	s, err := store.Open(filepath.Join(root, "remote-edges.db"))
+func checkBlobRemoteCacheEdges(t testing.TB, ctx context.Context, root string) (err error) {
+	s, err := teststore.OpenExisting(filepath.Join(root, "remote-edges.db"))
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := teststore.SeedCacheScope(ctx, s.DB())
+	request, err := teststore.SeedCacheScope(ctx, teststore.SQL(t, s))
 	if err != nil {
 		return err
 	}
 	var body []byte
-	if err := s.DB().QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", request.Intent.Authority.CapabilityRef).Scan(&body); err != nil {
+	if err := teststore.SQL(t, s).QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", request.Intent.Authority.CapabilityRef).Scan(&body); err != nil {
 		return err
 	}
 	var authority store.CapabilityRecord
@@ -42,7 +43,7 @@ func checkBlobRemoteCacheEdges(ctx context.Context, root string) (err error) {
 	if err != nil {
 		return err
 	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE capabilities SET authority_json=?,grants=?,ref_scope='' WHERE prefix=?", body, grants, authority.Value.Prefix); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET authority_json=?,grants=?,ref_scope='' WHERE prefix=?", body, grants, authority.Value.Prefix); err != nil {
 		return err
 	}
 	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
@@ -61,7 +62,7 @@ func checkBlobRemoteCacheEdges(ctx context.Context, root string) (err error) {
 		if err != nil {
 			return err
 		}
-		if _, err := s.DB().ExecContext(ctx, "UPDATE blob_records SET kind='depcache',scope=?,name='modules',ref_scope='main',pipeline='',ref_facts_json=?,verified_default_branch=? WHERE team=?", namespace, body, verifiedDefault, store.DefaultTeam); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE blob_records SET kind='depcache',scope=?,name='modules',ref_scope='main',pipeline='',ref_facts_json=?,verified_default_branch=? WHERE team=?", namespace, body, verifiedDefault, store.DefaultTeam); err != nil {
 			return err
 		}
 		hit, err := tenant.LookupRecord(ctx, lookup)

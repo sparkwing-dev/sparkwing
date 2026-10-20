@@ -42,7 +42,7 @@ func FuzzRemoteAdmissionNeverReadsOrCancelsLocalRuns(f *testing.F) {
 			t.Fatalf("remote admission changed a local run: %+v error=%v", row, err)
 		}
 		var records int
-		if err := binding.Store.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&records); err != nil || records != 1 {
+		if err := stateSQL(t, binding).QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&records); err != nil || records != 1 {
 			t.Fatalf("remote admission created local ownership: records=%d error=%v", records, err)
 		}
 	})

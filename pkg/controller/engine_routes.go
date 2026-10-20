@@ -198,7 +198,7 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 			return err
 		}
 		request.Intent = &intent.Request
-		response, err := s.admitWithFlood(ctx, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
+		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
 		})
 		if err != nil {

@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -32,22 +33,25 @@ type browserFixture struct {
 	logs   *syncBuffer
 }
 
-func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
+func newBrowserFixture(t *testing.T, d *controller.Dashboard, opts ...store.Option) *browserFixture {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	return newDeploymentBrowserFixture(t, deploymenttest.Team(t), d, opts...)
+}
+
+func newDeploymentBrowserFixture(t *testing.T, cfg deployment.Config, d *controller.Dashboard, opts ...store.Option) *browserFixture {
+	t.Helper()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	rawLicense, key := multiTeamLicense(t)
 	logs := &syncBuffer{}
-	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t)).
-		WithLicense(license.Resolve(rawLicense, key, time.Now(), nil))
+	srv := controller.NewDeployment(st, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t))
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('alice','alice@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','alice','owner',1)`,
 	} {
-		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, st).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -177,7 +181,7 @@ func TestBrowserAPICookieFailuresPreserveCookies(t *testing.T) {
 		t.Fatalf("API refusal changed cookies: %v", rec.Header().Values("Set-Cookie"))
 	}
 
-	if _, err := f.st.DB().Exec(`DROP TABLE sessions`); err != nil {
+	if _, err := teststore.SQL(t, f.st).Exec(`DROP TABLE sessions`); err != nil {
 		t.Fatal(err)
 	}
 	rec = f.serve(f.cookieRequest(http.MethodGet, "/api/v1/auth/whoami", ""))

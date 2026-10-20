@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -62,7 +63,7 @@ func TestNativeTerminalResultReplayUsesCommittedProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	var original []byte
-	if err := e.Store.DB().QueryRowContext(t.Context(), `SELECT state_actor FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&original); err != nil {
+	if err := teststore.SQL(t, e.Store).QueryRowContext(t.Context(), `SELECT state_actor FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&original); err != nil {
 		t.Fatal(err)
 	}
 	if err := quick.Check(func(selector uint8, input []byte) bool {
@@ -216,7 +217,7 @@ func TestNativeControllerPlanReplayAfterOwnerHandoff(t *testing.T) {
 	engineSQL(t, e.Store, `CREATE TRIGGER refuse_plan_proof BEFORE UPDATE OF result_digest ON capabilities WHEN NEW.result_digest<>'' BEGIN SELECT RAISE(ABORT,'proof write refused'); END`)
 	engineClaimHTTP(t, h, issued.Raw, "POST", "/api/v1/runs/run/plan", string(body), 500)
 	var count int
-	if err := e.Store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE team='a' AND id='run' AND spec_json IS NOT NULL`).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, e.Store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE team='a' AND id='run' AND spec_json IS NOT NULL`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("partial plan survived proof failure: count=%d error=%v", count, err)
 	}
 	engineSQL(t, e.Store, `DROP TRIGGER refuse_plan_proof`)

@@ -244,3 +244,26 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRotationKeepsTheRunnerTrustClass(t *testing.T) {
+	s, spec := machineEnrollment(t)
+	spec.Trust = capability.TrustAny
+	issued, err := s.ProvisionCapability(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := inventoryAuthorization(t, s, Actor{Authority: *spec.Authority}, "a", issued.Capability.Prefix)
+	rotation, err := (&Tenant{s: s, team: "a"}).RotateCapability(t.Context(), a, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: rotation.Issued.Capability.Prefix})
+	if err != nil || successor.Capability.Trust != capability.TrustAny {
+		t.Fatalf("successor trust = %q, %v", successor.Capability.Trust, err)
+	}
+	changed := issued.Capability
+	changed.Trust = capability.TrustVerifiedDefault
+	if sameRotationScope(issued.Capability, changed) {
+		t.Fatal("a successor with another trust class counts as the same rotation scope")
+	}
+}

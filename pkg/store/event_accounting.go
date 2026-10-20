@@ -39,7 +39,7 @@ func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID,
 }
 
 func admitEventStorageTx(ctx context.Context, tx *storeTx, team Team, size int64) error {
-	if creditMeteringDisabled(ctx) {
+	if tx.store.creditMeteringOff.Load() {
 		return nil
 	}
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {

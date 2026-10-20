@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
@@ -38,7 +39,7 @@ func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
 		w := credentialRequestHTTP(t, s.Handler(), session, string(body), false)
 		if !slices.Contains(allowed, grant) {
 			var count int
-			if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil {
+			if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			if w.Code != 403 || count != 0 {
@@ -194,7 +195,7 @@ func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
 		}
 		var runs int
 		var cancelled any
-		if err := e.Store.DB().QueryRow(`SELECT COUNT(*),MAX(cancel_requested_at) FROM runs`).Scan(&runs, &cancelled); err != nil {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*),MAX(cancel_requested_at) FROM runs`).Scan(&runs, &cancelled); err != nil {
 			t.Fatal(err)
 		}
 		return runs == 1 && cancelled == nil
@@ -272,7 +273,7 @@ func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
 	}
 	var state string
 	var cancelled any
-	if err := s.store.DB().QueryRow(`SELECT status,cancel_requested_at FROM runs WHERE team='a' AND id='run'`).Scan(&state, &cancelled); err != nil || state != "running" || cancelled != nil {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT status,cancel_requested_at FROM runs WHERE team='a' AND id='run'`).Scan(&state, &cancelled); err != nil || state != "running" || cancelled != nil {
 		t.Fatalf("run changed: %s %v %v", state, cancelled, err)
 	}
 }
@@ -307,7 +308,7 @@ func TestCredentialStartedClaimHTTPConsumesContractAttempt(t *testing.T) {
 	revokeEngineMachine(t, e.Store, "root")
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/annotations", `{"message":"after-revocation"}`, 401)
 	var count int
-	if err := e.Store.DB().QueryRow(`SELECT annotation_count FROM runs WHERE team='a' AND id='run'`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT annotation_count FROM runs WHERE team='a' AND id='run'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("revoked proof changed annotation count: %d %v", count, err)
 	}
 }

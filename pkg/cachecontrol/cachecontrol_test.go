@@ -34,7 +34,7 @@ func TestMeasureReportsActiveManagedBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.ObservedBytes != 6 || status.ActiveBytes != 6 || status.ActiveEntries != 1 {
+	if status.ObservedBytes != 71 || status.ActiveBytes != 71 || status.ActiveEntries != 1 {
 		t.Fatalf("status = %#v", status)
 	}
 }

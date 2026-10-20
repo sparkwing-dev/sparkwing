@@ -19,7 +19,7 @@ import (
 func newTestStore(t *testing.T) (*store.Store, paths.Paths) {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -99,21 +99,19 @@ func TestStoreBackendTenantReadsProperty(t *testing.T) {
 	if err := teststore.SeedNode(st, t.Context(), store.Node{RunID: "private-default", NodeID: "private-job", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO events(team,run_id,seq,ts,kind,payload) VALUES (?,'private-default',1,1,'private',?)`, store.DefaultTeam, []byte(`{}`)); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO events(team,run_id,seq,ts,kind,payload) VALUES (?,'private-default',1,1,'private',?)`, store.DefaultTeam, []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	for range 24 {
 		team := store.Team(fmt.Sprintf("reader-%x", random.Uint64()))
-		if err := st.AsOperator().CreateTeam(t.Context(), team); err != nil {
-			t.Fatal(err)
-		}
+		teststore.SeedTeam(t, st, team)
 		tenant := teststore.ForTeam(t, st, team)
 		run := fmt.Sprintf("run-%x", random.Uint64())
 		seedBackendRun(t, st, team, run, "pipeline", time.Unix(0, 1))
 		if err := teststore.SeedNode(st, t.Context(), store.Node{RunID: run, NodeID: "job", Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO events(team,run_id,seq,ts,kind,payload) VALUES (?,?,1,1,'fixture',?)`, team, run, []byte(`{}`)); err != nil {
+		if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO events(team,run_id,seq,ts,kind,payload) VALUES (?,?,1,1,'fixture',?)`, team, run, []byte(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 		b := backend.NewStoreBackend(tenant, nil)
@@ -156,7 +154,7 @@ func TestStoreBackendTenantReadsProperty(t *testing.T) {
 
 func seedBackendRun(t *testing.T, st *store.Store, team store.Team, id, pipeline string, at time.Time) {
 	t.Helper()
-	if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,started_at,log_retention_class,log_retention_days) VALUES (?,?,1,?,'running',?,'fixture',?,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, team, id, pipeline, []byte(`{"version":1}`), at.UnixNano(), []byte(`[]`), at.UnixNano(), at.UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,started_at,log_retention_class,log_retention_days) VALUES (?,?,1,?,'running',?,'fixture',?,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, team, id, pipeline, []byte(`{"version":1}`), at.UnixNano(), []byte(`[]`), at.UnixNano(), at.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 }

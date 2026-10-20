@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestHostileProjectCannotAuthorizeBurst(t *testing.T) {
@@ -90,10 +91,10 @@ func hostileProjectCannotAuthorizeBurst(t *testing.T, body string) {
 		})
 	}
 	var runs, uploads int
-	if e := state.DB().QueryRowContext(t.Context(), "SELECT count(*) FROM runs").Scan(&runs); e != nil {
+	if e := teststore.SQL(t, state).QueryRowContext(t.Context(), "SELECT count(*) FROM runs").Scan(&runs); e != nil {
 		t.Fatal(e)
 	}
-	if e := state.DB().QueryRowContext(t.Context(), "SELECT count(*) FROM blob_records").Scan(&uploads); e != nil {
+	if e := teststore.SQL(t, state).QueryRowContext(t.Context(), "SELECT count(*) FROM blob_records").Scan(&uploads); e != nil {
 		t.Fatal(e)
 	}
 	if requests != 0 || runs != 0 || uploads != 0 || err == nil {
@@ -120,7 +121,7 @@ func TestProjectUntrackedSourceRequiresMachineApproval(t *testing.T) {
 	})}}
 	_, err := prepareNativeBurst(t.Context(), "burst", runFlags{}, nil, userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"TOKEN"}}, options)
 	var uploads int
-	if e := state.DB().QueryRowContext(t.Context(), "SELECT count(*) FROM blob_records").Scan(&uploads); e != nil {
+	if e := teststore.SQL(t, state).QueryRowContext(t.Context(), "SELECT count(*) FROM blob_records").Scan(&uploads); e != nil {
 		t.Fatal(e)
 	}
 	if err == nil || uploads != 0 {
@@ -159,7 +160,7 @@ func burstCLIClaimantBoundary(t *testing.T, personal, listed, allowed bool, forg
 	repo := burstIntakeRepository(t)
 	t.Chdir(repo)
 	state, server, bearer := burstIntakeController(t, "http://controller.test")
-	if _, err := state.DB().ExecContext(t.Context(), "UPDATE memberships SET role='owner'"); err != nil {
+	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), "UPDATE memberships SET role='owner'"); err != nil {
 		t.Fatal(err)
 	}
 	handler := server.Handler()

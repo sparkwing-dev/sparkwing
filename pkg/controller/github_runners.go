@@ -52,8 +52,10 @@ func (s *Server) githubVerifier() *githuboidc.Verifier {
 		switch {
 		case s.githubRunners.override != nil:
 			s.githubRunners.verifier = githuboidc.New(*s.githubRunners.override)
-		case s.externalURL != "":
-			s.githubRunners.verifier = githuboidc.New(githuboidc.GitHub(s.externalURL))
+		default:
+			if origin, ok := s.deployment.PublicOrigin(); ok {
+				s.githubRunners.verifier = githuboidc.New(githuboidc.GitHub(origin))
+			}
 		}
 	})
 	return s.githubRunners.verifier

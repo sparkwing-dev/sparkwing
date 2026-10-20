@@ -29,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -202,7 +203,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 	if kind == capability.UnitEval {
 		unit.SourceGeneration = binding.Generation
 	}
-	connection := client.EngineOptions{URL: "http://controller.invalid", Bearer: fixedBearer(raw), HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
+	connection := client.EngineOptions{URL: "https://controller.invalid", Bearer: fixedBearer(raw), HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer "+raw {
 			return nil, errors.New("native binding lost the owner award")
 		}
@@ -238,7 +239,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		body, err := json.Marshal(response)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 	})}}
-	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", false), unit
+	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{}), unit
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
@@ -314,7 +315,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			args := []string{"--controller=http://controller.invalid", "--run=run", fmt.Sprintf("--generation=%d", binding.Generation), "--bootstrap-file=" + filepath.Join(directory, "bootstrap"), "--source-dir=" + filepath.Join(directory, "source"), "--module-cache=" + filepath.Join(directory, "modules")}
+			args := []string{"--controller=https://controller.invalid", "--run=run", fmt.Sprintf("--generation=%d", binding.Generation), "--bootstrap-file=" + filepath.Join(directory, "bootstrap"), "--source-dir=" + filepath.Join(directory, "source"), "--module-cache=" + filepath.Join(directory, "modules")}
 			if unit.JobID != "" {
 				args = append(args, "--job="+unit.JobID)
 			}

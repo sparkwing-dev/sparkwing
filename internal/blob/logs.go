@@ -1,9 +1,7 @@
 package blob
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -120,18 +118,4 @@ type LogUploadCheck struct {
 	Index   int64      `json:"index"`
 	Size    int64      `json:"size"`
 	Digest  Digest     `json:"digest"`
-}
-
-// LogTransport uses authenticated controller routes separate from the CAS data path.
-// Signing requires own-unit authority and its live generation, or C2's final-job
-// tail grace with the persisted writer/fence and no newer claim. Reads require
-// current read authority and meter egress, with the log download-cap exemption.
-type LogTransport interface {
-	SignUpload(context.Context, LogSigningRequest) (LogUploadURL, error)
-	// VerifyUpload rechecks current writer authority, derives the key from the
-	// persisted retention class and verifies stored size and SHA-256. A HEAD or
-	// HTTP 412 alone cannot prove a matching payload. Success grants no read URL
-	// or record edge; the subsequent record commit rechecks writer authority.
-	VerifyUpload(context.Context, LogUploadCheck) error
-	ReadLog(context.Context, LogReadRequest) (io.ReadCloser, error)
 }

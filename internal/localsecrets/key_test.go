@@ -32,7 +32,7 @@ func keyFileIn(t *testing.T, dir string) string {
 
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

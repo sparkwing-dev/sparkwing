@@ -19,11 +19,11 @@ import (
 )
 
 type sourceTransactions struct {
-	authorized       capability.Authorized
-	credential       store.GitCredential
-	audit            capability.SourceReleaseAudit
-	err              error
-	releases         int
+	authorized capability.Authorized
+	credential store.GitCredential
+	audit      capability.SourceReleaseAudit
+	err        error
+	releases   int
 }
 
 func (f *sourceTransactions) ReleaseSourceCredential(_ context.Context, a capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error) {

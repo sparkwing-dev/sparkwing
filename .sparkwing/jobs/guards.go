@@ -22,7 +22,6 @@ func checkGuards(ctx context.Context) error {
 func runGuardcheck(ctx context.Context, flags string) error {
 	_, err := sparkwing.Bash(ctx, "go run ./internal/guardcheck "+flags+" .").
 		Env("GOWORK", "off").
-		Env("GOLANGCI_LINT_CACHE", pipelineCacheDir("golangci-lint")).
 		Run()
 	return err
 }

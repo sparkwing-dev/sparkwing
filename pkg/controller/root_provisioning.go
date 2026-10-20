@@ -15,12 +15,13 @@ import (
 )
 
 type runnerEnrollmentRequest struct {
-	Personal      bool            `json:"personal,omitempty"`
-	Name          string          `json:"name"`
-	Repos         []string        `json:"repos"`
-	ReservedPools []string        `json:"reserved_pools,omitempty"`
-	Grants        json.RawMessage `json:"grants,omitempty"`
-	ExpiresAt     json.RawMessage `json:"expires_at,omitempty"`
+	Personal      bool             `json:"personal,omitempty"`
+	Name          string           `json:"name"`
+	Repos         []string         `json:"repos"`
+	ReservedPools []string         `json:"reserved_pools,omitempty"`
+	Trust         capability.Trust `json:"trust,omitempty"`
+	Grants        json.RawMessage  `json:"grants,omitempty"`
+	ExpiresAt     json.RawMessage  `json:"expires_at,omitempty"`
 }
 
 type serviceCredentialRequest struct {
@@ -51,6 +52,9 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 		}
 		seen[pool] = true
 	}
+	if !request.Trust.Valid() || request.Personal && request.Trust != "" {
+		return invalidEngineBody("trust must be verified-default or any, on a shared runner only")
+	}
 	expires, err := provisionExpiry(request.ExpiresAt)
 	if err != nil {
 		return err
@@ -64,8 +68,8 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 			return err
 		}
 		for _, grant := range grants {
-			if grant != capability.NodesClaim && grant != capability.TriggersClaim {
-				return invalidEngineBody("machine grants must be nodes.claim or triggers.claim")
+			if grant != capability.NodesClaim && grant != capability.TriggersClaim && grant != capability.ClaimsLaunch {
+				return invalidEngineBody("machine grants must be nodes.claim, triggers.claim or claims.launch")
 			}
 		}
 	}
@@ -74,7 +78,7 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 		RegistrationID: "runner:" + a.Target.Team + ":" + request.Name,
 		Subject:        capability.Subject{Kind: capability.SubjectMachine, ID: request.Name}, Team: a.Target.Team,
 		Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},
-		Repositories: allow.Patterns(), ReservedPools: request.ReservedPools, ExpiresAt: expires,
+		Repositories: allow.Patterns(), ReservedPools: request.ReservedPools, Trust: request.Trust, ExpiresAt: expires,
 	})
 }
 

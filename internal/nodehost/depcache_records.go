@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -27,6 +28,8 @@ type directoryCache struct {
 	key  blob.DepcacheKey
 	dir  string
 	save bool
+
+	workspace, declared string
 }
 
 // Prepare restores caches once and saves successful cold directories after retries.
@@ -69,28 +72,30 @@ func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declarati
 	if err != nil {
 		return directoryCache{}, err
 	}
-	dir := declaration.Path
+	cache := directoryCache{key: blob.DepcacheKey{Repo: input.Storage.Authority.Repo, Ref: input.Storage.Authority.Ref.Scope, Name: declaration.Name, Key: key}}
 	if declaration.Resolver != "" {
 		if d.Resolve == nil {
 			return directoryCache{}, errors.New("cache directory resolver is unavailable")
 		}
-		dir, err = d.Resolve(ctx, input, declaration)
+		cache.dir, err = d.Resolve(ctx, input, declaration)
 		if err != nil {
 			return directoryCache{}, err
 		}
+		if !filepath.IsAbs(cache.dir) {
+			return directoryCache{}, errors.New("cache resolver returned a relative directory")
+		}
+	} else {
+		if !filepath.IsLocal(declaration.Path) {
+			return directoryCache{}, errors.New("cache path must be relative and stay inside the workspace")
+		}
+		cache.workspace, cache.declared = sdkWorkingDirectory(input.Entry), declaration.Path
+		cache.dir = filepath.Join(cache.workspace, cache.declared)
 	}
-	if dir == "" {
-		return directoryCache{}, errors.New("cache directory is empty")
-	}
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(sdkWorkingDirectory(input.Entry), dir)
-	}
-	cache := directoryCache{dir: dir, key: blob.DepcacheKey{Repo: input.Storage.Authority.Repo, Ref: input.Storage.Authority.Ref.Scope, Name: declaration.Name, Key: key}}
-	entries, err := os.ReadDir(dir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	empty, err := cache.empty()
+	if err != nil {
 		return cache, err
 	}
-	if len(entries) != 0 {
+	if !empty {
 		return cache, nil
 	}
 	restored, err := d.restore(ctx, input, cache)
@@ -183,7 +188,12 @@ func (d DepcacheRecords) restore(ctx context.Context, input NodeInput, cache dir
 		}
 		return false, err
 	}
-	if _, err := depcacheblob.RestoreArchive(ctx, reader, cache.dir); err != nil {
+	parent, name, err := cache.open()
+	if err != nil {
+		return false, errors.Join(err, reader.Close())
+	}
+	defer parent.Close()
+	if _, err := depcacheblob.RestoreArchiveIn(ctx, reader, parent, name); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -195,4 +205,43 @@ func (d DepcacheRecords) warning(message string) {
 	} else {
 		slog.Warn(message)
 	}
+}
+
+// safety: the host archives and overwrites this directory, so a declared path outside the
+// workspace, or a symlink swapped in while the job runs, must not reach files only the host can.
+// Every open goes through an os.Root, which refuses a path that resolves outside it.
+func (c directoryCache) open() (parent *os.Root, name string, err error) {
+	if c.workspace == "" {
+		if err := os.MkdirAll(filepath.Dir(c.dir), 0o755); err != nil {
+			return nil, "", err
+		}
+		parent, err = os.OpenRoot(filepath.Dir(c.dir))
+		return parent, filepath.Base(c.dir), err
+	}
+	if !filepath.IsLocal(c.declared) {
+		return nil, "", errors.New("cache path must be relative and stay inside the workspace")
+	}
+	parent, err = os.OpenRoot(c.workspace)
+	return parent, filepath.Clean(c.declared), err
+}
+
+func (c directoryCache) empty() (bool, error) {
+	parent, name, err := c.open()
+	if err != nil {
+		return false, err
+	}
+	defer parent.Close()
+	dir, err := parent.Open(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(1)
+	if errors.Is(err, io.EOF) {
+		return true, nil
+	}
+	return len(entries) == 0, err
 }

@@ -230,7 +230,7 @@ func verifyCapturedEnvironment(ctx context.Context, expected runspec.EnvSnapshot
 }
 
 func capturedBase(ctx context.Context, base procenv.Base, snapshots CapturedEnvironmentLoader, seal runspec.EnvSnapshot) (procenv.Base, error) {
-	base.Captured, base.Ambient, base.SubmitEnvAllow = slices.Clone(base.Captured), slices.Clone(base.Ambient), slices.Clone(base.SubmitEnvAllow)
+	base.Captured, base.Ambient, base.SubmitEnvAllow, base.Submitted = slices.Clone(base.Captured), slices.Clone(base.Ambient), slices.Clone(base.SubmitEnvAllow), slices.Clone(base.Submitted)
 	if !base.Local {
 		return base, context.Cause(ctx)
 	}

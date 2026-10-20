@@ -14,7 +14,7 @@ import (
 )
 
 func meteredPlacement(claimant, root capability.Capability) bool {
-	return launcherClaimant(claimant) || root.RootMetered
+	return capability.CloudLauncher(claimant) || !launcherClaimant(claimant) && root.RootMetered
 }
 
 func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
@@ -64,7 +64,7 @@ func unitResourcesTx(ctx context.Context, tx *storeTx, team Team, run RunRow, un
 }
 
 func billingUnitKind(kind capability.UnitKind) capability.BillingUnit {
-	for _, mapping := range capability.UnitBillingMappings {
+	for _, mapping := range capability.UnitBillingMappings() {
 		if mapping.Operational == kind {
 			return mapping.Billing
 		}

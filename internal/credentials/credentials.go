@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -44,6 +45,33 @@ func Open(path string) (Dir, error) {
 		return Dir{}, fmt.Errorf("--%s: %s is not a directory", FlagName, path)
 	}
 	return Dir{path: path}, nil
+}
+
+// OpenNamed is Open for a service whose credentials are a closed set: the
+// directory may hold only files named in names. A misspelled file would
+// otherwise read as absent and turn its feature off, so it is refused with
+// the list of names this service reads. Entries Kubernetes keeps beside a
+// projected volume's files, whose names start with "..", are not credentials.
+func OpenNamed(path string, names []string) (Dir, error) {
+	dir, err := Open(path)
+	if err != nil || path == "" {
+		return dir, err
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return Dir{}, fmt.Errorf("--%s: %w", FlagName, err)
+	}
+	var unknown []string
+	for _, entry := range entries {
+		if name := entry.Name(); !strings.HasPrefix(name, "..") && !slices.Contains(names, name) {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		return Dir{}, fmt.Errorf("--%s %s holds %s, which this service does not read; rename or remove it (the names it reads are %s)",
+			FlagName, path, strings.Join(unknown, ", "), strings.Join(names, ", "))
+	}
+	return dir, nil
 }
 
 // Read returns the credential stored under name with surrounding

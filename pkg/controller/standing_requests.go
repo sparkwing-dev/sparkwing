@@ -51,9 +51,6 @@ func teamStandingBody(ctx context.Context, t *store.Tenant, b store.BillingStand
 }
 
 func (s *Server) handleTeamStandingRequest(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if !s.Metering() {
-		return &apierr.Error{Code: apierr.NotFound, Message: "billing is not enabled"}
-	}
 	var req controllerwire.StandingRequestWrite
 	if err := decodeEngineRequest(r, &req); err != nil {
 		return err

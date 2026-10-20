@@ -30,12 +30,6 @@ func GuardWrite(what, override, path string) error {
 	if !ok || fssecure.UnderDir(home, path) {
 		return nil
 	}
-	// safety: a test binary's sandbox root holds both its home and the config
-	// redirect beside it, so a write landing there has already stayed inside
-	// the sandbox and reaches neither the operator's files nor a fake HOME.
-	if paths.UnderTest() && fssecure.UnderDir(paths.TestSandbox(), path) {
-		return nil
-	}
 	if override == "" {
 		return fmt.Errorf("%w: this command runs under the sparkwing home %s, but %s lives at %s, "+
 			"which SPARKWING_HOME does not move. Clear SPARKWING_HOME to write the machine's copy on purpose",

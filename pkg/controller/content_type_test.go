@@ -11,6 +11,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRoutes_RejectSimpleRequestContentTypes(t *testing.T) {
@@ -55,7 +56,7 @@ func TestRoutes_RejectSimpleRequestContentTypes(t *testing.T) {
 func credentialCounts(t *testing.T, f *browserFixture) [3]int {
 	t.Helper()
 	var out [3]int
-	if err := f.st.DB().QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM capabilities), (SELECT COUNT(*) FROM capabilities WHERE revoked_at IS NOT NULL), (SELECT COUNT(*) FROM secrets)`).Scan(&out[0], &out[1], &out[2]); err != nil {
+	if err := teststore.SQL(t, f.st).QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM capabilities), (SELECT COUNT(*) FROM capabilities WHERE revoked_at IS NOT NULL), (SELECT COUNT(*) FROM secrets)`).Scan(&out[0], &out[1], &out[2]); err != nil {
 		t.Fatal(err)
 	}
 	return out

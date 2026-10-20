@@ -1040,20 +1040,18 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
 		}
-		// safety: each run spends one of the team's budget, so a repository
-		// with many subscriptions, or a team with many repositories, cannot
-		// multiply what one delivery or one hour creates.
-		if refusal := s.triggerFloodRefusal(ctx, tenant, githubAppFloodKey(in.Team), "github app "+event); refusal != nil {
-			if !githubAppStartedAny(resp.Runs) {
-				refusal.write(w)
-				return
-			}
-			shed++
-			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "shed"})
-			continue
-		}
 		run, err := s.startGitHubAppRun(r, tenant, in, plan, repo, body)
 		if err != nil {
+			var refusal *apierr.Error
+			if errors.As(err, &refusal) && refusal.Details["retry_after_ms"] != nil {
+				if !githubAppStartedAny(resp.Runs) {
+					writePolicyError(w, err)
+					return
+				}
+				shed++
+				resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "shed"})
+				continue
+			}
 			if s.writeComputeLimitRefusal(w, r, err) {
 				return
 			}
@@ -1084,11 +1082,6 @@ func githubAppStartedAny(runs []githubAppRun) bool {
 		}
 	}
 	return false
-}
-
-// safety: App deliveries spend their owning team's existing submission budget.
-func githubAppFloodKey(team store.Team) string {
-	return "team:" + string(team)
 }
 
 func (s *Server) writeGitHubAppDuplicate(w http.ResponseWriter, r *http.Request, tenant *store.Tenant,
@@ -1140,7 +1133,9 @@ func (s *Server) startGitHubAppRun(
 		head := runspec.RepoKey(fmt.Sprintf("gh:%d", in.headRepo))
 		request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: int64(pr.Number), Action: pr.Action, BaseRepo: key, HeadRepo: head, Fork: head != key, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA, Label: in.env["GITHUB_LABEL"], Merged: runspec.Optional[bool]{Set: in.env["GITHUB_MERGED"] != "", Value: in.env["GITHUB_MERGED"] == "true"}}}
 	}
-	result, err := tenant.AdmitGitHubAppRun(r.Context(), store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event")})
+	result, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (store.AdmissionResult, error) {
+		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event")})
+	})
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
 		return githubAppRun{Pipeline: plan.pipeline, Status: "ignored"}, nil
 	}

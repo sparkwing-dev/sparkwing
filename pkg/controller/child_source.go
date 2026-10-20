@@ -16,9 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// resolveChildRevisions pins a child to its parent's revision, or resolves the branch
-// it names on the server. A child never supplies its own commit: a commit is either
-// the parent's, or the head of a branch the controller read.
+// resolveChildRevisions preserves an authorized explicit source, or pins an
+// inherited source to the parent's revision or a branch the controller resolves.
 func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineController, a capability.Authorized, request *runspec.Request) error {
 	if request.Lineage.ParentRunID == "" {
 		return nil
@@ -35,11 +34,15 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 		return engineLookupError(err)
 	}
 	from := parent.Request.Request
-	if request.Git.Repository.Key != from.Git.Repository.Key || request.Source.Location != from.Source.Location {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "a child run uses its parent's repository location")
+	if !capability.RepositoryAllowed(a.Principal.Capability.Repositories, capability.RepositoryIdentity{Key: string(request.Git.Repository.Key), Display: request.Git.Repository.Display}) {
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's repository authorization")
+	}
+	sameRepository := request.Git.Repository.Key == from.Git.Repository.Key
+	if sameRepository && request.Source.Location != from.Source.Location {
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "an inherited repository uses its parent's source location")
 	}
 	if request.Git.SHA != "" {
-		if request.Git.SHA != from.Git.SHA || request.Git.Ref != from.Git.Ref || request.Source.Ref != from.Source.Ref {
+		if sameRepository && (request.Git.SHA != from.Git.SHA || request.Git.Ref != from.Git.Ref || request.Source.Ref != from.Source.Ref) {
 			return apierr.Authorization(apierr.ReasonBinding, "a child runs its parent's revision or a branch the controller resolves")
 		}
 		return nil

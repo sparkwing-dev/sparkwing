@@ -192,7 +192,7 @@ func Table() []Limit {
 		{Name: "LogSegmentUploadBytes", Value: LogSegmentUploadBytes, Class: Author, Doc: "Maximum encoded log segment accepted by storage.", Refusal: "Refuse oversized upload."},
 		{Name: "LogManifestBytes", Value: LogManifestBytes, Class: Author, Doc: "Maximum log manifest.", Refusal: "Refuse oversized manifest."},
 		{Name: "MaxLogSegmentNumber", Value: MaxLogSegmentNumber, Class: Author, Doc: "Maximum log segment number.", Refusal: "Refuse above bound."},
-		{Name: "StoredAttemptLogBytes", Value: StoredAttemptLogBytes, Class: Author, Doc: "Stored attempt logs including compression headroom.", Refusal: "Refuse above bound."},
+		{Name: "StoredAttemptLogBytes", Value: storedAttemptLogBytes, Class: Author, Doc: "Stored attempt logs including compression headroom.", Refusal: "Refuse above bound."},
 		{Name: "JSONRequestBytes", Value: JSONRequestBytes, Class: Author, Doc: "Ordinary controller JSON request envelope.", Refusal: "Refuse oversized body."},
 		{Name: "SecretJSONRequestBytes", Value: SecretJSONRequestBytes, Class: Author, Doc: "Secret controller JSON request envelope.", Refusal: "Refuse oversized body."},
 		{Name: "CloudEventRetention", Value: CloudEventRetention, Class: Operator, Doc: "Default cloud event retention.", Refusal: "Expire finished runs subject to retained-success pins."},

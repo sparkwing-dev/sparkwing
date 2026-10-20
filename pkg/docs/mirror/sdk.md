@@ -182,7 +182,11 @@ refuses an undeclared child with `403`. A child at its parent's exact revision
 inherits the parent's identity, including its pipeline for OIDC claims and
 pipeline-scoped secrets. A child that names a branch the controller resolves
 runs as an asserted manual run under its own pipeline name and reads only
-team-wide shared secrets. A child always uses the parent's repository. Children nest at most 10 levels deep
+team-wide shared secrets. Use `WithFreshRepo("owner/repo")` (TypeScript
+`runAndAwait` option `repo`) for an explicit repository and `WithFreshBranch`
+(option `branch`) to override its default `main` branch. The parent's live claim
+must authorize that repository. A child in another repository is always asserted.
+Children nest at most 10 levels deep
 counting the root, and one root starts at most 50; see
 [limits](limits.md#execution-and-records).
 The creating job reads the child's committed output under its live claim.

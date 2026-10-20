@@ -135,7 +135,7 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
 		Grants: []capability.Grant{capability.OperatorLimits}, Binding: capability.Binding{Kind: capability.BindingNone},
 	}}
-	srv := controller.New(st, nil).WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{}}).WithMetricsListener(metricsLn).WithAuthorization(controller.RouteAuthorization{
+	srv := controller.New(st, nil).WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{}}).WithMetricsAddr(metricsAddr).WithAuthorization(controller.RouteAuthorization{
 		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 	})
 
@@ -149,7 +149,8 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
-	go func() { served <- controller.ServeWith(ctx, srv, "127.0.0.1:0") }()
+	listeners := controller.Listeners{API: apiListener(t), Metrics: metricsLn}
+	go func() { served <- controller.ServeWith(ctx, srv, listeners) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-served; err != nil {
@@ -183,25 +184,29 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 	}
 }
 
-func TestMetricsAddr_FailsStartupWhenTheMetricsPortIsTaken(t *testing.T) {
+func TestMetricsAddr_FailsStartupWithoutAMetricsListener(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	held, err := net.Listen("tcp", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv := controller.New(st, nil).WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{}}).WithMetricsAddr("127.0.0.1:9100")
+	if err := controller.ServeWith(ctx, srv, controller.Listeners{API: apiListener(t)}); err == nil || !strings.Contains(err.Error(), "127.0.0.1:9100") {
+		t.Fatalf("ServeWith error = %v, want the missing metrics listener", err)
+	}
+}
+
+func apiListener(t *testing.T) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	t.Cleanup(func() { _ = held.Close() })
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	srv := controller.New(st, nil).WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{}}).WithMetricsAddr(held.Addr().String())
-	if err := controller.ServeWith(ctx, srv, "127.0.0.1:0"); err == nil || !strings.Contains(err.Error(), held.Addr().String()) {
-		t.Fatalf("ServeWith error = %v, want the bind failure", err)
-	}
+	t.Cleanup(func() { _ = ln.Close() })
+	return ln
 }
 
 func TestServeWithRefusesAServerWithoutRunnerPolicy(t *testing.T) {
@@ -212,7 +217,7 @@ func TestServeWithRefusesAServerWithoutRunnerPolicy(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	if err := controller.ServeWith(ctx, controller.New(st, nil), "127.0.0.1:0"); err == nil || !strings.Contains(err.Error(), "runner admission policy") {
+	if err := controller.ServeWith(ctx, controller.New(st, nil), controller.Listeners{API: apiListener(t)}); err == nil || !strings.Contains(err.Error(), "runner admission policy") {
 		t.Fatalf("ServeWith error = %v, want a startup refusal", err)
 	}
 }

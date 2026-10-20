@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const checkoutToken = "checkout-secret"
@@ -117,9 +118,8 @@ func (fc *fakeCheckout) calls() []checkoutCall {
 func billingFixture(t *testing.T) (*identityFixture, *fakeCheckout) {
 	t.Helper()
 	fc, url := newFakeCheckout(t)
-	raw, pub := multiTeamLicense(t)
 	return newIdentityFixtureWith(t, fixtureOpts{
-		license: raw, key: pub, checkoutURL: url, checkoutToken: checkoutToken,
+		checkoutURL: url, checkoutToken: checkoutToken,
 	}), fc
 }
 
@@ -295,7 +295,7 @@ func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 		t.Fatalf("provider retries changed reservation: %+v", calls)
 	}
 	var reservations int
-	if err := f.store.DB().QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team=?`, owner.team).Scan(&reservations); err != nil || reservations != 1 {
+	if err := teststore.SQL(t, f.store).QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team=?`, owner.team).Scan(&reservations); err != nil || reservations != 1 {
 		t.Fatalf("checkout reservations = %d: %v, want one", reservations, err)
 	}
 	if balance, err := teamTenant(t, f.store, store.Team(owner.team)).CreditBalanceMicro(t.Context()); err != nil || balance != 0 {

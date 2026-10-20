@@ -21,7 +21,7 @@ func TestCapabilityClaimLivenessProperty(t *testing.T) {
 			}
 			authenticate := func(raw, method, path string) bool {
 				t.Helper()
-				for _, route := range capability.Routes {
+				for _, route := range capability.Routes() {
 					if route.Method != method || route.Path != path {
 						continue
 					}

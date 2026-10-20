@@ -19,6 +19,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
@@ -46,7 +48,11 @@ type appFixture struct {
 
 func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Server) *appFixture {
 	t.Helper()
-	raw, pub := multiTeamLicense(t)
+	return newDeploymentAppFixture(t, deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam), opts...)
+}
+
+func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*controller.Server) *controller.Server) *appFixture {
+	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +74,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	replica := func() (*controller.Server, string) {
-		srv := controller.New(st, logger).WithSecretsCipher(testCipher(t)).
-			WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
+		srv := controller.NewDeployment(st, cfg, logger).WithSecretsCipher(testCipher(t)).
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect, appCallback}).
 			WithDashboardURL("https://dash.example.com").
@@ -1543,7 +1548,7 @@ func TestGitHubAppEventOlderThanTheReplayWindowIsRefused(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "deploy", nil)
-	if _, err := f.store.DB().Exec(`UPDATE github_app_installations SET created_at = ? WHERE installation_id = 7`,
+	if _, err := teststore.SQL(t, f.store).Exec(`UPDATE github_app_installations SET created_at = ? WHERE installation_id = 7`,
 		time.Now().Add(-2*store.GitHubAppDeliveryRetention).Unix()); err != nil {
 		t.Fatal(err)
 	}

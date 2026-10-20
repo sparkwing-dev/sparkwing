@@ -61,7 +61,7 @@ func TestNativeDataReaderRoutesAndSelectorIsolation(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	st := e.Store
 	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('data-reader','data@example.test',1,1)`)
-	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','data-reader','reader',1)`)
+	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','data-reader','editor',1)`)
 	raw := engineHTTPRoot(t, e, "a", "data-reader", []capability.Grant{capability.DataRead})
 	p, err := st.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {

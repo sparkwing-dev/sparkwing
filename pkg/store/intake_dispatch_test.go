@@ -27,8 +27,8 @@ func TestSelectDispatchRunsUnselectedWorkAnywhereOnEveryController(t *testing.T)
 		"machine name":             {mode: runspec.IntakeExecute, options: runner(runspec.RunnerName, "builder"), want: runspec.DispatchHost},
 		"label":                    {mode: runspec.IntakeExecute, options: runner(runspec.RunnerLabel, "gpu"), want: runspec.DispatchHost},
 		"here":                     {mode: runspec.IntakeExecute, options: runner(runspec.RunnerHere, ""), want: runspec.DispatchHost},
-		"pool requirement":         {mode: runspec.IntakeExecute, options: requires("linux", "pool=prod"), want: runspec.DispatchHost},
-		"pool alternative":         {mode: runspec.IntakeExecute, options: requires("arm64, pool=prod"), want: runspec.DispatchHost},
+		"pool requirement":         {mode: runspec.IntakeExecute, options: requires("linux", "pool=prod"), want: runspec.DispatchController},
+		"pool alternative":         {mode: runspec.IntakeExecute, options: requires("arm64, pool=prod"), want: runspec.DispatchController},
 		"publication has no run":   {mode: runspec.IntakePublish, want: runspec.DispatchHost},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -55,9 +55,6 @@ func TestAdmissionSealsDispatchAfterRouteRules(t *testing.T) {
 				t.Fatal(err)
 			}
 			want, kind := runspec.DispatchController, capability.UnitPlan
-			if route {
-				want, kind = runspec.DispatchHost, capability.UnitTrigger
-			}
 			var dispatch, unit string
 			if err := tenant.s.db.QueryRowContext(t.Context(), `SELECT r.dispatch,t.unit_kind FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE r.id=?`, result.RunID).Scan(&dispatch, &unit); err != nil {
 				t.Fatal(err)

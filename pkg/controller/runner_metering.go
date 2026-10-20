@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -20,9 +19,6 @@ func (s *Server) WithRunnerMeteringWriter(writer RunnerMeteringWriter) *Server {
 }
 
 func (s *Server) handleSetRunnerMetered(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if !s.Metering() {
-		return &apierr.Error{Code: apierr.NotFound, Message: "metering is unavailable"}
-	}
 	var request struct {
 		Metered *bool `json:"metered"`
 	}

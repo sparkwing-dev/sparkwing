@@ -41,7 +41,7 @@ func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := capability.Authorized{Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
+	a := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Repositories: []string{string(parent.Request.Request.Git.Repository.Key)}}}, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
 	property := func(value []byte, mutation uint8) bool {
 		request := parent.Request.Request
 		request.Git.SHA, request.Git.Ref = "", "deploy"
@@ -69,6 +69,14 @@ func (e childSourceEngine) Ensure(ctx context.Context, identity engine.Identity,
 }
 
 func TestNativeFreshBranchChildResolvesBeforeIntakeAndAcquisition(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit_repository=%v", explicit), func(t *testing.T) {
+			checkNativeFreshBranchChild(t, explicit)
+		})
+	}
+}
+
+func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 	e, _, claim := childIntakeFixture(t)
 	handler := New(e.Store, nil).WithEngineController(e).Handler()
 	engineClaimHTTP(t, handler, claim, "POST", "/api/v1/runs/run/source-credential", "", http.StatusForbidden)
@@ -91,14 +99,22 @@ func TestNativeFreshBranchChildResolvesBeforeIntakeAndAcquisition(t *testing.T) 
 		t.Fatal(err)
 	}
 	parent.Request.Request.Git.SHA = original
-	parent.Request.Request.Git.Repository = runspec.Repository{Key: "git:8.8.8.8/team/repo", Display: remote}
-	childSourceRepositories(t, e, claim, []string{"git:8.8.8.8/team/repo"})
-	parent.Request.Request.Source = runspec.Source{Ref: original, Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}}
+	parentRemote := remote
+	if explicit {
+		parentRemote = "https://8.8.8.8/team/parent"
+	}
+	parentRepository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: parentRemote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent.Request.Request.Git.Repository = parentRepository
+	childSourceRepositories(t, e, claim, []string{string(parentRepository.Key), "git:8.8.8.8/team/repo"})
+	parent.Request.Request.Source = runspec.Source{Ref: original, Location: runspec.SourceLocation{RemoteURL: parentRemote, PipelineDir: ".sparkwing"}}
 	body, err := json.Marshal(parent.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_key=? WHERE team='a' AND id='run'`, body, "git:8.8.8.8/team/repo")
+	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_key=? WHERE team='a' AND id='run'`, body, string(parentRepository.Key))
 	host, err := client.NewNodeHostClient(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: childRecorderTransport{handler}}, Bearer: func(context.Context) (string, error) { return claim, nil }}, "run", "job")
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +132,11 @@ func TestNativeFreshBranchChildResolvesBeforeIntakeAndAcquisition(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := process.StartChild(t.Context(), "deploy", nil, "", "deploy")
+	repoArgument := ""
+	if explicit {
+		repoArgument = remote
+	}
+	id, err := process.StartChild(t.Context(), "deploy", nil, repoArgument, "deploy")
 	if err != nil {
 		t.Fatal(err)
 	}

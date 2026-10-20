@@ -18,8 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -38,14 +37,12 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 			t.Error(err)
 		}
 	})
-	if err := state.AsOperator().CreateTeam(t.Context(), "billing-test"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, state, "billing-test")
 	for _, query := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('billing-test','member','` + role + `',1)`,
 	} {
-		if _, err := state.DB().ExecContext(t.Context(), query); err != nil {
+		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -53,10 +50,7 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	terms := licensetest.Terms{Features: []string{license.FeatureMultiTeam}, IssuedTo: "test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
-	server := controller.New(state, nil).WithSecretsCipher(cipher).WithLicense(license.Resolve(licensetest.Sign(t, priv, terms), pub, now, nil))
+	server := controller.NewDeployment(state, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "billing-test", time.Hour)
 	if err != nil {
 		t.Fatal(err)

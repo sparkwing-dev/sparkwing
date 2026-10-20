@@ -143,7 +143,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 				return admissionResultTx(ctx, tx, team, previous)
 			}
 		}
-		depth, err := validateChildLineageTx(ctx, tx, team, &input)
+		depth, err := validateChildLineageTx(ctx, tx, team, &input, principal.Capability.Repositories)
 		if err != nil {
 			return AdmissionResult{}, err
 		}
@@ -410,7 +410,7 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 // identity a signed App delivery or an App-armed schedule established qualifies.
 func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, provenance runspec.Provenance) ([]string, error) {
 	pools := []string{}
-	if !provenance.Verified() && provenance.Trust() != runspec.TrustSchedule {
+	if !provenance.Verified() && !provenance.TrustedDefault() {
 		return pools, nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT pool,branch,source,route FROM pool_access_rules WHERE team=? AND repo_key=? ORDER BY pool,id`+tx.forShare(), team, fmt.Sprintf("gh:%d", provenance.RepositoryID()))
@@ -489,13 +489,17 @@ func appReplayKey(input runspec.Request) string {
 
 // validateChildLineageTx checks a child against every ancestor and returns its depth,
 // counting the root as one level, or zero for a run that is not a child.
-func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request) (int, error) {
+func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, repositories []string) (int, error) {
 	input.Lineage.RootRunID = ""
 	if input.Lineage.ParentRunID == "" {
 		if input.Lineage.RepoInherited {
 			return 0, authorityError(apierr.BadRequest, "repository inheritance requires a parent")
 		}
 		return 0, nil
+	}
+	git := input.Git
+	if !capability.RepositoryAllowed(repositories, capability.RepositoryIdentity{Key: string(git.Repository.Key), Display: git.Repository.Display}) {
+		return 0, authorityError(apierr.Forbidden, "child source is outside the parent claim's repository authorization")
 	}
 	seen := map[string]bool{}
 	depth := 1
@@ -515,15 +519,14 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 				return 0, authorityError(apierr.SpecDrift, "child environment differs from its parent")
 			}
 			input.Env, input.EnvironmentSource = parent.Env, parent.EnvironmentSource
-			if parent.Git.Repository.Key != input.Git.Repository.Key {
-				return 0, authorityError(apierr.Forbidden, "a child run uses its parent's repository")
+			if parent.Git.Repository.Key == input.Git.Repository.Key {
+				input.Git.Repository.Display = parent.Git.Repository.Display
 			}
-			input.Git.Repository.Display = parent.Git.Repository.Display
 			if err := childDeclaredTx(ctx, tx, team, input.Lineage, input.Pipeline); err != nil {
 				return 0, err
 			}
 		}
-		if parent.Pipeline == input.Pipeline {
+		if parent.Git.Repository.Key == input.Git.Repository.Key && parent.Pipeline == input.Pipeline {
 			return 0, authorityError(apierr.Conflict, "child pipeline cycle")
 		}
 		input.Lineage.RootRunID = id
@@ -551,7 +554,7 @@ func childDeclaredTx(ctx context.Context, tx *storeTx, team Team, lineage runspe
 // provenanceOnBranch reports whether a verified run speaks for a branch the selector names.
 func provenanceOnBranch(p runspec.Provenance, selector string) bool {
 	branch, ok := strings.CutPrefix(p.Ref(), "refs/heads/")
-	return (p.Verified() || p.Trust() == runspec.TrustSchedule) && ok && runspec.BranchSelector{selector}.Matches(branch)
+	return (p.Verified() || p.TrustedDefault()) && ok && runspec.BranchSelector{selector}.Matches(branch)
 }
 
 func intakeScope(principal capability.Principal, pipeline string) (string, error) {

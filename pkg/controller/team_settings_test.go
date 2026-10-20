@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 )
 
 func TestMachineTeamSettingsHTTP(t *testing.T) {
@@ -81,7 +83,9 @@ func TestMachineTeamSettingsHTTP(t *testing.T) {
 func TestSelfHostedControllerRefusesTheCloudTier(t *testing.T) {
 	for _, cloud := range []bool{false, true} {
 		s, session := credentialSessionServer(t)
-		s.cloudDeployment = cloud
+		if cloud {
+			s.deployment = deploymenttest.Cloud(t, "https://controller.test")
+		}
 		engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.write,team.admin'`)
 		engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE account_id='member'`)
 		r := httptest.NewRequest("PUT", "https://controller.test/api/v1/team/settings", strings.NewReader(`{"claim_ranking":["self-hosted","cloud"]}`))

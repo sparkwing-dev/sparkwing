@@ -57,3 +57,45 @@ func TestJobSubjectPrefixRefusesBadParts(t *testing.T) {
 func keySubject(team, runID, nodeID string, attempt, generation int64) blob.LogSubject {
 	return blob.LogSubject{Kind: blob.LogJobAttempt, Team: team, RunID: runID, Attempt: &runspec.AttemptIdentity{Team: team, RunID: runID, NodeID: nodeID, Attempt: attempt, Generation: generation}}
 }
+
+func jobSubject() blob.LogSubject {
+	return blob.LogSubject{Kind: blob.LogJobAttempt, Team: "acme", RunID: "run-1", Attempt: &runspec.AttemptIdentity{Team: "acme", RunID: "run-1", NodeID: "build/linux", Attempt: 2, Generation: 7}}
+}
+
+func ownerSubject(kind blob.LogUnitKind) blob.LogSubject {
+	s := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "acme", RunID: "run-1", Unit: &blob.LogUnit{Kind: kind, Generation: 3}}
+	if kind == blob.LogEval {
+		s.Unit.Source = &blob.LogSource{NodeID: "generator", Generation: 5}
+	}
+	return s
+}
+
+func TestSubjectPrefixKeepsEveryFenceDistinct(t *testing.T) {
+	seen := map[string]bool{}
+	subjects := []blob.LogSubject{jobSubject(), ownerSubject(blob.LogTrigger), ownerSubject(blob.LogPlan), ownerSubject(blob.LogEval)}
+	for _, base := range subjects {
+		for i := range 4 {
+			s := base
+			if base.Attempt != nil {
+				a := *base.Attempt
+				s.Attempt = &a
+				s.Attempt.Generation += int64(i)
+			} else {
+				u := *base.Unit
+				s.Unit = &u
+				s.Unit.Generation += int64(i)
+			}
+			key, err := blob.LogSubjectPrefix("r90", s)
+			if err != nil || seen[key] {
+				t.Fatalf("colliding prefix = %q, %v", key, err)
+			}
+			seen[key] = true
+		}
+	}
+	eval := ownerSubject(blob.LogEval)
+	eval.Unit.Source.Generation++
+	prefix, err := blob.LogSubjectPrefix("r90", eval)
+	if err != nil || seen[prefix] {
+		t.Fatalf("source fence collision = %q, %v", prefix, err)
+	}
+}

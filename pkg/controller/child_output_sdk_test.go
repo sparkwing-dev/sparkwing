@@ -17,7 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -88,10 +89,10 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	e, _, root := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
-	if _, err := e.Store.DB().ExecContext(ctx, `UPDATE teams SET next_run_number=2 WHERE name='a'`); err != nil {
+	if _, err := teststore.SQL(t, e.Store).ExecContext(ctx, `UPDATE teams SET next_run_number=2 WHERE name='a'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Store.DB().ExecContext(ctx, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":["weather-report"]}`)); err != nil {
+	if _, err := teststore.SQL(t, e.Store).ExecContext(ctx, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":["weather-report"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	objectDirectory := t.TempDir()
@@ -226,7 +227,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 
 func childOutputSQL(t *testing.T, st *store.Store, query string, args ...any) {
 	t.Helper()
-	if _, err := st.DB().ExecContext(t.Context(), query, args...); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), query, args...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -240,7 +241,7 @@ func (childOutputCapacity) ResolveClaimProfile(context.Context, capability.Princ
 func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, httpClient *http.Client, run string) {
 	t.Helper()
 	st.SetClaimProfileResolver(childOutputCapacity{})
-	if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'stamp','pending',1,?,?)`, run, []byte(`{"id":"stamp"}`), []byte(`{}`)); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'stamp','pending',1,?,?)`, run, []byte(`{"id":"stamp"}`), []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	claim, err := st.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: run, NodeID: "stamp"}, Capacity: match.Resources{Cores: 2}, Available: match.Resources{Cores: 2}})
@@ -310,8 +311,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rawLicense, licenseKey := multiTeamLicense(t)
-	handler := controller.New(e.Store, nil).WithLicense(license.Resolve(rawLicense, licenseKey, time.Now(), nil)).WithSecretsCipher(cipher).WithEngineController(e).WithDataObjects(objects).HTTP().API
+	handler := controller.NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithEngineController(e).WithDataObjects(objects).HTTP().API
 	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
 	var award struct {
 		Claim struct {

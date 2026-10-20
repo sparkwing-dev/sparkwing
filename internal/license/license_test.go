@@ -118,16 +118,6 @@ func TestVerifyRefusesMalformedText(t *testing.T) {
 	}
 }
 
-func TestResolveGrantsNothingWithoutAUsableLicense(t *testing.T) {
-	pub, _ := licensetest.NewKey(t)
-	if lic := license.Resolve("", pub, now, nil); lic.Allows(license.FeatureMultiTeam, now) {
-		t.Fatal("an absent license allows multi-team")
-	}
-	if lic := license.Resolve("garbage", pub, now, nil); lic.Allows(license.FeatureMultiTeam, now) {
-		t.Fatal("a malformed license allows multi-team")
-	}
-}
-
 func TestEmbeddedKeyIsUsable(t *testing.T) {
 	if _, err := license.EmbeddedKey(); err != nil {
 		t.Fatal(err)
@@ -189,13 +179,6 @@ func TestVerifyRefusesASignedPayloadItCannotRead(t *testing.T) {
 		if _, err := license.Verify(raw, pub, now); !errors.Is(err, license.ErrMalformed) {
 			t.Errorf("%s: Verify = %v, want ErrMalformed", name, err)
 		}
-	}
-}
-
-func TestResolveGrantsAValidLicense(t *testing.T) {
-	pub, priv := licensetest.NewKey(t)
-	if lic := license.Resolve(licensetest.Sign(t, priv, multiTeamTerms()), pub, now, nil); !lic.Allows(license.FeatureMultiTeam, now) {
-		t.Fatal("a valid multi-team license resolves to nothing")
 	}
 }
 

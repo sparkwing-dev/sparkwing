@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -272,6 +273,29 @@ func TestAuthorityAwardRefusesForeignStaleAndUnreservedMeteredClaims(t *testing.
 			}
 			rewriteSchemaCount(t, s.db, "capabilities", 1)
 			rewriteSchemaCount(t, s.db, "billing_awards", 0)
+		})
+	}
+}
+
+func TestRemoteCacheReadsNeedTheRoleThatRunsCode(t *testing.T) {
+	for role, allowed := range map[Role]bool{RoleReader: false, RoleEditor: true, RoleOwner: true} {
+		t.Run(string(role), func(t *testing.T) {
+			s := authorityStore(t)
+			member := authorityMember(t, s, "member", role)
+			child := authorityRoot("remote-cache", "a")
+			child.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "member"}
+			child.Parent = &member.Authority
+			child.Grants = []capability.Grant{capability.DataRead}
+			child.Repositories = []string{"gh:1"}
+			child.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:1", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
+			authorityPersist(t, s, child)
+			p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.Contains(p.Capability.Grants, capability.DataRead) != allowed {
+				t.Fatalf("%s remote cache read grant = %v", role, p.Capability.Grants)
+			}
 		})
 	}
 }

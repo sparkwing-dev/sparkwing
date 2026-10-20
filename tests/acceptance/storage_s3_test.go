@@ -17,7 +17,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
 const storageS3Prefix = "deployment/nested-root"
@@ -117,25 +116,10 @@ func storageS3(t *testing.T) (*blob.S3, collectionS3) {
 
 func checkStorageS3Collection(t *testing.T) {
 	objects, transport := storageS3(t)
-	if err := checkBlobCollection(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
+	if err := checkBlobCollection(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 		t.Fatal(err)
 	}
 	if len(transport.objects) != 0 {
 		t.Fatalf("collection leaked %d objects", len(transport.objects))
 	}
-}
-
-func checkStorageS3Logs(t *testing.T) {
-	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
-		objects, transport := storageS3(t)
-		signing := &storageLogTransport{objects: objects, class: logseg.ClassFree}
-		var transfers http.RoundTripper = transport
-		if lost {
-			transfers = storageLostResponse{transport}
-		}
-		if err := checkBlobLogRecords(t.Context(), t.TempDir(), signing, objects, blob.TransferClient{Transport: transfers}, seed, 1+int(ordinal%17)); err != nil {
-			t.Fatal(err)
-		}
-		return true
-	})
 }

@@ -89,7 +89,7 @@ func (f *appFixture) claimRunNodeOn(owner signedIn, runID, repoURL string, repoI
 	ctx := context.Background()
 	f.createRun(owner, runID, repoURL, repoID)
 	if personal {
-		if _, err := f.store.DB().ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='account' WHERE team=? AND id=?`, owner.id, owner.team, runID); err != nil {
+		if _, err := teststore.SQL(f.t, f.store).ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='account' WHERE team=? AND id=?`, owner.id, owner.team, runID); err != nil {
 			f.t.Fatal(err)
 		}
 	}

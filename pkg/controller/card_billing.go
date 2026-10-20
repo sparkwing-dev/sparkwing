@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -53,9 +52,6 @@ type teamBudgetReq struct {
 }
 
 func (s *Server) handleTeamBillingBudget(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if !s.Metering() {
-		return &apierr.Error{Code: apierr.NotFound, Message: "billing is unavailable"}
-	}
 	var req teamBudgetReq
 	if err := decodeEngineRequest(r, &req); err != nil {
 		return err

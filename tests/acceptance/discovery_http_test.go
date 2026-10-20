@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -16,8 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
@@ -111,7 +109,7 @@ func TestDiscoveryHTTPRefusesInvalidAuthorityBeforeAvailability(t *testing.T) {
 						b.snapshot.Binding.Current.Generation++
 					case "bootstrap":
 						b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
-						b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants
+						b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants()
 						code = apierr.Forbidden
 					case "teamless":
 						b = deploymentBoundary(capability.OperatorTokens)
@@ -144,16 +142,7 @@ func TestDiscoveryHTTPAvailabilityAndMethods(t *testing.T) {
 
 func TestDiscoveryHTTPAnnouncesMultiTeamWithoutURLs(t *testing.T) {
 	b := authorityMember()
-	pub, private := licensetest.NewKey(t)
-	now := time.Now()
-	raw := licensetest.Sign(t, private, licensetest.Terms{
-		Features: []string{license.FeatureMultiTeam}, IssuedTo: "synthetic", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
-	})
-	lic, err := license.Verify(raw, pub, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithLicense(lic).Handler()
+	h := controller.NewDeployment(nil, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).Handler()
 	w := discoveryRequest(h, b, "GET", "/api/v1/services")
 	if w.Code != 200 {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())

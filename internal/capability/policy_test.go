@@ -9,7 +9,7 @@ import (
 )
 
 func TestRoutePolicyDoesNotRetainRemovedSurface(t *testing.T) {
-	for _, route := range capability.Routes {
+	for _, route := range capability.Routes() {
 		key := route.Method + " " + route.Path
 		for _, removed := range []string{"/triggers", "/api/v1/nodes", "/api/v1/runs/{run}/nodes", "/api/v1/runs/{run}/children/{child}/nodes", "/gitcache", "/cache-grant", "/bounce", "/dispatches", "/auto-retry", "/usage-metrics", "/operator/cache", "/claim/input"} {
 			if strings.Contains(route.Path, removed) && !strings.Contains(route.Path, "/github-app/triggers") {
@@ -72,7 +72,7 @@ func TestPrivilegedRouteBoundaries(t *testing.T) {
 			}
 		}
 	}
-	for _, route := range capability.Routes {
+	for _, route := range capability.Routes() {
 		if strings.Contains(route.Path, "/jobs/") && route.Method == "POST" {
 			for _, access := range route.Access {
 				if slices.Contains(access.Grants, capability.DataWrite) && access.Credential != capability.CredentialPublisher {
@@ -98,14 +98,14 @@ func TestPrivilegedRouteBoundaries(t *testing.T) {
 
 func TestAwardVocabulary(t *testing.T) {
 	seen := map[capability.AwardPurpose]bool{}
-	for _, policy := range capability.AwardPolicies {
+	for _, policy := range capability.AwardPolicies() {
 		if seen[policy.Purpose] {
 			t.Errorf("duplicate purpose %s", policy.Purpose)
 		}
 		seen[policy.Purpose] = true
 		grants := map[capability.Grant]bool{}
 		for _, grant := range append(slices.Clone(policy.Grants), policy.ClaimGrants...) {
-			if !slices.Contains(capability.Grants, grant) {
+			if !slices.Contains(capability.Grants(), grant) {
 				t.Errorf("unregistered grant %s", grant)
 			}
 		}
@@ -133,10 +133,10 @@ func TestAwardVocabulary(t *testing.T) {
 			t.Errorf("missing purpose %s", purpose)
 		}
 	}
-	if !slices.Equal(capability.BootstrapGrants, []capability.Grant{capability.SourceRead, capability.ClaimExchange}) {
+	if !slices.Equal(capability.BootstrapGrants(), []capability.Grant{capability.SourceRead, capability.ClaimExchange}) {
 		t.Fatal("bootstrap permits more than source and exchange")
 	}
-	if !slices.Equal(capability.BootstrapUnits, []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}) {
+	if !slices.Equal(capability.BootstrapUnits(), []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}) {
 		t.Fatal("bootstrap loses its operational unit")
 	}
 }
@@ -144,7 +144,7 @@ func TestAwardVocabulary(t *testing.T) {
 func TestReadOnlyDataOperations(t *testing.T) {
 	for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataHasMany, capability.DataLookup} {
 		found := false
-		for _, policy := range capability.DataPolicies {
+		for _, policy := range capability.DataPolicies() {
 			if policy.Operation != operation {
 				continue
 			}
@@ -187,7 +187,7 @@ func TestPaymentCallbackRequiresProviderProof(t *testing.T) {
 		t.Fatal("payment callback can bypass provider proof or checkout-derived tenancy")
 	}
 	seen := map[string]bool{}
-	for _, policy := range capability.PaymentEventPolicies {
+	for _, policy := range capability.PaymentEventPolicies() {
 		if seen[policy.ProviderType] {
 			t.Errorf("duplicate provider event %s", policy.ProviderType)
 		}

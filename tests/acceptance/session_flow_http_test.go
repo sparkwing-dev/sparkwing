@@ -15,11 +15,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type sessionFlow struct {
@@ -32,24 +33,22 @@ type sessionFlow struct {
 
 func newSessionFlow(t *testing.T) sessionFlow {
 	t.Helper()
+	return newDeploymentSessionFlow(t, deploymenttest.Team(t))
+}
+
+func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
+	t.Helper()
 	s, cipher := credentialMutationStore(t)
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','member','editor',1)`,
 	} {
-		if _, err := s.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}
-	pub, key := licensetest.NewKey(t)
-	now := time.Now()
-	signed := licensetest.Sign(t, key, licensetest.Terms{Features: []string{license.FeatureMultiTeam}, IssuedTo: "synthetic", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)})
-	lic, err := license.Verify(signed, pub, now)
-	if err != nil {
-		t.Fatal(err)
-	}
 	logs := &bytes.Buffer{}
-	server := controller.New(s, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher).WithLicense(lic)
+	server := controller.NewDeployment(s, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher)
 	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +69,7 @@ func (f sessionFlow) request(method, path, body string) *http.Request {
 func (f sessionFlow) state(t *testing.T) (int64, int64) {
 	t.Helper()
 	var count, expires int64
-	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*),COALESCE(MAX(expires_at),0) FROM sessions`).Scan(&count, &expires); err != nil {
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*),COALESCE(MAX(expires_at),0) FROM sessions`).Scan(&count, &expires); err != nil {
 		t.Fatal(err)
 	}
 	return count, expires
@@ -194,7 +193,7 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 		now := time.Now().UTC()
 		elapsed := (time.Duration(age%96) - 24) * time.Hour
 		created, expires := now.Add(-elapsed), now.Add(10*time.Minute)
-		if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), expires.UnixNano()); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), expires.UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		w := httptest.NewRecorder()
@@ -256,7 +255,11 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 	for _, state := range []string{"expired", "revoked", "removed member", "maximum lifetime", "future creation", "license", "missing key", "wrong key", "backend", "head", "body"} {
 		t.Run(state, func(t *testing.T) {
-			f := newSessionFlow(t)
+			cfg := deploymenttest.Team(t)
+			if state == "license" {
+				cfg = deployment.Config{}
+			}
+			f := newDeploymentSessionFlow(t, cfg)
 			method, path, body, code := "GET", "/api/v1/auth/session", "", apierr.Unauthenticated
 			digest := sha256.Sum256([]byte(f.raw))
 			query, value := "", int64(0)
@@ -272,7 +275,6 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 			case "future creation":
 				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(time.Hour).UnixNano()
 			case "license":
-				f.server.WithLicense(nil)
 			case "missing key":
 				f.server.WithSecretsCipher(nil)
 				code = apierr.Unavailable
@@ -296,7 +298,7 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 				if state == "removed member" || state == "backend" {
 					args = nil
 				}
-				if _, err := f.store.DB().ExecContext(t.Context(), query, args...); err != nil {
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), query, args...); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -318,7 +320,7 @@ func TestSessionFlowHTTPRolelessAccountHasNoTeamAuthority(t *testing.T) {
 		`INSERT INTO accounts(id,email,email_verified,created_at,updated_at,waitlist_reason) VALUES ('waitlisted','waitlisted@example.test',1,1,1,'signup_gate')`,
 		`INSERT INTO identities(provider,subject,account_id,email_verified,created_at) VALUES ('github','waitlisted','waitlisted',1,1)`,
 	} {
-		if _, err := f.store.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}

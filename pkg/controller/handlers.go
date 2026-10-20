@@ -29,7 +29,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	authState := "enabled"
 
-	if err := s.store.DB().PingContext(r.Context()); err != nil {
+	if err := s.store.Ping(r.Context()); err != nil {
 		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"status":   "degraded",
@@ -44,6 +44,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	egressState, egressProblems := s.egressHealth()
 	problems = append(problems, egressProblems...)
+
+	if problem := s.deployment.LicenseProblem(time.Now()); problem != "" {
+		problems = append(problems, problem)
+	}
 
 	resp := map[string]any{
 		"status": "ok", "auth": authState,

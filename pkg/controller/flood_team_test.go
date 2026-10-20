@@ -64,9 +64,7 @@ func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
 	for i := range 2 {
 		floodRun(t, f.submit(f.token, "build", fortyHex(i)), 201)
 	}
-	if err := f.st.AsOperator().CreateTeam(t.Context(), "other"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, f.st, "other")
 	other := floodMember(t, f, "other", "ci-other")
 	f.srv.WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
 	floodRun(t, f.submit(other, "build", fortyHex(1)), 201)
@@ -84,9 +82,7 @@ func TestFloodPolicyTeamBucketsRemainIndependentProperty(t *testing.T) {
 		f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1, DedupeWindow: time.Minute})
 		for _, team := range teams {
 			if _, err := f.st.ForTeam(t.Context(), team); err != nil {
-				if err := f.st.AsOperator().CreateTeam(t.Context(), team); err != nil {
-					t.Fatal(err)
-				}
+				teststore.SeedTeam(t, f.st, team)
 			}
 		}
 		a, b := floodMember(t, f, teams[0], fmt.Sprintf("a-%d-%d", i, seed)), floodMember(t, f, teams[1], fmt.Sprintf("b-%d-%d", i, seed))

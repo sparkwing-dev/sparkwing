@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func debugSelectorClient(t *testing.T, s *Server, session, grants string) (controllerwire.DebugControl, string) {
@@ -147,14 +148,14 @@ func FuzzDebugSelectorsStayWithinAuthenticatedTeam(f *testing.F) {
 			wantReleased = 1
 		}
 		var released int
-		if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM debug_pauses WHERE released_at IS NOT NULL`).Scan(&released); err != nil || released != wantReleased {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM debug_pauses WHERE released_at IS NOT NULL`).Scan(&released); err != nil || released != wantReleased {
 			t.Fatalf("release committed after invalid selection: %d %v", released, err)
 		}
 		if _, err := control.Cancel(t.Context(), selector, controllerwire.CancelRequest{Reason: "user_cancelled"}); (err == nil) != wantWrite {
 			t.Fatalf("cancel %q state %d: %v", selector, state%4, err)
 		}
 		var cancelled int
-		if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE cancel_requested_at IS NOT NULL`).Scan(&cancelled); err != nil || cancelled != wantReleased {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE cancel_requested_at IS NOT NULL`).Scan(&cancelled); err != nil || cancelled != wantReleased {
 			t.Fatalf("cancellation escaped authorized selection: %d %v", cancelled, err)
 		}
 	})

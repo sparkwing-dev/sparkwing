@@ -47,7 +47,7 @@ func (s *Server) operatorEndpoints() []Endpoint {
 		{Method: "POST", Pattern: "/api/v1/operator/waitlist/approve", Handle: s.handleApproveWaitlist},
 		{Method: "DELETE", Pattern: "/api/v1/operator/github-app/installations/{installation}", Handle: s.handleOperatorGitHubAppUnbind},
 		{Method: "PUT", Pattern: "/api/v1/operator/credits/settings", Handle: s.handleCreditsSettingsSet},
-		{Method: "POST", Pattern: "/api/v1/operator/runners/{runner}/metered", Handle: s.handleSetRunnerMetered},
+		{Method: "POST", Pattern: "/api/v1/operator/runners/{runner}/metered", Handle: s.meteredOnly(s.handleSetRunnerMetered)},
 		{Method: "POST", Pattern: "/api/v1/operator/secrets/rotate", Handle: s.handleRotateSealedValues},
 	}
 	for i := range endpoints {

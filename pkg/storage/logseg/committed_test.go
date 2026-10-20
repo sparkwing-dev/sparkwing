@@ -2,7 +2,10 @@ package logseg_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"strings"
@@ -232,3 +235,25 @@ func FuzzCommittedReadsUseOnlyAuthorizedRecords(f *testing.F) {
 		}
 	})
 }
+
+func subjectSegment(t *testing.T, n int, raw string) (logseg.Segment, []byte) {
+	t.Helper()
+	var b bytes.Buffer
+	w := gzip.NewWriter(&b)
+	if _, err := io.WriteString(w, raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(b.Bytes())
+	return logseg.Segment{N: n, FirstSeq: int64(n), LastSeq: int64(n), Lines: 1, Bytes: int64(len(raw)), StoredBytes: int64(b.Len()), SHA256: hex.EncodeToString(sum[:])}, b.Bytes()
+}
+
+type observedLogBody struct {
+	io.Reader
+	closed bool
+	err    error
+}
+
+func (b *observedLogBody) Close() error { b.closed = true; return b.err }

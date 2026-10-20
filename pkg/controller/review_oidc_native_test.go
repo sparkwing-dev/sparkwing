@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -54,7 +55,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		t.Fatalf("award: %v %s", err, response.Body)
 	}
 	var lease int64
-	if err := e.Store.DB().QueryRow(`SELECT lease_expires_at FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&lease); err != nil {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT lease_expires_at FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&lease); err != nil {
 		t.Fatal(err)
 	}
 	property := func(forged [8]byte) bool {

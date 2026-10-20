@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "sparkwing-full values",
+  "description": "Closes every mode value to its known choices, so a typo fails the render instead of falling through to a template's default branch. Everything else stays open.",
+  "type": "object",
+  "properties": {
+    "controller": {
+      "type": "object",
+      "required": ["deployment", "store"],
+      "properties": {
+        "deployment": {
+          "description": "--deployment: local (single-team self-hosted), team (licensed multi-team self-hosted) or cloud (the hosted service).",
+          "enum": ["local", "team", "cloud"]
+        },
+        "store": {
+          "description": "--store: sqlite (state.db under /data) or postgres (the pg-url credential).",
+          "enum": ["sqlite", "postgres"]
+        },
+        "limitsProfile": {
+          "description": "--limits-profile; empty supplies none. The cloud profiles need deployment=cloud.",
+          "enum": ["", "cloud", "cloud-free"]
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "description": "pvc mounts a PersistentVolumeClaim at /data; emptyDir loses /data with the pod.",
+              "enum": ["pvc", "emptyDir"]
+            },
+            "pvc": {
+              "type": "object",
+              "properties": {
+                "keepOnUninstall": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        "trustedProxyListener": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "allowInsecure": { "type": "boolean" }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" }
+      }
+    },
+    "volumePermissions": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    }
+  }
+}

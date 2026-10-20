@@ -14,7 +14,7 @@ import (
 )
 
 // NewPolicyRouter constructs the common controller/node-host authorization boundary.
-// Registration inventories come from handlers, independently of capability.Routes.
+// Registration inventories come from handlers, independently of capability.Routes().
 func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter {
 	return &PolicyRouter{mux: http.NewServeMux(), authorization: authorization, registered: make(map[string]Endpoint)}
 }
@@ -290,4 +290,16 @@ func (mux *registeredMux) Handle(pattern string, handler http.Handler) {
 
 func (mux *registeredMux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.Handle(pattern, http.HandlerFunc(handler))
+}
+
+// safety: billing routes stay registered on every deployment so the route
+// table is the same everywhere, but which handler serves them is chosen
+// once, from the declared deployment, when the routes are built.
+func (s *Server) meteredOnly(h func(http.ResponseWriter, *http.Request, capability.Authorized) error) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+	if s.deployment.Metering() {
+		return h
+	}
+	return func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+		return &apierr.Error{Code: apierr.NotFound, Message: "credit billing is unavailable on this deployment"}
+	}
 }

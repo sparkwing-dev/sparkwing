@@ -1,8 +1,7 @@
 # Tagged logs
 
-`Data` binds one `blob.LogSubject` to `blob.LogTransport`, a signed byte
-transport and the store's `RecordSegments` method. `NewSubjectUploader` copies
-that identity before requesting URLs. A job attempt and a trigger, plan or eval
+Hosts upload through an `Uploader` that the controller client binds to one
+`blob.LogSubject`. A job attempt and a trigger, plan or eval
 unit use separate object prefixes. Eval includes its own lease generation and
 the immutable source generation.
 
@@ -21,18 +20,10 @@ that stream's final tail grace. `NodeProgress` and `SealGrace` are removed.
 `NodeLogs.NodeLogCompleteness` takes only context, run and job IDs. The shared
 grace constant remains `limits.LogSealGrace`.
 
-`SubjectUploader` verifies compressed bytes, raw size and line coverage before
-signing. Each segment and the final manifest is signed separately with its
-exact stored size and SHA-256. Every URL carries its required signed headers.
-A slot must preserve the subject, retention class, index and expiry. Failed transfers
-and commits retain the pending payload. A retry cannot substitute different
-bytes under an uncertain immutable write.
-
-Each successful segment commit advances the uncompressed byte offset. The final
-manifest contains the exact committed segment list and its tagged identity.
-The uploader preserves the first final payload across failures and rejects a
-changed final payload. The sink can mark a lost tail incomplete without changing
-the job's result.
+Each segment and the final manifest is signed separately with its
+exact stored size and SHA-256. The final manifest contains the exact committed
+segment list and its tagged identity. The sink can mark a lost tail incomplete
+without changing the job's result.
 
 `Signer` signs one segment or manifest URL with a fifteen-minute expiry. The
 controller supplies the run's persisted retention class after authorizing its
@@ -41,11 +32,8 @@ The signer copies the subject and derives the key from it. `LogPutSigner`
 returns URLs and headers for both `blob.Filesystem` and `blob.S3`, bound to
 the requested length and digest. The filesystem backend permits only an identical
 retry at an existing key. S3 signs a create-only condition and rejects every
-overwrite. After a transfer error, `SubjectUploader` calls
-`LogTransport.VerifyUpload` with the exact subject, index, stored size and digest.
-Index zero selects the final manifest. A successful verification lets the
-record commit proceed. A 412 alone cannot establish a matching payload.
-Cancellation prevents recovery and record commit.
+overwrite. Index zero selects the final manifest. A 412 alone cannot
+establish a matching payload.
 
 The controller must authorize the current writer and resolve the run's persisted
 retention class before calling `UploadVerifier.Verify`. The verifier derives one
@@ -63,33 +51,13 @@ close successfully and pass digest and raw-size verification before its bytes
 reach the response. `ReadResult.Bytes` counts bytes emitted, including partial
 writes before an error. The controller must meter that count on success and
 failure. It joins the returned ranges to its live ring and polls for follow
-requests. `Data.Read` is the host-side entry to the controller-proxied stream.
+requests.
 Both filesystem and S3 backends open exact log keys for this reader. S3 response
 lengths must fit the shared object bound before the reader consumes their bytes.
 
-The component tests include a filesystem signer and HTTP handler round trip
-through the real uploader, sink, compressed files and committed reader. Only
-record persistence, authorization and controller transport are fakes. Separate
-tests exercise lifecycle refusal, expiry, size bounds, concurrent immutable
-uploads and uncertain commit retries. S3 tests run the real presigner, transfer
-client, uploader and committed reader with fake object responses and records.
-They cover segment and manifest conflicts, verified recovery after lost PUT
-responses and failed record commits, and refusal when current authority is lost.
-These proofs do not count as native acceptance receipts.
-
-`TestStorage/storage-log-segments-and-fallback/storage-components` generates
-job and trigger/plan/eval subjects over real filesystem signed uploads and reads.
-It covers lost PUT responses, offset resume, subject mismatch and corrupt bytes.
-Segment commits and reads use real SQLite tenant transactions and survive
-reopening. Authenticated signing and claim issuance remain contract fixtures.
-
-The `filesystem-sink` and `s3-sink` acceptance cells also exercise concurrent
-numbered writers, duplicate delivery, live offsets, compression, batch renewal,
-offset reads and spool removal through the real sink. Each backend runs 128
-generated cases with job, trigger, plan and eval subjects. Tenant transactions
-persist the segments and final seal. Reads reopen SQLite, select exact persisted
-ranges and reject foreign generations and revoked readers. Signing and claim
-issuance remain fixtures. The removed `fs.LogStore` has no production caller.
+Component tests cover lifecycle refusal, expiry, size bounds, replay
+verification and committed reads against filesystem and S3 objects. These
+proofs do not count as native acceptance receipts.
 
 The append/delete `LogStore` conformance facade and its unused portable suite
 are removed. Log tests call the tagged sink, reader and physical expiry APIs.
@@ -97,29 +65,13 @@ are removed. Log tests call the tagged sink, reader and physical expiry APIs.
 across immutable cuts, including combined filters and invalid ranges. Physical
 retention has separate expiry tests.
 
-Filesystem and S3 acceptance proofs join the physical components to the store's
-transactional log records. Authenticated controller routes, egress settlement
-and host bindings remain integration work.
-Hosts consume `blob.LogTransport` and `SegmentRecorder`. The authenticated
-signing and commit routes use the configured physical backend and real tenant
-transactions. Upload verification and host transport adapters remain W2 work.
+The authenticated signing and commit routes use the configured physical
+backend and real tenant transactions.
 
 `internal/blob` owns physical log keys. `LogObjectKey` reserves index zero for
 the final manifest and positive indexes for segments. Signing, verification and
 reads use its prefix and filename helpers. The former `logseg` key helpers are
 removed. The store can use this owner without importing `logseg`.
-
-The filesystem-records and s3-records acceptance cells join signed uploads to
-real SQLite records, reopen the store and check offset reads and revoked readers.
-Signed slots and committed records use the common physical keys and positive
-segment indexes. Authentication and award issuance remain fixtures.
-
-The S3 component property joins the real signer, SDK, batch uploader, upload
-verifier and committed reader against a fake object service. Its 128 inputs vary
-job and owner-unit subjects, retention classes and lost PUT responses. It checks
-the bucket lifecycle before signing, reads exact offsets and refuses corrupt
-segments before emitting bytes. Segment records and controller authorization
-remain fakes.
 
 The dashboard reader uses `Tenant.ReadRunView` to select committed subjects and
 passes the request actor to `CommittedReader`. Both physical backends are selected

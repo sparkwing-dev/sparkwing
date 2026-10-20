@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type localHostRoundTripper struct{ handler http.Handler }
@@ -70,9 +71,9 @@ func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
 	})
 }
 
-func localHostFixture(t *testing.T) (*Server, *client.LocalHostClient, *store.Tenant, capability.Principal) {
+func localHostFixture(t *testing.T, opts ...store.Option) (*Server, *client.LocalHostClient, *store.Tenant, capability.Principal) {
 	t.Helper()
-	engine, tenant := engineRuntimeStore(t)
+	engine, tenant := engineRuntimeStore(t, opts...)
 	engineRuntimeClaim(t, engine, capability.UnitNode)
 	engineSQL(t, engine.Store, `DELETE FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`)
 	engine.Store.SetClaimProfileResolver(engineProfileFake{})
@@ -127,14 +128,14 @@ func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) 
 		t.Fatalf("current persisted executor: %+v %v", current, err)
 	}
 	var ownerBefore, ownerAfter int64
-	if err := server.store.DB().QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers WHERE team='a' AND id='run'`).Scan(&ownerBefore); err != nil {
+	if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers WHERE team='a' AND id='run'`).Scan(&ownerBefore); err != nil {
 		t.Fatal(err)
 	}
 	beat, err := host.RenewNode(t.Context(), claim.Node.Ref, nodeActor, true)
 	if err != nil || beat.ExpiresAt.IsZero() {
 		t.Fatalf("independent node renewal: %+v %v", beat, err)
 	}
-	if err := server.store.DB().QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers WHERE team='a' AND id='run'`).Scan(&ownerAfter); err != nil {
+	if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers WHERE team='a' AND id='run'`).Scan(&ownerAfter); err != nil {
 		t.Fatal(err)
 	}
 	renewed, err := tenant.ReadNode(t.Context(), claim.Node.Ref)
@@ -185,7 +186,7 @@ func TestLocalHostFinishPreservesPolicyAndCompletesOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			var status string
-			if err := server.store.DB().QueryRowContext(t.Context(), `SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "done" {
+			if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "done" {
 				t.Fatalf("owner completion: %s %v", status, err)
 			}
 			run, err = tenant.ReadRun(t.Context(), "run")
@@ -213,7 +214,7 @@ func TestLocalHostRunTransitionCannotLeaveTerminalOwnerClaimed(t *testing.T) {
 		t.Fatal(err)
 	}
 	var status string
-	if err := server.store.DB().QueryRowContext(t.Context(), `SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "claimed" {
+	if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "claimed" {
 		t.Fatalf("owner changed: %s %v", status, err)
 	}
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
@@ -32,6 +33,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type cloudDispatch struct {
@@ -76,8 +78,7 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	api := httptest.NewUnstartedServer(nil)
 	t.Cleanup(api.Close)
 	endpoint := "http://" + api.Listener.Addr().String()
-	state, server, member := burstIntakeController(t, endpoint)
-	server.WithCloudDeployment(true)
+	state, server, member := burstIntakeDeploymentController(t, endpoint, deploymenttest.Cloud(t, endpoint))
 	api.Config.Handler = server.Handler()
 	api.Start()
 	if err := os.WriteFile(os.Getenv("SPARKWING_CONFIG"), []byte("profiles:\n  cloud: { controller: { url: "+endpoint+", token: "+member+" } }\n"), 0o600); err != nil {
@@ -217,7 +218,7 @@ func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
 			if err != nil || len(detail.Notices) != 0 {
 				t.Fatalf("fresh run already carries notices: %+v %v", detail.Notices, err)
 			}
-			if _, err := f.state.DB().ExecContext(t.Context(), `UPDATE triggers SET available_at=available_at-? WHERE id=?`, int64(time.Minute), created.RunID); err != nil {
+			if _, err := teststore.SQL(t, f.state).ExecContext(t.Context(), `UPDATE triggers SET available_at=available_at-? WHERE id=?`, int64(time.Minute), created.RunID); err != nil {
 				t.Fatal(err)
 			}
 			detail, err = f.member.ReadRun(t.Context(), created.RunID)
@@ -245,7 +246,7 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 	if detail, err := f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 0 {
 		t.Fatalf("fresh unfunded run already carries notices: %+v %v", detail.Notices, err)
 	}
-	if _, err := f.state.DB().ExecContext(t.Context(), `UPDATE triggers SET available_at=available_at-? WHERE id=?`, int64(time.Minute), created.RunID); err != nil {
+	if _, err := teststore.SQL(t, f.state).ExecContext(t.Context(), `UPDATE triggers SET available_at=available_at-? WHERE id=?`, int64(time.Minute), created.RunID); err != nil {
 		t.Fatal(err)
 	}
 	detail, err := f.member.ReadRun(t.Context(), created.RunID)
@@ -273,7 +274,7 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 func cloudDispatchMachine(t *testing.T, f cloudDispatch, name string) string {
 	t.Helper()
 	var prefix string
-	if err := f.state.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_kind='operator' AND parent_id IS NULL`).Scan(&prefix); err != nil {
+	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_kind='operator' AND parent_id IS NULL`).Scan(&prefix); err != nil {
 		t.Fatal(err)
 	}
 	issued, err := f.state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, RegistrationID: "runner:default:" + name, Authority: &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Repositories: []string{"git.example/acme/*"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TriggersClaim, capability.NodesClaim}})

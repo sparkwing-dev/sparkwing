@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type planSecretProbe struct {
@@ -158,7 +159,7 @@ func TestPlanSecretOpenerRejectsSecretIdentifiersInAcceptance(t *testing.T) {
 		t.Fatalf("refused plan persisted: %v", err)
 	}
 	var count int
-	if err := e.Store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM nodes`).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, e.Store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM nodes`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("jobs=%d err=%v", count, err)
 	}
 }

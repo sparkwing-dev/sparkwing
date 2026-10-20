@@ -2,6 +2,9 @@ package store
 
 import (
 	"cmp"
+	"context"
+	"database/sql"
+	"errors"
 	"slices"
 	"strings"
 
@@ -44,6 +47,16 @@ func compareLockTiers(a, b storeLockTier) int {
 	return cmp.Compare(slices.Index(storeLockOrder[:], a), slices.Index(storeLockOrder[:], b))
 }
 
+// lockAuthorityThenRunTx takes a writer's authority chain, then its run.
+// Renewal holds authority while it waits for the run, so taking the run first
+// deadlocks against it (B15).
+func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor) error {
+	if _, err := resolveActorTx(ctx, tx, actor); err != nil {
+		return err
+	}
+	return lockStateRunTx(ctx, tx, team, runID)
+}
+
 type authorityLock struct {
 	ref   capability.AuthorityRef
 	depth int
@@ -76,3 +89,73 @@ func compareStoreLocks(a, b storeLockKey) int {
 	}
 	return cmp.Compare(a.generation, b.generation)
 }
+
+// Row-lock clauses are spelled only here (TestRowLockClausesLiveInLockOrder).
+// That fixes where a lock's strength is written, not the order callers take
+// locks in; each transaction still orders its own acquisitions. SQLite
+// serializes writers and takes no row locks; snapshot reads take none either.
+
+func (s *Store) forUpdate() string {
+	if s.dialect == DialectPostgres {
+		return " FOR UPDATE"
+	}
+	return ""
+}
+
+func (t *storeTx) forUpdate() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR UPDATE"
+	}
+	return ""
+}
+
+func (t *storeTx) forKeyShare() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR KEY SHARE"
+	}
+	return ""
+}
+
+func (t *storeTx) forShare() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR SHARE"
+	}
+	return ""
+}
+
+// safety: FOR UPDATE also blocks the key-share lock an event insert's foreign
+// key takes on its run while holding the run's sequence lock, so a transaction
+// that locks its run and then appends an event deadlocks with that insert.
+func (t *storeTx) forNoKeyUpdate() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR NO KEY UPDATE"
+	}
+	return ""
+}
+
+// tryLockEntryTx takes a concurrency entry for update unless another
+// transaction holds it, and reports that it is busy instead of waiting.
+// SQLite serializes writers, so there it never reports busy.
+func tryLockEntryTx(ctx context.Context, tx *storeTx, team Team, key string) (busy bool, err error) {
+	if tx.dialect != DialectPostgres || tx.snapshotRead {
+		return false, nil
+	}
+	var one int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ? FOR UPDATE SKIP LOCKED`, string(team), key).Scan(&one)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`, string(team), key).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// controllerEpochLockSQL is the first lock every PostgreSQL write transaction takes: a share lock on the
+// promoted controller's epoch, so a promotion's epoch bump waits for in-flight writes and a superseded
+// controller's next transaction sees the new epoch and stops.
+const controllerEpochLockSQL = `SELECT convert_from(value,'UTF8')::bigint FROM settings WHERE key='controller_epoch' FOR SHARE`

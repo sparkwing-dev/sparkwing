@@ -20,7 +20,7 @@ func (f *githubCompletionFixture) pending() func() {
 	engineSQL(f.t, f.server.store, `UPDATE runs SET status='pending' WHERE team='a' AND id='run'`)
 	engineSQL(f.t, f.server.store, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES ('a','run','github_check','pending',1,1)`)
 	var prefix string
-	if err := f.server.store.DB().QueryRow(`SELECT capability_prefix FROM triggers WHERE team='a' AND id='run'`).Scan(&prefix); err != nil {
+	if err := teststore.SQL(f.t, f.server.store).QueryRow(`SELECT capability_prefix FROM triggers WHERE team='a' AND id='run'`).Scan(&prefix); err != nil {
 		f.t.Fatal(err)
 	}
 	owner, err := f.server.store.ResolveAuthority(f.t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})

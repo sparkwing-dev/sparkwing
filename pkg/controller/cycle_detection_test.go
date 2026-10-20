@@ -100,9 +100,7 @@ func TestCycleDetect_ParentNotFound(t *testing.T) {
 
 func TestChildCycleWalkStaysInsideItsTeamProperty(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
-	if err := e.Store.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, e.Store, "foreign")
 	if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{ID: "private-root", Pipeline: "private-pipeline", Status: "success"}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,16 +132,23 @@ func setChildAncestor(t *testing.T, e *EngineController, id, parent string) {
 	engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id=?`, lineage, id)
 }
 
-// 10#1: a child runs in its parent's repository even when the claim's repository
-// scope names another, so it cannot borrow another repository's source token.
-func TestChildRunsOnlyInItsParentRepository(t *testing.T) {
+// The same pipeline name in another authorized repository is not a cycle and
+// cannot inherit the first repository's identity, even at the same ref and SHA.
+func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
 	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
-	for _, git := range []runspec.Git{
-		{Repository: runspec.Repository{Key: "gh:2"}},
-		{Repository: runspec.Repository{Key: "gh:2", Display: "gh:2"}, Ref: "main", SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
-	} {
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", git), 403)
+	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:3"}}), 403)
+	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 201)
+	var result struct {
+		Request runspec.SealedRequest `json:"request"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	p := result.Request.Provenance
+	trigger, repo, ref, sha := p.OIDC()
+	if p.Trust() != runspec.TrustAsserted || !p.SharedSecretsOnly() || trigger != "manual" || repo != 0 || ref != "" || sha != "" {
+		t.Fatalf("explicit child inherited identity: %+v", p)
 	}
 }
 
@@ -156,7 +161,7 @@ func TestChildCycleWalkRefusesRepeatedAncestorIDs(t *testing.T) {
 	setChildAncestor(t, e, "run", "root")
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "fresh", runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), 409)
 	var count int
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("cyclic lineage persisted a child: %d: %v", count, err)
 	}
 }

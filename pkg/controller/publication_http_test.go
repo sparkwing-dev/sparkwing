@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type publicationLogReader struct{ controllerwire.LogReader }
@@ -174,7 +175,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 	}
 	for _, table := range []string{"triggers", "eval_units"} {
 		var count int
-		if err := s.store.DB().QueryRowContext(t.Context(), "SELECT count(*) FROM "+table+" WHERE team='a' AND "+map[string]string{"triggers": "id", "eval_units": "run_id"}[table]+"=?", run).Scan(&count); err != nil || count != 0 {
+		if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), "SELECT count(*) FROM "+table+" WHERE team='a' AND "+map[string]string{"triggers": "id", "eval_units": "run_id"}[table]+"=?", run).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("publication created %s: %d %v", table, count, err)
 		}
 	}
@@ -190,7 +191,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		profileCacheRead(t, s.store, options, *snapshot.Nodes[0].OutputRecord, *snapshot.Nodes[0].ManifestRecord)
 	}
 	var active int
-	if err := s.store.DB().QueryRowContext(t.Context(), `SELECT count(*) FROM capabilities WHERE bind_run=? AND revoked_at IS NULL`, run).Scan(&active); err != nil || active != 0 {
+	if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), `SELECT count(*) FROM capabilities WHERE bind_run=? AND revoked_at IS NULL`, run).Scan(&active); err != nil || active != 0 {
 		t.Fatalf("publication left live credentials: %d %v", active, err)
 	}
 }

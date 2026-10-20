@@ -208,7 +208,7 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	logger.InfoContext(ctx, "audit", attrs...)
 }
 
-var pathCredential = regexp.MustCompile(`(?:` + strings.Join(capability.CredentialPrefixes, "|") + `)[A-Za-z0-9_-]+`)
+var pathCredential = regexp.MustCompile(`(?:` + strings.Join(capability.CredentialPrefixes(), "|") + `)[A-Za-z0-9_-]+`)
 
 func sanitizedMissingPath(path string, mask func(string) string) string {
 	parts := strings.Split(mask(path), "/")

@@ -67,7 +67,7 @@ SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,'gh:1',?,'host','execute',?,?,?,?
 			query = strings.Replace(query, "?", fmt.Sprintf("$%d", i), 1)
 		}
 	}
-	_, err = s.DB().ExecContext(ctx, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, []byte(`[]`), created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
+	_, err = Exec(ctx, s, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, []byte(`[]`), created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
 	return err
 }
 
@@ -77,7 +77,7 @@ func SeedRunFinish(s *store.Store, ctx context.Context, team store.Team, id, sta
 	if s.Dialect() == store.DialectPostgres {
 		query = `UPDATE runs SET status=$1,error=$2,finished_at=$3 WHERE team=$4 AND id=$5`
 	}
-	result, err := s.DB().ExecContext(ctx, query, status, message, time.Now().UnixNano(), team, id)
+	result, err := Exec(ctx, s, query, status, message, time.Now().UnixNano(), team, id)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ WHERE team=? AND run_id=? AND node_id=?`
 claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',owner_capability_prefix=''
 WHERE team=$6 AND run_id=$7 AND node_id=$8`
 	}
-	write, err := s.DB().ExecContext(ctx, query, result.Outcome, result.MaskedError, result.Reason, result.ExitCode, time.Now().UnixNano(), team, ref.RunID, ref.NodeID)
+	write, err := Exec(ctx, s, query, result.Outcome, result.MaskedError, result.Reason, result.ExitCode, time.Now().UnixNano(), team, ref.RunID, ref.NodeID)
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ SELECT team,id,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM nod
 	if n.FinishedAt != nil {
 		finished = n.FinishedAt.UnixNano()
 	}
-	write, err := s.DB().ExecContext(ctx, query, n.NodeID, n.Status, n.Outcome, deps, started, finished, spec, n.SpecHash, []byte(`{}`), n.AttemptsConsumed, n.RequestedCores, n.RequestedMemoryBytes, max(n.RequestedSlots, 1), n.RunID, n.RunID)
+	write, err := Exec(ctx, s, query, n.NodeID, n.Status, n.Outcome, deps, started, finished, spec, n.SpecHash, []byte(`{}`), n.AttemptsConsumed, n.RequestedCores, n.RequestedMemoryBytes, max(n.RequestedSlots, 1), n.RunID, n.RunID)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func SeedNodeReady(s *store.Store, ctx context.Context, run, node string) error 
 		query = `UPDATE nodes SET ready_at=COALESCE(ready_at,$1),queue_started_at=COALESCE(queue_started_at,$2) WHERE run_id=$3 AND node_id=$4`
 	}
 	now := time.Now().UnixNano()
-	write, err := s.DB().ExecContext(ctx, query, now, now, run, node)
+	write, err := Exec(ctx, s, query, now, now, run, node)
 	if err != nil {
 		return err
 	}

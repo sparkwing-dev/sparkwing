@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -49,13 +51,6 @@ func (s *Store) greatest() string {
 	return "max"
 }
 
-func (s *Store) forUpdate() string {
-	if s.dialect == DialectPostgres {
-		return " FOR UPDATE"
-	}
-	return ""
-}
-
 func rewritePh(dialect Dialect, q string) string {
 	if dialect != DialectPostgres {
 		return q
@@ -82,28 +77,47 @@ func rewritePh(dialect Dialect, q string) string {
 	return b.String()
 }
 
+type sqlRunner interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+func (s *Store) sqlRunner() sqlRunner {
+	if s.conn != nil {
+		return s.conn
+	}
+	return s.db
+}
+
 func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	return s.db.ExecContext(ctx, rewritePh(s.dialect, q), args...)
+	var result sql.Result
+	err := s.inTx(ctx, func(tx *storeTx) (err error) {
+		result, err = tx.ExecContext(ctx, q, args...)
+		return err
+	})
+	return result, err
 }
 
 func (s *Store) execNoCtx(q string, args ...any) (sql.Result, error) {
-	return s.db.Exec(rewritePh(s.dialect, q), args...)
+	return s.exec(context.Background(), q, args...)
 }
 
 func (s *Store) query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	return s.db.QueryContext(ctx, rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().QueryContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) queryNoCtx(q string, args ...any) (*sql.Rows, error) {
-	return s.db.Query(rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().QueryContext(context.Background(), rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) queryRow(ctx context.Context, q string, args ...any) *sql.Row {
-	return s.db.QueryRowContext(ctx, rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().QueryRowContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
 func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
-	return s.db.QueryRow(rewritePh(s.dialect, q), args...)
+	return s.sqlRunner().QueryRowContext(context.Background(), rewritePh(s.dialect, q), args...)
 }
 
 type storeTx struct {
@@ -122,13 +136,6 @@ type storeTx struct {
 	createdTeam          *TeamInfo
 	blobIO               *blobIO
 	matchingRuns         map[matchingRunKey]*matchingRun
-}
-
-// SetTestClock overrides the SQLite store clock until the test ends.
-func (s *Store) SetTestClock(t interface{ Cleanup(func()) }, clock func() time.Time) {
-	original := s.clock
-	t.Cleanup(func() { s.clock = original })
-	s.clock = clock
 }
 
 func (s *Store) now() time.Time {
@@ -189,7 +196,7 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 		}
 		return tx, err
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{
+	tx, err := s.sqlRunner().BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,
 	})
@@ -199,43 +206,27 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s, snapshotRead: true}, nil
 }
 
+var errControllerFenced = errors.New("controller superseded by promotion")
+
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.sqlRunner().BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
+	if s.controllerEpoch != 0 {
+		var epoch int64
+		err := tx.QueryRowContext(ctx, controllerEpochLockSQL).Scan(&epoch)
+		if err != nil || epoch != s.controllerEpoch {
+			fenced := err == nil || errors.Is(err, sql.ErrNoRows)
+			err = errors.Join(err, tx.Rollback())
+			if fenced {
+				err = errors.Join(fmt.Errorf("controller epoch lost (promoted=%d, current=%d): %w", s.controllerEpoch, epoch, errControllerFenced), err)
+				s.controllerFailStop(err)
+			}
+			return nil, err
+		}
+	}
 	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s}, nil
-}
-
-func (t *storeTx) forUpdate() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR UPDATE"
-	}
-	return ""
-}
-
-func (t *storeTx) forKeyShare() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR KEY SHARE"
-	}
-	return ""
-}
-
-func (t *storeTx) forShare() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR SHARE"
-	}
-	return ""
-}
-
-// safety: FOR UPDATE also blocks the key-share lock an event insert's foreign
-// key takes on its run while holding the run's sequence lock, so a transaction
-// that locks its run and then appends an event deadlocks with that insert.
-func (t *storeTx) forNoKeyUpdate() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR NO KEY UPDATE"
-	}
-	return ""
 }
 
 func (t *storeTx) Commit() error {

@@ -56,7 +56,7 @@ func (s *Server) sweepClaimAttention(ctx context.Context, now time.Time, batch i
 			sightings = sightAgents(registered, now)
 			agents[n.Team] = sightings
 		}
-		if reason := claimAttention(n, sightings, s.Metering()); reason != n.Attention {
+		if reason := claimAttention(n, sightings, s.deployment.Metering()); reason != n.Attention {
 			updates = append(updates, store.NodeAttention{Team: n.Team, RunID: n.RunID, NodeID: n.NodeID, Reason: reason})
 		}
 	}

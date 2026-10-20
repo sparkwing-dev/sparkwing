@@ -24,8 +24,7 @@ type teamDeletionBody struct {
 
 func newDeletionFixture(t *testing.T) *identityFixture {
 	t.Helper()
-	raw, pub := multiTeamLicense(t)
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub})
+	f := newIdentityFixtureWith(t, fixtureOpts{})
 	return f
 }
 
@@ -183,8 +182,7 @@ type inviteBody struct {
 
 func TestInvitationEmailNamesTheInviterAndTeamAndStopsAtTheDailyCap(t *testing.T) {
 	mail := &mailFake{}
-	raw, pub := multiTeamLicense(t)
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
 		s.WithMailer(mail)
 	}})
 	owner := f.user("o", "olga@example.com")

@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
@@ -53,7 +55,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t)).WithOperatorAccounts([]string{"operator"})
+			s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
 			s.githubApp = &githubAppState{}
 			raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 			if err != nil {
@@ -73,7 +75,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 			}
 			if tc.query != "" {
 				var count int
-				if err := st.DB().QueryRow(tc.query).Scan(&count); err != nil || count != 1 {
+				if err := teststore.SQL(t, st).QueryRow(tc.query).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("commit: %d %v", count, err)
 				}
 			} else {

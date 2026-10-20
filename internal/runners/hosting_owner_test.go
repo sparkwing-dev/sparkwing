@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type hostingOwnerState struct {
@@ -46,7 +47,7 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 		state := hostingOwnerState{snapshot: original.snapshot}
 		state.snapshot.Run.State = store.RunRunning
 		state.snapshot.Run.Spec, state.snapshot.Run.Plan, state.snapshot.Run.PlanHash = &spec, unit.Accepted.Plan, "plan"
-		s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+		s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
