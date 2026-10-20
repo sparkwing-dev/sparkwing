@@ -38,7 +38,7 @@ func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, reposit
 	slices.Sort(list)
 	if len(list) != 0 {
 		var installation int64
-		if err := tx.QueryRowContext(ctx, `SELECT installation_id FROM github_app_installations WHERE team=? AND LOWER(account_login)=? AND suspended=0 ORDER BY installation_id LIMIT 1`+tx.forUpdate(), t.team, strings.ToLower(repo.Owner)).Scan(&installation); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT installation_id FROM github_app_installations WHERE team=? AND LOWER(account_login)=? AND suspended=0 ORDER BY installation_id LIMIT 1`, t.team, strings.ToLower(repo.Owner)).Scan(&installation); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, ErrNotFound
 			}

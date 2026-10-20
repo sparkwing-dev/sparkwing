@@ -10,8 +10,17 @@ import (
 
 // UnbindAuthorizedGitHubInstallation removes this tenant's installation and its subscriptions.
 func (t *Tenant) UnbindAuthorizedGitHubInstallation(ctx context.Context, a capability.Authorized, installation int64) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, _ capability.Principal) error {
-		return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			set.add(lockTeam, true, string(t.team))
+			return discoverInstallationLocks(ctx, tx, set, installation)
+		}); err != nil {
+			return err
+		}
+		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, _ capability.Principal) error {
+			return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
+		})
 	})
 }
 
@@ -79,7 +88,7 @@ func (t *Tenant) SetAuthorizedGitHubExtraRepos(ctx context.Context, a capability
 
 func (t *Tenant) liveGitHubInstallationTx(ctx context.Context, tx *storeTx, installation int64) error {
 	var suspended bool
-	if err := tx.QueryRowContext(ctx, `SELECT suspended FROM github_app_installations WHERE team=? AND installation_id=?`+tx.forUpdate(), t.team, installation).Scan(&suspended); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT suspended FROM github_app_installations WHERE team=? AND installation_id=?`, t.team, installation).Scan(&suspended); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}

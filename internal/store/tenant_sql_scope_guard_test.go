@@ -16,16 +16,22 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"discoverInstallationLocks":             "discovers the prior installation team before locking both teams and the installation, then repeats discovery under those locks",
+	"discoverAccountTeams":                  "discovers one account's membership teams before taking the account lock or writing session epoch foreign keys",
+	"discoverAccountSessionLocks":           "discovers one account's sessions and every membership team before removal, fallback or sign-in changes lock account authority",
 	"githubInstallationOwnerTx":             "a provider-verified current GitHub administrator resolves the prior installation tenant before locking both tenants and replacing its consent in one transaction",
 	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
 	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
 	"(*Operator).DeleteExpiredBlobStaging":  "leased maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
 	"(*Store).EnsureBootstrapCapability":    "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
-	"revokeSetupAuthorityTx":                "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
+	"setupAuthorityRefsTx":                  "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
 	"launcherAwardPrefixTx":                 "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
 	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
 	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
+	"discoverDeletionAuthorityLocks":             "team and account deletion discover existing target rows across teams from an explicit checked selector before taking all affected authority locks",
+	"discoverDeletionAccountLocks":               "discovers all fallback membership rows for an account whose team or account is being deleted",
+	"discoverAccountDeletionLocks":               "account deletion discovers all of the account's membership teams and fallback session teams before its transaction closes authority",
 	"revokeSelectedCapabilitiesTx":               "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
 
 	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
@@ -34,7 +40,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).RecordsPaymentParent": "a verified provider event names provider identities before its tenant is known",
 	"(*Store).OpenStandingRequests": "the operator console queue lists every team's open standing requests",
 	"loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
-	"(*Operator).SetRunnerMetered":  "a console-authorized deployment mutation resolves one enrolled root by its globally unique public prefix, validates its complete ancestry, and updates only that root's tenant row",
 	"persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
 	"deleteRetentionCapabilitiesTx": "the elected deployment pass removes ended credentials across teams while preserving cross-team ancestry",
 
@@ -47,7 +52,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"readAuthorityNodeTx":                 "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
 	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
-	"lockDiscoveredAuthoritiesTx":         "an authority chain may cross teams or reach deployment authority; its discovered prefixes and session hashes are globally unique",
+	"acquireRowLock":                      "the lock-set owner locks discovered globally unique authority and installation identities; memberships are scoped to their discovered team",
 	"lockUnitsTx":                         "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"loadMatchingRunTx":                   "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
@@ -74,7 +79,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).SampleSealedSecrets":     "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"unlinkAccountIdentityTx":          "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
-	"(*Store).lookupSession":           "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
+	"lookupSessionTx":                  "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
 	"(*Store).DeleteSession":           "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Store).mintCSRFKey":             "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"resolveSignInTx":                  "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
@@ -86,8 +91,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"acceptAccountInvitationTx":        "finds an invitation by its id before the team is known; the accepting write then names that team",
 	"(*Store).deleteAccountTx": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
-	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
-		"account deletion counts their owners",
 	"relabelPrincipalTx": "replaces a deleted account's name in every team's rows, because the account " +
 		"belonged to the deployment and acted in each of its teams",
 	"grantCreatorTeamsTx": "lists every team holding grants a deleted account created, to lock each team's ledger " +

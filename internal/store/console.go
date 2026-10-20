@@ -26,7 +26,7 @@ func (s *Store) AsConsole(allowed func(string) bool) *Console {
 	return &Console{s: s, allowed: allowed}
 }
 
-func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorized, write func(*storeTx, string) (T, error)) (T, error) {
+func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorized, write func(*storeTx, string) (T, error), discovery ...func(*storeTx, lockSet) lockSet) (T, error) {
 	var zero T
 	if c == nil || c.s == nil || c.allowed == nil || a.Principal.Class != capability.CredentialConsole || a.Principal.Capability.Subject.Kind != capability.SubjectOperator {
 		return zero, authorityError(apierr.Forbidden, "direct operator session required")
@@ -34,6 +34,18 @@ func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorize
 	var result T
 	err := c.s.inTx(ctx, func(tx *storeTx) error {
 		result = zero
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			if a.Target.Team != "" {
+				set.add(lockTeam, true, a.Target.Team)
+			}
+			for _, discover := range discovery {
+				set = discover(tx, set)
+			}
+			return set
+		}); err != nil {
+			return err
+		}
 		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
 		if err != nil {
 			return err
@@ -170,6 +182,8 @@ func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized
 			return TeamDeletion{}, err
 		}
 		return teamDeletionTx(ctx, tx, t.team)
+	}, func(tx *storeTx, set lockSet) lockSet {
+		return discoverTeamDeletionLocks(ctx, tx, set, Team(a.Target.Team))
 	})
 }
 
@@ -184,6 +198,16 @@ func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authori
 			return AccountDeletion{}, err
 		}
 		return c.s.deleteAccountTx(ctx, tx, account.ID, tx.now())
+	}, func(tx *storeTx, set lockSet) lockSet {
+		account, err := accountTx(ctx, tx, a.Target.AccountID)
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
+			account, err = accountByEmailTx(ctx, tx, a.Target.AccountID)
+		}
+		if err != nil {
+			set.err = err
+			return set
+		}
+		return discoverAccountDeletionLocks(ctx, tx, set, account.ID)
 	})
 }
 
@@ -204,7 +228,7 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 			return "", ErrInvalidInput
 		}
 		var team Team
-		err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`+tx.forUpdate(), installation).Scan(&team)
+		err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}
@@ -213,6 +237,8 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 		}
 		t := &Tenant{s: c.s, team: team}
 		return team, t.unbindGitHubAppInstallationTx(ctx, tx, installation)
+	}, func(tx *storeTx, set lockSet) lockSet {
+		return discoverInstallationLocks(ctx, tx, set, installation)
 	})
 }
 

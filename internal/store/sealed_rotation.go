@@ -79,9 +79,18 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		return SealedRotation{}, authorityError(apierr.Unavailable, "bound secret encryption is unavailable")
 	}
 	total := SealedRotation{Unreadable: []SealedRowName{}}
-	step := func(fn func(*sealedRotationTx) error) error {
+	step := func(fn func(*sealedRotationTx) error, teams ...Team) error {
 		var done SealedRotation
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
+			if err := acquireLockSet(ctx, tx, func() lockSet {
+				set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+				for _, team := range teams {
+					set.add(lockTeam, true, string(team))
+				}
+				return set
+			}); err != nil {
+				return err
+			}
 			if err := sealedRotationAuthorityTx(ctx, tx, a); err != nil {
 				return err
 			}
@@ -111,7 +120,7 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		return SealedRotation{}, err
 	}
 	for _, team := range teams {
-		if err := step(func(r *sealedRotationTx) error { return r.tenantCredentials(ctx, &Tenant{s: o.s, team: team}) }); err != nil {
+		if err := step(func(r *sealedRotationTx) error { return r.tenantCredentials(ctx, &Tenant{s: o.s, team: team}) }, team); err != nil {
 			return SealedRotation{}, err
 		}
 		for after, more := "", true; more; {

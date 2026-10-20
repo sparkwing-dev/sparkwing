@@ -1923,6 +1923,13 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
 14. Acquire transaction locks in the frozen class order and lexical order within a class.
     Implementers must review claim, cancellation and financial paths together
     before adding a lock; they must not silently acquire an earlier class late.
+    Authority mutations use `acquireLockSet` to discover every team, membership,
+    authority and installation row before acquiring any of them. The set includes
+    teams referenced by foreign keys, such as audit events. The owner acquires
+    each row once in class order, then repeats discovery under those locks. A
+    changed set restarts the transaction and releases its locks before retrying.
+    Nested authority checks reuse held locks. A late earlier-class lock or lock
+    upgrade fails rather than extending an incomplete set.
 
 ## Scheduling, placement and log contracts
 
@@ -2230,6 +2237,16 @@ operational kind and financial classification after run or capability pruning.
 Authentication reads the complete capability/session ancestry and current
 membership in one snapshot on every request. Revocation, role changes and
 membership epochs take effect at use time. Authentication facts are not cached.
+
+The first authentication of each `(session, team)` records an immutable membership
+epoch in `session_membership_epochs`. Selecting a team cannot replace that epoch.
+Session-derived credentials, including delegated data credentials, retain their
+minting team's context through every ancestor. When ancestry reaches a session,
+it resolves that session in the child's team and checks that team's recorded
+epoch against current membership. The session's active team still controls direct
+session use. Switching it cannot change an existing descendant's team or grants.
+Removal followed by rejoining through a fresh session cannot revive descendants
+of the old session.
 
 `Store.SettlePayment` accepts C2's opaque verified event and looks up the committed
 checkout by provider session ID and configured test/live mode. The checkout supplies

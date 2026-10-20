@@ -46,28 +46,42 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 
 // RevokeGitHubRunner removes enrollment and ends its Actions authority in one transaction.
 func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized, repositoryID int64) error {
-	return t.mutateCredentials(ctx, a, func(tx *storeTx, _ string) error {
-		if repositoryID <= 0 {
-			return ErrInvalidInput
-		}
-		result, err := tx.ExecContext(ctx, `DELETE FROM github_runner_bindings WHERE team=? AND repository_id=?`, t.team, repositoryID)
-		if err := credentialRowChanged(result, err); err != nil {
+	if repositoryID <= 0 {
+		return ErrInvalidInput
+	}
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		var prefixes []string
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND bind_kind='push' AND repo_key=? AND parent_id IS NULL`, t.team, githubRepositoryKey(repositoryID))
+			if err != nil {
+				return lockSet{err: err}
+			}
+			prefixes, err = scanPrefixes(rows)
+			if err != nil {
+				return lockSet{err: err}
+			}
+			leaves := []capability.AuthorityRef{a.Principal.Authority}
+			for _, prefix := range prefixes {
+				leaves = append(leaves, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+			}
+			set := discoverAuthorityLocks(ctx, tx, leaves, prefixes...)
+			set.add(lockTeam, true, string(t.team))
+			return set
+		}); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND bind_kind='push' AND repo_key=? AND parent_id IS NULL`, t.team, githubRepositoryKey(repositoryID))
-		if err != nil {
-			return err
-		}
-		prefixes, err := scanPrefixes(rows)
-		if err != nil {
-			return err
-		}
-		for _, prefix := range prefixes {
-			if err := revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, _ capability.Principal) error {
+			result, err := tx.ExecContext(ctx, `DELETE FROM github_runner_bindings WHERE team=? AND repository_id=?`, t.team, repositoryID)
+			if err := credentialRowChanged(result, err); err != nil {
 				return err
 			}
-		}
-		return nil
+			for _, prefix := range prefixes {
+				if err := revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	})
 }
 

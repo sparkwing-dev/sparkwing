@@ -43,11 +43,13 @@ func consoleAuthorityTx(ctx context.Context, tx *storeTx, a capability.Authorize
 // SetRunnerMetered changes future awards for one enrolled machine after a console recheck.
 func (o *Operator) SetRunnerMetered(ctx context.Context, a capability.Authorized, prefix string, metered bool) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		path := "/api/v1/operator/runners/{runner}/metered"
-		if err := consoleAuthorityTx(ctx, tx, a, path); err != nil {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			return discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority, {Kind: capability.AuthorityCapability, ID: prefix}}, prefix)
+		}); err != nil {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=?`+tx.forUpdate(), prefix).Scan(&prefix); err != nil {
+		path := "/api/v1/operator/runners/{runner}/metered"
+		if err := consoleAuthorityTx(ctx, tx, a, path); err != nil {
 			return err
 		}
 		record, err := loadCapabilityRecordTx(ctx, tx, prefix)

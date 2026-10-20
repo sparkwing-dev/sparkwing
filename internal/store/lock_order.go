@@ -5,9 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -60,11 +63,6 @@ func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID s
 type authorityLock struct {
 	ref   capability.AuthorityRef
 	depth int
-	write bool
-}
-
-func compareAuthorityLocks(a, b authorityLock) int {
-	return compareStoreLocks(authorityLockKey(a), authorityLockKey(b))
 }
 
 func authorityLockKey(a authorityLock) storeLockKey {
@@ -76,6 +74,257 @@ type storeLockKey struct {
 	depth      int
 	keys       [3]string
 	generation int64
+}
+
+type rowLock struct {
+	key      storeLockKey
+	write    bool
+	optional bool
+}
+
+func (r rowLock) sameRow(other rowLock) bool {
+	return r.key.tier == other.key.tier && r.key.keys == other.key.keys && r.key.generation == other.key.generation
+}
+
+// A mutation declares its complete set before resolving live authority. Team
+// foreign keys (including audit events) belong here even without an explicit read.
+type lockSet struct {
+	rows []rowLock
+	err  error
+}
+
+func (s *lockSet) add(tier storeLockTier, write bool, keys ...string) {
+	key := storeLockKey{tier: tier}
+	copy(key.keys[:], keys)
+	s.rows = append(s.rows, rowLock{key: key, write: write})
+}
+
+func (s lockSet) normalized() lockSet {
+	slices.SortFunc(s.rows, func(a, b rowLock) int { return compareStoreLocks(a.key, b.key) })
+	var rows []rowLock
+	for _, row := range s.rows {
+		if len(rows) != 0 && rows[len(rows)-1].key == row.key {
+			last := &rows[len(rows)-1]
+			last.write = last.write || row.write
+			last.optional = last.optional && row.optional
+		} else {
+			rows = append(rows, row)
+		}
+	}
+	s.rows = rows
+	return s
+}
+
+func discoverAuthorityLocks(ctx context.Context, tx *storeTx, leaves []capability.AuthorityRef, writes ...string) lockSet {
+	var set lockSet
+	for _, leaf := range leaves {
+		chain, err := discoverAuthorityChainTx(ctx, tx, leaf)
+		if err != nil {
+			set.err = err
+			return set
+		}
+		for _, key := range authorityMembershipKeys(chain) {
+			set.rows = append(set.rows, rowLock{key: key})
+		}
+		for i, node := range chain {
+			c, ref := node.principal.Capability, node.principal.Authority
+			if c.Team != "" && !slices.Contains(tx.insertedAuthorities, ref) {
+				set.add(lockTeam, false, c.Team)
+			}
+			write := slices.Contains(writes, ref.ID) || ref.Kind == capability.AuthorityCapability && registeredClaimant(c)
+			set.rows = append(set.rows, rowLock{key: authorityLockKey(authorityLock{ref: ref, depth: len(chain) - 1 - i}), write: write})
+		}
+	}
+	return set
+}
+
+// acquireLockSet owns discovery, ordered acquisition and revalidation. Changed
+// discovery restarts inTx, releasing every lock before discovering again.
+func acquireLockSet(ctx context.Context, tx *storeTx, discover func() lockSet) error {
+	if tx.snapshotRead {
+		return nil
+	}
+	set := discover().normalized()
+	if set.err != nil {
+		return set.err
+	}
+	for _, row := range set.rows {
+		if row.key.tier == lockTeam && tx.createdTeam != nil && row.key.keys[0] == string(tx.createdTeam.Slug) {
+			continue
+		}
+		if row.key.tier == lockAuthority && slices.Contains(tx.insertedAuthorities, capability.AuthorityRef{Kind: capability.AuthorityKind(row.key.keys[0]), ID: row.key.keys[1]}) {
+			continue
+		}
+		// Nested authority checks reuse the mutation's locks without upgrading them.
+		if slices.ContainsFunc(tx.authorityLocks, func(held rowLock) bool {
+			return held.sameRow(row) && (held.write || !row.write)
+		}) {
+			continue
+		}
+		for _, held := range tx.authorityLocks {
+			if compareStoreLocks(row.key, held.key) < 0 || held.sameRow(row) {
+				return fmt.Errorf("incomplete authority lock set: %s %v after %s %v", row.key.tier, row.key.keys, held.key.tier, held.key.keys)
+			}
+		}
+		if err := acquireRowLock(ctx, tx, row); err != nil {
+			return err
+		}
+		tx.authorityLocks = append(tx.authorityLocks, row)
+	}
+	current := discover().normalized()
+	if current.err != nil {
+		return current.err
+	}
+	if !slices.Equal(set.rows, current.rows) {
+		return errAuthorityChanged
+	}
+	return nil
+}
+
+func acquireRowLock(ctx context.Context, tx *storeTx, row rowLock) error {
+	k := row.key
+	var query string
+	args := []any{k.keys[0]}
+	switch k.tier {
+	case lockGlobal:
+		_, err := lockLedgerTx(ctx, tx, Team(k.keys[0]))
+		return err
+	case lockTeam:
+		query = "SELECT name FROM teams WHERE name=?"
+	case lockAccount:
+		query = "SELECT id FROM accounts WHERE id=?"
+	case lockMembership:
+		query = "SELECT account_id FROM memberships WHERE team=? AND account_id=?"
+		args = append(args, k.keys[1])
+	case lockAuthority:
+		query = "SELECT prefix FROM capabilities WHERE prefix=?"
+		if capability.AuthorityKind(k.keys[0]) == capability.AuthoritySession {
+			query = "SELECT hash FROM sessions WHERE hash=?"
+		}
+		args = []any{k.keys[1]}
+	case lockInstallation:
+		query = "SELECT installation_id FROM github_app_installations WHERE installation_id=?"
+	default:
+		return errors.New("unsupported authority lock tier")
+	}
+	mode := tx.forShare()
+	if row.write {
+		mode = tx.forUpdate()
+		if k.tier == lockAuthority {
+			mode = tx.forNoKeyUpdate()
+		}
+	}
+	var id string
+	err := tx.QueryRowContext(ctx, query+mode, args...).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		if row.optional {
+			return nil
+		}
+		if k.tier == lockTeam {
+			return ErrUnknownTeam
+		}
+		if k.tier == lockAccount {
+			return ErrNotFound
+		}
+		if k.tier == lockMembership {
+			return authorityError(apierr.Unauthenticated, "membership is unavailable")
+		}
+		return errAuthorityChanged
+	}
+	return err
+}
+
+func discoverInstallationLocks(ctx context.Context, tx *storeTx, set lockSet, installation int64) lockSet {
+	if set.err != nil {
+		return set
+	}
+	var team string
+	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team)
+	if err == nil {
+		set.add(lockTeam, true, team)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		set.err = err
+	}
+	set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockInstallation, keys: [3]string{strconv.FormatInt(installation, 10)}}, write: true, optional: true})
+	return set
+}
+
+func discoverAccountTeams(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
+	if set.err != nil {
+		return set
+	}
+	set.add(lockAccount, true, account)
+	teams, err := tx.QueryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for teams.Next() {
+		var team string
+		if err := teams.Scan(&team); err != nil {
+			set.err = err
+			break
+		}
+		set.add(lockTeam, false, team)
+	}
+	set.err = errors.Join(set.err, teams.Err(), teams.Close())
+	if set.err != nil {
+		return set
+	}
+	return set
+}
+
+func discoverAccountSessionLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
+	set = discoverAccountTeams(ctx, tx, set, account)
+	if set.err != nil {
+		return set
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT hash,COALESCE(team,'') FROM sessions WHERE account_id=?`, account)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	type accountSession struct{ id, team string }
+	var sessions []accountSession
+	for rows.Next() {
+		var session accountSession
+		if err := rows.Scan(&session.id, &session.team); err != nil {
+			set.err = err
+			break
+		}
+		sessions = append(sessions, session)
+	}
+	set.err = errors.Join(set.err, rows.Err(), rows.Close())
+	if set.err != nil {
+		return set
+	}
+	for _, session := range sessions {
+		if session.team != "" {
+			set.add(lockTeam, false, session.team)
+		}
+		set = discoverAuthorityWrite(ctx, tx, set, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: session.id})
+	}
+	return set
+}
+
+func discoverAuthorityWrite(ctx context.Context, tx *storeTx, set lockSet, ref capability.AuthorityRef) lockSet {
+	if set.err != nil {
+		return set
+	}
+	chain, err := discoverAuthorityChainTx(ctx, tx, ref)
+	depth := len(chain) - 1
+	if err != nil {
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.Unauthenticated && failure.Code != apierr.IntegrityFailure {
+			set.err = err
+			return set
+		}
+		// An unusable chain cannot have a competing live authority reader, but its
+		// surviving rows must still be removable by logout or account deletion.
+		depth = 0
+	}
+	set.rows = append(set.rows, rowLock{key: authorityLockKey(authorityLock{ref: ref, depth: depth}), write: true, optional: true})
+	return set
 }
 
 func compareStoreLocks(a, b storeLockKey) int {
@@ -91,9 +340,9 @@ func compareStoreLocks(a, b storeLockKey) int {
 }
 
 // Row-lock clauses are spelled only here (TestRowLockClausesLiveInLockOrder).
-// That fixes where a lock's strength is written, not the order callers take
-// locks in; each transaction still orders its own acquisitions. SQLite
-// serializes writers and takes no row locks; snapshot reads take none either.
+// Authority rows use acquireLockSet; other tiers retain their transaction's
+// acquisition order. SQLite serializes writers and takes no row locks;
+// snapshot reads take none either.
 
 func (s *Store) forUpdate() string {
 	if s.dialect == DialectPostgres {

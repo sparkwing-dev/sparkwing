@@ -101,19 +101,35 @@ func (s *Store) HasDeploymentAdministrator(ctx context.Context) (bool, error) {
 }
 
 func hasDeploymentAdministratorTx(ctx context.Context, tx *storeTx) (bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team IS NULL AND audience='controller' AND bind_kind='none' AND subject_kind IN ('operator','service') ORDER BY prefix`)
-	if err != nil {
-		return false, err
-	}
 	var prefixes []string
-	for rows.Next() {
-		var prefix string
-		if err := rows.Scan(&prefix); err != nil {
-			return false, errors.Join(err, rows.Close())
+	discover := func() lockSet {
+		rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team IS NULL AND audience='controller' AND bind_kind='none' AND subject_kind IN ('operator','service') ORDER BY prefix`)
+		if err != nil {
+			return lockSet{err: err}
 		}
-		prefixes = append(prefixes, prefix)
+		prefixes, err = scanPrefixes(rows)
+		if err != nil {
+			return lockSet{err: err}
+		}
+		var set lockSet
+		for _, prefix := range prefixes {
+			next := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: prefix}})
+			var api *apierr.Error
+			if errors.As(next.err, &api) && api.Code == apierr.Unauthenticated {
+				continue
+			}
+			if next.err != nil {
+				return next
+			}
+			set.rows = append(set.rows, next.rows...)
+		}
+		return set
 	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+	if tx.snapshotRead {
+		if set := discover(); set.err != nil {
+			return false, set.err
+		}
+	} else if err := acquireLockSet(ctx, tx, discover); err != nil {
 		return false, err
 	}
 	for _, prefix := range prefixes {
@@ -148,48 +164,65 @@ func finishBootstrapSetupTx(ctx context.Context, tx *storeTx, c capability.Capab
 	if err := advisoryLockTx(ctx, tx, bootstrapUsedKey); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE subject_kind='operator' AND subject_id='bootstrap:admin' AND (team IS NULL OR team='')`)
-	if err != nil {
+	var setup lockSet
+	if err := acquireLockSet(ctx, tx, func() lockSet {
+		setup = discoverSetupAuthorityLocks(ctx, tx, lockSet{})
+		return setup
+	}); err != nil {
 		return err
 	}
-	var prefixes []string
-	for rows.Next() {
-		var prefix string
-		if err := rows.Scan(&prefix); err != nil {
-			rows.Close()
-			return err
-		}
-		prefixes = append(prefixes, prefix)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
-	}
-	for _, prefix := range prefixes {
-		if err := revokeSetupAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+	for _, row := range setup.rows {
+		ref := capability.AuthorityRef{Kind: capability.AuthorityKind(row.key.keys[0]), ID: row.key.keys[1]}
+		if err := revokeAuthorityTx(ctx, tx, ref); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func revokeSetupAuthorityTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef) error {
-	var prefix string
-	if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=?`+tx.forUpdate(), root.ID).Scan(&prefix); err != nil {
-		return err
+func discoverSetupAuthorityLocks(ctx context.Context, tx *storeTx, set lockSet) lockSet {
+	if set.err != nil {
+		return set
 	}
-	refs := []capability.AuthorityRef{root}
-	seen := map[capability.AuthorityRef]bool{root: true}
+	refs, err := setupAuthorityRefsTx(ctx, tx)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for _, ref := range refs {
+		set = discoverAuthorityWrite(ctx, tx, set, ref)
+	}
+	return set
+}
+
+func setupAuthorityRefsTx(ctx context.Context, tx *storeTx) ([]capability.AuthorityRef, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE subject_kind='operator' AND subject_id='bootstrap:admin' AND (team IS NULL OR team='')`)
+	if err != nil {
+		return nil, err
+	}
+	prefixes, err := scanPrefixes(rows)
+	if err != nil {
+		return nil, err
+	}
+	var refs []capability.AuthorityRef
+	for _, prefix := range prefixes {
+		refs = append(refs, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	}
+	seen := map[capability.AuthorityRef]bool{}
+	for _, ref := range refs {
+		seen[ref] = true
+	}
 	for i := 0; i < len(refs); i++ {
 		ref := refs[i]
 		rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE parent_kind=? AND parent_id=?`, ref.Kind, ref.ID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for rows.Next() {
 			var id string
 			if err := rows.Scan(&id); err != nil {
 				rows.Close()
-				return err
+				return nil, err
 			}
 			child := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: id}
 			if !seen[child] {
@@ -198,20 +231,20 @@ func revokeSetupAuthorityTx(ctx context.Context, tx *storeTx, root capability.Au
 			}
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
+			return nil, err
 		}
 		if ref.Kind != capability.AuthorityCapability {
 			continue
 		}
 		rows, err = tx.QueryContext(ctx, `SELECT hash FROM sessions WHERE capability_prefix=?`, ref.ID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for rows.Next() {
 			var id string
 			if err := rows.Scan(&id); err != nil {
 				rows.Close()
-				return err
+				return nil, err
 			}
 			child := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}
 			if !seen[child] {
@@ -220,13 +253,8 @@ func revokeSetupAuthorityTx(ctx context.Context, tx *storeTx, root capability.Au
 			}
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	for _, ref := range refs {
-		if err := revokeAuthorityTx(ctx, tx, ref); err != nil {
-			return err
-		}
-	}
-	return nil
+	return refs, nil
 }

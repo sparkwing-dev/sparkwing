@@ -11,21 +11,8 @@ import (
 )
 
 func (t *Tenant) mutateCredentials(ctx context.Context, a capability.Authorized, write func(*storeTx, string) error) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := t.lockTeamTx(ctx, tx); err != nil {
-			return err
-		}
-		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
-			return err
-		}
-		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
-		if err != nil {
-			return err
-		}
-		if err := write(tx, p.Capability.Subject.ID); err != nil {
-			return err
-		}
-		return t.credentialAdminTx(ctx, tx, a)
+	return t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+		return write(tx, p.Capability.Subject.ID)
 	})
 }
 

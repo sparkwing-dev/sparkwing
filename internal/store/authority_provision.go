@@ -32,22 +32,21 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 			return capability.Capability{}, err
 		}
 	}
-	if spec.Kind == capability.ProvisionMachine {
+	if err := acquireLockSet(ctx, tx, func() lockSet {
 		var leaves []capability.AuthorityRef
 		if spec.Authority != nil {
 			leaves = append(leaves, *spec.Authority)
 		}
-		if err := lockAuthorityWithTeamTx(ctx, tx, Team(spec.Team), leaves); err != nil {
-			return capability.Capability{}, err
+		set := discoverAuthorityLocks(ctx, tx, leaves)
+		if spec.Team != "" {
+			set.add(lockTeam, spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionActions, spec.Team)
 		}
-	}
-	if spec.Kind == capability.ProvisionActions {
-		if err := (&Tenant{s: tx.store, team: Team(spec.Team)}).lockTeamTx(ctx, tx); err != nil {
-			if errors.Is(err, ErrNotFound) {
-				return capability.Capability{}, ErrUnknownTeam
-			}
-			return capability.Capability{}, err
+		if spec.Kind == capability.ProvisionService {
+			set = discoverSetupAuthorityLocks(ctx, tx, set)
 		}
+		return set
+	}); err != nil {
+		return capability.Capability{}, err
 	}
 	if err := checkProvisionOriginTx(ctx, tx, spec); err != nil {
 		return capability.Capability{}, err
@@ -182,7 +181,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	if spec.Team != "" {
 		var team string
 		var membersCanAddMachines bool
-		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`+tx.forShare(), spec.Team, TeamDeletionPending).Scan(&team, &membersCanAddMachines)
+		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`, spec.Team, TeamDeletionPending).Scan(&team, &membersCanAddMachines)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrUnknownTeam
 		}
@@ -204,7 +203,7 @@ func checkMemberProvision(ctx context.Context, tx *storeTx, spec capability.Prov
 	allowed := c.Grants
 	if tx.rotatingRoot != nil {
 		var role Role
-		if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), spec.Team, spec.Subject.ID).Scan(&role); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`, spec.Team, spec.Subject.ID).Scan(&role); err != nil {
 			return err
 		}
 		if !role.Valid() {

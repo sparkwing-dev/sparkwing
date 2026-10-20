@@ -10,23 +10,33 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func (t *Tenant) githubConnectTx(ctx context.Context, a capability.Authorized, use func(*storeTx, capability.Principal, string) error) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
-		if !a.Principal.DirectAccountSession() || !p.DirectAccountSession() || p.Capability.Subject != a.Principal.Capability.Subject || p.Capability.Team != a.Principal.Capability.Team || !p.Capability.IssuedAt.Equal(a.Principal.Capability.IssuedAt) {
-			return bindingRefusal()
-		}
-		if err := lockAccountTx(ctx, tx, p.Capability.Subject.ID); err != nil {
+func (t *Tenant) githubConnectTx(ctx context.Context, a capability.Authorized, use func(*storeTx, capability.Principal, string) error, installations ...int64) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			set.add(lockTeam, true, string(t.team))
+			set.add(lockAccount, true, a.Principal.Capability.Subject.ID)
+			for _, installation := range installations {
+				set = discoverInstallationLocks(ctx, tx, set, installation)
+			}
+			return set
+		}); err != nil {
 			return err
 		}
-		var subject string
-		err := tx.QueryRowContext(ctx, `SELECT subject FROM identities WHERE account_id=? AND provider=?`+tx.forUpdate(), p.Capability.Subject.ID, ProviderGitHub).Scan(&subject)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		return use(tx, p, subject)
+		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, p capability.Principal) error {
+			if !a.Principal.DirectAccountSession() || !p.DirectAccountSession() || p.Capability.Subject != a.Principal.Capability.Subject || p.Capability.Team != a.Principal.Capability.Team || !p.Capability.IssuedAt.Equal(a.Principal.Capability.IssuedAt) {
+				return bindingRefusal()
+			}
+			var subject string
+			err := tx.QueryRowContext(ctx, `SELECT subject FROM identities WHERE account_id=? AND provider=?`, p.Capability.Subject.ID, ProviderGitHub).Scan(&subject)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			return use(tx, p, subject)
+		})
 	})
 }
 
@@ -100,7 +110,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 			out.ReclaimedFrom = previousTeam
 		}
 		return nil
-	})
+	}, row.InstallationID)
 	if err != nil {
 		return GitHubAppInstallation{}, err
 	}
@@ -109,6 +119,6 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 
 func githubInstallationOwnerTx(ctx context.Context, tx *storeTx, installation int64) (string, error) {
 	var owner string
-	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`+tx.forUpdate(), installation).Scan(&owner)
+	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&owner)
 	return owner, err
 }

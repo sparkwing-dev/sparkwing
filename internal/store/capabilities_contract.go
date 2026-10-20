@@ -226,6 +226,9 @@ func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capabili
 	values = append(values, hex.EncodeToString(c.Digest[:]), body, c.Subject.ID)
 	columns := append(slices.Clone(authorityColumns), "digest", "authority_json", "created_by")
 	_, err = tx.ExecContext(ctx, "INSERT INTO capabilities ("+strings.Join(columns, ",")+") VALUES ("+strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")+")", values...)
+	if err == nil {
+		tx.insertedAuthorities = append(tx.insertedAuthorities, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
+	}
 	return err
 }
 
@@ -289,7 +292,7 @@ type authorityNode struct {
 	requirement *authorityRequirement
 }
 
-func readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) (authorityNode, error) {
+func readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, sessionTeam ...string) (authorityNode, error) {
 	if !validAuthorityRef(ref) {
 		return authorityNode{}, authorityError(apierr.Unauthenticated, "invalid authority reference")
 	}
@@ -310,7 +313,11 @@ func readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.Author
 		var created, expires, epoch int64
 		var revoked sql.NullInt64
 		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
-		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,COALESCE((SELECT epoch FROM session_membership_epochs WHERE session_hash=sessions.hash AND team=sessions.team),-1) FROM sessions WHERE hash = ?", ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &epoch)
+		var team any
+		if len(sessionTeam) != 0 {
+			team = sessionTeam[0]
+		}
+		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(?,team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,COALESCE((SELECT epoch FROM session_membership_epochs WHERE session_hash=sessions.hash AND team=COALESCE(?,sessions.team)),-1) FROM sessions WHERE hash = ?", team, team, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &epoch)
 		if err != nil {
 			return node, err
 		}
@@ -339,13 +346,13 @@ func readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.Author
 	return node, nil
 }
 
-func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool) (authorityNode, error) {
+func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, sessionTeam ...string) (authorityNode, error) {
 	if lock {
 		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}); err != nil {
 			return authorityNode{}, err
 		}
 	}
-	node, err := readAuthorityNodeTx(ctx, tx, ref)
+	node, err := readAuthorityNodeTx(ctx, tx, ref, sessionTeam...)
 	if err != nil {
 		return node, err
 	}
@@ -402,6 +409,9 @@ func (node authorityNode) readsMembership() bool {
 
 func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, writes ...string) ([]authorityNode, error) {
 	if lock {
+		if _, err := authorityChainTx(ctx, tx, ref, false); err != nil {
+			return nil, err
+		}
 		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, writes...); err != nil {
 			return nil, err
 		}
@@ -413,7 +423,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
-		node, err := readAuthorityTx(ctx, tx, ref, false)
+		node, err := readAuthorityTx(ctx, tx, ref, false, ancestrySessionTeam(ref, chain)...)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
 		}
@@ -458,7 +468,7 @@ func discoverAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.A
 			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
-		node, err := readAuthorityNodeTx(ctx, tx, ref)
+		node, err := readAuthorityNodeTx(ctx, tx, ref, ancestrySessionTeam(ref, chain)...)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
 		}
@@ -493,96 +503,19 @@ func authorityMembershipKeys(chain []authorityNode) []storeLockKey {
 	return slices.Compact(keys)
 }
 
-// The unlocked walk discovers the entire set before any lock is acquired. A
-// concurrent session team switch restarts the transaction rather than extending
-// the set while holding authority locks.
+// A descendant keeps the team authenticated when it was minted, even if its
+// session later selects another team. The per-team epoch is immutable.
+func ancestrySessionTeam(ref capability.AuthorityRef, chain []authorityNode) []string {
+	if ref.Kind == capability.AuthoritySession && len(chain) != 0 {
+		return []string{chain[len(chain)-1].principal.Capability.Team}
+	}
+	return nil
+}
+
 func lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.AuthorityRef, writes ...string) error {
-	return lockAuthorityWithTeamTx(ctx, tx, "", leaves, writes...)
-}
-
-func lockAuthorityWithTeamTx(ctx context.Context, tx *storeTx, team Team, leaves []capability.AuthorityRef, writes ...string) error {
-	var set []authorityLock
-	var memberships []storeLockKey
-	if team != "" {
-		memberships = append(memberships, storeLockKey{tier: lockTeam, keys: [3]string{string(team)}})
-	}
-	chains := make(map[capability.AuthorityRef][]authorityNode)
-	for _, leaf := range leaves {
-		chain, err := discoverAuthorityChainTx(ctx, tx, leaf)
-		if err != nil {
-			return err
-		}
-		chains[leaf] = chain
-		memberships = append(memberships, authorityMembershipKeys(chain)...)
-		for i, node := range chain {
-			ref := node.principal.Authority
-			write := slices.Contains(writes, ref.ID) || ref.Kind == capability.AuthorityCapability && registeredClaimant(node.principal.Capability)
-			if at := slices.IndexFunc(set, func(h authorityLock) bool { return h.ref == ref }); at >= 0 {
-				set[at].write = set[at].write || write
-				continue
-			}
-			set = append(set, authorityLock{ref, len(chain) - 1 - i, write})
-		}
-	}
-	slices.SortFunc(memberships, compareStoreLocks)
-	for _, key := range slices.Compact(memberships) {
-		query, args := "SELECT account_id FROM memberships WHERE team=? AND account_id=?", []any{key.keys[0], key.keys[1]}
-		if key.tier == lockTeam {
-			query, args = "SELECT name FROM teams WHERE name=?", []any{key.keys[0]}
-		}
-		var id string
-		mode := tx.forShare()
-		if key.tier == lockTeam && key.keys[0] == string(team) {
-			mode = tx.forUpdate()
-		}
-		if err := tx.QueryRowContext(ctx, query+mode, args...).Scan(&id); errors.Is(err, sql.ErrNoRows) {
-			if key.tier == lockTeam && key.keys[0] == string(team) {
-				return ErrUnknownTeam
-			}
-			return authorityError(apierr.Unauthenticated, "membership is unavailable")
-		} else if err != nil {
-			return err
-		}
-	}
-	if err := lockDiscoveredAuthoritiesTx(ctx, tx, set); err != nil {
-		return err
-	}
-	for leaf, discovered := range chains {
-		current, err := discoverAuthorityChainTx(ctx, tx, leaf)
-		if err != nil {
-			return err
-		}
-		if len(current) != len(discovered) || !slices.Equal(authorityMembershipKeys(current), authorityMembershipKeys(discovered)) {
-			return errAuthorityChanged
-		}
-		for i := range current {
-			if current[i].principal.Authority != discovered[i].principal.Authority {
-				return errAuthorityChanged
-			}
-		}
-	}
-	return nil
-}
-
-func lockDiscoveredAuthoritiesTx(ctx context.Context, tx *storeTx, set []authorityLock) error {
-	slices.SortFunc(set, compareAuthorityLocks)
-	for _, h := range set {
-		query := "SELECT prefix FROM capabilities WHERE prefix=?"
-		if h.ref.Kind == capability.AuthoritySession {
-			query = "SELECT hash FROM sessions WHERE hash=?"
-		}
-		mode := tx.forShare()
-		if h.write {
-			mode = tx.forNoKeyUpdate()
-		}
-		var key string
-		if err := tx.QueryRowContext(ctx, query+mode, h.ref.ID).Scan(&key); errors.Is(err, sql.ErrNoRows) {
-			return errAuthorityChanged
-		} else if err != nil {
-			return err
-		}
-	}
-	return nil
+	return acquireLockSet(ctx, tx, func() lockSet {
+		return discoverAuthorityLocks(ctx, tx, leaves, writes...)
+	})
 }
 
 // ResolveAuthority reads live ancestry and locks it in write transactions.
@@ -674,6 +607,11 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capa
 }
 
 func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) error {
+	if err := acquireLockSet(ctx, tx, func() lockSet {
+		return discoverAuthorityWrite(ctx, tx, lockSet{}, ref)
+	}); err != nil {
+		return err
+	}
 	now := tx.now()
 	if ref.Kind == capability.AuthorityCapability {
 		record, err := loadCapabilityRecordTx(ctx, tx, ref.ID)

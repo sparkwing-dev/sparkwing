@@ -46,8 +46,15 @@ func (t *Tenant) AdmitGitHubAppRun(ctx context.Context, in GitHubAppAdmission) (
 
 func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capability.Principal, error) {
 	refuse := func() (capability.Principal, error) { return capability.Principal{}, ErrGitHubAppAutomationRevoked }
+	if err := acquireLockSet(ctx, tx, func() lockSet {
+		var set lockSet
+		set.add(lockTeam, false, string(in.Installation.Team))
+		return discoverInstallationLocks(ctx, tx, set, in.Installation.InstallationID)
+	}); err != nil {
+		return capability.Principal{}, err
+	}
 	var created int64
-	err := tx.QueryRowContext(ctx, `SELECT created_at FROM github_app_installations WHERE team=? AND installation_id=? AND suspended=0`+tx.forUpdate(), in.Installation.Team, in.Installation.InstallationID).Scan(&created)
+	err := tx.QueryRowContext(ctx, `SELECT created_at FROM github_app_installations WHERE team=? AND installation_id=? AND suspended=0`, in.Installation.Team, in.Installation.InstallationID).Scan(&created)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && created != in.Installation.CreatedAt.UnixNano() {
 		return refuse()
 	}

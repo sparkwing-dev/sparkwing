@@ -30,7 +30,20 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		requested, expires := expires, expires
 		prefix := a.Target.TokenPrefix
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{a.Principal.Authority, {Kind: capability.AuthorityCapability, ID: prefix}}, prefix); err != nil {
+		if team == "" {
+			if err := advisoryLockTx(ctx, tx, bootstrapUsedKey); err != nil {
+				return err
+			}
+		}
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority, {Kind: capability.AuthorityCapability, ID: prefix}}, prefix)
+			if team != "" {
+				set.add(lockTeam, true, string(team))
+			} else {
+				set = discoverSetupAuthorityLocks(ctx, tx, set)
+			}
+			return set
+		}); err != nil {
 			return err
 		}
 		p, err := managementAuthorityTx(ctx, tx, team, a, "POST", true)

@@ -20,7 +20,16 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 		return ErrInvalidInput
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := t.lockTeamTx(ctx, tx); err != nil {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{actor.Authority})
+			set.add(lockTeam, true, string(t.team))
+			set.add(lockAccount, true, change.AccountID)
+			set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{string(t.team), change.AccountID}}, write: true, optional: true})
+			if change.Role == nil {
+				set = discoverAccountSessionLocks(ctx, tx, set, change.AccountID)
+			}
+			return set
+		}); err != nil {
 			return err
 		}
 		p, err := resolveActorTx(ctx, tx, actor)

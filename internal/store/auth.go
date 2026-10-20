@@ -68,40 +68,60 @@ func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl 
 	if err != nil {
 		return "", nil, err
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-	defer rollbackOrLog(tx)
-	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
-	if err != nil {
-		return "", nil, err
-	}
-	c := p.Capability
-	if c.Subject.Kind != capability.SubjectAccount || c.Team == "" || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Data != nil {
-		return "", nil, authorityError(apierr.Forbidden, "session requires an unbound account capability without data scope")
-	}
-	var email string
-	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, c.Subject.ID).Scan(&email); err != nil {
-		return "", nil, err
-	}
-	now := tx.now()
-	expires := now.Add(ttl)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
+	var session *Session
+	err = s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+			chain, err := discoverAuthorityChainTx(ctx, tx, ref)
+			if err != nil {
+				return lockSet{err: err}
+			}
+			if err := checkCapabilitySession(chain[0].principal.Capability); err != nil {
+				return lockSet{err: err}
+			}
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{ref})
+			return discoverAccountTeams(ctx, tx, set, chain[0].principal.Capability.Subject.ID)
+		}); err != nil {
+			return err
+		}
+		p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+		if err != nil {
+			return err
+		}
+		c := p.Capability
+		if err := checkCapabilitySession(c); err != nil {
+			return err
+		}
+		var email string
+		if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, c.Subject.ID).Scan(&email); err != nil {
+			return err
+		}
+		now := tx.now()
+		expires := now.Add(ttl)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
  VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
+			return err
+		}
+		if err := recordSessionMembershipsTx(ctx, tx, sessionDigest(raw), ""); err != nil {
+			return err
+		}
+		session = &Session{ID: raw, Principal: email, Team: Team(c.Team), AccountID: c.Subject.ID, CapabilityPrefix: prefix, CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
+		for _, grant := range c.Grants {
+			session.Scopes = append(session.Scopes, string(grant))
+		}
+		return nil
+	})
+	if err != nil {
 		return "", nil, err
-	}
-	if err := recordSessionMembershipsTx(ctx, tx, sessionDigest(raw), ""); err != nil {
-		return "", nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", nil, err
-	}
-	session := &Session{ID: raw, Principal: email, Team: Team(c.Team), AccountID: c.Subject.ID, CapabilityPrefix: prefix, CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
-	for _, grant := range c.Grants {
-		session.Scopes = append(session.Scopes, string(grant))
 	}
 	return raw, session, nil
+}
+
+func checkCapabilitySession(c capability.Capability) error {
+	if c.Subject.Kind != capability.SubjectAccount || c.Team == "" || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Data != nil {
+		return authorityError(apierr.Forbidden, "session requires an unbound account capability without data scope")
+	}
+	return nil
 }
 
 func newSessionID() (string, error) {
@@ -135,11 +155,22 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLi
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
-	tx, err := s.beginTx(ctx)
+	var session *Session
+	var lookupErr error
+	err = s.inTx(ctx, func(tx *storeTx) error {
+		session, lookupErr = lookupSessionTx(ctx, tx, rawSession, csrfToken, ttl, maxLifetime)
+		return lookupErr
+	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
+		if !errors.Is(err, lookupErr) {
+			return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
+		}
+		return nil, err
 	}
-	defer rollbackOrLog(tx)
+	return session, nil
+}
+
+func lookupSessionTx(ctx context.Context, tx *storeTx, rawSession, csrfToken string, ttl, maxLifetime time.Duration) (*Session, error) {
 	digest := sessionDigest(rawSession)
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: digest}, true, digest)
 	if err != nil {
@@ -191,14 +222,19 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLi
 	if n != 1 {
 		return nil, errors.New("session has ended")
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
-	}
 	return &sess, nil
 }
 
 // DeleteSession removes the session by its raw id. Idempotent.
 func (s *Store) DeleteSession(rawSession string) error {
-	_, err := s.execNoCtx(`DELETE FROM sessions WHERE hash = ?`, sessionDigest(rawSession))
-	return err
+	ctx, digest := context.Background(), sessionDigest(rawSession)
+	return s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			return discoverAuthorityWrite(ctx, tx, lockSet{}, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: digest})
+		}); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE hash = ?`, digest)
+		return err
+	})
 }

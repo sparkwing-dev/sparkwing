@@ -781,7 +781,7 @@ func acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invi
 		return none, err
 	}
 	var inviterRole Role
-	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, inviter).Scan(&inviterRole); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`, team, inviter).Scan(&inviterRole); errors.Is(err, sql.ErrNoRows) {
 		return none, ErrInvitationClosed
 	} else if err != nil {
 		return none, err
@@ -879,68 +879,65 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 	if err != nil {
 		return "", "", nil, err
 	}
-	tx, err := s.beginTx(ctx)
+	var session *Session
+	err = s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAccountTeams(ctx, tx, lockSet{}, acct.ID)
+			if team != "" {
+				set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockTeam, keys: [3]string{string(team)}}, optional: true})
+			}
+			return set
+		}); err != nil {
+			return err
+		}
+		if provider != "" {
+			var linked string
+			err := tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider=? AND subject=? AND account_id=?`, provider, subject, acct.ID).Scan(&linked)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrIdentityUnlinked
+			}
+			if err != nil {
+				return err
+			}
+		}
+		var role Role
+		var sessionTeam any
+		if team == "" {
+			if provider == "" {
+				return ErrNotMember
+			}
+		} else {
+			sessionTeam = string(team)
+			if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`, team, acct.ID).Scan(&role); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					err = ErrNotMember
+				}
+				return err
+			}
+			if !role.Valid() {
+				return ErrNotMember
+			}
+		}
+		var email string
+		if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
+			return err
+		}
+		now := tx.now()
+		expires := now.Add(ttl)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
+ VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
+			return err
+		}
+		if err := recordSessionMembershipsTx(ctx, tx, sessionDigest(raw), ""); err != nil {
+			return err
+		}
+		session = &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
+		return nil
+	})
 	if err != nil {
 		return "", "", nil, err
 	}
-	defer rollbackOrLog(tx)
-	// safety: the session insert's foreign key takes a team key-share after the
-	// account lock; taking it first keeps team before account (STORE-DATA.md lock order).
-	if team != "" {
-		var name string
-		err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=?`+tx.forKeyShare(), string(team)).Scan(&name)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return "", "", nil, err
-		}
-	}
-	if err := lockAccountTx(ctx, tx, acct.ID); err != nil {
-		return "", "", nil, err
-	}
-	if provider != "" {
-		var linked string
-		err := tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider=? AND subject=? AND account_id=?`, provider, subject, acct.ID).Scan(&linked)
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", "", nil, ErrIdentityUnlinked
-		}
-		if err != nil {
-			return "", "", nil, err
-		}
-	}
-	var role Role
-	var sessionTeam any
-	if team == "" {
-		if provider == "" {
-			return "", "", nil, ErrNotMember
-		}
-	} else {
-		sessionTeam = string(team)
-		if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, acct.ID).Scan(&role); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				err = ErrNotMember
-			}
-			return "", "", nil, err
-		}
-		if !role.Valid() {
-			return "", "", nil, ErrNotMember
-		}
-	}
-	var email string
-	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
-		return "", "", nil, err
-	}
-	now := tx.now()
-	expires := now.Add(ttl)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
- VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
-		return "", "", nil, err
-	}
-	if err := recordSessionMembershipsTx(ctx, tx, sessionDigest(raw), ""); err != nil {
-		return "", "", nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", "", nil, err
-	}
-	return raw, csrf, &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}, nil
+	return raw, csrf, session, nil
 }
 
 // MemberRole reads an account's role in t's team, or ErrNotMember.
@@ -1033,21 +1030,21 @@ func scanPrefixes(rows *sql.Rows) (_ []string, err error) {
 // safety: counting and then inserting is a race unless the team row is locked first; Postgres
 // serializes on it and SQLite's single connection already serializes every writer.
 func (t *Tenant) lockTeamTx(ctx context.Context, tx *storeTx) error {
-	var name string
-	err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name = ?`+tx.forUpdate(), string(t.team)).Scan(&name)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := acquireLockSet(ctx, tx, func() lockSet {
+		var set lockSet
+		set.add(lockTeam, true, string(t.team))
+		return set
+	})
+	if errors.Is(err, ErrUnknownTeam) {
 		return ErrNotFound
 	}
 	return err
 }
 
-// safety: account deletion drops memberships without the team lock, so the
-// role is read under the membership row's lock; a read that did not wait on
-// an uncommitted deletion would let a mint land after the deletion's sweep.
 func (t *Tenant) roleTx(ctx context.Context, tx *storeTx, accountID string) (Role, error) {
 	var role string
 	err := tx.QueryRowContext(ctx,
-		`SELECT role FROM memberships WHERE team = ? AND account_id = ?`+tx.forUpdate(), string(t.team), accountID).Scan(&role)
+		`SELECT role FROM memberships WHERE team = ? AND account_id = ?`, string(t.team), accountID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotMember
 	}

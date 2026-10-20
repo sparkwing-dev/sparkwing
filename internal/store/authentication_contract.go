@@ -61,8 +61,10 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 	}
 	defer rollbackOrLog(tx)
 	var team string
-	// safety: serialize root creation across controller processes.
-	if err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`+tx.forUpdate(), DefaultTeam, TeamDeletionPending).Scan(&team); err != nil {
+	if err := (&Tenant{s: s, team: DefaultTeam}).lockTeamTx(ctx, tx); err != nil {
+		return capability.AuthenticationSnapshot{}, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`, DefaultTeam, TeamDeletionPending).Scan(&team); err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability}

@@ -101,11 +101,142 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 	return result, revoked, err
 }
 
-func (t *Tenant) requestTeamDeletionTx(ctx context.Context, tx *storeTx, now time.Time) (TeamDeletion, []string, error) {
-	if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
-		return TeamDeletion{}, nil, err
+// Deletion closes existing authority without requiring its former membership to remain live.
+func discoverDeletionAuthorityLocks(ctx context.Context, tx *storeTx, set lockSet, where string, args ...any) lockSet {
+	rows, err := tx.QueryContext(ctx, `SELECT prefix,COALESCE(team,'') FROM capabilities WHERE `+where, args...)
+	if err != nil {
+		set.err = err
+		return set
 	}
-	if err := t.lockTeamTx(ctx, tx); err != nil {
+	type target struct{ prefix, team string }
+	var targets []target
+	for rows.Next() {
+		var row target
+		if err := rows.Scan(&row.prefix, &row.team); err != nil {
+			set.err = err
+			break
+		}
+		targets = append(targets, row)
+	}
+	set.err = errors.Join(set.err, rows.Err(), rows.Close())
+	if set.err != nil {
+		return set
+	}
+	for _, row := range targets {
+		if row.team != "" {
+			set.add(lockTeam, true, row.team)
+		}
+		set = discoverAuthorityWrite(ctx, tx, set, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.prefix})
+	}
+	return set
+}
+
+func discoverDeletionAccountLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
+	set = discoverAccountSessionLocks(ctx, tx, set, account)
+	if set.err != nil {
+		return set
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	teams, err := scanPrefixes(rows)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for _, team := range teams {
+		set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{team, account}}, optional: true})
+	}
+	return set
+}
+
+func discoverTeamDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, team Team) lockSet {
+	if set.err != nil {
+		return set
+	}
+	set.add(lockGlobal, true, string(team))
+	set.add(lockTeam, true, string(team))
+	ids, err := (&Tenant{s: tx.store, team: team}).memberIDsTx(ctx, tx)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for _, account := range ids {
+		set = discoverDeletionAccountLocks(ctx, tx, set, account)
+		set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{string(team), account}}, write: true, optional: true})
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT hash FROM sessions WHERE team=?`, team)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	sessions, err := scanPrefixes(rows)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for _, session := range sessions {
+		set = discoverAuthorityWrite(ctx, tx, set, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: session})
+	}
+	return discoverDeletionAuthorityLocks(ctx, tx, set, `team=?`, team)
+}
+
+func discoverAccountDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
+	if set.err != nil {
+		return set
+	}
+	acct, err := accountTx(ctx, tx, account)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	set = discoverDeletionAccountLocks(ctx, tx, set, account)
+	set.add(lockAccount, true, account)
+	rows, err := tx.QueryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	teams, err := scanPrefixes(rows)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for _, team := range teams {
+		set.add(lockTeam, true, team)
+		set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{team, account}}, write: true, optional: true})
+	}
+	sole, _, err := ownedTeamsTx(ctx, tx, account)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for _, team := range sole {
+		set = discoverTeamDeletionLocks(ctx, tx, set, team)
+	}
+	names, err := accountPrincipalNamesTx(ctx, tx, acct)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for _, name := range names {
+		teams, err := grantCreatorTeamsTx(ctx, tx, name)
+		if err != nil {
+			set.err = err
+			return set
+		}
+		for _, team := range teams {
+			set.add(lockGlobal, true, team)
+			set.add(lockTeam, true, team)
+		}
+	}
+	return discoverDeletionAuthorityLocks(ctx, tx, set, `created_by=? OR (subject_kind='account' AND subject_id=?)`, account, account)
+}
+
+func (t *Tenant) requestTeamDeletionTx(ctx context.Context, tx *storeTx, now time.Time) (TeamDeletion, []string, error) {
+	if err := acquireLockSet(ctx, tx, func() lockSet { return discoverTeamDeletionLocks(ctx, tx, lockSet{}, t.team) }); err != nil {
 		return TeamDeletion{}, nil, err
 	}
 	revoked, err := t.markForDeletionTx(ctx, tx, "", now)
@@ -484,15 +615,15 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 }
 
 func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (AccountDeletion, error) {
+	if err := acquireLockSet(ctx, tx, func() lockSet { return discoverAccountDeletionLocks(ctx, tx, lockSet{}, accountID) }); err != nil {
+		return AccountDeletion{}, err
+	}
 	acct, err := accountTx(ctx, tx, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
 	}
 	names, err := accountPrincipalNamesTx(ctx, tx, acct)
 	if err != nil {
-		return AccountDeletion{}, err
-	}
-	if err := lockOwnedTeamsTx(ctx, tx, s, accountID, names); err != nil {
 		return AccountDeletion{}, err
 	}
 	sole, blocked, err := ownedTeamsTx(ctx, tx, accountID)
@@ -505,9 +636,6 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	res := AccountDeletion{AccountID: accountID}
 	for _, team := range sole {
 		t := &Tenant{s: s, team: team}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
-			return AccountDeletion{}, err
-		}
 		revoked, err := t.markForDeletionTx(ctx, tx, accountID, now)
 		if err != nil {
 			return AccountDeletion{}, err
@@ -588,44 +716,6 @@ func ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Te
 		}
 	}
 	return sole, blocked, rows.Err()
-}
-
-// safety: two co-owners deleting their accounts at once would each count the
-// other as the owner who stays; locking every team the account owns first,
-// in one order, makes the second count see the first's departure without
-// two deletions deadlocking on each other's teams.
-func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID string, names []principalName) error {
-	rows, err := tx.QueryContext(ctx,
-		`SELECT team FROM memberships WHERE account_id = ? AND role = ? ORDER BY team`, accountID, string(RoleOwner))
-	if err != nil {
-		return err
-	}
-	teams, err := scanPrefixes(rows)
-	if err != nil {
-		return err
-	}
-	ledgerTeams := slices.Clone(teams)
-	for _, name := range names {
-		touched, err := grantCreatorTeamsTx(ctx, tx, name)
-		if err != nil {
-			return err
-		}
-		ledgerTeams = append(ledgerTeams, touched...)
-	}
-	slices.Sort(ledgerTeams)
-	// safety: take all touched ledger locks before any team row, in one order, including teams the account
-	// does not own, so cross-team relabeling cannot invert another account deletion's locks.
-	for _, team := range slices.Compact(ledgerTeams) {
-		if _, err := lockLedgerTx(ctx, tx, Team(team)); err != nil {
-			return err
-		}
-	}
-	for _, team := range teams {
-		if err := (&Tenant{s: s, team: Team(team)}).lockTeamTx(ctx, tx); err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
-	}
-	return nil
 }
 
 type principalName struct {

@@ -213,8 +213,10 @@ and returns empty grants and charges as arrays.
 
 `PATCH /api/v1/team/members/{account}` accepts a role of `owner`, `editor` or
 `reader`. `DELETE` on that path removes the membership. The store rechecks the
-authenticated authority and updates the membership generation in the same
-transaction. A missing member returns `not_found`. A last-owner change returns
+authenticated authority and commits the role change or removal in the same
+transaction. Removal ends the member's existing authority for that team,
+including delegated data credentials. Rejoining does not reactivate it; sign in
+again to use the new membership. A missing member returns `not_found`. A last-owner change returns
 `conflict`. Browser mutations require CSRF proof. Revocation stops descendants'
 new controller operations, including those parented to a session. Previously
 issued external credentials and signed URLs keep their documented lifetimes.

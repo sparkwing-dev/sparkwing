@@ -14,18 +14,16 @@ func accountSessionTx(ctx context.Context, tx *storeTx, a capability.Authorized,
 	if !a.Principal.DirectAccountSession() || a.Access.Credential != capability.CredentialAccount || a.Access.Binding != capability.BindNone || a.Access.Liveness != capability.LiveCredential || a.ResultReplay || a.LogTailAttempt != 0 || a.Target.RunID != "" || a.Target.NodeID != "" || a.Target.AccountID != "" && a.Target.AccountID != a.Principal.Capability.Subject.ID {
 		return capability.Principal{}, bindingRefusal()
 	}
-	teams := append(slices.Clone(target), Team(a.Principal.Capability.Team))
-	slices.Sort(teams)
-	for _, team := range slices.Compact(teams) {
-		if team == "" {
-			continue
+	if err := acquireLockSet(ctx, tx, func() lockSet {
+		set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority}, a.Principal.Authority.ID)
+		set.add(lockAccount, true, a.Principal.Capability.Subject.ID)
+		for _, team := range append(slices.Clone(target), Team(a.Principal.Capability.Team)) {
+			if team != "" {
+				set.add(lockTeam, true, string(team))
+			}
 		}
-		tenant := Tenant{s: tx.store, team: team}
-		if err := tenant.lockTeamTx(ctx, tx); err != nil {
-			return capability.Principal{}, err
-		}
-	}
-	if err := lockAccountTx(ctx, tx, a.Principal.Capability.Subject.ID); err != nil {
+		return discoverAccountSessionLocks(ctx, tx, set, a.Principal.Capability.Subject.ID)
+	}); err != nil {
 		return capability.Principal{}, err
 	}
 	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
