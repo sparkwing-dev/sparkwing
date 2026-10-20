@@ -7,7 +7,7 @@ import (
 
 func TestTableHasTypedUniqueDocumentedBounds(t *testing.T) {
 	seen := map[string]bool{}
-	for _, row := range Table() {
+	for _, row := range table() {
 		if row.Name == "" || seen[row.Name] || row.Doc == "" || row.Refusal == "" {
 			t.Errorf("incomplete or duplicate limit: %+v", row)
 		}
@@ -29,16 +29,16 @@ func TestTableHasTypedUniqueDocumentedBounds(t *testing.T) {
 			t.Errorf("untyped bound %s: %T", row.Name, v)
 		}
 	}
-	if JobSlack >= RunDeadline || SettleMargin >= RunDeadline {
+	if jobSlack >= RunDeadline || settleMargin >= RunDeadline {
 		t.Fatal("remote default leaves no execution budget")
 	}
-	if MemoMaxTTL > OutputRetention {
+	if MemoMaxTTL > outputRetention {
 		t.Fatal("memo may outlive unpinned output")
 	}
-	if LocalControllerDrain >= LocalControllerTermGrace {
+	if localControllerDrain >= localControllerTermGrace {
 		t.Fatal("controller may be killed before drain completes")
 	}
-	if ApprovalWait != 0 || TotalWallTime != 0 {
+	if approvalWait != 0 || totalWallTime != 0 {
 		t.Fatal("introduced an unapproved default wait or wall-time cap")
 	}
 }
@@ -49,7 +49,7 @@ func TestTableDocumentsStorageEnforcement(t *testing.T) {
 		"LocalBinaryCacheBytes": "Prune oldest eligible entries.",
 		"MemoMaxTTL":            "Refuse author values above the bound.",
 	}
-	for _, row := range Table() {
+	for _, row := range table() {
 		if behavior, ok := want[row.Name]; ok {
 			if row.Refusal != behavior {
 				t.Errorf("%s behavior = %q, want %q", row.Name, row.Refusal, behavior)

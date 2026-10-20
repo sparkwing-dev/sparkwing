@@ -163,7 +163,7 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	}
 	pipeline := selection.pipeline
 	if pipeline == "" {
-		pipeline = run.Request.Request.Pipeline
+		pipeline = run.Request.Provenance.Pipeline()
 	}
 	refused := &SecretPreflightError{RunID: runID, Pipeline: pipeline, sharedOnly: selection.scope == secretSharedOnly}
 	for _, name := range required {

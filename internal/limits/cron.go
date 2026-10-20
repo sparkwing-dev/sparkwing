@@ -11,6 +11,6 @@ const (
 	MaxSchedulesPerRepo int = 20
 	// MaxScheduledReposPerTeam bounds scheduled repositories per team.
 	MaxScheduledReposPerTeam int = 10
-	// RetainedScheduleFires bounds retained schedule fires.
-	RetainedScheduleFires int = 200
+	// retainedScheduleFires bounds retained schedule fires.
+	retainedScheduleFires int = 200
 )
