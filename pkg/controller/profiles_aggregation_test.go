@@ -53,7 +53,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 				if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: "r", NodeID: id}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := st.DB().Exec(`UPDATE nodes SET started_at=?, finished_at=? WHERE run_id=? AND node_id=?`, begin.UnixNano(), end.UnixNano(), "r", id); err != nil {
+				if _, err := teststore.SQL(t, st).Exec(`UPDATE nodes SET started_at=?, finished_at=? WHERE run_id=? AND node_id=?`, begin.UnixNano(), end.UnixNano(), "r", id); err != nil {
 					t.Fatal(err)
 				}
 				n, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(ctx, "r", id)
@@ -68,7 +68,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 					stamp = stamp.Add(24 * time.Hour)
 				}
 				for i := range 2 {
-					if err := teststore.SeedMetric(st.DB(), ctx, "r", id, store.MetricSample{Kind: store.MetricInterval, TS: stamp.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 100}); err != nil {
+					if err := teststore.SeedMetric(teststore.SQL(t, st), ctx, "r", id, store.MetricSample{Kind: store.MetricInterval, TS: stamp.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 100}); err != nil {
 						t.Fatal(err)
 					}
 				}

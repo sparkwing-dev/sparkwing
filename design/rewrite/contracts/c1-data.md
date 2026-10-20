@@ -1001,18 +1001,17 @@ Stream refusals remain errors. The old segment-unavailable classification is rem
 
 ## Host log uploads
 
-The pod log sink consumes `logseg.Data` and uses `logseg.SubjectUploader` for
-signed uploads and transactional segment commits. Its subject comes from the
-authenticated binding. It never infers a team or attempt from an object prefix.
+The pod log sink writes through the `logseg.Uploader` the host binds; the
+controller's uploader signs uploads and commits segments transactionally. Its
+subject comes from the authenticated binding. It never infers a team or attempt from an object prefix.
 An absent binding leaves the pod's stdout log intact and reports the missing
 binding. Job sinks keep live watch delivery under that exact attempt fence.
 
 `Client.LogSegment`, `SealLog`, `LogSegmentUploader`, `store.LogSegmentRequest`
 and `LogSegmentGrant` are removed with the unused `EngineNodeLog` wrapper.
-The generated sink property covers job, trigger, plan and eval subjects and
-mutated input identities. The watch test uses an in-process transport.
-W2 still supplies authenticated `LogTransport` and `SegmentRecorder` adapters.
-W3 still supplies the production `logseg.Data` binding to the pod host.
+`logseg.SubjectUploader`, `logseg.Data` and `SegmentRecorder` had no
+production caller and are removed with their tests. The watch test uses an
+in-process transport.
 
 ## Log byte accounting
 

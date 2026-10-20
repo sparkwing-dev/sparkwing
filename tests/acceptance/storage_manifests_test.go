@@ -38,14 +38,14 @@ func checkStorageS3Manifests(t *testing.T) {
 
 func checkStorageFilesystemManifestRecords(t *testing.T) {
 	objects, _ := storageFilesystem(t)
-	if err := checkBlobManifestRecords(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {
+	if err := checkBlobManifestRecords(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func checkStorageS3ManifestRecords(t *testing.T) {
 	objects, transport := storageS3(t)
-	if err := checkBlobManifestRecords(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
+	if err := checkBlobManifestRecords(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 		t.Fatal(err)
 	}
 }

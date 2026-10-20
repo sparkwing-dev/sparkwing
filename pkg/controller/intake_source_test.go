@@ -25,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type intakeGitHubTransport func(*http.Request) (*http.Response, error)
@@ -54,13 +55,7 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 	}
 	property := func(input string, forged bool) bool {
 		s, session := credentialSessionServer(t)
-		tenant, err := s.store.ForTeam(t.Context(), "a")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now()); err != nil {
-			t.Fatal(err)
-		}
+		teststore.SeedGitHubInstallation(t, s.store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now())
 		cfg := githubapp.Config{AppID: 1, Slug: "test", ClientID: "id", ClientSecret: "secret", WebhookSecret: "webhook", PrivateKey: key, HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
 			var payload string
 			switch r.URL.Path {

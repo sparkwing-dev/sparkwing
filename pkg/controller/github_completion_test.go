@@ -121,15 +121,14 @@ type githubCompletionFixture struct {
 
 func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
 	t.Helper()
-	server, tenant, finish := preparedProfileRun(t)
+	clock := &testClock{}
+	server, tenant, finish := preparedProfileRun(t, clock.option())
 	f := &githubCompletionFixture{t: t, server: server, tenant: tenant, finish: finish, now: time.Now(), api: &completionGitHub{repository: 42, name: "acme/app", checksGranted: true}}
-	server.store.SetTestClock(t, func() time.Time { return f.now })
+	clock.pin(func() time.Time { return f.now })
 	f.changeRequest(func(input *runspec.Request) {
 		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", VerifiedAt: f.now}}}
 	})
-	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization"}, f.now); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedGitHubInstallation(t, server.store, tenant.Team(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization"}, f.now)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +161,7 @@ func (f *githubCompletionFixture) reconcile() {
 
 func (f *githubCompletionFixture) revision() (desired, delivered, attempts, next int64) {
 	f.t.Helper()
-	if err := f.server.store.DB().QueryRow(`SELECT desired_rev,delivered_rev,attempts,next_at FROM run_effects WHERE team='a' AND run_id='run' AND effect='github_check'`).Scan(&desired, &delivered, &attempts, &next); err != nil {
+	if err := teststore.SQL(f.t, f.server.store).QueryRow(`SELECT desired_rev,delivered_rev,attempts,next_at FROM run_effects WHERE team='a' AND run_id='run' AND effect='github_check'`).Scan(&desired, &delivered, &attempts, &next); err != nil {
 		f.t.Fatal(err)
 	}
 	return desired, delivered, attempts, next

@@ -256,13 +256,12 @@ func TestActionsIssuanceHTTPCallerFieldsCannotSelectAuthority(t *testing.T) {
 		})
 	}
 	session := newSessionFlow(t)
-	if _, err := session.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+	if _, err := teststore.SQL(t, session.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
 	session.server.Handler().ServeHTTP(w, session.request("DELETE", "/api/v1/runners/github/exchange", ""))
 	assertEngineError(t, w, 400, apierr.BadRequest)
-
 }
 
 func TestActionsIssuanceHTTPMalformedBodyCannotReachOrigin(t *testing.T) {
@@ -322,7 +321,7 @@ func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('team',1,1)`,
 		`INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_at,repo_key) VALUES ('team',42,7,'acme/widgets',1,'gh:42')`,
 	} {
-		if _, err := st.DB().ExecContext(t.Context(), query); err != nil {
+		if _, err := teststore.SQL(t, st).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -350,15 +349,15 @@ func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		}
 	}
 	var count int
-	if err := st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE team='team' AND bind_kind='push'`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE team='team' AND bind_kind='push'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("capabilities=%d err=%v", count, err)
 	}
-	if _, err := st.DB().ExecContext(t.Context(), `DELETE FROM github_runner_bindings WHERE team='team' AND repository_id=42`); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `DELETE FROM github_runner_bindings WHERE team='team' AND repository_id=42`); err != nil {
 		t.Fatal(err)
 	}
 	w = f.request(t, "POST", f.token(t), "team", nil)
 	assertEngineError(t, w, 403, apierr.Forbidden)
-	if err := st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("failed issuance persisted: capabilities=%d err=%v", count, err)
 	}
 }

@@ -77,10 +77,11 @@ func BurstExecutionAcceptance(t *testing.T, placement string, proof BurstExecuti
 func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, proof *BurstExecutionProof) {
 	t.Helper()
 	cloudWorker := strings.HasPrefix(placement, "cloud")
-	s, options, input, memberBearer := sourceUploadFixture(t)
+	clock := &testClock{}
+	s, options, input, memberBearer := sourceUploadFixture(t, clock.option())
 	engineSQL(t, s.store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)
 	now := time.Now().UTC()
-	s.store.SetTestClock(t, func() time.Time { return now })
+	clock.pin(func() time.Time { return now })
 	s.store.SetClaimProfileResolver(billingCloudProfile{})
 	e := &EngineController{Store: s.store, RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })}
 	s.WithEngineController(e)

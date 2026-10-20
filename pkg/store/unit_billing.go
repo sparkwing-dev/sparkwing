@@ -64,7 +64,7 @@ func unitResourcesTx(ctx context.Context, tx *storeTx, team Team, run RunRow, un
 }
 
 func billingUnitKind(kind capability.UnitKind) capability.BillingUnit {
-	for _, mapping := range capability.UnitBillingMappings {
+	for _, mapping := range capability.UnitBillingMappings() {
 		if mapping.Operational == kind {
 			return mapping.Billing
 		}

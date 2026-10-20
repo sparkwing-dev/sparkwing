@@ -36,12 +36,10 @@ func TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries(t *testing.T) {
 
 func TestBuildTrustMutationStaysWithItsTeamAndCurrentOwnerProperty(t *testing.T) {
 	f := newBrowserFixture(t, nil)
-	if err := f.st.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, f.st, "foreign")
 	property := func(role uint8, enabled bool) bool {
 		current := []string{"owner", "editor", "reader"}[role%3]
-		if _, err := f.st.DB().Exec(`UPDATE memberships SET role=? WHERE team='default' AND account_id='alice'`, current); err != nil {
+		if _, err := teststore.SQL(t, f.st).Exec(`UPDATE memberships SET role=? WHERE team='default' AND account_id='alice'`, current); err != nil {
 			t.Fatal(err)
 		}
 		before, err := teststore.ForTeam(t, f.st, store.DefaultTeam).TrustLocalBuilds(t.Context())

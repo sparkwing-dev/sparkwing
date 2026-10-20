@@ -247,7 +247,7 @@ func drillSQLite(t *testing.T) {
 	cipher := drillCipher(t)
 	live := filepath.Join(t.TempDir(), "state.db")
 
-	st, err := store.Open(live)
+	st, err := teststore.OpenExisting(live)
 	if err != nil {
 		t.Fatalf("open live store: %v", err)
 	}
@@ -299,7 +299,7 @@ func drillSQLite(t *testing.T) {
 		}
 	}
 
-	rst, err := store.Open(filepath.Join(restored, "state.db"))
+	rst, err := teststore.OpenExisting(filepath.Join(restored, "state.db"))
 	if err != nil {
 		t.Fatalf("open restored store: %v", err)
 	}
@@ -314,7 +314,7 @@ func drillSQLite(t *testing.T) {
 func drillSQLiteWithoutKey(t *testing.T) {
 	cipher := drillCipher(t)
 	live := filepath.Join(t.TempDir(), "state.db")
-	st, err := store.Open(live)
+	st, err := teststore.OpenExisting(live)
 	if err != nil {
 		t.Fatalf("open live store: %v", err)
 	}
@@ -337,7 +337,7 @@ func drillSQLiteWithoutKey(t *testing.T) {
 		}
 	}
 
-	rst, err := store.Open(restored)
+	rst, err := teststore.OpenExisting(restored)
 	if err != nil {
 		t.Fatalf("open restored store: %v", err)
 	}
@@ -391,7 +391,7 @@ func drillPostgres(t *testing.T) {
 	sourceDSN := drillDatabaseDSN(t, base, sourceDB)
 	restoredDSN := drillDatabaseDSN(t, base, restoredDB)
 
-	st, err := store.OpenPostgres(context.Background(), sourceDSN)
+	st, err := teststore.OpenPostgres(context.Background(), sourceDSN)
 	if err != nil {
 		t.Fatalf("open source store: %v", err)
 	}
@@ -415,7 +415,7 @@ func drillPostgres(t *testing.T) {
 	drillRun(t, restore, "--no-owner", "--no-privileges", "--exit-on-error",
 		"--dbname="+restoredDSN, archive)
 
-	rst, err := store.OpenPostgres(context.Background(), restoredDSN)
+	rst, err := teststore.OpenPostgres(context.Background(), restoredDSN)
 	if err != nil {
 		t.Fatalf("open restored store: %v", err)
 	}
@@ -499,7 +499,7 @@ func drillRun(t *testing.T, program string, args ...string) {
 
 func drillCreateDatabase(t *testing.T, baseDSN, name string) {
 	t.Helper()
-	admin, err := store.OpenPostgres(context.Background(), baseDSN)
+	admin, err := teststore.OpenPostgres(context.Background(), baseDSN)
 	if err != nil {
 		t.Fatalf("open admin postgres: %v", err)
 	}
@@ -513,7 +513,7 @@ func drillCreateDatabase(t *testing.T, baseDSN, name string) {
 	t.Cleanup(func() {
 		// safety: t.Context is cancelled before Cleanup runs, so the drop
 		// opens its own connection.
-		cleanup, err := store.OpenPostgres(context.Background(), baseDSN)
+		cleanup, err := teststore.OpenPostgres(context.Background(), baseDSN)
 		if err != nil {
 			t.Errorf("open postgres to drop database %s: %v", name, err)
 			return

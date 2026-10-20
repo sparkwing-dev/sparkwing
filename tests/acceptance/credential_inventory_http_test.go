@@ -26,7 +26,7 @@ import (
 )
 
 func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "inventory.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "inventory.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,9 +40,7 @@ func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, team := range []store.Team{"team", "foreign"} {
-		if err := s.AsOperator().CreateTeam(t.Context(), team); err != nil {
-			t.Fatal(err)
-		}
+		teststore.SeedTeam(t, s, team)
 		tenant, err := s.ForTeam(t.Context(), team)
 		if err != nil {
 			t.Fatal(err)

@@ -78,7 +78,7 @@ func (f *gitReleaseFixture) registerRunner(personal bool) {
 func registerFixtureRunner(t *testing.T, s *store.Store, personal bool) {
 	t.Helper()
 	var body []byte
-	if err := s.DB().QueryRow(`SELECT authority_json FROM capabilities WHERE prefix='runner'`).Scan(&body); err != nil {
+	if err := teststore.SQL(t, s).QueryRow(`SELECT authority_json FROM capabilities WHERE prefix='runner'`).Scan(&body); err != nil {
 		t.Fatal(err)
 	}
 	var record store.CapabilityRecord
@@ -285,7 +285,7 @@ func TestTeamGitCredentialNeedsASecretsKey(t *testing.T) {
 		t.Fatalf("missing key=%s: %v", w.Body, err)
 	}
 	var count int
-	if err := f.s.store.DB().QueryRow(`SELECT COUNT(*) FROM git_credentials`).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, f.s.store).QueryRow(`SELECT COUNT(*) FROM git_credentials`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("refused credential persisted: %d: %v", count, err)
 	}
 }
@@ -306,9 +306,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 		status := 403
 		switch mode % 5 {
 		case 0:
-			if err := f.s.store.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
-				t.Fatal(err)
-			}
+			teststore.SeedTeam(t, f.s.store, "foreign")
 			if err := teststore.SeedRun(f.s.store, t.Context(), "foreign", store.Run{ID: "foreign-run", Pipeline: "foreign-private", Status: "running"}); err != nil {
 				t.Fatal(err)
 			}
@@ -333,9 +331,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 			revokeEngineMachine(t, f.s.store, "runner")
 			status = 401
 		case 4:
-			if err := f.s.store.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
-				t.Fatal(err)
-			}
+			teststore.SeedTeam(t, f.s.store, "foreign")
 			engineSQL(t, f.s.store, `UPDATE git_credentials SET team='foreign' WHERE team='a'`)
 			status = 404
 		}

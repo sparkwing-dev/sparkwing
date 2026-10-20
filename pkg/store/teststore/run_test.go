@@ -20,7 +20,7 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if _, err := teststore.SeedUpload(t.Context(), s.DB()); err != nil {
+	if _, err := teststore.SeedUpload(t.Context(), teststore.SQL(t, s)); err != nil {
 		t.Fatal(err)
 	}
 	started := time.Unix(1700000000, 123).UTC()
@@ -88,7 +88,7 @@ func TestRunReportingSeedUsesSealedSchemaWithoutExecutableWork(t *testing.T) {
 	}
 	for _, table := range []string{"triggers", "eval_units", "nodes", "capabilities"} {
 		var count int
-		if err := s.DB().QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+		if err := teststore.SQL(t, s).QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s has %d rows: %v", table, count, err)
 		}
 	}

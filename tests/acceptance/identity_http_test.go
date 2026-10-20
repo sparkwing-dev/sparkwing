@@ -97,7 +97,7 @@ func TestIdentityHTTPRejectsBootstrapAndEval(t *testing.T) {
 		b := newCredentialBoundary()
 		p := &b.snapshot.Authorities[0].Principal
 		if name == "bootstrap" {
-			p.Capability.Delivery, p.Capability.Grants = capability.DeliveryBootstrap, capability.BootstrapGrants
+			p.Capability.Delivery, p.Capability.Grants = capability.DeliveryBootstrap, capability.BootstrapGrants()
 		} else {
 			p.Capability.Unit, p.Capability.Purpose = capability.UnitEval, capability.PurposeEval
 			p.Capability.Grants = []capability.Grant{capability.ExpansionSubmit, capability.DataRead}

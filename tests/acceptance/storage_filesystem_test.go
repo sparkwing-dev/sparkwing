@@ -23,7 +23,7 @@ import (
 func checkStorageFilesystemCollection(t *testing.T) {
 	objects, _ := storageFilesystem(t)
 	transfers := blob.TransferClient{Transport: storageFilesystemHTTP(objects)}
-	if err := checkBlobCollection(t.Context(), t.TempDir(), objects, transfers); err != nil {
+	if err := checkBlobCollection(t, t.Context(), t.TempDir(), objects, transfers); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -31,6 +31,7 @@ import (
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -298,7 +299,7 @@ func burstVerifyDefaultCache(t *testing.T, state *store.Store, repo string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := state.DB().ExecContext(t.Context(), `UPDATE blob_records SET scope=?,ref_scope=?,verified_ref=1,verified_default_branch=1,ref_facts_json=? WHERE team='default' AND kind='depcache' AND name='modules'`, namespace, branch, facts)
+	result, err := teststore.SQL(t, state).ExecContext(t.Context(), `UPDATE blob_records SET scope=?,ref_scope=?,verified_ref=1,verified_default_branch=1,ref_facts_json=? WHERE team='default' AND kind='depcache' AND name='modules'`, namespace, branch, facts)
 	if err != nil {
 		t.Fatal(err)
 	}

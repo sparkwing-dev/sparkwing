@@ -25,7 +25,7 @@ func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
 				t.Fatalf("started history=%+v, %v", own, err)
 			}
 			foreign := &Tenant{s: s, team: Team(fmt.Sprintf("tenant-'\";--%x", i))}
-			if err := s.AsOperator().CreateTeam(t.Context(), foreign.team); err != nil {
+			if err := s.AsOperator().TestOnlyCreateTeam(t.Context(), foreign.team); err != nil {
 				t.Fatal(err)
 			}
 			for _, target := range []NodeRef{ref, {RunID: ref.RunID + "' OR 1=1 --", NodeID: ref.NodeID}} {

@@ -114,7 +114,7 @@ type harness struct {
 func newHarness(t *testing.T, now time.Time) *harness {
 	t.Helper()
 	home := t.TempDir()
-	st, err := store.Open(filepath.Join(home, "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(home, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

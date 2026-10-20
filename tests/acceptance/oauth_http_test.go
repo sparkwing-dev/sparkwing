@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const (
@@ -102,7 +103,7 @@ func newOAuthHTTP(t *testing.T) oauthHTTP {
 		`UPDATE accounts SET active_team='team' WHERE id='member'`,
 		`INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','123','member','member@example.test',1,1)`,
 	} {
-		if _, err := f.store.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -266,7 +267,7 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 func TestOAuthHTTPWaitlistedSessionHasNoTeamAuthority(t *testing.T) {
 	f := newOAuthHTTP(t)
 	for _, query := range []string{`DELETE FROM memberships`, `UPDATE accounts SET active_team='',waitlisted_at=1,waitlist_reason='manual'`} {
-		if _, err := f.store.DB().ExecContext(t.Context(), query); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -63,9 +63,12 @@ func (s *acquiredClaimStore) ReadSnapshot(context.Context, string) (store.RunSna
 	return store.RunSnapshot{Run: s.run, Nodes: []store.NodeRow{s.row}}, nil
 }
 
-func claimedNodeFixture(t *testing.T) (NodeInput, *acquiredClaimStore, ClaimedNodeHost, *[]*executorProcess) {
+func claimedNodeFixture(t *testing.T, configure ...func(*NodeInput, *ExecutorDependencies)) (NodeInput, *acquiredClaimStore, ClaimedNodeHost, *[]*executorProcess) {
 	t.Helper()
 	input, st, deps, processes := executorFixture(t)
+	for _, c := range configure {
+		c(&input, &deps)
+	}
 	var spec runspec.Spec
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 		t.Fatal(err)

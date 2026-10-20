@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // safety: neutral-schema translation must preserve every table, column, key,
@@ -272,7 +273,7 @@ func TestOpenRefusesANonEmptyForeignDatabase(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.Open(path); err == nil || !strings.Contains(err.Error(), "not empty") {
+		if _, err := teststore.OpenExisting(path); err == nil || !strings.Contains(err.Error(), "not empty") {
 			t.Fatalf("Open over a foreign database = %v, want the not-empty refusal", err)
 		}
 		db, err = sql.Open("sqlite", path)
@@ -292,7 +293,7 @@ func TestOpenRefusesANonEmptyForeignDatabase(t *testing.T) {
 		}
 		defer func() { _ = db.Close() }()
 		seedForeignTable(t, db)
-		if _, err := store.OpenPostgres(t.Context(), dsn); err == nil || !strings.Contains(err.Error(), "not empty") {
+		if _, err := teststore.OpenPostgres(t.Context(), dsn); err == nil || !strings.Contains(err.Error(), "not empty") {
 			t.Fatalf("OpenPostgres over a foreign schema = %v, want the not-empty refusal", err)
 		}
 		got := column(t, db, `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()`)

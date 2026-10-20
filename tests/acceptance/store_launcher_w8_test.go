@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type storeLauncherSyncW8 func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
@@ -141,7 +142,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 			}
 		case 4:
 			var prefix string
-			if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&prefix); err != nil {
+			if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&prefix); err != nil {
 				t.Fatal(err)
 			}
 			actor := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}}
@@ -178,7 +179,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 			t.Fatalf("launcher authorization: %v, want %s", err, want)
 		}
 		var claimedBy string
-		if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT COALESCE(claimed_by,'') FROM nodes WHERE run_id='run' AND node_id='job'`).Scan(&claimedBy); err != nil || claimedBy != "" {
+		if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT COALESCE(claimed_by,'') FROM nodes WHERE run_id='run' AND node_id='job'`).Scan(&claimedBy); err != nil || claimedBy != "" {
 			t.Fatalf("denied request claimed work: holder=%q error=%v", claimedBy, err)
 		}
 	})

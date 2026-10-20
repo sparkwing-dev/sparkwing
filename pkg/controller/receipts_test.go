@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestReceiptEndpoint_RoundTrip(t *testing.T) {
@@ -109,7 +110,7 @@ func TestReceiptEndpoint_NotFound(t *testing.T) {
 
 func mustExec(t *testing.T, st *store.Store, q string, args ...any) {
 	t.Helper()
-	if _, err := st.DB().ExecContext(context.Background(), q, args...); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(context.Background(), q, args...); err != nil {
 		t.Fatalf("exec %q: %v", q, err)
 	}
 }

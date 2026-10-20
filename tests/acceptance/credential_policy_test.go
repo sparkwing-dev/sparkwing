@@ -13,7 +13,7 @@ import (
 
 // safety: independent alternatives judge policy selection without claiming store or transport evidence.
 func TestCredentialPolicyAlternatives(t *testing.T) {
-	for _, route := range capability.Routes {
+	for _, route := range capability.Routes() {
 		if route.Authentication != capability.AuthCapability {
 			continue
 		}

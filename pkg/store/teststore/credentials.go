@@ -61,7 +61,7 @@ func seedCredentialMember(ctx context.Context, st *store.Store, team, account st
 				q = strings.Replace(q, "?", fmt.Sprintf("$%d", i), 1)
 			}
 		}
-		if _, err := st.DB().ExecContext(ctx, q, query.args...); err != nil {
+		if _, err := Exec(ctx, st, q, query.args...); err != nil {
 			return err
 		}
 	}

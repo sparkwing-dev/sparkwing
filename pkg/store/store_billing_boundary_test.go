@@ -113,7 +113,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	op := s.AsOperator()
 	rewriteSchemaExec(t, s.db, "DELETE FROM credit_grants")
 	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES ('payment_mode',?)", []byte(`"test"`))
-	if err := op.CreateTeam(t.Context(), "neighbor_%'--"); err != nil {
+	if err := op.TestOnlyCreateTeam(t.Context(), "neighbor_%'--"); err != nil {
 		t.Fatal(err)
 	}
 	for _, team := range []Team{"a", "neighbor_%'--"} {

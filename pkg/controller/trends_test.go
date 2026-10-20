@@ -161,7 +161,7 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "r-legacy", "success", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(ctx, `UPDATE runs SET created_at = 0 WHERE id = ?`, "r-legacy"); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(ctx, `UPDATE runs SET created_at = 0 WHERE id = ?`, "r-legacy"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -271,7 +271,7 @@ SELECT team, id, pipeline, status, created_at, started_at, 'not-an-integer' AS f
 				}
 			}
 			for _, query := range queries {
-				if _, err := st.DB().ExecContext(t.Context(), query); err != nil {
+				if _, err := teststore.SQL(t, st).ExecContext(t.Context(), query); err != nil {
 					t.Fatal(err)
 				}
 			}

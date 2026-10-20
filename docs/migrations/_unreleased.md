@@ -1,5 +1,21 @@
 # Migrating to the next release
 
+## Store raw handle, test hooks and dead readers removed
+
+`Store.DB` is removed; use `Store.Ping` for readiness. No caller can reach the
+store's connection, so every write goes through a transaction owner. Test
+fixtures open their own connection with `teststore.SQL`, `teststore.Exec` or
+`teststore.SQLite`. `Operator.CreateTeam`, `Store.SetTestClock`,
+`SetTestBusyTimeout`, `Tenant.TestOnlySeedGitHubInstallation`, `OpenReadOnly`,
+`OpenReadOnlySnapshot` and `logseg.SubjectUploader` are removed. Fixtures use
+`teststore.SeedTeam` and `teststore.SeedGitHubInstallation`, and pass
+`teststore.WithClock` when they open a store. A concurrency invariant
+violation now fails its transaction instead of committing with a log line.
+
+`capability.Grants`, `Routes`, `BillingRules` and the other policy tables are
+functions returning copies. `LookupRoute` returns a copy too, so reading a
+policy cannot change it.
+
 ## Local dashboard sign-in link
 
 The local dashboard's TCP listener now answers 401 to every API request without
@@ -939,8 +955,8 @@ structured inputs.
 
 ## Filesystem logs use tagged segments
 
-`fs.LogStore` and `fs.NewLogStore` are removed. Log writers use a tagged
-`logseg.Sink` with the host's bound `logseg.SubjectUploader`. Filesystem and S3
+`fs.LogStore` and `fs.NewLogStore` are removed. Log writers use
+a tagged `logseg.Sink` bound by the host. Filesystem and S3
 storage use the same immutable segment format.
 
 `conformance.TestLogStore` is removed.

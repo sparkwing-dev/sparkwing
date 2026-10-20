@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestOperatorSettingsHTTPCommitAuthorityProperty(t *testing.T) {
@@ -98,9 +99,7 @@ func (f storeSettingsWriterFake) WriteStorageAllowance(ctx context.Context, a ca
 
 func TestOperatorSettingsConsoleCommitsThroughHTTP(t *testing.T) {
 	s, raw, csrf := reviewAccount(t, "reader")
-	if err := s.store.AsOperator().CreateTeam(t.Context(), "b"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, s.store, "b")
 	s.WithOperatorAccounts([]string{"member"})
 	for _, route := range [][2]string{
 		{"limits", `{"limits":{"max_global_runners":7}}`},

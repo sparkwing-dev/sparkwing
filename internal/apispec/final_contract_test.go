@@ -30,7 +30,7 @@ func TestOpenAPIRetainsTheFinalPolicyInventory(t *testing.T) {
 	if doc.Paths["/api/v1/triggers"] != nil {
 		t.Error("removed trigger routes remain in OpenAPI")
 	}
-	for _, route := range capability.Routes {
+	for _, route := range capability.Routes() {
 		found := false
 		for method, node := range doc.Paths[strings.ReplaceAll(route.Path, "...}", "}")] {
 			if method != strings.ToLower(route.Method) {
@@ -68,7 +68,7 @@ func samePolicy(a, b capability.RoutePolicy) bool {
 
 func TestGeneratedSpecMatchesThePublishedContract(t *testing.T) {
 	var out bytes.Buffer
-	if err := writeSpec(&out, capability.Routes, wireOperations()); err != nil {
+	if err := writeSpec(&out, capability.Routes(), wireOperations()); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile("../../api/openapi.yaml")
@@ -88,7 +88,7 @@ func TestGeneratedSpecMatchesThePublishedContract(t *testing.T) {
 }
 
 func TestSpecRefusesInvalidBindingsBeforeWriting(t *testing.T) {
-	route := capability.Routes[0]
+	route := capability.Routes()[0]
 	for _, test := range []struct {
 		routes []capability.RoutePolicy
 		bodies map[string]wireOperation

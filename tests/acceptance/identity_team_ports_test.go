@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestAccountRolelessHTTPKeepsOnlyAccountAuthorityProperty(t *testing.T) {
@@ -81,7 +82,7 @@ func TestAccountMembershipHTTPCurrentRoleProperty(t *testing.T) {
 		f, writes := newSessionFlow(t), &engineTransactions{}
 		owner := role%3 == 0
 		current := []store.Role{store.RoleOwner, store.RoleEditor, store.RoleReader}[role%3]
-		if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role=? WHERE account_id='member'`, current); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role=? WHERE account_id='member'`, current); err != nil {
 			t.Fatal(err)
 		}
 		h := f.server.WithEngineController(fakeEngine(t, writes)).Handler()

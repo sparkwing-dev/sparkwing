@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestTeamWritesUseNativeTenantTransactions(t *testing.T) {
@@ -54,15 +55,13 @@ func TestTeamWritesUseNativeTenantTransactions(t *testing.T) {
 		t.Fatalf("trust=%v: %v", trust, err)
 	}
 	var actor string
-	if err := s.store.DB().QueryRow(`SELECT invited_by FROM invitations WHERE id=?`, invitation.ID).Scan(&actor); err != nil || actor != "member" {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT invited_by FROM invitations WHERE id=?`, invitation.ID).Scan(&actor); err != nil || actor != "member" {
 		t.Fatalf("actor=%q: %v", actor, err)
 	}
 	request("DELETE", "/api/v1/runs/run", "", 409)
 	engineSQL(t, s.store, `UPDATE runs SET status='success',finished_at=? WHERE team='a' AND id='run'`, time.Now().UnixNano())
 	request("DELETE", "/api/v1/runs/run", "", 204)
-	if err := s.store.AsOperator().CreateTeam(t.Context(), "b"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, s.store, "b")
 	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','member','owner',1)`)
 	request("DELETE", "/api/v1/team", `{"confirm_slug":"a"}`, 202)
 	if _, err := s.store.ForTeam(t.Context(), "a"); err == nil {

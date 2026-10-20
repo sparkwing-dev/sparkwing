@@ -1,17 +1,18 @@
 package acceptance_test
 
 import (
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func testGoSDKDependencyCacheKeys(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
 	for _, dir := range []string{first, second} {
-		if err := os.WriteFile(filepath.Join(dir, "lock"), []byte("one"), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "lock"), []byte("one"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -24,7 +25,7 @@ func testGoSDKDependencyCacheKeys(t *testing.T) {
 	if err != nil || a != b {
 		t.Fatalf("checkout roots changed key: %q %q %v", a, b, err)
 	}
-	if err := os.WriteFile(filepath.Join(second, "lock"), []byte("two"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(second, "lock"), []byte("two"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	b, err = cache.Key(second)

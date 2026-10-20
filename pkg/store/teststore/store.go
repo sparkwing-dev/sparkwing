@@ -2,17 +2,17 @@
 package teststore
 
 import (
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"sync"
-	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // ForTeam returns a registered tenant or fails the fixture.
-func ForTeam(t testing.TB, s *store.Store, team store.Team) *store.Tenant {
+func ForTeam(t T, s *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	tenant, err := s.ForTeam(t.Context(), team)
 	if err != nil {
@@ -31,16 +31,24 @@ var snapshot = sync.OnceValues(func() (seed []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = st.DB().Exec(`VACUUM INTO ?`, filepath.Join(dir, "snapshot.db"))
-	if err := errors.Join(err, st.Close()); err != nil {
+	if err := st.Close(); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(filepath.Join(dir, "seed.db")))
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`VACUUM INTO ?`, filepath.Join(dir, "snapshot.db"))
+	if err := errors.Join(err, db.Close()); err != nil {
 		return nil, err
 	}
 	return os.ReadFile(filepath.Join(dir, "snapshot.db"))
 })
 
-// Open creates an empty current-schema fixture at a new path, then calls store.Open.
-// Existing files are refused; reopening and migration tests must use store.Open.
-func Open(path string) (*store.Store, error) {
+// Open creates an empty current-schema fixture at a new path, then opens it
+// with OpenExisting. Existing files are refused; reopening and migration
+// tests use OpenExisting, so SQL can still reach the store.
+func Open(path string, opts ...store.Option) (*store.Store, error) {
 	seed, err := snapshot()
 	if err != nil {
 		return nil, err
@@ -53,5 +61,5 @@ func Open(path string) (*store.Store, error) {
 	if err := errors.Join(err, f.Close()); err != nil {
 		return nil, err
 	}
-	return store.Open(path)
+	return OpenExisting(path, opts...)
 }

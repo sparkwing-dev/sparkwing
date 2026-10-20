@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type failedDataDeletion struct{ blob.ObjectBackend }
@@ -26,7 +27,7 @@ func (failedDataDeletion) DeleteBlob(context.Context, blob.Blob) error {
 }
 
 func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,18 +48,18 @@ func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := strings.Repeat("a", 64)
-	if _, err := st.DB().ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,1,?)", store.DefaultTeam, digest, now.UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,1,?)", store.DefaultTeam, digest, now.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(t.Context(), "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?)", store.DefaultTeam, digest, now.Add(-2*limits.BlobGCGrace).UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?)", store.DefaultTeam, digest, now.Add(-2*limits.BlobGCGrace).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(t.Context(), "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES (?,'cache',123,?)", store.DefaultTeam, now.UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES (?,'cache',123,?)", store.DefaultTeam, now.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	server.maintainRetainedData(t.Context())
 	var through int64
-	if err := st.DB().QueryRowContext(t.Context(), "SELECT storage_charged_through FROM team_storage WHERE team=? AND store='cache'", store.DefaultTeam).Scan(&through); err != nil {
+	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), "SELECT storage_charged_through FROM team_storage WHERE team=? AND store='cache'", store.DefaultTeam).Scan(&through); err != nil {
 		t.Fatal(err)
 	}
 	if through != 0 {
@@ -68,7 +69,7 @@ func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
 
 func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 	root := t.TempDir()
-	st, err := store.Open(filepath.Join(root, "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(root, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 	now := time.Now()
 	for teamIndex := range 2 {
 		team := fmt.Sprintf("maintenance-%d", teamIndex)
-		if _, err := st.DB().ExecContext(t.Context(), "INSERT INTO teams(name,created_at,updated_at) VALUES (?,?,?)", team, now.UnixNano(), now.UnixNano()); err != nil {
+		if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO teams(name,created_at,updated_at) VALUES (?,?,?)", team, now.UnixNano(), now.UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		for i := range 32 {
@@ -115,7 +116,7 @@ func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 			}
 			live := random.Uint32N(2) == 1
 			seeded = append(seeded, object{path, live || i%3 != 0, body})
-			if _, err := st.DB().ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", team, digest, len(body), now.UnixNano()); err != nil {
+			if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", team, digest, len(body), now.UnixNano()); err != nil {
 				t.Fatal(err)
 			}
 			if i%3 != 2 {
@@ -123,12 +124,12 @@ func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 				if i%3 == 0 {
 					marked = now.Add(-2 * limits.BlobGCGrace)
 				}
-				if _, err := st.DB().ExecContext(t.Context(), "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?)", team, digest, marked.UnixNano()); err != nil {
+				if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?)", team, digest, marked.UnixNano()); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if live {
-				if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at) VALUES (?,'source_bundle','root',?,?,'gh:1','manual:main','fixture','local',?,'publication','retired',0,0,?,?)`, team, fmt.Sprint(i), digest, []byte(`{}`), []byte(`{}`), now.UnixNano()); err != nil {
+				if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at) VALUES (?,'source_bundle','root',?,?,'gh:1','manual:main','fixture','local',?,'publication','retired',0,0,?,?)`, team, fmt.Sprint(i), digest, []byte(`{}`), []byte(`{}`), now.UnixNano()); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -150,7 +151,7 @@ func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 
 func TestDataStorageMaintenanceHonorsForeignLease(t *testing.T) {
 	root := t.TempDir()
-	st, err := store.Open(filepath.Join(root, "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(root, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +191,7 @@ func TestDataStorageMaintenanceHonorsForeignLease(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("foreign holder removed bytes: %v", err)
 	}
-	if _, err := st.DB().ExecContext(t.Context(), "UPDATE leases SET until=0 WHERE name='maintenance'"); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "UPDATE leases SET until=0 WHERE name='maintenance'"); err != nil {
 		t.Fatal(err)
 	}
 	New(st, nil).WithDataObjects(objects).maintainRetainedData(t.Context())

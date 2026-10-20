@@ -38,14 +38,12 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 			t.Error(err)
 		}
 	})
-	if err := state.AsOperator().CreateTeam(t.Context(), "billing-test"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, state, "billing-test")
 	for _, query := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('billing-test','member','` + role + `',1)`,
 	} {
-		if _, err := state.DB().ExecContext(t.Context(), query); err != nil {
+		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)
 		}
 	}

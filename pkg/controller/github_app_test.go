@@ -1531,7 +1531,7 @@ func TestGitHubAppEventOlderThanTheReplayWindowIsRefused(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "deploy", nil)
-	if _, err := f.store.DB().Exec(`UPDATE github_app_installations SET created_at = ? WHERE installation_id = 7`,
+	if _, err := teststore.SQL(t, f.store).Exec(`UPDATE github_app_installations SET created_at = ? WHERE installation_id = 7`,
 		time.Now().Add(-2*store.GitHubAppDeliveryRetention).Unix()); err != nil {
 		t.Fatal(err)
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const splitSecret = "hunter2-straddles-the-split"
@@ -35,7 +36,7 @@ func checkMaskedNativeFailure(t *testing.T, f *storeHostFixture, input NodeInput
 		t.Fatal(readErr)
 	}
 	var storedError string
-	if err := f.Store.DB().QueryRowContext(t.Context(), "SELECT error FROM nodes WHERE team=? AND run_id=? AND node_id=?", store.DefaultTeam, input.Accepted.RunID, input.NodeID).Scan(&storedError); err != nil {
+	if err := teststore.SQL(t, f.Store).QueryRowContext(t.Context(), "SELECT error FROM nodes WHERE team=? AND run_id=? AND node_id=?", store.DefaultTeam, input.Accepted.RunID, input.NodeID).Scan(&storedError); err != nil {
 		t.Fatal(err)
 	}
 	events, readErr := f.Tenant.ListEventsAfter(t.Context(), input.Accepted.RunID, 0, 100)

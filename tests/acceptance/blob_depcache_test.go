@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
@@ -21,16 +22,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func checkBlobDepcache(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
+func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
 	path := filepath.Join(root, "archives.db")
-	s, err := store.Open(path)
+	s, err := teststore.OpenExisting(path)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	_, identity, err := seedDepcacheBoundary(ctx, s)
+	_, identity, err := seedDepcacheBoundary(t, ctx, s)
 	if err != nil {
 		return err
 	}
@@ -122,7 +124,7 @@ func checkBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := teststore.OpenExisting(path)
 	if err != nil {
 		return err
 	}
@@ -188,7 +190,7 @@ func checkBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, payload) {
 		return fmt.Errorf("failed archive read replaced destination: %v", err)
 	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", time.Now().UnixNano(), identity.CapabilityRef); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", time.Now().UnixNano(), identity.CapabilityRef); err != nil {
 		return err
 	}
 	if _, err := binding.Signer.Commit(ctx, settlement); err == nil {
@@ -218,17 +220,17 @@ func checkDepcacheScopes(ctx context.Context, data depcacheblob.Data, key, desti
 	return nil
 }
 
-func seedDepcacheBoundary(ctx context.Context, s *store.Store) (blob.Authority, blob.UploadIdentity, error) {
-	commit, err := seedStoreLogBoundary(ctx, s.DB())
+func seedDepcacheBoundary(t testing.TB, ctx context.Context, s *store.Store) (blob.Authority, blob.UploadIdentity, error) {
+	commit, err := seedStoreLogBoundary(ctx, teststore.SQL(t, s))
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
-	return seedStorageJobClaim(ctx, s, commit)
+	return seedStorageJobClaim(t, ctx, s, commit)
 }
 
-func seedStorageJobClaim(ctx context.Context, s *store.Store, commit store.SegmentCommit) (blob.Authority, blob.UploadIdentity, error) {
+func seedStorageJobClaim(t testing.TB, ctx context.Context, s *store.Store, commit store.SegmentCommit) (blob.Authority, blob.UploadIdentity, error) {
 	var raw []byte
-	if err := s.DB().QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", commit.Actor.CapabilityPrefix).Scan(&raw); err != nil {
+	if err := teststore.SQL(t, s).QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", commit.Actor.CapabilityPrefix).Scan(&raw); err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
 	var envelope store.CapabilityRecord
@@ -259,20 +261,20 @@ func seedStorageJobClaim(ctx context.Context, s *store.Store, commit store.Segme
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
-	_, err = s.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,bind_node,bind_generation,bind_holder,reserved_pools,created_at,created_by,repo_scope,parent_kind,parent_id,award_purpose,delivery_purpose,unit_id,billing_unit,payer_team,executor_class,reservation_id,billing_start,unit_kind,repo_key,ref_scope)
+	_, err = teststore.SQL(t, s).ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,bind_node,bind_generation,bind_holder,reserved_pools,created_at,created_by,repo_scope,parent_kind,parent_id,award_purpose,delivery_purpose,unit_id,billing_unit,payer_team,executor_class,reservation_id,billing_start,unit_kind,repo_key,ref_scope)
 SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_run,bind_node,bind_generation,bind_holder,reserved_pools,created_at,created_by,repo_scope,'capability',prefix,'work','direct',?,'job',team,'runner','archive-proof','at_start','node','gh:1','manual:main' FROM capabilities WHERE prefix=?`, c.Prefix, hex.EncodeToString(c.Digest[:]), grants, raw, c.UnitID, c.Parent.ID)
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
 	for _, table := range []string{"nodes", "node_attempts"} {
-		if _, err := s.DB().ExecContext(ctx, "UPDATE "+table+" SET capability_prefix=? WHERE team=? AND run_id=?", c.Prefix, c.Team, c.Binding.RunID); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE "+table+" SET capability_prefix=? WHERE team=? AND run_id=?", c.Prefix, c.Team, c.Binding.RunID); err != nil {
 			return blob.Authority{}, blob.UploadIdentity{}, err
 		}
 	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE runs SET request_json=? WHERE team=? AND id=?", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`), c.Team, c.Binding.RunID); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE runs SET request_json=? WHERE team=? AND id=?", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`), c.Team, c.Binding.RunID); err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE nodes SET spec_json=? WHERE team=? AND run_id=?", []byte(`{"memo":{}}`), c.Team, c.Binding.RunID); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE nodes SET spec_json=? WHERE team=? AND run_id=?", []byte(`{"memo":{}}`), c.Team, c.Binding.RunID); err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
 	attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: *commit.Subject.Attempt}

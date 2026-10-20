@@ -32,9 +32,9 @@ type browserFixture struct {
 	logs   *syncBuffer
 }
 
-func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
+func newBrowserFixture(t *testing.T, d *controller.Dashboard, opts ...store.Option) *browserFixture {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('alice','alice@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','alice','owner',1)`,
 	} {
-		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, st).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -177,7 +177,7 @@ func TestBrowserAPICookieFailuresPreserveCookies(t *testing.T) {
 		t.Fatalf("API refusal changed cookies: %v", rec.Header().Values("Set-Cookie"))
 	}
 
-	if _, err := f.st.DB().Exec(`DROP TABLE sessions`); err != nil {
+	if _, err := teststore.SQL(t, f.st).Exec(`DROP TABLE sessions`); err != nil {
 		t.Fatal(err)
 	}
 	rec = f.serve(f.cookieRequest(http.MethodGet, "/api/v1/auth/whoami", ""))

@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func privatePlanFailureFixture(t *testing.T) (*EngineController, *store.Tenant, string) {
@@ -46,7 +47,7 @@ func TestPrivatePlanFailureClosesPlanAndRunWithBoundedStage(t *testing.T) {
 			}
 			var status, errorText string
 			var until sql.NullInt64
-			if err := e.Store.DB().QueryRowContext(t.Context(), `SELECT t.status,t.lease_expires_at,r.error FROM triggers t JOIN runs r ON r.team=t.team AND r.id=t.id WHERE t.id='run'`).Scan(&status, &until, &errorText); err != nil || status != "done" || until.Valid || errorText != message {
+			if err := teststore.SQL(t, e.Store).QueryRowContext(t.Context(), `SELECT t.status,t.lease_expires_at,r.error FROM triggers t JOIN runs r ON r.team=t.team AND r.id=t.id WHERE t.id='run'`).Scan(&status, &until, &errorText); err != nil || status != "done" || until.Valid || errorText != message {
 				t.Fatalf("plan completion status=%s lease=%v error=%q: %v", status, until, errorText, err)
 			}
 			events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 10)

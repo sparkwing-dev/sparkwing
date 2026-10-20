@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestGitHubAppRemovalRoutesUseTenantTransactions(t *testing.T) {
@@ -20,9 +21,7 @@ func TestGitHubAppRemovalRoutesUseTenantTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 1, AccountLogin: "acme", AccountType: "Organization"}, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedGitHubInstallation(t, s.store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 1, AccountLogin: "acme", AccountType: "Organization"}, time.Now())
 	digest := sha256.Sum256([]byte(session))
 	a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}}, Target: capability.Target{Team: "a"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
 	if _, err := tenant.PutAuthorizedGitHubTrigger(t.Context(), a, store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/app", InstallationID: 7, Pipeline: "ci", Push: true}); err != nil {

@@ -9,11 +9,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func storageRetentionServer(t *testing.T, multiTeam bool) (*store.Store, *controller.Server) {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +24,7 @@ func storageRetentionServer(t *testing.T, multiTeam bool) (*store.Store, *contro
 		}
 	})
 	old := time.Now().Add(-120 * 24 * time.Hour).UnixNano()
-	if _, err := s.DB().Exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'old',1,'fixture','failed',?,'fixture',1,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, store.DefaultTeam, []byte(`{}`), []byte(`[]`), old, old); err != nil {
+	if _, err := teststore.SQL(t, s).Exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'old',1,'fixture','failed',?,'fixture',1,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, store.DefaultTeam, []byte(`{}`), []byte(`[]`), old, old); err != nil {
 		t.Fatal(err)
 	}
 	srv := controller.New(s, nil)
@@ -44,7 +45,7 @@ func TestAMultiTeamStoragePassSeedsRetentionAndReleasesOldRuns(t *testing.T) {
 		t.Fatalf("cloud policy=%+v: %v", settings, err)
 	}
 	var count int
-	if err := s.DB().QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, s).QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("expired runs=%d: %v", count, err)
 	}
 }
@@ -57,7 +58,7 @@ func TestASingleTeamControllerKeepsItsOperatorsRetention(t *testing.T) {
 		t.Fatalf("self-hosted policy=%+v: %v", settings, err)
 	}
 	var count int
-	if err := s.DB().QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, s).QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("retained runs=%d: %v", count, err)
 	}
 }
@@ -73,14 +74,14 @@ func TestStorageRetentionPassRequiresMaintenanceFence(t *testing.T) {
 	}
 	srv.MaintainStorage(t.Context())
 	var count int
-	if err := s.DB().QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, s).QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("foreign fence deleted run=%d: %v", count, err)
 	}
-	if _, err := s.DB().Exec("UPDATE leases SET until=0 WHERE name=? AND generation=?", lease.Name, lease.Generation); err != nil {
+	if _, err := teststore.SQL(t, s).Exec("UPDATE leases SET until=0 WHERE name=? AND generation=?", lease.Name, lease.Generation); err != nil {
 		t.Fatal(err)
 	}
 	srv.MaintainStorage(t.Context())
-	if err := s.DB().QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, s).QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("new fence retained expired run=%d: %v", count, err)
 	}
 }

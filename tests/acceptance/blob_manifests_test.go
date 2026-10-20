@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"path/filepath"
 	"reflect"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
@@ -18,19 +19,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func checkBlobManifestRecords(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
+func checkBlobManifestRecords(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
 	path := filepath.Join(root, "manifest-records.db")
-	s, err := store.Open(path)
+	s, err := teststore.OpenExisting(path)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := teststore.SeedPresence(ctx, s.DB())
+	request, err := teststore.SeedPresence(ctx, teststore.SQL(t, s))
 	if err != nil {
 		return err
 	}
 	var raw []byte
-	if err := s.DB().QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", request.Intent.Authority.CapabilityRef).Scan(&raw); err != nil {
+	if err := teststore.SQL(t, s).QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", request.Intent.Authority.CapabilityRef).Scan(&raw); err != nil {
 		return err
 	}
 	var record store.CapabilityRecord
@@ -43,10 +44,10 @@ func checkBlobManifestRecords(ctx context.Context, root string, objects blob.Obj
 	if err != nil {
 		return err
 	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE capabilities SET authority_json=?,ref_scope='manual:main' WHERE prefix=?", raw, record.Value.Prefix); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET authority_json=?,ref_scope='manual:main' WHERE prefix=?", raw, record.Value.Prefix); err != nil {
 		return err
 	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE runs SET request_json=? WHERE id='upload'", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`)); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE runs SET request_json=? WHERE id='upload'", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`)); err != nil {
 		return err
 	}
 	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
@@ -68,10 +69,10 @@ func checkBlobManifestRecords(ctx context.Context, root string, objects blob.Obj
 			return err
 		}
 		job := fmt.Sprintf("manifest-%d", i)
-		if _, err := s.DB().ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'done','success',2,1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'done','success',2,1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
 			return err
 		}
-		if _, err := s.DB().ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1)`, store.DefaultTeam, job); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1)`, store.DefaultTeam, job); err != nil {
 			return err
 		}
 		request.Intent.Identity.Attempt.Value.NodeID = job
@@ -91,10 +92,10 @@ func checkBlobManifestRecords(ctx context.Context, root string, objects blob.Obj
 			return fmt.Errorf("case %d unfinished imported attempt reserved an upload: %v", i, refused)
 		}
 		var reserved int
-		if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM uploads WHERE team=? AND id=?", store.DefaultTeam, unfinished.ID).Scan(&reserved); err != nil || reserved != 0 {
+		if err := teststore.SQL(t, s).QueryRowContext(ctx, "SELECT COUNT(*) FROM uploads WHERE team=? AND id=?", store.DefaultTeam, unfinished.ID).Scan(&reserved); err != nil || reserved != 0 {
 			return fmt.Errorf("case %d unfinished imported attempt left reservations=%d: %v", i, reserved, err)
 		}
-		if _, err := s.DB().ExecContext(ctx, "UPDATE node_attempts SET finished_at=2,outcome='success' WHERE team=? AND run_id='upload' AND node_id=?", store.DefaultTeam, job); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE node_attempts SET finished_at=2,outcome='success' WHERE team=? AND run_id='upload' AND node_id=?", store.DefaultTeam, job); err != nil {
 			return err
 		}
 		if err := settleManifestBlob(ctx, tenant, objects, transfers, request, fmt.Sprintf("manifest-%d", i), raw); err != nil {
@@ -115,7 +116,7 @@ func checkBlobManifestRecords(ctx context.Context, root string, objects blob.Obj
 			return fmt.Errorf("case %d borrowed another job's member receipt: %v", i, err)
 		}
 		var count int
-		if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM blob_members WHERE manifest_digest=?", manifestDigest).Scan(&count); err != nil || count != 0 {
+		if err := teststore.SQL(t, s).QueryRowContext(ctx, "SELECT COUNT(*) FROM blob_members WHERE manifest_digest=?", manifestDigest).Scan(&count); err != nil || count != 0 {
 			return fmt.Errorf("case %d leaked refused members=%d: %v", i, count, err)
 		}
 		if err := settleManifestBlob(ctx, tenant, objects, transfers, request, fmt.Sprintf("member-b-%d", i), body); err != nil {
@@ -127,7 +128,7 @@ func checkBlobManifestRecords(ctx context.Context, root string, objects blob.Obj
 		if err := s.Close(); err != nil {
 			return err
 		}
-		reopened, err := store.Open(path)
+		reopened, err := teststore.OpenExisting(path)
 		if err != nil {
 			return err
 		}

@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestNativeScheduleOriginMainRunsToCompletion(t *testing.T) {
@@ -56,6 +57,7 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 		return (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 			services, err := bindLocalController(ctx, binding)
 			if err == nil {
+				teststore.RegisterSQLite(binding.Store, filepath.Join(binding.Home, "state.db"))
 				opened <- binding.Store
 			}
 			return services, err
@@ -109,7 +111,7 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 		t.Fatalf("registration: %+v %v", registered, err)
 	}
 	due := time.Now().Truncate(time.Minute)
-	if _, err := state.DB().ExecContext(ctx, `UPDATE cron_schedules SET cursor_at=?,next_due_at=? WHERE id=?`, due.Add(-time.Minute).UnixNano(), due.UnixNano(), registered.Schedules[0].ID); err != nil {
+	if _, err := teststore.SQL(t, state).ExecContext(ctx, `UPDATE cron_schedules SET cursor_at=?,next_due_at=? WHERE id=?`, due.Add(-time.Minute).UnixNano(), due.UnixNano(), registered.Schedules[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := manager.TickLocalSchedules(ctx, false); err != nil {

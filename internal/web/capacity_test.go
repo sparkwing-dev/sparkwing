@@ -16,7 +16,7 @@ import (
 func capacityBackend(t *testing.T) (*store.Store, ProfileReader) {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
