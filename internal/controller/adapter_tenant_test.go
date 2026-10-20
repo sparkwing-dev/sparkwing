@@ -46,9 +46,9 @@ func TestAdaptersShareRequestTenant(t *testing.T) {
 	}
 }
 
-func TestUnboundDataReadRefusesMissingAuthority(t *testing.T) {
+func TestUnboundDataAuthorityRefusesMissingPolicy(t *testing.T) {
 	server := New(nil, nil).WithDataObjects(nil)
-	_, err := server.dataController.ReadBlob(t.Context(), blob.Authority{CapabilityRef: "missing"}, "")
+	_, err := server.dataController.authorityTenant(t.Context(), blob.Authority{CapabilityRef: "missing"})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.PolicyMissing {
 		t.Fatalf("missing authority: %v", err)

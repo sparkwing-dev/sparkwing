@@ -21,13 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-type sealIntakePolicy struct{}
-
-func (sealIntakePolicy) ResolveIntake(ctx context.Context, reader capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
-	_, err := reader.ResolveAuthority(ctx, request.Authority)
-	return store.IntakePolicyFacts{Options: &request.Request.Options, LogRetentionClass: "r30", LogRetentionDays: 30}, err
-}
-
 func checkStorePlanSeals(t *testing.T) (err error) {
 	ctx := t.Context()
 	target := storetest.NewSQLite(t)
@@ -225,7 +218,7 @@ func TestStorePlanInsertionLimitUsesCanonicalRefusal(t *testing.T) {
 }
 
 func sealStorePolicies(*store.Store) (store.Policies, error) {
-	return store.Policies{Intake: sealIntakePolicy{}, ClaimProfiles: acceptanceClaimProfile{}}, nil
+	return store.Policies{ClaimProfiles: acceptanceClaimProfile{}}, nil
 }
 
 func fixturePolicies(policies store.Policies) store.Option {

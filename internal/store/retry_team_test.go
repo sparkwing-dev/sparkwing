@@ -21,7 +21,7 @@ type retrySourcePolicy struct {
 }
 
 func (p retrySourcePolicy) ResolveIntake(ctx context.Context, reader capability.AuthorityResolver, in store.IntakeRequest) (store.IntakePolicyFacts, error) {
-	facts, err := (sealIntakePolicy{}).ResolveIntake(ctx, reader, in)
+	facts, err := (storetest.IntakePolicy{}).ResolveIntake(ctx, reader, in)
 	facts.SourceLocation = &p.location
 	if in.VerifiedDeliveryID != "" {
 		facts.Delivery = p.delivery

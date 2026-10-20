@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -270,5 +271,15 @@ func defaultOptions() []store.Option {
 	if err != nil {
 		panic(err)
 	}
-	return []store.Option{store.WithPolicies(func(*store.Store) (store.Policies, error) { return store.Policies{SessionKeys: cipher}, nil })}
+	return []store.Option{store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{Intake: IntakePolicy{}, SessionKeys: cipher}, nil
+	})}
+}
+
+// IntakePolicy supplies external intake facts while keeping the store's canonical sealing.
+type IntakePolicy struct{}
+
+func (IntakePolicy) ResolveIntake(ctx context.Context, reader capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
+	_, err := reader.ResolveAuthority(ctx, request.Authority)
+	return store.IntakePolicyFacts{Options: &request.Request.Options, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 }

@@ -17,7 +17,7 @@ import (
 func checkStoreEnrolledClaims(t *testing.T) (err error) {
 	ctx := t.Context()
 	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen(fixturePolicies(store.Policies{Intake: sealIntakePolicy{}}))
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 			return err
 		}
 		var err error
-		s, err = target.TryOpen(fixturePolicies(store.Policies{Intake: sealIntakePolicy{}}))
+		s, err = target.TryOpen()
 		return err
 	}
 	spec := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(team), RegistrationID: "runner:" + string(team) + ":enrolled", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "enrolled"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"private"}}

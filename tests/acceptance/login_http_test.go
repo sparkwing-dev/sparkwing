@@ -242,16 +242,19 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 			switch state {
 			case "unknown":
 				r = loginRequest("swk_"+strings.Repeat("a", 43), "browser-proof", "/")
-			case "machine", "operator":
-				spec := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}}
-				if state == "machine" {
-					if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
-						t.Fatal(err)
-					}
-					digest := sha256.Sum256([]byte(f.raw))
-					origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-					spec = capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, Team: "team", Repositories: []string{"github.com/acme/*"}, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}, RegistrationID: "runner:team:runner"}
+			case "operator":
+				raw, _, err := teststore.ProvisionCredential(t.Context(), f.store, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap})
+				if err != nil {
+					t.Fatal(err)
 				}
+				r, code = loginRequest(raw, "browser-proof", "/"), apierr.Forbidden
+			case "machine":
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+					t.Fatal(err)
+				}
+				digest := sha256.Sum256([]byte(f.raw))
+				origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+				spec := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, Team: "team", Repositories: []string{"github.com/acme/*"}, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}, RegistrationID: "runner:team:runner"}
 				issued, err := f.store.AsOperator().ProvisionCapability(t.Context(), spec)
 				if err != nil {
 					t.Fatal(err)
