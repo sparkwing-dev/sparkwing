@@ -733,16 +733,11 @@ func creditLimit(limit int) int {
 	return limit
 }
 
-type creditMeteringDisabledKey struct{}
-
-// WithoutCreditMetering keeps claims, trigger settlement and storage writes out of the credit ledger while preserving token-bound claim ownership.
-func WithoutCreditMetering(ctx context.Context) context.Context {
-	return context.WithValue(ctx, creditMeteringDisabledKey{}, true)
-}
-
-func creditMeteringDisabled(ctx context.Context) bool {
-	return ctx.Value(creditMeteringDisabledKey{}) == true
-}
+// DisableCreditMetering keeps trigger settlement and storage writes out of
+// the credit ledger and the free-tier allowance for the life of the store.
+// A deployment without metering calls it once while it is composed; there
+// is no call that turns metering back on.
+func (s *Store) DisableCreditMetering() { s.creditMeteringOff.Store(true) }
 
 func refuseFrozenTeamTx(
 	ctx context.Context, tx *storeTx, team Team, balance, required int64, runID, nodeID string,

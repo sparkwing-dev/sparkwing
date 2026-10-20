@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -91,6 +92,7 @@ const RetrySourceManual = "manual"
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
+	creditMeteringOff atomic.Bool
 	runEnvCipher     SessionKeyCipher
 	localSecrets     sync.Map
 	resultRecords    nodeResultRecords

@@ -72,7 +72,7 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 	if err != nil {
 		return StorageStanding{}, err
 	}
-	if creditMeteringDisabled(ctx) {
+	if tx.store.creditMeteringOff.Load() {
 		return out, nil
 	}
 	allowance, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, DefaultFreeAllowanceBytes)
@@ -167,7 +167,7 @@ func freeStoragePaused(team Team) error {
 // safety: a team with no slot takes one here, at its first stored byte.
 // The slot row stays locked until the caller's transaction ends, so two appends cannot count the same room.
 func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal string, bytes int64, now time.Time) error {
-	if creditMeteringDisabled(ctx) {
+	if tx.store.creditMeteringOff.Load() {
 		return nil
 	}
 	if bytes <= 0 {
