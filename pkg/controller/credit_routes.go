@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -27,9 +26,6 @@ func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (Cre
 }
 
 func (s *Server) creditReader(ctx context.Context, team string) (CreditReader, error) {
-	if !s.Metering() {
-		return nil, &apierr.Error{Code: apierr.NotFound, Message: "credit billing is unavailable"}
-	}
 	if team == "" {
 		return nil, missingEndpointPolicy()
 	}
@@ -56,9 +52,9 @@ func (s *Server) creditReader(ctx context.Context, team string) (CreditReader, e
 
 func (s *Server) creditEndpoints() []Endpoint {
 	return []Endpoint{
-		{Method: "GET", Pattern: "/api/v1/credits/settings", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreditsSettingsShow},
-		{Method: "GET", Pattern: "/api/v1/credits", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreditsShow},
-		{Method: "GET", Pattern: "/api/v1/credits/history", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreditsHistory},
+		{Method: "GET", Pattern: "/api/v1/credits/settings", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleCreditsSettingsShow)},
+		{Method: "GET", Pattern: "/api/v1/credits", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleCreditsShow)},
+		{Method: "GET", Pattern: "/api/v1/credits/history", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleCreditsHistory)},
 	}
 }
 

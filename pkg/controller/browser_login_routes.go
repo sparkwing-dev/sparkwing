@@ -55,7 +55,7 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 	if s.store == nil || s.authorization.Authenticator == nil {
 		return missingEndpointPolicy()
 	}
-	if !s.MultiTeam() {
+	if !s.deployment.MultiTeam() {
 		return sessionUnavailable()
 	}
 	route, _ := capability.LookupRoute("GET", "/api/v1/auth/whoami")

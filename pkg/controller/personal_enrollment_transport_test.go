@@ -25,7 +25,7 @@ func TestPersonalEnrollmentTransportNeverPromotesCapabilityAncestryProperty(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(e.Store, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
+	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	raw, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

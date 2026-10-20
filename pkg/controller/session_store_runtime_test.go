@@ -33,7 +33,7 @@ func TestSessionRoutePreservesCapabilityScopeProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(s, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
+	server := NewDeployment(s, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	memberRaw, _, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

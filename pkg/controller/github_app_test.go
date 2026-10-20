@@ -48,6 +48,11 @@ type appFixture struct {
 
 func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Server) *appFixture {
 	t.Helper()
+	return newDeploymentAppFixture(t, deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam), opts...)
+}
+
+func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*controller.Server) *controller.Server) *appFixture {
+	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -69,8 +74,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	replica := func() (*controller.Server, string) {
-		srv := controller.New(st, logger).WithSecretsCipher(testCipher(t)).
-			WithDeployment(deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)).
+		srv := controller.NewDeployment(st, cfg, logger).WithSecretsCipher(testCipher(t)).
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect, appCallback}).
 			WithDashboardURL("https://dash.example.com").

@@ -397,7 +397,7 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 
-	srv := New(st, nil).WithDeployment(deploymenttest.Metered(t))
+	srv := NewDeployment(st, deploymenttest.Metered(t), nil)
 	srv.WithRunnerInventory(func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
 		snapshot := capability.RunnerSnapshot{Now: time.Now()}
 		if team == "a" {

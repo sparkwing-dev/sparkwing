@@ -90,7 +90,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := New(e.Store, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
+	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('reader','reader@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','reader','reader',1)`)
 	session, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "reader"}, "a", time.Hour)

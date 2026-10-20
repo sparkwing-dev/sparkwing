@@ -31,7 +31,7 @@ func creditPolicyFixture(t *testing.T) (*Server, http.Handler, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(st, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t)).WithOperatorAccounts([]string{"operator"})
+	s := NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
 	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator','operator@example.test',1,1)`)
 	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'operator','reader',1)`, store.DefaultTeam)
 	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, store.DefaultTeam, time.Hour)

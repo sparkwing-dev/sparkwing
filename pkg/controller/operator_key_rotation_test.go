@@ -89,7 +89,7 @@ func newKeyRotationFixture(t *testing.T, st *store.Store) *keyRotationFixture {
 
 func (f *keyRotationFixture) server(t *testing.T, c *secrets.Cipher) http.Handler {
 	t.Helper()
-	return controller.New(f.st, nil).WithSecretsCipher(c).WithDeployment(deploymenttest.Cloud(t, "https://controller.test")).Handler()
+	return controller.NewDeployment(f.st, deploymenttest.Cloud(t, "https://controller.test"), nil).WithSecretsCipher(c).Handler()
 }
 
 func (f *keyRotationFixture) rotate(t *testing.T, h http.Handler, auth string, query ...string) (int, map[string]any) {

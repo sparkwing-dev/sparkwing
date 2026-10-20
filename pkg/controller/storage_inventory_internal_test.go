@@ -48,7 +48,7 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	server := New(s, slog.New(slog.NewJSONHandler(&logs, nil))).WithDeployment(deploymenttest.Metered(t))
+	server := NewDeployment(s, deploymenttest.Metered(t), slog.New(slog.NewJSONHandler(&logs, nil)))
 	server.MaintainStorage(t.Context())
 	decoder := json.NewDecoder(&logs)
 	for decoder.More() {

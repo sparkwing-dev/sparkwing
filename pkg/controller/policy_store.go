@@ -14,7 +14,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type policyStoreReader struct{ server *Server }
+// sessions is fixed when the server is built: a one-team deployment has no
+// signed-in accounts, so a session presentation never authenticates there.
+type policyStoreReader struct {
+	server   *Server
+	sessions bool
+}
 
 func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
 	console := lookup.Class == capability.CredentialConsole
@@ -31,7 +36,7 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 	}
 	for _, authority := range snapshot.Authorities {
 		p := authority.Principal
-		if p.Class == capability.CredentialSession && (!reader.server.MultiTeam() || reader.server.sessionExpired(p.Capability.IssuedAt, snapshot.Now)) {
+		if p.Class == capability.CredentialSession && (!reader.sessions || reader.server.sessionExpired(p.Capability.IssuedAt, snapshot.Now)) {
 			return capability.AuthenticationSnapshot{}, sessionUnavailable()
 		}
 	}
@@ -57,7 +62,7 @@ func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation
 			}
 		}
 	}
-	authenticated, err := capability.NewAuthenticator(policyStoreReader{a.server}).Authenticate(ctx, presentation, route)
+	authenticated, err := capability.NewAuthenticator(policyStoreReader{a.server, a.server.deployment.MultiTeam()}).Authenticate(ctx, presentation, route)
 	if err != nil {
 		return capability.Authenticated{}, err
 	}
@@ -79,7 +84,7 @@ func (s *Server) consoleAccount(p capability.Principal) bool {
 }
 
 func (s *Server) consoleAuthority(p capability.Principal, now time.Time) bool {
-	return capability.ConsoleAuthority(p, s.MultiTeam() && s.operatorAccount(p.Capability.Subject.ID), now, s.sessionMaxLifetime)
+	return capability.ConsoleAuthority(p, s.deployment.MultiTeam() && s.operatorAccount(p.Capability.Subject.ID), now, s.sessionMaxLifetime)
 }
 
 type policyStoreBindings struct{ server *Server }

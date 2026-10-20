@@ -127,7 +127,7 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 	if err := s.maintainDataObjects(ctx, lease); err != nil {
 		s.logger.Error("data storage maintenance failed", "err", err)
 	}
-	if !s.Metering() {
+	if !s.deployment.Metering() {
 		return
 	}
 	billed, err := operator.ChargeRetainedStorage(ctx, lease)

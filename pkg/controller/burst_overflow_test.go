@@ -162,7 +162,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(e.Store, nil).WithSecretsCipher(cipher).WithEngineController(e).WithDeployment(deploymenttest.Team(t))
+	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithEngineController(e)
 	raw, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

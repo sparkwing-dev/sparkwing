@@ -91,7 +91,7 @@ func (s *Server) readSessionFlow(r *http.Request) (*store.Session, error) {
 	if s.store == nil {
 		return nil, missingEndpointPolicy()
 	}
-	if !s.MultiTeam() {
+	if !s.deployment.MultiTeam() {
 		return nil, sessionUnavailable()
 	}
 	session, err := s.store.LookupSession(r.Context(), raw)

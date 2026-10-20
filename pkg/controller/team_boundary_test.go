@@ -112,8 +112,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if _, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.New(st, nil).WithSecretsCipher(testCipher(t)).
-		WithDeployment(deploymenttest.Team(t))
+	srv := controller.NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(testCipher(t))
 	f := &tenancyFixture{t: t, srv: srv, url: "https://controller.test", st: st}
 
 	alice, teamA := signUp(t, st, "alice")

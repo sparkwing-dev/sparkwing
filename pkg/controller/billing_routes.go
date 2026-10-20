@@ -53,18 +53,15 @@ func (s *Server) billingWriter(r *http.Request, a capability.Authorized) (Billin
 
 func (s *Server) billingEndpoints() []Endpoint {
 	return []Endpoint{
-		{Method: "POST", Pattern: "/api/v1/team/billing/checkout", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamBillingCheckout},
-		{Method: "POST", Pattern: "/api/v1/team/billing/standing-request", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamStandingRequest},
-		{Method: "POST", Pattern: "/api/v1/team/billing/card", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamBillingCard},
-		{Method: "POST", Pattern: "/api/v1/team/billing/pay", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamBillingPay},
-		{Method: "PUT", Pattern: "/api/v1/team/billing/budget", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamBillingBudget},
+		{Method: "POST", Pattern: "/api/v1/team/billing/checkout", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingCheckout)},
+		{Method: "POST", Pattern: "/api/v1/team/billing/standing-request", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamStandingRequest)},
+		{Method: "POST", Pattern: "/api/v1/team/billing/card", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingCard)},
+		{Method: "POST", Pattern: "/api/v1/team/billing/pay", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingPay)},
+		{Method: "PUT", Pattern: "/api/v1/team/billing/budget", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingBudget)},
 	}
 }
 
 func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capability.Authorized, kind capability.BillingPageKind, amount int64) error {
-	if !s.Metering() {
-		return &apierr.Error{Code: apierr.NotFound, Message: "billing is unavailable"}
-	}
 	if s.checkout == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": CheckoutUnavailableCode}}
 	}

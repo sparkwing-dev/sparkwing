@@ -77,8 +77,7 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	api := httptest.NewUnstartedServer(nil)
 	t.Cleanup(api.Close)
 	endpoint := "http://" + api.Listener.Addr().String()
-	state, server, member := burstIntakeController(t, endpoint)
-	server.WithDeployment(deploymenttest.Cloud(t, endpoint))
+	state, server, member := burstIntakeDeploymentController(t, endpoint, deploymenttest.Cloud(t, endpoint))
 	api.Config.Handler = server.Handler()
 	api.Start()
 	if err := os.WriteFile(os.Getenv("SPARKWING_CONFIG"), []byte("profiles:\n  cloud: { controller: { url: "+endpoint+", token: "+member+" } }\n"), 0o600); err != nil {

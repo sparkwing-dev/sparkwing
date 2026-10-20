@@ -345,8 +345,7 @@ func TestRootProvisioningHTTPMethodsAndRetry(t *testing.T) {
 }
 
 func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
-	f := newSessionFlow(t)
-	f.server.WithDeployment(deploymenttest.Cloud(t, "https://controller.test"))
+	f := newDeploymentSessionFlow(t, deploymenttest.Cloud(t, "https://controller.test"))
 	secret := sha256.Sum256([]byte(t.Name()))
 	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
 	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), f.store, seed); err != nil || !created {

@@ -79,7 +79,7 @@ func reviewAccount(t *testing.T, role string) (*Server, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
+	s := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	raw, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestReviewMembersRevokeOwnTokens(t *testing.T) {
 func TestReviewLicensedSelfHostRefusesDeploymentBearer(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	raw := reviewSeed(t, e.Store)
-	s := New(e.Store, nil).WithDeployment(deploymenttest.Team(t))
+	s := NewDeployment(e.Store, deploymenttest.Team(t), nil)
 	engineClaimHTTP(t, s.Handler(), raw, "GET", "/api/v1/operator/tokens", "", 401)
 }
 
@@ -306,7 +306,7 @@ func TestNativeDeploymentEligibilityProperty(t *testing.T) {
 	deployments := []deployment.Config{{}, deploymenttest.Team(t), deploymenttest.Cloud(t, "https://controller.test")}
 	property := func(pick uint8, hint uint64) bool {
 		d := deployments[int(pick)%len(deployments)]
-		s := New(e.Store, nil).WithDeployment(d)
+		s := NewDeployment(e.Store, d, nil)
 		r := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/operator/tokens?mode=cloud&eligible=%d", hint), nil)
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()

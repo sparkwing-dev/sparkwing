@@ -113,10 +113,8 @@ type Server struct {
 	deletionHolderID   string
 
 	metricsAddr       string
-	trustedProxyAddr  string
 	deliverySpools    chan struct{}
 	trustedProxyCIDRs []netip.Prefix
-	metricsLn         net.Listener
 
 	liveLogs  *liveLogs
 	placement placementPolicy
@@ -158,14 +156,22 @@ type Server struct {
 	localScheduleEnvironments LocalScheduleEnvironments
 }
 
-// New constructs a Server bound to the given store. A trigger it accepts is
-// recorded for a runner to claim. Callers own the store's lifecycle; New
-// never closes it.
+// New constructs a Server for a local, one-team deployment bound to the
+// given store. A trigger it accepts is recorded for a runner to claim.
+// Callers own the store's lifecycle; New never closes it.
 func New(st *store.Store, logger *slog.Logger) *Server {
+	return NewDeployment(st, deployment.Config{}, logger)
+}
+
+// NewDeployment constructs a Server for the declared deployment cfg. The
+// deployment is fixed for the server's life: routes, authentication and
+// the store's credit policy are built from it once.
+func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	srv := &Server{
+		deployment:         cfg,
 		store:              st,
 		engineController:   &EngineController{Store: st},
 		operatorSettings:   storeOperatorSettings{Store: st, Operator: st.AsOperator()},
@@ -183,6 +189,9 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		downloadFunded:     DefaultTeamDailyDownloadFundedBytes,
 	}
 	if st != nil {
+		if !cfg.Metering() {
+			st.DisableCreditMetering()
+		}
 		srv.credentialIssuer = st
 		st.SetConsolePolicy(srv.consoleAuthority)
 		st.SetIntakePolicy(srv)
@@ -275,24 +284,6 @@ func (s *Server) WithMetricsAddr(addr string) *Server {
 	return s
 }
 
-// WithMetricsListener moves the Prometheus endpoint onto a socket the
-// caller already holds, and serves it there instead of binding the
-// address [Server.WithMetricsAddr] takes. Pass a listener when the
-// address is one the operating system assigned, so nothing else can take
-// the port between the assignment and the bind.
-//
-// [ServeWith] closes the listener when it returns, so a Server configured
-// this way serves once. A nil listener leaves the server on whatever
-// [Server.WithMetricsAddr] gave it.
-func (s *Server) WithMetricsListener(ln net.Listener) *Server {
-	if ln == nil {
-		return s
-	}
-	s.metricsLn = ln
-	s.metricsAddr = ln.Addr().String()
-	return s
-}
-
 // WithSecretsCipher configures row-bound credential encryption and session-key protection.
 func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	s.secretsCipher = c
@@ -306,12 +297,6 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server {
 		s.store.SetSessionKeyCipher(bound)
 		s.store.SetRunEnvironmentCipher(bound)
 	}
-	return s
-}
-
-// WithTrustedProxyAddr keys login throttling and request logs on a trusted proxy's X-Real-IP.
-func (s *Server) WithTrustedProxyAddr(addr string) *Server {
-	s.trustedProxyAddr = addr
 	return s
 }
 
@@ -358,12 +343,7 @@ func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux
 		withRequestLog(router, s.logger, muxRouteLabeler(labels...), func(r *http.Request) string {
 			return ratelimit.ClientIP(r)
 		})))
-	if s.Metering() {
-		return h
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.ServeHTTP(w, r.WithContext(store.WithoutCreditMetering(r.Context())))
-	})
+	return h
 }
 
 func (s *Server) routers() *http.ServeMux {
@@ -491,15 +471,34 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 // time the listener's own shutdown already spent.
 const controllerShutdownBudget = 5 * time.Second
 
-// ServeWith runs a Server configured through its With options at addr,
-// refusing one whose engine has no runner admission policy.
-func ServeWith(ctx context.Context, s *Server, addr string) error {
-	if s.engineController.RunnerPolicy == nil {
+// Listeners are the sockets a Server serves on, bound by the caller before
+// startup changes any stored state, so a port that cannot be had fails the
+// start without side effects.
+type Listeners struct {
+	// API serves the controller.
+	API net.Listener
+	// TrustedProxy serves the same API keyed on X-Real-IP; nil serves none.
+	TrustedProxy net.Listener
+	// Metrics serves /metrics when [Server.WithMetricsAddr] moved it off API.
+	Metrics net.Listener
+}
+
+// ServeWith runs a Server configured through its With options on ln,
+// refusing one whose engine has no runner admission policy. Once serving
+// starts, it closes every listener when it returns; a refusal before then
+// leaves them to the caller.
+func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
+	metricsSrv := s.metricsServer()
+	switch {
+	case s.engineController.RunnerPolicy == nil:
 		return errors.New("controller has no runner admission policy; compose its engine with WithEngineController before serving")
+	case ln.API == nil:
+		return errors.New("controller has no API listener")
+	case metricsSrv != nil && ln.Metrics == nil:
+		return errors.New("controller metrics address " + s.metricsAddr + " has no listener")
 	}
-	listener := func(addr string, h http.Handler) *http.Server {
+	listener := func(h http.Handler) *http.Server {
 		return &http.Server{
-			Addr:              addr,
 			Handler:           h,
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       30 * time.Second,
@@ -507,10 +506,17 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 			IdleTimeout:       2 * time.Minute,
 		}
 	}
-	srv := listener(addr, s.Handler())
-	servers := []*http.Server{srv}
-	if s.trustedProxyAddr != "" {
-		servers = append(servers, listener(s.trustedProxyAddr, ratelimit.TrustedListener(srv.Handler)))
+	type served struct {
+		srv *http.Server
+		ln  net.Listener
+	}
+	api := listener(s.Handler())
+	servers := []served{{api, ln.API}}
+	if ln.TrustedProxy != nil {
+		servers = append(servers, served{listener(ratelimit.TrustedListener(api.Handler)), ln.TrustedProxy})
+	}
+	if metricsSrv != nil {
+		servers = append(servers, served{metricsSrv, ln.Metrics})
 	}
 
 	s.reapLeased(ctx)
@@ -527,57 +533,29 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runCardBilling(ctx, CardBillingInterval)
 	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
 
-	errCh := make(chan error, 1+len(servers))
-
-	metricsSrv := s.metricsServer()
-	if metricsSrv != nil {
-		metricsLn := s.metricsLn
-		if metricsLn == nil {
-			// safety: a metrics endpoint that never binds leaves the operator blind, so refuse to start instead.
-			var err error
-			metricsLn, err = net.Listen("tcp", metricsSrv.Addr)
-			if err != nil {
-				return fmt.Errorf("controller metrics listener: %w", err)
-			}
-		}
-		go func() {
-			s.logger.Info("controller metrics listening", "addr", metricsSrv.Addr)
-			if err := metricsSrv.Serve(metricsLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				errCh <- fmt.Errorf("controller metrics listener: %w", err)
-			}
-		}()
-		defer func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
-				s.logger.Warn("controller metrics shutdown incomplete", "err", err)
-			}
-		}()
-	}
-
+	errCh := make(chan error, len(servers))
 	for _, l := range servers {
 		go func() {
-			s.logger.Info("controller listening", "addr", l.Addr, "trusted_proxy", l != srv)
-			errCh <- l.ListenAndServe()
+			s.logger.Info("controller listening", "addr", l.ln.Addr().String())
+			if err := l.srv.Serve(l.ln); !errors.Is(err, http.ErrServerClosed) {
+				errCh <- fmt.Errorf("controller listener %s: %w", l.ln.Addr(), err)
+			}
 		}()
 	}
 
+	var err error
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controllerShutdownBudget)
-		defer cancel()
-		for _, l := range servers {
-			if err := l.Shutdown(shutdownCtx); err != nil {
-				s.logger.Warn("controller HTTP shutdown incomplete", "addr", l.Addr, "err", err)
-			}
-		}
-		return nil
-	case err := <-errCh:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
+	case err = <-errCh:
 	}
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controllerShutdownBudget)
+	defer cancel()
+	for _, l := range servers {
+		if serr := l.srv.Shutdown(shutdownCtx); serr != nil {
+			s.logger.Warn("controller HTTP shutdown incomplete", "addr", l.ln.Addr().String(), "err", serr)
+		}
+	}
+	return err
 }
 
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
@@ -689,7 +667,7 @@ func (s *Server) runCreditSampler(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) sampleCreditLedger(ctx context.Context) {
-	if !s.Metering() {
+	if !s.deployment.Metering() {
 		ledgerSnapshot.set(store.CreditLedgerTotals{})
 		return
 	}

@@ -35,8 +35,8 @@ func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
 		}
 	})
 	now := time.Now()
-	server := New(st, nil).WithDataObjects(failedDataDeletion{}).WithDeployment(deploymenttest.Metered(t))
-	if !server.Metering() {
+	server := NewDeployment(st, deploymenttest.Metered(t), nil).WithDataObjects(failedDataDeletion{})
+	if !server.deployment.Metering() {
 		t.Fatal("fixture has no metering authority")
 	}
 	rate := int64(0)

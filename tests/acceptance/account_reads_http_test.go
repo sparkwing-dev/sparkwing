@@ -15,7 +15,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -169,7 +168,7 @@ func TestAccountReadHTTPDoesNotRenewOrSwitchSession(t *testing.T) {
 
 func TestCreditSettingsReadHTTP(t *testing.T) {
 	f := newSessionFlow(t)
-	h := f.server.WithDeployment(deploymenttest.Team(t)).Handler()
+	h := f.server.Handler()
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, f.request("GET", "/api/v1/credits/settings?team=foreign", ""))
 	var got map[string]any

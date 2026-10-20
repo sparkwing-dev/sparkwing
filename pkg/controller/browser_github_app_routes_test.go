@@ -80,8 +80,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).
-		WithDeployment(deploymenttest.Team(t)).WithDashboard(Dashboard{})
+	s := NewDeployment(e.Store, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithDashboard(Dashboard{})
 	raw, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

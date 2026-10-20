@@ -29,7 +29,7 @@ func TestCallerStorageStandingUsesFinalTenantInventory(t *testing.T) {
 	if _, err := s.DB().ExecContext(t.Context(), "INSERT INTO team_storage(team,store,used_bytes,reserved_bytes,updated_at) VALUES ('a','cache',999999,999999,1)"); err != nil {
 		t.Fatal(err)
 	}
-	server := New(s, nil).WithDeployment(deploymenttest.Team(t))
+	server := NewDeployment(s, deploymenttest.Team(t), nil)
 	request := httptest.NewRequest("GET", "/", nil)
 	got, err := server.teamStorageStanding(request, "a")
 	if err != nil || got == nil || got.Team != "a" || got.CacheBytes != 3 || got.LogBytes != 0 || got.EventBytes != 0 {

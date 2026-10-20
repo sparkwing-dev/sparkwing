@@ -23,7 +23,7 @@ type ServicesResponse struct {
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
-	multiTeam := s.MultiTeam()
+	multiTeam := s.deployment.MultiTeam()
 	downloadURL := s.dataDownloadURL()
 	if s.dashboardURL == "" && !multiTeam && downloadURL == "" && !s.dataUploadsAvailable() {
 		return &apierr.Error{Code: apierr.NotFound, Message: "no services announced"}

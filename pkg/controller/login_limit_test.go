@@ -49,7 +49,7 @@ func failedTokenLogin(t *testing.T, srv *Server, h http.Handler, remoteAddr stri
 
 func multiTeamLoginServer(t *testing.T) *Server {
 	t.Helper()
-	return loginServer(t, nil).WithDeployment(deploymenttest.Team(t))
+	return NewDeployment(newStoreForAuth(t), deploymenttest.Team(t), nil).WithDashboard(Dashboard{})
 }
 
 func TestLoginLimiter_IPv6RotationWithinOnePrefixCannotBlockOthers(t *testing.T) {

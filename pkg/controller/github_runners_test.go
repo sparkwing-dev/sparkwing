@@ -52,8 +52,7 @@ func newGHFixture(t *testing.T) *ghFixture {
 		t.Fatal(err)
 	}
 	google, gh := googletest.New(t), githuboidctest.New(t)
-	srv := controller.New(st, nil).WithSecretsCipher(testCipher(t)).
-		WithDeployment(deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: ghAudience}, license.FeatureMultiTeam)).
+	srv := controller.NewDeployment(st, deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: ghAudience}, license.FeatureMultiTeam), nil).WithSecretsCipher(testCipher(t)).
 		WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 		WithGitHubRunners(gh.Config(ghAudience)).
 		WithDashboard(controller.Dashboard{})

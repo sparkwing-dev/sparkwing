@@ -9,7 +9,7 @@ const CloudRetentionDays = 90
 // safety: the defaults are written only where the operator has set nothing,
 // so a window an operator chose, zero included, survives every restart.
 func (s *Server) seedCloudRetention(ctx context.Context) {
-	if !s.MultiTeam() {
+	if !s.deployment.MultiTeam() {
 		return
 	}
 	seeded, err := s.store.AsOperator().SeedRunRetention(ctx, CloudRetentionDays)

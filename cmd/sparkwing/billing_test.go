@@ -52,7 +52,7 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := controller.New(state, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
+	server := controller.NewDeployment(state, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "billing-test", time.Hour)
 	if err != nil {
 		t.Fatal(err)

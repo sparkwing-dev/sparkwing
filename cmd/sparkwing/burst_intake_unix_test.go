@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -302,6 +303,11 @@ func burstIntakeRepository(t *testing.T) string {
 
 func burstIntakeController(t *testing.T, endpoint string) (*store.Store, *controller.Server, string) {
 	t.Helper()
+	return burstIntakeDeploymentController(t, endpoint, deploymenttest.Team(t))
+}
+
+func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployment.Config) (*store.Store, *controller.Server, string) {
+	t.Helper()
 	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -315,7 +321,7 @@ func burstIntakeController(t *testing.T, endpoint string) (*store.Store, *contro
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := controller.New(state, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")}).WithDeployment(deploymenttest.Team(t))
+	server := controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")})
 	for _, query := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('burst-user','burst@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','burst-user','editor',1)`,

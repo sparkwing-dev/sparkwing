@@ -318,7 +318,7 @@ func TestBillingModelControllerWaitlistsThe101stAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t)).withProvider(store.ProviderGoogle, billingIdentityProvider{}, []string{"https://app.test/callback"})
+	s := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).withProvider(store.ProviderGoogle, billingIdentityProvider{}, []string{"https://app.test/callback"})
 	for i := range 101 {
 		_, _, err := s.oauthSignIn(t.Context(), store.ProviderGoogle, fmt.Sprint("signup", i), "verifier", "https://app.test/callback")
 		if err != nil {
@@ -347,7 +347,7 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(e.Store, nil).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t)).WithBillingCheckout("https://checkout.test", "credential")
+	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithBillingCheckout("https://checkout.test", "credential")
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
 	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)

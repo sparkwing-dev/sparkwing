@@ -37,8 +37,6 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 		"changed payload":   base64.RawURLEncoding.EncodeToString([]byte(`{"features":["multi-team"],"issued_to":"other","issued_at":"2026-01-01T00:00:00Z","expires_at":"2099-01-01T00:00:00Z"}`)) + "." + signature,
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newOAuthHTTP(t)
-			f.server.WithGoogleSignIn(googleauth.New(googleauth.Google("client", "private")), []string{oauthOrigin + "/auth/google/callback"})
 			d := deployment.Config{}
 			if raw != "" {
 				var err error
@@ -53,7 +51,9 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			h := f.server.WithDeployment(d).Handler()
+			f := newDeploymentSessionFlow(t, d)
+			p := &oauthProvider{}
+			h := withOAuthGitHub(f.server, p).WithGoogleSignIn(googleauth.New(googleauth.Google("client", "private")), []string{oauthOrigin + "/auth/google/callback"}).Handler()
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/capabilities", nil))
 			var caps struct {
@@ -73,7 +73,7 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 				if name == "valid" {
 					status = 303
 				}
-				if w.Code != status || f.provider.calls != 0 {
+				if w.Code != status || p.calls != 0 {
 					t.Fatalf("%s start HTTP %d %s", provider, w.Code, w.Body)
 				}
 			}

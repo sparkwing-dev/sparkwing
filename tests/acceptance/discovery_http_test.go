@@ -142,7 +142,7 @@ func TestDiscoveryHTTPAvailabilityAndMethods(t *testing.T) {
 
 func TestDiscoveryHTTPAnnouncesMultiTeamWithoutURLs(t *testing.T) {
 	b := authorityMember()
-	h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithDeployment(deploymenttest.Team(t)).Handler()
+	h := controller.NewDeployment(nil, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).Handler()
 	w := discoveryRequest(h, b, "GET", "/api/v1/services")
 	if w.Code != 200 {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())

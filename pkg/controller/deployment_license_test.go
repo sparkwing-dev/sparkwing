@@ -28,11 +28,7 @@ func TestLicenseExpiryWhileRunningKeepsTheModeAndDegradesHealth(t *testing.T) {
 	// The license was valid when the controller started 25 hours ago and
 	// expired an hour ago.
 	cfg := deploymenttest.Parse(t, deployment.Inputs{Kind: "team", Now: time.Now().Add(-25 * time.Hour)}, license.FeatureMultiTeam)
-	srv := controller.New(st, nil).WithDeployment(cfg)
-	if !srv.MultiTeam() || !srv.Metering() {
-		t.Fatalf("expired license flipped the mode: multi-team %v, metering %v", srv.MultiTeam(), srv.Metering())
-	}
-	h := srv.Handler()
+	h := controller.NewDeployment(st, cfg, nil).Handler()
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil))

@@ -75,8 +75,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	}
 	iss := googletest.New(t)
 	gh := githubtest.New(t)
-	srv := controller.New(st, o.logger).WithSecretsCipher(testCipher(t)).
-		WithDeployment(deploymenttest.Cloud(t, "https://controller.test")).
+	srv := controller.NewDeployment(st, deploymenttest.Cloud(t, "https://controller.test"), o.logger).WithSecretsCipher(testCipher(t)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
 		WithBillingCheckout(o.checkoutURL, o.checkoutToken).

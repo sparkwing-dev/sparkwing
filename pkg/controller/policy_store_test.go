@@ -102,7 +102,7 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t))
+	server := NewDeployment(s, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher)
 	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithDeployment(deploymenttest.Team(t)).WithOperatorAccounts([]string{"operator"})
+	s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
 	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

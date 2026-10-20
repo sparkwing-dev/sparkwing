@@ -15,8 +15,8 @@ import (
 
 func TestGitHubAppOwnerSelectionSealsDispatchAndActionsClaimsItsTrigger(t *testing.T) {
 	issuer := githuboidctest.New(t)
-	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
-		return s.WithDeployment(deploymenttest.Cloud(t, ghAudience)).WithGitHubRunners(issuer.Config(ghAudience))
+	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, ghAudience), func(s *controller.Server) *controller.Server {
+		return s.WithGitHubRunners(issuer.Config(ghAudience))
 	})
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
@@ -70,9 +70,7 @@ func TestGitHubAppOwnerSelectionSealsDispatchAndActionsClaimsItsTrigger(t *testi
 }
 
 func TestGitHubAppAutomationOwnerSelectionReachesPushesAndArmedSchedules(t *testing.T) {
-	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
-		return s.WithDeployment(deploymenttest.Cloud(t, "https://controller.test"))
-	})
+	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
@@ -117,9 +115,7 @@ func TestGitHubAppAutomationOwnerSelectionReachesPushesAndArmedSchedules(t *test
 }
 
 func TestGitHubAppPoolScheduleReachesItsReservedRunner(t *testing.T) {
-	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
-		return s.WithDeployment(deploymenttest.Cloud(t, "https://controller.test"))
-	})
+	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
@@ -197,9 +193,7 @@ func TestGitHubRepositoryDisplayComesFromTheAppInstallation(t *testing.T) {
 }
 
 func TestGitHubAppRunsAnywhereUnlessTheRepositoryPinsCloud(t *testing.T) {
-	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
-		return s.WithDeployment(deploymenttest.Cloud(t, "https://controller.test"))
-	})
+	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	for pipeline, runner := range map[string]string{"any-build": "", "cloud-build": "cloud"} {

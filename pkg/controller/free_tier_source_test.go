@@ -58,7 +58,7 @@ func TestTheServerIsItsOwnFreeTierSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	server := New(s, slog.New(slog.NewJSONHandler(&logs, nil))).WithDeployment(deploymenttest.Team(t))
+	server := NewDeployment(s, deploymenttest.Team(t), slog.New(slog.NewJSONHandler(&logs, nil)))
 	server.WithFreeTier(server).CheckFreeTierSource()
 	if strings.Contains(logs.String(), "signup.free_tier_unwired") {
 		t.Fatalf("configured source logged as missing: %s", logs.String())

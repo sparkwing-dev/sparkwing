@@ -19,7 +19,7 @@ func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server {
 }
 
 func (s *Server) teamStorageStanding(r *http.Request, team store.Team) (*teamStandingJSON, error) {
-	if !s.MultiTeam() || team == "" || team == store.DefaultTeam {
+	if !s.deployment.MultiTeam() || team == "" || team == store.DefaultTeam {
 		return nil, nil
 	}
 	tenant, err := s.store.ForTeam(r.Context(), team)

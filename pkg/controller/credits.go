@@ -261,9 +261,6 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a cap
 }
 
 func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
-	if !s.Metering() {
-		return &apierr.Error{Code: apierr.NotFound, Message: "credit billing is unavailable"}
-	}
 	if s.store == nil {
 		return missingEndpointPolicy()
 	}

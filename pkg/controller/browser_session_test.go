@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -34,14 +35,18 @@ type browserFixture struct {
 
 func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 	t.Helper()
+	return newDeploymentBrowserFixture(t, deploymenttest.Team(t), d)
+}
+
+func newDeploymentBrowserFixture(t *testing.T, cfg deployment.Config, d *controller.Dashboard) *browserFixture {
+	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	logs := &syncBuffer{}
-	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t)).
-		WithDeployment(deploymenttest.Team(t))
+	srv := controller.NewDeployment(st, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t))
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('alice','alice@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','alice','owner',1)`,

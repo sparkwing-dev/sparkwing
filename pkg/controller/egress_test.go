@@ -59,7 +59,7 @@ func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(e.Store, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithEngineController(e).WithDeployment(deploymenttest.Team(t)).WithEgressMeter(meter).WithDataController(&DataController{Store: e.Store, Objects: objects})
+	s := NewDeployment(e.Store, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithEngineController(e).WithEgressMeter(meter).WithDataController(&DataController{Store: e.Store, Objects: objects})
 	h := s.Handler()
 	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse

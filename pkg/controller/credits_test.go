@@ -31,7 +31,7 @@ type creditsFixture struct {
 
 func newCreditsFixture(t *testing.T) creditsFixture {
 	t.Helper()
-	browser := newBrowserFixture(t, nil)
+	browser := newDeploymentBrowserFixture(t, deploymenttest.Cloud(t, "https://controller.test"), nil)
 	st := browser.st
 	now := time.Now().UTC()
 	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)})
@@ -42,7 +42,7 @@ func newCreditsFixture(t *testing.T) creditsFixture {
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
-	ctrl := browser.srv.WithDeployment(deploymenttest.Cloud(t, "https://controller.test")).WithOperatorAccounts([]string{"alice"})
+	ctrl := browser.srv.WithOperatorAccounts([]string{"alice"})
 	return creditsFixture{
 		srv: ctrl, handler: ctrl.Handler(), console: sessionAuth(browser.sessID), store: st, writer: browser.token,
 		admin: admin, readonly: readonly,

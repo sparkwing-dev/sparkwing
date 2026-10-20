@@ -93,30 +93,30 @@ const RetrySourceManual = "manual"
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
 	creditMeteringOff atomic.Bool
-	runEnvCipher     SessionKeyCipher
-	localSecrets     sync.Map
-	resultRecords    nodeResultRecords
-	materializations materializationRecords
-	claimProfiles    ClaimProfileResolver
-	intake           intakeContracts
-	intakePolicy     IntakePolicy
-	plans            planContracts
-	billing          billingCalculator
-	planSecretOpener PlanSecretOpener
-	delegation       delegationContracts
-	provisions       ProvisionPolicy
-	consolePolicy    consolePolicy
-	sourcePolicy     sourceReleaseContracts
-	clock            func() time.Time
-	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
-	db               *sql.DB
-	githubLocks      *sql.DB
-	dialect          Dialect
-	cleanup          func() error
-	csrfKeyMu        sync.Mutex
-	csrfKey          []byte
-	csrfCipher       SessionKeyCipher
-	githubCheckMu    sync.Mutex
+	runEnvCipher      SessionKeyCipher
+	localSecrets      sync.Map
+	resultRecords     nodeResultRecords
+	materializations  materializationRecords
+	claimProfiles     ClaimProfileResolver
+	intake            intakeContracts
+	intakePolicy      IntakePolicy
+	plans             planContracts
+	billing           billingCalculator
+	planSecretOpener  PlanSecretOpener
+	delegation        delegationContracts
+	provisions        ProvisionPolicy
+	consolePolicy     consolePolicy
+	sourcePolicy      sourceReleaseContracts
+	clock             func() time.Time
+	pinnedClock       func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
+	db                *sql.DB
+	githubLocks       *sql.DB
+	dialect           Dialect
+	cleanup           func() error
+	csrfKeyMu         sync.Mutex
+	csrfKey           []byte
+	csrfCipher        SessionKeyCipher
+	githubCheckMu     sync.Mutex
 }
 
 // Dialect reports the SQL dialect this Store was opened against.

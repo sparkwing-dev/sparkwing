@@ -307,7 +307,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := controller.New(e.Store, nil).WithDeployment(deploymenttest.Team(t)).WithSecretsCipher(cipher).WithEngineController(e).WithDataObjects(objects).HTTP().API
+	handler := controller.NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithEngineController(e).WithDataObjects(objects).HTTP().API
 	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
 	var award struct {
 		Claim struct {

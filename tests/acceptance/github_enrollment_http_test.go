@@ -16,12 +16,12 @@ import (
 )
 
 func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
-	f := newSessionFlow(t)
+	f := newDeploymentSessionFlow(t, deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam))
 	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner' WHERE team='team' AND account_id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	actions := newActionsExchangeFixture(t)
-	actions.server = f.server.WithDeployment(deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)).WithGitHubRunners(githuboidc.Config{
+	actions.server = f.server.WithGitHubRunners(githuboidc.Config{
 		Audience: "https://controller.test", Issuer: "https://actions.test", JWKSURL: "https://actions.test/keys",
 		HTTP: &http.Client{Transport: reportTransport{http.HandlerFunc(actions.signer.ServeKeys)}},
 	})

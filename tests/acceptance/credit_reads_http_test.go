@@ -56,8 +56,7 @@ func (f *creditReads) ListCreditCharges(_ context.Context, limit int) ([]store.C
 
 func licensedCreditServer(t *testing.T, b *credentialBoundary) *controller.Server {
 	t.Helper()
-	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).
-		WithDeployment(deploymenttest.Metered(t)).
+	return controller.NewDeployment(nil, deploymenttest.Metered(t), slog.New(slog.NewTextHandler(io.Discard, nil))).
 		WithAuthorization(consoleAuthorization(b))
 }
 
@@ -266,9 +265,6 @@ func TestCreditReadsCheckAvailabilityAfterAuthentication(t *testing.T) {
 					status, code = 403, apierr.Forbidden
 				case "member":
 					status, code = 404, apierr.NotFound
-					if strings.Contains(path, "limit=bad") {
-						status, code = 400, apierr.BadRequest
-					}
 				}
 				h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).Handler()
 				assertEngineError(t, snapshotRequest(h, b, "GET", path), status, code)
