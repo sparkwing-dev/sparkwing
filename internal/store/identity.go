@@ -930,12 +930,11 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 	}
 	now := tx.now()
 	expires := now.Add(ttl)
-	epoch, err := membershipEpochTx(ctx, tx, string(team), acct.ID)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
+ VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
 		return "", "", nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at,membership_epoch)
- VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano(), epoch); err != nil {
+	if err := authenticateSessionTeamsTx(ctx, tx, sessionDigest(raw)); err != nil {
 		return "", "", nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1000,8 +999,8 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 		return nil
 	}
 	_, err := tx.ExecContext(ctx,
-		`UPDATE sessions SET team = ?,membership_epoch=COALESCE((SELECT epoch FROM membership_epochs WHERE team=? AND account_id=?),0) WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
-		active, active, accountID, accountID, string(t.team))
+		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
+		active, accountID, string(t.team))
 	return err
 }
 

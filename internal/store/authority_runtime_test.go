@@ -89,6 +89,7 @@ func authorityMember(t *testing.T, s *Store, id string, role Role) Actor {
 	rewriteSchemaExec(t, s.db, "INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?, ?, 1, 1)", id, id+"@example.test")
 	rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a',?,?,1)", id, role)
 	rewriteSchemaExec(t, s.db, "INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,'a',?)", id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), id)
+	rewriteSchemaExec(t, s.db, "INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)", id)
 	return Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
 }
 
@@ -98,11 +99,15 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	member := authorityMember(t, s, "member", RoleEditor)
 	child := authorityRoot("child", "a")
 	child.Parent = &member.Authority
+	child.Grants = []capability.Grant{capability.RunsWrite}
 	authorityPersist(t, s, child)
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}
-	_, err := s.ResolveAuthority(t.Context(), ref)
+	before, err := s.ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Contains(before.Capability.Grants, capability.RunsWrite) {
+		t.Fatal("editor descendant lacked run write authority before demotion")
 	}
 	tenant := &Tenant{s: s, team: "a"}
 	role := RoleReader
@@ -113,8 +118,8 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(after.Capability.Grants, capability.NodesClaim) {
-		t.Fatal("demoted member retained node claim authority")
+	if slices.Contains(after.Capability.Grants, capability.RunsWrite) {
+		t.Fatal("demoted member retained run write authority")
 	}
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "owner", Role: &role}); !errors.Is(err, ErrLastOwner) {
 		t.Fatalf("last owner demotion: %v", err)

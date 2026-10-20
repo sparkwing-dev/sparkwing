@@ -53,7 +53,8 @@ func seedCredentialMember(ctx context.Context, st *store.Store, team, account st
 	}{
 		{`INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1) ON CONFLICT(id) DO NOTHING`, []any{account, account + "@fixture.invalid"}},
 		{`INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,'owner',1) ON CONFLICT(team,account_id) DO NOTHING`, []any{team, account}},
-		{`INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id,membership_epoch) VALUES (?,?,?,?,?,?,?,COALESCE((SELECT epoch FROM membership_epochs WHERE team=? AND account_id=?),0)) ON CONFLICT(hash) DO NOTHING`, []any{hex.EncodeToString(digest[:]), account, "runs.read,runs.write,runs.control,team.admin", now.UnixNano(), now.Add(time.Hour).UnixNano(), team, account, team, account}},
+		{`INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,?,?,?,?) ON CONFLICT(hash) DO NOTHING`, []any{hex.EncodeToString(digest[:]), account, "runs.read,runs.write,runs.control,team.admin", now.UnixNano(), now.Add(time.Hour).UnixNano(), team, account}},
+		{`INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,?,COALESCE((SELECT epoch FROM membership_epochs WHERE team=? AND account_id=?),0)) ON CONFLICT(session_hash,team) DO NOTHING`, []any{hex.EncodeToString(digest[:]), team, team, account}},
 	}
 	for _, query := range queries {
 		q := query.q

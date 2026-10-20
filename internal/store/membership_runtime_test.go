@@ -119,6 +119,7 @@ func TestMembershipDowngradeRechecksInviterAuthority(t *testing.T) {
 		rewriteSchemaExec(t, s.db, `UPDATE accounts SET email=?,email_verified=1 WHERE id=?`, string(role)+"@example.com", role)
 		rewriteSchemaExec(t, s.db, `UPDATE memberships SET team='b' WHERE account_id=?`, role)
 		rewriteSchemaExec(t, s.db, `UPDATE sessions SET team='b' WHERE hash=?`, invitee.Authority.ID)
+		rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'b',0)`, invitee.Authority.ID)
 	}
 	owner.Authority = tenant.mutationFixtureAuthority(t, "owner", capability.TeamAdmin, time.Now()).Principal.Authority
 	role := RoleReader
@@ -153,12 +154,14 @@ func TestMembershipRemovalKeepsAccountSessionsScopedAndParentsBoundProperty(t *t
 			var grants []capability.Grant
 			if random.IntN(2) == 0 {
 				rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','member','reader',1)")
+				rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('member','b',0)`)
 				team, grants = "b", []capability.Grant{capability.RunsRead, capability.LogsRead}
 			}
 			parent := authorityRoot("parent", "a")
 			parent.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "member"}
 			authorityPersist(t, s, parent)
 			rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id,capability_prefix) VALUES ('backed','member','runs.read',1,?,'a','member','parent')`, time.Now().Add(time.Hour).UnixNano())
+			rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('backed','a',0)`)
 			if err := (&Tenant{s: s, team: "a"}).UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member"}); err != nil {
 				t.Fatal(err)
 			}

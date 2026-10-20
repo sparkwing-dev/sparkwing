@@ -31,6 +31,7 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 	root.Grants = []capability.Grant{capability.RunsRead}
 	authorityPersist(t, s, root)
 	rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id,capability_prefix) SELECT 'derived',principal,scopes,created_at,expires_at,team,account_id,'root' FROM sessions WHERE hash='operator'`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) SELECT 'derived',team,epoch FROM session_membership_epochs WHERE session_hash='operator'`)
 	writes := []func(capability.Authorized) error{
 		func(a capability.Authorized) error {
 			_, err := c.ConsoleRefund(t.Context(), a, controllerwire.OperatorRefund{PaymentID: "pi_test", RefundID: "re_test", AmountCents: 1, Reason: "support"}, "once")

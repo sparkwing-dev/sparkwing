@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // WorkspaceBaseline records the snapshot's merge base and remote-tracking ref.
@@ -12,12 +14,9 @@ type WorkspaceBaseline struct {
 	SHA string
 }
 
-var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
-
 func validateGitObject(sha string) (string, error) {
-	sha = strings.ToLower(strings.TrimSpace(sha))
-	if !gitObjectRE.MatchString(sha) {
-		return "", fmt.Errorf("git sha must be a 40-64 character hex object id")
+	if !runspec.IsCommitID(sha) {
+		return "", fmt.Errorf("git sha must be a canonical 40- or 64-character commit id")
 	}
 	return sha, nil
 }

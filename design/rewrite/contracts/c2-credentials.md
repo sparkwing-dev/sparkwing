@@ -572,21 +572,15 @@ Session and console mutations require their selected session's CSRF proof.
 Responses use no-store and canonical errors. Failed origin verification exposes
 no bearer. Header and query team hints supply no authority.
 
-These are local C2 transport declarations over C1's existing ProvisionSpec,
-ProvisionPolicy and sole Store.Issue path. No persistence interface or second
-registry is introduced. W1's production origin policy must atomically enforce
-registration identity, current team administration, permitted pools/repos,
-issuance limits and service enrollment. It must persist origin/registration
-facts needed by claim identity and later root rotation. The controller cannot
-supply those transactions by adding SQL. Missing origin policy returns
-unavailable. Console service provisioning still needs W1 to recognize its
-verified console session origin; the existing service check only accepts
-operator/service subjects carrying operator.tokens.
+These are local C2 transport declarations over ProvisionSpec and the sole
+Store.Issue path. Store transactions enforce registration identity, current
+team administration, permitted pools and repositories, issuance limits, and
+service enrollment. They persist origin and registration facts needed by claim
+identity and later root rotation. The controller supplies verified console
+session proof to the same transaction.
 
 Real SQLite HTTP tests prove machine and service root round trips and
-refusal rollback through Store.Issue with a fake origin policy. They do not
-prove production registration, duplicate-name races, issuance limits, console
-session representation or ClaimProfileResolver integration. The Go client
+refusal rollback through Store.Issue. The Go client
 uses separate member, machine and service requests and never replays issuance.
 CLI/dashboard callers consume the same final response. The dashboard constructs
 its runner setup from the one-time capability and returned grant set. Its
@@ -616,13 +610,10 @@ appends `:<workflow-run-id>`. The existing one-hour root lifetime remains.
 No caller selects pools, metering, trust, grants or expiry. The response retains
 `token`, `team`, `repository`, `expires_at` and `labels` for the runner consumer.
 
-This is a local C2 declaration of the trusted registration selectors, not a
-second registry. C1's `ProvisionPolicy` must check that registration inside the
-issuance transaction, preserve any applicable issuance limits, and connect
-binding removal to the new capability roots. Missing policy returns unavailable.
-The real-store HTTP test uses a fake policy and proves the committed capability
-round trip and refusal rollback. It does not prove the registry race or native
-Actions placement.
+This is a local C2 declaration of the trusted registration selectors. The
+store checks the Actions binding and single-use attempt inside the issuance
+transaction. The real-store HTTP test proves the committed capability round
+trip and refusal rollback.
 
 The old exchange mint handler is removed. The route has `RetryNever` because
 issuance returns a one-time bearer with no replay contract. This local C2
@@ -3209,8 +3200,8 @@ Deployment authority uses the same predicate in root issuance, readiness and
 route policy. Console management carries `ConsoleProof` naming its direct
 session. Native transactions resolve it again and check the configured account
 and session lifetime. Inventory, rotation and revocation share `OwnsToken`.
-Native ProvisionPolicy, CapabilityManager and OIDCReader implementations are
-composed by the production store and controller constructors and checked at compile time.
+The store owns origin admission in the issuing transaction. CapabilityManager
+and OIDCReader are composed by the production store and controller constructors.
 
 `Repositories == nil` is unrestricted. A nonnil empty list authorizes nothing.
 RepositoryPattern and RepositoryIdentity distinguish path patterns from canonical

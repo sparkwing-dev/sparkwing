@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **auth:** Switching teams preserves each session's original membership fence, so removal and a later rejoin cannot revive an old session's access.
+- **github:** A verified current GitHub administrator can reclaim an App installation for their active team. Both teams receive an audit event, and the former team's owners receive an email notification. Its former subscriptions, automation consent and schedules are withdrawn.
+- **charts:** Runner bundle 0.1.17 and full chart 0.3.2 ship the launcher's generated admission policy, including Kubernetes' default failure tolerations.
+
 - **auth:** Token sign-in preserves an existing minting session when the token depends on it, so replacing the browser cookie leaves the new session usable. Explicit logout of the minting session still ends its tokens and descendant sessions. Session renewal acquires membership and ancestry locks in the shared lock order.
 
 - **go api (Breaking):** Move the store, controller, controller client, cipher tests and storage backends under `internal/`. External Go imports of their former `pkg/` paths are removed. HTTP credential DTOs and `NodeRef` live in `internal/controllerwire`; JSON contracts are unchanged. Use the author SDK, public wire packages or the documented HTTP API. See [migration](docs/migrations/_unreleased.md#controller-and-store-packages-are-internal).

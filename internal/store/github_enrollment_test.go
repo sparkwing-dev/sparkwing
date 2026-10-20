@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -20,7 +19,6 @@ func actionsEnrollment(t *testing.T) (*Tenant, capability.Authorized, GitHubRunn
 	if err != nil {
 		t.Fatal(err)
 	}
-	tenant.s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
 	return tenant, a, row
 }
 

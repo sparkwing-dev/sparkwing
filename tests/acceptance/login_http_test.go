@@ -22,7 +22,6 @@ import (
 
 func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
 	t.Helper()
-	f.store.SetProvisionPolicy(actionsProvisionPolicy(func(capability.ProvisionSpec) error { return nil }))
 	digest := sha256.Sum256([]byte(f.raw))
 	origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 	issued, err := f.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{
@@ -246,7 +245,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 			case "unknown":
 				r = loginRequest("swk_"+strings.Repeat("a", 43), "browser-proof", "/")
 			case "machine", "operator":
-				spec := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}}
+				spec := acceptanceBootstrapSpec()
 				if state == "machine" {
 					if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
 						t.Fatal(err)

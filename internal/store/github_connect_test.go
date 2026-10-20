@@ -293,8 +293,42 @@ func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
 	if err != nil || got.Team != "a" {
 		t.Fatalf("reclaim=%+v: %v", got, err)
 	}
+	if got.ReclaimedFrom != "b" {
+		t.Fatalf("reclaim notification: %+v", got)
+	}
+	for _, team := range []*Tenant{old, tenant} {
+		events, err := team.BusinessEvents(t.Context(), "github.installation_reclaimed")
+		if err != nil || len(events) != 1 {
+			t.Fatalf("team %s audit: %+v %v", team.team, events, err)
+		}
+		ev := events[0]
+		if ev.Actor != a.Principal.Capability.Subject.ID || ev.Attrs["previous_team"] != "b" || ev.Attrs["new_team"] != "a" || ev.Attrs["installation_id"] != float64(8) || ev.Attrs["github_user_id"] != float64(row.GitHubUserID) {
+			t.Fatalf("missing transfer facts: %+v", ev)
+		}
+	}
+	refreshed, err := tenant.BindAuthorizedGitHubInstallation(t.Context(), a, row)
+	if err != nil || refreshed.ReclaimedFrom != "" {
+		t.Fatalf("same team notified again: %+v %v", refreshed, err)
+	}
 	var remaining int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM github_app_triggers WHERE team='b' AND installation_id=8`).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("former subscriptions=%d: %v", remaining, err)
+	}
+}
+
+func TestGitHubReclaimRollsBackWhenAuditCannotCommit(t *testing.T) {
+	s, tenant, a, now := githubConnectionFixture(t)
+	old := &Tenant{s: s, team: "b"}
+	row := GitHubAppInstallation{InstallationID: 8, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", GitHubUserID: 501, Reclaim: true}
+	if _, err := old.TestOnlySeedGitHubInstallation(t.Context(), row, *now); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_reclaim_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	if _, err := tenant.BindAuthorizedGitHubInstallation(t.Context(), a, row); err == nil {
+		t.Fatal("reclaim committed without audit")
+	}
+	var team string
+	if err := s.db.QueryRow(`SELECT team FROM github_app_installations WHERE installation_id=8`).Scan(&team); err != nil || team != "b" {
+		t.Fatalf("failed audit changed owner: %s %v", team, err)
 	}
 }

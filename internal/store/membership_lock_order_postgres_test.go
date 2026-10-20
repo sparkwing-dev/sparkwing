@@ -27,9 +27,7 @@ func blockMembership(t *testing.T, ctx context.Context, st *store.Store, team st
 	return b
 }
 
-// Account resolution share-locked a capability and then its subject's
-// membership, while demotion locks the membership and then revokes the
-// capabilities its account minted, so the two deadlocked.
+// Account resolution and demotion both lock membership before authority.
 func TestPostgresAccountResolutionLocksMembershipBeforeAuthorityAgainstDemotion(t *testing.T) {
 	st := storetest.OpenPostgres(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)

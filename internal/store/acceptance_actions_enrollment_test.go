@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -14,15 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
-
-type storeActionsProof struct{}
-
-func (storeActionsProof) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	if spec.Kind != capability.ProvisionActions || spec.RegistrationID != "github:42:7" {
-		return errors.New("unverified Actions proof")
-	}
-	return nil
-}
 
 func checkStoreActionsEnrollment(t *testing.T) (err error) {
 	ctx := t.Context()
@@ -37,7 +27,6 @@ func checkStoreActionsEnrollment(t *testing.T) (err error) {
 		return err
 	}
 	s.SetSessionKeyCipher(cipher)
-	s.SetProvisionPolicy(storeActionsProof{})
 	member, err := s.ResolveSignIn(ctx, googleProfile("actions-owner", "actions-owner@example.test"), store.SignUpConditions{}, time.Now())
 	if err != nil {
 		return err
@@ -75,7 +64,6 @@ func checkStoreActionsEnrollment(t *testing.T) (err error) {
 	}
 	s = reopened
 	s.SetSessionKeyCipher(cipher)
-	s.SetProvisionPolicy(storeActionsProof{})
 	tenant, err = s.ForTeam(ctx, team)
 	if err != nil {
 		return err
@@ -100,7 +88,6 @@ func checkStoreActionsEnrollment(t *testing.T) (err error) {
 		return err
 	}
 	s = reopened
-	s.SetProvisionPolicy(storeActionsProof{})
 	for _, issued := range []capability.Issued{issued, child} {
 		_, err := s.LookupCapability(ctx, issued.Capability.Digest)
 		var refusal *apierr.Error

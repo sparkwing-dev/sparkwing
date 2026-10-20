@@ -62,6 +62,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 			engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)
 			engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 			engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('session','account','runs.read,runs.control',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
+			engineSQL(t, s, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('session','a',0)`)
 			principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"})
 			if err != nil {
 				t.Fatal(err)

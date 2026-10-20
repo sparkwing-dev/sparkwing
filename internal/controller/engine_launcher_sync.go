@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// LauncherSyncReader rechecks launcher ancestry and resolves current awards in one transaction.
+// LauncherSyncReader rechecks launcher ancestry and resolves current awards.
 type LauncherSyncReader interface {
 	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 }
@@ -58,7 +58,6 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 type storeLauncherSync struct{ store *store.Store }
 
 func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
-
 	var reservations []capability.LeaseRef
 	for _, observation := range observed {
 		if observation.Reservation {

@@ -42,7 +42,7 @@ func OpenExisting(ctx context.Context, dialect Dialect, target string) (*Store, 
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
-	st := &Store{db: db, conn: conn, dialect: dialect, provisions: nativeProvisionPolicy{}}
+	st := &Store{db: db, conn: conn, dialect: dialect}
 	label := target
 	if dialect == DialectPostgres {
 		label = "PostgreSQL target"

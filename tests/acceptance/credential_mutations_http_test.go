@@ -512,5 +512,9 @@ func credentialSeedAuthority(t testing.TB, s *store.Store, team store.Team) capa
 		t.Fatal(err)
 	}
 
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,?,0) ON CONFLICT DO NOTHING`, hash, team); err != nil {
+		t.Fatal(err)
+	}
+
 	return capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hash}}, Target: capability.Target{Team: string(team)}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
 }

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -53,7 +52,6 @@ func TestMachineEnrollmentUsesStoreOrigin(t *testing.T) {
 
 func TestMachineEnrollmentAuthorityProperty(t *testing.T) {
 	s, base := machineEnrollment(t)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
 	check := func(change uint8, suffix uint16) bool {
 		spec := base
 		spec.Subject.ID = fmt.Sprintf("runner-%d", suffix)

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -11,12 +12,10 @@ import (
 // LauncherFixtureClaim provisions a launcher and exchanges its current unit award.
 func LauncherFixtureClaim(t *testing.T, st *store.Store, runID, nodeID string) string {
 	t.Helper()
-	st.SetProvisionPolicy(sessionOriginFake{})
 	root, err := st.ProvisionCapability(t.Context(), capability.ProvisionSpec{
-		Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "fixture-bootstrap"},
-		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens},
+		Kind: capability.ProvisionBootstrap, Seed: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"},
+		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore},
 	})
-	st.SetProvisionPolicy(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

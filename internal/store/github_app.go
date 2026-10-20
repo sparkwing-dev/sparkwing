@@ -30,9 +30,11 @@ type GitHubAppInstallation struct {
 	ConnectedBy  string
 	GitHubUserID int64
 	// Reclaim is provider-verified current administration supplied by the connection flow.
-	Reclaim   bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Reclaim bool
+	// ReclaimedFrom identifies the previous team for the committed transfer notice.
+	ReclaimedFrom Team `json:"-"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // GitHubAppTrigger subscribes one pipeline to one repository's events

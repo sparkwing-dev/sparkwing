@@ -36,12 +36,10 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "alpha"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
 		return err
 	}
-	s.SetProvisionPolicy(storeProvisionPolicy{})
-	operator, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "acceptance", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
+	operator, err := s.ProvisionCapability(ctx, storeNativeBootstrapSpec())
 	if err != nil {
 		return err
 	}
-	s.SetProvisionPolicy(nil)
 	operatorRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
 	until := time.Now().UTC().Add(time.Hour)
 	launcher, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &operatorRef, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: &until})

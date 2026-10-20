@@ -382,6 +382,10 @@ func (s *Server) bindGitHubAppInstallation(ctx context.Context, writer GitHubCon
 	if err != nil {
 		return store.GitHubAppInstallation{}, identityRefusal("github app bind", err)
 	}
+	if bound.ReclaimedFrom != "" {
+		text := fmt.Sprintf("GitHub App installation %d (%s) was moved from Sparkwing team %s to team %s by a verified current GitHub administrator. Its subscriptions, automation consent and schedules were withdrawn from your team. A team owner who administers the GitHub account can reconnect it.", inst.ID, inst.Account.Login, bound.ReclaimedFrom, bound.Team)
+		s.mailOwners(ctx, bound.ReclaimedFrom, "GitHub App installation moved to another team", text, strings.TrimRight(s.dashboardURL, "/")+"/team/github")
+	}
 	s.logger.Info("github app installation connected", "team", string(p.Target.Team), "installation_id", inst.ID,
 		"account", inst.Account.Login, "account_type", inst.Account.Type, "by", p.Principal.Capability.Subject.ID, "github_user", githubUser)
 	return bound, nil

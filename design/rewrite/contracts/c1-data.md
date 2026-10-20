@@ -678,7 +678,7 @@ serialization. No foreign contract changes.
 `Tenant.CreateMemberToken`, `CreateMachineToken`, `TeamTokens`, `TeamToken`
 and `RevokeTeamToken` are removed with `TokenFamily`, its constants,
 `TeamTokenFamily`, `Token.Family` and `MachinePrincipal`. Production callers
-already use capability provisioning and management. Member roots use
+already use capability provisioning and management. Member capabilities use
 `Store.ProvisionCapability` under current session authority. Machine roots use
 the registered `ProvisionMachine` origin. Inventory, rotation and revocation
 use the authority-bearing capability methods.
@@ -1295,29 +1295,25 @@ These declarations leave transaction implementation with W1.
   ancestry, current membership and route-specific unit/result/log facts. Binding,
   data-edge and source-release checks also run on the transaction owning the write.
   A source credential is released only after its authorization audit commits.
-- Trusted root provisioning is the root-only Delegate variant. Roots have no
-  revocation parent. `ProvisionSpec.Authority` is their authorizer, whose current
-  rights constrain provisioning. Membership still governs account-root liveness.
+- `ProvisionSpec.Authority` is the authorizer whose current rights constrain
+  provisioning. Machine, service and Actions roots have no revocation parent.
+  Member capabilities retain the issuing session as their parent, so logout
+  ends their authority. Membership also governs account authority at use time.
   Here awards retain the requester's session/token ancestry and current runs.write.
-  Member roots have their own optional expiry. The issuing session is checked at
-  issuance and does not become their lifetime or revocation parent. Current
-  account membership still constrains each subsequent use.
-- `provision_contract.go` declares `ProvisionPolicy.AuthorizeProvision` for trusted
-  bootstrap and verified Actions evidence, and optional additional enrollment policy.
-  It receives the issuing transaction's authority resolver and trusted `ProvisionSpec`.
-  Bootstrap and Actions origins require that verifier. Machine/service enrollment
+  Member capabilities have an expiry bounded by their parent session.
+- `provision_contract.go` declares the transaction-owned checks for trusted
+  bootstrap, Actions origin and enrollment. Machine/service enrollment
   uses the existing capability rows and their persisted `CapabilityRecord.Origin`.
   Current team administration, canonical registration selectors, claim-only machine
   grants, deployment-only service grants, repository patterns, unique pools, active
   names and the existing machine cap are checked inside the issuing transaction.
   Team locks serialize machine enrollment. One advisory lock serializes service names.
   Rotation preserves registration and counts overlapping grace roots as one machine.
-  An optional verifier cannot bypass these checks. The store rechecks authorizer scope, expiry, root shape and
-  registered team after verification. Only deployment token authority can set
+  The store rechecks authorizer scope, expiry, root shape and registered team.
+  Only deployment token authority can set
   metering or authorize service issuance. Provisioning never grants console
   authority. Machine enrollment records the account authorizer in `created_by`,
-  which also decides whether a claim is the requester's own machine. Roots retain no
-  revocation parent. The evidence providers remain W2's integration.
+  which also decides whether a claim is the requester's own machine.
 - Claim selection checks every requested kind's grant before one ordered scan.
   Runner selection accepts trigger/node, launcher selection plan/eval/node. The
   named trigger path retains the exact here reservation's trigger.host exception. Unknown,
@@ -2316,8 +2312,8 @@ allowance and rate-table presence. Their unused Store getters are removed.
 | Export | Purpose |
 |---|---|
 | `CapabilityRecord`, `CapabilityRecord.Validate` | Preserve and validate complete versioned authority alongside indexed projections. |
-| `Tenant.RevokeAuthority`, `Operator.RevokeAuthority` | Revoke authorized tenant or deployment authority and advance its generation atomically. |
-| `MembershipUpdate`, `Tenant.UpdateMembership` | Change or remove membership with current account authority, invitation withdrawal, minter revocation, session movement and the corresponding generation increment. |
+| `Tenant.RevokeAuthority`, `Operator.RevokeAuthority` | Revoke authorized tenant or deployment authority atomically. |
+| `MembershipUpdate`, `Tenant.UpdateMembership` | Change or remove membership with current account authority and session movement. Authority use checks the member's current role and the membership epoch. |
 | `PaymentSettlement`, `Store.SettlePayment` | Deduplicate verified checkout events and commit their derived-team financial result. |
 
 `TestRewriteSchemaCapabilitiesPreserveAuthority` persists full capability envelopes

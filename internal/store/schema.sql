@@ -277,9 +277,15 @@ CREATE TABLE sessions (
     account_id TEXT NOT NULL DEFAULT '',
     capability_prefix TEXT NOT NULL DEFAULT '',
     revoked_at BIGINT,
-    membership_epoch BIGINT NOT NULL DEFAULT 0 CHECK(membership_epoch >= 0),
     auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0),
     CHECK(team IS NOT NULL OR (account_id <> '' AND capability_prefix = ''))
+);
+
+CREATE TABLE session_membership_epochs (
+    session_hash TEXT NOT NULL REFERENCES sessions(hash) ON DELETE CASCADE,
+    team TEXT NOT NULL REFERENCES teams(name) ON DELETE CASCADE,
+    epoch BIGINT NOT NULL CHECK(epoch >= 0),
+    PRIMARY KEY (session_hash, team)
 );
 
 CREATE TABLE run_control_requests (

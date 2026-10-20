@@ -91,13 +91,11 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	}
 	authority := plan.Seal.Request.AuthorityRef
 	if scenario == "metered_runner" {
-		s.SetProvisionPolicy(storeProvisionPolicy{})
-		operator, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "acceptance", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
+		operator, err := s.ProvisionCapability(ctx, storeNativeBootstrapSpec())
 		if err != nil {
 			t.Fatal(err)
 		}
 		authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
-		s.SetProvisionPolicy(nil)
 	}
 	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":enrolled", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "enrolled"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: pools, Metered: scenario == "metered_runner"})
 	if err != nil {

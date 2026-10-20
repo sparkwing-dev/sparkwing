@@ -32,31 +32,31 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 			return capability.Capability{}, err
 		}
 	}
-	if err := checkProvisionOriginTx(ctx, tx, spec, false); err != nil {
-		return capability.Capability{}, err
+	if spec.Kind == capability.ProvisionMachine {
+		var leaves []capability.AuthorityRef
+		if spec.Authority != nil {
+			leaves = append(leaves, *spec.Authority)
+		}
+		if err := lockAuthorityWithTeamTx(ctx, tx, Team(spec.Team), leaves); err != nil {
+			return capability.Capability{}, err
+		}
 	}
 	if spec.Kind == capability.ProvisionActions {
 		if err := (&Tenant{s: tx.store, team: Team(spec.Team)}).lockTeamTx(ctx, tx); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return capability.Capability{}, ErrUnknownTeam
+			}
 			return capability.Capability{}, err
 		}
 	}
+	if err := checkProvisionOriginTx(ctx, tx, spec); err != nil {
+		return capability.Capability{}, err
+	}
 	if spec.Kind != capability.ProvisionMember && spec.Kind != capability.ProvisionTeamAdmin && !(tx.rotatingRoot != nil && spec.Kind == capability.ProvisionBootstrap) {
-		enrollment := spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionService
-		if tx.store.provisions == nil && !enrollment && !(spec.Kind == capability.ProvisionBootstrap && spec.Seed != "") {
-			return capability.Capability{}, authorityError(apierr.Unavailable, "root origin verification is not configured")
-		}
-		if tx.store.provisions != nil {
-			if err := tx.store.provisions.AuthorizeProvision(ctx, tx, spec); err != nil {
-				return capability.Capability{}, err
-			}
-		}
-		if enrollment {
+		if spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionService {
 			if err := authorizeEnrollmentTx(ctx, tx, spec); err != nil {
 				return capability.Capability{}, err
 			}
-		}
-		if err := checkProvisionOriginTx(ctx, tx, spec, true); err != nil {
-			return capability.Capability{}, err
 		}
 	}
 	if spec.Kind == capability.ProvisionActions {
@@ -77,7 +77,7 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 	return c, nil
 }
 
-func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec, lockRegistry bool) error {
+func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(tx.now()) {
 		return authorityError(apierr.Forbidden, "root expiry has passed")
 	}
@@ -127,6 +127,9 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 		return nil
 	case capability.ProvisionBootstrap:
+		if tx.rotatingRoot == nil && (spec.Seed == "" || spec.Subject != (capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}) || spec.ExpiresAt != nil || spec.Metered || !slices.Equal(spec.Grants, []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore})) {
+			return bindingRefusal()
+		}
 		if tx.rotatingRoot != nil {
 			if !deployment {
 				return bindingRefusal()
@@ -179,11 +182,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	if spec.Team != "" {
 		var team string
 		var membersCanAddMachines bool
-		lock := ""
-		if lockRegistry {
-			lock = tx.forShare()
-		}
-		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`+lock, spec.Team, TeamDeletionPending).Scan(&team, &membersCanAddMachines)
+		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`+tx.forShare(), spec.Team, TeamDeletionPending).Scan(&team, &membersCanAddMachines)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrUnknownTeam
 		}

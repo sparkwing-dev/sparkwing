@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -32,6 +33,7 @@ type githubConnectFake struct {
 	seen                   capability.Authorized
 	bound                  store.GitHubAppInstallation
 	consumed               map[string]bool
+	reclaimedFrom          store.Team
 	bindErr                error
 	reads, consumes, binds int
 }
@@ -60,6 +62,7 @@ func (f *githubConnectFake) BindAuthorizedGitHubInstallation(_ context.Context, 
 	f.binds++
 	f.seen, f.bound = a, row
 	row.Team = f.team
+	row.ReclaimedFrom = f.reclaimedFrom
 	return row, f.bindErr
 }
 
@@ -397,4 +400,43 @@ func TestGitHubBrowserConnectionPrivateConsumeFailure(t *testing.T) {
 	if w.Code != 500 || f.providerCalls != 0 || f.writer.binds != 0 || strings.Contains(w.Body.String(), "private-database-password") {
 		t.Fatalf("consume failure = %d %s", w.Code, w.Body)
 	}
+}
+
+func TestGitHubReclaimNotifiesPreviousTeamAdministrators(t *testing.T) {
+	f := newGitHubBrowserFixture(t)
+	sender := &reclaimMailer{}
+	f.s.WithMailer(sender)
+	f.writer.reclaimedFrom = "b"
+	engineSQL(t, f.s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
+	engineSQL(t, f.s.store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('prior-owner-1','first@example.test',1,1,1),('prior-owner-2','second@example.test',1,1,1),('prior-reader','reader@example.test',1,1,1)`)
+	engineSQL(t, f.s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','prior-owner-1','owner',1),('b','prior-owner-2','owner',1),('b','prior-reader','reader',1)`)
+	recipients := []string{"first@example.test", "second@example.test"}
+	p := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}}}, Target: capability.Target{Team: "a"}}
+	inst := githubapp.Installation{ID: 7}
+	if _, err := f.s.bindGitHubAppInstallation(t.Context(), f.writer, p, inst, 42); err != nil {
+		t.Fatal(err)
+	}
+	messages := sender.messages
+	if len(messages) != 2 {
+		t.Fatalf("notifications: %+v", messages)
+	}
+	for i, message := range messages {
+		if message.To != recipients[i] || !strings.Contains(message.Text, "installation 7") || !strings.Contains(message.Text, "team b to team a") {
+			t.Fatalf("missing reclaim facts: %+v", message)
+		}
+	}
+	f.writer.bindErr = errors.New("bind refused")
+	if _, err := f.s.bindGitHubAppInstallation(t.Context(), f.writer, p, inst, 42); err == nil {
+		t.Fatal("failed binding succeeded")
+	}
+	if len(sender.messages) != 2 {
+		t.Fatal("failed transfer sent notification")
+	}
+}
+
+type reclaimMailer struct{ messages []mailer.Message }
+
+func (m *reclaimMailer) Send(_ context.Context, message mailer.Message) error {
+	m.messages = append(m.messages, message)
+	return nil
 }

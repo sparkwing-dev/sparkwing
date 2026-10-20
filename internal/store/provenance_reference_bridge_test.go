@@ -75,6 +75,7 @@ func referenceMember(t *testing.T, s *Store, id string, role Role) Actor {
 	s.testOnlyExec(t, "INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?, ?, 1, 1)", id, id+"@example.test")
 	s.testOnlyExec(t, "INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a',?,?,1)", id, role)
 	s.testOnlyExec(t, "INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,'a',?)", id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), id)
+	s.testOnlyExec(t, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)`, id)
 	return Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
 }
 

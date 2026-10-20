@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,12 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-type sessionOriginFake struct{}
-
-func (sessionOriginFake) AuthorizeProvision(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error {
-	return nil
-}
-
 func TestSessionRoutePreservesCapabilityScopeProperty(t *testing.T) {
 	engine, _ := engineRuntimeStore(t)
 	s := engine.Store
@@ -39,7 +32,6 @@ func TestSessionRoutePreservesCapabilityScopeProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(memberRaw))
-	s.SetProvisionPolicy(sessionOriginFake{})
 	all := []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsWrite, capability.RunsControl, capability.ApprovalsWrite, capability.TeamAdmin}
 	random := rand.New(rand.NewPCG(183, 550))
 	handler := server.Handler()

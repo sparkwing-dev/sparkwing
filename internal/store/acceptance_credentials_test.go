@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -13,19 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-type storeProvisionPolicy struct{}
-
-func (storeProvisionPolicy) AuthorizeProvision(ctx context.Context, resolver capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	if spec.RegistrationID != "acceptance" {
-		return errors.New("unverified root origin")
-	}
-	if spec.Authority != nil {
-		_, err := resolver.ResolveAuthority(ctx, *spec.Authority)
-		return err
-	}
-	return nil
-}
-
 func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 	ctx := t.Context()
 	target := storetest.NewSQLite(t)
@@ -34,9 +20,7 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	s.SetProvisionPolicy(storeProvisionPolicy{})
-	bootstrap := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "acceptance", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}}
-	bootstrap.Seed = capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	bootstrap := storeNativeBootstrapSpec()
 	operator, err := s.ProvisionCapability(ctx, bootstrap)
 	if err != nil {
 		return err
@@ -45,7 +29,6 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 		return fmt.Errorf("seeded administrator readiness: %t, %v", ready, err)
 	}
 	operatorRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
-	s.SetProvisionPolicy(nil)
 	serviceSpec := capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &operatorRef, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch, capability.OperatorTokens}, Metered: true}
 	service, err := s.ProvisionCapability(ctx, serviceSpec)
 	if err != nil {
@@ -67,12 +50,8 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 	if roots != 2 {
 		return fmt.Errorf("refused provisioning left %d roots, want 2", roots)
 	}
-	operatorActor := store.Actor{Authority: operatorRef, CapabilityPrefix: operatorRef.ID}
-	if err := s.AsOperator().RevokeAuthority(ctx, operatorActor, operatorRef); err != nil {
-		return err
-	}
 	if _, err := s.LookupCapability(ctx, operator.Capability.Digest); err == nil {
-		return errors.New("revoked operator remains live")
+		return errors.New("setup administrator remains live after service enrollment")
 	}
 	if _, err := s.LookupCapability(ctx, service.Capability.Digest); err != nil {
 		return fmt.Errorf("service root inherited its authorizer's revocation: %w", err)
@@ -92,6 +71,10 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 		return errors.New("ended bootstrap seed reopened issuance")
 	}
 	return nil
+}
+
+func storeNativeBootstrapSpec() capability.ProvisionSpec {
+	return capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
 }
 
 func TestStoreProvisioningOrigins(t *testing.T) {

@@ -64,12 +64,14 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		if row.Team != "" && row.Team != t.team || row.ConnectedBy != "" && row.ConnectedBy != p.Capability.Subject.ID || row.GitHubUserID <= 0 || strconv.FormatInt(row.GitHubUserID, 10) != subject || row.AccountType != "User" && row.AccountType != "Organization" {
 			return bindingRefusal()
 		}
+		var previousTeam Team
 		if row.Reclaim {
 			previous, err := githubInstallationOwnerTx(ctx, tx, row.InstallationID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
 			if err == nil && previous != string(t.team) {
+				previousTeam = Team(previous)
 				prior := &Tenant{s: t.s, team: Team(previous)}
 				if err := prior.unbindGitHubAppInstallationTx(ctx, tx, row.InstallationID); err != nil {
 					return err
@@ -82,7 +84,22 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		row.ConnectedBy = p.Capability.Subject.ID
 		var err error
 		out, err = t.bindGitHubInstallationTx(ctx, tx, row, tx.now())
-		return err
+		if err != nil {
+			return err
+		}
+		if previousTeam != "" {
+			transfer, err := newIdentityID()
+			if err != nil {
+				return err
+			}
+			for _, team := range []Team{previousTeam, t.team} {
+				if err := RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
+					return err
+				}
+			}
+			out.ReclaimedFrom = previousTeam
+		}
+		return nil
 	})
 	if err != nil {
 		return GitHubAppInstallation{}, err

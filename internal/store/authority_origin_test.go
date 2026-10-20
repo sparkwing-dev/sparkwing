@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -24,7 +23,6 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := authorityMember(t, s, "owner", RoleOwner)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, _ capability.ProvisionSpec) error { return nil }))
 	registration := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:runner", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}}
 	_, err = s.ProvisionCapability(t.Context(), registration)
 	if err != nil {
@@ -68,7 +66,6 @@ func TestMachineProvisionGrantsProperty(t *testing.T) {
 	deployment.Subject.Kind = capability.SubjectService
 	deployment.Grants = []capability.Grant{capability.OperatorTokens}
 	authorityPersist(t, s, deployment)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
 	random := rand.New(rand.NewPCG(453, 28))
 	for originIndex, origin := range []capability.AuthorityRef{owner.Authority, {Kind: capability.AuthorityCapability, ID: deployment.Prefix}} {
 		for grantIndex, grant := range capability.Grants() {

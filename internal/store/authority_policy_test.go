@@ -107,11 +107,23 @@ func TestPersonalAuthorityFollowsRequiredSettingAndGrant(t *testing.T) {
 
 func TestOIDCCeilingIncludesEveryAncestorGraceAndDeadline(t *testing.T) {
 	now := time.Unix(1700000000, 0)
-	expiry, grace, deadline := now.Add(time.Hour), now.Add(time.Second), now.Add(time.Minute)
-	for _, at := range []*time.Time{&expiry, &grace, &deadline} {
-		chain := []authorityNode{{principal: capability.Principal{Capability: capability.Capability{ExpiresAt: &expiry}}}, {principal: capability.Principal{Capability: capability.Capability{RevokedAt: at}}}}
-		if got := authorityNotAfter(chain, now.Add(2*time.Hour)); !got.Equal(*at) {
-			t.Fatalf("ancestor bound %v: got %v", at, got)
-		}
+	for _, tc := range []struct {
+		name  string
+		bound func(*capability.Capability, *time.Time)
+	}{
+		{"expiry", func(c *capability.Capability, at *time.Time) { c.ExpiresAt = at }},
+		{"revocation grace", func(c *capability.Capability, at *time.Time) { c.RevokedAt = at }},
+		{"binding deadline", func(c *capability.Capability, at *time.Time) { c.Binding.Deadline = at }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bound := now.Add(time.Minute)
+			future := now.Add(time.Hour)
+			ancestor := capability.Capability{}
+			tc.bound(&ancestor, &bound)
+			chain := []authorityNode{{principal: capability.Principal{Capability: capability.Capability{ExpiresAt: &future}}}, {principal: capability.Principal{Capability: ancestor}}}
+			if got := authorityNotAfter(chain, now.Add(2*time.Hour)); !got.Equal(bound) {
+				t.Fatalf("ancestor bound: got %v, want %v", got, bound)
+			}
+		})
 	}
 }

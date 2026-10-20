@@ -3,6 +3,7 @@ package acceptance_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -57,13 +58,6 @@ func (c *storedRunnerW8) Finish(ctx context.Context, run string, body controller
 
 type runnerStorePolicyW8 struct{}
 
-func (runnerStorePolicyW8) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	if spec.RegistrationID != "runner-store-fixture" && spec.RegistrationID != "runner:default:runner" && spec.RegistrationID != "service:"+spec.Subject.ID {
-		return errors.New("unregistered fixture origin")
-	}
-	return nil
-}
-
 func (runnerStorePolicyW8) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
 	capacity := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
 	return match.Profile{Capacity: capacity}, capacity, nil
@@ -92,9 +86,8 @@ func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*controller.Engi
 
 func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) (*controller.EngineController, capability.Issued) {
 	t.Helper()
-	s.SetProvisionPolicy(runnerStorePolicyW8{})
 	s.SetClaimProfileResolver(runnerStorePolicyW8{})
-	operator, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "runner-store-fixture", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
+	operator, err := s.ProvisionCapability(t.Context(), acceptanceBootstrapSpec())
 	if err != nil {
 		t.Fatalf("fixture bootstrap: %v", err)
 	}
@@ -150,6 +143,10 @@ VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/t
 	return &controller.EngineController{Store: s, RunnerPolicy: runnerStorePolicyW8{}}, root
 }
 
+func acceptanceBootstrapSpec() capability.ProvisionSpec {
+	return capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
+}
+
 func storedRunnerClientW8(ctx context.Context, server *controller.EngineController, bearer string) (*storedRunnerW8, error) {
 	principal, err := server.Store.LookupCapability(ctx, sha256.Sum256([]byte(bearer)))
 	if err != nil {
@@ -165,6 +162,7 @@ func revokeStoredRunnerW8(t *testing.T, s *store.Store, target capability.Author
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('runner-admin','runner-admin@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','runner-admin','owner',1)`,
 		`INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('runner-admin','runner-admin','runs.read,team.admin',1,4102444800000000000,'default','runner-admin')`,
+		`INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('runner-admin','default',0)`,
 	} {
 		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)

@@ -314,7 +314,7 @@ is false, personal enrollment requires administration too. A personal runner
 records the membership epoch, grant and setting that authorized enrollment.
 Every use checks them again. Removing and re-adding the member cannot revive
 an old credential. Shared runners belong to the team and survive the
-registrar's demotion or removal. An administrator revokes them.
+registrar's demotion or removal. Revoke a departing registrar's shared runners if they still control the machines or bearer credentials.
 
 Member tokens expire within 90 days and remain children of the minting session,
 so logout ends their authority. `team.admin` requires `--allow-team-admin`
@@ -625,6 +625,9 @@ payment operation. It grants no general team or operator power.
 
 GitHub Actions enrollment uses `GET` and `POST /api/v1/runners/github` and
 `DELETE /api/v1/runners/github/{repository}`. The dashboard uses these paths.
+Each repository, workflow run and run attempt can exchange its GitHub identity
+once. Run the Sparkwing runner in one job per attempt. Actions credentials cannot
+be rotated. A new workflow attempt receives its own credential.
 Runner metering uses the console-only
 `POST /api/v1/operator/runners/{runner}/metered`, selecting an enrolled root's
 capability prefix.

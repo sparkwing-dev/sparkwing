@@ -2292,12 +2292,12 @@ The legacy `Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`,
 `NewSecretManager` for typed management operations. The legacy enqueue API is removed. Submit a sealed `CreateRunRequest` through
 `Controller.CreateRun`; the request retains its captured environment digest and
 resolved intake options. Controller integrations retain the
-existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
+existing `WithCredentialIssuer` and the store's origin-admission transaction.
 Machine and service enrollment use persisted root registrations by default.
 The store checks current authority, canonical registration selectors, repository
 patterns, pools, active names and the existing machine limit before commit.
 An active name returns `conflict`. The runner limit returns `quota_exceeded`.
-Bootstrap and Actions provisioning still require their trusted origin verifier.
+Bootstrap and Actions provisioning use the store's native origin checks.
 Console-origin persistence remains a separate integration.
 
 ## Launcher claims use the shared unit queue

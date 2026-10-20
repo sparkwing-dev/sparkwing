@@ -26,7 +26,6 @@ func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 		Audience: "https://controller.test", Issuer: "https://actions.test", JWKSURL: "https://actions.test/keys",
 		HTTP: &http.Client{Transport: reportTransport{http.HandlerFunc(actions.signer.ServeKeys)}},
 	})
-	f.store.SetProvisionPolicy(actionsProvisionPolicy(func(capability.ProvisionSpec) error { return nil }))
 	call := func(method, path, body string, want int) {
 		t.Helper()
 		w := httptest.NewRecorder()

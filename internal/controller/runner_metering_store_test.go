@@ -30,7 +30,6 @@ func TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(raw))
-	st.SetProvisionPolicy(sessionOriginFake{})
 	root, err := st.ProvisionCapability(t.Context(), capability.ProvisionSpec{
 		Kind: capability.ProvisionMachine, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
 		Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "worker"}, RegistrationID: "runner:a:worker",

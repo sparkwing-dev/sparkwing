@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"fmt"
 	"math/rand/v2"
 	"reflect"
@@ -16,7 +15,6 @@ func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authori
 	t.Helper()
 	s, demand, _ := meteredUnitFixture(t, false)
 	owner := authorityMember(t, s, "owner", RoleOwner)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
 	expiry := s.now().Add(time.Hour)
 	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{
 		Kind: capability.ProvisionMachine, Authority: &owner.Authority, Team: "a",

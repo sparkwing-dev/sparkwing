@@ -148,17 +148,18 @@ func TestIntakeSourcePrivateGitHubUsesStoredTeamCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.WithSecretsCipher(cipher)
-	sealed, err := sealSecret(cipher, gitCredentialBinding(store.GitCredential{Team: "a", Host: "github.com", HostWide: true}), "team-read-token")
+	sealed, err := sealSecret(cipher, gitCredentialBinding(store.GitCredential{Team: "a", Host: "github.com", Repository: "gh:42"}), "team-read-token")
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, s.store, `INSERT INTO git_credentials(host_wide,id,team,host,kind,username,secret,confirmed_at,created_at,updated_at) VALUES (1,'source','a','github.com','https','oauth',?,1,1,1)`, sealed)
+	engineSQL(t, s.store, `INSERT INTO git_credentials(host_wide,id,team,repository_key,host,kind,username,secret,confirmed_at,created_at,updated_at) VALUES (0,'source','a','gh:42','github.com','https','oauth',?,1,1,1)`, sealed)
 	original := http.DefaultTransport
+	githubID := int64(42)
 	http.DefaultTransport = intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://api.github.com/repos/acme/app" || r.Header.Get("Authorization") != "Bearer team-read-token" {
-			t.Fatal("private identity escaped the configured host credential")
+			t.Fatal("private identity escaped the repository credential")
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":42}`))}, nil
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"id":%d}`, githubID)))}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
 	input.Git.Repository = runspec.Repository{Key: "gh:42", Display: "acme/app"}
@@ -174,6 +175,10 @@ func TestIntakeSourcePrivateGitHubUsesStoredTeamCredential(t *testing.T) {
 	raw, err := json.Marshal(created)
 	if err != nil || strings.Contains(string(raw), "team-read-token") {
 		t.Fatal("source credential escaped into the receipt")
+	}
+	githubID = 43
+	if _, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{IdempotencyKey: "mismatched-github", Request: input}); err == nil {
+		t.Fatal("accepted a supplied repository key that GitHub did not verify")
 	}
 }
 

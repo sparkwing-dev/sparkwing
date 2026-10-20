@@ -72,13 +72,13 @@ func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.Paym
 		if settled.RefillFailed != "" {
 			s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill was refused",
 				"We queued a full refund for an automatic refill because the card cannot pay for this team ("+settled.Refused+"). "+
-					"This refill did not add credits. Check your saved card or use Add funds to keep Cloud work funded:")
+					"This refill did not add credits. Check your saved card or use Add funds to keep Cloud work funded:", s.billingPageURL())
 		}
 	case settled.RefillFailed != "":
 		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
 		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
 			"We could not charge your card for an automatic refill ("+settled.RefillFailed+"). "+
-				"Refills stop until you change the saved card or Add funds succeeds; Cloud work stops when the credits run out:")
+				"Refills stop until you change the saved card or Add funds succeeds; Cloud work stops when the credits run out:", s.billingPageURL())
 	case settled.Granted:
 		s.logger.Info("payment granted", append(attrs, "grant", settled.GrantID, "amount_micro", settled.AmountMicro)...)
 	}
@@ -193,20 +193,18 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 	}
 }
 
-// safety: a failed send loses only the email; the dashboard shows the same
-// state, so billing never waits on the mail service.
-func (s *Server) mailOwners(ctx context.Context, team store.Team, subject, text string) {
+// A failed send loses only the email; the committed state remains visible.
+func (s *Server) mailOwners(ctx context.Context, team store.Team, subject, text, link string) {
 	t, err := s.store.ForTeam(ctx, team)
 	if err != nil {
-		s.logger.Warn("billing mail: team", "team", string(team), "err", err)
+		s.logger.Warn("owner mail: team", "team", string(team), "err", err)
 		return
 	}
 	owners, err := t.TeamOwnerEmails(ctx)
 	if err != nil {
-		s.logger.Warn("billing mail: owners", "team", string(team), "err", err)
+		s.logger.Warn("owner mail: owners", "team", string(team), "err", err)
 		return
 	}
-	link := s.billingPageURL()
 	m := s.mailer
 	if m == nil {
 		m = mailer.Log{Logger: s.logger}
@@ -218,7 +216,7 @@ func (s *Server) mailOwners(ctx context.Context, team store.Team, subject, text 
 				html.EscapeString(link) + "</a></p>",
 		}
 		if err := m.Send(ctx, msg); err != nil {
-			s.logger.Warn("billing mail: send", "team", string(team), "err", err)
+			s.logger.Warn("owner mail: send", "team", string(team), "err", err)
 		}
 	}
 }

@@ -65,7 +65,7 @@ The controller binds the installation to the caller's active team only when all 
 
 The last rule is stricter than "the user can see the installation" on purpose. An organization member with read access to one repository sees the organization's installation in `GET /user/installations`, and a binding would give their team source tokens for every repository in it.
 
-An installation belongs to one team. A freshly verified current GitHub account owner or organization admin can reconnect it to their active team. The transaction removes the former team's subscriptions and automation consent, withdraws its schedules, and binds the installation to the new team. Reconnecting one the team already holds refreshes it.
+An installation belongs to one team. A freshly verified current GitHub account owner or organization admin can reconnect it to their active team. The transaction removes the former team's subscriptions and automation consent, withdraws its schedules, and binds the installation to the new team. Both teams receive a `github.installation_reclaimed` audit event naming the actor, installation, previous team and new team. The controller emails the previous team's owners at their verified addresses. Without a configured mail service it logs the notification attempt. Reconnecting one the team already holds refreshes it.
 
 ### Connecting an App installed on GitHub already
 

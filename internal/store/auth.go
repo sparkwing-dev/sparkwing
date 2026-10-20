@@ -87,12 +87,11 @@ func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl 
 	}
 	now := tx.now()
 	expires := now.Add(ttl)
-	epoch, err := membershipEpochTx(ctx, tx, c.Team, c.Subject.ID)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
+ VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
 		return "", nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at,membership_epoch)
- VALUES (?,?,?,'',?,?,?,?,?)`, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano(), epoch); err != nil {
+	if err := authenticateSessionTeamsTx(ctx, tx, sessionDigest(raw)); err != nil {
 		return "", nil, err
 	}
 	if err := tx.Commit(); err != nil {

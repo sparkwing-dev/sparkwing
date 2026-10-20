@@ -310,7 +310,7 @@ func readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.Author
 		var created, expires, epoch int64
 		var revoked sql.NullInt64
 		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
-		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,membership_epoch FROM sessions WHERE hash = ?", ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &epoch)
+		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,COALESCE((SELECT epoch FROM session_membership_epochs WHERE session_hash=sessions.hash AND team=sessions.team),-1) FROM sessions WHERE hash = ?", ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &epoch)
 		if err != nil {
 			return node, err
 		}
@@ -497,8 +497,15 @@ func authorityMembershipKeys(chain []authorityNode) []storeLockKey {
 // concurrent session team switch restarts the transaction rather than extending
 // the set while holding authority locks.
 func lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.AuthorityRef, writes ...string) error {
+	return lockAuthorityWithTeamTx(ctx, tx, "", leaves, writes...)
+}
+
+func lockAuthorityWithTeamTx(ctx context.Context, tx *storeTx, team Team, leaves []capability.AuthorityRef, writes ...string) error {
 	var set []authorityLock
 	var memberships []storeLockKey
+	if team != "" {
+		memberships = append(memberships, storeLockKey{tier: lockTeam, keys: [3]string{string(team)}})
+	}
 	chains := make(map[capability.AuthorityRef][]authorityNode)
 	for _, leaf := range leaves {
 		chain, err := discoverAuthorityChainTx(ctx, tx, leaf)
@@ -524,7 +531,14 @@ func lockAuthorityTx(ctx context.Context, tx *storeTx, leaves []capability.Autho
 			query, args = "SELECT name FROM teams WHERE name=?", []any{key.keys[0]}
 		}
 		var id string
-		if err := tx.QueryRowContext(ctx, query+tx.forShare(), args...).Scan(&id); errors.Is(err, sql.ErrNoRows) {
+		mode := tx.forShare()
+		if key.tier == lockTeam && key.keys[0] == string(team) {
+			mode = tx.forUpdate()
+		}
+		if err := tx.QueryRowContext(ctx, query+mode, args...).Scan(&id); errors.Is(err, sql.ErrNoRows) {
+			if key.tier == lockTeam && key.keys[0] == string(team) {
+				return ErrUnknownTeam
+			}
 			return authorityError(apierr.Unauthenticated, "membership is unavailable")
 		} else if err != nil {
 			return err

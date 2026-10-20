@@ -66,6 +66,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.test',1,1)`)
 			engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 			engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('personal-session','account','runs.read,runs.write',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
+			engineSQL(t, e.Store, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('personal-session','a',0)`)
 			authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "personal-session"}
 			machine, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:own-machine", Repositories: []string{"github.com/acme/*"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "own-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 			if err != nil {

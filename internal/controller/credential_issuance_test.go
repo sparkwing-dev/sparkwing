@@ -30,6 +30,7 @@ func credentialSessionServer(t *testing.T, opts ...store.Option) (*Server, strin
 	raw := "private-account-session"
 	digest := sha256.Sum256([]byte(raw))
 	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','runs.read,runs.write',?,?,'a','member')`, hex.EncodeToString(digest[:]), time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano())
+	engineSQL(t, s, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)`, hex.EncodeToString(digest[:]))
 	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	a := server.authorization
 	a.Authenticator = capability.NewAuthenticator(s)

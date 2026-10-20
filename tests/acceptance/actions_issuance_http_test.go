@@ -301,12 +301,6 @@ func TestActionsIssuanceHTTPBindingCannotCrossTeamRepositoryOrOwner(t *testing.T
 	}
 }
 
-type actionsProvisionPolicy func(capability.ProvisionSpec) error
-
-func (f actionsProvisionPolicy) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	return f(spec)
-}
-
 func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

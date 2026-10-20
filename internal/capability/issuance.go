@@ -168,8 +168,7 @@ type ExchangeSpec struct {
 	BootstrapPrefix string
 }
 
-// ProvisionKind names non-capability authority which can originate a root through Store.Issue.
-// Root provisioning is the trusted root-only Delegate case, not a fourth issuance kind.
+// ProvisionKind names origins that Store.Issue rechecks before issuing authority.
 type ProvisionKind string
 
 const (
@@ -181,7 +180,7 @@ const (
 	ProvisionActions   ProvisionKind = "github_actions_binding"
 )
 
-// ProvisionSpec is trusted root-issuance input whose origin Store.Issue rechecks in its transaction.
+// ProvisionSpec is trusted issuance input whose origin Store.Issue rechecks in its transaction.
 type ProvisionSpec struct {
 	AllowTeamAdmin bool
 	Personal       bool
@@ -203,7 +202,7 @@ type ProvisionSpec struct {
 }
 
 // IssueRequest requires exactly one variant matching Kind, inside the caller's transaction.
-// Provision is the root-only Delegate case and cannot be combined with DelegateSpec.
+// Provision cannot be combined with DelegateSpec.
 type IssueRequest struct {
 	Kind      IssuanceKind
 	Provision *ProvisionSpec

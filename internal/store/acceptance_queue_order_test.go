@@ -57,7 +57,6 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	if _, err := tenant.RegisterGitHubRunner(ctx, admin, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/repo"}); err != nil {
 		t.Fatal(err)
 	}
-	s.SetProvisionPolicy(storeActionsProof{})
 	until := time.Now().Add(30 * time.Minute)
 	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000:1"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
 	if err != nil {
