@@ -50,9 +50,9 @@ func metricHTTPFixture(t *testing.T) (scheduleHTTPFixture, *metricWriterFake) {
 	p.Capability.Grants = []capability.Grant{capability.NodeReport, capability.DataRead}
 	p.Capability.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 1, Holder: "holder"}
 	f.facts.snapshot.Binding = capability.BindingState{Current: p.Capability.Binding, LeaseExpiresAt: f.facts.snapshot.Now.Add(time.Minute)}
-	f.s.WithEngineController(&EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return store.DefaultTeam, nil }})
+	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
 	writer := &metricWriterFake{team: store.DefaultTeam}
-	f.s.WithMetricWriter(func(context.Context, store.Team) (MetricWriter, error) { return writer, nil })
+	testOnlyTenantPort[MetricWriter](f.s, func(context.Context, store.Team) (MetricWriter, error) { return writer, nil })
 	return f, writer
 }
 
@@ -104,7 +104,7 @@ func TestMetricsHTTPAuthorityProperty(t *testing.T) {
 			property := func(input []byte, phase uint8) bool {
 				f.facts.snapshot.Authorities[0].Principal = base
 				writer.calls, writer.err, writer.team = 0, nil, store.DefaultTeam
-				f.s.WithMetricWriter(func(context.Context, store.Team) (MetricWriter, error) { return writer, nil })
+				testOnlyTenantPort[MetricWriter](f.s, func(context.Context, store.Team) (MetricWriter, error) { return writer, nil })
 				want := 204
 				body := `{"cpu_time_nanos":2}`
 				if operation == "metrics" {
@@ -124,7 +124,7 @@ func TestMetricsHTTPAuthorityProperty(t *testing.T) {
 					writer.team = "foreign"
 					want = 500
 				case 5:
-					f.s.WithMetricWriter(func(context.Context, store.Team) (MetricWriter, error) { return nil, nil })
+					testOnlyTenantPort[MetricWriter](f.s, func(context.Context, store.Team) (MetricWriter, error) { return nil, nil })
 					want = 500
 				case 6:
 					body = `{"cpu_time_nanos":-1}`
@@ -178,8 +178,11 @@ func TestMetricsHTTPReadsPagedSamplesFromAuthorizedTenant(t *testing.T) {
 	}
 	f, _ := metricHTTPFixture(t)
 	f.s.store = engine.Store
+	f.s.WithTenantResolver(func(ctx context.Context, team store.Team) (TenantHandle, error) {
+		return engine.Store.ForTeam(ctx, team)
+	})
 	f.facts.snapshot.Authorities[0].Principal.Capability.Team = "a"
-	f.s.WithEngineController(&EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "a", nil }})
+	f.s.WithEngineController(engine)
 	var first, second metricsPage
 	f.call(t, "GET", "/api/v1/runs/run/jobs/job/metrics?team=foreign&limit=1", "", "", 200, &first)
 	if len(first.Points) != 1 || first.Points[0].CPUMillicores != 1 || first.NextCursor != "1970-01-01T00:00:01Z" {

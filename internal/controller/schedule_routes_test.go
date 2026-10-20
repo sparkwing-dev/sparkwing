@@ -206,7 +206,7 @@ func newDeploymentScheduleHTTPFixture(t *testing.T, cfg deployment.Config) sched
 		t.Fatal(err)
 	}
 	writer := &scheduleWriterFake{Tenant: tenant, s: s, runs: map[string]string{}}
-	s.WithScheduleWriter(func(context.Context, store.Team) (ScheduleWriter, error) { return writer, nil })
+	testOnlyTenantPort[ScheduleWriter](s, func(context.Context, store.Team) (ScheduleWriter, error) { return writer, nil })
 	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	now := time.Now().UTC()
 	p := capability.Principal{
@@ -349,7 +349,7 @@ func TestScheduleHTTPInvalidInputAndBackend(t *testing.T) {
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("failed transaction leaked schedules: %+v %v", rows, err)
 	}
-	f.s.WithScheduleWriter(func(context.Context, store.Team) (ScheduleWriter, error) { return nil, nil })
+	testOnlyTenantPort[ScheduleWriter](f.s, func(context.Context, store.Team) (ScheduleWriter, error) { return nil, nil })
 	w := f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 500, nil)
 	if !strings.Contains(w.Body.String(), "policy_missing") {
 		t.Fatal(w.Body.String())

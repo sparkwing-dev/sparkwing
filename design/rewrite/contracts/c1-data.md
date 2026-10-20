@@ -1,5 +1,28 @@
 # C1 data contract
 
+## Request tenant and fleet maintenance
+
+The controller uses one tenant resolver. Policy routing binds a request handle
+from the authorized team, and narrow handler ports come from that same handle.
+Run selector reads share it with the handler. Embedded claimant requests use the
+registered policy router and carry its scoped context into the claim transaction.
+A `{run}` endpoint without a target resolver fails policy validation.
+
+The serving mux also supplies route discovery. Probing does not rebuild a second
+router. Every call that assembles an HTTP handler installs its serving snapshot.
+
+`Operator.EachTeam` selects live teams with the same predicate as handle
+acquisition. Cron, completion, attention and runner sampling continue after a
+team callback fails. Pending deletion withdraws stored schedules and run effects
+in the deletion transaction. Physical deletion removes the complete team object
+prefix, including CAS and pending uploads, and its logs.
+
+Launcher reconciliation isolates persisted award corruption across preparation
+renewal, rejection, reservation validation and snapshot reads. A failed award
+returns an explicit deferred fence, preserving its Job while healthy awards
+continue. Database failures and invalid claimant authority still fail the request.
+
+
 ## Collection and required blob reads
 
 Integration amendment under the store review ruling: collection rechecks the

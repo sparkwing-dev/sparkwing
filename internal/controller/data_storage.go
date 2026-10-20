@@ -26,7 +26,7 @@ func (s *Server) maintainDataObjects(ctx context.Context, lease store.SingletonL
 	if s.dataController == nil || s.dataController.Objects == nil {
 		return nil
 	}
-	operator := s.store.AsOperator()
+	operator := s.operator
 	lease, err := operator.RenewSingletonLease(ctx, lease, StorageMaintenanceInterval)
 	if err != nil {
 		return err

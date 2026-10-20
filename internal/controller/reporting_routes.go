@@ -68,5 +68,5 @@ func (s *Server) reportingTenant(r *http.Request, a capability.Authorized) (*sto
 	if a.Target.Team == "" || s.store == nil {
 		return nil, missingEndpointPolicy()
 	}
-	return s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	return s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 }

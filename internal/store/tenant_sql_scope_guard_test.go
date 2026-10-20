@@ -16,6 +16,25 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).ComputeUsage":            "deployment capacity sums metered awards from every tenant",
+	"(*Operator).ListWaitingNodes":        "deployment attention samples every tenant queue before updating individual tenant nodes",
+	"(*Operator).MarkBlobTombstones":      "leased garbage collection compares every tenant blob with the complete live reference graph",
+	"(*Operator).SealAbandonedLogStreams": "leased log maintenance discovers abandoned streams across every tenant",
+	"(*Operator).dueRunEffects":           "the completion worker discovers due effects across tenants before dispatching each tenant run",
+	"(*Store).expiredUnits":               "the leased reaper discovers expired execution units across tenants before expiring each exact unit",
+	"queuedClaimQuery":                    "launcher claims scan deployment queues; ordinary claimant queries append their bound tenant predicate",
+	"launcherPrefixesTx":                  "launcher reconciliation discovers every tenant award before validating each exact award",
+	"lockMaintenanceCapacityTx":           "the leased concurrency pass locks capacity entries across tenants before maintaining each tenant key",
+	"(*Operator).retainedStorageTeams":    "storage billing discovers every live tenant holding retained records or blobs",
+	"deleteRetentionRunsTx":               "leased retention discovers finished runs across tenants before deleting exact tenant run keys",
+	"deleteRetentionEffectsTx":            "leased retention discovers settled effects across tenants before deleting exact tenant effect keys",
+	"finishBootstrapSetupTx":              "bootstrap completion resolves the deployment administrator capability whose tenant is null",
+	"(*Store).SearchTeams":                "the operator console searches every tenant and its owners by deployment search text",
+	"(*Store).listTriggers":               "the operator trigger view lists every tenant; tenant callers append their bound tenant predicate",
+	"nodeRunActiveSQL":                    "the shared predicate correlates a node with its own run; its enclosing statement supplies the tenant scope",
+	"paidGrantForPaymentTx":               "a verified provider payment identity resolves its paid grant before its tenant is known",
+	"accountHasOtherTeamTx":               "an account must retain another membership when deleting its current tenant; account identity spans tenants",
+
 	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
 	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
 	"(*Operator).DeleteExpiredBlobStaging":  "leased maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
@@ -98,8 +117,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
 	"freeSlotOpenTx":     "a reservation asks whether any slot is left, so it counts every team's",
-	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
-		"launches each one through its own team's handle",
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
 
@@ -122,10 +139,8 @@ var reviewedUnscopedSQL = map[string]string{
 // or a write of that table.
 var tenantOwnedTableRe = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)`)
 
-// safety: covers every shape this package writes the predicate in: a
-// bare column, a qualified one, an IN list, and the excluded.team a
-// conflict guard compares against.
-var teamPredicateRe = regexp.MustCompile(`(?is)(?:\b(?:[a-z_][a-z0-9_]*\.)?team|\bCOALESCE\(\s*(?:[a-z_][a-z0-9_]*\.)?team\s*,\s*''\s*\))\s*(?:=|IN\b|<>|!=)`)
+// A column comparison or exclusion does not bind a statement to a tenant.
+var teamPredicateRe = regexp.MustCompile(`(?is)(?:\b(?:[a-z_][a-z0-9_]*\.)?team|\bCOALESCE\(\s*(?:[a-z_][a-z0-9_]*\.)?team\s*,\s*''\s*\))\s*(?:=\s*(?:\?|\$[1-9][0-9]*)|IN\s*\(\s*(?:\?|\$[1-9][0-9]*))`)
 
 // safety: reads an INSERT's column list, because a write with no WHERE
 // carries its key there and nowhere else.
@@ -133,6 +148,8 @@ var insertColumnsRe = regexp.MustCompile(`(?is)INSERT\s+INTO\s+[a-z_][a-z0-9_]*\
 
 // safety: splits a conflict clause so a team-aware target and a
 // team-aware guard are told apart; either one closes the hole.
+var conflictTeamPredicateRe = regexp.MustCompile(`(?is)\b[a-z_][a-z0-9_]*\.team\s*=\s*excluded\.team\b`)
+
 var onConflictRe = regexp.MustCompile(`(?is)ON\s+CONFLICT\s*(?:\(([^)]*)\))?`)
 
 // Every statement in this package that touches a tenant-owned table
@@ -160,6 +177,14 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 		unscoped := unscopedSubqueries(stmt.text)
 		if outerCarriesTeam(stmt.text) && len(unscoped) == 0 {
 			continue
+		}
+		// The recursive graph has one shared owner; its bound output, rather
+		// than each intermediate CTE row, scopes this tenant-only existence check.
+		if stmt.key == "blobReachableTx" && strings.HasPrefix(stmt.text, reachableBlobsSQL) {
+			output := strings.TrimPrefix(stmt.text, reachableBlobsSQL)
+			if statementCarriesTeam(output) && len(unscopedSubqueries(output)) == 0 {
+				continue
+			}
 		}
 		if exemptFromScope(stmt.key) {
 			seen[stmt.key] = true
@@ -234,6 +259,12 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"qualified nullable tenant", `SELECT prefix FROM capabilities c WHERE COALESCE(c.team, '') = ?`, true},
 		{"nullable tenant without predicate", `SELECT COALESCE(team,'') FROM capabilities WHERE prefix=?`, false},
 		{"scoped select", `SELECT id FROM runs WHERE team = ? AND id = ?`, true},
+		{"join alone", `SELECT n.id FROM nodes n JOIN runs r ON n.team=r.team`, false},
+		{"excluded team", `SELECT id FROM runs WHERE team<>?`, false},
+		{"nonempty team", `SELECT id FROM runs WHERE team != ''`, false},
+		{"literal team", `SELECT id FROM runs WHERE team = 'someone'`, false},
+		{"unbound team IN", `SELECT id FROM runs WHERE team IN (SELECT team FROM nodes)`, false},
+		{"bound team IN", `SELECT id FROM runs WHERE team IN (?)`, true},
 		{"unscoped select", `SELECT id FROM runs WHERE id = ?`, false},
 		{"qualified predicate", `UPDATE nodes SET x = 1 WHERE nodes.team = ? AND run_id = ?`, true},
 		{"insert with key", `INSERT INTO secrets (team, name, pipeline) VALUES (?,?,?)`, true},
@@ -244,10 +275,13 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"postgres placeholder", `SELECT id FROM runs WHERE team = $1`, true},
 		{"operator table", `SELECT value FROM sparkwing_meta WHERE key = ?`, true},
 		{"unscoped subquery under a scoped statement", `INSERT INTO nodes (team, run_id, x) VALUES (?, ?, (SELECT x FROM runs WHERE id = ?))`, false},
+		{"bound correlated subquery", `SELECT id FROM nodes WHERE team = ? AND EXISTS (SELECT 1 FROM runs r WHERE r.team=nodes.team AND r.id=nodes.run_id)`, true},
+		{"shadowed correlation", `SELECT n.id FROM nodes n WHERE n.team=? AND EXISTS (SELECT 1 FROM runs n WHERE n.team=n.team)`, false},
+		{"unbound correlated subquery", `SELECT id FROM nodes WHERE EXISTS (SELECT 1 FROM runs r WHERE r.team=nodes.team AND r.id=nodes.run_id)`, false},
 		{"scoped subquery", `INSERT INTO nodes (team, run_id, x) VALUES (?, ?, (SELECT x FROM runs WHERE team = ? AND id = ?))`, true},
 		{"unscoped exists", `SELECT id FROM nodes WHERE team = ? AND EXISTS (SELECT 1 FROM runs r WHERE r.id = nodes.run_id)`, false},
 		{"unscoped nested subquery", `SELECT id FROM nodes WHERE team = ? AND run_id IN (SELECT id FROM runs WHERE team = ? AND retry_of IN (SELECT id FROM runs WHERE id = ?))`, false},
-		{"subquery deriving the team", `INSERT INTO nodes (team, run_id) VALUES ((SELECT team FROM runs WHERE id = ?), ?)`, true},
+		{"subquery deriving the team", `INSERT INTO nodes (team, run_id) VALUES ((SELECT team FROM runs WHERE id = ?), ?)`, false},
 		{"predicate only in a select-list subquery", `SELECT (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id) FROM nodes WHERE run_id = ?`, false},
 		{"outer filtered by a scoped IN", `SELECT run_id FROM approvals WHERE resolved_at IS NULL AND run_id IN (SELECT id FROM runs WHERE team = ?)`, true},
 		{"outer filtered by a scoped EXISTS", `DELETE FROM nodes WHERE EXISTS (SELECT 1 FROM runs r WHERE r.team = ? AND r.id = nodes.run_id)`, true},
@@ -305,7 +339,7 @@ func statementCarriesTeam(sql string) bool {
 		targetHasTeam := slices.ContainsFunc(strings.Split(target, ","), func(c string) bool {
 			return strings.EqualFold(strings.TrimSpace(c), "team")
 		})
-		return targetHasTeam || teamPredicateRe.MatchString(sql[loc[1]:])
+		return targetHasTeam || conflictTeamPredicateRe.MatchString(sql[loc[1]:])
 	}
 	if insertColumnsRe.MatchString(sql) {
 		return true
@@ -315,17 +349,51 @@ func statementCarriesTeam(sql string) bool {
 
 // safety: an outer predicate says nothing about a subquery reading another tenant table by a bare id, and
 // a predicate inside a subquery says nothing about the outer rows, so the statement and each parenthesized
-// SELECT are judged on their own text. A subquery selecting only the team column is exempt: asking which
-// team owns an id is how a write takes its row's team.
+// SELECT are judged on their own text. A team derived from an unbound identity still crosses tenants.
 func unscopedSubqueries(sql string) []string {
-	var out []string
-	for _, sub := range splitSubqueries(sql).subs {
-		if len(tenantTablesTouchedBy(sub)) == 0 || teamPredicateRe.MatchString(sub) || teamDerivationRe.MatchString(sub) {
-			continue
+	return unscopedSQLQueries(sql, nil, false)
+}
+
+var (
+	tableAliasRe     = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|UPDATE|INTO)\s+([a-z_][a-z0-9_]*)(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?`)
+	correlatedTeamRe = regexp.MustCompile(`(?is)\b((?:[a-z_][a-z0-9_]*\.)?team)\s*=\s*((?:[a-z_][a-z0-9_]*\.)?team)\b`)
+)
+
+// Correlation inherits scope only from an enclosing query with a bound team.
+func unscopedSQLQueries(sql string, parents []string, check bool) []string {
+	parts := splitSubqueries(sql)
+	local := queryTeamReferences(parts.outer)
+	parents = slices.DeleteFunc(slices.Clone(parents), func(ref string) bool { return slices.Contains(local, ref) })
+	bound := statementCarriesTeam(parts.outer)
+	for _, m := range correlatedTeamRe.FindAllStringSubmatch(parts.outer, -1) {
+		if slices.Contains(parents, strings.ToLower(m[1])) || slices.Contains(parents, strings.ToLower(m[2])) {
+			bound = true
 		}
-		out = append(out, sub)
+	}
+	var out []string
+	if check && len(tenantTablesTouchedBy(parts.outer)) > 0 && !bound {
+		out = append(out, parts.outer)
+	}
+	refs := slices.Clone(parents)
+	if bound {
+		refs = append(refs, local...)
+	}
+	for _, sub := range parts.subs {
+		out = append(out, unscopedSQLQueries(sub, refs, true)...)
 	}
 	return out
+}
+
+func queryTeamReferences(sql string) []string {
+	var refs []string
+	for _, m := range tableAliasRe.FindAllStringSubmatch(sql, -1) {
+		if m[2] != "" && !slices.Contains([]string{"where", "join", "left", "right", "inner", "on", "set", "order", "group", "union"}, strings.ToLower(m[2])) {
+			refs = append(refs, strings.ToLower(m[2])+".team")
+		} else {
+			refs = append(refs, strings.ToLower(m[1])+".team")
+		}
+	}
+	return refs
 }
 
 // safety: a scoped subquery behind IN or EXISTS filters the outer rows to the team, so it scopes the outer
@@ -334,8 +402,6 @@ func outerCarriesTeam(sql string) bool {
 	outer := splitSubqueries(sql).outer
 	return len(tenantTablesTouchedBy(outer)) == 0 || statementCarriesTeam(outer)
 }
-
-var teamDerivationRe = regexp.MustCompile(`(?is)^\s*SELECT\s+(?:[a-z_][a-z0-9_]*\.)?team\s+FROM\b`)
 
 var subqueryStartRe = regexp.MustCompile(`(?is)^\s*(?:SELECT|WITH)\b`)
 
@@ -368,26 +434,15 @@ func splitSubqueries(sql string) splitSQL {
 			}
 		}
 	}
-	own := func(sp span) string {
-		b := []byte(sql[sp.from:sp.to])
-		for _, inner := range spans {
-			if inner.from > sp.from && inner.to < sp.to {
-				for j := inner.from - sp.from; j < inner.to-sp.from; j++ {
-					b[j] = ' '
-				}
-			}
-		}
-		return string(b)
-	}
 	outer := []byte(sql)
 	var out splitSQL
 	for _, sp := range spans {
-		text := own(sp)
-		out.subs = append(out.subs, text)
 		nested := slices.ContainsFunc(spans, func(o span) bool { return o.from < sp.from && o.to > sp.to })
 		if nested {
 			continue
 		}
+		text := sql[sp.from:sp.to]
+		out.subs = append(out.subs, text)
 		fill := byte(' ')
 		for j := sp.from; j < sp.to; j++ {
 			outer[j] = fill

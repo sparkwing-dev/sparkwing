@@ -28,12 +28,8 @@ func (s *Server) HTTP() wingd.LocalHTTP {
 			}
 			return capability.Subject{}
 		})
-		router := s.registeredRouters()
+		router := s.rebuildRouters()
 		s.registerControllerEndpoints(router, []Endpoint{{Method: "POST", Pattern: "/api/v1/local/doctor", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.localDoctor}})
-		router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			policy := s.routeProbe()
-			writeRouteMiss(w, allowedRouteMethods(policy, r, routeProbeMethods))
-		})
 		api := s.observedHandler(router.ServeMux)
 		s.localHTTP = wingd.LocalHTTP{API: api, Dashboard: api}
 		if s.dashboard != nil {

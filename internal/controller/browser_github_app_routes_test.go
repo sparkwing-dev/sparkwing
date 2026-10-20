@@ -111,7 +111,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	client := githubapp.New(cfg)
 	s.githubApp = &githubAppState{client: client, stateKey: client.StateKey()}
 	s.identity.redirectURIs = []string{"https://controller.test/github/app/callback"}
-	s.WithGitHubConnectWriter(func(context.Context, store.Team) (GitHubConnectWriter, error) { return f.writer, nil })
+	testOnlyTenantPort[GitHubConnectWriter](s, func(context.Context, store.Team) (GitHubConnectWriter, error) { return f.writer, nil })
 	f.h = s.Handler()
 	return f
 }
@@ -259,7 +259,7 @@ func TestGitHubBrowserConnectionProviderAndReplay(t *testing.T) {
 func TestGitHubBrowserConnectionRealStore(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
 	engineSQL(t, f.s.store, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','42','member','member@example.test',1,1)`)
-	f.s.WithGitHubConnectWriter(nil)
+	testOnlyTenantPort[GitHubConnectWriter](f.s, nil)
 	f.h = f.s.Handler()
 	flow := f.start(t, false)
 	flow.Code, flow.InstallationID = "code", 7
@@ -346,7 +346,7 @@ func TestGitHubBrowserConnectionCommitRefusal(t *testing.T) {
 
 func TestGitHubBrowserConnectionRequiresTransaction(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
-	f.s.WithGitHubConnectWriter(func(context.Context, store.Team) (GitHubConnectWriter, error) { return nil, nil })
+	testOnlyTenantPort[GitHubConnectWriter](f.s, func(context.Context, store.Team) (GitHubConnectWriter, error) { return nil, nil })
 	w := f.request("POST", "/github/app/connect", url.Values{"csrf_token": {f.csrf}}, nil, nil)
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "policy_missing") || f.providerCalls != 0 {
 		t.Fatalf("missing writer = %d %s", w.Code, w.Body)
@@ -355,7 +355,7 @@ func TestGitHubBrowserConnectionRequiresTransaction(t *testing.T) {
 
 func TestGitHubBrowserConnectionUsesStoreTransactions(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
-	f.s.resolveGitHubConnectWriter = nil
+	f.s.resolveTenant = nil
 	w := f.request("POST", "/github/app/connect", url.Values{"csrf_token": {f.csrf}}, nil, nil)
 	if w.Code != http.StatusForbidden || f.providerCalls != 0 {
 		t.Fatalf("unlinked account = %d %s", w.Code, w.Body)

@@ -121,7 +121,7 @@ func (s *S3) DeleteLogs(ctx context.Context, team, run string) (int64, error) {
 			if err != nil {
 				continue
 			}
-			n, err := s.deleteLogPrefix(ctx, s.PhysicalKey(prefix))
+			n, err := s.deleteObjectPrefix(ctx, s.PhysicalKey(prefix))
 			deleted += n
 			if err != nil {
 				return deleted, err
@@ -137,7 +137,7 @@ func (s *S3) DeleteLogs(ctx context.Context, team, run string) (int64, error) {
 	}
 }
 
-func (s *S3) deleteLogPrefix(ctx context.Context, prefix string) (int64, error) {
+func (s *S3) deleteObjectPrefix(ctx context.Context, prefix string) (int64, error) {
 	var deleted int64
 	var token *string
 	for {
@@ -148,7 +148,7 @@ func (s *S3) deleteLogPrefix(ctx context.Context, prefix string) (int64, error) 
 		for _, object := range page.Contents {
 			key := aws.ToString(object.Key)
 			if !strings.HasPrefix(key, prefix) || aws.ToInt64(object.Size) < 0 {
-				return deleted, fmt.Errorf("log object listing escaped its scope")
+				return deleted, fmt.Errorf("object listing escaped its scope")
 			}
 			if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)}); err != nil {
 				return deleted, err
@@ -159,8 +159,48 @@ func (s *S3) deleteLogPrefix(ctx context.Context, prefix string) (int64, error) 
 			return deleted, nil
 		}
 		if aws.ToString(page.NextContinuationToken) == "" || aws.ToString(page.NextContinuationToken) == aws.ToString(token) {
-			return deleted, fmt.Errorf("log object listing did not advance")
+			return deleted, fmt.Errorf("object listing did not advance")
 		}
 		token = page.NextContinuationToken
 	}
+}
+
+// TeamObjectDeleter removes CAS and staging bytes as well as retained logs.
+type TeamObjectDeleter interface {
+	DeleteTeamObjects(context.Context, string) error
+}
+
+func teamObjectPrefix(team string) (string, error) {
+	if !ValidLogTeam(team) {
+		return "", fmt.Errorf("invalid team object scope")
+	}
+	return "teams/" + team + "/", nil
+}
+
+// DeleteTeamObjects removes the team's complete physical namespace.
+func (f *Filesystem) DeleteTeamObjects(ctx context.Context, team string) error {
+	prefix, err := teamObjectPrefix(team)
+	if err != nil {
+		return err
+	}
+	if _, err := f.DeleteLogs(ctx, team, ""); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.root.RemoveAll(strings.TrimSuffix(prefix, "/"))
+}
+
+// DeleteTeamObjects removes the team's complete physical namespace.
+func (s *S3) DeleteTeamObjects(ctx context.Context, team string) error {
+	prefix, err := teamObjectPrefix(team)
+	if err != nil {
+		return err
+	}
+	if _, err := s.DeleteLogs(ctx, team, ""); err != nil {
+		return err
+	}
+	_, err = s.deleteObjectPrefix(ctx, s.PhysicalKey(prefix))
+	return err
 }

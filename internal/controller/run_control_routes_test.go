@@ -55,12 +55,12 @@ func TestRunControlHTTPAuthorityProperty(t *testing.T) {
 	property := func(input string, fail bool) bool {
 		f := newScheduleHTTPFixture(t)
 		f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl, capability.ApprovalsWrite}
-		f.s.WithEngineController(&EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return store.DefaultTeam, nil }})
+		f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
 		writer := &runControlWriterFake{team: store.DefaultTeam}
 		if fail {
 			writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "authority changed"}
 		}
-		f.s.WithRunControlWriter(func(context.Context, store.Team) (RunControlWriter, error) { return writer, nil })
+		testOnlyTenantPort[RunControlWriter](f.s, func(context.Context, store.Team) (RunControlWriter, error) { return writer, nil })
 		key := "request-key"
 		for _, pause := range []bool{false, true} {
 			path := "/api/v1/runs/bound-run/approvals/bound-job"
@@ -106,9 +106,9 @@ func TestRunControlHTTPAuthorityProperty(t *testing.T) {
 func TestRunControlHTTPRefusals(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl, capability.ApprovalsWrite}
-	f.s.WithEngineController(&EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return store.DefaultTeam, nil }})
+	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
 	writer := &runControlWriterFake{team: store.DefaultTeam}
-	f.s.WithRunControlWriter(func(context.Context, store.Team) (RunControlWriter, error) { return writer, nil })
+	testOnlyTenantPort[RunControlWriter](f.s, func(context.Context, store.Team) (RunControlWriter, error) { return writer, nil })
 	for _, body := range []string{`{"resolution":"timed_out"}`, `{"resolution":"approved","approver":"forged"}`, `{"resolution":"approved","team":"foreign"}`, `{"resolution":"approved","idempotency_key":"body-key"}`} {
 		f.call(t, "POST", "/api/v1/runs/bound-run/approvals/bound-job", body, "key", 400, nil)
 	}
@@ -124,16 +124,16 @@ func TestRunControlHTTPRefusals(t *testing.T) {
 	if writer.calls != 0 {
 		t.Fatal("foreign tenant reached a transaction")
 	}
-	f.s.WithRunControlWriter(func(context.Context, store.Team) (RunControlWriter, error) { return nil, nil })
+	testOnlyTenantPort[RunControlWriter](f.s, func(context.Context, store.Team) (RunControlWriter, error) { return nil, nil })
 	f.call(t, "POST", "/api/v1/runs/bound-run/approvals/bound-job", `{"resolution":"approved"}`, "key", 500, nil)
 }
 
 func TestResumeDebugPauseWriterScopeAndErrors(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl}
-	f.s.WithEngineController(&EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return store.DefaultTeam, nil }})
+	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
 	writer := &runControlWriterFake{team: store.DefaultTeam}
-	f.s.WithRunControlWriter(func(context.Context, store.Team) (RunControlWriter, error) { return writer, nil })
+	testOnlyTenantPort[RunControlWriter](f.s, func(context.Context, store.Team) (RunControlWriter, error) { return writer, nil })
 	f.call(t, "POST", "/api/v1/runs/run/jobs/job/resume", `{}`, "", 204, nil)
 	if writer.calls != 1 || writer.seen.Target.RunID != "run" || writer.seen.Target.NodeID != "job" {
 		t.Fatalf("resume=%+v calls=%d", writer.seen, writer.calls)

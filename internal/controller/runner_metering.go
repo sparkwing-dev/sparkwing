@@ -30,7 +30,7 @@ func (s *Server) handleSetRunnerMetered(w http.ResponseWriter, r *http.Request, 
 	}
 	writer := s.runnerMeteringWriter
 	if writer == nil && s.store != nil {
-		writer, _ = any(s.store.AsOperator()).(RunnerMeteringWriter)
+		writer, _ = any(s.operator).(RunnerMeteringWriter)
 	}
 	if writer == nil {
 		return missingEndpointPolicy()

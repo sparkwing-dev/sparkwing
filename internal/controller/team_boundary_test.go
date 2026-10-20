@@ -430,7 +430,7 @@ func TestTeamBoundary_EveryRunRouteHidesOtherTeamsResources(t *testing.T) {
 func TestTeamBoundary_ListsNeverIncludeAnotherTeam(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		readers := map[store.Team]*queueGroupReaderFake{}
-		f.srv.WithConcurrencyStore(func(ctx context.Context, team store.Team) (controller.ConcurrencyStore, error) {
+		controller.BindTenantPortForTest[controller.ConcurrencyStore](f.srv, func(ctx context.Context, team store.Team) (controller.ConcurrencyStore, error) {
 			tenant, err := f.st.ForTeam(ctx, team)
 			if err != nil {
 				return nil, err

@@ -105,7 +105,7 @@ func (f *credentialMutationFake) RemoveGitCredential(ctx context.Context, a capa
 func mutationServerConfig(t testing.TB, s *store.Store, cipher controller.Cipher, b *credentialBoundary) *controller.Server {
 	server := controller.New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithAuthorization(consoleAuthorization(b))
 	if s != nil {
-		server.WithCredentialWriter(func(ctx context.Context, team store.Team) (controller.CredentialWriter, error) {
+		bindTenantPort[controller.CredentialWriter](server, func(ctx context.Context, team store.Team) (controller.CredentialWriter, error) {
 			tenant, err := s.ForTeam(ctx, team)
 			if err != nil {
 				return nil, err
@@ -327,14 +327,16 @@ func TestCredentialMutationsHTTPTransactionBoundary(t *testing.T) {
 				case "default":
 					writer, code, writes = nil, apierr.Unauthenticated, 0
 				}
-				server := mutationServerConfig(t, s, cipher, b).WithCredentialWriter(func(_ context.Context, team store.Team) (controller.CredentialWriter, error) {
+				server := bindTenantPort[controller.CredentialWriter](mutationServerConfig(t, s, cipher, b), func(_ context.Context, team store.Team) (controller.CredentialWriter, error) {
 					if team != "team" {
 						t.Fatalf("resolved tenant %q", team)
 					}
 					return writer, resolveErr
 				})
 				if failure == "default" {
-					server.WithCredentialWriter(nil)
+					server.WithTenantResolver(func(ctx context.Context, team store.Team) (controller.TenantHandle, error) {
+						return s.ForTeam(ctx, team)
+					})
 				}
 				w := authorityHTTP(server.Handler(), b, route.method, route.path, route.body)
 				assertEngineError(t, w, apierr.Status(code), code)
@@ -395,7 +397,7 @@ func TestCredentialMutationsHTTPValidatesBodiesBeforeTransactions(t *testing.T) 
 		for _, body := range []string{"", "null", "[]", "true", `{"team":"foreign"}`, route.body + `{}`, strings.TrimSuffix(route.body, "}") + `,"actor":"forged"}`} {
 			b := authorityMember()
 			f := &credentialMutationFake{Tenant: tenant}
-			server := mutationServerConfig(t, s, cipher, b).WithCredentialWriter(func(context.Context, store.Team) (controller.CredentialWriter, error) { return f, nil })
+			server := bindTenantPort[controller.CredentialWriter](mutationServerConfig(t, s, cipher, b), func(context.Context, store.Team) (controller.CredentialWriter, error) { return f, nil })
 			w := authorityHTTP(server.Handler(), b, route.method, route.path, body)
 			assertEngineError(t, w, 400, apierr.BadRequest)
 			if f.calls != 0 {

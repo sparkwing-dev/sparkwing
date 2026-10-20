@@ -395,3 +395,25 @@ func TestAccountByEmailPrefersTheVerifiedHolder(t *testing.T) {
 		t.Fatalf("unknown address = %v, want ErrNotFound", err)
 	}
 }
+
+func TestTeamDeletionWithdrawsSchedulesAndEffectsBeforePurge(t *testing.T) {
+	st := storetest.Open(t)
+	tn := tenantFor(t, st, "acme")
+	seedTenantRun(t, tn, "withdraw-run", "build")
+	for _, query := range []string{
+		`INSERT INTO cron_schedules(id,repo_path,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,team,repo_key) VALUES ('cron','repo','build','* * * * *','UTC','skip',0,1,1,1,'acme','repo')`,
+		`INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES ('acme','withdraw-run','github_check','running',1,1) ON CONFLICT(team,run_id,effect) DO NOTHING`,
+	} {
+		if _, err := st.DB().ExecContext(t.Context(), query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := st.AsOperator().RequestTeamDeletion(t.Context(), "acme", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"cron_schedules", "run_effects"} {
+		if n := countWhere(t, st, table, `team='acme'`); n != 0 {
+			t.Fatalf("%s retains %d pending rows", table, n)
+		}
+	}
+}

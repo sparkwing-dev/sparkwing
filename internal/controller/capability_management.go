@@ -33,33 +33,11 @@ type capabilityRotationResponse struct {
 	OldRevokedAt time.Time           `json:"old_revoked_at"`
 }
 
-// WithCapabilityManager supplies capability inventory and rotation before Handler is constructed.
-func (s *Server) WithCapabilityManager(resolve func(context.Context, store.Team) (CapabilityManager, error)) *Server {
-	s.resolveCapabilityManager = resolve
-	return s
-}
-
 func (s *Server) capabilityManager(ctx context.Context, team string) (CapabilityManager, error) {
-	var manager CapabilityManager
-	var err error
-	if s.resolveCapabilityManager != nil {
-		manager, err = s.resolveCapabilityManager(ctx, store.Team(team))
-	} else if s.store != nil {
-		if team == "" {
-			manager = s.store.AsOperator()
-		} else {
-			var tenant *store.Tenant
-			tenant, err = s.store.ForTeam(ctx, store.Team(team))
-			manager = tenant
-		}
+	if team == "" && s.operator != nil {
+		return s.operator, nil
 	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if manager == nil || manager.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return manager, nil
+	return tenantPort[CapabilityManager](ctx, s, store.Team(team))
 }
 
 func (s *Server) capabilityEndpoints() []Endpoint {

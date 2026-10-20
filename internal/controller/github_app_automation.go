@@ -164,10 +164,6 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 	if s.githubApp == nil {
 		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	tenant, err := s.reportingTenant(r, a)
-	if err != nil {
-		return engineLookupError(err)
-	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
 		return githubAppRequestError(http.StatusBadRequest, errors.New("invalid automation query"))
@@ -195,6 +191,10 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 		}
 		w.WriteHeader(http.StatusNoContent)
 		return nil
+	}
+	tenant, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	slug := r.URL.Query().Get("repository")
 	runner := store.GitHubAppRunnerAnywhere

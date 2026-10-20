@@ -66,7 +66,7 @@ func oidcPrivate(t *testing.T) (*rsa.PrivateKey, []byte) {
 func oidcServer(t *testing.T, b *credentialBoundary, f *oidcFacts, private, published []byte) *controller.Server {
 	t.Helper()
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithEngineController(&controller.EngineController{
-		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "team", nil },
+		ResolveTenant: selectorTenant("team", nil),
 	})
 	if private != nil {
 		issuer, err := oidcissuer.New("https://issuer.example", private, published, 0)
@@ -76,7 +76,7 @@ func oidcServer(t *testing.T, b *credentialBoundary, f *oidcFacts, private, publ
 		s.WithOIDCIssuer(issuer)
 	}
 	if f != nil {
-		s.WithOIDCReader(func(context.Context, store.Team) (controller.OIDCReader, error) { return f, nil })
+		bindTenantPort[controller.OIDCReader](s, func(context.Context, store.Team) (controller.OIDCReader, error) { return f, nil })
 	}
 	return s
 }

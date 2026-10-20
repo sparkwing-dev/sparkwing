@@ -12,7 +12,7 @@ import (
 func (s *Server) ReconcileRunEffects(ctx context.Context) (err error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	op := s.store.AsOperator()
+	op := s.operator
 	lease, err := op.AcquireSingletonLease(ctx, "completion", s.leaseHolder, time.Minute)
 	if errors.Is(err, store.ErrLockHeld) {
 		return nil
@@ -29,26 +29,32 @@ func (s *Server) ReconcileRunEffects(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	for _, effect := range append(profiles, checks...) {
-		tenant, err := s.store.ForTeam(ctx, effect.Team)
-		if err != nil {
-			return err
-		}
-		delivery := store.EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev, Lease: lease}
-		if err := s.deliverRunEffect(ctx, tenant, effect, delivery); err != nil {
-			var recordErr error
-			if errors.Is(err, errInvalidGitHubCompletion) {
-				recordErr = tenant.RejectRunEffect(ctx, delivery)
-			} else {
-				recordErr = tenant.RetryRunEffect(ctx, delivery, effect.ObservedAt.Add(time.Second*time.Duration(1<<min(effect.Attempts, 6))))
-			}
-			if recordErr != nil {
-				return errors.Join(err, recordErr)
-			}
-			s.logger.Error("deliver run effect", "effect", effect.Effect, "team", effect.Team, "run_id", effect.RunID, "err", err)
-		}
+	effects := append(profiles, checks...)
+	teams := make([]store.Team, 0, len(effects))
+	for _, effect := range effects {
+		teams = append(teams, effect.Team)
 	}
-	return nil
+	return op.EachTeam(ctx, teams, func(tenant *store.Tenant) error {
+		for _, effect := range effects {
+			if effect.Team != tenant.Team() {
+				continue
+			}
+			delivery := store.EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev, Lease: lease}
+			if err := s.deliverRunEffect(ctx, tenant, effect, delivery); err != nil {
+				var recordErr error
+				if errors.Is(err, errInvalidGitHubCompletion) {
+					recordErr = tenant.RejectRunEffect(ctx, delivery)
+				} else {
+					recordErr = tenant.RetryRunEffect(ctx, delivery, effect.ObservedAt.Add(time.Second*time.Duration(1<<min(effect.Attempts, 6))))
+				}
+				if recordErr != nil {
+					return errors.Join(err, recordErr)
+				}
+				s.logger.Error("deliver run effect", "effect", effect.Effect, "team", effect.Team, "run_id", effect.RunID, "err", err)
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Server) deliverRunEffect(ctx context.Context, tenant *store.Tenant, effect store.DesiredRunEffect, delivery store.EffectDelivery) error {

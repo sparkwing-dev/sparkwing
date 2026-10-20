@@ -12,7 +12,7 @@ func (s *Server) seedCloudRetention(ctx context.Context) {
 	if !s.deployment.MultiTeam() {
 		return
 	}
-	seeded, err := s.store.AsOperator().SeedRunRetention(ctx, CloudRetentionDays)
+	seeded, err := s.operator.SeedRunRetention(ctx, CloudRetentionDays)
 	if err != nil {
 		s.logger.Error("seeding the cloud retention window failed", "err", err)
 		return

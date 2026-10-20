@@ -189,7 +189,7 @@ func (s *Server) readSignedGitHubDelivery(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery, body []byte) {
 	ctx := r.Context()
-	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
+	in, err := s.operator.GitHubAppInstallationTeam(ctx, env.Installation.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		githubAppIgnored(w, "no team holds this installation")
 		return
@@ -316,7 +316,7 @@ func (s *Server) handleGitHubAppInstallationEvent(w http.ResponseWriter, r *http
 		return
 	}
 	id := env.Installation.ID
-	op := s.store.AsOperator()
+	op := s.operator
 	var err error
 	switch env.Action {
 	case "deleted":
@@ -620,7 +620,7 @@ func (s *Server) githubAppBinding(w http.ResponseWriter, r *http.Request, env gi
 		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
 	}
 	repo.ID = env.Repository.ID
-	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
+	in, err := s.operator.GitHubAppInstallationTeam(ctx, env.Installation.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		githubAppIgnored(w, "no team holds this installation")
 		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false

@@ -146,7 +146,7 @@ func TestPostgresLauncherPreparationLocksExchangedAuthorityBeforeRun(t *testing.
 	}
 	b := blockRun(t, ctx, st)
 	b.start(func() error {
-		_, err := st.RenewLauncherPreparation(ctx, root, []capability.LeaseRef{fence})
+		_, _, err := st.ReconcileLauncherAwards(ctx, root, nil, []capability.LeaseRef{fence}, nil)
 		return err
 	})
 	b.waitBlocked(1)
@@ -178,7 +178,7 @@ func TestPostgresLauncherPreparationRestartsDiscoveryAfterConcurrentExchange(t *
 	})
 	b.waitBlocked(1)
 	b.start(func() error {
-		prepared, err := st.RenewLauncherPreparation(ctx, root, []capability.LeaseRef{fence})
+		_, prepared, err := st.ReconcileLauncherAwards(ctx, root, nil, []capability.LeaseRef{fence}, nil)
 		if err == nil && len(prepared) != 0 {
 			return fmt.Errorf("preparation retained exchanged authority: %+v", prepared)
 		}

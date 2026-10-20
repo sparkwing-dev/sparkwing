@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+
 	"golang.org/x/crypto/ssh"
 )
 
@@ -20,4 +22,9 @@ var (
 // so a test serves a key without dialing a host.
 func SetHostKeyScan(s *Server, scan func(ctx context.Context, host string, port int) (ssh.PublicKey, error)) {
 	s.hostKeyScan = scan
+}
+
+// BindTenantPortForTest binds one fake tenant rather than independent route ports.
+func BindTenantPortForTest[P any](s *Server, resolve func(context.Context, store.Team) (P, error)) *Server {
+	return testOnlyTenantPort(s, resolve)
 }

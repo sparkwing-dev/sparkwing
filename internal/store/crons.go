@@ -386,16 +386,6 @@ func (t *Tenant) ListCronSchedules(ctx context.Context) ([]CronSchedule, error) 
  ORDER BY repo_path, pipeline, schedule_name`, string(t.team))
 }
 
-// ListCronSchedulesAcrossTeams returns every team's schedules, each
-// carrying its team, ordered by repository path, pipeline, then schedule
-// name. The controller's tick reads it and launches each schedule in its
-// own team.
-func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSchedule, error) {
-	return o.s.listCronSchedules(ctx, `SELECT `+cronScheduleColumns+`
-  FROM cron_schedules
- ORDER BY repo_path, pipeline, schedule_name, team`)
-}
-
 func (s *Store) listCronSchedules(ctx context.Context, query string, args ...any) (out []CronSchedule, err error) {
 	rows, err := s.query(ctx, query, args...)
 	if err != nil {

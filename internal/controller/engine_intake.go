@@ -54,7 +54,7 @@ func (s *EngineController) runTransactions(ctx context.Context, team string) (Ru
 	if s.Store == nil {
 		return nil, missingEndpointPolicy()
 	}
-	tenant, err := s.Store.ForTeam(ctx, store.Team(team))
+	tenant, err := s.tenantForTeam(ctx, store.Team(team))
 	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
 		return nil, &apierr.Error{Code: apierr.NotFound, Message: "team is not registered"}
 	}

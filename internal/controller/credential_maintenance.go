@@ -24,60 +24,12 @@ type SourceAuditReader interface {
 	SourceReleaseAudits(context.Context, int) ([]capability.SourceReleaseAudit, error)
 }
 
-// WithCredentialRotator supplies tenant rotation transactions before Handler is constructed.
-func (s *Server) WithCredentialRotator(resolve func(context.Context, store.Team) (CredentialRotator, error)) *Server {
-	s.resolveCredentialRotator = resolve
-	return s
-}
-
-// WithSourceAuditReader supplies tenant source-release reads before Handler is constructed.
-func (s *Server) WithSourceAuditReader(resolve func(context.Context, store.Team) (SourceAuditReader, error)) *Server {
-	s.resolveSourceAuditReader = resolve
-	return s
-}
-
 func (s *Server) credentialRotator(ctx context.Context, team string) (CredentialRotator, error) {
-	var rotator CredentialRotator
-	var err error
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	if s.resolveCredentialRotator != nil {
-		rotator, err = s.resolveCredentialRotator(ctx, store.Team(team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		rotator, _ = any(tenant).(CredentialRotator)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if rotator == nil || rotator.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return rotator, nil
+	return tenantPort[CredentialRotator](ctx, s, store.Team(team))
 }
 
 func (s *Server) sourceAuditReader(ctx context.Context, team string) (SourceAuditReader, error) {
-	var reader SourceAuditReader
-	var err error
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	if s.resolveSourceAuditReader != nil {
-		reader, err = s.resolveSourceAuditReader(ctx, store.Team(team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		reader, _ = any(tenant).(SourceAuditReader)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if reader == nil || reader.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return reader, nil
+	return tenantPort[SourceAuditReader](ctx, s, store.Team(team))
 }
 
 func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -157,7 +109,7 @@ func (s *Server) handleRotateSealedValues(w http.ResponseWriter, r *http.Request
 	if !ok || s.store == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": apierr.ReasonSecretsKeyRequired}}
 	}
-	result, err := s.store.AsOperator().RotateSealedValues(r.Context(), a, cipher, verify)
+	result, err := s.operator.RotateSealedValues(r.Context(), a, cipher, verify)
 	if err != nil {
 		return credentialWriteError(err)
 	}

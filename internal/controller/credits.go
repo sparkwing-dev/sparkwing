@@ -245,7 +245,7 @@ func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Reques
 	if s.store == nil {
 		return missingEndpointPolicy()
 	}
-	settings, err := s.store.AsOperator().CreditSettings(r.Context())
+	settings, err := s.operator.CreditSettings(r.Context())
 	if err != nil {
 		return engineLookupError(err)
 	}

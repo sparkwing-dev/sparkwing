@@ -50,7 +50,7 @@ func (s *EngineController) handleJob(w http.ResponseWriter, r *http.Request, a c
 			return missingEndpointPolicy()
 		}
 		read = func(ctx context.Context, team store.Team, run string) (RunStatusFacts, error) {
-			tenant, err := s.Store.ForTeam(ctx, team)
+			tenant, err := s.tenantForTeam(ctx, team)
 			if err != nil {
 				return RunStatusFacts{}, err
 			}

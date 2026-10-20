@@ -139,7 +139,7 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 		inviter = acct.Name
 	}
 	team := string(inv.Team)
-	if tenant, err := s.store.ForTeam(ctx, inv.Team); err == nil {
+	if tenant, err := s.tenantForTeam(ctx, inv.Team); err == nil {
 		if info, err := tenant.Info(ctx); err == nil {
 			team = info.Label()
 		}

@@ -11,7 +11,7 @@ import (
 func launcherFence(t *testing.T, s *Store, demand UnitDemand, claim UnitClaim, kind capability.UnitKind) (capability.AuthorityRef, capability.LeaseRef) {
 	t.Helper()
 	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-	awards, err := s.ReadLauncherAwards(t.Context(), root, nil)
+	awards, _, err := s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 	if err != nil || len(awards) != 1 {
 		t.Fatalf("launcher awards: %+v %v", awards, err)
 	}
@@ -35,7 +35,7 @@ func TestLauncherAwardMetersFromFirstPodRenewal(t *testing.T) {
 			reserved := chargedMicro(t, s)
 			for range 6 {
 				*now = now.Add(SliceSeconds * time.Second * 2 / 3)
-				if prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil || len(prepared) != 1 {
+				if prepared, err := s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil || len(prepared) != 1 {
 					t.Fatalf("preparation: %+v %v", prepared, err)
 				}
 			}
@@ -65,7 +65,7 @@ func TestCancelledUnstartedLauncherAwardEndsMetering(t *testing.T) {
 			s, demand, claim, now := launcherSnapshotFixture(t, kind)
 			root, fence := launcherFence(t, s, demand, claim, kind)
 			*now = now.Add(time.Minute)
-			if _, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
+			if _, err := s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 				t.Fatal(err)
 			}
 			operator := authorityMember(t, s, "operator", RoleOwner)
@@ -77,7 +77,7 @@ func TestCancelledUnstartedLauncherAwardEndsMetering(t *testing.T) {
 			unitBillingTotal(t, s, 0, true)
 			rewriteSchemaCount(t, s.db, "billable_intervals", 0)
 			*now = now.Add(time.Second)
-			prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence})
+			prepared, err := s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence})
 			if err != nil || len(prepared) != 0 {
 				t.Fatalf("cancelled preparation renewed: %+v %v", prepared, err)
 			}
@@ -108,7 +108,7 @@ func TestUnstartedLauncherAwardRefundsItsReservation(t *testing.T) {
 				if path == "renewed_lapse" {
 					for range 3 {
 						*now = now.Add(limits.DefaultLease / 2)
-						if _, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
+						if _, err := s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 							t.Fatal(err)
 						}
 					}

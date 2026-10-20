@@ -23,10 +23,6 @@ func (s *Server) WithEgressMeter(m *egress.Meter) *Server {
 	return s
 }
 
-// EgressMeter returns the meter this controller counts downloads
-// against, or nil when it was given none.
-func (s *Server) EgressMeter() *egress.Meter { return s.egress }
-
 func (s *Server) meterResponse(w http.ResponseWriter, r *http.Request, class egress.Class, slot egress.Slot, next http.Handler, principal string, team store.Team) {
 	// safety: a response the server discards holds no slot and
 	// counts nothing.
@@ -48,7 +44,7 @@ func (s *Server) meterResponse(w http.ResponseWriter, r *http.Request, class egr
 	var tenant *store.Tenant
 	if s.store != nil {
 		var err error
-		tenant, err = s.store.ForTeam(r.Context(), team)
+		tenant, err = s.tenantForTeam(r.Context(), team)
 		if err != nil {
 			s.writeInternalError(w, r, "resolve egress team", err)
 			return
@@ -116,7 +112,7 @@ func (s *Server) loadEgressUsage(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
-	rows, err := s.store.AsOperator().EgressUsageAcrossTeams(ctx, now.Format("2006-01"))
+	rows, err := s.operator.EgressUsageAcrossTeams(ctx, now.Format("2006-01"))
 	if err != nil {
 		s.logger.Error("egress usage reload failed", "err", err)
 		return
@@ -133,7 +129,7 @@ func (s *Server) loadEgressUsage(ctx context.Context) {
 	}
 	s.egress.Restore(usages)
 	day := now.Format("2006-01-02")
-	rows, err = s.store.AsOperator().EgressUsageAcrossTeams(ctx, day)
+	rows, err = s.operator.EgressUsageAcrossTeams(ctx, day)
 	if err != nil {
 		s.logger.Error("egress daily usage reload failed", "err", err)
 		return

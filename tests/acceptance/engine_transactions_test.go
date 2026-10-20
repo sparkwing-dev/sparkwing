@@ -184,7 +184,6 @@ func fakeEngine(t *testing.T, f *engineTransactions) *controller.EngineControlle
 			}
 			return f, nil
 		},
-		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "team", nil },
 	}
 }
 

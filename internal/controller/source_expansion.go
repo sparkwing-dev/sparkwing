@@ -17,7 +17,7 @@ func (s *EngineController) sourceExpansionAuthorization(ctx context.Context, a c
 	if err != nil {
 		return a, err
 	}
-	tenant, err := s.Store.ForTeam(ctx, store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(ctx, store.Team(a.Target.Team))
 	if err != nil {
 		return a, err
 	}

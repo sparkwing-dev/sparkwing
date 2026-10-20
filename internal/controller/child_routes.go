@@ -37,7 +37,7 @@ func (s *Server) handleOutput(w http.ResponseWriter, r *http.Request, a capabili
 	if !ok {
 		return missingEndpointPolicy()
 	}
-	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return engineLookupError(err)
 	}

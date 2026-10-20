@@ -15,6 +15,14 @@ func (s *Store) CloudAwardResources(ctx context.Context, ref capability.Authorit
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
+	resources, err := cloudAwardResourcesTx(ctx, tx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return resources, tx.Commit()
+}
+
+func cloudAwardResourcesTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) (*match.Resources, error) {
 	chain, err := authorityChainTx(ctx, tx, ref, false)
 	if err != nil {
 		return nil, err
@@ -30,13 +38,10 @@ func (s *Store) CloudAwardResources(ctx context.Context, ref capability.Authorit
 			return nil, err
 		}
 		allocation := matchingResources(resources)
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
 		return &allocation, nil
 	}
 	if c.Billing == nil || c.Billing.ExecutorClass != "cloud" {
-		return nil, tx.Commit()
+		return nil, nil
 	}
 	if !c.Billing.Metered {
 		return nil, authorityError(apierr.IntegrityFailure, "Cloud award has no metered allocation")
@@ -59,9 +64,6 @@ func (s *Store) CloudAwardResources(ctx context.Context, ref capability.Authorit
 	memory := CPUClassMemoryBytes(class)
 	if class <= 0 || memory <= 0 {
 		return nil, authorityError(apierr.IntegrityFailure, "Cloud allocation has no priced resources")
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	return &match.Resources{Cores: float64(class), MemoryBytes: memory}, nil
 }

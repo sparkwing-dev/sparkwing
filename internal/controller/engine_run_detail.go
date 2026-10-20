@@ -142,7 +142,7 @@ func statusAttempts(target capability.Target, nodes map[string]store.NodeRow, ro
 }
 
 func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.Team, run string) (RunStatusFacts, error) {
-	tenant, err := s.Store.ForTeam(ctx, team)
+	tenant, err := s.tenantForTeam(ctx, team)
 	if err != nil {
 		return RunStatusFacts{}, err
 	}

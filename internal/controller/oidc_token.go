@@ -20,9 +20,8 @@ const (
 )
 
 type oidcState struct {
-	issuer  *oidcissuer.Issuer
-	limit   *ratelimit.Limiter
-	resolve func(context.Context, store.Team) (OIDCReader, error)
+	issuer *oidcissuer.Issuer
+	limit  *ratelimit.Limiter
 }
 
 // OIDCTokenRequest selects the relying party for the authenticated run.
@@ -48,29 +47,8 @@ type OIDCReader interface {
 	ReadOIDCFacts(context.Context, capability.Authorized) (capability.OIDCFacts, error)
 }
 
-// WithOIDCReader supplies tenant OIDC facts before Handler is constructed.
-func (s *Server) WithOIDCReader(resolve func(context.Context, store.Team) (OIDCReader, error)) *Server {
-	s.oidc.resolve = resolve
-	return s
-}
-
 func (s *Server) oidcReader(ctx context.Context, team string) (OIDCReader, error) {
-	var reader OIDCReader
-	var err error
-	if s.oidc.resolve != nil {
-		reader, err = s.oidc.resolve(ctx, store.Team(team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		reader = tenant
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if reader == nil || reader.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return reader, nil
+	return tenantPort[OIDCReader](ctx, s, store.Team(team))
 }
 
 func (s *Server) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {

@@ -36,7 +36,7 @@ func (s *Server) localHostEndpoints() []Endpoint {
 }
 
 func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func generatorSources(expansions []store.AcceptedExpansionRow, id string) map[st
 }
 
 func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 }
 
 func (s *Server) localHostNode(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (s *Server) localHostRunEdge(w http.ResponseWriter, r *http.Request, a capa
 	if a.Principal.Capability.Unit == capability.UnitPlan && (!finish || body.Cause != store.RunFinish || body.To != store.RunFailed && body.To != store.RunCancelled || body.OwnerPolicy != nil) {
 		return invalidEngineBody("plan completion requires a preparation failure or cancellation")
 	}
-	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request,
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
@@ -276,7 +276,7 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 	if owner.Capability.Unit != capability.UnitTrigger || ref.Kind != "" && ref.Kind != capability.AuthorityCapability {
 		return capability.Principal{}, localHostRefusal()
 	}
-	tenant, err := s.store.ForTeam(ctx, store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(ctx, store.Team(a.Target.Team))
 	if err != nil {
 		return capability.Principal{}, err
 	}

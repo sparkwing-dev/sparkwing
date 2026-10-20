@@ -24,32 +24,8 @@ type DebugPauseResumer interface {
 	ResumeAuthorizedDebugPause(context.Context, capability.Authorized) error
 }
 
-// WithRunControlWriter supplies tenant run-control transactions before Handler is constructed.
-func (s *Server) WithRunControlWriter(resolve func(context.Context, store.Team) (RunControlWriter, error)) *Server {
-	s.resolveRunControlWriter = resolve
-	return s
-}
-
 func (s *Server) runControlWriter(r *http.Request, a capability.Authorized) (RunControlWriter, error) {
-	if a.Target.Team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var writer RunControlWriter
-	var err error
-	if s.resolveRunControlWriter != nil {
-		writer, err = s.resolveRunControlWriter(r.Context(), store.Team(a.Target.Team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.reportingTenant(r, a)
-		writer, _ = any(tenant).(RunControlWriter)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if writer == nil || writer.Team() != store.Team(a.Target.Team) {
-		return nil, missingEndpointPolicy()
-	}
-	return writer, nil
+	return tenantPort[RunControlWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) runControlEndpoints() []Endpoint {
@@ -65,22 +41,9 @@ func (s *Server) handleResumeDebugPause(w http.ResponseWriter, r *http.Request, 
 	if err := decodeEngineRequest(r, &struct{}{}); err != nil {
 		return err
 	}
-	var writer DebugPauseResumer
-	if s.resolveRunControlWriter != nil {
-		control, err := s.runControlWriter(r, a)
-		if err != nil {
-			return err
-		}
-		writer, _ = control.(DebugPauseResumer)
-	} else {
-		tenant, err := s.reportingTenant(r, a)
-		if err != nil {
-			return err
-		}
-		writer = tenant
-	}
-	if writer == nil || string(writer.Team()) != a.Target.Team {
-		return missingEndpointPolicy()
+	writer, err := tenantPort[DebugPauseResumer](r.Context(), s, store.Team(a.Target.Team))
+	if err != nil {
+		return err
 	}
 	if err := writer.ResumeAuthorizedDebugPause(r.Context(), a); err != nil {
 		return engineLookupError(err)

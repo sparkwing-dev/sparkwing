@@ -71,82 +71,42 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 	now := s.now()
 	report := TickReport{At: now}
 
-	stored, err := s.tickSchedules(ctx)
-	if err != nil {
-		return report, err
-	}
-	scoped := map[store.Team]*Service{}
-	if !dryRun {
-		refresh := func(svc *Service) {
+	tick := func(svc *Service) error {
+		if !dryRun {
 			refreshed, err := svc.Refresh(ctx)
 			if err != nil {
-				report.Errors = append(report.Errors, err.Error())
+				return err
 			}
 			report.Errors = append(report.Errors, refreshed.Errors...)
 		}
-		if s.Schedules != nil {
-			refresh(s)
-		} else {
-			for _, sched := range stored {
-				if _, ok := scoped[sched.Team]; ok {
-					continue
-				}
-				svc, err := s.forTeam(ctx, sched.Team, scoped)
-				if err != nil {
-					return report, err
-				}
-				refresh(svc)
-			}
-		}
-		stored, err = s.tickSchedules(ctx)
+		schedules, err := svc.Schedules.ListCronSchedules(ctx)
 		if err != nil {
-			return report, err
+			return err
 		}
-	}
-	for _, sched := range stored {
-		svc, serr := s.forTeam(ctx, sched.Team, scoped)
-		if serr != nil {
-			report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), serr))
-			continue
+		for _, sched := range schedules {
+			svc.tickOne(ctx, sched, now, dryRun, &report)
 		}
-		svc.tickOne(ctx, sched, now, dryRun, &report)
+		return nil
 	}
-
-	if dryRun {
-		return report, nil
+	var err error
+	if s.Schedules != nil {
+		err = tick(s)
+	} else {
+		err = s.Store.AsOperator().EachTeam(ctx, nil, func(tenant *store.Tenant) error {
+			svc := *s
+			svc.Schedules = tenant
+			err := tick(&svc)
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", tenant.Team(), err))
+			}
+			return err
+		})
 	}
-	tick := store.CronTick{At: now, Host: s.Host, Version: s.Version, Error: summarize(report.Errors)}
-	if err := s.Store.AsOperator().RecordCronTick(ctx, tick); err != nil {
+	if err != nil || dryRun {
 		return report, err
 	}
-	return report, nil
-}
-
-func (s *Service) tickSchedules(ctx context.Context) ([]store.CronSchedule, error) {
-	if s.Schedules != nil {
-		return s.Schedules.ListCronSchedules(ctx)
-	}
-	return s.Store.AsOperator().ListCronSchedulesAcrossTeams(ctx)
-}
-
-// safety: a tick reads every team's schedules, so each one is resolved through
-// its own team's handle and the cursor, the history and the launch all land in
-// the team that armed it.
-func (s *Service) forTeam(ctx context.Context, team store.Team, cache map[store.Team]*Service) (*Service, error) {
-	if s.Schedules != nil {
-		return s, nil
-	}
-	if svc, ok := cache[team]; ok {
-		return svc, nil
-	}
-	tenant, err := s.Store.ForTeam(ctx, team)
-	if err != nil {
-		return nil, err
-	}
-	svc := *s
-	svc.Schedules = tenant
-	cache[team] = &svc
-	return &svc, nil
+	err = s.Store.AsOperator().RecordCronTick(ctx, store.CronTick{At: now, Host: s.Host, Version: s.Version, Error: summarize(report.Errors)})
+	return report, err
 }
 
 func summarize(errs []string) string {

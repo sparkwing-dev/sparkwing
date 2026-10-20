@@ -27,7 +27,7 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 	if s.localSessions == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "local session ledger is unavailable"}
 	}
-	tenant, err := s.store.ForTeam(r.Context(), store.DefaultTeam)
+	tenant, err := s.tenantForTeam(r.Context(), store.DefaultTeam)
 	if err != nil {
 		return engineLookupError(err)
 	}

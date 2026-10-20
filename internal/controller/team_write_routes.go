@@ -19,32 +19,8 @@ type TeamWriter interface {
 	DeleteAuthorizedRun(context.Context, capability.Authorized) error
 }
 
-// WithTeamWriter supplies tenant administration transactions before Handler is constructed.
-func (s *Server) WithTeamWriter(resolve func(context.Context, store.Team) (TeamWriter, error)) *Server {
-	s.resolveTeamWriter = resolve
-	return s
-}
-
 func (s *Server) teamWriter(r *http.Request, a capability.Authorized) (TeamWriter, error) {
-	if a.Target.Team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var writer TeamWriter
-	var err error
-	if s.resolveTeamWriter != nil {
-		writer, err = s.resolveTeamWriter(r.Context(), store.Team(a.Target.Team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.reportingTenant(r, a)
-		writer, _ = any(tenant).(TeamWriter)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if writer == nil || writer.Team() != store.Team(a.Target.Team) {
-		return nil, missingEndpointPolicy()
-	}
-	return writer, nil
+	return tenantPort[TeamWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) teamWriteEndpoints() []Endpoint {

@@ -74,6 +74,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
+	body.RunID = authorized.Target.RunID
 	target, err := engineClaimTarget(body)
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
@@ -137,7 +138,7 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	if err != nil {
 		return controllerwire.ClaimedUnit{}, err
 	}
-	tenant, err := s.Store.ForTeam(ctx, claim.Team)
+	tenant, err := s.tenantForTeam(ctx, claim.Team)
 	if err != nil {
 		return controllerwire.ClaimedUnit{}, err
 	}

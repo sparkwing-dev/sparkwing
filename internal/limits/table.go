@@ -84,7 +84,7 @@ func Table() []Limit {
 		{Name: "CloudRunRetention", Value: CloudRunRetention, Class: Author, Doc: "Cloud run retention; self-hosted default is disabled.", Refusal: "Expire eligible records; newest successful run and output per pipeline stay pinned."},
 		{Name: "BlobGCGrace", Value: BlobGCGrace, Class: Internal, Doc: "Tombstone grace before unreachable blob collection.", Refusal: "Only unreachable, unpinned blobs are eligible."},
 		{Name: "CapabilityRetention", Value: CapabilityRetention, Class: Internal, Doc: "Retention after capability expiry or revocation.", Refusal: "Delete after grace."},
-		{Name: "CompletionEffectRetention", Value: CompletionEffectRetention, Class: Internal, Doc: "Retention after effect delivery.", Refusal: "Delete only fully delivered rows."},
+		{Name: "CompletionEffectRetention", Value: completionEffectRetention, Class: Internal, Doc: "Retention after effect delivery.", Refusal: "Delete only fully delivered rows."},
 		{Name: "DataDownloadURLTTL", Value: DataDownloadURLTTL, Class: Internal, Doc: "Signed data download URL lifetime.", Refusal: "Require fresh authorization after expiry."},
 		{Name: "LogUploadURLTTL", Value: LogUploadURLTTL, Class: Internal, Doc: "Batch log PUT URL lifetime.", Refusal: "Re-sign after expiry."},
 		{Name: "LogSegmentInterval", Value: LogSegmentInterval, Class: Internal, Doc: "Maximum segment buffering interval.", Refusal: "Flush segment."},

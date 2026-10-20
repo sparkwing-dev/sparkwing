@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 	"strings"
 )
 
@@ -50,10 +52,7 @@ func (s *Store) forTeam(ctx context.Context, team Team) (*Tenant, error) {
 		return nil, ErrNoTeam
 	}
 	var name string
-	err := s.queryRow(ctx, `
-		SELECT name FROM teams WHERE name = ?
-		AND NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name AND d.state = ?)`,
-		string(team), TeamDeletionPending).Scan(&name)
+	err := s.queryRow(ctx, liveTeamsSQL+` AND name = ?`, string(team)).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTeam, team)
 	}
@@ -142,24 +141,36 @@ func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 	return err
 }
 
-// ListTeams returns every registered team, name order.
-func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error) {
-	rows, err := o.s.query(ctx, `SELECT name FROM teams ORDER BY name`)
+// liveTeamsSQL is shared by handle acquisition and fleet maintenance.
+const liveTeamsSQL = `SELECT name FROM teams WHERE NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name AND d.state = 'pending')`
+
+// EachTeam visits selected live tenants, or all live tenants when query is nil.
+// A tenant's failure is logged and cannot prevent another tenant's maintenance.
+func (o *Operator) EachTeam(ctx context.Context, query []Team, fn func(*Tenant) error) error {
+	rows, err := o.s.query(ctx, liveTeamsSQL+` ORDER BY name`)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-	var out []Team
+	var teams []Team
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
+		var team Team
+		if err := rows.Scan(&team); err != nil {
+			return errors.Join(err, rows.Close())
 		}
-		out = append(out, Team(name))
+		if query == nil || slices.Contains(query, team) {
+			teams = append(teams, team)
+		}
 	}
-	return out, rows.Err()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, team := range teams {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := fn(&Tenant{s: o.s, team: team}); err != nil {
+			slog.ErrorContext(ctx, "tenant maintenance failed", "team", team, "err", err)
+		}
+	}
+	return ctx.Err()
 }

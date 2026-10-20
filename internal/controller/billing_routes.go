@@ -23,32 +23,8 @@ type BillingWriter interface {
 
 var _ BillingWriter = (*store.Tenant)(nil)
 
-// WithBillingWriter supplies tenant billing transactions before Handler is constructed.
-func (s *Server) WithBillingWriter(resolve func(context.Context, store.Team) (BillingWriter, error)) *Server {
-	s.resolveBillingWriter = resolve
-	return s
-}
-
 func (s *Server) billingWriter(r *http.Request, a capability.Authorized) (BillingWriter, error) {
-	if a.Target.Team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var writer BillingWriter
-	var err error
-	if s.resolveBillingWriter != nil {
-		writer, err = s.resolveBillingWriter(r.Context(), store.Team(a.Target.Team))
-	} else if s.store != nil {
-		var tenant *store.Tenant
-		tenant, err = s.reportingTenant(r, a)
-		writer = tenant
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if writer == nil || writer.Team() != store.Team(a.Target.Team) {
-		return nil, missingEndpointPolicy()
-	}
-	return writer, nil
+	return tenantPort[BillingWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) billingEndpoints() []Endpoint {

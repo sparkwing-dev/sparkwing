@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,42 +33,25 @@ import (
 
 // Server serves controller HTTP requests.
 type Server struct {
-	deployment                 deployment.Config
-	resolveQueuePriorityWriter func(context.Context, store.Team) (QueuePriorityWriter, error)
-	store                      *store.Store
-	logger                     *slog.Logger
+	deployment    deployment.Config
+	store         *store.Store
+	operator      *store.Operator
+	resolveTenant func(context.Context, store.Team) (TenantHandle, error)
+	logger        *slog.Logger
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
 
-	credentialIssuer           CredentialIssuer
-	runnerMeteringWriter       RunnerMeteringWriter
-	resolveCapabilityManager   func(context.Context, store.Team) (CapabilityManager, error)
-	authorization              RouteAuthorization
-	accountReads               AccountReader
-	accountWrites              AccountWriter
-	identityLinkWrites         IdentityLinkWriter
-	dataController             *DataController
-	sourceController           *SourceController
-	operatorSettings           operatorSettingsStore
-	engineController           *EngineController
-	resolveSizingStore         func(context.Context, store.Team) (SizingStore, error)
-	resolveCreditReader        func(context.Context, store.Team) (CreditReader, error)
-	resolveConcurrencyStore    func(context.Context, store.Team) (ConcurrencyStore, error)
-	resolveQueueReader         func(context.Context, store.Team) (QueueReader, error)
-	resolveRunnerInventory     func(context.Context, store.Team) (RunnerInventoryReader, error)
-	resolveCredentialInventory func(context.Context, store.Team) (CredentialInventoryReader, error)
-	resolveCredentialWriter    func(context.Context, store.Team) (CredentialWriter, error)
-	resolveCredentialRotator   func(context.Context, store.Team) (CredentialRotator, error)
-	resolveSourceAuditReader   func(context.Context, store.Team) (SourceAuditReader, error)
-	resolveSecretReader        func(context.Context, store.Team) (SecretReader, error)
-	resolveScheduleWriter      func(context.Context, store.Team) (ScheduleWriter, error)
-	resolveScheduledRunWriter  func(context.Context, store.Team) (ScheduledRunWriter, error)
-	resolveBillingWriter       func(context.Context, store.Team) (BillingWriter, error)
-	resolveTeamWriter          func(context.Context, store.Team) (TeamWriter, error)
-	resolveGitHubConnectWriter func(context.Context, store.Team) (GitHubConnectWriter, error)
-	resolveGitHubAppWriter     func(context.Context, store.Team) (GitHubAppWriter, error)
-	resolveRunControlWriter    func(context.Context, store.Team) (RunControlWriter, error)
+	credentialIssuer     CredentialIssuer
+	runnerMeteringWriter RunnerMeteringWriter
+	authorization        RouteAuthorization
+	accountReads         AccountReader
+	accountWrites        AccountWriter
+	identityLinkWrites   IdentityLinkWriter
+	dataController       *DataController
+	sourceController     *SourceController
+	operatorSettings     operatorSettingsStore
+	engineController     *EngineController
 
 	peerIdentity func(*http.Request) capability.Subject
 
@@ -76,7 +59,6 @@ type Server struct {
 
 	flood                  *floodControl
 	operatorSettingsWrites OperatorSettingsWriter
-	resolveMetricWriter    func(context.Context, store.Team) (MetricWriter, error)
 	requestBudget          *principalBudget
 	tokenBudget            *tokenBudget
 
@@ -128,14 +110,12 @@ type Server struct {
 	// instant without waiting a minute for one. Nil reads time.Now.
 	cronNow func() time.Time
 
-	routeProbeOnce sync.Once
-	routeProbeMux  *http.ServeMux
+	routesMu      sync.Mutex
+	servingRoutes *registeredMux
 
 	storage storageSample
 
 	identity identityConfig
-
-	tenants tenantCache
 
 	githubRunners githubRunnerConfig
 
@@ -155,51 +135,6 @@ type Server struct {
 	localSchedules            *crons.Service
 	localScheduleProver       LocalScheduleProver
 	localScheduleEnvironments LocalScheduleEnvironments
-}
-
-// New constructs a Server for a local, one-team deployment bound to the
-// given store. A trigger it accepts is recorded for a runner to claim.
-// Callers own the store's lifecycle; New never closes it.
-func New(st *store.Store, logger *slog.Logger) *Server {
-	return NewDeployment(st, deployment.Config{}, logger)
-}
-
-// NewDeployment constructs a Server for the declared deployment cfg. The
-// deployment is fixed for the server's life: routes, authentication and
-// the store's credit policy are built from it once.
-func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) *Server {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	srv := &Server{
-		deployment:         cfg,
-		store:              st,
-		engineController:   &EngineController{Store: st},
-		operatorSettings:   storeOperatorSettings{Store: st, Operator: st.AsOperator()},
-		logger:             logger,
-		loginLimit:         newLoginLimiter(),
-		deliverySpools:     make(chan struct{}, githubDeliverySpools),
-		queueTimeout:       15 * time.Minute,
-		sessionMaxLifetime: DefaultSessionMaxLifetime,
-		liveLogs:           newLiveLogs(),
-		cronHolder:         defaultCronHolder(),
-		leaseHolder:        rand.Text(),
-		requestBudget:      newPrincipalBudget(RequestBudget{}),
-		idleClaimPoll:      DefaultMaxIdleClaimPoll,
-		downloadFree:       DefaultTeamDailyDownloadFreeBytes,
-		downloadFunded:     DefaultTeamDailyDownloadFundedBytes,
-	}
-	if st != nil {
-		if !cfg.Metering() {
-			st.DisableCreditMetering()
-		}
-		srv.credentialIssuer = st
-		st.SetConsolePolicy(srv.consoleAuthority)
-		st.SetIntakePolicy(srv)
-	}
-	srv.authorization = srv.storeRouteAuthorization()
-	srv.recordQueueActivity(time.Now())
-	return srv
 }
 
 type placementPolicy struct {
@@ -333,9 +268,8 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handler() http.Handler {
-	router := s.routers()
-	router.HandleFunc("/", s.writeRouteMiss)
-	return s.observedHandler(router)
+	router := s.rebuildRouters()
+	return s.observedHandler(router.ServeMux)
 }
 
 func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux) http.Handler {
@@ -352,6 +286,22 @@ func (s *Server) routers() *http.ServeMux {
 }
 
 func (s *Server) registeredRouters() *registeredMux {
+	s.routesMu.Lock()
+	defer s.routesMu.Unlock()
+	if s.servingRoutes == nil {
+		s.servingRoutes = s.buildRegisteredRouters()
+	}
+	return s.servingRoutes
+}
+
+func (s *Server) rebuildRouters() *registeredMux {
+	s.routesMu.Lock()
+	defer s.routesMu.Unlock()
+	s.servingRoutes = s.buildRegisteredRouters()
+	return s.servingRoutes
+}
+
+func (s *Server) buildRegisteredRouters() *registeredMux {
 	router := newRegisteredMux()
 	var endpoints []Endpoint
 	endpoints = append(endpoints, s.operatorEndpoints()...)
@@ -401,18 +351,8 @@ func (s *Server) registeredRouters() *registeredMux {
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	router.Handle("POST /webhooks/stripe", s.paymentHandler())
 
+	router.HandleFunc("/", s.writeRouteMiss)
 	return router
-}
-
-// safety: several routes are registered only when this server was given the
-// surface behind them, so the answer is this server's, not the build's. It
-// runs registration a second time rather than reading the serving muxes,
-// because the caller asks before the store that server needs is open.
-func (s *Server) routeProbe() *http.ServeMux {
-	s.routeProbeOnce.Do(func() {
-		s.routeProbeMux = s.routers()
-	})
-	return s.routeProbeMux
 }
 
 // Registrations returns the method and pattern pairs installed by this server's serving routers.
@@ -435,11 +375,11 @@ func (s *Server) Registrations() []string {
 // controller uses it to tell a route this server does not serve, which is a
 // permanent answer, from a condition that may clear.
 func (s *Server) RegisteredRoute(r *http.Request) bool {
-	return routeRegistered(s.routeProbe(), r)
+	return routeRegistered(s.registeredRouters().ServeMux, r)
 }
 
 func (s *Server) writeRouteMiss(w http.ResponseWriter, r *http.Request) {
-	writeRouteMiss(w, allowedRouteMethods(s.routeProbe(), r, routeProbeMethods))
+	writeRouteMiss(w, allowedRouteMethods(s.registeredRouters().ServeMux, r, routeProbeMethods))
 }
 
 var routeProbeMethods = []string{
@@ -451,7 +391,7 @@ var routeProbeMethods = []string{
 // its Allow header, which the mux only produces while no pattern matches, so
 // the probe asks the mux rather than claiming the path is unserved.
 func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
-	if _, pattern := mux.Handler(r); pattern != "" {
+	if _, pattern := mux.Handler(r); strings.Contains(pattern, " ") {
 		return true
 	}
 	for _, method := range routeProbeMethods {
@@ -460,7 +400,7 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 		}
 		probe := r.Clone(r.Context())
 		probe.Method = method
-		if _, pattern := mux.Handler(probe); pattern != "" {
+		if _, pattern := mux.Handler(probe); strings.Contains(pattern, " ") {
 			return true
 		}
 	}
@@ -600,7 +540,7 @@ func (s *Server) runLicenseAlarm(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) reapLeased(ctx context.Context) bool {
-	lease, err := s.store.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", s.measureHolder(), reaperLeaseTTL)
+	lease, err := s.operator.AcquireSingletonLease(ctx, "controller.reaper", s.measureHolder(), reaperLeaseTTL)
 	if errors.Is(err, store.ErrLockHeld) {
 		return false
 	}
@@ -613,7 +553,7 @@ func (s *Server) reapLeased(ctx context.Context) bool {
 }
 
 func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
-	concurrency, err := s.store.AsOperator().MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
+	concurrency, err := s.operator.MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
 	if err != nil {
 		s.logger.Error("concurrency maintenance failed", "err", err)
 	}
@@ -643,7 +583,7 @@ func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
 }
 
 func (s *Server) sampleOperationalSeries(ctx context.Context) {
-	if counts, err := s.store.AsOperator().CountNodesByQueueState(ctx); err != nil {
+	if counts, err := s.operator.CountNodesByQueueState(ctx); err != nil {
 		s.logger.Error("queue depth sample failed", "err", err)
 	} else {
 		setPendingNodes(counts[store.QueueStateReady])
@@ -672,7 +612,7 @@ func (s *Server) sampleCreditLedger(ctx context.Context) {
 		ledgerSnapshot.set(store.CreditLedgerTotals{})
 		return
 	}
-	totals, err := s.store.AsOperator().CreditLedgerTotals(ctx)
+	totals, err := s.operator.CreditLedgerTotals(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logger.Error("credit ledger sample failed", "err", err)

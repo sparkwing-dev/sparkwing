@@ -17,7 +17,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type reportingFacts struct {
@@ -40,7 +39,7 @@ func (f *reportingFacts) CheckBinding(context.Context, capability.Principal, cap
 
 func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 	s := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(&EngineController{
-		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "a", nil },
+		ResolveTenant: selectorTenant("a", nil),
 	})
 	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	endpoints := append(s.reportingEndpoints(), s.teamReadEndpoints()...)

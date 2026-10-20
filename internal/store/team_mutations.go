@@ -139,11 +139,11 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if role != RoleOwner {
 			return ErrRoleAboveOwn
 		}
-		var others int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships WHERE account_id=? AND team<>?`, p.Capability.Subject.ID, t.team).Scan(&others); err != nil {
+		hasOther, err := accountHasOtherTeamTx(ctx, tx, p.Capability.Subject.ID, string(t.team))
+		if err != nil {
 			return err
 		}
-		if others == 0 {
+		if !hasOther {
 			return ErrOnlyTeam
 		}
 		if _, err := t.markForDeletionTx(ctx, tx, p.Capability.Subject.ID, tx.now()); err != nil {
@@ -156,6 +156,12 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		return TeamDeletion{}, err
 	}
 	return out, nil
+}
+
+func accountHasOtherTeamTx(ctx context.Context, tx *storeTx, accountID, excludedTeam string) (bool, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships WHERE account_id=? AND team<>?`, accountID, excludedTeam).Scan(&count)
+	return count > 0, err
 }
 
 // DeleteAuthorizedRun removes a finished run under current control authority.

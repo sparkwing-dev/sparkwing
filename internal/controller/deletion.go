@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -161,7 +162,7 @@ func (s *Server) runTeamDeletions(ctx context.Context, interval time.Duration) {
 	}
 }
 
-var teamPurgeDelay = 2 * tenantCacheTTL
+var teamPurgeDelay = time.Minute
 
 const teamRecheckDelay = limits.LogUploadURLTTL + time.Hour
 
@@ -178,7 +179,7 @@ const teamDeletionLease = 5 * time.Minute
 // every step removes only what is still there. ServeWith runs it on a timer;
 // a process that serves Handler directly calls it.
 func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time) {
-	op := s.store.AsOperator()
+	op := s.operator
 	pending, err := op.PendingTeamDeletions(ctx)
 	if err != nil {
 		s.logger.Warn("team deletions: list pending", "err", err)
@@ -215,7 +216,7 @@ func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time) {
 var errDeletionNotHeld = errors.New("another replica holds this team deletion")
 
 func (s *Server) holdDeletion(ctx context.Context, team store.Team, now time.Time) error {
-	ok, err := s.store.AsOperator().ClaimTeamDeletion(ctx, team, s.deletionHolder(), now, teamDeletionLease)
+	ok, err := s.operator.ClaimTeamDeletion(ctx, team, s.deletionHolder(), now, teamDeletionLease)
 	if err != nil {
 		return err
 	}
@@ -239,7 +240,7 @@ func (s *Server) deletionHolder() string {
 // safety: stored objects go before rows, because the team's rows are the
 // only index of some of what the cache holds for it.
 func (s *Server) purgeTeam(ctx context.Context, team store.Team, now time.Time) error {
-	op := s.store.AsOperator()
+	op := s.operator
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
@@ -262,12 +263,18 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	return s.store.AsOperator().FinishTeamRecheck(ctx, team, s.deletionHolder(), now)
+	return s.operator.FinishTeamRecheck(ctx, team, s.deletionHolder(), now)
 }
 
 func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
-	_, err := s.deleteDataLogs(ctx, team, "")
-	return err
+	if s.dataController == nil || s.dataController.Objects == nil {
+		return nil
+	}
+	objects, ok := s.dataController.Objects.(blob.TeamObjectDeleter)
+	if !ok {
+		return fmt.Errorf("data backend cannot delete team objects")
+	}
+	return objects.DeleteTeamObjects(ctx, string(team))
 }
 
 // safety: An unsettled checkout or dispute hold blocks account deletion until money is resolved.

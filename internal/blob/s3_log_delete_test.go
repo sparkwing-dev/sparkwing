@@ -219,3 +219,39 @@ func TestS3LogDeletionStopsOnForeignObjectsAndServiceErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestS3TeamDeletionUsesConfiguredPhysicalPrefix(t *testing.T) {
+	const prefix = "deployment/nested/"
+	objects := map[string]int64{prefix + "teams/acme/cas/blob": 3, prefix + "teams/acme/pending/upload": 5, prefix + "teams/acme-other/cas/blob": 7, "teams/acme/cas/other-deployment": 11}
+	backend := logS3Prefix(t, prefix, func(r *http.Request) (*http.Response, error) {
+		response := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}
+		if r.Method == http.MethodDelete {
+			key := strings.TrimPrefix(r.URL.Path, "/bucket/")
+			if !strings.HasPrefix(key, prefix+"teams/acme/") {
+				return nil, errors.New("foreign delete")
+			}
+			delete(objects, key)
+			return response, nil
+		}
+		listed := r.URL.Query().Get("prefix")
+		if listed != prefix+"logs/" && listed != prefix+"teams/acme/" {
+			return nil, fmt.Errorf("unscoped listing %q", listed)
+		}
+		page := logDeletePage{}
+		for key, size := range objects {
+			if strings.HasPrefix(key, listed) {
+				page.Objects = append(page.Objects, logDeleteObject{key, size})
+			}
+		}
+		body, err := xml.Marshal(page)
+		response.Header.Set("Content-Type", "application/xml")
+		response.Body = io.NopCloser(strings.NewReader(string(body)))
+		return response, err
+	})
+	if err := backend.DeleteTeamObjects(t.Context(), "acme"); err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 2 || objects[prefix+"teams/acme-other/cas/blob"] != 7 || objects["teams/acme/cas/other-deployment"] != 11 {
+		t.Fatalf("remaining objects=%v", objects)
+	}
+}

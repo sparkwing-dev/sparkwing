@@ -3,17 +3,24 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // LauncherAward contains persisted execution inputs without reusable bearer material.
 type LauncherAward struct {
+	CloudResources         *match.Resources
+	Fence                  capability.LeaseRef
+	Failure                error
 	Claim                  UnitClaim
 	Capability             capability.Capability
 	Run                    RunRow
@@ -21,8 +28,90 @@ type LauncherAward struct {
 	ParentCapabilityExpiry *time.Time
 }
 
-// ReadLauncherAwards reads current launcher-owned fences and execution inputs in one snapshot.
-func (s *Store) ReadLauncherAwards(ctx context.Context, authority capability.AuthorityRef, reservations []capability.LeaseRef) ([]LauncherAward, error) {
+// ReconcileLauncherAwards isolates each persisted award through renewal, rejection and snapshot validation.
+func (s *Store) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, reservations, preparing, rejected []capability.LeaseRef) ([]LauncherAward, []LauncherPreparation, error) {
+	if err := validateLauncherPreparationFences(preparing); err != nil {
+		return nil, nil, err
+	}
+	selected := append(append(slices.Clone(reservations), preparing...), rejected...)
+	owned, err := s.launcherAwardOwnership(ctx, authority, selected)
+	if err != nil {
+		return nil, nil, err
+	}
+	owner := launcherAwardResults{failed: map[capability.LeaseRef]error{}, owned: owned}
+	var prepared []LauncherPreparation
+	for _, fence := range preparing {
+		if err := owner.apply(ctx, fence, func() error {
+			rows, err := s.renewLauncherPreparation(ctx, authority, []capability.LeaseRef{fence})
+			prepared = append(prepared, rows...)
+			return err
+		}); err != nil {
+			return nil, nil, err
+		}
+	}
+	for _, fence := range rejected {
+		if err := owner.apply(ctx, fence, func() error { return s.rejectLauncherAwards(ctx, authority, []capability.LeaseRef{fence}) }); err != nil {
+			return nil, nil, err
+		}
+	}
+	tx, err := s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rollbackOrLog(tx)
+	chain, err := authorityChainTx(ctx, tx, authority, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	claimant := chain[0].principal.Capability
+	if authority.Kind != capability.AuthorityCapability || claimant.Audience != capability.Controller || !launcherClaimant(claimant) {
+		return nil, nil, bindingRefusal()
+	}
+	root := chain[len(chain)-1].principal
+	for _, fence := range reservations {
+		if err := owner.apply(ctx, fence, func() error { return launcherReservationAwardTx(ctx, tx, root.Authority, claimant.Subject, fence) }); err != nil {
+			return nil, nil, err
+		}
+	}
+	prefixes, err := launcherPrefixesTx(ctx, tx, root.Authority, claimant.Subject, selected)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := []LauncherAward{}
+	for _, key := range prefixes {
+		owner.owned[key.fence] = true
+		if !key.live {
+			continue
+		}
+		if err := owner.apply(ctx, key.fence, func() error {
+			award, live, err := readLauncherAwardTx(ctx, tx, key.prefix, claimant, root)
+			if err == nil && live && slices.Contains(reservations, key.fence) {
+				award.CloudResources, err = cloudAwardResourcesTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: key.prefix})
+			}
+			if err == nil && live {
+				award.Fence = key.fence
+				out = append(out, award)
+			}
+			return err
+		}); err != nil {
+			return nil, nil, err
+		}
+	}
+	for fence, err := range owner.failed {
+		out = append(out, LauncherAward{Fence: fence, Failure: err})
+	}
+
+	if _, err := authorityChainTx(ctx, tx, authority, false); err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return out, prepared, nil
+}
+
+// Raw projected ownership survives an unreadable authority envelope without granting a foreign fence a deferred result.
+func (s *Store) launcherAwardOwnership(ctx context.Context, authority capability.AuthorityRef, selected []capability.LeaseRef) (map[capability.LeaseRef]bool, error) {
 	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return nil, err
@@ -36,44 +125,80 @@ func (s *Store) ReadLauncherAwards(ctx context.Context, authority capability.Aut
 	if authority.Kind != capability.AuthorityCapability || claimant.Audience != capability.Controller || !launcherClaimant(claimant) {
 		return nil, bindingRefusal()
 	}
-	root := chain[len(chain)-1].principal
-	for _, fence := range reservations {
-		if err := launcherReservationAwardTx(ctx, tx, root.Authority, claimant.Subject, fence); err != nil {
-			return nil, err
-		}
-	}
-	prefixes, err := launcherPrefixesTx(ctx, tx, root.Authority, claimant.Subject.ID)
+	root := chain[len(chain)-1].principal.Authority
+	keys, err := launcherPrefixesTx(ctx, tx, root, claimant.Subject, selected)
 	if err != nil {
 		return nil, err
 	}
-	out := []LauncherAward{}
-	for _, prefix := range prefixes {
-		award, live, err := readLauncherAwardTx(ctx, tx, prefix, claimant, root)
-		if err != nil {
-			return nil, err
-		}
-		if live {
-			out = append(out, award)
-		}
+	owned := map[capability.LeaseRef]bool{}
+	for _, key := range keys {
+		owned[key.fence] = true
 	}
-	if _, err := authorityChainTx(ctx, tx, authority, false); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return out, nil
+
+	return owned, tx.Commit()
 }
 
-func launcherPrefixesTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject string) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind IN ('service','machine') AND c.subject_id=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND (c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?) AND (
+type launcherAwardResults struct {
+	failed map[capability.LeaseRef]error
+	owned  map[capability.LeaseRef]bool
+}
+
+func (r *launcherAwardResults) apply(ctx context.Context, fence capability.LeaseRef, fn func() error) error {
+	if r.failed[fence] != nil {
+		return nil
+	}
+	err := fn()
+	if err == nil || !r.owned[fence] || !corruptLauncherAward(err) {
+		return err
+	}
+	slog.ErrorContext(ctx, "launcher award deferred", "award", fence, "err", err)
+	r.failed[fence] = err
+	return nil
+}
+
+// corruptLauncherAward separates damaged persisted input from a failed database read.
+func corruptLauncherAward(err error) bool {
+	var integrity *apierr.Error
+	var syntax *json.SyntaxError
+	var shape *json.UnmarshalTypeError
+	return errors.As(err, &integrity) && integrity.Code == apierr.IntegrityFailure || errors.As(err, &syntax) || errors.As(err, &shape) || errors.Is(err, ErrNotFound)
+}
+
+type launcherAwardKey struct {
+	live   bool
+	prefix string
+	fence  capability.LeaseRef
+}
+
+func launcherPrefixesTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject capability.Subject, selected []capability.LeaseRef) ([]launcherAwardKey, error) {
+	query := `SELECT * FROM (SELECT c.prefix,c.unit_kind,c.unit_id,c.bind_holder,COALESCE(c.eval_unit_generation,c.bind_generation) AS generation,
+(c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?) AND (
 EXISTS (SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.bind_run AND n.node_id=c.bind_node AND n.capability_prefix=c.prefix AND n.status<>'done' AND n.claimed_by IS NOT NULL)
 OR EXISTS (SELECT 1 FROM triggers t WHERE t.team=c.team AND t.id=c.bind_run AND t.capability_prefix=c.prefix AND t.status='claimed' AND t.finished_at IS NULL)
-OR EXISTS (SELECT 1 FROM eval_units e WHERE e.team=c.team AND e.run_id=c.bind_run AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.status IN ('claimed','running'))) ORDER BY c.prefix`, root.Kind, root.ID, subject, tx.now().UnixNano(), tx.now().UnixNano())
+OR EXISTS (SELECT 1 FROM eval_units e WHERE e.team=c.team AND e.run_id=c.bind_run AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.status IN ('claimed','running'))) AS live
+FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=? AND c.subject_id=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND c.unit_kind IN ('plan','eval','node')) a WHERE a.live`
+	args := []any{tx.now().UnixNano(), tx.now().UnixNano(), root.Kind, root.ID, subject.Kind, subject.ID}
+	var wanted []string
+	for _, fence := range selected {
+		wanted = append(wanted, `(a.unit_kind=? AND a.unit_id=? AND a.bind_holder=? AND a.generation=?)`)
+		args = append(args, fence.Kind, fence.ID, fence.Holder, fence.Generation)
+	}
+	if len(wanted) > 0 {
+		query += ` OR ` + strings.Join(wanted, ` OR `)
+	}
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY a.prefix`, args...)
 	if err != nil {
 		return nil, err
 	}
-	return scanPrefixes(rows)
+	var keys []launcherAwardKey
+	for rows.Next() {
+		var key launcherAwardKey
+		if err := rows.Scan(&key.prefix, &key.fence.Kind, &key.fence.ID, &key.fence.Holder, &key.fence.Generation, &key.live); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		keys = append(keys, key)
+	}
+	return keys, errors.Join(rows.Err(), rows.Close())
 }
 
 func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claimant capability.Capability, root capability.Principal) (LauncherAward, bool, error) {

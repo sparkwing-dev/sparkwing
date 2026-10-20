@@ -116,7 +116,7 @@ func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID str
 	if err != nil || id <= 0 || s.githubApp == nil || s.store == nil {
 		return "", refused
 	}
-	tenant, err := s.store.ForTeam(ctx, store.Team(team))
+	tenant, err := s.tenantForTeam(ctx, store.Team(team))
 	if err != nil {
 		return "", engineLookupError(err)
 	}
@@ -146,7 +146,7 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		return 0, missingEndpointPolicy()
 	}
 	if s.githubApp != nil {
-		tenant, err := s.store.ForTeam(ctx, store.Team(team))
+		tenant, err := s.tenantForTeam(ctx, store.Team(team))
 		if err != nil {
 			return 0, engineLookupError(err)
 		}

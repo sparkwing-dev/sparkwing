@@ -87,10 +87,10 @@ func TestTeamWriteHTTPAuthorityProperty(t *testing.T) {
 	f.s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = append(f.facts.snapshot.Authorities[0].Principal.Capability.Grants, capability.TeamAdmin)
 	writer := &teamWriteFake{team: store.DefaultTeam}
-	f.s.WithTeamWriter(func(context.Context, store.Team) (TeamWriter, error) { return writer, nil })
-	f.s.WithGitHubAppWriter(func(context.Context, store.Team) (GitHubAppWriter, error) { return writer, nil })
+	testOnlyTenantPort[TeamWriter](f.s, func(context.Context, store.Team) (TeamWriter, error) { return writer, nil })
+	testOnlyTenantPort[GitHubAppWriter](f.s, func(context.Context, store.Team) (GitHubAppWriter, error) { return writer, nil })
 	f.s.githubApp = &githubAppState{}
-	f.s.WithEngineController(&EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return store.DefaultTeam, nil }})
+	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
 	cases := []struct {
 		method, path, body string
 		status             int
@@ -197,7 +197,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 	f.s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = append(f.facts.snapshot.Authorities[0].Principal.Capability.Grants, capability.TeamAdmin)
 	writer := &billingWriterFake{team: store.DefaultTeam}
-	f.s.WithBillingWriter(func(context.Context, store.Team) (BillingWriter, error) { return writer, nil })
+	testOnlyTenantPort[BillingWriter](f.s, func(context.Context, store.Team) (BillingWriter, error) { return writer, nil })
 	calls := 0
 	mode := uint8(0)
 	f.s.checkout = &billingCheckout{url: "https://checkout.example", token: "private-service-key", http: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {

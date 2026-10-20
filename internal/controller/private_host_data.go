@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Server) localHostDataAuthority(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}

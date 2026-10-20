@@ -240,6 +240,10 @@ linters:
         text: "F1: widening"
         linters:
           - forbidigo
+      - path: ^internal/controller/composition\.go$
+        text: "F1: widening"
+        linters:
+          - forbidigo
       - path: ^(internal/runspec/|internal/store/intake_provenance\.go$|internal/store/teststore/)
         text: "F2: only the intake"
         linters:

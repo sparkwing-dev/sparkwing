@@ -27,7 +27,7 @@ func (s *Server) settingsWriter() (OperatorSettingsWriter, error) {
 		return s.operatorSettingsWrites, nil
 	}
 	if s.store != nil {
-		return s.store.AsOperator(), nil
+		return s.operator, nil
 	}
 	return nil, missingEndpointPolicy()
 }

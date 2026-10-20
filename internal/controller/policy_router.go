@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -34,7 +35,8 @@ func (router *PolicyRouter) Register(endpoint Endpoint) (err error) {
 			err = fmt.Errorf("invalid endpoint %s: %v", key, failure)
 		}
 	}()
-	router.mux.HandleFunc(key, func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(context.WithValue(r.Context(), requestTenantKey{}, &requestTenant{resolve: router.resolveTenant}))
 		// safety: ServeMux lets GET match HEAD, but grants apply to exact methods.
 		if r.Method != endpoint.Method {
 			w.Header().Set("Allow", endpoint.Method)
@@ -45,6 +47,11 @@ func (router *PolicyRouter) Register(endpoint Endpoint) (err error) {
 			writePolicyError(w, err)
 		}
 	})
+	var protected http.Handler = handler
+	if endpoint.Authentication != capability.AuthPublic {
+		protected = noStore(protected)
+	}
+	router.mux.Handle(key, protected)
 	router.registered[key] = endpoint
 	return nil
 }
@@ -100,7 +107,7 @@ func allowedRouteMethods(mux *http.ServeMux, r *http.Request, methods []string) 
 		}
 		seen[method] = true
 		probe.Method = method
-		if _, pattern := mux.Handler(probe); pattern != "" && (!strings.Contains(pattern, " ") || strings.HasPrefix(pattern, method+" ")) {
+		if _, pattern := mux.Handler(probe); pattern != "" && strings.HasPrefix(pattern, method+" ") {
 			allowed = append(allowed, method)
 		}
 	}
@@ -118,6 +125,9 @@ func writeRouteMiss(w http.ResponseWriter, allowed []string) {
 }
 
 func (router *PolicyRouter) checkEndpoint(route capability.RoutePolicy, endpoint Endpoint) error {
+	if strings.Contains(endpoint.Pattern, "{run}") && endpoint.ResolveTarget == nil {
+		return missingEndpointPolicy()
+	}
 	if route.Authentication != endpoint.Authentication {
 		return missingEndpointPolicy()
 	}
@@ -157,37 +167,16 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 	}
 	presentation.Evidence, err = endpoint.Decode(r)
 	decodeErr := err
-	authenticated, err := router.authorization.Authenticator.Authenticate(r.Context(), presentation, route)
-	if err != nil {
-		return err
-	}
-	notePolicyPrincipal(r.Context(), authenticated.Principal)
-	// safety: team-local routes without a selector use only the committed credential's active team.
-	if route.Owner == capability.OwnerTeam && presentation.Evidence.Target.Team == "" {
-		presentation.Evidence.Target.Team = authenticated.Principal.Capability.Team
-	}
-	if endpoint.ResolveTarget != nil {
-		presentation.Evidence.Target, err = endpoint.ResolveTarget(r.Context(), authenticated.Principal, presentation.Evidence.Target)
-		if err != nil {
-			return err
+	authorized, err := router.authorize(r.Context(), endpoint, route, presentation, decodeErr, func(principal capability.Principal) error {
+		if !requiresCSRF(r.Method, principal.Class) {
+			return nil
 		}
-	}
-	if decodeErr != nil {
-		return decodeErr
-	}
-	if requiresCSRF(r.Method, authenticated.Principal.Class) {
 		if router.authorization.CheckCSRF == nil {
 			return missingEndpointPolicy()
 		}
-		if err := router.authorization.CheckCSRF(r, authenticated.Principal); err != nil {
-			return err
-		}
-	}
-	authorized, err := capability.Authorize(r.Context(), router.authorization.Bindings, route, authenticated, presentation.Evidence.Target)
+		return router.authorization.CheckCSRF(r, principal)
+	})
 	if err != nil {
-		if presentation.Evidence.Target.Data != nil {
-			return dataRouteError(err)
-		}
 		return err
 	}
 	if evidence := presentation.Evidence; evidence.ResultDigest != "" {
@@ -195,9 +184,57 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 		if evidence.ResultAttempt != nil {
 			b.Attempt = *evidence.ResultAttempt
 		}
-		authorized.Result = &capability.RecordedResult{Actor: authorized.Principal.Authority, Method: r.Method, Pattern: route.Path, RunID: evidence.Target.RunID, NodeID: evidence.Target.NodeID, ClaimID: evidence.Target.ClaimID, Generation: b.Generation, Attempt: b.Attempt, Digest: evidence.ResultDigest}
+		authorized.Result = &capability.RecordedResult{Actor: authorized.Principal.Authority, Method: r.Method, Pattern: route.Path, RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID, ClaimID: authorized.Target.ClaimID, Generation: b.Generation, Attempt: b.Attempt, Digest: evidence.ResultDigest}
 	}
 	return endpoint.Handle(w, r, authorized)
+}
+
+// Authorize applies the registered route resolver and policy to embedded requests.
+func (router *PolicyRouter) Authorize(ctx context.Context, method, pattern string, presentation capability.Presentation) (context.Context, capability.Authorized, error) {
+	if presentation.Class != capability.CredentialBearer {
+		return ctx, capability.Authorized{}, missingEndpointPolicy()
+	}
+	endpoint, ok := router.registered[method+" "+pattern]
+	route, found := capability.LookupRoute(method, pattern)
+	if !ok || !found || route.Authentication != capability.AuthCapability {
+		return ctx, capability.Authorized{}, missingEndpointPolicy()
+	}
+	ctx = context.WithValue(ctx, requestTenantKey{}, &requestTenant{resolve: router.resolveTenant})
+	authorized, err := router.authorize(ctx, endpoint, route, presentation, nil, nil)
+	return ctx, authorized, err
+}
+
+func (router *PolicyRouter) authorize(ctx context.Context, endpoint Endpoint, route capability.RoutePolicy, presentation capability.Presentation, decodeErr error, beforeAuthorize func(capability.Principal) error) (capability.Authorized, error) {
+	if err := router.checkEndpoint(route, endpoint); err != nil {
+		return capability.Authorized{}, err
+	}
+	authenticated, err := router.authorization.Authenticator.Authenticate(ctx, presentation, route)
+	if err != nil {
+		return capability.Authorized{}, err
+	}
+	notePolicyPrincipal(ctx, authenticated.Principal)
+	if route.Owner == capability.OwnerTeam && presentation.Evidence.Target.Team == "" {
+		presentation.Evidence.Target.Team = authenticated.Principal.Capability.Team
+	}
+	if endpoint.ResolveTarget != nil {
+		presentation.Evidence.Target, err = endpoint.ResolveTarget(ctx, authenticated.Principal, presentation.Evidence.Target)
+		if err != nil {
+			return capability.Authorized{}, err
+		}
+	}
+	if decodeErr != nil {
+		return capability.Authorized{}, decodeErr
+	}
+	if beforeAuthorize != nil {
+		if err := beforeAuthorize(authenticated.Principal); err != nil {
+			return capability.Authorized{}, err
+		}
+	}
+	authorized, err := capability.Authorize(ctx, router.authorization.Bindings, route, authenticated, presentation.Evidence.Target)
+	if err != nil && presentation.Evidence.Target.Data != nil {
+		err = dataRouteError(err)
+	}
+	return authorized, err
 }
 
 func (router *PolicyRouter) presentation(r *http.Request) (capability.Presentation, error) {
@@ -258,18 +295,14 @@ func writePolicyError(w http.ResponseWriter, err error) {
 
 func (s *Server) registerControllerEndpoints(mux *registeredMux, endpoints []Endpoint) {
 	policy := NewPolicyRouter(s.authorization)
+	policy.mux = mux.ServeMux
+	policy.resolveTenant = s.resolveTenant
 	for _, endpoint := range endpoints {
-		if err := policy.Register(s.budgetEndpoint(endpoint)); err != nil {
+		if err := policy.Register(s.budgetEndpoint(s.tenantEndpoint(endpoint))); err != nil {
 			panic(err)
 		}
 	}
-	for _, endpoint := range endpoints {
-		var handler http.Handler = policy
-		if endpoint.Authentication != capability.AuthPublic {
-			handler = noStore(handler)
-		}
-		mux.Handle(endpoint.Method+" "+endpoint.Pattern, handler)
-	}
+	mux.registrations = append(mux.registrations, policy.Registrations()...)
 }
 
 type registeredMux struct {

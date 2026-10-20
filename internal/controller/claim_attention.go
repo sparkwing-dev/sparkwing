@@ -28,7 +28,7 @@ func (s *Server) sweepClaimAttention(ctx context.Context, now time.Time, batch i
 	if s.attentionCursor == ([2]string{}) {
 		s.attentionPassAt = now
 	}
-	waiting, err := s.store.AsOperator().ListWaitingNodes(ctx, s.attentionPassAt.Add(-claimAttentionGrace), s.attentionCursor, batch)
+	waiting, err := s.operator.ListWaitingNodes(ctx, s.attentionPassAt.Add(-claimAttentionGrace), s.attentionCursor, batch)
 	if err != nil {
 		s.logger.Error("claim attention sweep failed", "err", err)
 		return
@@ -38,29 +38,31 @@ func (s *Server) sweepClaimAttention(ctx context.Context, now time.Time, batch i
 		last := waiting[len(waiting)-1]
 		s.attentionCursor = [2]string{last.RunID, last.NodeID}
 	}
-	agents := map[store.Team][]agentSighting{}
-	var updates []store.NodeAttention
+	teams := make([]store.Team, 0, len(waiting))
 	for _, n := range waiting {
-		sightings, ok := agents[n.Team]
-		if !ok {
-			tenant, err := s.store.ForTeam(ctx, n.Team)
-			if err != nil {
-				s.logger.Error("claim attention sweep failed", "err", err)
-				return
-			}
-			registered, err := tenant.ListRegisteredAgents(ctx)
-			if err != nil {
-				s.logger.Error("claim attention sweep failed", "err", err)
-				return
-			}
-			sightings = sightAgents(registered, now)
-			agents[n.Team] = sightings
-		}
-		if reason := claimAttention(n, sightings, s.deployment.Metering()); reason != n.Attention {
-			updates = append(updates, store.NodeAttention{Team: n.Team, RunID: n.RunID, NodeID: n.NodeID, Reason: reason})
-		}
+		teams = append(teams, n.Team)
 	}
-	if err := s.store.AsOperator().SetNodeAttention(ctx, updates); err != nil {
+	var updates []store.NodeAttention
+	if err := s.operator.EachTeam(ctx, teams, func(tenant *store.Tenant) error {
+		registered, err := tenant.ListRegisteredAgents(ctx)
+		if err != nil {
+			return err
+		}
+		sightings := sightAgents(registered, now)
+		for _, n := range waiting {
+			if n.Team != tenant.Team() {
+				continue
+			}
+			if reason := claimAttention(n, sightings, s.deployment.Metering()); reason != n.Attention {
+				updates = append(updates, store.NodeAttention{Team: n.Team, RunID: n.RunID, NodeID: n.NodeID, Reason: reason})
+			}
+		}
+		return nil
+	}); err != nil {
+		s.logger.Error("claim attention sweep failed", "err", err)
+		return
+	}
+	if err := s.operator.SetNodeAttention(ctx, updates); err != nil {
 		s.logger.Error("claim attention sweep failed", "err", err)
 	}
 }

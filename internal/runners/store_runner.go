@@ -30,7 +30,11 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 	}
 	cfg.Loop.Labels = slices.Clone(cfg.Loop.Labels)
 	cfg.Loop.Kinds = slices.Clone(cfg.Loop.Kinds)
-	client := StoreController{Engine: engine, Bearer: cfg.Bearer}
+	router, err := engine.ClaimPolicyRouter()
+	if err != nil {
+		return nil, err
+	}
+	client := StoreController{Engine: engine, Bearer: cfg.Bearer, Router: router}
 	return &Loop{
 		Config: cfg.Loop, Controller: client,
 		Host: StoreHosting{Store: engine.Store, Bind: cfg.Bind}, CheckVersion: client.checkVersion,
@@ -40,6 +44,7 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 
 // StoreController applies shared route policy to the embedded local queue.
 type StoreController struct {
+	Router *controller.PolicyRouter
 	Engine *controller.EngineController
 	Bearer func(context.Context) (string, error)
 }
@@ -68,41 +73,26 @@ func (c StoreController) Claim(ctx context.Context, body controllerwire.ClaimReq
 		pattern = "/api/v1/runs/{run}/claim"
 	}
 	target := capability.Target{RunID: body.RunID, NodeID: body.JobID, ClaimKinds: slices.Clone(body.Kinds)}
-	authorized, err := c.authorize(ctx, pattern, target)
+	ctx, authorized, err := c.authorize(ctx, pattern, target)
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
 	return c.Engine.Claim(ctx, authorized, body)
 }
 
-func (c StoreController) authorize(ctx context.Context, pattern string, target capability.Target) (capability.Authorized, error) {
+func (c StoreController) authorize(ctx context.Context, pattern string, target capability.Target) (context.Context, capability.Authorized, error) {
 	if err := context.Cause(ctx); err != nil {
-		return capability.Authorized{}, err
+		return ctx, capability.Authorized{}, err
 	}
 	if c.Engine == nil || c.Engine.Store == nil || c.Bearer == nil {
-		return capability.Authorized{}, errors.New("embedded controller requires the owned store and claimant")
+		return ctx, capability.Authorized{}, errors.New("embedded controller requires the owned store and claimant")
 	}
 	raw, err := c.Bearer(ctx)
 	if err != nil {
-		return capability.Authorized{}, err
+		return ctx, capability.Authorized{}, err
 	}
-	route, ok := capability.LookupRoute("POST", pattern)
-	if !ok {
-		return capability.Authorized{}, errors.New("embedded controller route policy is unavailable")
+	if c.Router == nil {
+		return ctx, capability.Authorized{}, errors.New("embedded controller requires the policy router")
 	}
-	authenticated, err := capability.NewAuthenticator(c.Engine.Store).Authenticate(ctx, capability.Presentation{
-		Raw: raw, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target},
-	}, route)
-	if err != nil {
-		return capability.Authorized{}, err
-	}
-	target.Team = authenticated.Principal.Capability.Team
-	if pattern == "/api/v1/runs/{run}/claim" {
-		team, err := c.Engine.Store.AsOperator().RunTeam(ctx, target.RunID)
-		if err != nil {
-			return capability.Authorized{}, err
-		}
-		target.Team = string(team)
-	}
-	return capability.Authorize(ctx, c.Engine.Store, route, authenticated, target)
+	return c.Router.Authorize(ctx, "POST", pattern, capability.Presentation{Raw: raw, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}})
 }

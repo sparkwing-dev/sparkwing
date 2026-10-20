@@ -205,10 +205,10 @@ func TestEngineSnapshotHTTPRefusals(t *testing.T) {
 				status, code = 403, apierr.Forbidden
 			case "missing run":
 				f.readErr = store.ErrNotFound
-				status, code, reads = 404, apierr.NotFound, 1
+				status, code, reads = 404, apierr.NotFound, 0
 			case "private read":
 				f.readErr = errors.New("private-read")
-				status, code, reads = 500, apierr.Internal, 1
+				status, code, reads = 500, apierr.Internal, 0
 			default:
 				status, code, reads = 500, apierr.Internal, 1
 				switch state {
@@ -264,7 +264,7 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 	for _, state := range []string{"no policy", "no tenant", "nil tenant", "tenant error", "lookup error", "dead with lookup error"} {
 		t.Run(state, func(t *testing.T) {
 			b := ownerBoundary()
-			e := &controller.EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "team", nil }}
+			e := &controller.EngineController{}
 			code := apierr.PolicyMissing
 			switch state {
 			case "nil tenant":
@@ -275,7 +275,7 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 				}
 				code = apierr.Internal
 			case "lookup error", "dead with lookup error":
-				e.ResolveRunTeam = func(context.Context, string) (store.Team, error) { return "", errors.New("private-lookup") }
+				e.ResolveTenant = selectorTenant("team", errors.New("private-lookup"))
 				code = apierr.Internal
 				if state == "dead with lookup error" {
 					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now

@@ -206,7 +206,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	if err != nil {
 		return nil, err
 	}
-	if len(response.Awards)+len(response.Remove)+len(response.RemoveReservations) != len(observations) {
+	if len(response.Deferred)+len(response.Awards)+len(response.Remove)+len(response.RemoveReservations) != len(observations) {
 		return nil, errors.New("controller sync omitted or added Cloud Job decisions")
 	}
 	states := make([]CloudJobState, len(observations))
@@ -231,6 +231,13 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 			return nil, errors.New("controller sync returned unknown or contradictory Cloud cleanup")
 		}
 		states[i] = CloudJobState{Binding: observations[i].Binding, Delete: true}
+	}
+	for _, fence := range response.Deferred {
+		i, ok := byAward[fence]
+		if !ok || states[i].Binding.UnitID != "" {
+			return nil, errAwardMismatch
+		}
+		states[i] = CloudJobState{Binding: observations[i].Binding, Deferred: true}
 	}
 	for _, reservation := range response.RemoveReservations {
 		i, ok := byAward[reservation.Award]

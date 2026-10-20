@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -236,6 +237,50 @@ func TestEngineNamedClaimHTTPRequiresReadyMatchingWork(t *testing.T) {
 			}
 			if count != want || status != http.StatusOK && strings.Contains(w.Body.String(), `"capability"`) {
 				t.Fatalf("refused claim changed award: %d %s", count, w.Body)
+			}
+		})
+	}
+}
+
+func TestNamedClaimNumericSelectorConvergesAcrossTransports(t *testing.T) {
+	for _, transport := range []string{"http", "embedded"} {
+		t.Run(transport, func(t *testing.T) {
+			e, _ := engineRuntimeStore(t)
+			e.Store.SetClaimProfileResolver(engineProfileFake{})
+			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
+			raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
+			var number int64
+			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT number FROM runs WHERE team='a' AND id='run'`).Scan(&number); err != nil {
+				t.Fatal(err)
+			}
+			selector := strconv.FormatInt(number, 10)
+			body := controllerwire.ClaimRequest{RunnerVersion: "v1", RunID: selector, Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 1}
+			var response controllerwire.ClaimResponse
+			if transport == "http" {
+				encoded, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				w := engineClaimHTTP(t, New(e.Store, nil).WithEngineController(e).Handler(), raw, "POST", "/api/v1/runs/"+selector+"/claim", string(encoded), http.StatusOK)
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				router, err := e.ClaimPolicyRouter()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, authorized, err := router.Authorize(t.Context(), "POST", "/api/v1/runs/{run}/claim", capability.Presentation{Raw: raw, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: capability.Target{RunID: selector, ClaimKinds: body.Kinds}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				response, err = e.Claim(ctx, authorized, body)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if response.Claim == nil || response.Claim.RunID != "run" {
+				t.Fatalf("claim=%+v", response.Claim)
 			}
 		})
 	}

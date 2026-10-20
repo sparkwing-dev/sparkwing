@@ -264,7 +264,7 @@ func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	writer := &browserRunDeleter{tenant: tenant}
-	f.srv.WithTeamWriter(func(context.Context, store.Team) (controller.TeamWriter, error) { return writer, nil })
+	controller.BindTenantPortForTest[controller.TeamWriter](f.srv, func(context.Context, store.Team) (controller.TeamWriter, error) { return writer, nil })
 	f.h = f.srv.Handler()
 	for i, id := range []string{"r1", "r2", `a\b`} {
 		if _, err := teststore.SQL(t, f.st).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default',?,?,'demo','success',?,'request',1,'github.com/acme/app','host','execute',?,'alice',1,2,'r30',30)`, id, i+1, []byte(`{}`), []byte(`[]`)); err != nil {

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -18,36 +17,8 @@ type CreditReader interface {
 	ListCreditCharges(context.Context, int) ([]store.CreditCharge, error)
 }
 
-// WithCreditReader supplies tenant ledger reads before Handler is constructed.
-// A nil resolver uses Store.ForTeam. The selected reader must belong to the authorized team.
-func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (CreditReader, error)) *Server {
-	s.resolveCreditReader = resolve
-	return s
-}
-
 func (s *Server) creditReader(ctx context.Context, team string) (CreditReader, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	var reader CreditReader
-	var err error
-	if s.resolveCreditReader != nil {
-		reader, err = s.resolveCreditReader(ctx, store.Team(team))
-	} else if s.store != nil {
-		reader, err = s.store.ForTeam(ctx, store.Team(team))
-	} else {
-		return nil, missingEndpointPolicy()
-	}
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return nil, engineLookupError(store.ErrNotFound)
-	}
-	if err != nil {
-		return nil, engineLookupError(err)
-	}
-	if reader == nil || reader.Team() != store.Team(team) {
-		return nil, missingEndpointPolicy()
-	}
-	return reader, nil
+	return tenantPort[CreditReader](ctx, s, store.Team(team))
 }
 
 func (s *Server) creditEndpoints() []Endpoint {

@@ -48,7 +48,7 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref, fence := launcherFence(t, s, demand, claim, capability.UnitNode)
-	awards, err := s.ReadLauncherAwards(t.Context(), ref, nil)
+	awards, _, err := s.ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil)
 	if err != nil || len(awards) != 1 {
 		t.Fatalf("pool reconciliation: %+v %v", awards, err)
 	}
@@ -56,7 +56,7 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	if c.Delivery != capability.DeliveryBootstrap || c.Billing.Metered || c.RootMetered || c.Billing.ExecutorClass != "runner" {
 		t.Fatalf("pool award must be unmetered bootstrap: %+v", c)
 	}
-	if prepared, err := s.RenewLauncherPreparation(t.Context(), ref, []capability.LeaseRef{fence}); err != nil || len(prepared) != 1 {
+	if prepared, err := s.renewLauncherPreparation(t.Context(), ref, []capability.LeaseRef{fence}); err != nil || len(prepared) != 1 {
 		t.Fatalf("pool preparation: %v %v", prepared, err)
 	}
 	allocation, err := s.CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})

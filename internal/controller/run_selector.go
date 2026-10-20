@@ -21,25 +21,19 @@ func (s *EngineController) resolveRunSelector(ctx context.Context, principal cap
 	}
 	number, err := strconv.ParseInt(target.RunID, 10, 64)
 	numeric := err == nil && number > 0 && strconv.FormatInt(number, 10) == target.RunID
-	if !numeric && s.ResolveRunTeam != nil {
-		team, err := s.ResolveRunTeam(ctx, target.RunID)
+	if !numeric {
+		tenant, err := s.runTransactions(ctx, target.Team)
 		if err != nil {
 			return target, engineLookupError(err)
 		}
-		if string(team) != target.Team {
-			return target, engineLookupError(store.ErrNotFound)
-		}
-		return target, nil
+		_, err = tenant.ReadRun(ctx, target.RunID)
+		return target, engineLookupError(err)
 	}
 	if s.Store == nil {
 		return target, missingEndpointPolicy()
 	}
-	tenant, err := s.Store.ForTeam(ctx, store.Team(target.Team))
+	tenant, err := s.tenantForTeam(ctx, store.Team(target.Team))
 	if err != nil {
-		return target, engineLookupError(err)
-	}
-	if !numeric {
-		_, err = tenant.ReadRun(ctx, target.RunID)
 		return target, engineLookupError(err)
 	}
 	views, err := tenant.ListRunViews(ctx, number-1, number, 1)
