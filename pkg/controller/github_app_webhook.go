@@ -361,9 +361,10 @@ type githubAppPullRequestPayload struct {
 		Name string `json:"name"`
 	} `json:"label"`
 	PullRequest struct {
-		UpdatedAt string `json:"updated_at"`
-		Merged    bool   `json:"merged"`
-		Head      struct {
+		UpdatedAt      string `json:"updated_at"`
+		Merged         bool   `json:"merged"`
+		MergeCommitSHA string `json:"merge_commit_sha"`
+		Head           struct {
 			Ref  string            `json:"ref"`
 			SHA  string            `json:"sha"`
 			Repo *githubAppRepoRef `json:"repo"`
@@ -387,6 +388,8 @@ type githubAppIntake struct {
 	env    map[string]string
 	at     time.Time
 	prInfo *sparkwing.PullRequest
+	// headRepo is GitHub's ID for the repository a pull request's head lives in.
+	headRepo int64
 }
 
 // bug: GitHub push payloads use Unix seconds; other deliveries may use timestamps.
@@ -543,6 +546,18 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	if !githubCommit(pr.Head.SHA) {
 		return githubAppIntake{}, "the pull request names no head commit", nil
 	}
+	// safety: a closed pull request's head is code nobody merged; only a merge
+	// commit, which branch protection on the base admitted, may run.
+	sha := pr.Head.SHA
+	if env.Action == "closed" {
+		if !pr.Merged {
+			return githubAppIntake{}, "an unmerged closed pull request starts nothing", nil
+		}
+		if !githubCommit(pr.MergeCommitSHA) {
+			return githubAppIntake{}, "the merged pull request names no merge commit", nil
+		}
+		sha = pr.MergeCommitSHA
+	}
 	base["GITHUB_EVENT_NAME"] = "pull_request"
 	base["GITHUB_PR_NUMBER"] = strconv.Itoa(p.Number)
 	base["GITHUB_PR_ACTION"] = env.Action
@@ -558,8 +573,8 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		updated = time.Time{}
 	}
 	return githubAppIntake{
-		user: pr.User.Login, branch: pr.Head.Ref, sha: pr.Head.SHA, env: base, at: updated,
-		prInfo: PullRequestForTrigger(base),
+		user: pr.User.Login, branch: pr.Head.Ref, sha: sha, env: base, at: updated,
+		prInfo: PullRequestForTrigger(base), headRepo: pr.Head.Repo.ID,
 	}, "", nil
 }
 
@@ -820,19 +835,6 @@ func (s *Server) manualCronConflict(ctx context.Context, svc *crons.Service,
 	return nil
 }
 
-func githubAppBranchMatches(patterns []string, branch string) bool {
-	if len(patterns) == 0 {
-		return true
-	}
-	for _, pattern := range patterns {
-		matched, err := path.Match(pattern, branch)
-		if err == nil && matched {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery) {
 	if env.Action != "renamed" && env.Action != "transferred" && env.Action != "deleted" {
 		githubAppIgnored(w, "repository action starts nothing")
@@ -922,15 +924,16 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
 }
 
-// safety: Branch filters gate every event that runs branch code; tag patterns alone select tag pushes.
+// safety: Branch filters gate every event that runs branch code; tag patterns alone select tag
+// pushes and gate releases, because anyone who can push a tag can publish a release on it.
 func githubAppSubscribes(sub store.GitHubAppTrigger, event, action string, env map[string]string, branch string) bool {
-	baseMatches := githubAppBranchMatches(sub.BaseBranches, env["GITHUB_BASE_REF"])
+	baseMatches := runspec.BranchSelector(sub.BaseBranches).Matches(env["GITHUB_BASE_REF"])
 	switch event {
 	case "push":
 		if env["GITHUB_REF_TYPE"] == "tag" {
 			return githubTagMatches(sub.Tags, env["GITHUB_TAG"])
 		}
-		return sub.Push && githubAppBranchMatches(sub.Branches, branch)
+		return sub.Push && runspec.BranchSelector(sub.Branches).Matches(branch)
 	case "pull_request":
 		switch action {
 		case "opened", "synchronize", "reopened":
@@ -950,11 +953,11 @@ func githubAppSubscribes(sub store.GitHubAppTrigger, event, action string, env m
 			}
 		}
 	case "release":
-		return action == "published" && sub.ReleasePublished || action == "prereleased" && sub.ReleasePrereleased
+		return (action == "published" && sub.ReleasePublished || action == "prereleased" && sub.ReleasePrereleased) && githubTagMatches(sub.Tags, env["GITHUB_TAG_NAME"])
 	case "create":
-		return sub.BranchCreate && githubAppBranchMatches(sub.Branches, strings.TrimPrefix(env["GITHUB_REF"], "refs/heads/"))
+		return sub.BranchCreate && runspec.BranchSelector(sub.Branches).Matches(env["GITHUB_REF"])
 	case "delete":
-		return sub.BranchDelete && githubAppBranchMatches(sub.Branches, strings.TrimPrefix(env["GITHUB_REF"], "refs/heads/"))
+		return sub.BranchDelete && runspec.BranchSelector(sub.Branches).Matches(env["GITHUB_REF"])
 	}
 	return false
 }
@@ -1130,7 +1133,8 @@ func (s *Server) startGitHubAppRun(
 	request.Git, request.Source = git, code
 	if in.prInfo != nil {
 		pr := in.prInfo
-		request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: int64(pr.Number), Action: pr.Action, BaseRepo: key, HeadRepo: key, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA, Label: in.env["GITHUB_LABEL"], Merged: runspec.Optional[bool]{Set: in.env["GITHUB_MERGED"] != "", Value: in.env["GITHUB_MERGED"] == "true"}}}
+		head := runspec.RepoKey(fmt.Sprintf("gh:%d", in.headRepo))
+		request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: int64(pr.Number), Action: pr.Action, BaseRepo: key, HeadRepo: head, Fork: head != key, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA, Label: in.env["GITHUB_LABEL"], Merged: runspec.Optional[bool]{Set: in.env["GITHUB_MERGED"] != "", Value: in.env["GITHUB_MERGED"] == "true"}}}
 	}
 	result, err := tenant.AdmitGitHubAppRun(r.Context(), store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event")})
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
