@@ -195,7 +195,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err = enforceRunsPerHourTx(ctx, tx, team, id, charge, now); err != nil {
 		var refused *ComputeLimitError
 		if errors.As(err, &refused) {
-			err = errors.Join(err, &apierr.Error{Code: apierr.RateLimited, Message: "hourly run admission limit reached", Details: map[string]any{"limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed, "retry_after_ms": 5000}})
+			err = errors.Join(err, &apierr.Error{Code: apierr.RateLimited, Message: refused.Error(), Details: map[string]any{"reason": "compute_limit", "limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed, "scope": refused.Scope, "retry_after_ms": 5000}})
 		}
 		return AdmissionResult{}, err
 	}

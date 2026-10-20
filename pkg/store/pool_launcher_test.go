@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,9 +30,7 @@ func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 	if err := json.Unmarshal(body, &seal); err != nil {
 		t.Fatal(err)
 	}
-	seal.Request.Git.SHA = strings.Repeat("a", 40)
-	seal.Request.Git.Ref = "refs/heads/main"
-	seal.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Ref: seal.Request.Git.Ref, SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: true}}
+	seal.Provenance, seal.Request.Git = referenceAppProvenance(t, "refs/heads/main", fixtureOtherSHA)
 	body, err := json.Marshal(seal)
 	if err != nil {
 		t.Fatal(err)
