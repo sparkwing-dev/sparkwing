@@ -16,7 +16,6 @@ func TestPostgresPaymentStateSerializesBeforePayerAssociation(t *testing.T) {
 	defer cancel()
 	for _, query := range []string{
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`,
-		`INSERT INTO settings(key,value) VALUES ('payment_mode','"test"')`,
 		`INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('checkout','a','session','test','usd',100,100000000,1,2)`,
 	} {
 		if _, err := s.DB().ExecContext(ctx, query); err != nil {
