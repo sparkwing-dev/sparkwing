@@ -60,7 +60,7 @@ func snapshotFixture(b *credentialBoundary) *snapshotTransactions {
 func snapshotServer(t *testing.T, b *credentialBoundary, f *snapshotTransactions) http.Handler {
 	t.Helper()
 	e := fakeEngine(t, &f.engineTransactions)
-	e.ResolveTenant = func(_ context.Context, team store.Team) (controller.RunTransactions, error) {
+	e.ResolveTenant = func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 		if team != "team" {
 			t.Fatalf("tenant = %q", team)
 		}
@@ -268,9 +268,9 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 			code := apierr.PolicyMissing
 			switch state {
 			case "nil tenant":
-				e.ResolveTenant = func(context.Context, store.Team) (controller.RunTransactions, error) { return nil, nil }
+				e.ResolveTenant = func(context.Context, store.Team) (controller.TenantHandle, error) { return nil, nil }
 			case "tenant error":
-				e.ResolveTenant = func(context.Context, store.Team) (controller.RunTransactions, error) {
+				e.ResolveTenant = func(context.Context, store.Team) (controller.TenantHandle, error) {
 					return nil, errors.New("private-tenant")
 				}
 				code = apierr.Internal

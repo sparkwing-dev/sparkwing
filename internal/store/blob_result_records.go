@@ -9,12 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// SetResultBlobRecords configures verified manifests for records and results before the store is shared.
-func (s *Store) SetResultBlobRecords(manifests BlobManifestReader) {
-	records := &blobRecords{manifests: manifests}
-	s.resultRecords, s.materializations = records, records
-}
-
 func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, result NodeResult) error {
 	attempt := runspec.AttemptIdentity{Team: string(team), RunID: row.Ref.RunID, NodeID: row.Ref.NodeID, Attempt: row.Attempt, Generation: row.Generation}
 	if attempt.Attempt <= 0 || attempt.Generation <= 0 || actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: actor.CapabilityPrefix}) {

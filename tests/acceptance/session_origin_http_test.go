@@ -50,7 +50,7 @@ func TestTokenLoginDescendantEndsWithOriginalToken(t *testing.T) {
 	f := newSessionFlow(t)
 	root := loginCapability(t, f)
 	expiry := time.Now().Add(time.Hour)
-	limited, err := f.store.DelegateCapability(t.Context(), capability.DelegateSpec{
+	limited, err := f.store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
 		Parent:   capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix},
 		Audience: capability.Controller, Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: &expiry,
 	})
@@ -69,7 +69,7 @@ func TestTokenLoginDescendantEndsWithOriginalToken(t *testing.T) {
 			raw = cookie.Value
 		}
 	}
-	session, err := f.store.LookupSession(t.Context(), raw)
+	session, err := f.store.AsOperator().LookupSession(t.Context(), raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestTokenLoginDescendantEndsWithOriginalToken(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &minted) != nil {
 		t.Fatalf("mint: HTTP %d %s", w.Code, w.Body)
 	}
-	child, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(minted.Capability)))
+	child, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(minted.Capability)))
 	digest := sha256.Sum256([]byte(raw))
 	parent := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 	if err != nil || child.Capability.Parent == nil || *child.Capability.Parent != parent || child.Capability.ExpiresAt == nil || child.Capability.ExpiresAt.After(expiry) {
@@ -95,7 +95,7 @@ func TestTokenLoginDescendantEndsWithOriginalToken(t *testing.T) {
 	if err := tenant.RevokeAuthority(t.Context(), actor, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: limited.Capability.Prefix}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(minted.Capability))); err == nil {
+	if _, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(minted.Capability))); err == nil {
 		t.Fatal("descendant survived login token revocation")
 	}
 }

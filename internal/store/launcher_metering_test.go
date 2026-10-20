@@ -11,7 +11,7 @@ import (
 func launcherFence(t *testing.T, s *Store, demand UnitDemand, claim UnitClaim, kind capability.UnitKind) (capability.AuthorityRef, capability.LeaseRef) {
 	t.Helper()
 	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-	awards, _, err := s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 	if err != nil || len(awards) != 1 {
 		t.Fatalf("launcher awards: %+v %v", awards, err)
 	}
@@ -43,12 +43,12 @@ func TestLauncherAwardMetersFromFirstPodRenewal(t *testing.T) {
 			if got := chargedMicro(t, s); got != reserved {
 				t.Fatalf("preparation charged %d micro beyond the %d reservation", got-reserved, reserved)
 			}
-			issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 			if err != nil {
 				t.Fatal(err)
 			}
 			*now = now.Add(10 * time.Second)
-			if _, err = s.RenewUnit(t.Context(), issued.Capability.Prefix, false); err != nil {
+			if _, err = s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, false); err != nil {
 				t.Fatal(err)
 			}
 			var began int64
@@ -81,7 +81,7 @@ func TestCancelledUnstartedLauncherAwardEndsMetering(t *testing.T) {
 			if err != nil || len(prepared) != 0 {
 				t.Fatalf("cancelled preparation renewed: %+v %v", prepared, err)
 			}
-			if _, err = s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err == nil {
+			if _, err = s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err == nil {
 				t.Fatal("cancelled unstarted award exchanged authority")
 			}
 			unitBillingTotal(t, s, 0, true)
@@ -114,7 +114,7 @@ func TestUnstartedLauncherAwardRefundsItsReservation(t *testing.T) {
 					}
 				}
 				*now = now.Add(limits.DefaultLease * 2)
-				if _, err := s.ReapUnits(t.Context(), lease, 10); err != nil {
+				if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 					t.Fatal(err)
 				}
 				if path == "lapse_then_cancel" {

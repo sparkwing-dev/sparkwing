@@ -29,7 +29,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	authState := "enabled"
 
-	if err := s.store.Ping(r.Context()); err != nil {
+	if err := s.operator.Ping(r.Context()); err != nil {
 		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"status":   "degraded",

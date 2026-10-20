@@ -239,7 +239,7 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 		return nil, "", refuse(http.StatusBadGateway, "", name+" could not be reached to finish the sign-in")
 	}
 	now := time.Now().UTC()
-	res, err := s.store.ResolveSignIn(ctx, profile, s.signUpConditions(ctx), now)
+	res, err := s.operator.ResolveSignIn(ctx, profile, s.signUpConditions(ctx), now)
 	if errors.Is(err, store.ErrAccountExists) {
 		return nil, "", refuse(http.StatusConflict, "", errAccountExistsSignIn.Error())
 	}
@@ -248,7 +248,7 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 	}
 	s.observeSignUp(ctx, name, res, now)
 	acct := res.Account
-	raw, _, sess, err := s.store.CreateIdentityAccountSession(ctx, acct, acct.ActiveTeam,
+	raw, _, sess, err := s.operator.CreateIdentityAccountSession(ctx, acct, acct.ActiveTeam,
 		profile.Provider, profile.Subject, s.sessionInitialTTL())
 	if err != nil {
 		if errors.Is(err, store.ErrIdentityUnlinked) {

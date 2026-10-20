@@ -109,7 +109,7 @@ func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, team Team, pay
 
 // safety: a queued refund that Stripe's recorded refunds already cover in full is settled, so the worker never
 // refunds a payment twice whichever refund arrived first.
-func closeRefundedQueueTx(ctx context.Context, tx *storeTx, paymentIntent string) error {
+func (op *Operator) closeRefundedQueueTx(ctx context.Context, tx *storeTx, paymentIntent string) error {
 	refunded, err := refundedMicroTx(ctx, tx, paymentIntent)
 	if err != nil || refunded == 0 {
 		return err
@@ -134,7 +134,7 @@ func refundedMicroTx(ctx context.Context, tx *storeTx, paymentIntent string) (in
 	return refunded, err
 }
 
-func reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, payment string, attribution paymentAttribution) error {
+func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, payment string, attribution paymentAttribution) error {
 	var team Team
 	var amount int64
 	var refusalWarning string
@@ -217,7 +217,7 @@ func reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mode capability.P
 	if err := applyPaymentConsequencesTx(ctx, tx, team, payment, attribution); err != nil {
 		return err
 	}
-	return closeRefundedQueueTx(ctx, tx, payment)
+	return tx.operator.closeRefundedQueueTx(ctx, tx, payment)
 }
 
 func paymentConsequenceReference(mode capability.PaymentMode, kind, id string) string {

@@ -15,11 +15,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) {
+func childIntakeFixture(t *testing.T) (*engineFixture, http.Handler, string) {
 	return childIntakeFixtureWith(t, nil)
 }
 
-func childIntakeFixtureWith(t *testing.T, prepare func(*EngineController)) (*EngineController, http.Handler, string) {
+func childIntakeFixtureWith(t *testing.T, prepare func(*engineFixture)) (*engineFixture, http.Handler, string) {
 	t.Helper()
 	e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
 	engineSQL(t, e.Store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
@@ -55,7 +55,7 @@ func childIntakeFixtureWith(t *testing.T, prepare func(*EngineController)) (*Eng
 }
 
 // declareChildren makes the parent job's plan declare the child pipelines it may start.
-func declareChildren(t *testing.T, e *EngineController, pipelines ...string) {
+func declareChildren(t *testing.T, e *engineFixture, pipelines ...string) {
 	t.Helper()
 	children := make([]map[string]string, len(pipelines))
 	for i, pipeline := range pipelines {
@@ -173,7 +173,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 	property := func(seed uint32) bool {
 		private := fmt.Sprintf("private-pipeline-%x", seed)
-		e, h, claim := childIntakeFixtureWith(t, func(e *EngineController) { declareChildren(t, e, "ci", private) })
+		e, h, claim := childIntakeFixtureWith(t, func(e *engineFixture) { declareChildren(t, e, "ci", private) })
 		team, err := e.Store.ForTeam(t.Context(), "a")
 		if err != nil {
 			t.Fatal(err)

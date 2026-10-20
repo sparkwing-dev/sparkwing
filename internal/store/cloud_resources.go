@@ -9,8 +9,8 @@ import (
 )
 
 // CloudAwardResources reads Cloud's committed allocation or a self-hosted pool's sealed resource pins.
-func (s *Store) CloudAwardResources(ctx context.Context, ref capability.AuthorityRef) (*match.Resources, error) {
-	tx, err := s.beginSnapshotReadTx(ctx)
+func (o *Operator) CloudAwardResources(ctx context.Context, ref capability.AuthorityRef) (*match.Resources, error) {
+	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return nil, err
 	}

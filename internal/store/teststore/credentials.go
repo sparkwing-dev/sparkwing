@@ -17,10 +17,10 @@ import (
 func ProvisionCredential(ctx context.Context, st *store.Store, spec capability.ProvisionSpec) (string, *capability.Capability, error) {
 	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	bootstrap := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
-	if _, err := st.EnsureBootstrapCapability(ctx, bootstrap); err != nil {
+	if _, err := st.AsOperator().EnsureBootstrapCapability(ctx, bootstrap); err != nil {
 		return "", nil, err
 	}
-	root, err := st.LookupCapability(ctx, sha256.Sum256([]byte(seed)))
+	root, err := st.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(seed)))
 	if err != nil {
 		return "", nil, err
 	}
@@ -36,7 +36,7 @@ func ProvisionCredential(ctx context.Context, st *store.Store, spec capability.P
 		ref = capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 	}
 	spec.Authority = &ref
-	issued, err := st.ProvisionCapability(ctx, spec)
+	issued, err := st.AsOperator().ProvisionCapability(ctx, spec)
 	if err != nil {
 		return "", nil, err
 	}

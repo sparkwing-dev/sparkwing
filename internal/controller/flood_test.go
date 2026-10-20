@@ -14,14 +14,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 type floodFixture struct{ *browserFixture }
 
-func newFloodServer(t *testing.T, policy controller.FloodPolicy) *floodFixture {
+func newFloodServer(t *testing.T, policy controller.FloodPolicy, opts ...store.Option) *floodFixture {
 	t.Helper()
-	f := newBrowserFixture(t, nil)
+	f := newBrowserFixture(t, nil, opts...)
 	f.srv.WithFloodPolicy(policy)
 	f.h = f.srv.Handler()
 	return &floodFixture{f}
@@ -189,7 +190,7 @@ func TestFloodPolicyDedupeRechecksAuthorityAndReturnsHereBearerOnce(t *testing.T
 	if replay.RunID != first.RunID || !replay.Replayed || replay.HereBearer != "" {
 		t.Fatalf("replay = run %s, replayed %v, bearer present %v", replay.RunID, replay.Replayed, replay.HereBearer != "")
 	}
-	principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
+	principal, err := f.st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
 	if err != nil {
 		t.Fatal(err)
 	}

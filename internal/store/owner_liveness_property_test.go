@@ -22,7 +22,7 @@ func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
 			authorityPersist(t, s, root)
 			demand.CapabilityPrefix = root.Prefix
 			demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: owner.RunID, NodeID: "job"}
-			remote, err := s.ClaimUnit(t.Context(), demand)
+			remote, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -33,20 +33,20 @@ func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
 			ownerEnd := owner.Award.LeaseExpiresAt
 			for range random.IntN(4) + 1 {
 				*now = now.Add(time.Duration(random.IntN(5)+1) * time.Second)
-				beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
+				beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
 				if err != nil || !beat.ExpiresAt.After(ownerEnd) {
 					t.Fatalf("owner renewal: %+v, %v", beat, err)
 				}
 				ownerEnd = beat.ExpiresAt
-				if _, err := s.RenewUnit(t.Context(), remote.Award.CapabilityPrefix, false); err != nil {
+				if _, err := s.AsOperator().RenewUnit(t.Context(), remote.Award.CapabilityPrefix, false); err != nil {
 					t.Fatal(err)
 				}
-				if reaped, err := s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+				if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
 					t.Fatalf("renewed owner recovered: %+v, %v", reaped, err)
 				}
 			}
 			*now = ownerEnd.Add(-time.Second)
-			remoteBeat, err := s.RenewUnit(t.Context(), remote.Award.CapabilityPrefix, false)
+			remoteBeat, err := s.AsOperator().RenewUnit(t.Context(), remote.Award.CapabilityPrefix, false)
 			if err != nil || !remoteBeat.ExpiresAt.After(ownerEnd) {
 				t.Fatalf("remote renewal: %+v, %v", remoteBeat, err)
 			}
@@ -55,14 +55,14 @@ func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false); err == nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false); err == nil {
 				t.Fatal("expired owner renewed itself")
 			}
 			after, err := tenant.ReadSnapshot(t.Context(), owner.RunID)
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("refused renewal changed work: %v", err)
 			}
-			reaped, err := s.ReapUnits(t.Context(), lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].RunID != owner.RunID || reaped[0].Disruptions != 0 {
 				t.Fatalf("remote activity retained lost owner: %+v, %v", reaped, err)
 			}

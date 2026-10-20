@@ -37,7 +37,10 @@ func blobMaterializationFixture(t *testing.T) (*Store, *Tenant, ReconcileRequest
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
 	}
-	s.SetResultBlobRecords(records.manifests)
+	{
+		records := &blobRecords{manifests: records.manifests}
+		s.resultRecords, s.materializations = records, records
+	}
 	return materializationTarget(t, s, records.tenant, change.Ref)
 }
 
@@ -70,7 +73,10 @@ func MaterializationTestFixture(t *testing.T, manifests BlobManifestReader, outp
 	s, records, intent := blobRecordFixture(t)
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_hash='same'")
 	records.manifests = manifests
-	s.SetResultBlobRecords(manifests)
+	{
+		records := &blobRecords{manifests: manifests}
+		s.resultRecords, s.materializations = records, records
+	}
 	for _, object := range append([]blob.Blob{output, manifest}, members...) {
 		intent.Digest, intent.Size = object.Digest, object.Size
 		if _, err := commitTestBlob(t, records.tenant, intent); err != nil {

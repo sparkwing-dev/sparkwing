@@ -16,11 +16,13 @@ func (s selectorTransactions) ReadRun(_ context.Context, id string) (store.RunRo
 	return store.RunRow{ID: id, Team: s.team}, s.err
 }
 
-func selectorTenant(team store.Team, err error) func(context.Context, store.Team) (RunTransactions, error) {
-	return func(_ context.Context, selected store.Team) (RunTransactions, error) {
+func selectorTenant(team store.Team, err error) func(context.Context, store.Team) (TenantHandle, error) {
+	return func(_ context.Context, selected store.Team) (TenantHandle, error) {
 		if selected != team {
 			return nil, store.ErrNotFound
 		}
 		return selectorTransactions{team: team, err: err}, nil
 	}
 }
+
+func (s selectorTransactions) Team() store.Team { return s.team }

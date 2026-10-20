@@ -22,7 +22,7 @@ type StoreRunnerConfig struct {
 
 // NewStoreRunner constructs the shared queue without a transport or another store opener.
 func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) (*Loop, error) {
-	if engine == nil || engine.Store == nil || engine.RunnerPolicy == nil || cfg.Bearer == nil || cfg.Bind == nil {
+	if engine == nil || engine.ResolveTenant == nil || engine.RunnerPolicy == nil || cfg.Bearer == nil || cfg.Bind == nil {
 		return nil, errors.New("embedded runner requires the owned controller, claimant, signed policy and native services")
 	}
 	if cfg.Loop.Version == "" || cfg.Loop.MaxConcurrent < 1 {
@@ -35,11 +35,15 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 		return nil, err
 	}
 	client := StoreController{Engine: engine, Bearer: cfg.Bearer, Router: router}
-	return &Loop{
+	loop := &Loop{
 		Config: cfg.Loop, Controller: client,
-		Host: StoreHosting{Store: engine.Store, Bind: cfg.Bind}, CheckVersion: client.checkVersion,
+		Host:            StoreHosting{Controller: engine, Bind: cfg.Bind},
 		RequestCapacity: cfg.RequestCapacity, OnError: cfg.OnError,
-	}, nil
+	}
+	loop.CheckVersion = func(ctx context.Context, version string) error {
+		return client.checkVersion(ctx, version, loop.Config.Kinds)
+	}
+	return loop, nil
 }
 
 // StoreController applies shared route policy to the embedded local queue.
@@ -49,20 +53,12 @@ type StoreController struct {
 	Bearer func(context.Context) (string, error)
 }
 
-func (c StoreController) checkVersion(ctx context.Context, version string) error {
-	raw, err := c.Bearer(ctx)
+func (c StoreController) checkVersion(ctx context.Context, version string, kinds []capability.UnitKind) error {
+	ctx, authorized, err := c.authorize(ctx, "/api/v1/runners/claim", capability.Target{ClaimKinds: slices.Clone(kinds)})
 	if err != nil {
 		return err
 	}
-	route, ok := capability.LookupRoute("POST", "/api/v1/runners/claim")
-	if !ok {
-		return errors.New("embedded controller route policy is unavailable")
-	}
-	authenticated, err := capability.NewAuthenticator(c.Engine.Store).Authenticate(ctx, capability.Presentation{Raw: raw, Class: capability.CredentialBearer}, route)
-	if err != nil {
-		return err
-	}
-	_, err = c.Engine.CheckRunner(ctx, authenticated.Principal.Authority, version)
+	_, err = c.Engine.CheckRunner(ctx, authorized.Principal.Authority, version)
 	return err
 }
 
@@ -84,7 +80,7 @@ func (c StoreController) authorize(ctx context.Context, pattern string, target c
 	if err := context.Cause(ctx); err != nil {
 		return ctx, capability.Authorized{}, err
 	}
-	if c.Engine == nil || c.Engine.Store == nil || c.Bearer == nil {
+	if c.Engine == nil || c.Bearer == nil {
 		return ctx, capability.Authorized{}, errors.New("embedded controller requires the owned store and claimant")
 	}
 	raw, err := c.Bearer(ctx)

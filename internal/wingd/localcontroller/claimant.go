@@ -14,7 +14,8 @@ import (
 
 // Claimant owns the local queue's delegated credential for one controller lifetime.
 type Claimant struct {
-	store    *store.Store
+	operator *store.Operator
+	tenant   *store.Tenant
 	subject  string
 	mu       sync.Mutex
 	issued   capability.Issued
@@ -31,14 +32,18 @@ func NewClaimant(s *store.Store) (*Claimant, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Claimant{store: s, subject: subject}, nil
+	tenant, err := s.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		return nil, err
+	}
+	return &Claimant{operator: s.AsOperator(), tenant: tenant, subject: subject}, nil
 }
 
 // Bearer delegates queue authority through the shared peer authentication and issuance policy.
 func (c *Claimant) Bearer(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.store == nil || c.subject == "" {
+	if c.closed || c.operator == nil || c.subject == "" {
 		return "", errors.New("local claimant requires an open store and OS subject")
 	}
 	if c.issued.Raw != "" {
@@ -49,19 +54,19 @@ func (c *Claimant) Bearer(ctx context.Context) (string, error) {
 		return "", errors.New("local credential issuance policy is missing")
 	}
 	target := capability.Target{Team: string(store.DefaultTeam)}
-	auth, err := capability.NewAuthenticator(c.store).Authenticate(ctx, capability.Presentation{
+	auth, err := capability.NewAuthenticator(c.operator).Authenticate(ctx, capability.Presentation{
 		Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: c.subject},
 		Evidence: capability.RequestEvidence{Target: target},
 	}, route)
 	if err != nil {
 		return "", err
 	}
-	authorized, err := capability.Authorize(ctx, c.store, route, auth, target)
+	authorized, err := capability.Authorize(ctx, c.operator, route, auth, target)
 	if err != nil {
 		return "", err
 	}
 	p := authorized.Principal
-	c.issued, err = c.store.DelegateCapability(ctx, capability.DelegateSpec{
+	c.issued, err = c.operator.DelegateCapability(ctx, capability.DelegateSpec{
 		Parent: p.Authority, Audience: capability.Controller,
 		Grants:  []capability.Grant{capability.TriggersClaim, capability.NodesClaim},
 		Binding: p.Capability.Binding, ExpiresAt: p.Capability.ExpiresAt,
@@ -81,12 +86,8 @@ func (c *Claimant) Close() (err error) {
 	if c.issued.Raw == "" {
 		return nil
 	}
-	tenant, err := c.store.ForTeam(context.Background(), store.DefaultTeam)
-	if err != nil {
-		return err
-	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.issued.Capability.Prefix}
-	return tenant.RevokeAuthority(context.Background(), store.Actor{Kind: store.ActorOperator, Authority: ref}, ref)
+	return c.tenant.RevokeAuthority(context.Background(), store.Actor{Kind: store.ActorOperator, Authority: ref}, ref)
 }
 
 // ResolveClaimProfile binds local queue capacity to the captured OS account.

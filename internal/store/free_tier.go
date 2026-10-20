@@ -124,7 +124,7 @@ func lockFreeTierTx(ctx context.Context, tx *storeTx) error {
 }
 
 func takeFreeSlotTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (bool, error) {
-	open, err := freeSlotOpenTx(ctx, tx)
+	open, err := tx.operator.freeSlotOpenTx(ctx, tx)
 	if err != nil {
 		return false, err
 	}
@@ -143,7 +143,7 @@ SELECT ?, ?
 
 // safety: a reservation only asks whether a slot is left; the team's first
 // committed byte takes it, so an abandoned reservation spends none.
-func freeSlotOpenTx(ctx context.Context, tx *storeTx) (bool, error) {
+func (op *Operator) freeSlotOpenTx(ctx context.Context, tx *storeTx) (bool, error) {
 	limit, err := creditSettingTx(ctx, tx, metaKeyFreeTeamSlots, DefaultFreeTeamSlots)
 	if err != nil {
 		return false, err
@@ -251,10 +251,10 @@ func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error {
 }
 
 // FreeSlots reports how many free-tier slots are taken and how many exist.
-func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error) {
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM free_slots`).Scan(&taken); err != nil {
+func (o *Operator) FreeSlots(ctx context.Context) (taken, limit int64, err error) {
+	if err := o.s.queryRow(ctx, `SELECT COUNT(*) FROM free_slots`).Scan(&taken); err != nil {
 		return 0, 0, err
 	}
-	limit, err = s.creditSetting(ctx, metaKeyFreeTeamSlots, DefaultFreeTeamSlots)
+	limit, err = o.s.creditSetting(ctx, metaKeyFreeTeamSlots, DefaultFreeTeamSlots)
 	return taken, limit, err
 }

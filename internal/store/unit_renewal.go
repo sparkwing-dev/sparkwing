@@ -15,7 +15,7 @@ func (s *Store) renewUnit(ctx context.Context, prefix string, executing bool) (L
 			return err
 		}
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, prefix); err != nil {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, prefix); err != nil {
 			return err
 		}
 		principal, err := tx.ResolveAuthority(ctx, ref)

@@ -94,7 +94,7 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	}
 	seed := sha256.Sum256([]byte("cloud-dispatch-bootstrap"))
 	admin := "swk_" + base64.RawURLEncoding.EncodeToString(seed[:])
-	if _, err := controller.EnsureBootstrapAdminToken(t.Context(), state, admin); err != nil {
+	if _, err := controller.EnsureBootstrapAdminToken(t.Context(), state.AsOperator(), admin); err != nil {
 		t.Fatal(err)
 	}
 	tokens, err := client.NewTokenManager(client.EngineOptions{URL: endpoint, Bearer: func(context.Context) (string, error) { return admin, nil }}, true)
@@ -277,7 +277,7 @@ func cloudDispatchMachine(t *testing.T, f cloudDispatch, name string) string {
 	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_kind='operator' AND parent_id IS NULL`).Scan(&prefix); err != nil {
 		t.Fatal(err)
 	}
-	issued, err := f.state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, RegistrationID: "runner:default:" + name, Authority: &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Repositories: []string{"git.example/acme/*"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TriggersClaim, capability.NodesClaim}})
+	issued, err := f.state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, RegistrationID: "runner:default:" + name, Authority: &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Repositories: []string{"git.example/acme/*"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TriggersClaim, capability.NodesClaim}})
 	if err != nil {
 		t.Fatal(err)
 	}

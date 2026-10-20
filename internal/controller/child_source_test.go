@@ -56,7 +56,7 @@ func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *
 		case 2:
 			request.Lineage.ParentJobID = "foreign:" + encoded
 		}
-		err := server.resolveChildRevisions(t.Context(), e, a, &request)
+		err := server.resolveChildRevisions(t.Context(), e.EngineController, a, &request)
 		var refusal *apierr.Error
 		return errors.As(err, &refusal) && refusal.Code == apierr.Forbidden
 	}
@@ -96,7 +96,7 @@ func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, _, claim := childIntakeFixtureWith(t, func(e *EngineController) {
+	e, _, claim := childIntakeFixtureWith(t, func(e *engineFixture) {
 		tenant, err := e.Store.ForTeam(t.Context(), "a")
 		if err != nil {
 			t.Fatal(err)
@@ -116,7 +116,7 @@ func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 		engineSQL(t, e.Store, `INSERT INTO repos(team,repo_key,updated_at) VALUES ('a','git:8.8.8.8/team/repo',1)`)
 		engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"deploy","repository":"git:8.8.8.8/team/repo"}]}`))
 	})
-	handler := New(e.Store, nil).WithEngineController(e).Handler()
+	handler := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 	engineClaimHTTP(t, handler, claim, "POST", "/api/v1/runs/run/source-credential", "", http.StatusForbidden)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {

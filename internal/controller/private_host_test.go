@@ -71,17 +71,17 @@ func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
 	})
 }
 
-func localHostFixture(t *testing.T, opts ...store.Option) (*Server, *client.LocalHostClient, *store.Tenant, capability.Principal) {
+func localHostFixture(t *testing.T, opts ...store.Option) (*serverFixture, *client.LocalHostClient, *store.Tenant, capability.Principal) {
 	t.Helper()
 	engine, tenant := engineRuntimeStore(t, opts...)
 	engineRuntimeClaim(t, engine, capability.UnitNode)
 	engineSQL(t, engine.Store, `DELETE FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`)
-	engine.Store.SetClaimProfileResolver(engineProfileFake{})
-	award, err := engine.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	engine.claimProfiles = engineProfileFake{}
+	award, err := engine.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := engine.Store.LookupCapability(t.Context(), sha256.Sum256(award.Bearer))
+	principal, err := engine.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256(award.Bearer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func localHostFixture(t *testing.T, opts ...store.Option) (*Server, *client.Loca
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = host.Close() })
-	return server, host, tenant, principal
+	return &serverFixture{Server: server, store: engine.Store, engine: engine}, host, tenant, principal
 }
 
 func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) {
@@ -393,8 +393,8 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			engine, _ := engineRuntimeStore(t)
 			engineRuntimeClaim(t, engine, capability.UnitNode)
-			engine.Store.SetClaimProfileResolver(engineProfileFake{})
-			award, err := engine.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			engine.claimProfiles = engineProfileFake{}
+			award, err := engine.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 			if err != nil {
 				t.Fatal(err)
 			}

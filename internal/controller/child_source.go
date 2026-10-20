@@ -78,7 +78,7 @@ type intakeRevisionAccess struct {
 
 func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error) {
 	s := a.server
-	if s.store == nil {
+	if s.operator == nil {
 		return source.Credential{}, missingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(ctx, a.team)

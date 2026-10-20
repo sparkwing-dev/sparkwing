@@ -12,10 +12,12 @@ import (
 
 func (s *DataController) persistedDataAuthority(ctx context.Context, a capability.Authorized) (blob.Authority, error) {
 	c := a.Principal.Capability
-	if s.Store == nil || a.Principal.Authority.Kind != capability.AuthorityCapability || c.Prefix == "" || a.Principal.Authority.ID != c.Prefix || c.Team == "" {
+	if a.Principal.Authority.Kind != capability.AuthorityCapability || c.Prefix == "" || a.Principal.Authority.ID != c.Prefix || c.Team == "" {
 		return blob.Authority{}, missingEndpointPolicy()
 	}
-	tenant, err := s.Store.ForTeam(ctx, store.Team(c.Team))
+	tenant, err := ScopedTenantPort[interface {
+		ResolveDataAuthority(context.Context, capability.Authorized) (blob.Authority, error)
+	}](ctx, store.Team(c.Team), s.ResolveTenant)
 	if err != nil {
 		return blob.Authority{}, err
 	}

@@ -27,7 +27,7 @@ type runnerPoll struct {
 }
 
 // RecordRunnerPoll stores a live machine's advertised capacity and labels with the store clock.
-func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
+func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
 	if !validMatchingResources(observation.Capacity) || !validMatchingResources(observation.Available) {
 		return authorityError(apierr.BadRequest, "invalid claim resources")
 	}
@@ -36,9 +36,9 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 	if err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(tx *storeTx) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
 			return err
 		}
 		principal, err := tx.ResolveAuthority(ctx, ref)

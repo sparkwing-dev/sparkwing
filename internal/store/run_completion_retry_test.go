@@ -74,7 +74,7 @@ func TestRunCompletionHasOneCommittedWinner(t *testing.T) {
 }
 
 func TestRunCompletionAuthorityProperty(t *testing.T) {
-	s := storetest.OpenSQLite(t)
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 	tenant, finish := runCompletionFixture(t, s)
 	foreign := tenantFor(t, s, "foreign")
 	before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
@@ -129,7 +129,7 @@ func TestRunCompletionAuthorityProperty(t *testing.T) {
 func TestRunCompletionFailureRollsBackOwnerAndVerdict(t *testing.T) {
 	for _, table := range []string{"events", "business_events"} {
 		t.Run(table, func(t *testing.T) {
-			s := storetest.OpenSQLite(t)
+			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 			tenant, finish := runCompletionFixture(t, s)
 			before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
 			if _, err := s.DB().ExecContext(t.Context(), `CREATE TRIGGER refuse_completion_event BEFORE INSERT ON `+table+` BEGIN SELECT RAISE(ABORT,'event refused'); END`); err != nil {

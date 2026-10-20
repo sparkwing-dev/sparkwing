@@ -39,7 +39,7 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 	ctx := t.Context()
 	f := &storeRecoveryFixture{target: target}
 	var err error
-	f.s, err = f.target.TryOpen()
+	f.s, err = f.target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 		t.Fatal(err)
 	}
 	authority := plan.Seal.Request.AuthorityRef
-	issued, err := f.s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(f.tenant.Team()), RegistrationID: "runner:planner:runner", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+	issued, err := f.s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(f.tenant.Team()), RegistrationID: "runner:planner:runner", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim, err := f.s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: f.ref.RunID, NodeID: f.ref.NodeID}, Available: match.Resources{Cores: 8}})
+	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: f.ref.RunID, NodeID: f.ref.NodeID}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,11 +108,10 @@ func (f *storeRecoveryFixture) reopen(ctx context.Context) error {
 		return err
 	}
 	var err error
-	f.s, err = f.target.TryOpen()
+	f.s, err = f.target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
-	f.s.SetClaimProfileResolver(acceptanceClaimProfile{})
 	f.tenant, err = f.s.ForTeam(ctx, acceptanceTeam)
 	return err
 }
@@ -176,7 +175,7 @@ func checkRecoveryUnstarted(t *testing.T) error {
 			return err
 		}
 		checkStoreQueueCounts(t, f.s, map[string]int{store.QueueStateClaimed: 1})
-		units, err := f.s.ReapUnits(ctx, f.lease, 10)
+		units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
 		if err != nil {
 			return err
 		}
@@ -245,7 +244,7 @@ func checkRecoveryStartedCap(t *testing.T) error {
 		if err := f.expireHolder(ctx); err != nil {
 			return err
 		}
-		units, err := f.s.ReapUnits(ctx, f.lease, 10)
+		units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
 		if err != nil {
 			return err
 		}
@@ -404,7 +403,7 @@ func checkRecoveryCancellation(t *testing.T) error {
 	if err := f.expireHolder(ctx); err != nil {
 		return err
 	}
-	units, err := f.s.ReapUnits(ctx, f.lease, 10)
+	units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
 	if err != nil {
 		return err
 	}
@@ -471,7 +470,7 @@ func checkRecoveryReconciliation(t *testing.T, order string) error {
 			return err
 		}
 	}
-	units, err := f.s.ReapUnits(ctx, f.lease, 10)
+	units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
 	if err != nil {
 		return err
 	}

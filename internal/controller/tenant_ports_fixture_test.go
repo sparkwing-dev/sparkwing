@@ -6,7 +6,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func testOnlyTenantPort[P any](s *Server, resolve func(context.Context, store.Team) (P, error)) *Server {
+func testOnlyTenantPort[P any](input interface{ fixtureServer() *Server }, resolve func(context.Context, store.Team) (P, error)) *Server {
+	s := input.fixtureServer()
 	if resolve == nil {
 		return s.WithTenantResolver(nil)
 	}

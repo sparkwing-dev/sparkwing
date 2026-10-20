@@ -33,7 +33,7 @@ func (s *localState) Ready() error {
 	if !ready {
 		return errors.New("wingd: local state has not reconciled")
 	}
-	return s.binding.Store.Ping(context.Background())
+	return s.binding.Store.AsOperator().Ping(context.Background())
 }
 
 func (s *localState) TypeSafeAPIKey(ctx context.Context) (string, error) {

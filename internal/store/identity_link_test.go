@@ -21,7 +21,7 @@ func gh(sub, email string) store.SignInProfile {
 
 func resolve(t *testing.T, st *store.Store, p store.SignInProfile) store.SignInResult {
 	t.Helper()
-	res, err := st.ResolveSignIn(context.Background(), p, store.SignUpConditions{}, time.Now())
+	res, err := st.AsOperator().ResolveSignIn(context.Background(), p, store.SignUpConditions{}, time.Now())
 	if err != nil {
 		t.Fatalf("ResolveSignIn(%s %s): %v", p.Provider, p.Subject, err)
 	}
@@ -30,7 +30,7 @@ func resolve(t *testing.T, st *store.Store, p store.SignInProfile) store.SignInR
 
 func identitiesOf(t *testing.T, st *store.Store, accountID string) []store.Identity {
 	t.Helper()
-	ids, err := st.AccountIdentities(context.Background(), accountID)
+	ids, err := st.AsOperator().AccountIdentities(context.Background(), accountID)
 	if err != nil {
 		t.Fatalf("AccountIdentities: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestLinkIdentityAttachesASignInWhateverItsEmail(t *testing.T) {
 	owner := signIn(t, st, "g-owner", "owner@example.com")
 	holder := signIn(t, st, "g-holder", "elsewhere@example.org")
 
-	if _, err := st.ResolveSignIn(ctx, gh("gh-stranger", "elsewhere@example.org"), store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrAccountExists) {
+	if _, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-stranger", "elsewhere@example.org"), store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrAccountExists) {
 		t.Fatalf("an unlinked GitHub sign-in on holder's address = %v, want ErrAccountExists", err)
 	}
 
@@ -62,11 +62,11 @@ func TestLinkIdentityAttachesASignInWhateverItsEmail(t *testing.T) {
 	if back.Account.ID != owner.Account.ID || back.NewAccount {
 		t.Fatalf("GitHub sign-in after linking = %+v, want the owner's account", back)
 	}
-	acct, err := st.Account(ctx, owner.Account.ID)
+	acct, err := st.AsOperator().Account(ctx, owner.Account.ID)
 	if err != nil || acct.Email != "owner@example.com" || !acct.EmailVerified {
 		t.Fatalf("owner after linking and signing in = %+v, %v; want its email unchanged", acct, err)
 	}
-	other, err := st.Account(ctx, holder.Account.ID)
+	other, err := st.AsOperator().Account(ctx, holder.Account.ID)
 	if err != nil || !other.EmailVerified {
 		t.Fatalf("the account holding the linked address = %+v, %v; want its claim kept", other, err)
 	}
@@ -115,19 +115,19 @@ func TestUnlinkIdentityKeepsTheLastSignInMethod(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	owner := signIn(t, st, "g-owner", "owner@example.com")
-	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGoogle); !errors.Is(err, store.ErrLastSignInMethod) {
+	if _, err := st.AsOperator().UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGoogle); !errors.Is(err, store.ErrLastSignInMethod) {
 		t.Fatalf("unlinking the only sign-in = %v, want ErrLastSignInMethod", err)
 	}
 	if back := signIn(t, st, "g-owner", "owner@example.com"); back.Account.ID != owner.Account.ID {
 		t.Fatal("the refused unlink detached the sign-in")
 	}
-	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.AsOperator().UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unlinking a provider the account lacks = %v, want ErrNotFound", err)
 	}
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "gh@example.com"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGoogle); err != nil {
+	if _, err := st.AsOperator().UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGoogle); err != nil {
 		t.Fatalf("unlinking google beside github = %v", err)
 	}
 }
@@ -166,7 +166,7 @@ func TestConcurrentUnlinksKeepOneMethodPostgres(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := st.UnlinkAccountIdentity(ctx, a, provider)
+			_, err := st.AsOperator().UnlinkAccountIdentity(ctx, a, provider)
 			results <- err
 		}()
 	}
@@ -216,10 +216,10 @@ func TestUnlinkBeforeIdentitySessionCreationRefusesStaleResolution(t *testing.T)
 		t.Fatal(err)
 	}
 	resolved := resolve(t, st, profile)
-	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); err != nil {
+	if _, err := st.AsOperator().UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); err != nil {
 		t.Fatal(err)
 	}
-	raw, _, _, err := st.CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
+	raw, _, _, err := st.AsOperator().CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
 		profile.Provider, profile.Subject, time.Hour)
 	if !errors.Is(err, store.ErrIdentityUnlinked) || raw != "" {
 		t.Fatalf("session from stale identity resolution = %q, %v; want ErrIdentityUnlinked", raw, err)
@@ -259,7 +259,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 	}
 	sessionDone := make(chan sessionResult, 1)
 	go func() {
-		raw, _, _, err := st.CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
+		raw, _, _, err := st.AsOperator().CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
 			profile.Provider, profile.Subject, time.Hour)
 		sessionDone <- sessionResult{raw, err}
 	}()
@@ -285,7 +285,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 	waitForDBLock("%INSERT INTO sessions%")
 	unlinkDone := make(chan error, 1)
 	go func() {
-		_, err := st.UnlinkAccountIdentity(ctx, a, store.ProviderGitHub)
+		_, err := st.AsOperator().UnlinkAccountIdentity(ctx, a, store.ProviderGitHub)
 		unlinkDone <- err
 	}()
 	unlinked := false
@@ -323,7 +323,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 	if session.err != nil {
 		t.Fatalf("session creation: %v", session.err)
 	}
-	if _, err := st.LookupSession(t.Context(), session.raw); err == nil {
+	if _, err := st.AsOperator().LookupSession(t.Context(), session.raw); err == nil {
 		t.Fatal("session created during unlink survived revocation")
 	}
 }
@@ -356,7 +356,7 @@ func TestSignInAndUnlinkUseTheSameLockOrderPostgres(t *testing.T) {
 	}
 	resolveDone := make(chan error, 1)
 	go func() {
-		_, err := st.ResolveSignIn(ctx, profile, store.SignUpConditions{}, time.Now())
+		_, err := st.AsOperator().ResolveSignIn(ctx, profile, store.SignUpConditions{}, time.Now())
 		resolveDone <- err
 	}()
 	for {
@@ -375,7 +375,7 @@ func TestSignInAndUnlinkUseTheSameLockOrderPostgres(t *testing.T) {
 	}
 	unlinkDone := make(chan error, 1)
 	go func() {
-		_, err := st.UnlinkAccountIdentity(ctx, a, store.ProviderGoogle)
+		_, err := st.AsOperator().UnlinkAccountIdentity(ctx, a, store.ProviderGoogle)
 		unlinkDone <- err
 	}()
 	for {
@@ -432,7 +432,7 @@ func TestSignInRetriesWhenIdentityWasUnlinkedWhileWaitingPostgres(t *testing.T) 
 	}
 	done := make(chan result, 1)
 	go func() {
-		resolved, err := st.ResolveSignIn(ctx, profile, store.SignUpConditions{}, time.Now())
+		resolved, err := st.AsOperator().ResolveSignIn(ctx, profile, store.SignUpConditions{}, time.Now())
 		done <- result{resolved.Account.ID, err}
 	}()
 	for {
@@ -481,16 +481,16 @@ func TestUnlinkedSignInNoLongerReachesTheAccount(t *testing.T) {
 	if back := resolve(t, st, gh("gh-1", "owner@example.com")); back.Account.ID != owner.Account.ID {
 		t.Fatal("control: the linked sign-in did not reach the account")
 	}
-	keep, _, _, err := st.CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
+	keep, _, _, err := st.AsOperator().CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, _, _, err := st.CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
+	other, _, _, err := st.AsOperator().CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	ended, err := st.UnlinkAccountIdentity(ctx, storetest.SessionAuthority(t, st, keep), store.ProviderGitHub)
+	ended, err := st.AsOperator().UnlinkAccountIdentity(ctx, storetest.SessionAuthority(t, st, keep), store.ProviderGitHub)
 	if err != nil {
 		t.Fatalf("UnlinkIdentity: %v", err)
 	}
@@ -498,10 +498,10 @@ func TestUnlinkedSignInNoLongerReachesTheAccount(t *testing.T) {
 	if ended != 1 || len(ids) != 1 || ids[0].Provider != store.ProviderGoogle {
 		t.Fatalf("unlink ended %d sessions or retained the wrong sign-in", ended)
 	}
-	if _, err := st.LookupSession(t.Context(), keep); err != nil {
+	if _, err := st.AsOperator().LookupSession(t.Context(), keep); err != nil {
 		t.Fatalf("the session that unlinked = %v, want it kept", err)
 	}
-	if _, err := st.LookupSession(t.Context(), other); err == nil {
+	if _, err := st.AsOperator().LookupSession(t.Context(), other); err == nil {
 		t.Fatal("another session of the account survived the unlink")
 	}
 
@@ -523,7 +523,7 @@ func TestRelinkingLiftsAnUnlink(t *testing.T) {
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "owner@example.com"), now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); err != nil {
+	if _, err := st.AsOperator().UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "owner@example.com"), now); err != nil {
@@ -565,7 +565,7 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 	if n := countWhere(t, st, "identity_unlinks", "account_id = '"+leaver.Account.ID+"'"); n != 0 {
 		t.Fatal("the deleted account's unlink records survived it")
 	}
-	if _, err := st.ResolveSignIn(ctx, gh("gh-1", "holder@example.com"), store.SignUpConditions{}, now); !errors.Is(err, store.ErrAccountExists) {
+	if _, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-1", "holder@example.com"), store.SignUpConditions{}, now); !errors.Is(err, store.ErrAccountExists) {
 		t.Fatalf("GitHub sign-in after the deletion = %v, want holder's account to refuse it until holder links it", err)
 	}
 }
@@ -577,7 +577,7 @@ func TestSignInRefusesANewProviderOnAnExistingAccountsAddress(t *testing.T) {
 	ctx := context.Background()
 	alice := signIn(t, st, "g-alice", "alice@corp.example")
 
-	_, err := st.ResolveSignIn(ctx, gh("gh-reassigned", "alice@corp.example"), store.SignUpConditions{}, time.Now())
+	_, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-reassigned", "alice@corp.example"), store.SignUpConditions{}, time.Now())
 	if !errors.Is(err, store.ErrAccountExists) {
 		t.Fatalf("GitHub sign-in on Alice's address = %v, want ErrAccountExists", err)
 	}
@@ -607,7 +607,7 @@ func TestSignInRefusesANewProviderOnAnExistingAccountsAddress(t *testing.T) {
 
 func identityLinkClaim(t *testing.T, st *store.Store, account store.SignInResult, nonce string) capability.IdentityLink {
 	t.Helper()
-	raw, _, _, err := st.CreateAccountSession(context.Background(), account.Account, account.PersonalTeam, time.Hour)
+	raw, _, _, err := st.AsOperator().CreateAccountSession(context.Background(), account.Account, account.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,18 +622,18 @@ func TestLinkAccountIdentityRequiresItsConsumedBinding(t *testing.T) {
 	other := signIn(t, st, "g-other", "other@example.com")
 	claim := identityLinkClaim(t, st, owner, "bound")
 	profile := gh("gh-bound", "bound@example.com")
-	if _, err := st.LinkAccountIdentity(ctx, claim, profile); err == nil {
+	if _, err := st.AsOperator().LinkAccountIdentity(ctx, claim, profile); err == nil {
 		t.Fatal("unconsumed claim attached an identity")
 	}
-	if err := st.ConsumeIdentityLink(ctx, claim); err != nil {
+	if err := st.AsOperator().ConsumeIdentityLink(ctx, claim); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ConsumeIdentityLink(ctx, claim); err == nil {
+	if err := st.AsOperator().ConsumeIdentityLink(ctx, claim); err == nil {
 		t.Fatal("nonce consumed twice")
 	}
 	foreign := identityLinkClaim(t, st, other, "foreign")
 	foreign.AccountID = owner.Account.ID
-	if err := st.ConsumeIdentityLink(ctx, foreign); err == nil {
+	if err := st.AsOperator().ConsumeIdentityLink(ctx, foreign); err == nil {
 		t.Fatal("another account's session consumed a link for this account")
 	}
 	for _, mutate := range []func(*capability.IdentityLink, *store.SignInProfile){
@@ -644,7 +644,7 @@ func TestLinkAccountIdentityRequiresItsConsumedBinding(t *testing.T) {
 	} {
 		c, p := claim, profile
 		mutate(&c, &p)
-		if _, err := st.LinkAccountIdentity(ctx, c, p); err == nil {
+		if _, err := st.AsOperator().LinkAccountIdentity(ctx, c, p); err == nil {
 			t.Fatalf("mismatched claim %+v %+v attached an identity", c, p)
 		}
 	}
@@ -652,7 +652,7 @@ func TestLinkAccountIdentityRequiresItsConsumedBinding(t *testing.T) {
 	wins := make(chan bool, 8)
 	for range 8 {
 		wg.Go(func() {
-			_, err := st.LinkAccountIdentity(ctx, claim, profile)
+			_, err := st.AsOperator().LinkAccountIdentity(ctx, claim, profile)
 			wins <- err == nil
 		})
 	}
@@ -670,7 +670,7 @@ func TestLinkAccountIdentityRequiresItsConsumedBinding(t *testing.T) {
 	if ids := identitiesOf(t, st, owner.Account.ID); len(ids) != 2 || ids[1].Subject != "gh-bound" || !ids[1].Linked {
 		t.Fatalf("identities = %+v", ids)
 	}
-	account, err := st.Account(ctx, owner.Account.ID)
+	account, err := st.AsOperator().Account(ctx, owner.Account.ID)
 	if err != nil || account.Email != "owner@example.com" {
 		t.Fatalf("account email changed: %+v %v", account, err)
 	}

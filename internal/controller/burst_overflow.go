@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Server) handleReadOverflow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if s.store == nil {
+	if s.operator == nil {
 		return missingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
@@ -30,7 +30,7 @@ func (s *Server) handleSetOverflow(w http.ResponseWriter, r *http.Request, a cap
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	if s.store == nil {
+	if s.operator == nil {
 		return missingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))

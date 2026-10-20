@@ -23,11 +23,11 @@ func metricAuthorization(t *testing.T, f *storeRecoveryFixture, kind string) cap
 		t.Fatal("missing metric route")
 	}
 	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID}
-	auth, err := capability.NewAuthenticator(f.s).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
+	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := capability.Authorize(t.Context(), f.s, route, auth, target)
+	a, err := capability.Authorize(t.Context(), f.s.AsOperator(), route, auth, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestMetricTransactionsRecheckReportingAuthorityProperty(t *testing.T) {
 		t.Fatalf("usage = %+v", row)
 	}
 
-	principal, err := f.s.ResolveAuthority(t.Context(), f.holder.Authority)
+	principal, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.holder.Authority)
 	if err != nil || principal.Capability.Parent == nil {
 		t.Fatalf("claim ancestry = %+v, %v", principal.Capability.Parent, err)
 	}
@@ -135,7 +135,7 @@ func TestMetricRunHostReportsFinishedJobsUnderItsOwnFence(t *testing.T) {
 	if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
 		t.Fatal(err)
 	}
-	principal, err := f.s.ResolveAuthority(t.Context(), f.owner.Authority)
+	principal, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.owner.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestMetricRunHostReportsFinishedJobsUnderItsOwnFence(t *testing.T) {
 			}
 		}
 		target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID}
-		a, err := capability.Authorize(t.Context(), f.s, route, capability.Authenticated{Principal: principal, Method: route.Method, Pattern: route.Path, Live: live}, target)
+		a, err := capability.Authorize(t.Context(), f.s.AsOperator(), route, capability.Authenticated{Principal: principal, Method: route.Method, Pattern: route.Path, Live: live}, target)
 		if err != nil {
 			t.Fatal(err)
 		}

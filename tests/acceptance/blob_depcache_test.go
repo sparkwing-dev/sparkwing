@@ -284,9 +284,9 @@ SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_ru
 }
 
 func bindStorageData(ctx context.Context, s *store.Store, objects blob.ObjectBackend, prefix string) (controller.DataBinding, error) {
-	data := &controller.DataController{Store: s, Objects: objects}
+	data := controller.NewDataController(s, controller.DataController{Objects: objects})
 	controller.New(s, nil).WithDataController(data)
-	p, err := s.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	p, err := s.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
 	if err != nil {
 		return controller.DataBinding{}, err
 	}

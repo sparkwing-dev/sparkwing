@@ -17,15 +17,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 const testRunID = "run-sched"
 
-func openStore(t *testing.T) *store.Store {
+func openStore(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(time.Now))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{teststore.WithClock(time.Now), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+		return store.Policies{Intake: hostIntakePolicy{}, ClaimProfiles: hostEnrollment{}, SessionKeys: cipher}, err
+	})}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

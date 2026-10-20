@@ -178,7 +178,7 @@ func fakeEngine(t *testing.T, f *engineTransactions) *controller.EngineControlle
 	t.Helper()
 	return &controller.EngineController{
 		Units: f,
-		ResolveTenant: func(_ context.Context, team store.Team) (controller.RunTransactions, error) {
+		ResolveTenant: func(_ context.Context, team store.Team) (controller.TenantHandle, error) {
 			if team != "team" {
 				t.Fatalf("resolved tenant %q", team)
 			}
@@ -438,3 +438,5 @@ func TestEngineExpansionHTTPMethodRefusal(t *testing.T) {
 		}
 	}
 }
+
+func (f *engineTransactions) Team() store.Team { return "team" }

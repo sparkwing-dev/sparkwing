@@ -11,7 +11,7 @@ import (
 
 // safety: every payment this deployment takes is an Add funds checkout or a refill, both rows of credit_checkouts,
 // so that row is the one answer to whose payment this is and which grant it funded.
-func paidGrantForPaymentTx(ctx context.Context, tx *storeTx, paymentID string) (CreditGrant, bool, error) {
+func (op *Operator) paidGrantForPaymentTx(ctx context.Context, tx *storeTx, paymentID string) (CreditGrant, bool, error) {
 	if paymentID == "" {
 		return CreditGrant{}, false, nil
 	}
@@ -34,7 +34,7 @@ func paidGrantForPaymentTx(ctx context.Context, tx *storeTx, paymentID string) (
 	return g, true, nil
 }
 
-func paymentTeamTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, paymentID string) (Team, error) {
+func (op *Operator) paymentTeamTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, paymentID string) (Team, error) {
 	if mode == "" {
 		var err error
 		if mode, err = paymentModeTx(ctx, tx); err != nil {

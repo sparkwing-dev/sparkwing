@@ -208,12 +208,12 @@ func TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest(t *testing.T) {
 	claim, _ := meteredUnitClaim(t, s, demand)
 	unitBillingTotal(t, s, 600, false)
 	*now = now.Add(20 * time.Second)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
 	unitBillingTotal(t, s, 1_200, false)
 	*now = now.Add(90 * time.Second)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
 	unitBillingTotal(t, s, 1_500, false)

@@ -18,7 +18,7 @@ func TestOperatorTeamReadRequiresCurrentDeploymentGrantProperty(t *testing.T) {
 	clock := time.Now().UTC()
 	e, _ := engineRuntimeStore(t, teststore.WithClock(func() time.Time { return clock }))
 	raw := reviewSeed(t, e.Store)
-	parent, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	parent, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestOperatorTeamReadRequiresCurrentDeploymentGrantProperty(t *testing.T) {
 			grants = append(grants, capability.OperatorTokens)
 		}
 		expires := clock.Add(time.Minute)
-		issued, err := e.Store.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: &expires})
+		issued, err := e.Store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: &expires})
 		if err != nil {
 			t.Fatal(err)
 		}

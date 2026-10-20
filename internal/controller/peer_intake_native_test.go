@@ -29,7 +29,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	type verifiedPeer struct{}
-	s := New(st, nil).WithEngineController(&EngineController{Store: st}).WithPeerIdentity(func(r *http.Request) capability.Subject {
+	s := New(st, nil).WithEngineController(NewEngineController(st, EngineController{})).WithPeerIdentity(func(r *http.Request) capability.Subject {
 		peer, _ := r.Context().Value(verifiedPeer{}).(capability.Subject)
 		return peer
 	})
@@ -127,7 +127,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 
 func TestPeerIntakeBudgetsFollowPlacement(t *testing.T) {
 	st := newStoreForAuth(t)
-	server := New(st, nil).WithEngineController(&EngineController{Store: st}).WithPeerIdentity(func(*http.Request) capability.Subject {
+	server := New(st, nil).WithEngineController(NewEngineController(st, EngineController{})).WithPeerIdentity(func(*http.Request) capability.Subject {
 		return capability.Subject{Kind: capability.SubjectLocal, ID: "uid:placement"}
 	})
 	handler := server.Handler()

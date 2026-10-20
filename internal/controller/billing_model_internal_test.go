@@ -49,10 +49,10 @@ func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 	for _, id := range []string{"one", "two", "three"} {
 		engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), rawExecution)
 	}
-	e.Store.SetClaimProfileResolver(billingCloudProfile{})
+	e.claimProfiles = billingCloudProfile{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	h := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e).Handler()
+	h := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e.EngineController).Handler()
 	for _, id := range []string{"one", "two", "three"} {
 		status := http.StatusOK
 		if id == "three" {
@@ -90,10 +90,10 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 			if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 				t.Fatal(err)
 			}
-			e.Store.SetClaimProfileResolver(billingCloudProfile{})
+			e.claimProfiles = billingCloudProfile{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-			h := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e).Handler()
+			h := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e.EngineController).Handler()
 			if blocked == "capacity" {
 				for _, id := range []string{"one", "two"} {
 					engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":%q,"available_cores":64}`, id), http.StatusOK)
@@ -124,7 +124,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatal(err)
 	}
-	e.Store.SetClaimProfileResolver(billingCloudProfile{})
+	e.claimProfiles = billingCloudProfile{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	h, webhook := billingModelPaymentHandler(t, e)
@@ -168,7 +168,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/one/transition", `{"to":"success","cause":"report","source_attempt":1,"result":{"outcome":"success"}}`, http.StatusOK)
 }
 
-func refillFixture(t *testing.T) (*EngineController, *store.Tenant) {
+func refillFixture(t *testing.T) (*engineFixture, *store.Tenant) {
 	t.Helper()
 	e, tenant := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
@@ -311,7 +311,7 @@ func TestARefusedRefillStopsRefillsAndAlerts(t *testing.T) {
 	}
 }
 
-func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler, func(string, string, string)) {
+func billingModelPaymentHandler(t *testing.T, e *engineFixture) (http.Handler, func(string, string, string)) {
 	t.Helper()
 	h, deliver := billingModelPaymentDelivery(t, e, func(s *Server) *Server { return s })
 	return h, func(id, kind, object string) {
@@ -322,13 +322,13 @@ func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler
 	}
 }
 
-func billingModelPaymentDelivery(t *testing.T, e *EngineController, configure func(*Server) *Server) (http.Handler, func(string, string, string) *httptest.ResponseRecorder) {
+func billingModelPaymentDelivery(t *testing.T, e *engineFixture, configure func(*Server) *Server) (http.Handler, func(string, string, string) *httptest.ResponseRecorder) {
 	t.Helper()
 	provider := paymenttest.Provider{}.SettledCheckout("pi_fixture", false, "authenticated").SettledCheckout("payment", false, "authenticated")
 	return billingModelProviderDelivery(t, e, provider, configure)
 }
 
-func billingModelProviderDelivery(t *testing.T, e *EngineController, provider paymenttest.Provider, configure func(*Server) *Server) (http.Handler, func(string, string, string) *httptest.ResponseRecorder) {
+func billingModelProviderDelivery(t *testing.T, e *engineFixture, provider paymenttest.Provider, configure func(*Server) *Server) (http.Handler, func(string, string, string) *httptest.ResponseRecorder) {
 	t.Helper()
 	key, secret := filepath.Join(t.TempDir(), "api-key"), filepath.Join(t.TempDir(), "webhook-secret")
 	for path, value := range map[string]string{key: "sk_test_fixture", secret: "whsec_fixture"} {
@@ -340,7 +340,7 @@ func billingModelProviderDelivery(t *testing.T, e *EngineController, provider pa
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := configure(NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e).WithPayments(verifier, e.Store)).Handler()
+	h := configure(NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e.EngineController).WithPayments(verifier, e.Store.AsOperator())).Handler()
 	now := time.Now().Unix()
 	deliver := func(id, kind, object string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -413,7 +413,7 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 600000 * store.MicroCreditsPerCent, Reference: "console:grant", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
-	raw, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "owner"}, "a", time.Hour)
+	raw, _, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "owner"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

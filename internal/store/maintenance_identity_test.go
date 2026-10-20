@@ -134,11 +134,11 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	if !invitation.CreatedAt.Equal(*now) || !invitation.ExpiresAt.Equal(now.Add(7*24*time.Hour)) {
 		t.Fatalf("invitation timestamps: %+v", invitation)
 	}
-	listed, err := s.OpenInvitationsForEmail(t.Context(), invitation.Email, *now)
+	listed, err := s.AsOperator().OpenInvitationsForEmail(t.Context(), invitation.Email, *now)
 	if err != nil || len(listed) != 1 || !listed[0].CreatedAt.Equal(*now) || !listed[0].ExpiresAt.Equal(invitation.ExpiresAt) {
 		t.Fatalf("invitation read: %+v %v", listed, err)
 	}
-	if claimed, err := s.ClaimInvitationEmail(t.Context(), invitation.ID, *now); err != nil || !claimed {
+	if claimed, err := s.AsOperator().ClaimInvitationEmail(t.Context(), invitation.ID, *now); err != nil || !claimed {
 		t.Fatalf("invitation email: %v %v", claimed, err)
 	}
 	var created, expires, emailed, sent int64
@@ -153,16 +153,16 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('invited',?,1,1,1)`, invitation.Email)
 	rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email,created_at) VALUES ('google','invited','invited',?,1)`, invitation.Email)
-	raw, _, _, err := s.CreateIdentityAccountSession(t.Context(), Account{ID: "invited"}, "", ProviderGoogle, "invited", time.Hour)
+	raw, _, _, err := s.AsOperator().CreateIdentityAccountSession(t.Context(), Account{ID: "invited"}, "", ProviderGoogle, "invited", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	route, _ := capability.LookupRoute("POST", "/api/v1/invitations/{invitation}/accept")
-	accepted, err := s.AcceptAccountInvitation(t.Context(), capability.Authorized{Principal: p, Access: route.Access[0]}, invitation.ID)
+	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), capability.Authorized{Principal: p, Access: route.Access[0]}, invitation.ID)
 	if err != nil || accepted.Team != tenant.team {
 		t.Fatalf("invitation acceptance: %+v %v", accepted, err)
 	}

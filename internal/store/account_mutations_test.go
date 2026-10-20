@@ -31,21 +31,21 @@ func accountMutationFixture(t *testing.T) (*Store, capability.Authorized, string
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetSessionKeyCipher(cipher)
-	result, err := s.ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "member", Email: "member@example.test", EmailVerified: true}, SignUpConditions{}, now)
+	s.csrfCipher, s.csrfKey = cipher, nil
+	result, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "member", Email: "member@example.test", EmailVerified: true}, SignUpConditions{}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _, _, err := s.CreateAccountSession(t.Context(), result.Account, result.Account.ActiveTeam, time.Hour)
+	raw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), result.Account, result.Account.ActiveTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	route, _ := capability.LookupRoute("POST", "/api/v1/me/active-team")
-	a, err := capability.Authorize(t.Context(), s, route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{AccountID: result.Account.ID})
+	a, err := capability.Authorize(t.Context(), s.AsOperator(), route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{AccountID: result.Account.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,10 +92,10 @@ func TestAccountMutationsRequireTheSameLiveDirectSessionProperty(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE sessions SET capability_prefix=? WHERE hash=?`, parent.Prefix, a.Principal.Authority.ID)
 		}
 		before := accountMutationRows(t, s)
-		selectErr := s.SelectAccountTeam(t.Context(), a, Team(a.Principal.Capability.Team))
-		_, createErr := s.CreateAccountTeam(t.Context(), a, TeamInfo{Slug: "created"})
-		_, acceptErr := s.AcceptAccountInvitation(t.Context(), a, "missing")
-		_, unlinkErr := s.UnlinkAccountIdentity(t.Context(), a, ProviderGoogle)
+		selectErr := s.AsOperator().SelectAccountTeam(t.Context(), a, Team(a.Principal.Capability.Team))
+		_, createErr := s.AsOperator().CreateAccountTeam(t.Context(), a, TeamInfo{Slug: "created"})
+		_, acceptErr := s.AsOperator().AcceptAccountInvitation(t.Context(), a, "missing")
+		_, unlinkErr := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGoogle)
 		return selectErr != nil && createErr != nil && acceptErr != nil && unlinkErr != nil && reflect.DeepEqual(before, accountMutationRows(t, s))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 36}); err != nil {
@@ -105,33 +105,33 @@ func TestAccountMutationsRequireTheSameLiveDirectSessionProperty(t *testing.T) {
 
 func TestAccountMutationsCommitSessionAndAccountTogether(t *testing.T) {
 	s, a, raw, now := accountMutationFixture(t)
-	created, err := s.CreateAccountTeam(t.Context(), a, TeamInfo{Slug: " SECOND ", DisplayName: "  Second  "})
+	created, err := s.AsOperator().CreateAccountTeam(t.Context(), a, TeamInfo{Slug: " SECOND ", DisplayName: "  Second  "})
 	if err != nil || created.Slug != "second" || created.CreatedBy != a.Principal.Capability.Subject.ID || created.DisplayName != "Second" {
 		t.Fatalf("create=%+v: %v", created, err)
 	}
-	session, err := s.LookupSession(t.Context(), raw)
+	session, err := s.AsOperator().LookupSession(t.Context(), raw)
 	if err != nil || session.Team != created.Slug {
 		t.Fatalf("selected session=%+v: %v", session, err)
 	}
-	if err := s.SelectAccountTeam(t.Context(), a, created.Slug); err == nil {
+	if err := s.AsOperator().SelectAccountTeam(t.Context(), a, created.Slug); err == nil {
 		t.Fatal("stale session selection committed")
 	}
-	a.Principal, err = s.ResolveAuthority(t.Context(), a.Principal.Authority)
+	a.Principal, err = s.AsOperator().ResolveAuthority(t.Context(), a.Principal.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	account, err := s.Account(t.Context(), created.CreatedBy)
+	account, err := s.AsOperator().Account(t.Context(), created.CreatedBy)
 	if err != nil || account.ActiveTeam != created.Slug {
 		t.Fatalf("selected account=%+v: %v", account, err)
 	}
 	before := accountMutationRows(t, s)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_account_session BEFORE UPDATE OF team ON sessions BEGIN SELECT RAISE(ABORT,'session refused'); END`)
-	if _, err := s.CreateAccountTeam(t.Context(), a, TeamInfo{Slug: "rolled-back"}); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
+	if _, err := s.AsOperator().CreateAccountTeam(t.Context(), a, TeamInfo{Slug: "rolled-back"}); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
 		t.Fatalf("creation escaped session rollback: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_account_session`)
 	*now = now.Add(time.Minute)
-	if err := s.SelectAccountTeam(t.Context(), a, created.Slug); err != nil {
+	if err := s.AsOperator().SelectAccountTeam(t.Context(), a, created.Slug); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -142,38 +142,38 @@ func TestAccountUnlinkKeepsSelectedSessionAndRequiresRecentSignIn(t *testing.T) 
 	if _, err := s.LinkIdentity(t.Context(), id, SignInProfile{Provider: ProviderGitHub, Subject: "linked", Email: "other@example.test"}, *now); err != nil {
 		t.Fatal(err)
 	}
-	other, _, _, err := s.CreateAccountSession(t.Context(), Account{ID: id}, Team(a.Principal.Capability.Team), time.Hour)
+	other, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), Account{ID: id}, Team(a.Principal.Capability.Team), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(10*time.Minute + time.Nanosecond)
 	before := accountMutationRows(t, s)
-	if _, err := s.UnlinkAccountIdentity(t.Context(), a, ProviderGoogle); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
+	if _, err := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGoogle); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
 		t.Fatalf("stale unlink changed state: %v", err)
 	}
 	*now = now.Add(-time.Nanosecond)
-	ended, err := s.UnlinkAccountIdentity(t.Context(), a, ProviderGoogle)
+	ended, err := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGoogle)
 	if err != nil || ended != 1 {
 		t.Fatalf("unlink ended=%d: %v", ended, err)
 	}
-	if _, err := s.LookupSession(t.Context(), raw); err != nil {
+	if _, err := s.AsOperator().LookupSession(t.Context(), raw); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.LookupSession(t.Context(), other); err == nil {
+	if _, err := s.AsOperator().LookupSession(t.Context(), other); err == nil {
 		t.Fatal("other session survived unlink")
 	}
-	if _, err := s.UnlinkAccountIdentity(t.Context(), a, ProviderGitHub); !errors.Is(err, ErrLastSignInMethod) {
+	if _, err := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGitHub); !errors.Is(err, ErrLastSignInMethod) {
 		t.Fatalf("last method unlink: %v", err)
 	}
 }
 
 func accountMutationInvitation(t *testing.T, s *Store, now time.Time) Invitation {
 	t.Helper()
-	owner, err := s.ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "owner", Email: "owner@example.test", EmailVerified: true}, SignUpConditions{}, now)
+	owner, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "owner", Email: "owner@example.test", EmailVerified: true}, SignUpConditions{}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _, _, err := s.CreateAccountSession(t.Context(), owner.Account, owner.PersonalTeam, time.Hour)
+	raw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), owner.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,32 +195,32 @@ func TestAccountInvitationCommitsMembershipAndSessionTogether(t *testing.T) {
 	invitation := accountMutationInvitation(t, s, *now)
 	before := accountMutationRows(t, s)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_invitation_session BEFORE UPDATE OF team ON sessions BEGIN SELECT RAISE(ABORT,'session refused'); END`)
-	if _, err := s.AcceptAccountInvitation(t.Context(), a, invitation.ID); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
+	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
 		t.Fatalf("invitation escaped session rollback: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_invitation_session`)
 	rewriteSchemaExec(t, s.db, `UPDATE accounts SET email_verified=0 WHERE id=?`, a.Principal.Capability.Subject.ID)
-	if _, err := s.AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrEmailMismatch) {
+	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrEmailMismatch) {
 		t.Fatalf("unverified acceptance: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE accounts SET email_verified=1 WHERE id=?`, a.Principal.Capability.Subject.ID)
-	accepted, err := s.AcceptAccountInvitation(t.Context(), a, invitation.ID)
+	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID)
 	if err != nil || accepted.Team != invitation.Team {
 		t.Fatalf("accepted=%+v: %v", accepted, err)
 	}
-	session, err := s.LookupSession(t.Context(), raw)
+	session, err := s.AsOperator().LookupSession(t.Context(), raw)
 	if err != nil || session.Team != invitation.Team {
 		t.Fatalf("selected session=%+v: %v", session, err)
 	}
-	account, err := s.Account(t.Context(), session.AccountID)
+	account, err := s.AsOperator().Account(t.Context(), session.AccountID)
 	if err != nil || account.ActiveTeam != invitation.Team {
 		t.Fatalf("selected account=%+v: %v", account, err)
 	}
-	a.Principal, err = s.ResolveAuthority(t.Context(), a.Principal.Authority)
+	a.Principal, err = s.AsOperator().ResolveAuthority(t.Context(), a.Principal.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrInvitationClosed) {
+	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrInvitationClosed) {
 		t.Fatalf("invitation replay: %v", err)
 	}
 }
@@ -228,12 +228,12 @@ func TestAccountInvitationCommitsMembershipAndSessionTogether(t *testing.T) {
 func TestAccountInvitationHasOneWinnerAcrossSessions(t *testing.T) {
 	s, a, _, now := accountMutationFixture(t)
 	invitation := accountMutationInvitation(t, s, *now)
-	raw, _, _, err := s.CreateAccountSession(t.Context(), Account{ID: a.Principal.Capability.Subject.ID}, Team(a.Principal.Capability.Team), time.Hour)
+	raw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), Account{ID: a.Principal.Capability.Subject.ID}, Team(a.Principal.Capability.Team), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := a
-	b.Principal, err = s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)})
+	b.Principal, err = s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestAccountInvitationHasOneWinnerAcrossSessions(t *testing.T) {
 	results := make(chan error, 2)
 	for _, actor := range []capability.Authorized{a, b} {
 		wg.Go(func() {
-			_, err := s.AcceptAccountInvitation(t.Context(), actor, invitation.ID)
+			_, err := s.AsOperator().AcceptAccountInvitation(t.Context(), actor, invitation.ID)
 			results <- err
 		})
 	}
@@ -268,7 +268,7 @@ func TestAccountInvitationExpiresOnStoreClock(t *testing.T) {
 			*now = invitation.ExpiresAt.Add(elapsed)
 			rewriteSchemaExec(t, s.db, `UPDATE sessions SET expires_at=? WHERE hash=?`, now.Add(time.Hour).UnixNano(), a.Principal.Authority.ID)
 			before := accountMutationRows(t, s)
-			if _, err := s.AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrInvitationClosed) || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
+			if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrInvitationClosed) || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
 				t.Fatalf("acceptance at %s: %v", elapsed, err)
 			}
 		})
@@ -278,12 +278,12 @@ func TestAccountInvitationExpiresOnStoreClock(t *testing.T) {
 func TestAccountMutationsKeepNanosecondTimestamps(t *testing.T) {
 	s, a, _, now := accountMutationFixture(t)
 	id := a.Principal.Capability.Subject.ID
-	account, err := s.Account(t.Context(), id)
+	account, err := s.AsOperator().Account(t.Context(), id)
 	if err != nil || !account.CreatedAt.Equal(*now) {
 		t.Fatalf("created=%s, want %s: %v", account.CreatedAt, *now, err)
 	}
 	*now = now.Add(457 * time.Nanosecond)
-	created, err := s.CreateAccountTeam(t.Context(), a, TeamInfo{Slug: "timed"})
+	created, err := s.AsOperator().CreateAccountTeam(t.Context(), a, TeamInfo{Slug: "timed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,22 +300,22 @@ func TestAccountMutationsKeepNanosecondTimestamps(t *testing.T) {
 	if err != nil || !linked.CreatedAt.Equal(*now) {
 		t.Fatalf("linked=%s, want %s: %v", linked.CreatedAt, *now, err)
 	}
-	identities, err := s.AccountIdentities(t.Context(), id)
+	identities, err := s.AsOperator().AccountIdentities(t.Context(), id)
 	if err != nil || len(identities) != 2 || !identities[1].CreatedAt.Equal(*now) {
 		t.Fatalf("identity times=%+v: %v", identities, err)
 	}
-	a.Principal, err = s.ResolveAuthority(t.Context(), a.Principal.Authority)
+	a.Principal, err = s.AsOperator().ResolveAuthority(t.Context(), a.Principal.Authority)
 	if err != nil || a.Principal.Capability.Team != string(created.Slug) {
 		t.Fatal(err)
 	}
-	if _, err := s.UnlinkAccountIdentity(t.Context(), a, ProviderGitHub); err != nil {
+	if _, err := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGitHub); err != nil {
 		t.Fatal(err)
 	}
 	var at int64
 	if err := s.db.QueryRow(`SELECT unlinked_at FROM identity_unlinks WHERE account_id=?`, id).Scan(&at); err != nil || at != now.UnixNano() {
 		t.Fatalf("unlinked=%d, want %d: %v", at, now.UnixNano(), err)
 	}
-	counts, err := s.SignUpCounts(t.Context(), now.Add(time.Hour))
+	counts, err := s.AsOperator().SignUpCounts(t.Context(), now.Add(time.Hour))
 	if err != nil || counts.LastHour != 0 || counts.LastDay != 1 {
 		t.Fatalf("signup count=%+v: %v", counts, err)
 	}

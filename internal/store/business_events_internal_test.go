@@ -23,7 +23,7 @@ func TestBusinessEventsReadTiesInIDOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, subject := range []string{"a", "b", "c", "d", "e"} {
-		if err := RecordBusinessEvent(tx, BusinessEvent{At: at, Team: DefaultTeam, Kind: "test.tie", SubjectID: subject}); err != nil {
+		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: at, Team: DefaultTeam, Kind: "test.tie", SubjectID: subject}); err != nil {
 			t.Fatal(err)
 		}
 	}

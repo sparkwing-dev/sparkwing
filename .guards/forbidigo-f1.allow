@@ -2,21 +2,3 @@
 # and TestOnly* outside _test.go. One line per call: <file><TAB><method>.
 # Only delete lines: guardcheck fails a finding missing here and a line no
 # finding matches. See .guards/README.md.
-internal/crons/health.go	AsOperator
-internal/crons/pushed.go	AsOperator
-internal/crons/tick.go	AsOperator
-internal/crons/tick.go	AsOperator
-internal/crons/tick.go	AsOperator
-internal/runners/store_host.go	ForTeam
-internal/controller/authority_routes.go	AsOperator
-internal/controller/data_authority.go	ForTeam
-internal/controller/data_binding.go	ForTeam
-internal/controller/data_store.go	ForTeam
-internal/controller/data_store.go	ForTeam
-internal/controller/data_store.go	ForTeam
-internal/controller/github_checks.go	AsOperator
-internal/controller/github_checks.go	AsOperator
-internal/controller/github_checks.go	ForTeam
-internal/controller/source_controller.go	ForTeam
-internal/controller/source_controller.go	ForTeam
-internal/controller/tenant_scope.go	ForTeam

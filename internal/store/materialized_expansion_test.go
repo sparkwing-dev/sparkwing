@@ -34,7 +34,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	if err != nil || materialized.Kind != Materialize || materialized.Node.Generation != 0 || materialized.Node.Outcome != NodeMemoized || materialized.Node.Expansion != ExpansionExpected {
 		t.Fatalf("materialized source=%+v error=%v", materialized, err)
 	}
-	issued, err := tenant.s.DelegateCapability(t.Context(), capability.DelegateSpec{
+	issued, err := tenant.s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
 		Parent: request.Actor.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit},
 		Binding: capability.Binding{
 			Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: materialized.Node.Generation,
@@ -48,7 +48,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	if !ok {
 		t.Fatal("expansion route is missing")
 	}
-	if _, err := capability.NewAuthenticator(tenant.s).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: issued.Raw}, route); err != nil {
+	if _, err := capability.NewAuthenticator(tenant.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: issued.Raw}, route); err != nil {
 		t.Fatalf("authenticate materialized expansion: %v", err)
 	}
 	actor := request.Actor

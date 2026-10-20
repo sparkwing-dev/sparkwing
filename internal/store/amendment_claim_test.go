@@ -34,7 +34,7 @@ func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
 				demand.Kinds = []capability.UnitKind{capability.UnitNode, capability.UnitNode}
 				demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
 			}
-			_, err := s.ClaimUnit(t.Context(), demand)
+			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != want {
 				t.Fatalf("selection %s: %v, want %s", problem, err, want)
@@ -47,8 +47,8 @@ func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
 
 func TestClaimRechecksRegisteredCapacityAtAward(t *testing.T) {
 	s, demand := unitClaimFixture(t)
-	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 2}}})
-	if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 2}}}
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 		t.Fatal("caller observation widened enrolled capacity")
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 0)
@@ -59,7 +59,7 @@ func TestClaimRejectsInvalidObservationsEvenWithAnEmptyQueue(t *testing.T) {
 		s, demand := unitClaimFixture(t)
 		demand.Target, demand.Kinds, demand.Available = nil, []capability.UnitKind{capability.UnitNode}, resources
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL`)
-		_, err := s.ClaimUnit(t.Context(), demand)
+		_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		var failure *apierr.Error
 		if !errors.As(err, &failure) || failure.Code != apierr.BadRequest {
 			t.Fatalf("invalid empty-queue observations: %v", err)
@@ -82,7 +82,7 @@ func TestMixedClaimSelectionUsesOneRankedQueue(t *testing.T) {
 			if first == capability.UnitNode {
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET created_at=4 WHERE id='run'`)
 			}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil || claim.Kind != first {
 				t.Fatalf("ordered mixed claim: %+v, %v", claim, err)
 			}

@@ -66,7 +66,7 @@ func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run st
 	}
 	var names []string
 	for prefix, name := range candidates {
-		record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +82,7 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
 		return nil
 	}
-	record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
 	if err != nil {
 		return err
 	}
@@ -133,7 +133,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 	root := chain[len(chain)-1].principal.Capability
 	eligible := here || cloud
 	if root.Subject.Kind == capability.SubjectMachine && root.Parent == nil {
-		record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
 		if err != nil {
 			return err
 		}

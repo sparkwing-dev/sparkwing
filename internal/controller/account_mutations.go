@@ -28,9 +28,7 @@ func (s *Server) accountWriter() (AccountWriter, error) {
 	if s.accountWrites != nil {
 		return s.accountWrites, nil
 	}
-	if writer, ok := any(s.store).(AccountWriter); ok && s.store != nil {
-		return writer, nil
-	}
+
 	return nil, missingEndpointPolicy()
 }
 

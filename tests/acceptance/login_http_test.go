@@ -22,10 +22,9 @@ import (
 
 func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
 	t.Helper()
-	f.store.SetProvisionPolicy(actionsProvisionPolicy(func(capability.ProvisionSpec) error { return nil }))
 	digest := sha256.Sum256([]byte(f.raw))
 	origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := f.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+	issued, err := f.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 		Kind: capability.ProvisionMember, Authority: &origin, Team: "team",
 		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
@@ -69,7 +68,7 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	if w.Header().Get("X-Request-Id") == "" || !strings.Contains(f.logs.String(), "route=/login") || !strings.Contains(f.logs.String(), "principal_id=member") {
 		t.Fatalf("sign-in audit: %s", f.logs.String())
 	}
-	session, err := f.store.LookupSession(t.Context(), raw)
+	session, err := f.store.AsOperator().LookupSession(t.Context(), raw)
 	if err != nil || session.AccountID != "member" || session.CapabilityPrefix != root.Capability.Prefix || session.Team != "team" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
@@ -95,7 +94,7 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 			t.Fatal("plaintext CSRF column survives")
 		}
 	}
-	if _, err := f.store.LookupSession(t.Context(), f.raw); err == nil {
+	if _, err := f.store.AsOperator().LookupSession(t.Context(), f.raw); err == nil {
 		t.Fatal("replaced session survived")
 	}
 	r = httptest.NewRequest("GET", "https://controller.test/api/v1/auth/whoami", nil)
@@ -253,7 +252,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 					origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 					spec = capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, Team: "team", Repositories: []string{"github.com/acme/*"}, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}, RegistrationID: "runner:team:runner"}
 				}
-				issued, err := f.store.ProvisionCapability(t.Context(), spec)
+				issued, err := f.store.AsOperator().ProvisionCapability(t.Context(), spec)
 				if err != nil {
 					t.Fatal(err)
 				}

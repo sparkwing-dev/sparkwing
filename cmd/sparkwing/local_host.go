@@ -56,13 +56,13 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 		state = localOwnerState{Tenant: binding.Tenant, owner: binding.Principal.Authority}
 	}
 	services, err := build(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
-		Home: home, Version: installedVersion(), Store: state, Parent: owned, Bindings: owned,
-		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: source, Local: store.OwnerCanExecute(binding.Principal),
+		Home: home, Version: installedVersion(), Store: state, Parent: owned.AsOperator(), Bindings: owned.AsOperator(),
+		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.AsOperator().RenewUnit, Source: source, Local: store.OwnerCanExecute(binding.Principal),
 	}, private))
 	if err != nil {
 		return runners.NativeServices{}, err
 	}
-	services.Config.Owner.Delegator = owned
+	services.Config.Owner.Delegator = owned.AsOperator()
 	closeServices := services.Close
 	services.Close = func() error { return errors.Join(closeServices(), private.Close()) }
 	run, err := binding.Tenant.ReadRun(ctx, fence.RunID)

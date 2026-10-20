@@ -28,11 +28,11 @@ func TestAuthorityGraceDeadlineFencesDescendantsProperty(t *testing.T) {
 		for _, at := range []time.Time{start, end.Add(-time.Nanosecond), end, end.Add(time.Nanosecond)} {
 			now = at
 			for _, c := range []capability.Capability{root, child} {
-				_, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
+				_, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
 				if (err == nil) != at.Before(end) {
 					t.Fatalf("resolve %s at %s: %v", c.Prefix, at, err)
 				}
-				_, err = s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(c.Prefix)), Audience: capability.Controller}, capability.RequestEvidence{})
+				_, err = s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(c.Prefix)), Audience: capability.Controller}, capability.RequestEvidence{})
 				if (err == nil) != at.Before(end) {
 					t.Fatalf("snapshot %s at %s: %v", c.Prefix, at, err)
 				}
@@ -53,17 +53,17 @@ func TestDeploymentReadinessRespectsRotationDeadlineProperty(t *testing.T) {
 		c.RevokedAt = &deadline
 		authorityPersist(t, s, c)
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}
-		if _, err := s.ResolveAuthority(t.Context(), ref); err != nil {
+		if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err != nil {
 			return false
 		}
-		if ready, err := s.HasDeploymentAdministrator(t.Context()); err != nil || !ready {
+		if ready, err := s.AsOperator().HasDeploymentAdministrator(t.Context()); err != nil || !ready {
 			return false
 		}
 		now = deadline
-		if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
+		if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
 			return false
 		}
-		ready, err := s.HasDeploymentAdministrator(t.Context())
+		ready, err := s.AsOperator().HasDeploymentAdministrator(t.Context())
 		return err == nil && !ready
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {

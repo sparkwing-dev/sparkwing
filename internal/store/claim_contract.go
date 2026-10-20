@@ -51,8 +51,8 @@ type UnitClaim struct {
 // duplicate, unknown and unauthorized kinds fail instead of being filtered silently.
 // A named trigger Target also accepts the matching here Award's trigger.host after
 // rechecking its first-claim/reclaim window, reservation and requester authority.
-func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
-	return s.claimUnit(ctx, demand)
+func (o *Operator) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
+	return o.claimUnit(ctx, demand)
 }
 
 // ReleaseUnit returns an unstarted unit without consuming an attempt; cancellation and started leases use transitions.
@@ -63,8 +63,8 @@ func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPref
 // RenewUnit derives the unit's team, identity and fences from its live capability.
 // Executing reports current owner compute, pausing billing during customer-runner waits; job starts use TransitionNode.
 // Cancelled units renew to drain and return CancelRequested without recording a new start.
-func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error) {
-	return s.renewUnit(ctx, capabilityPrefix, executing)
+func (o *Operator) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error) {
+	return o.s.renewUnit(ctx, capabilityPrefix, executing)
 }
 
 // OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store.

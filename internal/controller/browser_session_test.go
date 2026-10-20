@@ -40,13 +40,18 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard, opts ...store.Opti
 
 func newDeploymentBrowserFixture(t *testing.T, cfg deployment.Config, d *controller.Dashboard, opts ...store.Option) *browserFixture {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), opts...)
+	logs := &syncBuffer{}
+	var srv *controller.Server
+	composition := store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		srv = controller.NewDeployment(st, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t))
+		return srv.StorePolicies(), nil
+	})
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{composition}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	logs := &syncBuffer{}
-	srv := controller.NewDeployment(st, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t))
+
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('alice','alice@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','alice','owner',1)`,
@@ -55,12 +60,12 @@ func newDeploymentBrowserFixture(t *testing.T, cfg deployment.Config, d *control
 			t.Fatal(err)
 		}
 	}
-	sessID, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "alice", Email: "alice@example.test"}, store.DefaultTeam, time.Hour)
+	sessID, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "alice", Email: "alice@example.test"}, store.DefaultTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(sessID))
-	issued, err := st.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+	issued, err := st.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 		Kind: capability.ProvisionMember, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
 		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}, Team: string(store.DefaultTeam),
 		Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone},

@@ -302,7 +302,9 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 
 	s := &Store{db: db, dialect: dialect, provisions: nativeProvisionPolicy{}}
 	for _, opt := range opts {
-		opt.apply(s)
+		if opt.apply != nil {
+			opt.apply(s)
+		}
 	}
 	if err := s.migrate(ctx, remedy); err != nil {
 		return nil, errors.Join(err, db.Close())
@@ -315,6 +317,15 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 		s.githubLocks.SetMaxOpenConns(2)
 		s.githubLocks.SetMaxIdleConns(2)
 		s.githubLocks.SetConnMaxIdleTime(5 * time.Minute)
+	}
+	for _, opt := range opts {
+		if opt.policies != nil {
+			policies, err := opt.policies(s)
+			if err != nil {
+				return nil, errors.Join(err, s.Close())
+			}
+			s.configurePolicies(policies)
+		}
 	}
 	return s, nil
 }
@@ -339,7 +350,7 @@ func (s *Store) Close() error {
 }
 
 // Ping reports whether the database answers.
-func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+func (o *Operator) Ping(ctx context.Context) error { return o.s.db.PingContext(ctx) }
 
 func retryOnBusy(fn func() error) error {
 	return retryOnBusyWithSleep(fn, time.Sleep)
@@ -448,7 +459,7 @@ var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another t
 
 // safety: takes no team because the question is who owns the id, and an
 // answer scoped to the asker is no answer.
-func runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, error) {
+func (op *Operator) runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, error) {
 	var owner string
 	err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&owner)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -528,14 +539,14 @@ func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 //
 // Scope: this reads every team. Tenant callers use [Tenant.ListRuns].
 func (o *Operator) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
-	return o.s.listRuns(ctx, allTeams(), f)
-}
-
-func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ []*Run, err error) {
-	where, args, err := runFilterWhere(s.dialect, scope, f)
+	where, args, err := runFilterWhere(o.s.dialect, f)
 	if err != nil {
 		return nil, err
 	}
+	return o.s.listRuns(ctx, `SELECT `+runColumns+` FROM runs`+where, args, f)
+}
+
+func (s *Store) listRuns(ctx context.Context, query string, args []any, f RunFilter) (_ []*Run, err error) {
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
@@ -548,11 +559,7 @@ func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ [
 	if f.HasBeforeCursor() {
 		order = "COALESCE(started_at,0) ASC, id ASC"
 	}
-	query := `
-SELECT ` + runColumns + `
-  FROM runs` + where + `
- ORDER BY ` + order + `
- LIMIT ?`
+	query += ` ORDER BY ` + order + ` LIMIT ?`
 
 	rows, err := s.query(ctx, query, args...)
 	if err != nil {
@@ -598,23 +605,7 @@ func runCursorArgs(f RunFilter) []any {
 	return []any{f.AfterStartedAt, f.AfterStartedAt, f.AfterID}
 }
 
-func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (int, error) {
-	where, args, err := runFilterWhere(s.dialect, scope, f)
-	if err != nil {
-		return 0, err
-	}
-	row := s.queryRow(ctx, `SELECT COUNT(*) FROM runs`+where, args...)
-	var n int
-	if err := row.Scan(&n); err != nil {
-		return 0, err
-	}
-	return n, nil
-}
-
-func runFilterWhere(dialect Dialect, scope teamScope, f RunFilter) (string, []any, error) {
-	if !scope.all && scope.team == "" {
-		return "", nil, ErrNoTeam
-	}
+func runFilterWhere(dialect Dialect, f RunFilter) (string, []any, error) {
 	var err error
 	if f.GitSHAPrefixes, err = normalizeSHAPrefixes(f.GitSHAPrefixes); err != nil {
 		return "", nil, err
@@ -625,10 +616,6 @@ func runFilterWhere(dialect Dialect, scope teamScope, f RunFilter) (string, []an
 
 	where := ""
 	args := []any{}
-	if !scope.all {
-		where = " WHERE runs.team = ?"
-		args = append(args, string(scope.team))
-	}
 	addIn := func(col string, values []string) {
 		if len(values) == 0 {
 			return
@@ -700,13 +687,16 @@ func prefixUpperBound(prefix string) (string, bool) {
 // GetLatestRun returns the newest run for pipeline matching statuses
 // within maxAge. ErrNotFound on miss.
 func (o *Operator) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
-	return o.s.getLatestRun(ctx, allTeams(), pipeline, statuses, maxAge)
+	return o.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE pipeline=?`, []any{pipeline}, pipeline, statuses, maxAge)
 }
 
 // GetLatestRun returns t's newest run for pipeline matching statuses within
 // maxAge. ErrNotFound on miss.
 func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
-	return t.s.getLatestRun(ctx, oneTeam(t.team), pipeline, statuses, maxAge)
+	if t.team == "" {
+		return nil, ErrNoTeam
+	}
+	return t.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE team=? AND pipeline=?`, []any{t.team, pipeline}, pipeline, statuses, maxAge)
 }
 
 type rowScanner interface {
@@ -1280,16 +1270,16 @@ const triggerSelect = `SELECT ` + runColumns + `,triggers.team,triggers.status,t
  FROM runs JOIN triggers ON triggers.team=runs.team AND triggers.id=runs.id`
 
 // ListTriggers returns this tenant's sealed trigger displays, newest first.
-func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
-	return t.s.listTriggers(ctx, oneTeam(t.team), f)
-}
+func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) (_ []*Trigger, err error) {
+	if t.team == "" {
+		return nil, ErrNoTeam
+	}
 
-func (s *Store) listTriggers(ctx context.Context, scope teamScope, f TriggerFilter) (_ []*Trigger, err error) {
 	filter := RunFilter{Pipelines: f.Pipelines}
 	if f.Repo != "" {
 		filter.RepoNames = []string{f.Repo}
 	}
-	where, args, err := runFilterWhere(s.dialect, scope, filter)
+	where, args, err := runFilterWhere(t.s.dialect, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -1307,7 +1297,9 @@ func (s *Store) listTriggers(ctx context.Context, scope teamScope, f TriggerFilt
 		limit = 20
 	}
 	args = append(args, min(limit, MaxRunListLimit))
-	rows, err := s.query(ctx, triggerSelect+where+` ORDER BY triggers.created_at DESC,triggers.id DESC LIMIT ?`, args...)
+	args = append([]any{t.team}, args...)
+	where = strings.Replace(where, " WHERE ", " AND ", 1)
+	rows, err := t.s.query(ctx, triggerSelect+` WHERE runs.team = ?`+where+` ORDER BY triggers.created_at DESC,triggers.id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}

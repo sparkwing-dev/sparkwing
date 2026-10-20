@@ -43,12 +43,12 @@ func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 
 func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	s, demand := poolLauncherFixture(t)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ref, fence := launcherFence(t, s, demand, claim, capability.UnitNode)
-	awards, _, err := s.ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil)
+	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil)
 	if err != nil || len(awards) != 1 {
 		t.Fatalf("pool reconciliation: %+v %v", awards, err)
 	}
@@ -59,11 +59,11 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	if prepared, err := s.renewLauncherPreparation(t.Context(), ref, []capability.LeaseRef{fence}); err != nil || len(prepared) != 1 {
 		t.Fatalf("pool preparation: %v %v", prepared, err)
 	}
-	allocation, err := s.CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
+	allocation, err := s.AsOperator().CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
 	if err != nil || allocation == nil || allocation.Cores != 4 {
 		t.Fatalf("pool allocation: %+v %v", allocation, err)
 	}
-	issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+	issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: &ordinal}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
 		t.Fatal(err)
 	}
 	if chargedMicro(t, s) != 0 {
@@ -103,7 +103,7 @@ func TestVerifiedPoolRefusesPersistentRunnerCredentials(t *testing.T) {
 			if kind == capability.UnitTrigger {
 				demand.Target.NodeID = ""
 			}
-			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatalf("persistent runner claimed verified pool work: kind=%s inherited=%v", kind, inherited)
 			}
 		}
@@ -122,9 +122,9 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 	git := input.Request.Git
 	git.Ref = "refs/heads/main"
 	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}
-	s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+	s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{SourceLocation: &input.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "actor"}}}, nil
-	}))
+	})
 	rewriteSchemaExec(t, s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('a','deploy','deploy','gh:1','owner',1)`)
 	admitted, err := tenant.AdmitRun(ctx, input)
 	if err != nil {
@@ -144,14 +144,14 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 	claim := func(kind capability.UnitKind) capability.Capability {
 		t.Helper()
 		demand := UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
-		award, err := s.ClaimUnit(ctx, demand)
+		award, err := s.AsOperator().ClaimUnit(ctx, demand)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if award.RunID != admitted.RunID || award.Kind != kind {
 			t.Fatalf("pool award: %+v", award)
 		}
-		issued, err := s.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: award.Award.CapabilityPrefix})
+		issued, err := s.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: award.Award.CapabilityPrefix})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -221,7 +221,7 @@ func TestPoolLauncherCannotCrossItsScope(t *testing.T) {
 			} else {
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET allowed_pools=? WHERE id='run'`, []byte(`["other"]`))
 			}
-			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatalf("pool launcher escaped its %s", other)
 			}
 		})

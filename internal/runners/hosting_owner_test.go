@@ -56,7 +56,7 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 				t.Error(err)
 			}
 		}()
-		authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: s, Bindings: s})
+		authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: s.AsOperator(), Bindings: s.AsOperator()})
 		if err != nil {
 			t.Fatal(err)
 		}

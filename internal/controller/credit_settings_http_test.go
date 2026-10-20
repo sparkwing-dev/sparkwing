@@ -16,7 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func creditPolicyFixture(t *testing.T) (*Server, http.Handler, string, string) {
+func creditPolicyFixture(t *testing.T) (*serverFixture, http.Handler, string, string) {
 	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -34,11 +34,11 @@ func creditPolicyFixture(t *testing.T) (*Server, http.Handler, string, string) {
 	s := NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
 	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator','operator@example.test',1,1)`)
 	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'operator','reader',1)`, store.DefaultTeam)
-	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, store.DefaultTeam, time.Hour)
+	raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "operator"}, store.DefaultTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s, s.Handler(), raw, csrf
+	return &serverFixture{Server: s, store: st}, s.Handler(), raw, csrf
 }
 
 func creditPolicyWrite(t *testing.T, h http.Handler, raw, csrf, body string, want int) creditSettingsJSON {

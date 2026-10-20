@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func deleteRetentionIdentityTx(ctx context.Context, tx *storeTx, now time.Time, limit int, result *RetentionResult) error {
+func (op *Operator) deleteRetentionIdentityTx(ctx context.Context, tx *storeTx, now time.Time, limit int, result *RetentionResult) error {
 	spent := now.Add(-30 * 24 * time.Hour).UnixNano()
 	for _, step := range []struct {
 		query string

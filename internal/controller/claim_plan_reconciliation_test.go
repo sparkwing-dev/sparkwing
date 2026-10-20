@@ -60,11 +60,11 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		}
 	}
 
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := e.Store.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: principal.Authority, Audience: capability.Controller, Binding: principal.Capability.Binding, Grants: []capability.Grant{capability.SourceRead}, Repositories: principal.Capability.Repositories, Data: principal.Capability.Data, ExpiresAt: principal.Capability.ExpiresAt})
+	child, err := e.Store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: principal.Authority, Audience: capability.Controller, Binding: principal.Capability.Binding, Grants: []capability.Grant{capability.SourceRead}, Repositories: principal.Capability.Repositories, Data: principal.Capability.Data, ExpiresAt: principal.Capability.ExpiresAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('reader','reader@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','reader','reader',1)`)
-	session, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "reader"}, "a", time.Hour)
+	session, csrf, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "reader"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

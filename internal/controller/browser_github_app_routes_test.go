@@ -64,7 +64,7 @@ func (f *githubConnectFake) BindAuthorizedGitHubInstallation(_ context.Context, 
 }
 
 type githubBrowserFixture struct {
-	s             *Server
+	s             *serverFixture
 	writer        *githubConnectFake
 	h             http.Handler
 	raw, csrf     string
@@ -81,7 +81,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 		t.Fatal(err)
 	}
 	s := NewDeployment(e.Store, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithDashboard(Dashboard{})
-	raw, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	raw, csrf, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &githubBrowserFixture{s: s, raw: raw, csrf: csrf, writer: &githubConnectFake{team: "a", subject: "42", consumed: make(map[string]bool)}}
+	f := &githubBrowserFixture{s: &serverFixture{Server: s, store: e.Store, engine: e}, raw: raw, csrf: csrf, writer: &githubConnectFake{team: "a", subject: "42", consumed: make(map[string]bool)}}
 	cfg := githubapp.Config{AppID: 1, Slug: "test", ClientID: "client", ClientSecret: "private-provider-secret", PrivateKey: key, HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 		f.providerCalls++
 		var body string

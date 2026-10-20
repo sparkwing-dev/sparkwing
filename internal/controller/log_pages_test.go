@@ -67,12 +67,12 @@ func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
 func TestPersistedLogPageUsesCanonicalSubjectAndCursor(t *testing.T) {
 	logs, subject, st := committedDashboardLogs(t, []byte("first\nsecond\n"))
 	server := New(st, nil).WithDataObjects(logs.objs.(blob.ObjectBackend))
-	principal, err := st.ResolveAuthority(t.Context(), logs.actor.Authority)
+	principal, err := st.AsOperator().ResolveAuthority(t.Context(), logs.actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	auth := capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
-	raw := nativeClaimPresentation(t, &EngineController{Store: st}, auth)
+	raw := nativeClaimPresentation(t, newEngineFixture(st, EngineController{}), auth)
 	reader, err := client.NewLogReader(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}}, Bearer: func(context.Context) (string, error) { return raw, nil }})
 	if err != nil {
 		t.Fatal(err)

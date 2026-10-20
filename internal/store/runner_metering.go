@@ -12,11 +12,6 @@ import (
 
 type consolePolicy func(capability.Principal, time.Time) bool
 
-// SetConsolePolicy installs the controller's console predicate before concurrent use.
-func (s *Store) SetConsolePolicy(policy func(capability.Principal, time.Time) bool) {
-	s.consolePolicy = policy
-}
-
 func consoleAuthorityTx(ctx context.Context, tx *storeTx, a capability.Authorized, path string) error {
 	route, ok := capability.LookupRoute("POST", path)
 	if !ok || a.Principal.Class != capability.CredentialConsole || !reflect.DeepEqual(a.Target, capability.Target{}) || a.ResultReplay || a.LogTailAttempt != 0 {
@@ -50,7 +45,7 @@ func (o *Operator) SetRunnerMetered(ctx context.Context, a capability.Authorized
 		if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=?`+tx.forUpdate(), prefix).Scan(&prefix); err != nil {
 			return err
 		}
-		record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
 		if err != nil {
 			return err
 		}

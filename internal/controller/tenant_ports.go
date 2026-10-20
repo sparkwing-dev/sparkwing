@@ -56,8 +56,13 @@ func scopedTenant(ctx context.Context, team store.Team, resolve func(context.Con
 }
 
 func tenantPort[P any](ctx context.Context, s *Server, team store.Team) (P, error) {
+	return ScopedTenantPort[P](ctx, team, s.resolveTenant)
+}
+
+// ScopedTenantPort selects a narrow port from the one request tenant handle.
+func ScopedTenantPort[P any](ctx context.Context, team store.Team, resolve func(context.Context, store.Team) (TenantHandle, error)) (P, error) {
 	var zero P
-	handle, err := s.requestTenant(ctx, team)
+	handle, err := scopedTenant(ctx, team, resolve)
 	if err != nil {
 		return zero, err
 	}

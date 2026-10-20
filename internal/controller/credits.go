@@ -242,7 +242,7 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a cap
 }
 
 func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
-	if s.store == nil {
+	if s.operator == nil {
 		return missingEndpointPolicy()
 	}
 	settings, err := s.operator.CreditSettings(r.Context())

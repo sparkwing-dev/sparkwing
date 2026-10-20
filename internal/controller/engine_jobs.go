@@ -46,7 +46,7 @@ func (s *EngineController) handleJobs(w http.ResponseWriter, r *http.Request, a 
 func (s *EngineController) handleJob(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	read := s.ReadRunStatus
 	if read == nil {
-		if s.Store == nil {
+		if s.ResolveTenant == nil {
 			return missingEndpointPolicy()
 		}
 		read = func(ctx context.Context, team store.Team, run string) (RunStatusFacts, error) {

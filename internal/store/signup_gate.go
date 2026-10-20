@@ -182,8 +182,8 @@ func scanSignUpGate(row rowScanner) (SignUpGate, error) {
 }
 
 // SignUpGate reads the stored gate.
-func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error) {
-	return scanSignUpGate(s.queryRow(ctx, signUpGateSelect))
+func (o *Operator) SignUpGate(ctx context.Context) (SignUpGate, error) {
+	return scanSignUpGate(o.s.queryRow(ctx, signUpGateSelect))
 }
 
 func writeSignUpGateTx(ctx context.Context, tx *storeTx, g SignUpGate) error {
@@ -249,10 +249,10 @@ func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignU
 
 // SignUpCounts reads the accounts created in the last hour and the last day,
 // and how many wait on the list.
-func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error) {
+func (o *Operator) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error) {
 	var c SignUpCounts
 	at := now.UTC().UnixNano()
-	err := s.queryRow(ctx, `
+	err := o.s.queryRow(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
@@ -291,7 +291,7 @@ func recordAdmissionTx(ctx context.Context, tx *storeTx, accountID, kind string,
 }
 
 func recordAdmissionEventTx(tx *storeTx, accountID, via, actor string, now time.Time) error {
-	return RecordBusinessEvent(tx, BusinessEvent{
+	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		At: now, Account: accountID, Kind: BusinessEventAccountAdmitted, SubjectID: accountID, Actor: actor,
 		Attrs: map[string]any{"via": via},
 	})
@@ -391,8 +391,8 @@ func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]Waitlisted
 
 // NewestWaitlisted lists a page of the accounts waiting for admission, newest
 // first, skipping the offset newest.
-func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error) {
-	return s.waitlisted(ctx, " DESC", limit, offset)
+func (o *Operator) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error) {
+	return o.s.waitlisted(ctx, " DESC", limit, offset)
 }
 
 func (s *Store) waitlisted(ctx context.Context, order string, limit, offset int) (_ []WaitlistedAccount, err error) {
@@ -485,14 +485,14 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string, now time.T
 		return Account{}, false, err
 	}
 	defer rollbackOrLog(tx)
-	acct, changed, err := approveOneTx(ctx, tx, id, actor, now)
+	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, now)
 	if err != nil {
 		return Account{}, false, err
 	}
 	return acct, changed, tx.Commit()
 }
 
-func approveOneTx(ctx context.Context, tx *storeTx, id, actor string, now time.Time) (Account, bool, error) {
+func (op *Operator) approveOneTx(ctx context.Context, tx *storeTx, id, actor string, now time.Time) (Account, bool, error) {
 	at := now.UTC().UnixNano()
 	res, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET waitlisted_at = 0, waitlist_reason = '', updated_at = ? WHERE id = ? AND waitlisted_at <> 0`,
@@ -522,7 +522,7 @@ func approveOneTx(ctx context.Context, tx *storeTx, id, actor string, now time.T
 			return Account{}, false, err
 		}
 	}
-	if err := settleActiveTeamTx(ctx, tx, id, at); err != nil {
+	if err := tx.operator.settleActiveTeamTx(ctx, tx, id, at); err != nil {
 		return Account{}, false, err
 	}
 	if acct, err = accountTx(ctx, tx, id); err != nil {

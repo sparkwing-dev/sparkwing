@@ -20,9 +20,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func engineRuntimeStore(t *testing.T, opts ...store.Option) (*EngineController, *store.Tenant) {
+type engineFixture struct {
+	*EngineController
+	Store         *store.Store
+	claimProfiles store.ClaimProfileResolver
+}
+
+func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *store.Tenant) {
 	t.Helper()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), opts...)
+	fixture := &engineFixture{claimProfiles: engineProfileFake{}}
+	profiles := store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{ClaimProfiles: engineEnrollmentFunc(func(ctx context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
+			return fixture.claimProfiles.ResolveClaimProfile(ctx, p)
+		})}, nil
+	})
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{profiles}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +54,8 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*EngineController, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &EngineController{Store: s}, tenant
+	fixture.EngineController, fixture.Store = NewEngineController(s, EngineController{}), s
+	return fixture, tenant
 }
 
 func engineSQL(t *testing.T, s *store.Store, query string, args ...any) {
@@ -60,7 +73,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 			engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)
 			engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 			engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('session','account','runs.read,runs.control',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
-			principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"})
+			principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -99,7 +112,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 	}
 }
 
-func engineRuntimeClaim(t *testing.T, server *EngineController, kind capability.UnitKind) capability.Authorized {
+func engineRuntimeClaim(t *testing.T, server *engineFixture, kind capability.UnitKind) capability.Authorized {
 	t.Helper()
 	s := server.Store
 	digest := sha256.Sum256([]byte("runner-secret"))
@@ -118,11 +131,11 @@ func engineRuntimeClaim(t *testing.T, server *EngineController, kind capability.
 		target.NodeID = "job"
 		engineSQL(t, s, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	}
-	claim, err := s.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, err := s.LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+	principal, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +189,7 @@ func (engineProfileFake) ResolveClaimProfile(context.Context, capability.Princip
 func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	server, tenant := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
-	server.Store.SetClaimProfileResolver(engineProfileFake{})
+	server.claimProfiles = engineProfileFake{}
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +215,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	if err != nil || wait.Kind != "wait_holder" || wait.Claim != nil {
 		t.Fatalf("live holder: %+v, %v", wait, err)
 	}
-	principal, err := server.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(response.Claim.Capability)))
+	principal, err := server.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(response.Claim.Capability)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,4 +253,8 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	if err := teststore.SQL(t, server.Store).QueryRow(`SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "done" {
 		t.Fatalf("owner status=%s, %v", status, err)
 	}
+}
+
+func newEngineFixture(st *store.Store, cfg EngineController) *engineFixture {
+	return &engineFixture{EngineController: NewEngineController(st, cfg), Store: st}
 }

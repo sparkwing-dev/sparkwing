@@ -35,7 +35,7 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 					}
 					insufficient := demand
 					insufficient.Available.Cores = random.Float64() * 4
-					_, err := s.ClaimUnit(t.Context(), insufficient)
+					_, err := s.AsOperator().ClaimUnit(t.Context(), insufficient)
 					var capacity *apierr.Error
 					if !errors.As(err, &capacity) || capacity.Code != apierr.LockHeld {
 						t.Fatalf("capacity boundary: %v", err)
@@ -55,7 +55,7 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 						}
 						wg.Go(func() {
 							<-start
-							claim, err := claimant.ClaimUnit(t.Context(), request)
+							claim, err := claimant.AsOperator().ClaimUnit(t.Context(), request)
 							if err == nil {
 								if request.Available.Cores < 4 {
 									t.Error("claim exceeded available capacity")
@@ -83,7 +83,7 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 					start = make(chan struct{})
 					wg.Go(func() {
 						<-start
-						_, err := replica.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
+						_, err := replica.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
 						if err != nil {
 							var refused *store.ErrIllegalTransition
 							if !errors.As(err, &refused) || refused.Reason != store.ReasonHolderRights {
@@ -99,7 +99,7 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 					})
 					close(start)
 					wg.Wait()
-					_, err = s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
+					_, err = s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
 					var refused *store.ErrIllegalTransition
 					if !errors.As(err, &refused) || refused.Reason != store.ReasonHolderRights {
 						t.Fatalf("released award renewed: %v", err)
@@ -132,7 +132,7 @@ func TestUnitOperationsShareControllerFence(t *testing.T) {
 							t.Fatal(err)
 						}
 						var err error
-						claim, err = s.ClaimUnit(t.Context(), demand)
+						claim, err = s.AsOperator().ClaimUnit(t.Context(), demand)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -161,13 +161,13 @@ func TestUnitOperationsShareControllerFence(t *testing.T) {
 						var err error
 						switch operation {
 						case "claim":
-							claim, err = s.ClaimUnit(ctx, demand)
+							claim, err = s.AsOperator().ClaimUnit(ctx, demand)
 						case "renew":
-							_, err = s.RenewUnit(ctx, claim.Award.CapabilityPrefix, false)
+							_, err = s.AsOperator().RenewUnit(ctx, claim.Award.CapabilityPrefix, false)
 						case "release":
 							err = s.ReleaseUnit(ctx, claim, claim.Award.CapabilityPrefix)
 						case "reap":
-							_, err = s.ReapUnits(ctx, reaper, 10)
+							_, err = s.AsOperator().ReapUnits(ctx, reaper, 10)
 						}
 						done <- err
 					}()

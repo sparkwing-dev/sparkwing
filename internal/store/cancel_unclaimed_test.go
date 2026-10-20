@@ -45,7 +45,7 @@ func TestRunCancellationPreventsUnclaimedAwards(t *testing.T) {
 				if !named {
 					demand.Kinds, demand.Target = []capability.UnitKind{kind}, nil
 				}
-				if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+				if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 					t.Fatal("cancelled owner unit was awarded")
 				}
 			}
@@ -54,7 +54,7 @@ func TestRunCancellationPreventsUnclaimedAwards(t *testing.T) {
 				t.Fatal(err)
 			}
 			for replay := range 2 {
-				units, err := s.ReapUnits(t.Context(), lease, 10)
+				units, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
 				if err != nil || len(units) != 1-replay || replay == 0 && !units[0].Cancelled {
 					t.Fatalf("cancel recovery: %+v, %v", units, err)
 				}
@@ -85,7 +85,7 @@ func TestRunCancellationRacesOwnerAwardProperty(t *testing.T) {
 			var claimErr, cancelErr error
 			wg.Go(func() {
 				<-start
-				claim, claimErr = s.ClaimUnit(t.Context(), demand)
+				claim, claimErr = s.AsOperator().ClaimUnit(t.Context(), demand)
 			})
 			wg.Go(func() {
 				<-start
@@ -101,7 +101,7 @@ func TestRunCancellationRacesOwnerAwardProperty(t *testing.T) {
 				t.Fatalf("cancellation under holder: %+v, %v", row, err)
 			}
 			if claimErr == nil {
-				beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
+				beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
 				if err != nil || !beat.CancelRequested || beat.CancelReason != change.Reason {
 					t.Fatalf("awarded owner missed cancellation: %+v, %v", beat, err)
 				}
@@ -121,25 +121,25 @@ func TestRunCancellationReachesClaimedOwner(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, tenant, demand, change := cancellationFixture(t, kind)
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
 			prefix := claim.Award.CapabilityPrefix
 			if kind == capability.UnitPlan {
-				issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: prefix})
+				issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: prefix})
 				if err != nil {
 					t.Fatal(err)
 				}
 				prefix = issued.Capability.Prefix
 			}
-			if _, err := s.RenewUnit(t.Context(), prefix, true); err != nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), prefix, true); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tenant.TransitionRun(t.Context(), change); err != nil {
 				t.Fatal(err)
 			}
-			beat, err := s.RenewUnit(t.Context(), prefix, false)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), prefix, false)
 			if err != nil || !beat.CancelRequested || beat.CancelReason != change.Reason {
 				t.Fatalf("held cancellation: %+v, %v", beat, err)
 			}

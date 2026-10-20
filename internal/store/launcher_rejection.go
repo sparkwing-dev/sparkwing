@@ -24,7 +24,7 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			if err := launcherReservationAwardTx(ctx, tx, root.Authority, claimant.Subject, fence); err != nil {
 				return err
 			}
-			row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
+			row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
 			if endedLauncherPreparation(err) {
 				continue
 			}

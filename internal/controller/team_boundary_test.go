@@ -23,7 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func openPostgresStore(t *testing.T) *store.Store {
+func openPostgresStore(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
 	base := os.Getenv("SPARKWING_TEST_PG_URL")
 	if strings.TrimSpace(base) == "" {
@@ -67,7 +67,7 @@ func openPostgresStore(t *testing.T) *store.Store {
 	if strings.Contains(base, "?") {
 		sep = "&"
 	}
-	st, err := teststore.OpenPostgres(ctx, base+sep+"search_path="+schema)
+	st, err := teststore.OpenPostgres(ctx, base+sep+"search_path="+schema, opts...)
 	if err != nil {
 		t.Fatalf("open postgres schema %s: %v", schema, err)
 	}
@@ -75,9 +75,9 @@ func openPostgresStore(t *testing.T) *store.Store {
 	return st
 }
 
-func openSQLiteStore(t *testing.T) *store.Store {
+func openSQLiteStore(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), opts...)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -105,14 +105,18 @@ type tenancyFixture struct {
 
 var everyMemberGrant = store.ScopesForRole(store.RoleOwner)
 
-func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
+func newTenancyFixture(t *testing.T, open func(*testing.T, ...store.Option) *store.Store) *tenancyFixture {
 	t.Helper()
 	ctx := context.Background()
+	var srv *controller.Server
+	st := open(t, store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		srv = controller.NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(testCipher(t))
+		return srv.StorePolicies(), nil
+	}))
 	now := time.Now().UTC()
 	if _, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(testCipher(t))
 	f := &tenancyFixture{t: t, srv: srv, url: "https://controller.test", st: st}
 
 	alice, teamA := signUp(t, st, "alice")
@@ -151,7 +155,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 
 func signUp(t *testing.T, st *store.Store, name string) (store.Account, store.Team) {
 	t.Helper()
-	res, err := st.ResolveSignIn(context.Background(), store.SignInProfile{
+	res, err := st.AsOperator().ResolveSignIn(context.Background(), store.SignInProfile{
 		Provider: "google", Subject: "sub-" + name, Email: name + "@example.test",
 		EmailVerified: true, Name: name, GivenName: name,
 	}, store.SignUpConditions{}, time.Now().UTC())
@@ -175,7 +179,7 @@ func forTeam(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 
 func session(t *testing.T, st *store.Store, acct store.Account, team store.Team) string {
 	t.Helper()
-	raw, _, _, err := st.CreateAccountSession(context.Background(), acct, team, time.Hour)
+	raw, _, _, err := st.AsOperator().CreateAccountSession(context.Background(), acct, team, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +194,7 @@ func (f *tenancyFixture) member(owner store.Account, name string, role store.Rol
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.st.AcceptAccountInvitation(ctx, fixtureAccountAuthority(f.t, f.st, acct), inv.ID); err != nil {
+	if _, err := f.st.AsOperator().AcceptAccountInvitation(ctx, fixtureAccountAuthority(f.t, f.st, acct), inv.ID); err != nil {
 		f.t.Fatal(err)
 	}
 	return session(f.t, f.st, acct, f.teamA.Team())
@@ -240,13 +244,13 @@ func (f *tenancyFixture) do(method, path, auth string, body any) (int, string) {
 func tenancyDialects(t *testing.T, run func(t *testing.T, f *tenancyFixture)) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) *store.Store
+		open func(*testing.T, ...store.Option) *store.Store
 	}{
 		{name: "sqlite", open: openSQLiteStore},
 		{name: "postgres", open: openPostgresStore},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			run(t, newTenancyFixture(t, tc.open(t)))
+			run(t, newTenancyFixture(t, tc.open))
 		})
 	}
 }
@@ -660,18 +664,18 @@ func TestTeamBoundary_SecretsStayWithTheirTeam(t *testing.T) {
 
 func fixtureInvitation(t *testing.T, st *store.Store, tenant *store.Tenant, actor, email string, role store.Role) (store.Invitation, error) {
 	t.Helper()
-	account, err := st.Account(t.Context(), actor)
+	account, err := st.AsOperator().Account(t.Context(), actor)
 	if err != nil {
 		return store.Invitation{}, err
 	}
 	raw := strings.TrimPrefix(session(t, st, account, tenant.Team()), "Session ")
 	route, _ := capability.LookupRoute("POST", "/api/v1/team/invitations")
 	target := capability.Target{Team: string(tenant.Team())}
-	auth, err := capability.NewAuthenticator(st).Authenticate(t.Context(), capability.Presentation{Raw: raw, Class: capability.CredentialSession, Evidence: capability.RequestEvidence{Target: target}}, route)
+	auth, err := capability.NewAuthenticator(st.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: raw, Class: capability.CredentialSession, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		return store.Invitation{}, err
 	}
-	a, err := capability.Authorize(t.Context(), st, route, auth, target)
+	a, err := capability.Authorize(t.Context(), st.AsOperator(), route, auth, target)
 	if err != nil {
 		return store.Invitation{}, err
 	}
@@ -682,11 +686,11 @@ func fixtureAccountAuthority(t *testing.T, st *store.Store, account store.Accoun
 	t.Helper()
 	raw := strings.TrimPrefix(session(t, st, account, account.ActiveTeam), "Session ")
 	route, _ := capability.LookupRoute("POST", "/api/v1/me/active-team")
-	auth, err := capability.NewAuthenticator(st).Authenticate(t.Context(), capability.Presentation{Raw: raw, Class: capability.CredentialSession}, route)
+	auth, err := capability.NewAuthenticator(st.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: raw, Class: capability.CredentialSession}, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := capability.Authorize(t.Context(), st, route, auth, capability.Target{AccountID: account.ID})
+	a, err := capability.Authorize(t.Context(), st.AsOperator(), route, auth, capability.Target{AccountID: account.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

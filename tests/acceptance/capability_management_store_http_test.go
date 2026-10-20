@@ -54,15 +54,15 @@ func TestCapabilityManagementHTTPUsesStoreTransactions(t *testing.T) {
 	if err := json.Unmarshal(rotated.Body.Bytes(), &replacement); err != nil || replacement.Capability == "" || replacement.Old != root.Prefix || replacement.New.CreatedBy != "member" {
 		t.Fatalf("rotate: %s %v", rotated.Body, err)
 	}
-	if _, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability))); err == nil {
+	if _, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(root.Capability))); err == nil {
 		t.Fatal("old credential survived zero grace")
 	}
-	if _, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(replacement.Capability))); err != nil {
+	if _, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(replacement.Capability))); err != nil {
 		t.Fatalf("replacement not committed: %v", err)
 	}
 	call("POST", "/api/v1/tokens/"+root.Prefix+"/rotate", `{}`, 409)
 	call("DELETE", "/api/v1/tokens/"+replacement.New.Prefix, "", 204)
-	if _, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(replacement.Capability))); err == nil {
+	if _, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(replacement.Capability))); err == nil {
 		t.Fatal("owned credential survived HTTP revocation")
 	}
 }

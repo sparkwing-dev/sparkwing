@@ -71,11 +71,8 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 				}
 			}
 			raw := cloudResourceRoot(t, e)
-			e.Store.SetClaimProfileResolver(cloudResourceProfile(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-				return match.Profile{Capacity: match.Resources{Cores: 1, MemoryBytes: 1 << 30}}, match.Resources{Cores: 1, MemoryBytes: 1 << 30}, nil
-			}))
 			e.RunnerPolicy = cloudResourcePolicy(func(context.Context, string) error { return nil })
-			handler := controller.New(e.Store, nil).WithEngineController(e).Handler()
+			handler := controller.New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 			transport := &http.Client{Transport: cloudResourceTransport(func(r *http.Request) (*http.Response, error) {
 				w := httptest.NewRecorder()
 				handler.ServeHTTP(w, r)
@@ -138,9 +135,18 @@ func cloudResourceSQL(t *testing.T, s *store.Store, q string, args ...any) {
 	}
 }
 
-func cloudResourceStore(t *testing.T) (*controller.EngineController, *store.Tenant) {
+type cloudResourceFixture struct {
+	*controller.EngineController
+	Store *store.Store
+}
+
+func cloudResourceStore(t *testing.T) (*cloudResourceFixture, *store.Tenant) {
 	t.Helper()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{ClaimProfiles: cloudResourceProfile(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+			return match.Profile{Capacity: match.Resources{Cores: 1, MemoryBytes: 1 << 30}}, match.Resources{Cores: 1, MemoryBytes: 1 << 30}, nil
+		})}, nil
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,10 +171,10 @@ func cloudResourceStore(t *testing.T) (*controller.EngineController, *store.Tena
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &controller.EngineController{Store: s}, tenant
+	return &cloudResourceFixture{EngineController: controller.NewEngineController(s, controller.EngineController{}), Store: s}, tenant
 }
 
-func cloudResourceRoot(t *testing.T, e *controller.EngineController) string {
+func cloudResourceRoot(t *testing.T, e *cloudResourceFixture) string {
 	t.Helper()
 	secret := sha256.Sum256([]byte("launcher"))
 	raw := "swk_" + base64.RawURLEncoding.EncodeToString(secret[:])

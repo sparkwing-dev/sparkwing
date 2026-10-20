@@ -19,7 +19,7 @@ func scheduleLockFixture(t *testing.T, target *storetest.Target) (*storeRecovery
 	f := newStoreRecoveryFixtureAt(t, true, target)
 	f.s.DB().SetMaxOpenConns(8)
 	controller.New(f.s, nil)
-	p, err := f.s.ResolveAuthority(t.Context(), f.plan.Seal.Request.AuthorityRef)
+	p, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.plan.Seal.Request.AuthorityRef)
 	if err != nil {
 		t.Fatal(err)
 	}

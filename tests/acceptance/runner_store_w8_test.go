@@ -3,9 +3,13 @@ package acceptance_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,12 +28,12 @@ import (
 
 type storedRunnerW8 struct {
 	controllerwire.Controller
-	server     *controller.EngineController
+	server     *storedEngineW8
 	authorized capability.Authorized
 }
 
 func (c *storedRunnerW8) Claim(ctx context.Context, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-	return c.server.Claim(ctx, c.authorized, body)
+	return c.Controller.Claim(ctx, body)
 }
 
 func (c *storedRunnerW8) Renew(ctx context.Context, unit string, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
@@ -76,9 +80,9 @@ func (runnerStorePolicyW8) CheckRunner(_ context.Context, version string) error 
 	return nil
 }
 
-func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*controller.EngineController, capability.Issued) {
+func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*storedEngineW8, capability.Issued) {
 	t.Helper()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "runner.db"))
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "runner.db"), runnerStoreOptionsW8())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,16 +94,20 @@ func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*controller.Engi
 	return seedStoredRunnerW8(t, s, kind)
 }
 
-func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) (*controller.EngineController, capability.Issued) {
+func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) (*storedEngineW8, capability.Issued) {
 	t.Helper()
-	s.SetProvisionPolicy(runnerStorePolicyW8{})
-	s.SetClaimProfileResolver(runnerStorePolicyW8{})
-	operator, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "runner-store-fixture", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
+	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	_, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: raw, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}})
 	if err != nil {
-		t.Fatalf("fixture bootstrap: %v", err)
+		t.Fatal(err)
 	}
+	operator, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	parent := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
-	root, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, RegistrationID: "runner:default:runner", Repositories: []string{"github.com/team/repo"}, Authority: &parent, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}})
+	root, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, RegistrationID: "runner:default:runner", Repositories: []string{"github.com/team/repo"}, Authority: &parent, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}})
 	if err != nil {
 		t.Fatalf("fixture machine: %v", err)
 	}
@@ -147,16 +155,29 @@ VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/t
 			t.Fatal(err)
 		}
 	}
-	return &controller.EngineController{Store: s, RunnerPolicy: runnerStorePolicyW8{}}, root
+	return newStoredEngineW8(s, controller.EngineController{RunnerPolicy: runnerStorePolicyW8{}}), root
 }
 
-func storedRunnerClientW8(ctx context.Context, server *controller.EngineController, bearer string) (*storedRunnerW8, error) {
-	principal, err := server.Store.LookupCapability(ctx, sha256.Sum256([]byte(bearer)))
+func storedRunnerClientW8(ctx context.Context, server *storedEngineW8, bearer string) (*storedRunnerW8, error) {
+	principal, err := server.Store.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(bearer)))
 	if err != nil {
 		return nil, err
 	}
 	c := principal.Capability
-	return &storedRunnerW8{server: server, authorized: capability.Authorized{Principal: principal, Binding: c.Binding, Target: capability.Target{Team: c.Team, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID}}}, nil
+	handler := controller.New(server.Store, nil).WithEngineController(server.EngineController).Handler()
+	transport, err := client.NewEngineClient(client.EngineOptions{
+		URL: "http://controller", Launcher: slices.Contains(c.Grants, capability.ClaimsLaunch),
+		Bearer: func(context.Context) (string, error) { return bearer, nil },
+		HTTP: &http.Client{Transport: surfaceTransport(func(request *http.Request) (*http.Response, error) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			return response.Result(), nil
+		})},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &storedRunnerW8{Controller: transport, server: server, authorized: capability.Authorized{Principal: principal, Binding: c.Binding, Target: capability.Target{Team: c.Team, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID}}}, nil
 }
 
 func revokeStoredRunnerW8(t *testing.T, s *store.Store, target capability.AuthorityRef) {
@@ -204,4 +225,19 @@ func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 	if err := host.Host(t.Context(), *response.Claim); err == nil {
 		t.Fatal("revoked root reached hosting")
 	}
+}
+
+func runnerStoreOptionsW8() store.Option {
+	return store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{ClaimProfiles: runnerStorePolicyW8{}}, nil
+	})
+}
+
+type storedEngineW8 struct {
+	*controller.EngineController
+	Store *store.Store
+}
+
+func newStoredEngineW8(st *store.Store, cfg controller.EngineController) *storedEngineW8 {
+	return &storedEngineW8{EngineController: controller.NewEngineController(st, cfg), Store: st}
 }

@@ -47,7 +47,7 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 					if err := s.ReleaseUnit(t.Context(), stale, stale.Award.CapabilityPrefix); err == nil {
 						t.Fatal("former holder released a replacement")
 					}
-					if _, err := s.RenewUnit(t.Context(), stale.Award.CapabilityPrefix, false); err == nil {
+					if _, err := s.AsOperator().RenewUnit(t.Context(), stale.Award.CapabilityPrefix, false); err == nil {
 						t.Fatal("former holder renewed a replacement")
 					}
 					actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: stale.Award.CapabilityPrefix}, CapabilityPrefix: stale.Award.CapabilityPrefix, Owner: stale.Owner}
@@ -56,7 +56,7 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 						t.Fatal("former holder finished a replacement's run")
 					}
 				}
-				if reaped, err := s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+				if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
 					t.Fatalf("live owner recovered: %+v, %v", reaped, err)
 				}
 				after, err := tenant.ReadSnapshot(t.Context(), "run")
@@ -68,7 +68,7 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 				}
 				*now = claim.Award.LeaseExpiresAt
 				for replay := range 2 {
-					reaped, err := s.ReapUnits(t.Context(), lease, 10)
+					reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
 					if err != nil || len(reaped) != 1-replay {
 						t.Fatalf("recovery %d: %+v, %v", replay, reaped, err)
 					}
@@ -124,10 +124,10 @@ func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reaped, err := s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+	if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
 		t.Fatalf("terminal owner recovered: %+v, %v", reaped, err)
 	}
-	if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 		t.Fatal("terminal run awarded again")
 	}
 	after, err := tenant.ReadSnapshot(t.Context(), claim.RunID)

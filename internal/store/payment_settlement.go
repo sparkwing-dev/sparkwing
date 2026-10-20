@@ -46,11 +46,11 @@ type PaymentSettlement struct {
 }
 
 // SettlePayment settles verified provider events against committed billing facts.
-func (s *Store) SettlePayment(ctx context.Context, proof capability.VerifiedPaymentEvent) (PaymentSettlement, error) {
+func (o *Operator) SettlePayment(ctx context.Context, proof capability.VerifiedPaymentEvent) (PaymentSettlement, error) {
 	if proof == (capability.VerifiedPaymentEvent{}) {
 		return PaymentSettlement{}, authorityError(apierr.Unauthenticated, "payment verification is required")
 	}
-	return s.settlePaymentFacts(ctx, proof.Event())
+	return o.s.settlePaymentFacts(ctx, proof.Event())
 }
 
 type paymentCheckout struct {
@@ -69,7 +69,7 @@ func paymentPaid(kind capability.PaymentEventKind) bool {
 	return kind == capability.PaymentCheckoutPaid || kind == capability.PaymentCardPaid
 }
 
-func applyCheckoutPaymentTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent) (PaymentSettlement, error) {
+func (op *Operator) applyCheckoutPaymentTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent) (PaymentSettlement, error) {
 	var checkout paymentCheckout
 	err := tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id FROM credit_checkouts WHERE payment_mode = ? AND session_id = ? AND session_id <> id`+tx.forUpdate(), string(event.Mode), event.CheckoutID).Scan(checkout.scan()...)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -89,7 +89,7 @@ func applyCheckoutPaymentTx(ctx context.Context, tx *storeTx, event capability.P
 		if used != 0 {
 			return PaymentSettlement{}, errors.Join(ErrCreditGrantConflict, authorityError(apierr.Conflict, "payment identity belongs to another checkout"))
 		}
-		grant, found, err := paidGrantForPaymentTx(ctx, tx, event.PaymentID)
+		grant, found, err := tx.operator.paidGrantForPaymentTx(ctx, tx, event.PaymentID)
 		if err != nil {
 			return PaymentSettlement{}, err
 		}
@@ -246,7 +246,7 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
-	return RecordBusinessEvent(tx, BusinessEvent{At: now, Team: team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID, "failure": failure}})
+	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: now, Team: team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID, "failure": failure}})
 }
 
 // safety: a refused Add funds or refill payment closes its row without a grant and is queued for a full refund, whose
@@ -266,7 +266,7 @@ func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.Payment
 	if err := forgetTeamCardTx(ctx, tx, team, event.Fingerprint, refusal.reason, now); err != nil {
 		return err
 	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
+	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardRefused, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", At: now,
 		Attrs: map[string]any{"reason": refusal.reason, "payment_id": event.PaymentID, "warning_id": refusal.warning},
 	}); err != nil {

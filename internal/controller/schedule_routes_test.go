@@ -24,7 +24,7 @@ import (
 
 type scheduleWriterFake struct {
 	*store.Tenant
-	s            *Server
+	s            *serverFixture
 	runs         map[string]string
 	seen         capability.Authorized
 	failure      error
@@ -186,7 +186,7 @@ func (f *scheduleWriterFake) DeleteAuthorizedSchedule(ctx context.Context, a cap
 }
 
 type scheduleHTTPFixture struct {
-	s      *Server
+	s      *serverFixture
 	writer *scheduleWriterFake
 	raw    string
 	facts  *reportingFacts
@@ -199,14 +199,14 @@ func newScheduleHTTPFixture(t *testing.T) scheduleHTTPFixture {
 
 func newDeploymentScheduleHTTPFixture(t *testing.T, cfg deployment.Config) scheduleHTTPFixture {
 	t.Helper()
-	s := NewDeployment(newStoreForAuth(t), cfg, nil)
-	s.store.SetIntakePolicy(scheduleIntakePolicy{})
+	s := &serverFixture{}
+	newStoreForAuth(t, s.option(cfg, nil), store.WithPolicies(func(*store.Store) (store.Policies, error) { return store.Policies{Intake: scheduleIntakePolicy{}}, nil }))
 	tenant, err := s.store.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writer := &scheduleWriterFake{Tenant: tenant, s: s, runs: map[string]string{}}
-	testOnlyTenantPort[ScheduleWriter](s, func(context.Context, store.Team) (ScheduleWriter, error) { return writer, nil })
+	testOnlyTenantPort[ScheduleWriter](s.Server, func(context.Context, store.Team) (ScheduleWriter, error) { return writer, nil })
 	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	now := time.Now().UTC()
 	p := capability.Principal{

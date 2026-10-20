@@ -47,10 +47,10 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	member := signIn(t, st, "m", "member@example.com")
-	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: "Acme"}); err != nil {
+	if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: "Acme"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "keep", DisplayName: "Keep"}); err != nil {
+	if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "keep", DisplayName: "Keep"}); err != nil {
 		t.Fatal(err)
 	}
 	acme := tenant(t, st, "acme")
@@ -58,10 +58,10 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
-	memberSession, _, _, err := st.CreateAccountSession(ctx, member.Account, "acme", time.Hour)
+	memberSession, _, _, err := st.AsOperator().CreateAccountSession(ctx, member.Account, "acme", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if n := countWhere(t, st, "runs", "team = 'acme' AND cancel_requested_at IS NOT NULL"); n != 1 {
 		t.Fatalf("queued run has no cancellation request: %d requested", n)
 	}
-	sess, err := st.LookupSession(t.Context(), memberSession)
+	sess, err := st.AsOperator().LookupSession(t.Context(), memberSession)
 	if err != nil || sess.Team != member.PersonalTeam {
 		t.Fatalf("member session = %+v, %v; want moved to %s", sess, err, member.PersonalTeam)
 	}
@@ -143,7 +143,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 			t.Errorf("the purge removed keep's %s", table)
 		}
 	}
-	mine, err := st.TeamDeletionsRequestedBy(ctx, owner.Account.ID)
+	mine, err := st.AsOperator().TeamDeletionsRequestedBy(ctx, owner.Account.ID)
 	if err != nil || len(mine) != 1 || mine[0].State != store.TeamDeletionDone || mine[0].FinishedAt == nil {
 		t.Fatalf("requester's view = %+v, %v", mine, err)
 	}
@@ -258,7 +258,7 @@ func TestAccountDeletionRefusesALastOwnerWithMembersAndNamesTheTeams(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	_, err = st.DeleteAccount(ctx, owner.Account.ID, now)
@@ -266,7 +266,7 @@ func TestAccountDeletionRefusesALastOwnerWithMembersAndNamesTheTeams(t *testing.
 	if !errors.As(err, &lastOwner) || len(lastOwner.Teams) != 1 || lastOwner.Teams[0].Slug != owner.PersonalTeam {
 		t.Fatalf("DeleteAccount = %v, want LastOwnerError naming %s", err, owner.PersonalTeam)
 	}
-	if _, err := st.Account(ctx, owner.Account.ID); err != nil {
+	if _, err := st.AsOperator().Account(ctx, owner.Account.ID); err != nil {
 		t.Fatalf("a refused deletion removed the account: %v", err)
 	}
 }
@@ -282,10 +282,10 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
-	session, _, _, err := st.CreateAccountSession(ctx, leaver.Account, owner.PersonalTeam, time.Hour)
+	session, _, _, err := st.AsOperator().CreateAccountSession(ctx, leaver.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,10 +307,10 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if !containsString(res.RevokedPrefixes, cliTok.Prefix) {
 		t.Fatalf("revoked = %v, want the CLI token %s", res.RevokedPrefixes, cliTok.Prefix)
 	}
-	if _, err := st.Account(ctx, leaver.Account.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.AsOperator().Account(ctx, leaver.Account.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("account after deletion = %v, want ErrNotFound", err)
 	}
-	if _, err := st.LookupSession(t.Context(), session); err == nil {
+	if _, err := st.AsOperator().LookupSession(t.Context(), session); err == nil {
 		t.Fatal("the deleted account's session still authenticates")
 	}
 	for table, where := range map[string]string{
@@ -350,7 +350,7 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ok, err := st.ClaimInvitationEmail(ctx, inv.ID, now)
+		ok, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,7 +358,7 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 			claimed++
 		}
 		if i == 0 {
-			if twice, err := st.ClaimInvitationEmail(ctx, inv.ID, now); err != nil || twice {
+			if twice, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID, now); err != nil || twice {
 				t.Fatalf("claiming one invitation twice = %v, %v; want false", twice, err)
 			}
 		}
@@ -371,14 +371,14 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := st.ClaimInvitationEmail(ctx, other.ID, now); err != nil || !ok {
+	if ok, err := st.AsOperator().ClaimInvitationEmail(ctx, other.ID, now); err != nil || !ok {
 		t.Fatalf("another address = %v, %v; want claimed", ok, err)
 	}
 	later, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := st.ClaimInvitationEmail(ctx, later.ID, now.Add(25*time.Hour)); err != nil || !ok {
+	if ok, err := st.AsOperator().ClaimInvitationEmail(ctx, later.ID, now.Add(25*time.Hour)); err != nil || !ok {
 		t.Fatalf("the same address a day later = %v, %v; want claimed", ok, err)
 	}
 }

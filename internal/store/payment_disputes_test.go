@@ -24,7 +24,7 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 			if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "dispute", "payment", "opened", *now); err != nil {
 				t.Fatal(err)
 			}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if metered {
 				var refused *InsufficientCreditsError
 				if !errors.As(err, &refused) || refused.Hold != HoldCauseDispute {

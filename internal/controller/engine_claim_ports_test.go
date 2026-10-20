@@ -66,9 +66,9 @@ func TestEngineClaimHTTPRepositorySelectionUsesEnrollment(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					e.Store.SetClaimProfileResolver(engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+					e.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
 						return match.Profile{Accept: accept, Capacity: match.Resources{Cores: 1}}, match.Resources{Cores: 1}, nil
-					}))
+					})
 					e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 					raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
 					body := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{kind}, AvailableCores: 1}
@@ -87,7 +87,7 @@ func TestEngineClaimHTTPRepositorySelectionUsesEnrollment(t *testing.T) {
 					if named && !allowed {
 						status = http.StatusForbidden
 					}
-					h := New(e.Store, nil).WithEngineController(e).Handler()
+					h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 					w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", string(encoded), status)
 					var response controllerwire.ClaimResponse
 					if status == http.StatusOK && (json.Unmarshal(w.Body.Bytes(), &response) != nil || (response.Claim != nil) != allowed) {
@@ -110,10 +110,10 @@ func TestEngineClaimHTTPTriggerQueueKeepsOrder(t *testing.T) {
 		engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,number+?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,?,log_retention_class,log_retention_days FROM runs WHERE id='run'`, id, i+1, i+2)
 		engineSQL(t, e.Store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,?,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`, id)
 	}
-	e.Store.SetClaimProfileResolver(engineProfileFake{})
+	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
-	h := New(e.Store, nil).WithEngineController(e).Handler()
+	h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 	for _, id := range []string{"run", "second", "third", ""} {
 		w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`, http.StatusOK)
 		var response controllerwire.ClaimResponse
@@ -132,10 +132,10 @@ func TestEngineClaimHTTPTriggerQueueKeepsOrder(t *testing.T) {
 
 func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 	e, tenant := engineRuntimeStore(t)
-	e.Store.SetClaimProfileResolver(engineProfileFake{})
+	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
-	h := New(e.Store, nil).WithEngineController(e).Handler()
+	h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/claim", `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`, http.StatusOK)
 	var claimed controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &claimed); err != nil || claimed.Claim == nil {
@@ -160,7 +160,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 		first = result
 		if i == 0 {
 			digest := sha256.Sum256([]byte(claim))
-			snapshot, err := e.Store.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{})
+			snapshot, err := e.Store.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +169,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 				Actor:  snapshot.Authorities[0].Principal.Authority,
 				Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: "run", Generation: claimed.Claim.Binding.Generation, Digest: hex.EncodeToString(bodyDigest[:]),
 			}
-			server := New(e.Store, nil).WithEngineController(e)
+			server := New(e.Store, nil).WithEngineController(e.EngineController)
 			authorization := server.authorization
 			authorization.Authenticator = capability.NewAuthenticator(&reportingFacts{snapshot: snapshot, digest: digest})
 			h = server.WithAuthorization(authorization).Handler()
@@ -246,7 +246,7 @@ func TestNamedClaimNumericSelectorConvergesAcrossTransports(t *testing.T) {
 	for _, transport := range []string{"http", "embedded"} {
 		t.Run(transport, func(t *testing.T) {
 			e, _ := engineRuntimeStore(t)
-			e.Store.SetClaimProfileResolver(engineProfileFake{})
+			e.claimProfiles = engineProfileFake{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
 			var number int64
@@ -261,7 +261,7 @@ func TestNamedClaimNumericSelectorConvergesAcrossTransports(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				w := engineClaimHTTP(t, New(e.Store, nil).WithEngineController(e).Handler(), raw, "POST", "/api/v1/runs/"+selector+"/claim", string(encoded), http.StatusOK)
+				w := engineClaimHTTP(t, New(e.Store, nil).WithEngineController(e.EngineController).Handler(), raw, "POST", "/api/v1/runs/"+selector+"/claim", string(encoded), http.StatusOK)
 				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 					t.Fatal(err)
 				}

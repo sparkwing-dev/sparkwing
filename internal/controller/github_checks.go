@@ -59,13 +59,14 @@ func (u githubCheckUpdate) phase() githubCheckPhase { return githubCheckPhaseFor
 
 type githubCheckReporter struct {
 	client        *githubapp.Client
-	store         *store.Store
+	resolveTenant func(context.Context, store.Team) (TenantHandle, error)
+	operator      *store.Operator
 	dashboardURL  string
 	missingChecks func()
 }
 
 func (r *githubCheckReporter) deliver(ctx context.Context, u githubCheckUpdate) error {
-	tenant, err := r.store.ForTeam(ctx, u.team)
+	tenant, err := ScopedTenantPort[*store.Tenant](ctx, u.team, r.resolveTenant)
 	if err != nil {
 		return err
 	}
@@ -98,7 +99,7 @@ func (r *githubCheckReporter) deliver(ctx context.Context, u githubCheckUpdate) 
 }
 
 func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdate, permission string) (string, string, string, error) {
-	in, err := r.store.AsOperator().GitHubAppInstallationTeam(ctx, u.installation)
+	in, err := r.operator.GitHubAppInstallationTeam(ctx, u.installation)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -117,7 +118,7 @@ func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdat
 	if repo.ID != u.repository || !valid {
 		return "", "", "", fmt.Errorf("GitHub repository identity does not match the sealed run")
 	}
-	in, err = r.store.AsOperator().GitHubAppInstallationTeam(ctx, u.installation)
+	in, err = r.operator.GitHubAppInstallationTeam(ctx, u.installation)
 	if err != nil {
 		return "", "", "", err
 	}

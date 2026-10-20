@@ -34,12 +34,11 @@ func TestSessionRoutePreservesCapabilityScopeProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := NewDeployment(s, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
-	memberRaw, _, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	memberRaw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(memberRaw))
-	s.SetProvisionPolicy(sessionOriginFake{})
 	all := []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsWrite, capability.RunsControl, capability.ApprovalsWrite, capability.TeamAdmin}
 	random := rand.New(rand.NewPCG(183, 550))
 	handler := server.Handler()
@@ -55,11 +54,11 @@ func TestSessionRoutePreservesCapabilityScopeProperty(t *testing.T) {
 		if len(grants) == 0 {
 			grants, expected = []capability.Grant{capability.RunsRead}, []string{"runs.read"}
 		}
-		issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}})
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, _, err := s.CreateCapabilitySession(t.Context(), issued.Capability.Prefix, time.Hour)
+		raw, _, err := s.AsOperator().CreateCapabilitySession(t.Context(), issued.Capability.Prefix, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}

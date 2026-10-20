@@ -20,13 +20,13 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 	}
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	claim, err := e.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, Holder: claim.Award.Holder, Generation: claim.Award.Generation}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "job", UID: "old-job-uid"}, NodeUID: "node-uid"}
-	principal, err := e.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	principal, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 			t.Fatalf("current award not retained: %+v", response)
 		}
 		if exchange == 0 {
-			if _, err := e.Store.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
+			if _, err := e.Store.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -110,11 +110,11 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 	}
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	claim, err := e.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := e.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	p, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	for range 2 {
 		w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", string(body), 200)
 		var response controllerwire.LauncherSyncResponse
@@ -161,11 +161,11 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 			var badPrefix string
 			for _, id := range []string{"run", "sibling"} {
 				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'job','pending',1,?,?)`, id, []byte(`{"id":"job"}`), []byte(`{}`))
-				claim, err := e.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: id, NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+				claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: id, NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 				if err != nil {
 					t.Fatal(err)
 				}
-				principal, err := e.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+				principal, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -181,7 +181,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 			} else {
 				engineSQL(t, e.Store, damage.query)
 			}
-			principal, err := e.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"})
+			principal, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -206,7 +206,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 				t.Fatalf("retired reservation deferred: %+v, %v", response, err)
 			}
 			engineHTTPRoot(t, e, "", "foreign-launcher", []capability.Grant{capability.ClaimsLaunch})
-			foreign, err := e.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "foreign-launcher"})
+			foreign, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "foreign-launcher"})
 			if err != nil {
 				t.Fatal(err)
 			}

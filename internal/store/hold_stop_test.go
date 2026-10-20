@@ -78,7 +78,7 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 				t.Fatal(err)
 			}
 			*now = now.Add(time.Second)
-			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil || !beat.CancelRequested {
 				t.Errorf("hold released before renewal evaded stop: %+v, %v", beat, err)
 			}
@@ -110,7 +110,7 @@ func TestHoldStopsRunningAndUnstartedAwardsTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = now.Add(time.Second)
-	beat, err := s.RenewUnit(t.Context(), unstarted.Award.CapabilityPrefix, true)
+	beat, err := s.AsOperator().RenewUnit(t.Context(), unstarted.Award.CapabilityPrefix, true)
 	var refusal *ErrIllegalTransition
 	if err == nil && !beat.CancelRequested || err != nil && !errors.As(err, &refusal) {
 		t.Fatalf("unstarted award regained authority after release: %+v, %v", beat, err)
@@ -147,7 +147,7 @@ func TestHoldRollbackRestoresRunningAward(t *testing.T) {
 		t.Fatalf("rollback kept award stop %q/%v: %v", stop, drain, err)
 	}
 	*now = now.Add(time.Second)
-	beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+	beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 	if err != nil || beat.CancelRequested {
 		t.Fatalf("rollback stopped renewal: %+v, %v", beat, err)
 	}
@@ -199,14 +199,14 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`)
 			}
 			now = now.Add(10 * time.Second)
-			beat, err := s.RenewUnit(t.Context(), cloud.Award.CapabilityPrefix, true)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), cloud.Award.CapabilityPrefix, true)
 			if err != nil || !beat.CancelRequested {
 				t.Fatalf("Cloud stop: %+v %v", beat, err)
 			}
 			if beat, err := tenant.RenewOwner(t.Context(), request.Actor); err != nil || beat.CancelRequested {
 				t.Fatalf("job stop cancelled its owner: %+v %v", beat, err)
 			}
-			if beat, err := s.RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true); err != nil || beat.CancelRequested {
+			if beat, err := s.AsOperator().RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true); err != nil || beat.CancelRequested {
 				t.Fatalf("independent customer job cancelled: %+v %v", beat, err)
 			}
 			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
@@ -221,7 +221,7 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.ReapUnits(t.Context(), lease, 10); err != nil {
+			if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "blocked"}, To: NodeSkipped, Cause: CauseDependency, Actor: request.Actor}); err != nil {

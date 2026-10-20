@@ -335,7 +335,7 @@ func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Token == "" {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
-	principal, err := st.LookupCapability(t.Context(), sha256.Sum256([]byte(result.Token)))
+	principal, err := st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(result.Token)))
 	if err != nil || principal.Capability.Parent != nil || principal.Capability.Binding.Push == nil || principal.Capability.Binding.Push.RepositoryKey != "gh:42" || principal.Capability.Binding.Push.WorkflowRunID != "1000" || principal.Capability.Subject.ID != "github:42:7:1000" || principal.Capability.ExpiresAt == nil || principal.Capability.ExpiresAt.Sub(principal.Capability.IssuedAt) <= 0 || principal.Capability.ExpiresAt.Sub(principal.Capability.IssuedAt) > time.Hour || !reflect.DeepEqual(principal.Capability.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
 		t.Fatalf("persisted root=%+v err=%v", principal, err)
 	}

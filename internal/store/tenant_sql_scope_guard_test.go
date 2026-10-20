@@ -16,115 +16,111 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"(*Operator).ComputeUsage":            "deployment capacity sums metered awards from every tenant",
-	"(*Operator).ListWaitingNodes":        "deployment attention samples every tenant queue before updating individual tenant nodes",
-	"(*Operator).MarkBlobTombstones":      "leased garbage collection compares every tenant blob with the complete live reference graph",
-	"(*Operator).SealAbandonedLogStreams": "leased log maintenance discovers abandoned streams across every tenant",
-	"(*Operator).dueRunEffects":           "the completion worker discovers due effects across tenants before dispatching each tenant run",
-	"(*Store).expiredUnits":               "the leased reaper discovers expired execution units across tenants before expiring each exact unit",
-	"queuedClaimQuery":                    "launcher claims scan deployment queues; ordinary claimant queries append their bound tenant predicate",
-	"launcherPrefixesTx":                  "launcher reconciliation discovers every tenant award before validating each exact award",
-	"lockMaintenanceCapacityTx":           "the leased concurrency pass locks capacity entries across tenants before maintaining each tenant key",
-	"(*Operator).retainedStorageTeams":    "storage billing discovers every live tenant holding retained records or blobs",
-	"deleteRetentionRunsTx":               "leased retention discovers finished runs across tenants before deleting exact tenant run keys",
-	"deleteRetentionEffectsTx":            "leased retention discovers settled effects across tenants before deleting exact tenant effect keys",
-	"finishBootstrapSetupTx":              "bootstrap completion resolves the deployment administrator capability whose tenant is null",
-	"(*Store).SearchTeams":                "the operator console searches every tenant and its owners by deployment search text",
-	"(*Store).listTriggers":               "the operator trigger view lists every tenant; tenant callers append their bound tenant predicate",
-	"nodeRunActiveSQL":                    "the shared predicate correlates a node with its own run; its enclosing statement supplies the tenant scope",
-	"paidGrantForPaymentTx":               "a verified provider payment identity resolves its paid grant before its tenant is known",
-	"accountHasOtherTeamTx":               "an account must retain another membership when deleting its current tenant; account identity spans tenants",
+	"(*Operator).ListRuns":                  "the operator lists runs across all tenants",
+	"(*Operator).GetLatestRun":              "the operator locates the latest pipeline run across tenants",
+	"(*Operator).ComputeUsage":              "deployment capacity sums metered awards from every tenant",
+	"(*Operator).ListWaitingNodes":          "deployment attention samples every tenant queue before updating individual tenant nodes",
+	"(*Operator).MarkBlobTombstones":        "leased garbage collection compares every tenant blob with the complete live reference graph",
+	"(*Operator).SealAbandonedLogStreams":   "leased log maintenance discovers abandoned streams across every tenant",
+	"(*Operator).dueRunEffects":             "the completion worker discovers due effects across tenants before dispatching each tenant run",
+	"(*Operator).expiredUnits":              "the leased reaper discovers expired execution units across tenants before expiring each exact unit",
+	"(*Operator).queuedClaimQuery":          "launcher claims scan deployment queues; ordinary claimant queries append their bound tenant predicate",
+	"(*Operator).launcherPrefixesTx":        "launcher reconciliation discovers every tenant award before validating each exact award",
+	"(*Operator).lockMaintenanceCapacityTx": "the leased concurrency pass locks capacity entries across tenants before maintaining each tenant key",
+	"(*Operator).retainedStorageTeams":      "storage billing discovers every live tenant holding retained records or blobs",
+	"(*Operator).deleteRetentionRunsTx":     "leased retention discovers finished runs across tenants before deleting exact tenant run keys",
+	"(*Operator).deleteRetentionEffectsTx":  "leased retention discovers settled effects across tenants before deleting exact tenant effect keys",
+	"(*Operator).finishBootstrapSetupTx":    "bootstrap completion resolves the deployment administrator capability whose tenant is null",
+	"(*Operator).SearchTeams":               "the operator console searches every tenant and its owners by deployment search text",
+	"(*Operator).nodeRunActiveSQL":          "the shared predicate correlates a node with its own run; its enclosing statement supplies the tenant scope",
+	"(*Operator).paidGrantForPaymentTx":     "a verified provider payment identity resolves its paid grant before its tenant is known",
+	"(*Operator).accountHasOtherTeamTx":     "an account must retain another membership when deleting its current tenant; account identity spans tenants",
 
 	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
 	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
 	"(*Operator).DeleteExpiredBlobStaging":  "leased maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
-	"(*Store).EnsureBootstrapCapability":    "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
-	"revokeSetupAuthorityTx":                "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
-	"launcherAwardPrefixTx":                 "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
+	"(*Operator).EnsureBootstrapCapability": "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
+	"(*Operator).revokeSetupAuthorityTx":    "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
+	"(*Operator).launcherAwardPrefixTx":     "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
-	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
-	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
-	"revokeSelectedCapabilitiesTx":               "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
+	"(*Operator).RecordBusinessEvent":          "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
+	"(*Operator).githubInstallationTeamTx":     "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
+	"(*Operator).revokeSelectedCapabilitiesTx": "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
 
-	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
-	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
-	"bindCompletedPageTx":           "a verified page completion resolves its team from the session correlation committed before payment",
-	"(*Store).RecordsPaymentParent": "a verified provider event names provider identities before its tenant is known",
-	"(*Store).OpenStandingRequests": "the operator console queue lists every team's open standing requests",
-	"loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
-	"(*Operator).SetRunnerMetered":  "a console-authorized deployment mutation resolves one enrolled root by its globally unique public prefix, validates its complete ancestry, and updates only that root's tenant row",
-	"persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
-	"deleteRetentionCapabilitiesTx": "the elected deployment pass removes ended credentials across teams while preserving cross-team ancestry",
+	"(*Operator).hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
+	"(*Operator).LookupCapability":              "a presentation digest identifies the credential before its tenant is known",
+	"(*Operator).bindCompletedPageTx":           "a verified page completion resolves its team from the session correlation committed before payment",
+	"(*Operator).RecordsPaymentParent":          "a verified provider event names provider identities before its tenant is known",
+	"(*Operator).OpenStandingRequests":          "the operator console queue lists every team's open standing requests",
+	"(*Operator).loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
+	"(*Operator).SetRunnerMetered":              "a console-authorized deployment mutation resolves one enrolled root by its globally unique public prefix, validates its complete ancestry, and updates only that root's tenant row",
+	"(*Operator).persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
+	"(*Operator).deleteRetentionCapabilitiesTx": "the elected deployment pass removes ended credentials across teams while preserving cross-team ancestry",
 
-	"refundableBillingSecondsTx":        "the deployment credit sampler totals unsettled awards across teams from their immutable billing records",
-	"(*Operator).CollectBlobTombstones": "the elected blob collector visits expired tombstones across teams and deletes each exact tenant digest",
-	"maintainRetentionTx":               "the elected maintenance pass counts retained pins and records across all teams",
-	"deleteRetentionRecordsTx":          "the elected maintenance pass selects expired records across teams and deletes exact tenant record keys",
+	"(*Operator).refundableBillingSecondsTx": "the deployment credit sampler totals unsettled awards across teams from their immutable billing records",
+	"(*Operator).CollectBlobTombstones":      "the elected blob collector visits expired tombstones across teams and deletes each exact tenant digest",
+	"(*Operator).maintainRetentionTx":        "the elected maintenance pass counts retained pins and records across all teams",
+	"(*Operator).deleteRetentionRecordsTx":   "the elected maintenance pass selects expired records across teams and deletes exact tenant record keys",
 
-	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
-	"readAuthorityTx":                     "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
-	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
-	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
-	"advanceAuthGenerationsTx":            "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
-	"lockAuthorityTx":                     "globally unique capability prefixes and session hashes are locked before authority resolution reads their teams",
-	"lockUnitsTx":                         "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
-	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
-	"loadMatchingRunTx":                   "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
-	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
-	"deleteRetentionMetricsTx":            "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
-	"deleteRetentionIdentityTx":           "the elected deployment maintenance pass expires every team's spent identity rows while preserving session ancestry",
-	"closeRefundedQueueTx":                "a provider refund names a payment identity, and a queued refund it covers is settled for whichever team queued it",
-	"reconcileSetupStateTx":               "a verified setup event resolves its payer from the setup correlation committed before payment",
-	"applyPaymentStateTx":                 "the payment owner resolves its payer before acquiring the ledger lock and reading mutable checkout state",
-	"reducePaymentStateTx":                "a verified refill payment names its provider payment, which resolves the one refill that recorded it",
-	"reconcilePaymentStateTx":             "the payment owner resolves the payer by mode and provider payment identity before settling its normalized state",
-	"paymentTeamTx":                       "a provider payment identity is resolved to the checkout or refill that took it before its team is known",
-	"(*Operator).CreditLedgerTotals":      "the deployment credit sampler totals every team's ledger in one snapshot",
-	"(*Operator).DueRefills":              "the elected refill worker lists teams with refill on and open refills, then opens or resumes each under that team's lock",
-	"applyCheckoutPaymentTx":              "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
+	"(*Operator).ReconcileControllerRuns":   "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
+	"(*Operator).readAuthorityTx":           "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
+	"(*Operator).authenticationAuthorityTx": "a globally unique presentation digest identifies the session before its tenant and current membership are known",
+	"(*Operator).revokeAuthorityTx":         "the authorized revocation path names its exact capability or session by global identity",
+	"(*Operator).advanceAuthGenerationsTx":  "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
+	"(*Operator).lockAuthorityTx":           "globally unique capability prefixes and session hashes are locked before authority resolution reads their teams",
+	"(*Operator).lockUnitsTx":               "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
+	"(*Operator).claimUnitTx":               "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
+	"(*Operator).loadMatchingRunTx":         "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
+	"(*Operator).loadAwardRowTx":            "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
+	"(*Operator).deleteRetentionMetricsTx":  "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
+	"(*Operator).deleteRetentionIdentityTx": "the elected deployment maintenance pass expires every team's spent identity rows while preserving session ancestry",
+	"(*Operator).closeRefundedQueueTx":      "a provider refund names a payment identity, and a queued refund it covers is settled for whichever team queued it",
+	"(*Operator).reconcileSetupStateTx":     "a verified setup event resolves its payer from the setup correlation committed before payment",
+	"(*Operator).applyPaymentStateTx":       "the payment owner resolves its payer before acquiring the ledger lock and reading mutable checkout state",
+	"(*Operator).reducePaymentStateTx":      "a verified refill payment names its provider payment, which resolves the one refill that recorded it",
+	"(*Operator).reconcilePaymentStateTx":   "the payment owner resolves the payer by mode and provider payment identity before settling its normalized state",
+	"(*Operator).paymentTeamTx":             "a provider payment identity is resolved to the checkout or refill that took it before its team is known",
+	"(*Operator).CreditLedgerTotals":        "the deployment credit sampler totals every team's ledger in one snapshot",
+	"(*Operator).DueRefills":                "the elected refill worker lists teams with refill on and open refills, then opens or resumes each under that team's lock",
+	"(*Operator).applyCheckoutPaymentTx":    "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
-	"(*Operator).DueCardRefunds": "the payment worker lists every team's queued refunds in one pass",
-	"globalRunsPerHourRefusal":   "the global hourly cap counts runs from every team",
-	"runOwnerTx":                 "asks which team owns an id, so an answer scoped to the asker is no answer",
-	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
-		"a scope with no team and no all-teams flag is refused there",
-	"(*Store).countRuns": "shares listRuns' predicate builder and its refusal",
-	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
-		"a scope with no team and no all-teams flag is refused there",
-	"(*Store).SampleSealedSecrets":     "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
-	"unlinkAccountIdentityTx":          "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
-	"(*Store).lookupSession":           "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
-	"(*Store).DeleteSession":           "ends the one session whose globally unique digest the caller presented, before its team is known",
-	"(*Store).mintCSRFKey":             "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
-	"resolveSignInTx":                  "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
-	"approveOneTx":                     "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
-	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
-	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
-	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",
-	"(*Store).AcceptAccountInvitation": "finds the invitation by its global id to lock its team before rechecking the account and committing the scoped acceptance",
-	"acceptAccountInvitationTx":        "finds an invitation by its id before the team is known; the accepting write then names that team",
-	"(*Store).deleteAccountTx": "removes one account from every team it belongs to and relabels the rows it " +
+	"(*Operator).DueCardRefunds":            "the payment worker lists every team's queued refunds in one pass",
+	"(*Operator).globalRunsPerHourRefusal":  "the global hourly cap counts runs from every team",
+	"(*Operator).runOwnerTx":                "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Operator).SampleSealedSecrets":       "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
+	"(*Operator).unlinkAccountIdentityTx":   "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
+	"(*Operator).lookupSession":             "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
+	"(*Operator).DeleteSession":             "ends the one session whose globally unique digest the caller presented, before its team is known",
+	"(*Operator).mintCSRFKey":               "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
+	"(*Operator).resolveSignInTx":           "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
+	"(*Operator).approveOneTx":              "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
+	"(*Operator).settleActiveTeamTx":        "picks the account's first team from all of its memberships when its sticky team is gone",
+	"(*Operator).AccountMemberships":        "lists the teams one account belongs to, which is a question across teams by definition",
+	"(*Operator).OpenInvitationsForEmail":   "lists the invitations addressed to one verified email from every team that sent one",
+	"(*Operator).AcceptAccountInvitation":   "finds the invitation by its global id to lock its team before rechecking the account and committing the scoped acceptance",
+	"(*Operator).acceptAccountInvitationTx": "finds an invitation by its id before the team is known; the accepting write then names that team",
+	"(*Operator).deleteAccountTx": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
-	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
+	"(*Operator).lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
 		"account deletion counts their owners",
-	"relabelPrincipalTx": "replaces a deleted account's name in every team's rows, because the account " +
+	"(*Operator).relabelPrincipalTx": "replaces a deleted account's name in every team's rows, because the account " +
 		"belonged to the deployment and acted in each of its teams",
-	"grantCreatorTeamsTx": "lists every team holding grants a deleted account created, to lock each team's ledger " +
+	"(*Operator).grantCreatorTeamsTx": "lists every team holding grants a deleted account created, to lock each team's ledger " +
 		"before relabelling them",
-	"(*Store).ClaimInvitationEmail": "counts the invitation emails one address received from every team, " +
+	"(*Operator).ClaimInvitationEmail": "counts the invitation emails one address received from every team, " +
 		"because the daily cap protects the inbox, not the team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
 		"so the installation's binding is how either finds the team it belongs to",
-	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
-	"freeSlotOpenTx":     "a reservation asks whether any slot is left, so it counts every team's",
-	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
+	"(*Operator).FreeSlots":      "the free tier is bounded by how many teams hold a slot, so it counts every team's",
+	"(*Operator).freeSlotOpenTx": "a reservation asks whether any slot is left, so it counts every team's",
+	"(*Operator).disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
 
 	"(*Operator).PruneEgressUsage": "expires every team's egress reports under the maintenance lease",
-	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
+	"(*Operator).ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
 
-	"(*Store).runTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
+	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Operator).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
@@ -139,34 +135,8 @@ var reviewedUnscopedSQL = map[string]string{
 // or a write of that table.
 var tenantOwnedTableRe = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)`)
 
-// A column comparison or exclusion does not bind a statement to a tenant.
-var teamPredicateRe = regexp.MustCompile(`(?is)(?:\b(?:[a-z_][a-z0-9_]*\.)?team|\bCOALESCE\(\s*(?:[a-z_][a-z0-9_]*\.)?team\s*,\s*''\s*\))\s*(?:=\s*(?:\?|\$[1-9][0-9]*)|IN\s*\(\s*(?:\?|\$[1-9][0-9]*))`)
-
-// safety: reads an INSERT's column list, because a write with no WHERE
-// carries its key there and nowhere else.
-var insertColumnsRe = regexp.MustCompile(`(?is)INSERT\s+INTO\s+[a-z_][a-z0-9_]*\s*\(([^)]*)\)`)
-
-// safety: splits a conflict clause so a team-aware target and a
-// team-aware guard are told apart; either one closes the hole.
-var conflictTeamPredicateRe = regexp.MustCompile(`(?is)\b[a-z_][a-z0-9_]*\.team\s*=\s*excluded\.team\b`)
-
-var onConflictRe = regexp.MustCompile(`(?is)ON\s+CONFLICT\s*(?:\(([^)]*)\))?`)
-
-// Every statement in this package that touches a tenant-owned table
-// carries the tenant key, or its function is exempt. This is the guard
-// that replaces the compiler for the length of the port: the ported
-// methods still exist byte-identically on *Store and Go satisfies
-// interfaces structurally, so nothing but this test refuses an unscoped
-// statement.
-//
-// reviewedUnscopedSQL holds the statements that cross teams on purpose --
-// a reaper, a sweep, the dispatch and claim path -- each with its reason.
-//
-// It is keyed by receiver and function name, so a method moving from
-// *Store to *Tenant changes its key and stops being exempt. A function
-// that already holds a team cannot be exempt at all; the next test
-// enforces that. New unscoped work belongs in reviewedUnscopedSQL with
-// its reason.
+// Unbound SQL belongs to a reviewed Operator operation. Scoped methods and
+// package functions cannot acquire an exemption by adding an allowlist entry.
 func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	seen := map[string]bool{}
 	for _, stmt := range tenantSQLStatements(t) {
@@ -201,6 +171,9 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 			stmt.pos, stmt.key, strings.Join(tables, ", "), stmt.key, collapse(stmt.text))
 	}
 	for key, why := range reviewedUnscopedSQL {
+		if !strings.HasPrefix(key, "(*Operator).") {
+			t.Errorf("unscoped SQL belongs to *Operator, cannot exempt %q", key)
+		}
 		if strings.TrimSpace(why) == "" {
 			t.Errorf("reviewedUnscopedSQL exempts %q with no reason", key)
 		}
@@ -267,6 +240,23 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"bound team IN", `SELECT id FROM runs WHERE team IN (?)`, true},
 		{"unscoped select", `SELECT id FROM runs WHERE id = ?`, false},
 		{"qualified predicate", `UPDATE nodes SET x = 1 WHERE nodes.team = ? AND run_id = ?`, true},
+		{"comment is not a filter", `SELECT id FROM nodes -- WHERE team = ?`, false},
+		{"literal is not a filter", `SELECT 'WHERE team = ?' FROM nodes`, false},
+		{"assignment is not a filter", `UPDATE nodes SET team = ? WHERE id = ?`, false},
+		{"sort is not a filter", `SELECT id FROM nodes ORDER BY team = ?`, false},
+		{"empty tenant wildcard", `SELECT id FROM credit_grants WHERE (? = '' OR team = ?) AND reference = ?`, false},
+		{"unbound alternative", `SELECT id FROM nodes WHERE team = ? OR status = ?`, false},
+		{"bound alternatives", `SELECT id FROM nodes WHERE team = ? OR team = ?`, true},
+		{"comment between tokens", `SELECT id FROM nodes WHERE team /* scope */ = ?`, true},
+		{"insert every row bound", `INSERT INTO secrets(team,name) VALUES (?, ?), (?, ?)`, true},
+		{"insert one row unbound", `INSERT INTO secrets(team,name) VALUES (?, ?), ('foreign', ?)`, false},
+		{"insert select bound source", `INSERT INTO secrets(team,name) SELECT team,name FROM secrets WHERE team=?`, true},
+		{"insert select unbound source", `INSERT INTO secrets(team,name) SELECT team,name FROM secrets`, false},
+		{"uncorrelated EXISTS does not bind outer tenant", `SELECT id FROM nodes WHERE EXISTS (SELECT 1 FROM runs WHERE team=?)`, false},
+		{"non-team IN does not bind outer tenant", `SELECT id FROM nodes WHERE status IN (SELECT status FROM runs WHERE team=?)`, false},
+		{"projection is not a filter", `SELECT team = ? FROM nodes`, false},
+		{"insert literal tenant", `INSERT INTO secrets(team,name) VALUES ('foreign', ?)`, false},
+		{"conflict cannot bind insert tenant", `INSERT INTO secrets(team,name) VALUES ('foreign', ?) ON CONFLICT(team,name) DO UPDATE SET v=1`, false},
 		{"insert with key", `INSERT INTO secrets (team, name, pipeline) VALUES (?,?,?)`, true},
 		{"insert without key", `INSERT INTO secrets (name, pipeline) VALUES (?,?)`, false},
 		{"conflict target without team", `INSERT INTO secrets (team, name) VALUES (?,?) ON CONFLICT (name) DO UPDATE SET v = 1`, false},
@@ -283,8 +273,10 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"unscoped nested subquery", `SELECT id FROM nodes WHERE team = ? AND run_id IN (SELECT id FROM runs WHERE team = ? AND retry_of IN (SELECT id FROM runs WHERE id = ?))`, false},
 		{"subquery deriving the team", `INSERT INTO nodes (team, run_id) VALUES ((SELECT team FROM runs WHERE id = ?), ?)`, false},
 		{"predicate only in a select-list subquery", `SELECT (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id) FROM nodes WHERE run_id = ?`, false},
-		{"outer filtered by a scoped IN", `SELECT run_id FROM approvals WHERE resolved_at IS NULL AND run_id IN (SELECT id FROM runs WHERE team = ?)`, true},
-		{"outer filtered by a scoped EXISTS", `DELETE FROM nodes WHERE EXISTS (SELECT 1 FROM runs r WHERE r.team = ? AND r.id = nodes.run_id)`, true},
+		{"outer bound with scoped IN", `SELECT run_id FROM approvals WHERE team=? AND run_id IN (SELECT id FROM runs WHERE team=?)`, true},
+		{"outer bound with scoped EXISTS", `DELETE FROM nodes WHERE team=? AND EXISTS (SELECT 1 FROM runs r WHERE r.team=nodes.team AND r.id=nodes.run_id)`, true},
+		{"outer scoped IN requires its own bound team", `SELECT run_id FROM approvals WHERE resolved_at IS NULL AND run_id IN (SELECT id FROM runs WHERE team = ?)`, false},
+		{"outer scoped EXISTS requires its own bound team", `DELETE FROM nodes WHERE EXISTS (SELECT 1 FROM runs r WHERE r.team = ? AND r.id = nodes.run_id)`, false},
 		{"scoped subquery in a SET clause", `UPDATE nodes SET x = (SELECT x FROM runs WHERE team = ? AND id = ?) WHERE run_id = ?`, false},
 		{"outer reading no table", `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?), (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`, true},
 		{"parenthesis in a literal", `SELECT id FROM runs WHERE team = ? AND note = '(' AND id IN (SELECT run_id FROM nodes WHERE team = ?)`, true},
@@ -324,27 +316,7 @@ func tenantTablesTouchedBy(sql string) []string {
 // proof that every table in the statement is scoped. A subquery is judged
 // on its own by unscopedSubqueries.
 func statementCarriesTeam(sql string) bool {
-	if cols := insertColumnsRe.FindStringSubmatch(sql); cols != nil {
-		if !slices.ContainsFunc(strings.Split(cols[1], ","), func(c string) bool {
-			return strings.EqualFold(strings.TrimSpace(c), "team")
-		}) {
-			return false
-		}
-	}
-	if loc := onConflictRe.FindStringSubmatchIndex(sql); loc != nil {
-		target := ""
-		if loc[2] >= 0 {
-			target = sql[loc[2]:loc[3]]
-		}
-		targetHasTeam := slices.ContainsFunc(strings.Split(target, ","), func(c string) bool {
-			return strings.EqualFold(strings.TrimSpace(c), "team")
-		})
-		return targetHasTeam || conflictTeamPredicateRe.MatchString(sql[loc[1]:])
-	}
-	if insertColumnsRe.MatchString(sql) {
-		return true
-	}
-	return teamPredicateRe.MatchString(sql)
+	return scopeBound(scopeTokens(sql), nil)
 }
 
 // safety: an outer predicate says nothing about a subquery reading another tenant table by a bare id, and
@@ -354,22 +326,14 @@ func unscopedSubqueries(sql string) []string {
 	return unscopedSQLQueries(sql, nil, false)
 }
 
-var (
-	tableAliasRe     = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|UPDATE|INTO)\s+([a-z_][a-z0-9_]*)(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?`)
-	correlatedTeamRe = regexp.MustCompile(`(?is)\b((?:[a-z_][a-z0-9_]*\.)?team)\s*=\s*((?:[a-z_][a-z0-9_]*\.)?team)\b`)
-)
+var tableAliasRe = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|UPDATE|INTO)\s+([a-z_][a-z0-9_]*)(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?`)
 
 // Correlation inherits scope only from an enclosing query with a bound team.
 func unscopedSQLQueries(sql string, parents []string, check bool) []string {
 	parts := splitSubqueries(sql)
 	local := queryTeamReferences(parts.outer)
 	parents = slices.DeleteFunc(slices.Clone(parents), func(ref string) bool { return slices.Contains(local, ref) })
-	bound := statementCarriesTeam(parts.outer)
-	for _, m := range correlatedTeamRe.FindAllStringSubmatch(parts.outer, -1) {
-		if slices.Contains(parents, strings.ToLower(m[1])) || slices.Contains(parents, strings.ToLower(m[2])) {
-			bound = true
-		}
-	}
+	bound := scopeBound(scopeTokens(parts.outer), parents)
 	var out []string
 	if check && len(tenantTablesTouchedBy(parts.outer)) > 0 && !bound {
 		out = append(out, parts.outer)
@@ -396,16 +360,14 @@ func queryTeamReferences(sql string) []string {
 	return refs
 }
 
-// safety: a scoped subquery behind IN or EXISTS filters the outer rows to the team, so it scopes the outer
-// statement; one in a select list or a SET clause does not, and is cut out before the outer is judged.
+// Every outer query must bind its own tenant. A subquery cannot supply that
+// predicate, regardless of its projection, correlation or position.
 func outerCarriesTeam(sql string) bool {
 	outer := splitSubqueries(sql).outer
 	return len(tenantTablesTouchedBy(outer)) == 0 || statementCarriesTeam(outer)
 }
 
 var subqueryStartRe = regexp.MustCompile(`(?is)^\s*(?:SELECT|WITH)\b`)
-
-var filterBeforeRe = regexp.MustCompile(`(?is)\b(?:IN|EXISTS)\s*$`)
 
 type splitSQL struct {
 	outer string
@@ -446,9 +408,6 @@ func splitSubqueries(sql string) splitSQL {
 		fill := byte(' ')
 		for j := sp.from; j < sp.to; j++ {
 			outer[j] = fill
-		}
-		if filterBeforeRe.MatchString(sql[:sp.from-1]) && teamPredicateRe.MatchString(text) {
-			copy(outer[sp.from:], " team = ? ")
 		}
 	}
 	out.outer = string(outer)

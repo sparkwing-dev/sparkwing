@@ -51,13 +51,13 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 		t.Fatal(err)
 	}
 	server := controller.NewDeployment(state, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
-	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "billing-test", time.Hour)
+	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "billing-test", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	member, err := state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "billing-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}})
+	member, err := state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "billing-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestBillingCLIRequestsHighStandingThroughControllerAndStore(t *testing.T) {
 	if !errors.As(err, &refusal) || refusal.Code != apierr.Conflict || out.Len() != 0 {
 		t.Fatalf("second request: %q %v", out.String(), err)
 	}
-	open, err := state.OpenStandingRequests(t.Context(), 10)
+	open, err := state.AsOperator().OpenStandingRequests(t.Context(), 10)
 	if err != nil || len(open) != 1 || open[0].ID != made.ID || open[0].RequestedBy != "member" {
 		t.Fatalf("operator queue: %+v %v", open, err)
 	}
@@ -134,7 +134,7 @@ func TestBillingCLIRefusesMembersAndInvalidTiers(t *testing.T) {
 			t.Fatalf("parsed %v", args)
 		}
 	}
-	if open, err := state.OpenStandingRequests(t.Context(), 10); err != nil || len(open) != 0 {
+	if open, err := state.AsOperator().OpenStandingRequests(t.Context(), 10); err != nil || len(open) != 0 {
 		t.Fatalf("refused requests reached the queue: %+v %v", open, err)
 	}
 	if err := runBillingArgs(t.Context(), []string{"standing", "--profile", "work", "-o", "plain"}, &out, connect); err != nil || strings.TrimSpace(out.String()) != "New" {
@@ -210,7 +210,7 @@ func TestBillingCLIHighTeamRequestsLargerPayments(t *testing.T) {
 	if err := runBillingArgs(t.Context(), []string{"request-tier", "--tier", "high", "--message", "We need $2,000 payments.", "--profile", "work", "-o", "json"}, &out, connect); err != nil {
 		t.Fatal(err)
 	}
-	open, err := state.OpenStandingRequests(t.Context(), 10)
+	open, err := state.AsOperator().OpenStandingRequests(t.Context(), 10)
 	if err != nil || len(open) != 1 || open[0].Message != "We need $2,000 payments." {
 		t.Fatalf("High team's contact queue=%+v: %v", open, err)
 	}

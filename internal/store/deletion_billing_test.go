@@ -22,7 +22,7 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	for _, slug := range []store.Team{"acme", "held"} {
-		if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: string(slug)}); err != nil {
+		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: string(slug)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -68,7 +68,7 @@ func TestACheckoutCannotOpenOnceTheTeamIsBeingDeleted(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: "Acme"}); err != nil {
+	if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: "Acme"}); err != nil {
 		t.Fatal(err)
 	}
 	stale := tenant(t, st, "acme")

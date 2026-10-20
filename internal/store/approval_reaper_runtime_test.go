@@ -48,7 +48,8 @@ func approvalReaperFixture(t *testing.T, policy string) (*Tenant, controllerwire
 	approver.Grants = []capability.Grant{capability.Grant("approvals.write")}
 	authorityPersist(t, tenant.s, approver)
 	ref := controllerwire.NodeRef{RunID: request.RunID, NodeID: "gate"}
-	resolve := NodeTransition{Ref: ref, To: NodeFailed, Cause: CauseApprovalResolve,
+	resolve := NodeTransition{
+		Ref: ref, To: NodeFailed, Cause: CauseApprovalResolve,
 		Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: approver.Prefix}},
 		Extra: TransitionExtra{Approval: &ApprovalResolution{Decision: "denied", Comment: "declined"}},
 	}
@@ -60,12 +61,12 @@ func TestApprovalReaperUsesDeadlineAndPolicyOnce(t *testing.T) {
 		t.Run(policy, func(t *testing.T) {
 			tenant, ref, now, lease, _ := approvalReaperFixture(t, policy)
 			*now = now.Add(time.Second - time.Nanosecond)
-			if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
+			if got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
 				t.Fatalf("before deadline: %+v, %v", got, err)
 			}
 			*now = now.Add(time.Nanosecond)
 			for pass := range 2 {
-				got, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+				got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
 				if err != nil || len(got) != 1-pass {
 					t.Fatalf("pass %d: %+v, %v", pass, got, err)
 				}
@@ -108,7 +109,7 @@ func TestApprovalReaperLeavesIndefiniteAndResolvedGates(t *testing.T) {
 				t.Fatal(err)
 			}
 			*now = now.Add(time.Minute)
-			if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
+			if got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
 				t.Fatalf("reaped %s gate: %+v, %v", mode, got, err)
 			}
 			after, err := tenant.ReadNode(t.Context(), ref)
@@ -141,7 +142,7 @@ func TestApprovalResolutionAndReaperHaveOneWinner(t *testing.T) {
 		var resolveErr, reapErr error
 		var reaped []ReapedUnit
 		wg.Go(func() { <-start; _, resolveErr = tenant.TransitionNode(t.Context(), resolve) })
-		wg.Go(func() { <-start; reaped, reapErr = tenant.s.ReapUnits(t.Context(), lease, 10) })
+		wg.Go(func() { <-start; reaped, reapErr = tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10) })
 		close(start)
 		wg.Wait()
 		if reapErr != nil {
@@ -183,7 +184,7 @@ func TestApprovalReaperRollsBackResolutionWithLifecycle(t *testing.T) {
 			}
 			rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_timeout BEFORE `+verb+` ON `+table+` BEGIN SELECT RAISE(ABORT,'persistence unavailable'); END`)
 			*now = now.Add(time.Second)
-			if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err == nil || len(got) != 0 {
+			if got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err == nil || len(got) != 0 {
 				t.Fatalf("failed persistence: %+v, %v", got, err)
 			}
 			gate, err := tenant.ReadNode(t.Context(), ref)
@@ -199,7 +200,7 @@ func TestApprovalReaperRollsBackResolutionWithLifecycle(t *testing.T) {
 				t.Fatalf("partial events: %+v, %v", after, err)
 			}
 			rewriteSchemaExec(t, tenant.s.db, `DROP TRIGGER refuse_timeout`)
-			if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 1 {
+			if got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 1 {
 				t.Fatalf("retry: %+v, %v", got, err)
 			}
 		})

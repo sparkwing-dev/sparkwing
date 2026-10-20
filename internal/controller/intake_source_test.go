@@ -72,7 +72,7 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 		})}}
 		s.WithGitHubApp(cfg)
 		transaction := &intakeSourceTransaction{}
-		s.WithEngineController(&EngineController{Store: s.store, ResolveTenant: func(context.Context, store.Team) (RunTransactions, error) { return transaction, nil }})
+		s.WithEngineController(NewEngineController(s.store, EngineController{ResolveTenant: func(context.Context, store.Team) (TenantHandle, error) { return transaction, nil }}))
 		request := runspec.Request{Version: 1, Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Display: input}, Ref: "main"}, Source: runspec.Source{Ref: "main", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}}}
 		if forged {
 			request.Git.Repository.Key = "gh:43"
@@ -179,7 +179,7 @@ func TestIntakeSourcePrivateGitHubUsesStoredTeamCredential(t *testing.T) {
 
 func TestIntakeSourceProofCannotBeChangedProperty(t *testing.T) {
 	s, _, input, raw := sourceUploadFixture(t)
-	p, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	p, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,11 +214,11 @@ func TestIntakeSourceProofCannotBeChangedProperty(t *testing.T) {
 
 func TestSourceUploadNameScopeNeverTrustsCallerDisplayProperty(t *testing.T) {
 	s, _, input, raw := sourceUploadFixture(t)
-	parent, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	parent, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	restricted, err := s.store.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+	restricted, err := s.store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,3 +339,5 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func (f *intakeSourceTransaction) Team() store.Team { return "a" }

@@ -89,25 +89,22 @@ func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, b
 		return controllerwire.RenewalResponse{}, missingEndpointPolicy()
 	}
 	units := s.Units
-	if units == nil && s.Store != nil {
-		units = s.Store
-	}
 	if units == nil {
 		return controllerwire.RenewalResponse{}, missingEndpointPolicy()
 	}
 	if body.LocalSecrets != nil {
-		if s.Store == nil {
+		if s.authority == nil {
 			return controllerwire.RenewalResponse{}, missingEndpointPolicy()
 		}
-		if err := s.Store.ResupplyHereSecrets(ctx, p.Authority, body.LocalSecrets); err != nil {
+		if err := s.authority.ResupplyHereSecrets(ctx, p.Authority, body.LocalSecrets); err != nil {
 			return controllerwire.RenewalResponse{}, err
 		}
 	}
 	if body.Available != nil {
-		if s.Store == nil {
+		if s.authority == nil {
 			return controllerwire.RenewalResponse{}, missingEndpointPolicy()
 		}
-		if err := s.Store.RecordHereAvailability(ctx, p.Authority, *body.Available); err != nil {
+		if err := s.authority.RecordHereAvailability(ctx, p.Authority, *body.Available); err != nil {
 			return controllerwire.RenewalResponse{}, err
 		}
 	}

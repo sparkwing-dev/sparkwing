@@ -47,7 +47,7 @@ func TestQueuePriorityHTTPPreservesTenantAuthorityProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher)
-	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

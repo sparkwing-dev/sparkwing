@@ -122,11 +122,11 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 	secret := [32]byte{17}
 	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
 	spec := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
-	if created, err := st.EnsureBootstrapCapability(ctx, spec); err != nil || !created {
+	if created, err := st.AsOperator().EnsureBootstrapCapability(ctx, spec); err != nil || !created {
 		t.Fatalf("seed admin: %v %v", created, err)
 	}
 	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: seed[:16]}
-	if _, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(store.DefaultTeam), Repositories: []string{"example.com/acme/repo"}, RegistrationID: "runner:default:runner-1", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner-1"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}}); err != nil {
+	if _, err := st.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(store.DefaultTeam), Repositories: []string{"example.com/acme/repo"}, RegistrationID: "runner:default:runner-1", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner-1"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}}); err != nil {
 		t.Fatalf("enroll runner: %v", err)
 	}
 }

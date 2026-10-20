@@ -106,7 +106,7 @@ func (s *Server) handleRotateSealedValues(w http.ResponseWriter, r *http.Request
 		return invalidEngineBody("key rotation accepts only verify=1")
 	}
 	cipher, ok := s.secretsCipher.(store.SealedRotationCipher)
-	if !ok || s.store == nil {
+	if !ok || s.operator == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": apierr.ReasonSecretsKeyRequired}}
 	}
 	result, err := s.operator.RotateSealedValues(r.Context(), a, cipher, verify)

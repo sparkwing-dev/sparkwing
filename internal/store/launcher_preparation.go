@@ -67,7 +67,7 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	if err := launcherReservationAwardTx(ctx, tx, root.Authority, claimant.Subject, fence); err != nil {
 		return time.Time{}, err
 	}
-	row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
+	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: fence.Kind, UnitID: fence.ID})
 	if err != nil {
 		if endedLauncherPreparation(err) {
 			return time.Time{}, nil

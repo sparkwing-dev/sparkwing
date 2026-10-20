@@ -120,11 +120,11 @@ func TestOperatorPageServesOnlyTheOperatorsSession(t *testing.T) {
 	if rec := f.get("/operator", session); rec.Code != http.StatusOK {
 		t.Fatalf("listed account = %d %s", rec.Code, rec.Body)
 	}
-	principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
+	principal, err := f.st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _, err := f.st.CreateCapabilitySession(t.Context(), principal.Capability.Prefix, time.Hour)
+	raw, _, err := f.st.AsOperator().CreateCapabilitySession(t.Context(), principal.Capability.Prefix, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

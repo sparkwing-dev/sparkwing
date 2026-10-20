@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc) (*EngineController, *store.Tenant, http.Handler, string, []byte) {
+func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc) (*engineFixture, *store.Tenant, http.Handler, string, []byte) {
 	t.Helper()
 	e, tenant := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
@@ -56,7 +56,7 @@ func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc) (*EngineControl
 	if _, err := e.Store.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "controller", time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	h := New(e.Store, nil).WithEngineController(e).Handler()
+	h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()
 	return e, tenant, h, raw, body
 }
 

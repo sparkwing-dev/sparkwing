@@ -69,7 +69,10 @@ func TestBlobObjectReadsRunOutsideTransactions(t *testing.T) {
 	calls := map[string]int{}
 	probing := probingManifests{fakeBlobManifests{manifest.Digest: members}, probeWithoutTransaction(t, s, calls)}
 	records.manifests = probing
-	s.SetResultBlobRecords(probing)
+	{
+		records := &blobRecords{manifests: probing}
+		s.resultRecords, s.materializations = records, records
+	}
 	artifacts := blobOutputRequest(manifest)
 	artifacts.Key.Kind, artifacts.Members = blob.KindManifest, members
 	if _, err := records.CommitRecord(t.Context(), artifacts); err != nil {
@@ -149,11 +152,14 @@ func TestBlobMaterializationRecheckAfterVerification(t *testing.T) {
 	s, tenant, request := blobMaterializationFixture(t)
 	request.MaterializeOnly = true
 	fake := tenant.s.materializations.(*blobRecords).manifests.(fakeBlobManifests)
-	s.SetResultBlobRecords(probingManifests{fake, func(kind string, _ blob.Digest) {
-		if kind == "blob" {
-			rewriteSchemaExec(t, s.db, "DELETE FROM blob_records WHERE kind='output'")
-		}
-	}})
+	{
+		records := &blobRecords{manifests: probingManifests{fake, func(kind string, _ blob.Digest) {
+			if kind == "blob" {
+				rewriteSchemaExec(t, s.db, "DELETE FROM blob_records WHERE kind='output'")
+			}
+		}}}
+		s.resultRecords, s.materializations = records, records
+	}
 	got, err := tenant.ReconcileNode(t.Context(), request)
 	if err != nil || got.Kind != Dispatch || got.Node.OutputRecord != nil {
 		t.Fatalf("stale verification materialized: %+v: %v", got, err)

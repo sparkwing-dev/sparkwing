@@ -48,7 +48,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := New(e.Store, nil).WithEngineController(e).WithOIDCIssuer(issuer).Handler()
+	handler := New(e.Store, nil).WithEngineController(e.EngineController).WithOIDCIssuer(issuer).Handler()
 	response := engineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
@@ -165,7 +165,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 	if claims["trigger"] != "delete" || claims["ref"] != "refs/heads/topic" || !strings.Contains(claims["sub"].(string), "repository_id:42:pipeline:") {
 		t.Fatalf("replay expiry changed sealed identity: %s", payload)
 	}
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(award.Claim.Capability)))
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(award.Claim.Capability)))
 	if err != nil {
 		t.Fatal(err)
 	}

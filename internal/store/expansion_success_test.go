@@ -211,7 +211,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=? WHERE id='run'`, raw)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','token','ciphertext','account',1,1,1,'p',0,'prod'),('b','token','other-ciphertext','other',1,1,1,'p',0,'prod')`)
 			if mode != "no_opener" {
-				tenant.s.SetPlanSecretOpener(fakePlanSecretOpener(func(_ context.Context, team Team, secret Secret) (string, error) {
+				tenant.s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, team Team, secret Secret) (string, error) {
 					if team != "a" || secret.Value != "ciphertext" || secret.Pipeline != "p" {
 						t.Fatalf("secret scope = %q, %+v", team, secret)
 					}
@@ -219,7 +219,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 						return "", errors.New("private diagnostic")
 					}
 					return "42", nil
-				}))
+				})
 			}
 			contracts := tenant.s.plans.(fakePlanContracts)
 			validate := contracts.validate

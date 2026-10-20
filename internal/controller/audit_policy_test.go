@@ -120,7 +120,9 @@ func TestAuditPolicyRecordsSensitiveReadsAndDeniedSubjects(t *testing.T) {
 
 func TestAuditPolicyRecordsFinalJobPathIDs(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
-	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
+	f.s.WithEngineController(&EngineController{ResolveTenant: func(context.Context, store.Team) (TenantHandle, error) {
+		return selectorTransactions{RunTransactions: f.writer.Tenant, team: store.DefaultTeam}, nil
+	}})
 	var logs bytes.Buffer
 	f.s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 	r := httptest.NewRequest("POST", "/api/v1/runs/run-7/jobs/build/cancel", strings.NewReader(`{"reason":"cancel"}`))

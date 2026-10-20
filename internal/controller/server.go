@@ -33,11 +33,11 @@ import (
 
 // Server serves controller HTTP requests.
 type Server struct {
-	deployment    deployment.Config
-	store         *store.Store
-	operator      *store.Operator
-	resolveTenant func(context.Context, store.Team) (TenantHandle, error)
-	logger        *slog.Logger
+	deployment           deployment.Config
+	operator             *store.Operator
+	operatorCapabilities CapabilityManager
+	resolveTenant        func(context.Context, store.Team) (TenantHandle, error)
+	logger               *slog.Logger
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
@@ -223,16 +223,6 @@ func (s *Server) WithMetricsAddr(addr string) *Server {
 // WithSecretsCipher configures row-bound credential encryption and session-key protection.
 func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	s.secretsCipher = c
-	if s.store != nil {
-		var opener store.PlanSecretOpener
-		if c != nil {
-			opener = planSecretCipher{cipher: c}
-		}
-		s.store.SetPlanSecretOpener(opener)
-		bound, _ := c.(store.SessionKeyCipher)
-		s.store.SetSessionKeyCipher(bound)
-		s.store.SetRunEnvironmentCipher(bound)
-	}
 	return s
 }
 
@@ -568,7 +558,7 @@ func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
 			"node_id", w.NodeID, "policy", w.Policy,
 			"arrived_at", w.ArrivedAt.Format(time.RFC3339))
 	}
-	if recoveries, err := s.store.ReapUnits(ctx, lease, 500); err != nil {
+	if recoveries, err := s.operator.ReapUnits(ctx, lease, 500); err != nil {
 		s.logger.Error("work recovery sweep failed", "err", err)
 	} else {
 		for _, recovery := range recoveries {

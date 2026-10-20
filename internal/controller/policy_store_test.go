@@ -105,11 +105,11 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := NewDeployment(s, deploymenttest.Team(t), slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher)
-	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	raw, csrf, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, otherCSRF, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	other, otherCSRF, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewDeployment(st, deploymenttest.Team(t), slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
-	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
+	raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

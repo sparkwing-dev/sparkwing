@@ -413,17 +413,17 @@ const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 // BindGitHubAppDeliveryEvent ties digest to the first event it arrived as and
 // reports whether event is that one. The binding is kept apart from the
 // processed record, so binding a delivery does not make it seen.
-func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error) {
-	if err := s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
+func (o *Operator) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error) {
+	if err := o.s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
 		return false, err
 	}
 	key := "event:" + digest
-	if _, err := s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
+	if _, err := o.s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
 		ON CONFLICT (digest) DO NOTHING`, key, delivery, now.Unix(), event); err != nil {
 		return false, err
 	}
 	var bound string
-	if err := s.queryRow(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
+	if err := o.s.queryRow(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
 		return false, err
 	}
 	return bound == event, nil
@@ -431,20 +431,20 @@ func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, d
 
 // GitHubAppDeliverySeen reports whether a delivery with digest was processed
 // before, for any team.
-func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error) {
+func (o *Operator) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error) {
 	var n int
-	err := s.queryRow(ctx, `SELECT COUNT(*) FROM github_app_deliveries WHERE digest = ?`, digest).Scan(&n)
+	err := o.s.queryRow(ctx, `SELECT COUNT(*) FROM github_app_deliveries WHERE digest = ?`, digest).Scan(&n)
 	return n > 0, err
 }
 
 // RecordGitHubAppDelivery remembers that a delivery with digest was
 // processed. It and [Store.BindGitHubAppDeliveryEvent] forget digests and
 // event bindings older than [GitHubAppDeliveryRetention].
-func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error {
-	if err := s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
+func (o *Operator) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error {
+	if err := o.s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
 		return err
 	}
-	_, err := s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
+	_, err := o.s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
 		ON CONFLICT (digest) DO NOTHING`, digest, delivery, now.Unix())
 	return err
 }
@@ -592,4 +592,13 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 		return err
 	}
 	return nil
+}
+
+func (o *Operator) githubInstallationTeamTx(ctx context.Context, tx *storeTx, installation int64) (Team, error) {
+	var team Team
+	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`+tx.forUpdate(), installation).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return team, err
 }

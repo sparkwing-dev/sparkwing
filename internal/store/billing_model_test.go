@@ -33,7 +33,7 @@ func TestBillingModelNewCloudAdmissionsShareEightVCPU(t *testing.T) {
 			billingModelJob(t, s, id)
 		}
 		demand.Target.NodeID = id
-		claim, err := s.ClaimUnit(t.Context(), demand)
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if id != "third" {
 			if err != nil {
 				t.Fatal(err)
@@ -52,7 +52,7 @@ func TestBillingModelNewCloudAdmissionsShareEightVCPU(t *testing.T) {
 func TestBillingModelNewCloudJobHasHardFourHourDeadline(t *testing.T) {
 	s, demand, now := billingModelFixture(t)
 	claim, _ := meteredUnitClaim(t, s, demand)
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,12 +62,12 @@ func TestBillingModelNewCloudJobHasHardFourHourDeadline(t *testing.T) {
 	}
 	*now = want.Add(-time.Second)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE team='a' AND run_id='run' AND node_id='job'`, want.Add(time.Minute).UnixNano())
-	beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
+	beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
 	if err != nil || !beat.ExpiresAt.Equal(want) {
 		t.Fatalf("renewal escaped hard deadline: %+v: %v", beat, err)
 	}
 	*now = want
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err == nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err == nil {
 		t.Fatal("job renewed past hard deadline")
 	}
 }
@@ -93,7 +93,7 @@ func TestBillingModelPrepayImmediatelyLiftsCloudStanding(t *testing.T) {
 			billingModelJob(t, s, id)
 		}
 		demand.Target.NodeID = id
-		if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+		if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 			t.Fatalf("prepay did not lift standing: %v", err)
 		}
 	}
@@ -166,7 +166,7 @@ func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
 			execution := fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%d}}}}`, cores)
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=? WHERE team='a' AND run_id='run' AND node_id=?`, []byte(execution), id)
 			demand.Target.NodeID = id
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if allocated+cores <= 8 {
 				if err != nil {
 					t.Logf("fitting job refused: %v", err)
@@ -214,7 +214,11 @@ func TestBillingModelIndependentClaimantsCannotOversubscribe(t *testing.T) {
 		target := *demand.Target
 		target.NodeID = id
 		request.Target = &target
-		go func(client *Store) { <-start; _, err := client.ClaimUnit(t.Context(), request); results <- err }(clients[i])
+		go func(client *Store) {
+			<-start
+			_, err := client.AsOperator().ClaimUnit(t.Context(), request)
+			results <- err
+		}(clients[i])
 	}
 	close(start)
 	admitted := 0
@@ -240,7 +244,7 @@ func TestBillingModelCustomerRunnerHasNoStandingCapacityOrDeadline(t *testing.T)
 		}
 		demand.Target.NodeID = id
 		claim, _ := meteredUnitClaim(t, s, demand)
-		principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+		principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 		if err != nil || principal.Capability.Binding.Deadline == nil || !principal.Capability.Binding.Deadline.Equal(deadline) {
 			t.Fatalf("customer runner inherited standing deadline: %+v: %v", principal.Capability.Binding.Deadline, err)
 		}
@@ -257,7 +261,7 @@ func TestBillingModelCloudReclaimCannotRestartJobDeadline(t *testing.T) {
 	*now = now.Add(3 * time.Hour)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=1 WHERE team='a' AND run_id='run' AND node_id='job'`)
 	replacement, _ := meteredUnitClaim(t, s, demand)
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: replacement.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: replacement.Award.CapabilityPrefix})
 	if err != nil || p.Capability.Binding.Deadline == nil || !p.Capability.Binding.Deadline.Equal(began.Add(4*time.Hour)) {
 		t.Fatalf("reclaim restarted job deadline: %+v: %v", p.Capability.Binding.Deadline, err)
 	}
@@ -293,7 +297,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=600`)
 			}
 			*now = now.Add(30 * time.Second)
-			beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -314,12 +318,12 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='' WHERE name='a'`)
 			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES ('a','late','paid',?,1)`, int64(MaxCreditGrantMicro))
 			*now = now.Add(10 * time.Second)
-			again, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+			again, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil || !again.CancelRequested || !again.ExpiresAt.Equal(beat.ExpiresAt) {
 				t.Fatalf("lifting the hold resumed stopped work: %+v %v", again, err)
 			}
 			*now = beat.ExpiresAt
-			if late, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
+			if late, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
 				t.Fatalf("a runner that kept renewing past its drain deadline was renewed: %+v", late)
 			}
 			rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants WHERE id='late'`)
@@ -328,7 +332,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			}
 			billingModelJob(t, s, "second")
 			demand.Target.NodeID = "second"
-			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatalf("%s admitted new Cloud work", hold.name)
 			}
 		})

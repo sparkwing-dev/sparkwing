@@ -27,7 +27,7 @@ func TestPersonalEnrollmentTransportNeverPromotesCapabilityAncestryProperty(t *t
 		t.Fatal(err)
 	}
 	server := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
-	raw, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
+	raw, _, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,11 +39,11 @@ func TestPersonalEnrollmentTransportNeverPromotesCapabilityAncestryProperty(t *t
 		if administrative {
 			grants = append(grants, capability.TeamAdmin)
 		}
-		member, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}})
+		member, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		presentation, _, err := e.Store.CreateCapabilitySession(t.Context(), member.Capability.Prefix, time.Hour)
+		presentation, _, err := e.Store.AsOperator().CreateCapabilitySession(t.Context(), member.Capability.Prefix, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}

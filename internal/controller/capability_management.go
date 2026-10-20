@@ -34,8 +34,11 @@ type capabilityRotationResponse struct {
 }
 
 func (s *Server) capabilityManager(ctx context.Context, team string) (CapabilityManager, error) {
-	if team == "" && s.operator != nil {
-		return s.operator, nil
+	if team == "" {
+		if s.operatorCapabilities == nil {
+			return nil, missingEndpointPolicy()
+		}
+		return s.operatorCapabilities, nil
 	}
 	return tenantPort[CapabilityManager](ctx, s, store.Team(team))
 }
@@ -204,3 +207,9 @@ var (
 	_ CapabilityManager = (*store.Tenant)(nil)
 	_ CapabilityManager = (*store.Operator)(nil)
 )
+
+// WithOperatorCapabilityManager supplies deployment-wide inventory and rotation transactions.
+func (s *Server) WithOperatorCapabilityManager(manager CapabilityManager) *Server {
+	s.operatorCapabilities = manager
+	return s
+}

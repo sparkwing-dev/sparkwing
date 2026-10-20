@@ -21,14 +21,14 @@ func localSecretFixture(t *testing.T, value string) (*Tenant, capability.Authori
 	if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
 		t.Fatal(err)
 	}
-	p, err := tenant.s.ResolveAuthority(t.Context(), plan.Actor.Authority)
+	p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), plan.Actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p.Capability.Grants = append(p.Capability.Grants, capability.SecretsRelease)
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM capabilities WHERE prefix=?`, p.Capability.Prefix)
 	authorityPersist(t, tenant.s, p.Capability)
-	p, err = tenant.s.ResolveAuthority(t.Context(), plan.Actor.Authority)
+	p, err = tenant.s.AsOperator().ResolveAuthority(t.Context(), plan.Actor.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestLocalSecretsPurgedOnTeamDeletionAndOwnerLeaseExpiry(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+				if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 					t.Fatalf("expired owner did not requeue: %+v %v", reaped, err)
 				}
 			}
@@ -269,7 +269,7 @@ func FuzzCancelledHereResupplyNeverRestoresSecrets(f *testing.F) {
 		case 2:
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET lease_expires_at=? WHERE team='a' AND id='run'`, s.now().UnixNano())
 		}
-		err = s.ResupplyHereSecrets(t.Context(), owner.Authority, map[string]string{"KEY": string(value)})
+		err = s.AsOperator().ResupplyHereSecrets(t.Context(), owner.Authority, map[string]string{"KEY": string(value)})
 		if attack%3 == 0 && err != nil {
 			t.Fatalf("cancelled live owner cannot drain: %v", err)
 		}

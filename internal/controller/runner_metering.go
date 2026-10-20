@@ -29,7 +29,7 @@ func (s *Server) handleSetRunnerMetered(w http.ResponseWriter, r *http.Request, 
 		return invalidEngineBody("metered must be a boolean")
 	}
 	writer := s.runnerMeteringWriter
-	if writer == nil && s.store != nil {
+	if writer == nil && s.operator != nil {
 		writer, _ = any(s.operator).(RunnerMeteringWriter)
 	}
 	if writer == nil {

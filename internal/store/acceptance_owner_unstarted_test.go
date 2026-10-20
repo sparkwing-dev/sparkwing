@@ -15,7 +15,7 @@ import (
 func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 	ctx := t.Context()
 	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
+	s, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 		return err
 	}
 	for range 3 {
-		beat, err := s.RenewUnit(ctx, plan.Actor.CapabilityPrefix, false)
+		beat, err := s.AsOperator().RenewUnit(ctx, plan.Actor.CapabilityPrefix, false)
 		if err != nil {
 			return err
 		}
@@ -48,7 +48,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 		if expiry != beat.ExpiresAt.UnixNano() {
 			return errors.New("owner renewal did not persist its lease")
 		}
-		if reaped, err := s.ReapUnits(ctx, lease, 10); err != nil || len(reaped) != 0 {
+		if reaped, err := s.AsOperator().ReapUnits(ctx, lease, 10); err != nil || len(reaped) != 0 {
 			return fmt.Errorf("live owner recovered: %+v: %v", reaped, err)
 		}
 		now, err := s.TestOnlyDatabaseTime(ctx)
@@ -59,7 +59,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 			return err
 		}
 		for replay := range 2 {
-			reaped, err := s.ReapUnits(ctx, lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(ctx, lease, 10)
 			if err != nil || len(reaped) != 1-replay {
 				return fmt.Errorf("owner recovery %d: %+v: %v", replay, reaped, err)
 			}
@@ -70,12 +70,11 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 		if err := s.Close(); err != nil {
 			return err
 		}
-		reopened, err := target.TryOpen()
+		reopened, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 		if err != nil {
 			return err
 		}
 		s = reopened
-		s.SetClaimProfileResolver(acceptanceClaimProfile{})
 		tenant, err = s.ForTeam(ctx, acceptanceTeam)
 		if err != nil {
 			return err
@@ -87,10 +86,10 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 		if _, err := tenant.AcceptPlan(ctx, plan); err == nil {
 			return errors.New("former owner accepted a plan after recovery")
 		}
-		if _, err := s.RenewUnit(ctx, plan.Actor.CapabilityPrefix, false); err == nil {
+		if _, err := s.AsOperator().RenewUnit(ctx, plan.Actor.CapabilityPrefix, false); err == nil {
 			return errors.New("former owner renewed after recovery")
 		}
-		claim, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: rootPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: plan.RunID}, Available: match.Resources{Cores: 8}})
+		claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: rootPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: plan.RunID}, Available: match.Resources{Cores: 8}})
 		if err != nil || claim.Award.Generation != plan.Actor.Owner.Generation+1 || len(claim.Bearer) == 0 || claim.RunID != plan.RunID {
 			return fmt.Errorf("owner reclaim: %+v: %v", claim, err)
 		}

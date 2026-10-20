@@ -98,9 +98,12 @@ func (c *transitionCapture) TransitionNode(_ context.Context, change store.NodeT
 	c.change = change
 	return store.Applied{}, nil
 }
+
 func captureEngineTransition(ctx context.Context, body controllerwire.JobTransitionRequest) (store.NodeTransition, error) {
 	capture := &transitionCapture{}
-	server := &EngineController{ResolveTenant: func(context.Context, store.Team) (RunTransactions, error) { return capture, nil }}
+	server := &EngineController{ResolveTenant: func(context.Context, store.Team) (TenantHandle, error) { return capture, nil }}
 	_, err := server.TransitionJob(ctx, capability.Authorized{Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}, body)
 	return capture.change, err
 }
+
+func (f *transitionCapture) Team() store.Team { return "a" }

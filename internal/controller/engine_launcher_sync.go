@@ -21,9 +21,6 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 		return controllerwire.LauncherSyncResponse{}, err
 	}
 	reader := s.Launcher
-	if reader == nil && s.Store != nil {
-		reader = storeLauncherSync{s.Store}
-	}
 	if reader == nil {
 		return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
 	}
@@ -40,7 +37,11 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	return response, nil
 }
 
-type storeLauncherSync struct{ store *store.Store }
+type storeLauncherSync struct {
+	store interface {
+		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef) ([]store.LauncherAward, []store.LauncherPreparation, error)
+	}
+}
 
 func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation, preparing []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error) {
 	if err := validateLauncherObservations(observed); err != nil {

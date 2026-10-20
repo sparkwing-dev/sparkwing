@@ -270,7 +270,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 			return Applied{}, err
 		}
 		if row.State == RunSuccess {
-			if err := RecordBusinessEvent(tx, BusinessEvent{At: now, Team: team, Kind: BusinessEventFirstRunSucceeded, Attrs: map[string]any{"run_id": row.ID}}); err != nil {
+			if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: now, Team: team, Kind: BusinessEventFirstRunSucceeded, Attrs: map[string]any{"run_id": row.ID}}); err != nil {
 				return Applied{}, err
 			}
 			if row.Request.Request.Mode != runspec.IntakePublish {

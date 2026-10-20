@@ -31,13 +31,13 @@ func TestAttemptExecutorComesFromClaimAncestryProperty(t *testing.T) {
 					authorityPersist(t, s, root)
 					demand.CapabilityPrefix = root.Prefix
 					if hosted {
-						host, err := s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
+						host, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
 						if err != nil {
 							t.Fatal(err)
 						}
 						demand.CapabilityPrefix = host.Award.CapabilityPrefix
 					}
-					claim, err := s.ClaimUnit(t.Context(), demand)
+					claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 					if err != nil {
 						t.Fatal(err)
 					}

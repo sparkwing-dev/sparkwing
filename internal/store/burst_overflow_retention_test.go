@@ -48,12 +48,12 @@ func overflowRetainedUsage(t *testing.T, name string, account bool) {
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET created_principal=?,created_subject_kind=? WHERE team='a' AND id='run'`, name, kind)
 	claim, _ := meteredUnitClaim(t, s, demand)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
 	for range 7 {
 		*now = now.Add(10 * time.Second)
-		if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+		if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -174,7 +174,10 @@ func TestBlobResultRecordsAttachmentUsesWriteGrant(t *testing.T) {
 
 func TestBlobResultRecordsConfiguredAdapterAndEmbeddedManifest(t *testing.T) {
 	s, records, change := blobResultFixture(t)
-	s.SetResultBlobRecords(records.manifests)
+	{
+		records := &blobRecords{manifests: records.manifests}
+		s.resultRecords, s.materializations = records, records
+	}
 	configured, ok := s.resultRecords.(*blobRecords)
 	if !ok || configured.manifests == nil {
 		t.Fatal("store did not retain its manifest reader")

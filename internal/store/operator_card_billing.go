@@ -74,6 +74,6 @@ func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, key, refun
 		if _, err := tx.ExecContext(ctx, `UPDATE card_refunds SET refund_id=?, status='pending' WHERE payment_mode=? AND team=? AND payment_intent=? AND attempts=? AND status='due'`, refundID, mode, team, paymentIntent, attempt); err != nil {
 			return err
 		}
-		return reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})
+		return tx.operator.reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})
 	})
 }

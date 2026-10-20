@@ -30,9 +30,9 @@ func TestEngineLauncherSyncNativeFenceProperty(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	e.Store.SetClaimProfileResolver(engineProfileFake{})
+	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"],"available_cores":1}`, 200)
 	var claim controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &claim); err != nil || claim.Claim == nil {
@@ -88,7 +88,7 @@ func btoi(value bool) int {
 func TestEngineLauncherSyncHTTPUsesAuthenticatedRootAndNeverDeliversBearer(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	body := `{"observed":[{"award":{"kind":"node","id":"unit","holder":"launcher","generation":1},"job":{"namespace":"ci","name":"job","uid":"job-uid"},"node_uid":"node"}]}`
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/launcher/sync", body, 401)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", body, 200)

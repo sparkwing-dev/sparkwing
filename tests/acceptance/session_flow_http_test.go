@@ -49,7 +49,7 @@ func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
 	}
 	logs := &bytes.Buffer{}
 	server := controller.NewDeployment(s, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher)
-	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+	raw, csrf, _, err := s.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestSessionFlowHTTPRenewsWithNamedProof(t *testing.T) {
 func TestSessionFlowHTTPLogoutUsesVerifiedSession(t *testing.T) {
 	for _, header := range []bool{false, true} {
 		f := newSessionFlow(t)
-		other, _, _, err := f.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+		other, _, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -121,7 +121,7 @@ func TestSessionFlowHTTPLogoutUsesVerifiedSession(t *testing.T) {
 		if w.Code != 204 || w.Body.Len() != 0 || count != 1 || w.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("HTTP %d %s count=%d", w.Code, w.Body.String(), count)
 		}
-		if _, err := f.store.LookupSession(t.Context(), other); err != nil {
+		if _, err := f.store.AsOperator().LookupSession(t.Context(), other); err != nil {
 			t.Fatalf("logout ended unrelated session: %v", err)
 		}
 	}
@@ -182,10 +182,10 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 	const maximum = 48 * time.Hour
 	h := f.server.WithSessionMaxLifetime(maximum).Handler()
 	property := func(age uint8) bool {
-		if err := f.store.DeleteSession(f.raw); err != nil {
+		if err := f.store.AsOperator().DeleteSession(f.raw); err != nil {
 			t.Fatal(err)
 		}
-		raw, csrf, _, err := f.store.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+		raw, csrf, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +216,7 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 	for _, method := range []string{"GET", "POST"} {
 		f := newSessionFlow(t)
 		digest := sha256.Sum256([]byte(f.raw))
-		parent, err := f.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		parent, err := f.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 			Kind: capability.ProvisionMember, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
 			Team: "team", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 			Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone},
@@ -224,7 +224,7 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, session, err := f.store.CreateCapabilitySession(t.Context(), parent.Capability.Prefix, time.Hour)
+		raw, session, err := f.store.AsOperator().CreateCapabilitySession(t.Context(), parent.Capability.Prefix, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -324,7 +324,7 @@ func TestSessionFlowHTTPRolelessAccountHasNoTeamAuthority(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, csrf, _, err := f.store.CreateIdentityAccountSession(t.Context(), store.Account{ID: "waitlisted"}, "", "github", "waitlisted", time.Hour)
+	raw, csrf, _, err := f.store.AsOperator().CreateIdentityAccountSession(t.Context(), store.Account{ID: "waitlisted"}, "", "github", "waitlisted", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestSessionFlowHTTPRolelessAccountHasNoTeamAuthority(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("roleless logout: %d %s", w.Code, w.Body.String())
 	}
-	if _, err := f.store.LookupSession(t.Context(), raw); err == nil {
+	if _, err := f.store.AsOperator().LookupSession(t.Context(), raw); err == nil {
 		t.Fatal("roleless logout kept session live")
 	}
 }

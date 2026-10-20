@@ -16,7 +16,7 @@ func TestCapabilityClaimLivenessProperty(t *testing.T) {
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -27,11 +27,11 @@ func TestCapabilityClaimLivenessProperty(t *testing.T) {
 						continue
 					}
 					target := capability.Target{Team: "a", RunID: "run", NodeID: "job"}
-					auth, err := capability.NewAuthenticator(s).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: raw, Evidence: capability.RequestEvidence{Target: target}}, route)
+					auth, err := capability.NewAuthenticator(s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: raw, Evidence: capability.RequestEvidence{Target: target}}, route)
 					if err != nil {
 						return false
 					}
-					_, err = capability.Authorize(t.Context(), s, route, auth, target)
+					_, err = capability.Authorize(t.Context(), s.AsOperator(), route, auth, target)
 					return err == nil
 				}
 				t.Fatal("missing route policy")
@@ -78,7 +78,7 @@ func TestCapabilityResultCannotChangeAfterCompletionOrLossProperty(t *testing.T)
 	for i := range 24 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}

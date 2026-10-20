@@ -70,7 +70,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 				if problem == "capacity" {
 					observation.Available.Cores = 2
 				}
-				if err := s.RecordRunnerPoll(t.Context(), observation); err != nil {
+				if err := s.AsOperator().RecordRunnerPoll(t.Context(), observation); err != nil {
 					t.Fatal(err)
 				}
 				switch problem {
@@ -98,7 +98,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					t.Fatal(err)
 				}
 				ctx := WithClaimPlacement(t.Context(), policy)
-				claim, err := s.ClaimUnit(ctx, request)
+				claim, err := s.AsOperator().ClaimUnit(ctx, request)
 				if problem == "live" || problem == "granted_name" {
 					var denied *apierr.Error
 					if !errors.Is(err, ErrNotFound) && (!errors.As(err, &denied) || denied.Code != apierr.LockHeld) {
@@ -174,7 +174,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 				live := random.IntN(2) == 0
 				if live {
 					observation := UnitDemand{CapabilityPrefix: name, Labels: []string{"name=runner", "class=cloud"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
-					if err := s.RecordRunnerPoll(t.Context(), observation); err != nil {
+					if err := s.AsOperator().RecordRunnerPoll(t.Context(), observation); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -191,7 +191,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			claim, err := s.ClaimUnit(WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: preferences, Liveness: time.Minute}), request)
+			claim, err := s.AsOperator().ClaimUnit(WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: preferences, Liveness: time.Minute}), request)
 			if wantHeld {
 				var refused *apierr.Error
 				if !errors.Is(err, ErrNotFound) && (!errors.As(err, &refused) || refused.Code != apierr.LockHeld) {

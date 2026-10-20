@@ -84,29 +84,13 @@ func (s *Store) AsOperator() *Operator { return &Operator{s: s} }
 // id across teams and has to act on it through that team's handle.
 // [ErrNotFound] when no run carries the id.
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
-	return o.s.runTeam(ctx, runID)
-}
-
-func (s *Store) runTeam(ctx context.Context, runID string) (Team, error) {
 	var team string
-	err := s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)
+	err := o.s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", notFound("run", runID)
 	}
 	return Team(team), err
 }
-
-// safety: a type rather than an empty team meaning "all", because that
-// sentinel cannot be told from a team a caller failed to set; the zero
-// value here scopes to the empty team, which matches nothing.
-type teamScope struct {
-	team Team
-	all  bool
-}
-
-func oneTeam(team Team) teamScope { return teamScope{team: team} }
-
-func allTeams() teamScope { return teamScope{all: true} }
 
 var (
 	tenantTables   = schemaTableNames(SchemaTenant)

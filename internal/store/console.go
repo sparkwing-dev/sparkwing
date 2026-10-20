@@ -183,7 +183,7 @@ func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authori
 		if err != nil {
 			return AccountDeletion{}, err
 		}
-		return c.s.deleteAccountTx(ctx, tx, account.ID, tx.now())
+		return tx.operator.deleteAccountTx(ctx, tx, account.ID, tx.now())
 	})
 }
 
@@ -203,11 +203,7 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 		if installation <= 0 {
 			return "", ErrInvalidInput
 		}
-		var team Team
-		err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`+tx.forUpdate(), installation).Scan(&team)
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrNotFound
-		}
+		team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
 		if err != nil {
 			return "", err
 		}
@@ -272,7 +268,7 @@ func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Autho
 		replay = digest
 		out := []Account{}
 		for _, id := range ids {
-			acct, changed, err := approveOneTx(ctx, tx, id, actor, tx.now())
+			acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, tx.now())
 			if err != nil {
 				return nil, err
 			}

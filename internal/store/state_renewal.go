@@ -168,5 +168,5 @@ func lockActorTx(ctx context.Context, tx *storeTx, actor Actor) error {
 	if actor.CapabilityPrefix == "" {
 		return nil
 	}
-	return lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority}, actor.CapabilityPrefix)
+	return tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority}, actor.CapabilityPrefix)
 }

@@ -18,7 +18,7 @@ func TestReviewNativeEnrollmentRepositoryClaim(t *testing.T) {
 				t.Fatal(err)
 			}
 			engineSQL(t, s.store, `UPDATE runs SET repo_display=? WHERE id='run'`, display)
-			claim, err := s.store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: issued.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
+			claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: issued.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
 			if display == "https://github.com/acme/repo" {
 				if err != nil || claim.RunID != "run" {
 					t.Fatalf("enrolled repository claim: %+v %v", claim, err)

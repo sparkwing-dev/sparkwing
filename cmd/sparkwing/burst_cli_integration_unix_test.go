@@ -547,7 +547,7 @@ func burstPublicHoldMachine(t *testing.T, ctx context.Context, endpoint string) 
 
 func burstPublicPersonalRunner(t *testing.T, ctx context.Context, cli, repo string, state *store.Store) string {
 	t.Helper()
-	session, _, _, err := state.CreateAccountSession(ctx, store.Account{ID: "burst-user"}, "default", time.Hour)
+	session, _, _, err := state.AsOperator().CreateAccountSession(ctx, store.Account{ID: "burst-user"}, "default", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

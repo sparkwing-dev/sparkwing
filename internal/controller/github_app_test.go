@@ -53,15 +53,6 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 
 func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*controller.Server) *controller.Server) *appFixture {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
-	if err != nil {
-		t.Fatal(err)
-	}
 	google, gh, app := googletest.New(t), githubtest.New(t), githubapptest.New(t)
 	app.AddInstallation(githubapptest.Installation{
 		ID: 7, Account: githubapp.Account{ID: 70, Login: "acme", Type: "Organization"},
@@ -73,7 +64,7 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 	})
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	replica := func() (*controller.Server, string) {
+	assemble := func(st *store.Store) *controller.Server {
 		srv := controller.NewDeployment(st, cfg, logger).WithSecretsCipher(testCipher(t)).
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect, appCallback}).
@@ -84,11 +75,32 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 			srv = opt(srv)
 		}
 		configureGitHubClaims(srv, st)
+		return srv
+	}
+	var primary *controller.Server
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		primary = assemble(st)
+		policies := primary.StorePolicies()
+		policies.ClaimProfiles = githubClaimEnvironment{location: "cloud"}
+		return policies, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replica := func() (*controller.Server, string) {
+		srv := assemble(st)
 		ts := httptest.NewServer(srv.Handler())
 		t.Cleanup(ts.Close)
 		return srv, ts.URL
 	}
-	srv, url := replica()
+	ts := httptest.NewServer(primary.Handler())
+	t.Cleanup(ts.Close)
+	srv, url := primary, ts.URL
 	return &appFixture{
 		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin, srv: srv},
 		app:             app, replica: replica, logs: logs,

@@ -51,11 +51,11 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture, operation, id stri
 		t.Fatal(err)
 	}
 	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, SlotKey: "global:deploy", SlotHolderID: id, SlotRunID: f.ref.RunID, SlotNodeID: f.ref.NodeID, SlotGeneration: row.Generation}
-	auth, err := capability.NewAuthenticator(f.s).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
+	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := capability.Authorize(t.Context(), f.s, route, auth, target)
+	a, err := capability.Authorize(t.Context(), f.s.AsOperator(), route, auth, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestAuthorizedConcurrencyCancellationKeepsReportingAndRevocationRefusesAll(
 	if _, err := f.tenant.CancelAuthorizedWaiter(t.Context(), cancel, "global:deploy", f.ref); err != nil {
 		t.Fatal(err)
 	}
-	p, err := f.s.ResolveAuthority(t.Context(), f.holder.Authority)
+	p, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.holder.Authority)
 	if err != nil || p.Capability.Parent == nil {
 		t.Fatalf("claim ancestry: %+v, %v", p, err)
 	}
@@ -319,11 +319,11 @@ func TestAuthorizedConcurrencyMemberForceReleasePromotesWithinWorkLease(t *testi
 	if !ok {
 		t.Fatal("missing force-release route")
 	}
-	p, err := f.s.ResolveAuthority(t.Context(), f.plan.Seal.Request.AuthorityRef)
+	p, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.plan.Seal.Request.AuthorityRef)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := capability.Authorize(t.Context(), f.s, route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: string(f.tenant.Team()), SlotKey: "global:deploy"})
+	a, err := capability.Authorize(t.Context(), f.s.AsOperator(), route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: string(f.tenant.Team()), SlotKey: "global:deploy"})
 	if err != nil {
 		t.Fatal(err)
 	}

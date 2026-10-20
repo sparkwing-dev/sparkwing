@@ -54,7 +54,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 							altered.SHA = fmt.Sprintf("%040x", random.Uint64())
 						}
 						writePushRun(t, s, altered)
-						_, err := s.ClaimUnit(t.Context(), demand)
+						_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 						var refused *apierr.Error
 						if named && (!errors.As(err, &refused) || refused.Code != apierr.Forbidden) || !named && !errors.Is(err, ErrNotFound) {
 							t.Fatalf("out-of-scope claim: %v", err)
@@ -62,7 +62,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 						rewriteSchemaCount(t, s.db, "billing_awards", 0)
 						rewriteSchemaCount(t, s.db, "events", 0)
 						writePushRun(t, s, git)
-						claim, err := s.ClaimUnit(t.Context(), demand)
+						claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 						if err != nil || claim.Kind != kind || claim.RunID != "run" {
 							t.Fatalf("matching push claim: %+v, %v", claim, err)
 						}
@@ -109,7 +109,7 @@ func TestPushAwardedHostRetainsAncestorScopeProperty(t *testing.T) {
 		authorityPersist(t, s, root)
 		git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA}
 		writePushRun(t, s, git)
-		host, err := s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
+		host, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -117,14 +117,14 @@ func TestPushAwardedHostRetainsAncestorScopeProperty(t *testing.T) {
 		altered := git
 		altered.SHA = fmt.Sprintf("%040x", random.Uint64())
 		writePushRun(t, s, altered)
-		_, err = s.ClaimUnit(t.Context(), demand)
+		_, err = s.AsOperator().ClaimUnit(t.Context(), demand)
 		var refused *apierr.Error
 		if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
 			t.Fatalf("awarded host escaped its push ancestor: %v", err)
 		}
 		rewriteSchemaCount(t, s.db, "billing_awards", 1)
 		writePushRun(t, s, git)
-		claim, err := s.ClaimUnit(t.Context(), demand)
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if err != nil || claim.NodeID != "job" {
 			t.Fatalf("awarded host in scope: %+v, %v", claim, err)
 		}

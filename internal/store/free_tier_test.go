@@ -57,7 +57,7 @@ func TestTriggersAreNeverRefusedForBilling(t *testing.T) {
 			t.Fatalf("run %d of a team with no credits and no slot: %v", i, err)
 		}
 	}
-	if taken, _, err := st.FreeSlots(ctx); err != nil || taken != 0 {
+	if taken, _, err := st.AsOperator().FreeSlots(ctx); err != nil || taken != 0 {
 		t.Fatalf("slots taken = %d, %v; want a run to take none", taken, err)
 	}
 	held := teamHandle(t, st, "held")
@@ -127,7 +127,7 @@ func TestTheOperatorsTeamIsNotHeldToAnEventShare(t *testing.T) {
 	if err := appendBytes(storageTestTenant(t, st), "r1", 500); err != nil {
 		t.Fatalf("an operator write past the share: %v", err)
 	}
-	if taken, _, err := st.FreeSlots(context.Background()); err != nil || taken != 0 {
+	if taken, _, err := st.AsOperator().FreeSlots(context.Background()); err != nil || taken != 0 {
 		t.Fatalf("slots taken = %d, %v; want none", taken, err)
 	}
 }

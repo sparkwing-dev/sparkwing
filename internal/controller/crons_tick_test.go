@@ -21,7 +21,7 @@ import (
 func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
 	seedTickAppConsent(t, st, store.DefaultTeam)
-	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "schedule-owner"}
+	svc := &crons.Service{Operator: st.AsOperator(), Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "schedule-owner"}
 	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
 		GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		RepoURL: "https://github.com/acme/widgets.git",
@@ -230,7 +230,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 		t.Fatalf("ForTeam default: %v", err)
 	}
 	seedTickAppConsent(t, st, "team-b")
-	report, err := (&crons.Service{Store: st, Schedules: tenantB, ArmedBy: "team-b-owner"}).ArmPushed(ctx, crons.ArmPush{
+	report, err := (&crons.Service{Operator: st.AsOperator(), Schedules: tenantB, ArmedBy: "team-b-owner"}).ArmPushed(ctx, crons.ArmPush{
 		GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		RepoURL: "https://github.com/acme/widgets.git",
 		Branch:  "main",
@@ -339,7 +339,7 @@ func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
 	if !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing {
 		t.Fatalf("missing backend: %v", err)
 	}
-	other := &scheduleWriterFake{Tenant: teststore.ForTeam(t, st, store.DefaultTeam), s: srv}
+	other := &scheduleWriterFake{Tenant: teststore.ForTeam(t, st, store.DefaultTeam), s: &serverFixture{Server: srv, store: st}}
 	testOnlyTenantPort[ScheduledRunWriter](srv, func(context.Context, store.Team) (ScheduledRunWriter, error) { return other, nil })
 	sched.Team = "other"
 	if _, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due); !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing || len(other.runs) != 0 {

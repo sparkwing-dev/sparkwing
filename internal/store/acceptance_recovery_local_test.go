@@ -19,7 +19,7 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 			ctx := t.Context()
 			f := &storeRecoveryFixture{target: storetest.NewSQLite(t)}
 			var err error
-			f.s, err = f.target.TryOpen()
+			f.s, err = f.target.TryOpen(store.WithPolicies(sealStorePolicies))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -46,7 +46,7 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.s.RenewUnit(ctx, f.owner.CapabilityPrefix, started); err != nil {
+			if _, err := f.s.AsOperator().RenewUnit(ctx, f.owner.CapabilityPrefix, started); err != nil {
 				t.Fatal(err)
 			}
 			f.lease, err = f.s.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "recovery", time.Minute)
@@ -61,7 +61,7 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 				t.Fatal(err)
 			}
 			for pass := range 2 {
-				units, err := f.s.ReapUnits(ctx, f.lease, 10)
+				units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
 				if err != nil {
 					t.Fatal(err)
 				}

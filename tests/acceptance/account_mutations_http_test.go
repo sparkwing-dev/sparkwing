@@ -56,36 +56,36 @@ func (f *accountWrites) UnlinkAccountIdentity(_ context.Context, a capability.Au
 	return 2, f.called(a, provider)
 }
 
-var _ controller.AccountWriter = (*store.Store)(nil)
+var _ controller.AccountWriter = (*store.Operator)(nil)
 
 func TestAccountMutationsHTTPUseCommittedStoreAdapter(t *testing.T) {
 	f := newSessionFlow(t)
 	now := time.Now()
-	member, err := f.store.ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-member", Email: "real-member@example.test", EmailVerified: true}, store.SignUpConditions{}, now)
+	member, err := f.store.AsOperator().ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-member", Email: "real-member@example.test", EmailVerified: true}, store.SignUpConditions{}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.raw, f.csrf, _, err = f.store.CreateAccountSession(t.Context(), member.Account, member.PersonalTeam, time.Hour)
+	f.raw, f.csrf, _, err = f.store.AsOperator().CreateAccountSession(t.Context(), member.Account, member.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at,linked) VALUES ('github','linked',?,'',0,?,1)`, member.Account.ID, now.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	owner, err := f.store.ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-owner", Email: "real-owner@example.test", EmailVerified: true}, store.SignUpConditions{}, now)
+	owner, err := f.store.AsOperator().ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-owner", Email: "real-owner@example.test", EmailVerified: true}, store.SignUpConditions{}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ownerRaw, _, _, err := f.store.CreateAccountSession(t.Context(), owner.Account, owner.PersonalTeam, time.Hour)
+	ownerRaw, _, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), owner.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	route, _ := capability.LookupRoute("POST", "/api/v1/team/invitations")
-	auth, err := capability.NewAuthenticator(f.store).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialSession, Raw: ownerRaw}, route)
+	auth, err := capability.NewAuthenticator(f.store.AsOperator()).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialSession, Raw: ownerRaw}, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := capability.Authorize(t.Context(), f.store, route, auth, capability.Target{Team: string(owner.PersonalTeam)})
+	a, err := capability.Authorize(t.Context(), f.store.AsOperator(), route, auth, capability.Target{Team: string(owner.PersonalTeam)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,11 +113,11 @@ func TestAccountMutationsHTTPUseCommittedStoreAdapter(t *testing.T) {
 			t.Fatalf("%s: %d %s", action.path, w.Code, w.Body.String())
 		}
 	}
-	session, err := f.store.LookupSession(t.Context(), f.raw)
+	session, err := f.store.AsOperator().LookupSession(t.Context(), f.raw)
 	if err != nil || session.Team != invitation.Team {
 		t.Fatalf("session=%+v: %v", session, err)
 	}
-	account, err := f.store.Account(t.Context(), session.AccountID)
+	account, err := f.store.AsOperator().Account(t.Context(), session.AccountID)
 	if err != nil || account.ActiveTeam != invitation.Team {
 		t.Fatalf("account=%+v: %v", account, err)
 	}

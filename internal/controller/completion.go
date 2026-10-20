@@ -71,7 +71,7 @@ func (s *Server) deliverRunEffect(ctx context.Context, tenant *store.Tenant, eff
 		}
 		ctx, cancel := context.WithTimeout(ctx, githubStatusTimeout)
 		defer cancel()
-		reporter := githubCheckReporter{client: s.githubApp.client, store: s.store, dashboardURL: s.dashboardURL, missingChecks: func() { s.warnMissingChecks(update.installation) }}
+		reporter := githubCheckReporter{client: s.githubApp.client, resolveTenant: s.resolveTenant, operator: s.operator, dashboardURL: s.dashboardURL, missingChecks: func() { s.warnMissingChecks(update.installation) }}
 		if err := reporter.deliver(ctx, update); err != nil {
 			return err
 		}

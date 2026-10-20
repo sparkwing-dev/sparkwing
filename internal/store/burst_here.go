@@ -45,10 +45,10 @@ func hereObserverTx(ctx context.Context, tx *storeTx, p capability.Principal) (b
 }
 
 // RecordHereAvailability updates only the authenticated here owner's fenced host observation.
-func (s *Store) RecordHereAvailability(ctx context.Context, authority capability.AuthorityRef, available match.Resources) error {
+func (o *Operator) RecordHereAvailability(ctx context.Context, authority capability.AuthorityRef, available match.Resources) error {
 	var demand UnitDemand
-	err := s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{authority}, authority.ID); err != nil {
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{authority}, authority.ID); err != nil {
 			return err
 		}
 		p, err := tx.ResolveAuthority(ctx, authority)

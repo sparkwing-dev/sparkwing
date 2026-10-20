@@ -33,7 +33,7 @@ func TestTickRefreshesAndEvaluatesThroughEachTenant(t *testing.T) {
 		}
 	}
 	for _, scoped := range []bool{false, true} {
-		svc := &Service{Store: s, Side: store.CronWhereController, Now: func() time.Time { return now }}
+		svc := &Service{Operator: s.AsOperator(), Side: store.CronWhereController, Now: func() time.Time { return now }}
 		want := 2
 		if scoped {
 			svc.Schedules = teststore.ForTeam(t, s, "other")

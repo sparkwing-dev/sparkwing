@@ -31,12 +31,12 @@ func TestBootstrapSeedIsOnceOnlyProperty(t *testing.T) {
 				secret[j] = byte(random.Uint32())
 			}
 			spec := bootstrapSpec(secret)
-			created, err := s.EnsureBootstrapCapability(t.Context(), spec)
+			created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec)
 			if err != nil || !created {
 				t.Fatalf("bootstrap: %t %v", created, err)
 			}
 			digest := sha256.Sum256([]byte(spec.Seed))
-			p, err := s.LookupCapability(t.Context(), digest)
+			p, err := s.AsOperator().LookupCapability(t.Context(), digest)
 			if err != nil || p.Capability.Prefix != spec.Seed[:16] || p.Capability.Parent != nil {
 				t.Fatalf("seed authority: %+v %v", p, err)
 			}
@@ -47,26 +47,26 @@ func TestBootstrapSeedIsOnceOnlyProperty(t *testing.T) {
 			if bytes.Contains(body, []byte(spec.Seed)) {
 				t.Fatal("persisted the raw seed")
 			}
-			if created, err := s.EnsureBootstrapCapability(t.Context(), spec); err != nil || created {
+			if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err != nil || created {
 				t.Fatalf("live replay: %t %v", created, err)
 			}
 			other := spec
 			secret[(i%2)*31] ^= 255
 			other.Seed = bootstrapSpec(secret).Seed
-			if created, err := s.EnsureBootstrapCapability(t.Context(), other); err == nil || created {
+			if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), other); err == nil || created {
 				t.Fatal("a different seed bypassed the gate")
 			}
 			if err := s.AsOperator().RevokeAuthority(t.Context(), Actor{Authority: p.Authority}, p.Authority); err != nil {
 				t.Fatal(err)
 			}
-			if created, err := s.EnsureBootstrapCapability(t.Context(), spec); err == nil || created {
+			if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err == nil || created {
 				t.Fatal("revived a revoked seed")
 			}
-			if live, err := s.HasDeploymentAdministrator(t.Context()); err != nil || live {
+			if live, err := s.AsOperator().HasDeploymentAdministrator(t.Context()); err != nil || live {
 				t.Fatalf("revoked administrator: %t %v", live, err)
 			}
 			rewriteSchemaExec(t, s.db, `DELETE FROM capabilities`)
-			if _, err := s.ProvisionCapability(t.Context(), other); err == nil {
+			if _, err := s.AsOperator().ProvisionCapability(t.Context(), other); err == nil {
 				t.Fatal("retention reopened the bootstrap gate")
 			}
 			rewriteSchemaCount(t, s.db, "capabilities", 0)
@@ -83,14 +83,14 @@ func TestBootstrapSeedCannotEnterOtherOriginsProperty(t *testing.T) {
 				member := authorityMember(t, s, "owner", RoleOwner)
 				spec = capability.ProvisionSpec{Kind: kind, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}}
 			}
-			s.SetProvisionPolicy(provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, _ capability.ProvisionSpec) error { return nil }))
+			s.provisions = provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, _ capability.ProvisionSpec) error { return nil })
 			for range 16 {
 				var secret [32]byte
 				for j := range secret {
 					secret[j] = byte(random.Uint32())
 				}
 				spec.Seed = bootstrapSpec(secret).Seed
-				issued, err := s.ProvisionCapability(t.Context(), spec)
+				issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 				if err == nil || issued.Raw != "" {
 					t.Fatal("non-bootstrap origin accepted a seed")
 				}
@@ -121,7 +121,7 @@ func TestBootstrapGateSurvivesConcurrentReplicasAndRestart(t *testing.T) {
 			if i%2 == 1 {
 				s = second
 			}
-			created, err := s.EnsureBootstrapCapability(t.Context(), spec)
+			created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec)
 			results <- created
 			failures <- err
 		})
@@ -154,10 +154,10 @@ func TestBootstrapGateSurvivesConcurrentReplicasAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if created, err := reopened.EnsureBootstrapCapability(t.Context(), spec); err != nil || created {
+	if created, err := reopened.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err != nil || created {
 		t.Fatalf("restart replay: %t %v", created, err)
 	}
-	if live, err := reopened.HasDeploymentAdministrator(t.Context()); err != nil || !live {
+	if live, err := reopened.AsOperator().HasDeploymentAdministrator(t.Context()); err != nil || !live {
 		t.Fatalf("restarted administrator: %t %v", live, err)
 	}
 }
@@ -172,13 +172,13 @@ func TestBootstrapFailureRollsBackGateAndBearer(t *testing.T) {
 			s := authorityStore(t)
 			spec := bootstrapSpec([32]byte{7})
 			rewriteSchemaExec(t, s.db, trigger)
-			if created, err := s.EnsureBootstrapCapability(t.Context(), spec); err == nil || created {
+			if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err == nil || created {
 				t.Fatal("failed commit returned authority")
 			}
 			rewriteSchemaCount(t, s.db, "capabilities", 0)
 			rewriteSchemaCount(t, s.db, "settings", 0)
 			rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_bootstrap`)
-			if created, err := s.EnsureBootstrapCapability(t.Context(), spec); err != nil || !created {
+			if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err != nil || !created {
 				t.Fatalf("rolled back gate: %t %v", created, err)
 			}
 		})
@@ -219,12 +219,12 @@ func TestDeploymentAdministratorRequiresLiveAncestryProperty(t *testing.T) {
 				admin.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent.Prefix}
 			}
 			authorityPersist(t, s, admin)
-			if live, err := s.HasDeploymentAdministrator(t.Context()); err != nil || live != (problem == "live") {
+			if live, err := s.AsOperator().HasDeploymentAdministrator(t.Context()); err != nil || live != (problem == "live") {
 				t.Fatalf("administrator %s: %t %v", problem, live, err)
 			}
 			if problem == "live" {
 				spec := bootstrapSpec([32]byte{9})
-				if created, err := s.EnsureBootstrapCapability(t.Context(), spec); err == nil || created {
+				if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err == nil || created {
 					t.Fatal("bootstrap bypassed existing administrator")
 				}
 				rewriteSchemaCount(t, s.db, "capabilities", 1)
@@ -238,10 +238,10 @@ func TestIssueRejectsMalformedBootstrapPresentations(t *testing.T) {
 	for _, raw := range []string{"swu_private", "swn_" + base64.RawURLEncoding.EncodeToString(make([]byte, 32)), "swk_private\n", "swk_" + base64.RawURLEncoding.EncodeToString(make([]byte, 31)), "swk_" + base64.RawURLEncoding.EncodeToString(make([]byte, 33))} {
 		spec := bootstrapSpec([32]byte{})
 		spec.Seed = raw
-		if created, err := s.EnsureBootstrapCapability(t.Context(), spec); err == nil || created {
+		if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err == nil || created {
 			t.Fatal("invalid presentation reached the bootstrap gate")
 		}
-		if issued, err := s.ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
+		if issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
 			t.Fatal("direct Issue accepted an invalid seed")
 		}
 	}
@@ -270,7 +270,7 @@ func TestBootstrapDifferentSeedsRaceForOneGate(t *testing.T) {
 			if i%2 == 1 {
 				s = second
 			}
-			created, err := s.EnsureBootstrapCapability(t.Context(), bootstrapSpec([32]byte{byte(i + 1)}))
+			created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), bootstrapSpec([32]byte{byte(i + 1)}))
 			var api *apierr.Error
 			if err != nil && (!errors.As(err, &api) || api.Code != apierr.Conflict) {
 				failures <- err

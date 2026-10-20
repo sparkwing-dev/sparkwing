@@ -237,7 +237,7 @@ func TestConsoleAccountDeletionRetainsLastOwnerConflict(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &result) != nil || len(result.Error.Details.Teams) != 1 || result.Error.Details.Teams[0].Slug != "team" {
 		t.Fatalf("conflict: %s", w.Body.String())
 	}
-	if _, err := f.store.Account(t.Context(), "target"); err != nil {
+	if _, err := f.store.AsOperator().Account(t.Context(), "target"); err != nil {
 		t.Fatalf("refused deletion changed account: %v", err)
 	}
 }

@@ -14,9 +14,6 @@ type ProvisionPolicy interface {
 	AuthorizeProvision(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error
 }
 
-// SetProvisionPolicy installs trusted origin verification before concurrent store use.
-func (s *Store) SetProvisionPolicy(policy ProvisionPolicy) { s.provisions = policy }
-
 type nativeProvisionPolicy struct{}
 
 func (nativeProvisionPolicy) AuthorizeProvision(ctx context.Context, resolver capability.AuthorityResolver, spec capability.ProvisionSpec) error {

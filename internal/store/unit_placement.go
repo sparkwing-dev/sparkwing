@@ -125,10 +125,13 @@ func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, liveness ti
 	now := tx.now()
 	cutoff := now.Add(-liveness)
 	query := `SELECT prefix,claim_observation_json FROM capabilities WHERE team=? AND last_used_at>=? AND claim_observation_json IS NOT NULL`
+	args := []any{team}
 	if launchers {
-		query = `SELECT prefix,claim_observation_json FROM capabilities WHERE (team=? OR team IS NULL AND subject_kind='service') AND last_used_at>=? AND claim_observation_json IS NOT NULL`
+		query = `SELECT prefix,claim_observation_json FROM capabilities WHERE COALESCE(team,'') IN (?,?) AND (team IS NOT NULL OR subject_kind='service') AND last_used_at>=? AND claim_observation_json IS NOT NULL`
+		args = append(args, "")
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY last_used_at DESC,prefix LIMIT ?`, team, cutoff.UnixNano(), limits.RankingObservations)
+	args = append(args, cutoff.UnixNano(), limits.RankingObservations)
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY last_used_at DESC,prefix LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}

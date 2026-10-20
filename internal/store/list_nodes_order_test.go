@@ -50,7 +50,7 @@ func checkNodeOrderAfterStarts(t *testing.T, st *store.Store) {
 }
 
 func TestRunSnapshotKeepsDeclarationOrderAcrossStarts(t *testing.T) {
-	checkNodeOrderAfterStarts(t, storetest.Open(t))
+	checkNodeOrderAfterStarts(t, storetest.Open(t, store.WithPolicies(sealStorePolicies)))
 }
 
 func TestPostgresRunSnapshotKeepsDeclarationOrderAcrossStarts(t *testing.T) {

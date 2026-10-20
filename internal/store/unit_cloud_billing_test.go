@@ -31,7 +31,7 @@ func cloudRenewalBillingFixture(t *testing.T, kind capability.UnitKind) (*Store,
 func TestCloudPlanIdleRenewalIsCharged(t *testing.T) {
 	s, claim, _, now := cloudRenewalBillingFixture(t, capability.UnitPlan)
 	*now = now.Add(5 * time.Second)
-	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(11 * time.Second)
@@ -62,7 +62,7 @@ func TestCloudRenewalBillsHeldTimeRegardlessOfActivityProperty(t *testing.T) {
 				for renewal := range 8 {
 					executing := reports&(1<<renewal) != 0
 					var err error
-					beat, err = s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, executing)
+					beat, err = s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, executing)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -73,7 +73,7 @@ func TestCloudRenewalBillsHeldTimeRegardlessOfActivityProperty(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if reaped, err := s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 {
+				if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 {
 					t.Fatalf("reaped=%+v, %v", reaped, err)
 				}
 				heldSeconds := int64(beat.ExpiresAt.Sub(start) / time.Second)

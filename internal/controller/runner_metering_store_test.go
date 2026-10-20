@@ -25,13 +25,12 @@ func TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"})
-	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
+	raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(raw))
-	st.SetProvisionPolicy(sessionOriginFake{})
-	root, err := st.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+	root, err := st.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 		Kind: capability.ProvisionMachine, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
 		Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "worker"}, RegistrationID: "runner:a:worker",
 		Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"},
@@ -63,7 +62,7 @@ func TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession(t *testing.T) {
 			t.Fatalf("metering route = %d %s; want %d", w.Code, w.Body, tc.status)
 		}
 	}
-	current, err := st.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix})
+	current, err := st.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix})
 	if err != nil || !current.Capability.RootMetered {
 		t.Fatalf("HTTP did not commit root metering: %+v, %v", current, err)
 	}
@@ -71,7 +70,7 @@ func TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession(t *testing.T) {
 	if w := request(`{"metered":false}`, csrf); w.Code != 403 {
 		t.Fatalf("delisted console = %d %s", w.Code, w.Body)
 	}
-	current, err = st.ResolveAuthority(t.Context(), current.Authority)
+	current, err = st.AsOperator().ResolveAuthority(t.Context(), current.Authority)
 	if err != nil || !current.Capability.RootMetered {
 		t.Fatalf("refused HTTP changed root metering: %+v, %v", current, err)
 	}

@@ -20,6 +20,9 @@ import (
 // Handler is constructed. ServeWith refuses an engine without a runner policy.
 func (s *Server) WithEngineController(engine *EngineController) *Server {
 	s.engineController = engine
+	if engine != nil && engine.ResolveTenant != nil {
+		s.resolveTenant = engine.ResolveTenant
+	}
 	return s
 }
 

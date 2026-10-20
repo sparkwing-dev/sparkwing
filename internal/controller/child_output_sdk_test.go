@@ -88,13 +88,6 @@ func (s childAwaitServices) RunPipeline(ctx context.Context, request sdkserve.Ch
 func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	e, _, root := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
-	if _, err := teststore.SQL(t, e.Store).ExecContext(ctx, `UPDATE teams SET next_run_number=2 WHERE name='a'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := teststore.SQL(t, e.Store).ExecContext(ctx, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"weather-report"}]}`)); err != nil {
-		t.Fatal(err)
-	}
 	objectDirectory := t.TempDir()
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: objectDirectory, Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {
@@ -105,7 +98,21 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	handler := controller.New(e.Store, nil).WithEngineController(e).WithDataObjects(objects).HTTP().API
+	var server *controller.Server
+	e, _, root := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		server = controller.New(st, nil).WithDataObjects(objects)
+		policies := server.StorePolicies()
+		policies.ClaimProfiles = childOutputCapacity{}
+		return policies, nil
+	}))
+	if _, err := teststore.SQL(t, e.Store).ExecContext(ctx, `UPDATE teams SET next_run_number=2 WHERE name='a'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := teststore.SQL(t, e.Store).ExecContext(ctx, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"weather-report"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := server.WithEngineController(e.EngineController).HTTP().API
 	parent := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
 	var award struct {
 		Claim struct {
@@ -240,11 +247,10 @@ func (childOutputCapacity) ResolveClaimProfile(context.Context, capability.Princ
 
 func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, httpClient *http.Client, run string) {
 	t.Helper()
-	st.SetClaimProfileResolver(childOutputCapacity{})
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'stamp','pending',1,?,?)`, run, []byte(`{"id":"stamp"}`), []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := st.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: run, NodeID: "stamp"}, Capacity: match.Resources{Cores: 2}, Available: match.Resources{Cores: 2}})
+	claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: run, NodeID: "stamp"}, Capacity: match.Resources{Cores: 2}, Available: match.Resources{Cores: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +266,7 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 			t.Error(err)
 		}
 	})
-	principal, err := st.LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+	principal, err := st.AsOperator().LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +303,6 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 }
 
 func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
-	e, _, root := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {
 		t.Fatal(err)
@@ -311,7 +316,15 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := controller.NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithEngineController(e).WithDataObjects(objects).HTTP().API
+	var server *controller.Server
+	e, _, root := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		server = controller.NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(cipher).WithDataObjects(objects)
+		policies := server.StorePolicies()
+		policies.ClaimProfiles = childOutputCapacity{}
+		return policies, nil
+	}))
+
+	handler := server.WithEngineController(e.EngineController).HTTP().API
 	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
 	var award struct {
 		Claim struct {
@@ -384,7 +397,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 	}
 	childOutputSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('output-reader','output-reader@example.test',1,1)`)
 	childOutputSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','output-reader','reader',1)`)
-	session, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "output-reader"}, "a", time.Hour)
+	session, _, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "output-reader"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

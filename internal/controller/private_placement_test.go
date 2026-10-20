@@ -17,8 +17,8 @@ func TestPrivateHostSnapshotCarriesCanonicalPlacementAcrossTransport(t *testing.
 		t.Fatalf("private placement snapshot: %v", err)
 	}
 	server.placement.defaultPrefers, server.placement.hold, server.placement.liveness = []string{"name=preferred"}, time.Hour, time.Minute
-	engineHTTPRoot(t, &EngineController{Store: server.store}, "a", "preferred", []capability.Grant{capability.NodesClaim})
-	if err := server.store.RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "preferred", Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+	engineHTTPRoot(t, newEngineFixture(server.store, EngineController{}), "a", "preferred", []capability.Grant{capability.NodesClaim})
+	if err := server.store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "preferred", Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err = host.ReadSnapshot(t.Context(), "run")

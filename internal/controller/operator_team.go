@@ -15,10 +15,10 @@ func (s *Server) handleOperatorCreateTeam(w http.ResponseWriter, r *http.Request
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
 	}
-	if s.store == nil {
+	if s.operator == nil {
 		return missingEndpointPolicy()
 	}
-	issued, err := s.store.CreateOperatorTeam(r.Context(), a, request.Slug, request.DisplayName)
+	issued, err := s.operator.CreateOperatorTeam(r.Context(), a, request.Slug, request.DisplayName)
 	if errors.Is(err, store.ErrSlugTaken) {
 		return &apierr.Error{Code: apierr.Conflict, Message: "team already exists or its slug is retired"}
 	}

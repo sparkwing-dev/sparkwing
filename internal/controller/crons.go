@@ -107,7 +107,7 @@ func (s *Server) cronServiceFor(tenant *store.Tenant, principal string) *crons.S
 	}
 
 	svc := &crons.Service{
-		Store:    s.store,
+		Operator: s.operator,
 		Launcher: cronLauncher{server: s},
 		Now:      s.cronNow,
 		Host:     s.cronHolder,

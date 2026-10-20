@@ -22,23 +22,23 @@ func TestAuthorityAdaptersResolveLiveAncestryWithoutUnitAuthorization(t *testing
 	child.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "former-holder", Generation: 1}
 	authorityPersist(t, s, child)
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}
-	resolved, err := s.ResolveAuthority(t.Context(), ref)
+	resolved, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lookedUp, err := s.LookupCapability(t.Context(), child.Digest)
+	lookedUp, err := s.AsOperator().LookupCapability(t.Context(), child.Digest)
 	if err != nil || !reflect.DeepEqual(resolved, lookedUp) {
 		t.Fatalf("digest lookup differs from reference lookup: %v", err)
 	}
 	if resolved.Authority != ref || resolved.Class != capability.CredentialBearer || resolved.Capability.Binding != child.Binding || !slices.Contains(resolved.Capability.Grants, capability.RunsWrite) || slices.Contains(resolved.Capability.Grants, capability.TeamAdmin) {
 		t.Fatalf("resolved authority = %+v", resolved)
 	}
-	session, err := s.ResolveAuthority(t.Context(), member.Authority)
+	session, err := s.AsOperator().ResolveAuthority(t.Context(), member.Authority)
 	if err != nil || session.Class != capability.CredentialSession || session.Capability.Subject.ID != "member" {
 		t.Fatalf("resolved session = %+v, %v", session, err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='member'`)
-	lookedUp, err = s.LookupCapability(t.Context(), child.Digest)
+	lookedUp, err = s.AsOperator().LookupCapability(t.Context(), child.Digest)
 	if err != nil || slices.Contains(lookedUp.Capability.Grants, capability.RunsWrite) || !slices.Contains(lookedUp.Capability.Grants, capability.RunsRead) {
 		t.Fatalf("membership narrowing = %+v, %v", lookedUp, err)
 	}
@@ -72,10 +72,10 @@ func TestAuthorityAdaptersRefuseUnavailableAncestry(t *testing.T) {
 			if problem == "forged_digest" {
 				digest[0] ^= 1
 			} else {
-				principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix})
+				principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix})
 				assertUnavailableAuthority(t, principal, err)
 			}
-			principal, err := s.LookupCapability(t.Context(), digest)
+			principal, err := s.AsOperator().LookupCapability(t.Context(), digest)
 			assertUnavailableAuthority(t, principal, err)
 		})
 	}
@@ -100,11 +100,11 @@ func adapterBootstrap(t *testing.T) (*Store, capability.Issued) {
 	authorityPersist(t, s, root)
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET dispatch='controller'")
 	demand.CapabilityPrefix = root.Prefix
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+	p, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,14 +113,14 @@ func adapterBootstrap(t *testing.T) (*Store, capability.Issued) {
 
 func TestExchangeCapabilityCommitsOnceAndPreservesTheAward(t *testing.T) {
 	s, bootstrap := adapterBootstrap(t)
-	issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix})
+	issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if issued.Raw == "" || issued.Capability.Digest != sha256.Sum256([]byte(issued.Raw)) || issued.Capability.Parent.ID != "launcher" || issued.Capability.Delivery != capability.DeliveryDirect || !reflect.DeepEqual(issued.Capability.Billing, bootstrap.Capability.Billing) {
 		t.Fatal("exchanged capability lost its secret, parent, delivery or billing identity")
 	}
-	principal, err := s.LookupCapability(t.Context(), issued.Capability.Digest)
+	principal, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest)
 	if err != nil || principal.Capability.Prefix != issued.Capability.Prefix {
 		t.Fatalf("committed exchange lookup = %+v, %v", principal, err)
 	}
@@ -128,9 +128,9 @@ func TestExchangeCapabilityCommitsOnceAndPreservesTheAward(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT capability_prefix FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&prefix); err != nil || prefix != issued.Capability.Prefix {
 		t.Fatalf("exchanged unit fence = %q, %v", prefix, err)
 	}
-	principal, err = s.LookupCapability(t.Context(), bootstrap.Capability.Digest)
+	principal, err = s.AsOperator().LookupCapability(t.Context(), bootstrap.Capability.Digest)
 	assertUnavailableAuthority(t, principal, err)
-	again, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix})
+	again, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix})
 	if err == nil || !reflect.DeepEqual(again, capability.Issued{}) {
 		t.Fatal("bootstrap exchanged more than once")
 	}
@@ -141,16 +141,16 @@ func TestExchangeCapabilityCommitsOnceAndPreservesTheAward(t *testing.T) {
 func TestExchangeCapabilityRollbackReturnsNoBearer(t *testing.T) {
 	s, bootstrap := adapterBootstrap(t)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_exchange BEFORE UPDATE OF capability_prefix ON nodes BEGIN SELECT RAISE(ABORT,'unit write refused'); END`)
-	issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix})
+	issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix})
 	if err == nil || !reflect.DeepEqual(issued, capability.Issued{}) {
 		t.Fatal("failed exchange returned a capability")
 	}
 	rewriteSchemaCount(t, s.db, "capabilities", 2)
-	if _, err := s.LookupCapability(t.Context(), bootstrap.Capability.Digest); err != nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), bootstrap.Capability.Digest); err != nil {
 		t.Fatalf("rollback consumed bootstrap: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_exchange`)
-	if _, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix}); err != nil {
+	if _, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix}); err != nil {
 		t.Fatalf("retry after rollback: %v", err)
 	}
 }

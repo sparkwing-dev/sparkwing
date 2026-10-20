@@ -42,7 +42,7 @@ func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorize
 	}
 	read := s.ReadRunStatus
 	if read == nil {
-		if s.Store == nil {
+		if s.ResolveTenant == nil {
 			return controllerwire.RunDetail{}, missingEndpointPolicy()
 		}
 		read = s.readStoredRunStatus

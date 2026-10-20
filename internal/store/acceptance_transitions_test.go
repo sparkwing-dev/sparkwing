@@ -17,7 +17,7 @@ import (
 func checkStoreTransitions(t *testing.T) (err error) {
 	ctx := t.Context()
 	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
+	s, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
@@ -38,18 +38,17 @@ func checkStoreTransitions(t *testing.T) (err error) {
 		}
 	}
 	demand := store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 8}}
-	if _, err := s.ClaimUnit(ctx, demand); err == nil {
+	if _, err := s.AsOperator().ClaimUnit(ctx, demand); err == nil {
 		return errors.New("withdrawn job remained claimable")
 	}
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := target.TryOpen()
+	reopened, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
 	if err != nil {
 		return err
 	}
 	s = reopened
-	s.SetClaimProfileResolver(acceptanceClaimProfile{})
 	tenant, err = s.ForTeam(ctx, acceptanceTeam)
 	if err != nil {
 		return err
@@ -60,7 +59,7 @@ func checkStoreTransitions(t *testing.T) (err error) {
 	if _, err := tenant.TransitionNode(ctx, ready); err != nil {
 		return err
 	}
-	claim, err := s.ClaimUnit(ctx, demand)
+	claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		return err
 	}

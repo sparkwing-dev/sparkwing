@@ -129,7 +129,7 @@ func newHarness(t *testing.T, now time.Time) *harness {
 	launcher.store = st
 	return &harness{
 		svc: &Service{
-			Store:     st,
+			Operator:  st.AsOperator(),
 			Schedules: teststore.ForTeam(t, st, store.DefaultTeam),
 			Launcher:  launcher,
 			Now:       c.now,

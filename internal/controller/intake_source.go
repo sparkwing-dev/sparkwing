@@ -113,7 +113,7 @@ var errUncoveredGitHubRepository = errors.New("no GitHub App installation of thi
 func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID string) (string, error) {
 	refused := errUncoveredGitHubRepository
 	id, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil || id <= 0 || s.githubApp == nil || s.store == nil {
+	if err != nil || id <= 0 || s.githubApp == nil || s.operator == nil {
 		return "", refused
 	}
 	tenant, err := s.tenantForTeam(ctx, store.Team(team))
@@ -142,7 +142,7 @@ func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID str
 }
 
 func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string) (int64, error) {
-	if team == "" || s.store == nil {
+	if team == "" || s.operator == nil {
 		return 0, missingEndpointPolicy()
 	}
 	if s.githubApp != nil {

@@ -92,7 +92,7 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 	if s.Schedules != nil {
 		err = tick(s)
 	} else {
-		err = s.Store.AsOperator().EachTeam(ctx, nil, func(tenant *store.Tenant) error {
+		err = s.Operator.EachTeam(ctx, nil, func(tenant *store.Tenant) error {
 			svc := *s
 			svc.Schedules = tenant
 			err := tick(&svc)
@@ -105,7 +105,7 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 	if err != nil || dryRun {
 		return report, err
 	}
-	err = s.Store.AsOperator().RecordCronTick(ctx, store.CronTick{At: now, Host: s.Host, Version: s.Version, Error: summarize(report.Errors)})
+	err = s.Operator.RecordCronTick(ctx, store.CronTick{At: now, Host: s.Host, Version: s.Version, Error: summarize(report.Errors)})
 	return report, err
 }
 
@@ -171,7 +171,7 @@ func (s *Service) minIntervalRefusal(ctx context.Context, sched store.CronSchedu
 	if sched.Where != store.CronWhereController {
 		return nil, nil
 	}
-	limits, err := s.Store.AsOperator().ComputeLimits(ctx)
+	limits, err := s.Operator.ComputeLimits(ctx)
 	if err != nil {
 		return nil, err
 	}

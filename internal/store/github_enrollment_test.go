@@ -20,7 +20,7 @@ func actionsEnrollment(t *testing.T) (*Tenant, capability.Authorized, GitHubRunn
 	if err != nil {
 		t.Fatal(err)
 	}
-	tenant.s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+	tenant.s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 	return tenant, a, row
 }
 
@@ -151,7 +151,7 @@ func TestGitHubActionsRequiresCurrentEnrollmentProperty(t *testing.T) {
 		case 8:
 			spec.ExpiresAt = new(tenant.s.now().Add(2 * time.Hour))
 		}
-		issued, err := tenant.s.ProvisionCapability(t.Context(), spec)
+		issued, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), spec)
 		if err == nil || issued.Raw != "" {
 			t.Fatalf("forged Actions root: %+v %v", issued.Capability, err)
 		}
@@ -162,11 +162,11 @@ func TestGitHubActionsRequiresCurrentEnrollmentProperty(t *testing.T) {
 func TestGitHubEnrollmentRemovalFencesRootsAndDescendants(t *testing.T) {
 	tenant, a, row := actionsEnrollment(t)
 	spec := actionsSpec(t, tenant.s, tenant.team, "workflow")
-	root, err := tenant.s.ProvisionCapability(t.Context(), spec)
+	root, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := tenant.s.DelegateCapability(t.Context(), capability.DelegateSpec{
+	child, err := tenant.s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
 		Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Audience: capability.Controller,
 		Grants: []capability.Grant{capability.NodesClaim}, Binding: spec.Binding, Repositories: spec.Repositories, ExpiresAt: spec.ExpiresAt,
 	})
@@ -179,7 +179,7 @@ func TestGitHubEnrollmentRemovalFencesRootsAndDescendants(t *testing.T) {
 	if _, err := tenant.RegisterGitHubRunner(t.Context(), a, GitHubRunnerBinding{RepositoryID: 43, RepositoryOwnerID: 7, Repository: "acme/other"}); err != nil {
 		t.Fatal(err)
 	}
-	independent, err := tenant.s.ProvisionCapability(t.Context(), other)
+	independent, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), other)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,22 +187,22 @@ func TestGitHubEnrollmentRemovalFencesRootsAndDescendants(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, issued := range []capability.Issued{root, child} {
-		_, err := tenant.s.LookupCapability(t.Context(), issued.Capability.Digest)
+		_, err := tenant.s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest)
 		var refusal *apierr.Error
 		if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
 			t.Fatalf("removed enrollment authority: %v", err)
 		}
 	}
-	if _, err := tenant.s.LookupCapability(t.Context(), independent.Capability.Digest); err != nil {
+	if _, err := tenant.s.AsOperator().LookupCapability(t.Context(), independent.Capability.Digest); err != nil {
 		t.Fatalf("unrelated enrollment revoked: %v", err)
 	}
-	if issued, err := tenant.s.ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
+	if issued, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
 		t.Fatal("stale binding read minted after revocation")
 	}
 	if _, err := tenant.RegisterGitHubRunner(t.Context(), a, row); err != nil {
 		t.Fatal(err)
 	}
-	_, err = tenant.s.LookupCapability(t.Context(), root.Capability.Digest)
+	_, err = tenant.s.AsOperator().LookupCapability(t.Context(), root.Capability.Digest)
 	var refusal *apierr.Error
 	if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
 		t.Fatalf("re-enrolled root: %v", err)
@@ -219,7 +219,7 @@ func TestGitHubEnrollmentRemovalRacesIssuance(t *testing.T) {
 			var group sync.WaitGroup
 			group.Go(func() {
 				<-start
-				issued, issueErr = tenant.s.ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "race"))
+				issued, issueErr = tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "race"))
 			})
 			group.Go(func() { <-start; revokeErr = tenant.RevokeGitHubRunner(t.Context(), a, row.RepositoryID) })
 			close(start)
@@ -228,7 +228,7 @@ func TestGitHubEnrollmentRemovalRacesIssuance(t *testing.T) {
 				t.Fatal(revokeErr)
 			}
 			if issueErr == nil {
-				_, err := tenant.s.LookupCapability(t.Context(), issued.Capability.Digest)
+				_, err := tenant.s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest)
 				var refusal *apierr.Error
 				if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
 					t.Fatalf("racing issuance after revocation: %v", err)
@@ -253,7 +253,7 @@ func TestGitHubEnrollmentAndIssuanceLimitsSerialize(t *testing.T) {
 				group.Go(func() {
 					var err error
 					if issuance {
-						_, err = tenant.s.ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, fmt.Sprint(i)))
+						_, err = tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, fmt.Sprint(i)))
 					} else {
 						_, err = tenant.RegisterGitHubRunner(t.Context(), a, GitHubRunnerBinding{RepositoryID: int64(i + 100), RepositoryOwnerID: 7, Repository: "acme/repo"})
 					}
@@ -308,12 +308,12 @@ func TestGitHubActionsExpiredAndRevokedRootsReleaseIssuanceCapacity(t *testing.T
 	now := tenant.s.now()
 	tenant.s.clock = func() time.Time { return now }
 	for i := range MaxGitHubRunnerCredentials {
-		if _, err := tenant.s.ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, fmt.Sprint(i))); err != nil {
+		if _, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, fmt.Sprint(i))); err != nil {
 			t.Fatal(err)
 		}
 	}
 	now = now.Add(time.Hour)
-	if _, err := tenant.s.ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "expired-capacity")); err != nil {
+	if _, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "expired-capacity")); err != nil {
 		t.Fatalf("expired roots still consume issuance capacity: %v", err)
 	}
 	if err := tenant.RevokeGitHubRunner(t.Context(), a, row.RepositoryID); err != nil {
@@ -322,7 +322,7 @@ func TestGitHubActionsExpiredAndRevokedRootsReleaseIssuanceCapacity(t *testing.T
 	if _, err := tenant.RegisterGitHubRunner(t.Context(), a, row); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.s.ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "revoked-capacity")); err != nil {
+	if _, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "revoked-capacity")); err != nil {
 		t.Fatalf("revoked roots still consume issuance capacity: %v", err)
 	}
 }
@@ -341,7 +341,7 @@ func TestGitHubEnrollmentRollbackPreservesConsentAndAuthority(t *testing.T) {
 				return
 			}
 			tenant, a, row := actionsEnrollment(t)
-			root, err := tenant.s.ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "rollback"))
+			root, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "rollback"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -356,7 +356,7 @@ func TestGitHubEnrollmentRollbackPreservesConsentAndAuthority(t *testing.T) {
 			if _, err := tenant.GitHubRunnerBinding(t.Context(), row.RepositoryID); err != nil {
 				t.Fatalf("failed revocation removed consent: %v", err)
 			}
-			if _, err := tenant.s.LookupCapability(t.Context(), root.Capability.Digest); err != nil {
+			if _, err := tenant.s.AsOperator().LookupCapability(t.Context(), root.Capability.Digest); err != nil {
 				t.Fatalf("failed revocation ended root: %v", err)
 			}
 		})
@@ -370,7 +370,7 @@ func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
 	s.clock = func() time.Time { return now }
 	var first capability.Issued
 	for i := range MaxGitHubRunnerCredentials {
-		issued, err := s.ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, fmt.Sprint(i)))
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, fmt.Sprint(i)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -378,14 +378,14 @@ func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
 			first = issued
 		}
 	}
-	if issued, err := s.ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, "full")); !errors.Is(err, ErrGitHubRunnerCredentialLimit) || issued.Raw != "" {
+	if issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, "full")); !errors.Is(err, ErrGitHubRunnerCredentialLimit) || issued.Raw != "" {
 		t.Fatalf("full quota: %+v, %v", issued.Capability, err)
 	}
 	now = *first.Capability.ExpiresAt
-	if _, err := s.LookupCapability(t.Context(), first.Capability.Digest); err == nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), first.Capability.Digest); err == nil {
 		t.Fatal("expired Actions authority authenticated")
 	}
-	issued, err := s.ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, "after-expiry"))
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, "after-expiry"))
 	if err != nil || issued.Raw == "" {
 		t.Fatalf("quota after expiry: %+v, %v", issued.Capability, err)
 	}

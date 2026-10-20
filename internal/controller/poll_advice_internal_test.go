@@ -14,10 +14,10 @@ import (
 func newAdviceServer(t *testing.T) *Server {
 	t.Helper()
 	engine, _ := engineRuntimeStore(t)
-	engine.Store.SetClaimProfileResolver(engineProfileFake{})
+	engine.claimProfiles = engineProfileFake{}
 	engine.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	engineHTTPRoot(t, engine, "a", "advice", []capability.Grant{capability.NodesClaim})
-	return New(engine.Store, nil).WithEngineController(engine)
+	return New(engine.Store, nil).WithEngineController(engine.EngineController)
 }
 
 func TestClaimPollAdvice_WidensWithTheIdleWindow(t *testing.T) {

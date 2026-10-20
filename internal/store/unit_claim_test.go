@@ -61,16 +61,16 @@ func TestClaimUnitNamedAndQueuedUseCapacityAndIdentity(t *testing.T) {
 				demand.Kinds = []capability.UnitKind{capability.UnitNode}
 			}
 			demand.Capacity.Cores, demand.Available.Cores = 2, 2
-			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatal("two-core runner claimed four-core job")
 			}
 			demand.Capacity.Cores, demand.Available.Cores = 8, 0
-			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatal("busy runner claimed job")
 			}
 			demand.Available.Cores = 8
 			demand.Labels = []string{"name=forged", "class=cloud"}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,7 +81,7 @@ func TestClaimUnitNamedAndQueuedUseCapacityAndIdentity(t *testing.T) {
 			if err != nil || row.ClaimedBy != "runner" || row.StateSeq != 1 || row.Attempt != 0 {
 				t.Fatalf("row=%+v err=%v", row, err)
 			}
-			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatal("claimed twice")
 			}
 			rewriteSchemaCount(t, s.db, "billing_awards", 1)
@@ -117,7 +117,7 @@ func TestClaimUnitRejectsForeignAndMissingRequirements(t *testing.T) {
 				authorityPersist(t, s, root)
 				demand.CapabilityPrefix = root.Prefix
 			}
-			_, err := s.ClaimUnit(t.Context(), demand)
+			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if test == "expired" {
 				var refused *ErrIllegalTransition
 				if !errors.As(err, &refused) || refused.Reason != ReasonHolderRights {
@@ -168,8 +168,8 @@ func TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement(t *testing.
 				if err != nil {
 					t.Fatal(err)
 				}
-				s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Accept: accept}})
-				_, err = s.ClaimUnit(t.Context(), demand)
+				s.claimProfiles = claimProfileFake{profile: match.Profile{Accept: accept}}
+				_, err = s.AsOperator().ClaimUnit(t.Context(), demand)
 				var denied *apierr.Error
 				if queued && !errors.Is(err, ErrNotFound) || !queued && (!errors.As(err, &denied) || denied.Code != apierr.Forbidden) {
 					t.Fatalf("repository denial=%v", err)
@@ -182,8 +182,8 @@ func TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement(t *testing.
 				if err != nil {
 					t.Fatal(err)
 				}
-				s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Accept: accept}})
-				claim, err := s.ClaimUnit(t.Context(), demand)
+				s.claimProfiles = claimProfileFake{profile: match.Profile{Accept: accept}}
+				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil || claim.NodeID != "job" || claim.Award.Holder != root.Subject.ID {
 					t.Fatalf("authorized repository claim=%+v, %v", claim, err)
 				}
@@ -216,7 +216,7 @@ func TestClaimUnitGrantedProfileKeys(t *testing.T) {
 				if requirement != "gpu" {
 					demand.Labels = []string{requirement}
 				}
-				_, err = s.ClaimUnit(t.Context(), demand)
+				_, err = s.AsOperator().ClaimUnit(t.Context(), demand)
 				var denied *apierr.Error
 				if queued && !errors.Is(err, ErrNotFound) || !queued && (!errors.As(err, &denied) || denied.Code != apierr.Forbidden) {
 					t.Fatalf("unmet requirement=%v", err)
@@ -234,7 +234,7 @@ func TestClaimUnitGrantedProfileKeys(t *testing.T) {
 					authorityPersist(t, s, launcher)
 					demand.CapabilityPrefix = launcher.Prefix
 				}
-				claim, err := s.ClaimUnit(t.Context(), demand)
+				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil || claim.NodeID != "job" || claim.Award.Holder != demand.CapabilityPrefix {
 					t.Fatalf("matching identity claim=%+v, %v", claim, err)
 				}
@@ -264,7 +264,7 @@ func TestClaimUnitOwnerKindsAndEvalFences(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, s.now().Add(time.Hour).UnixNano())
 				rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
 			}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -294,7 +294,7 @@ func TestClaimUnitOwnerKindsAndEvalFences(t *testing.T) {
 				demand.Target = nil
 				demand.Kinds = []capability.UnitKind{capability.UnitEval}
 			}
-			second, err := s.ClaimUnit(t.Context(), demand)
+			second, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil || second.Award.Generation != 2 {
 				t.Fatalf("reclaim=%+v err=%v", second, err)
 			}
@@ -325,17 +325,17 @@ func TestClaimUnitTriggerRequirementsAndQueuePreference(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?`, body)
-	if _, err = s.ClaimUnit(t.Context(), demand); err == nil {
+	if _, err = s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 		t.Fatal("trigger ignored requirements")
 	}
 	demand.Labels = []string{"gpu"}
-	if _, err = s.ClaimUnit(t.Context(), demand); err != nil {
+	if _, err = s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 		t.Fatal(err)
 	}
 	demand.Target = nil
 	demand.Kinds = []capability.UnitKind{capability.UnitNode}
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','preferred','pending',1,?,?)`, []byte(`{"id":"preferred"}`), []byte(`{"prefers":{"set":true,"value":["gpu"]}}`))
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || claim.NodeID != "preferred" {
 		t.Fatalf("preferred=%+v err=%v", claim, err)
 	}
@@ -348,13 +348,13 @@ func TestClaimUnitMismatchPreservesQueueAndDoesNotHideEligibleWork(t *testing.T)
 	demand.Target = nil
 	demand.Kinds = []capability.UnitKind{capability.UnitNode}
 	demand.Labels = []string{"pool=prod"}
-	claimed, err := s.ClaimUnit(t.Context(), demand)
+	claimed, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || claimed.NodeID != "later" {
 		t.Fatalf("oldest eligible claim: %+v, %v", claimed, err)
 	}
 	tenant := &Tenant{s: s, team: "a"}
 	for range 2 {
-		if _, err := s.ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+		if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("ineligible queue: %v", err)
 		}
 	}
@@ -394,7 +394,7 @@ func TestClaimUnitRefusesElapsedQueueBeforeReaping(t *testing.T) {
 				} else {
 					demand.Target = nil
 				}
-				if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+				if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 					t.Fatal("expired queue was awarded before reaping")
 				}
 				rewriteSchemaCount(t, s.db, "billing_awards", 0)
@@ -426,7 +426,7 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 			}
 			demand.CapabilityPrefix = here.Capability.Prefix
 			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if late {
 				if err == nil {
 					t.Fatal("here claimed after initial window")
@@ -453,7 +453,7 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 				t.Fatal(err)
 			}
 			s.clock = func() time.Time { return start.Add(11 * time.Minute) }
-			if claim, err = s.ClaimUnit(t.Context(), demand); err != nil || claim.Award.Generation != 2 {
+			if claim, err = s.AsOperator().ClaimUnit(t.Context(), demand); err != nil || claim.Award.Generation != 2 {
 				t.Fatalf("here reclaim=%+v err=%v", claim, err)
 			}
 		})
@@ -463,14 +463,14 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 func TestClaimUnitRechecksOwnerAfterProfileResolution(t *testing.T) {
 	s, demand := unitClaimFixture(t)
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
-	owner, err := s.ClaimUnit(t.Context(), demand)
+	owner, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetClaimProfileResolver(claimProfileFake{before: func() { s.clock = func() time.Time { return owner.Award.LeaseExpiresAt } }})
+	s.claimProfiles = claimProfileFake{before: func() { s.clock = func() time.Time { return owner.Award.LeaseExpiresAt } }}
 	demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
 	demand.CapabilityPrefix = owner.Award.CapabilityPrefix
-	if _, err = s.ClaimUnit(t.Context(), demand); err == nil {
+	if _, err = s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 		t.Fatal("owner lease lapse during profile resolution still claimed job")
 	}
 	var holder sql.NullString
@@ -500,7 +500,7 @@ func TestClaimUnitInheritsRunnerSelection(t *testing.T) {
 					}
 					setClaimRunnerSelection(t, s, runspec.RunnerSelection{Kind: runnerKind, Value: selected})
 					demand.Labels = []string{"name=other"}
-					if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+					if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 						t.Fatal("runner selection was ignored")
 					}
 					if runnerKind == runspec.RunnerName {
@@ -508,7 +508,7 @@ func TestClaimUnitInheritsRunnerSelection(t *testing.T) {
 					} else {
 						demand.Labels = append(demand.Labels, "gpu")
 					}
-					if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+					if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 						t.Fatal(err)
 					}
 				})
@@ -548,13 +548,13 @@ func TestClaimUnitRefusesAcceptedGuardFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET spec_json=?,spec_hash='accepted',sealed_at=1,plan_json=?,plan_hash='plan' WHERE id='run'`, body, []byte(`{"jobs":[{"id":"job"}]}`))
-			if _, err = s.ClaimUnit(t.Context(), demand); err == nil {
+			if _, err = s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatal("ready job bypassed refused run guard")
 			}
 			rewriteSchemaCount(t, s.db, "billing_awards", 0)
 			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 			demand.Kinds = nil
-			if _, err = s.ClaimUnit(t.Context(), demand); err != nil {
+			if _, err = s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 				t.Fatalf("owner cannot finish guard-refused run: %v", err)
 			}
 		})

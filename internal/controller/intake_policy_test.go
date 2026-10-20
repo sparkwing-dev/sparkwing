@@ -119,9 +119,9 @@ func TestControllerIntakePublishesCapturedLocalHistory(t *testing.T) {
 	if err != nil || admitted.OwnerUnit != nil || admitted.Request.Request.Options.OwnerExecutionTimeout.Value != 0 || admitted.Request.Request.Origin != runspec.OriginPublish {
 		t.Fatalf("local history gained an execution deadline or owner: %+v, %v", admitted, err)
 	}
-	_ = engineHTTPRoot(t, &EngineController{Store: server.store}, "a", "publisher", []capability.Grant{capability.DataWrite})
+	_ = engineHTTPRoot(t, newEngineFixture(server.store, EngineController{}), "a", "publisher", []capability.Grant{capability.DataWrite})
 	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "publisher"}
-	principal, err := server.store.ResolveAuthority(t.Context(), authority)
+	principal, err := server.store.AsOperator().ResolveAuthority(t.Context(), authority)
 	if err != nil {
 		t.Fatal(err)
 	}

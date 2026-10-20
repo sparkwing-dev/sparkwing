@@ -72,7 +72,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if !errors.Is(err, sql.ErrNoRows) {
 			return CreditReversal{}, err
 		}
-		paid, found, err := paidGrantForPaymentTx(ctx, tx, req.PaymentID)
+		paid, found, err := tx.operator.paidGrantForPaymentTx(ctx, tx, req.PaymentID)
 		if err != nil {
 			return CreditReversal{}, err
 		}
@@ -84,7 +84,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		if _, err := applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentRefund, Mode: mode, ObjectID: req.RefundID, PaymentID: req.PaymentID, AmountMinor: req.AmountCents, Status: CardRefundSucceeded}, actor); err != nil {
+		if _, err := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentRefund, Mode: mode, ObjectID: req.RefundID, PaymentID: req.PaymentID, AmountMinor: req.AmountCents, Status: CardRefundSucceeded}, actor); err != nil {
 			return CreditReversal{}, err
 		}
 		result := CreditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
@@ -104,7 +104,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		if err := RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: t.team, Kind: "operator.refund_recorded", SubjectID: subject, Actor: actor, Attrs: map[string]any{"digest": digest, "result": result, "reason": req.Reason, "payment_id": req.PaymentID, "refund_id": req.RefundID}}); err != nil {
+		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: t.team, Kind: "operator.refund_recorded", SubjectID: subject, Actor: actor, Attrs: map[string]any{"digest": digest, "result": result, "reason": req.Reason, "payment_id": req.PaymentID, "refund_id": req.RefundID}}); err != nil {
 			return CreditReversal{}, err
 		}
 		return result, nil

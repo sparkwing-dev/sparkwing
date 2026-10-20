@@ -33,7 +33,7 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	f := newCreditsFixture(t)
+	f := newCreditsFixture(t, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 
 	status, body := f.request(t, http.MethodGet, "/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
@@ -81,7 +81,7 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 }
 
 func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
-	f := newCreditsFixture(t)
+	f := newCreditsFixture(t, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	for range 20 {
 		status, body := f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 			map[string]any{"limits": map[string]int64{
@@ -108,7 +108,7 @@ func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
 }
 
 func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
-	f := newCreditsFixture(t)
+	f := newCreditsFixture(t, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	setComputeLimit(t, f, store.ComputeLimitGlobalRunners, 7)
 
 	status, body := f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
@@ -164,8 +164,7 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 }
 
 func TestComputeLimits_RunCreationRefusedPastTheHourlyCap(t *testing.T) {
-	f := newCreditsFixture(t)
-	f.store.SetIntakePolicy(receiptPolicy{})
+	f := newCreditsFixture(t, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	setComputeLimit(t, f, store.ComputeLimitGlobalRunsPerHour, 1)
 	seedRunNode(t, f.store, "run-first", "build")
 
@@ -208,7 +207,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	f := newCreditsFixture(t)
+	f := newCreditsFixture(t, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	ctx := context.Background()
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
 	writer, _, err := teststore.ProvisionCredential(ctx, f.store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "pool"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.control", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
@@ -216,7 +215,6 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 		t.Fatalf("mint a writer for the metered principal: %v", err)
 	}
 
-	f.store.SetIntakePolicy(receiptPolicy{})
 	body := computeIntake("demo")
 	status, first := f.request(t, http.MethodPost, "/api/v1/runs", writer, body)
 	if status != http.StatusCreated {

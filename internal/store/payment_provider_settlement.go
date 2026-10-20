@@ -53,7 +53,7 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 				return err
 			}
 		}
-		result, err = applyPaymentStateTx(ctx, tx, event, "payment_provider")
+		result, err = tx.operator.applyPaymentStateTx(ctx, tx, event, "payment_provider")
 		if err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ func samePaymentObject(a, b capability.PaymentEvent) bool {
 	return a.Kind != capability.PaymentDisputeClosed || b.Kind != capability.PaymentDisputeClosed || a.Status == b.Status
 }
 
-func applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent, actor string) (PaymentSettlement, error) {
+func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent, actor string) (PaymentSettlement, error) {
 	// The refill worker locks ledger before checkout; callbacks preserve that order after the payment lock.
 	var team Team
 	err := tx.QueryRowContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND ((payment_id<>'' AND payment_id=?) OR (session_id<>id AND session_id=?))`, e.Mode, e.PaymentID, e.CheckoutID).Scan(&team)
@@ -208,7 +208,7 @@ func applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentE
 			return PaymentSettlement{}, err
 		}
 	}
-	result, err := reducePaymentStateTx(ctx, tx, e)
+	result, err := tx.operator.reducePaymentStateTx(ctx, tx, e)
 	if err != nil {
 		return result, err
 	}
@@ -217,7 +217,7 @@ func applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentE
 		if e.Kind == capability.PaymentPageCompleted {
 			intent = e.IntentID
 		}
-		team, err := reconcileSetupStateTx(ctx, tx, e.Mode, intent)
+		team, err := tx.operator.reconcileSetupStateTx(ctx, tx, e.Mode, intent)
 		if err != nil {
 			return result, err
 		}
@@ -228,11 +228,11 @@ func applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentE
 	if e.PaymentID == "" {
 		return result, nil
 	}
-	if err := reconcilePaymentStateTx(ctx, tx, e.Mode, e.PaymentID, paymentAttribution{refund: e.ObjectID, actor: actor}); err != nil {
+	if err := tx.operator.reconcilePaymentStateTx(ctx, tx, e.Mode, e.PaymentID, paymentAttribution{refund: e.ObjectID, actor: actor}); err != nil {
 		return result, err
 	}
 	if result.Team == "" {
-		result.Team, err = paymentTeamTx(ctx, tx, e.Mode, e.PaymentID)
+		result.Team, err = tx.operator.paymentTeamTx(ctx, tx, e.Mode, e.PaymentID)
 		if err != nil {
 			return result, err
 		}
@@ -254,13 +254,13 @@ func applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentE
 	return result, nil
 }
 
-func reducePaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
+func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
 	var result PaymentSettlement
 	switch e.Kind {
 	case capability.PaymentCheckoutPaid, capability.PaymentCheckoutExpired, capability.PaymentCheckoutFailed:
-		return applyCheckoutPaymentTx(ctx, tx, e)
+		return tx.operator.applyCheckoutPaymentTx(ctx, tx, e)
 	case capability.PaymentPageCompleted:
-		return bindCompletedPageTx(ctx, tx, e)
+		return tx.operator.bindCompletedPageTx(ctx, tx, e)
 	case capability.PaymentCardSetup:
 		if e.CustomerID == "" || e.MethodID == "" || e.Fingerprint == "" {
 			return result, ErrInvalidInput
@@ -341,7 +341,7 @@ func reducePaymentStateTx(ctx context.Context, tx *storeTx, e capability.Payment
 	return result, authorityError(apierr.BadRequest, "unsupported provider outcome")
 }
 
-func bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
+func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
 	var team, customer string
 	err := tx.QueryRowContext(ctx, `SELECT team,customer_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup_session'`+tx.forShare(), e.Mode, e.ObjectID).Scan(&team, &customer)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -369,16 +369,16 @@ func bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentE
 }
 
 // RecordsPaymentParent reports whether this deployment committed the checkout, refill, page or intent an event concerns.
-func (s *Store) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (bool, error) {
+func (o *Operator) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (bool, error) {
 	var found int
-	err := s.queryRow(ctx, `SELECT CASE WHEN
+	err := o.s.queryRow(ctx, `SELECT CASE WHEN
  EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode=? AND (session_id=? OR payment_id<>'' AND payment_id=?))
  OR EXISTS(SELECT 1 FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?))
  THEN 1 ELSE 0 END`, r.Mode, r.CheckoutID, r.PaymentID, r.Mode, r.CheckoutID, r.PaymentID, r.ObjectID).Scan(&found)
 	return found == 1, err
 }
 
-func reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, intent string) (Team, error) {
+func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, intent string) (Team, error) {
 	var card Card
 	var created int64
 	var applied int

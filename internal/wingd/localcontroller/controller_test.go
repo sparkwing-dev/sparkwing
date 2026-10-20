@@ -106,7 +106,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 	var binding Binding
 	c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
 		binding = b
-		if b.Tenant.Team() != store.DefaultTeam || b.Controller.Store != b.Store {
+		if b.Tenant.Team() != store.DefaultTeam || b.Controller.ResolveTenant == nil {
 			t.Fatal("shared controller did not receive the owned default-team handle")
 		}
 		seedOwner(t, b, "unstarted", false)
@@ -129,7 +129,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 			}
 			return wingd.LocalActivity{QueuedTriggers: 1}, nil
 		}
-		services.Close = func() error { return b.Store.Ping(t.Context()) }
+		services.Close = func() error { return b.Store.AsOperator().Ping(t.Context()) }
 		return services, nil
 	})
 	activity, err := c.Reconcile(t.Context())
@@ -139,7 +139,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Store.Ping(t.Context()); err == nil {
+	if err := binding.Store.AsOperator().Ping(t.Context()); err == nil {
 		t.Fatal("owned store remained open")
 	}
 	reopened, err := teststore.OpenExisting(filepath.Join(binding.Home, "state.db"))
@@ -171,7 +171,7 @@ func TestCompositionCompletesRunsAfterReadinessAndJoinsOnFailure(t *testing.T) {
 				if !ready.Load() {
 					t.Error("completion ran before readiness")
 				}
-				if err := b.Store.Ping(ctx); err != nil {
+				if err := b.Store.AsOperator().Ping(ctx); err != nil {
 					t.Error(err)
 				}
 				return failure
@@ -204,7 +204,7 @@ func TestCompositionMaintainsStorageAfterReadinessWhileOwningStore(t *testing.T)
 				if !ready.Load() {
 					t.Error("storage scan ran before readiness")
 				}
-				if err := b.Store.Ping(ctx); err != nil {
+				if err := b.Store.AsOperator().Ping(ctx); err != nil {
 					t.Error("storage maintenance lost the elected store:", err)
 				}
 				select {
@@ -241,7 +241,7 @@ func TestCompositionMaintainsStorageAfterReadinessWhileOwningStore(t *testing.T)
 }
 
 func TestCompositionCleansPartialBindings(t *testing.T) {
-	for _, mode := range []string{"bind_error", "cancelled", "incomplete", "runner", "policy", "foreign_store"} {
+	for _, mode := range []string{"bind_error", "cancelled", "incomplete", "runner", "policy", "tenant"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -253,7 +253,7 @@ func TestCompositionCleansPartialBindings(t *testing.T) {
 				services := serviceFixture(b)
 				services.Close = func() error {
 					closed++
-					return errors.Join(closeFailure, b.Store.Ping(t.Context()))
+					return errors.Join(closeFailure, b.Store.AsOperator().Ping(t.Context()))
 				}
 				switch mode {
 				case "bind_error":
@@ -266,12 +266,12 @@ func TestCompositionCleansPartialBindings(t *testing.T) {
 					services.Runner.Bind = nil
 				case "policy":
 					b.Controller.RunnerPolicy = nil
-				case "foreign_store":
-					b.Controller.Store = nil
+				case "tenant":
+					b.Controller.ResolveTenant = nil
 				}
 				return services, nil
 			}}).Open(ctx, t.TempDir())
-			if err == nil || !errors.Is(err, closeFailure) || closed != 1 || owned.Ping(t.Context()) == nil {
+			if err == nil || !errors.Is(err, closeFailure) || closed != 1 || owned.AsOperator().Ping(t.Context()) == nil {
 				t.Fatalf("partial binding leaked or lost cleanup: close=%d: %v", closed, err)
 			}
 			if mode == "bind_error" && !errors.Is(err, failure) || mode == "cancelled" && !errors.Is(err, context.Canceled) {
@@ -293,7 +293,7 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 				<-ctx.Done()
 				<-release
 				defer close(joined)
-				return "", errors.Join(ctx.Err(), b.Store.Ping(t.Context()))
+				return "", errors.Join(ctx.Err(), b.Store.AsOperator().Ping(t.Context()))
 			}
 			services.State.(*stateFixture).watch = func(ctx context.Context, report func(wingd.LocalActivity) error) error {
 				<-started

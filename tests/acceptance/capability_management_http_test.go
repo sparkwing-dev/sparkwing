@@ -82,7 +82,7 @@ func managementFixture(operator bool) (*credentialBoundary, *capabilityManagemen
 }
 
 func managementServer(b *credentialBoundary, f *capabilityManagement) http.Handler {
-	return bindTenantPort[controller.CapabilityManager](controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)),
+	return bindTenantPort[controller.CapabilityManager](controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithOperatorCapabilityManager(f),
 		func(_ context.Context, team store.Team) (controller.CapabilityManager, error) {
 			if team != f.team {
 				return nil, errors.New("wrong resolver scope")
@@ -387,7 +387,7 @@ func TestCapabilityManagementHTTPAuditProperty(t *testing.T) {
 		raw := "swk_" + base64.RawURLEncoding.EncodeToString(digest[:])
 		f.rows[0].Prefix = raw[:16]
 		logs := &bytes.Buffer{}
-		s := bindTenantPort[controller.CapabilityManager](controller.New(nil, slog.New(slog.NewTextHandler(logs, nil))).WithAuthorization(consoleAuthorization(b)),
+		s := bindTenantPort[controller.CapabilityManager](controller.New(nil, slog.New(slog.NewTextHandler(logs, nil))).WithAuthorization(consoleAuthorization(b)).WithOperatorCapabilityManager(f),
 			func(context.Context, store.Team) (controller.CapabilityManager, error) { return f, nil })
 		selector := raw[:16]
 		if complete {

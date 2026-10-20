@@ -100,7 +100,7 @@ func TestAuthorizationSnapshotReadsWithoutLocksAndMutationLocksAncestry(t *testi
 	authorityPersist(t, s, child)
 	s.dialect = DialectPostgres
 	p := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}}
-	if err := s.CheckBinding(t.Context(), p, capability.BindNone, capability.Target{Team: "a"}); err != nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindNone, capability.Target{Team: "a"}); err != nil {
 		t.Fatal(err)
 	}
 	if !recording.options.ReadOnly || recording.options.Isolation != driver.IsolationLevel(sql.LevelRepeatableRead) {

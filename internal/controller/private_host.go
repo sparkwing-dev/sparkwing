@@ -18,7 +18,7 @@ import (
 )
 
 func (s *Server) localHostEndpoints() []Endpoint {
-	engine := &EngineController{Store: s.store}
+	engine := s.engineController
 	return []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/data-authority", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostDataAuthority},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostDataAuthority},
@@ -185,7 +185,7 @@ func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request,
 		if body.SourceAttempt == nil || *body.SourceAttempt < 0 || *body.SourceAttempt == math.MaxInt64 {
 			return invalidEngineBody("start requires a valid captured source attempt")
 		}
-		profile, _, err := s.store.ReadClaimProfile(r.Context(), a.Principal.Authority)
+		profile, _, err := s.operator.ReadClaimProfile(r.Context(), a.Principal.Authority)
 		if err != nil {
 			return err
 		}
@@ -219,7 +219,7 @@ func (s *Server) localHostAuthentication(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		return err
 	}
-	snapshot, err := s.store.ReadAuthentication(r.Context(), body.Lookup, body.Evidence)
+	snapshot, err := s.operator.ReadAuthentication(r.Context(), body.Lookup, body.Evidence)
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,7 @@ func (s *Server) localHostBinding(w http.ResponseWriter, r *http.Request, a capa
 	if err != nil {
 		return err
 	}
-	if err := s.store.CheckBinding(r.Context(), principal, body.Rule, target); err != nil {
+	if err := s.operator.CheckBinding(r.Context(), principal, body.Rule, target); err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, localhostwire.LocalBindingChecked{Checked: true})
@@ -288,7 +288,7 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 		if node.OwnerCapabilityPrefix != owner.Capability.Prefix || node.CapabilityPrefix == "" || ref.ID != "" && ref.ID != node.CapabilityPrefix {
 			continue
 		}
-		principal, err := s.store.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix})
+		principal, err := s.operator.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix})
 		if err != nil {
 			return capability.Principal{}, err
 		}

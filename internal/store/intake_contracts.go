@@ -32,10 +32,6 @@ type IntakePolicy interface {
 	ResolveIntake(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error)
 }
 
-// SetIntakePolicy configures the server policy lookup before the store is shared.
-// An unconfigured store refuses intake rather than accepting missing operator ceilings.
-func (s *Store) SetIntakePolicy(policy IntakePolicy) { s.intakePolicy = policy }
-
 type intakeContracts interface {
 	SealRequest(runspec.Request, runspec.IntakeFacts) (runspec.SealedRequest, error)
 	SealSpec(runspec.SealInput) (runspec.Spec, error)

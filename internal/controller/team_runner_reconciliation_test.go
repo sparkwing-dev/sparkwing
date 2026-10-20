@@ -25,7 +25,7 @@ func (tenantRunnerPolicy) CheckRunner(context.Context, string) error { return ni
 
 func tenantRunClaim(t *testing.T, f *tenancyFixture) (controllerwire.CreateRunResponse, controllerwire.ClaimedUnit) {
 	t.Helper()
-	f.srv.WithEngineController(&controller.EngineController{Store: f.st, RunnerPolicy: tenantRunnerPolicy{}})
+	f.srv.WithEngineController(controller.NewEngineController(f.st, controller.EngineController{RunnerPolicy: tenantRunnerPolicy{}}))
 	body := computeIntake("build-b")
 	body.Request.Git.Repository = runspec.Repository{}
 	body.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://git.example.test/acme/widgets.git", PipelineDir: ".sparkwing"}

@@ -41,24 +41,7 @@ type RunTransactions interface {
 }
 
 func (s *EngineController) runTransactions(ctx context.Context, team string) (RunTransactions, error) {
-	if team == "" {
-		return nil, missingEndpointPolicy()
-	}
-	if s.ResolveTenant != nil {
-		tenant, err := s.ResolveTenant(ctx, store.Team(team))
-		if err == nil && tenant == nil {
-			return nil, missingEndpointPolicy()
-		}
-		return tenant, err
-	}
-	if s.Store == nil {
-		return nil, missingEndpointPolicy()
-	}
-	tenant, err := s.tenantForTeam(ctx, store.Team(team))
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return nil, &apierr.Error{Code: apierr.NotFound, Message: "team is not registered"}
-	}
-	return tenant, err
+	return ScopedTenantPort[RunTransactions](ctx, store.Team(team), s.ResolveTenant)
 }
 
 // IntakeForStore preserves tagged authority and the idempotency key. API input

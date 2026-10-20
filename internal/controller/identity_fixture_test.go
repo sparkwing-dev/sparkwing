@@ -46,7 +46,6 @@ type identityFixture struct {
 }
 
 type fixtureOpts struct {
-	store     *store.Store
 	configure func(*controller.Server)
 	logger    *slog.Logger
 
@@ -60,29 +59,30 @@ func newIdentityFixture(t *testing.T) *identityFixture {
 
 func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	t.Helper()
-	st := o.store
-	if st == nil {
-		var err error
-		st, err = teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-		if err != nil {
-			t.Fatal(err)
+	iss := googletest.New(t)
+	gh := githubtest.New(t)
+	var srv *controller.Server
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		srv = controller.NewDeployment(st, deploymenttest.Cloud(t, "https://controller.test"), o.logger).WithSecretsCipher(testCipher(t)).
+			WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
+			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
+			WithBillingCheckout(o.checkoutURL, o.checkoutToken).
+			WithDashboard(controller.Dashboard{})
+		if o.configure != nil {
+			o.configure(srv)
 		}
-		t.Cleanup(func() { _ = st.Close() })
+		return srv.StorePolicies(), nil
+	}))
+	if err != nil {
+		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = st.Close() })
+
 	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	iss := googletest.New(t)
-	gh := githubtest.New(t)
-	srv := controller.NewDeployment(st, deploymenttest.Cloud(t, "https://controller.test"), o.logger).WithSecretsCipher(testCipher(t)).
-		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
-		WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
-		WithBillingCheckout(o.checkoutURL, o.checkoutToken).
-		WithDashboard(controller.Dashboard{})
-	if o.configure != nil {
-		o.configure(srv)
-	}
+
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin, srv: srv}
@@ -422,4 +422,8 @@ func teamOf(f *identityFixture) (owner, editor, reader signedIn) {
 	f.join(owner, reader, "rita@example.com", "reader")
 	editor.team, reader.team = owner.team, owner.team
 	return owner, editor, reader
+}
+
+func fixtureStorePolicies(policies store.Policies) store.Option {
+	return store.WithPolicies(func(*store.Store) (store.Policies, error) { return policies, nil })
 }

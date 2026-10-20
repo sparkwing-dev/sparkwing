@@ -55,13 +55,13 @@ func TestOverflowCLIThroughAuthenticatedControllerAndStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := controller.New(state, nil).WithSecretsCipher(cipher)
-	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "overflow-test", time.Hour)
+	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "overflow-test", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	member, err := state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "overflow-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	member, err := state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "overflow-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

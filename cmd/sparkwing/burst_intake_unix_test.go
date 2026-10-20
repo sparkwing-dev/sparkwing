@@ -330,13 +330,13 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 			t.Fatal(err)
 		}
 	}
-	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
+	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-user"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-user"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.WithEngineController(&controller.EngineController{Store: state, RunnerPolicy: &controller.SignedRunnerAdmission{Resolver: versions}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}})
+	server.WithEngineController(controller.NewEngineController(state, controller.EngineController{RunnerPolicy: &controller.SignedRunnerAdmission{Resolver: versions}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}}))
 	return state, server, issued.Raw
 }
 
@@ -411,7 +411,7 @@ func main() {
 
 func TestBurstFixtureSupportsPublicSessionEnrollment(t *testing.T) {
 	state, server, _ := burstIntakeController(t, "http://controller.test")
-	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
+	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

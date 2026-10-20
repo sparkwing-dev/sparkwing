@@ -44,7 +44,7 @@ func TestSourceControllerUsesStoreAuditAndBoundCipher(t *testing.T) {
 			}
 			engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE id='run'`, raw)
 			a := engineRuntimeClaim(t, e, capability.UnitNode)
-			e.Store.SetClaimProfileResolver(engineProfileFake{})
+			e.claimProfiles = engineProfileFake{}
 			engineSQL(t, e.Store, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
 			registerFixtureRunner(t, e.Store, false)
 			cipher, err := secrets.NewCipher(bytes.Repeat([]byte{21}, secrets.KeySize))
@@ -57,7 +57,7 @@ func TestSourceControllerUsesStoreAuditAndBoundCipher(t *testing.T) {
 			}
 			engineSQL(t, e.Store, `INSERT INTO git_credentials(id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES ('credential','a','github.com','https',?,1,1,1)`, envelope)
 			p := a.Principal.Capability
-			issued, err := e.Store.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: a.Principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.SourceRead}, Binding: p.Binding, Repositories: p.Repositories, Data: p.Data, ExpiresAt: p.ExpiresAt})
+			issued, err := e.Store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: a.Principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.SourceRead}, Binding: p.Binding, Repositories: p.Repositories, Data: p.Data, ExpiresAt: p.ExpiresAt})
 			if err != nil {
 				t.Fatal(err)
 			}

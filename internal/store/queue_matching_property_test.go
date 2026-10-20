@@ -33,7 +33,7 @@ func TestClaimQueueMismatchPreservesPositionProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		for range 3 {
-			if _, err := s.ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("mismatched queue poll: %v", err)
 			}
 		}
@@ -44,7 +44,7 @@ func TestClaimQueueMismatchPreservesPositionProperty(t *testing.T) {
 		rewriteSchemaCount(t, s.db, "billing_awards", 0)
 		rewriteSchemaCount(t, s.db, "events", 0)
 		demand.Labels = []string{label}
-		claim, err := s.ClaimUnit(t.Context(), demand)
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if err != nil || claim.NodeID != "job" || claim.Award.Generation != 1 || !claim.Award.LeaseExpiresAt.After(s.now()) {
 			t.Fatalf("eligible immediate claim: %+v, %v", claim, err)
 		}
@@ -59,7 +59,7 @@ func TestClaimQueuePreferenceHasNoOfferWindow(t *testing.T) {
 			demand.Kinds = []capability.UnitKind{capability.UnitNode}
 			demand.Labels = labels
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?,execution_json=?`, s.now().UnixNano(), []byte(`{"prefers":{"set":true,"value":["gpu"]}}`))
-			claim, err := s.ClaimUnit(t.Context(), demand)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil || claim.NodeID != "job" {
 				t.Fatalf("immediate preferred or fallback claim: %+v, %v", claim, err)
 			}
@@ -67,7 +67,7 @@ func TestClaimQueuePreferenceHasNoOfferWindow(t *testing.T) {
 			if err != nil || row.ReadyAt == nil || !row.ReadyAt.Equal(s.now()) {
 				t.Fatalf("claim changed arrival: %+v, %v", row, err)
 			}
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 				t.Fatal(err)
 			}
 		})

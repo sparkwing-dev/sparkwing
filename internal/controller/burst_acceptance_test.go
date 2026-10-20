@@ -83,9 +83,9 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	engineSQL(t, s.store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 	now := time.Now().UTC()
 	clock.pin(func() time.Time { return now })
-	s.store.SetClaimProfileResolver(billingCloudProfile{})
-	e := &EngineController{Store: s.store, RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })}
-	s.WithEngineController(e)
+	s.engine.claimProfiles = billingCloudProfile{}
+	e := newEngineFixture(s.store, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
+	s.WithEngineController(e.EngineController)
 	options.HTTP = &http.Client{Transport: inventoryRoundTrip{s.Handler()}}
 	newClient := func(raw string, launcher bool) controllerwire.Controller {
 		t.Helper()
@@ -377,11 +377,11 @@ func burstAcceptanceCheckout(t *testing.T, options client.EngineOptions, run str
 	}
 }
 
-func burstAcceptancePersonalMachine(t *testing.T, s *Server) string {
+func burstAcceptancePersonalMachine(t *testing.T, s *serverFixture) string {
 	t.Helper()
 	digest := sha256.Sum256([]byte("private-account-session"))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := s.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:burst-desktop", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "burst-desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"example.test/acme/*"}})
+	issued, err := s.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:burst-desktop", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "burst-desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"example.test/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}

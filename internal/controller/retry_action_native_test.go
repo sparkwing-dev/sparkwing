@@ -23,10 +23,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func retryActionFixture(t *testing.T, value string, accepted bool) (*Server, client.EngineOptions, string, store.RunRow) {
+func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixture, client.EngineOptions, string, store.RunRow) {
 	t.Helper()
 	s, session := credentialSessionServer(t)
-	s.WithEngineController(&EngineController{Store: s.store, VersionPolicy: engineVersionPolicy(&engineVersionFake{})})
+	s.WithEngineController(NewEngineController(s.store, EngineController{VersionPolicy: engineVersionPolicy(&engineVersionFake{})}))
 	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.control'`)
 	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	input := runspec.Request{

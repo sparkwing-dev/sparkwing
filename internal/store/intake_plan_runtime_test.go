@@ -92,12 +92,12 @@ func intakeFixture(t *testing.T) (*Tenant, IntakeRequest, *time.Time) {
 		err := json.Unmarshal(raw, &p)
 		return p, err
 	}}
-	s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+	s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		if _, err := r.ResolveAuthority(ctx, in.Authority); err != nil {
 			return IntakePolicyFacts{}, err
 		}
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil
-	}))
+	})
 	request := IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}, Request: runspec.Request{Version: 1, Team: "a", Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, RequestedArgs: map[string]string{"message": "hello"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}}}}
 	return &Tenant{s: s, team: "a"}, request, &now
 }
@@ -202,13 +202,13 @@ func TestAdmissionRefusalsCommitNothing(t *testing.T) {
 			case "missing_policy":
 				tenant.s.intakePolicy = nil
 			case "policy_error":
-				tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+				tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 					return IntakePolicyFacts{}, errors.New("policy unavailable")
-				}))
+				})
 			case "missing_retention":
-				tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+				tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 					return IntakePolicyFacts{}, nil
-				}))
+				})
 			case "policy_expires_authority":
 				root := authorityRoot("temporary", "a")
 				root.Grants = []capability.Grant{capability.RunsWrite}
@@ -216,10 +216,10 @@ func TestAdmissionRefusalsCommitNothing(t *testing.T) {
 				root.ExpiresAt = &expiry
 				authorityPersist(t, tenant.s, root)
 				request.Authority.ID = "temporary"
-				tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+				tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 					*now = now.Add(time.Hour)
 					return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil
-				}))
+				})
 			case "push_mismatch":
 				root := authorityRoot("push", "a")
 				root.Grants = []capability.Grant{capability.RunsWrite}
@@ -254,9 +254,9 @@ func TestAdmissionPoolTrustRequiresIndependentFacts(t *testing.T) {
 				}
 			}
 			request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DefaultBranchPush: true, Ref: "main", SHA: "typed"}}
-			tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+			tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 				return facts, nil
-			}))
+			})
 			result, err := tenant.AdmitRun(t.Context(), request)
 			if mode == "fork_app" {
 				if err == nil {
@@ -796,9 +796,9 @@ func TestAdmissionRetryKeepsVerifiedAppFactsAndDoesNotReplayDelivery(t *testing.
 	tenant, request, now := intakeFixture(t)
 	request.VerifiedDeliveryID = "delivery"
 	facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}
-	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+	tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return facts, nil
-	}))
+	})
 	original, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -822,9 +822,9 @@ func TestAdmissionRetryKeepsVerifiedAppFactsAndDoesNotReplayDelivery(t *testing.
 func TestAdmissionDeduplicatesVerifiedAppDeliveryWithoutClientKey(t *testing.T) {
 	tenant, request, now := intakeFixture(t)
 	request.VerifiedDeliveryID = "delivery"
-	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+	tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}, nil
-	}))
+	})
 	first, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -863,11 +863,11 @@ func TestAdmissionDeduplicatesVerifiedAppDeliveryWithoutClientKey(t *testing.T) 
 func TestAdmissionSealsServerResolvedOptionsAndCeilings(t *testing.T) {
 	tenant, request, _ := intakeFixture(t)
 	ceiling := runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 4}, Origin: runspec.SettingOrigin{Layer: runspec.LayerOperatorTeam, Key: "operator.max_priority"}}
-	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(_ context.Context, _ capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+	tenant.s.intakePolicy = fakeIntakePolicy(func(_ context.Context, _ capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		options := in.Request.Options
 		options.Priority = runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 0}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "priority"}}
 		return IntakePolicyFacts{Options: &options, Ceilings: runspec.Ceilings{Priority: ceiling}, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
-	}))
+	})
 	result, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)

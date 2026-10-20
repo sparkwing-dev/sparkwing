@@ -107,7 +107,7 @@ func (s *Server) resolveGitHubRunnerIdentity(ctx context.Context, team string, r
 	if s.githubApp == nil {
 		return nil
 	}
-	if s.store == nil {
+	if s.operator == nil {
 		return missingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(ctx, store.Team(team))

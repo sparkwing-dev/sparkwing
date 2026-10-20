@@ -47,7 +47,7 @@ func TestOperatorSettingsRevalidateAuthorityProperty(t *testing.T) {
 				authorityPersist(t, s, root)
 				ctx, op := t.Context(), s.AsOperator()
 				v := int64(input) + 1
-				gate, err := s.SignUpGate(ctx)
+				gate, err := s.AsOperator().SignUpGate(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -87,7 +87,7 @@ func TestOperatorSettingsRevalidateAuthorityProperty(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				after, err := s.SignUpGate(ctx)
+				after, err := s.AsOperator().SignUpGate(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -127,7 +127,7 @@ func TestOperatorSignUpBatchRollsBackInvalidSibling(t *testing.T) {
 	root.Grants = []capability.Grant{capability.OperatorLimits}
 	authorityPersist(t, s, root)
 	a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}}}
-	before, err := s.SignUpGate(t.Context())
+	before, err := s.AsOperator().SignUpGate(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestOperatorSignUpBatchRollsBackInvalidSibling(t *testing.T) {
 	if err := s.AsOperator().WriteSignUpSettings(t.Context(), a, SignUpSettingsChange{Mode: &mode, HourlyLimit: &good, DailyLimit: &bad}); err == nil {
 		t.Fatal("invalid sibling committed")
 	}
-	after, err := s.SignUpGate(t.Context())
+	after, err := s.AsOperator().SignUpGate(t.Context())
 	if err != nil || after != before {
 		t.Fatalf("changed gate: %+v %v", after, err)
 	}
@@ -145,19 +145,19 @@ func TestOperatorSettingsConsoleProofProperty(t *testing.T) {
 	property := func(input uint16, phase uint8) bool {
 		s := authorityStore(t)
 		actor := authorityMember(t, s, "owner", RoleOwner)
-		member, err := s.ResolveAuthority(t.Context(), actor.Authority)
+		member, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.SetConsolePolicy(func(p capability.Principal, _ time.Time) bool {
+		s.consolePolicy = func(p capability.Principal, _ time.Time) bool {
 			return p.DirectAccountSession() && p.Capability.Subject.ID == "owner"
-		})
+		}
 		member.Class, member.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
 		member.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 		a := capability.Authorized{Principal: member}
 		switch phase % 6 {
 		case 1:
-			s.SetConsolePolicy(func(capability.Principal, time.Time) bool { return false })
+			s.consolePolicy = func(capability.Principal, time.Time) bool { return false }
 		case 2:
 			rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash='owner'`)
 		case 3:
@@ -169,10 +169,10 @@ func TestOperatorSettingsConsoleProofProperty(t *testing.T) {
 			a.Principal.Authority.ID = "missing"
 		case 5:
 			calls := 0
-			s.SetConsolePolicy(func(p capability.Principal, _ time.Time) bool {
+			s.consolePolicy = func(p capability.Principal, _ time.Time) bool {
 				calls++
 				return calls == 1 && p.DirectAccountSession()
-			})
+			}
 		}
 		v := int64(input) + 1
 		_, err = s.AsOperator().WriteComputeLimits(t.Context(), a, map[string]int64{ComputeLimitGlobalRunners: v})
@@ -198,31 +198,31 @@ func TestDeploymentBindingAllowsOnlyUnboundTeamSelectionProperty(t *testing.T) {
 		root.Subject.Kind = capability.SubjectOperator
 		root.Grants = []capability.Grant{capability.OperatorObjectStore}
 		authorityPersist(t, s, root)
-		p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix})
+		p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix})
 		if err != nil {
 			t.Fatal(err)
 		}
 		target := capability.Target{Team: fmt.Sprintf("target-%d", input)}
-		if err := s.CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err != nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err != nil {
 			return false
 		}
 		target.RunID = fmt.Sprintf("run-%d", input)
-		if err := s.CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err == nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err == nil {
 			return false
 		}
 		target.RunID, target.NodeID = "", fmt.Sprintf("job-%d", input)
-		if err := s.CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err == nil {
+		if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err == nil {
 			return false
 		}
 		tenant := authorityRoot("tenant", "a")
 		tenant.Grants = root.Grants
 		authorityPersist(t, s, tenant)
-		p, err = s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: tenant.Prefix})
+		p, err = s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: tenant.Prefix})
 		if err != nil {
 			t.Fatal(err)
 		}
 		target.NodeID = ""
-		return s.CheckBinding(t.Context(), p, capability.BindOperatorSettings, target) != nil
+		return s.AsOperator().CheckBinding(t.Context(), p, capability.BindOperatorSettings, target) != nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
@@ -236,11 +236,11 @@ func TestDeploymentBindNoneRefusesCrossTeamProperty(t *testing.T) {
 		root.Subject.Kind = capability.SubjectOperator
 		root.Grants = []capability.Grant{capability.OperatorObjectStore}
 		authorityPersist(t, s, root)
-		p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix})
+		p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return s.CheckBinding(t.Context(), p, capability.BindNone, capability.Target{Team: fmt.Sprintf("target-%d", value)}) != nil
+		return s.AsOperator().CheckBinding(t.Context(), p, capability.BindNone, capability.Target{Team: fmt.Sprintf("target-%d", value)}) != nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
 		t.Fatal(err)

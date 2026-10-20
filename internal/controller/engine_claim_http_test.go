@@ -44,7 +44,7 @@ func revokeEngineMachine(t *testing.T, s *store.Store, prefix string) {
 	}
 }
 
-func engineHTTPRoot(t *testing.T, e *EngineController, team, prefix string, grants []capability.Grant) string {
+func engineHTTPRoot(t *testing.T, e *engineFixture, team, prefix string, grants []capability.Grant) string {
 	t.Helper()
 	secret := sha256.Sum256([]byte(prefix))
 	raw := "swk_" + base64.RawURLEncoding.EncodeToString(secret[:])
@@ -90,15 +90,15 @@ func engineClaimHTTP(t *testing.T, h http.Handler, raw, method, path, body strin
 	return w
 }
 
-func engineClaimHTTPFixture(t *testing.T, grants []capability.Grant) (*EngineController, http.Handler, string) {
+func engineClaimHTTPFixture(t *testing.T, grants []capability.Grant, opts ...store.Option) (*engineFixture, http.Handler, string) {
 	t.Helper()
-	e, _ := engineRuntimeStore(t)
+	e, _ := engineRuntimeStore(t, opts...)
 	engineRuntimeClaim(t, e, capability.UnitTrigger)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	e.Store.SetClaimProfileResolver(engineProfileFake{})
+	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	raw := engineHTTPRoot(t, e, "a", "root", grants)
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	return e, h, raw
 }
 
@@ -132,7 +132,7 @@ func TestEngineClaimHTTPLocalFirstUsesPersistedPoll(t *testing.T) {
 	preferred := engineHTTPRoot(t, e, "a", "preferred", []capability.Grant{capability.NodesClaim})
 	now := time.Now().UnixNano()
 	engineSQL(t, e.Store, `UPDATE nodes SET ready_at=?,execution_json=?`, now, []byte(`{"requires":{"set":true,"value":["ready"]}}`))
-	h := New(e.Store, slog.New(slog.DiscardHandler)).WithEngineController(e).WithLocalFirstPlacement([]string{"gpu"}, time.Minute, time.Minute).Handler()
+	h := New(e.Store, slog.New(slog.DiscardHandler)).WithEngineController(e.EngineController).WithLocalFirstPlacement([]string{"gpu"}, time.Minute, time.Minute).Handler()
 	poll := `{"runner_version":"v1","kinds":["node"],"labels":["gpu"],"available_cores":1}`
 	engineClaimHTTP(t, h, preferred, "POST", "/api/v1/runners/claim", poll, http.StatusOK)
 	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
@@ -215,9 +215,9 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	e.Store.SetClaimProfileResolver(engineProfileFake{})
+	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithEngineController(e.EngineController).Handler()
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"],"available_cores":1}`, 200)
 	var response controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
@@ -243,7 +243,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	if claim.Capability == "" || claim.Capability == bootstrap || claim.Delivery != capability.DeliveryDirect || !reflect.DeepEqual(claim.Binding, response.Claim.Binding) || !claim.LeaseExpiresAt.Equal(response.Claim.LeaseExpiresAt) {
 		t.Fatal("exchange changed the immutable award or did not replace its bootstrap")
 	}
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Capability)))
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Capability)))
 	if err != nil || principal.Capability.Billing == nil || !principal.Capability.Billing.Metered {
 		t.Fatalf("Cloud exchange lost metered provenance: %+v, %v", principal.Capability.Billing, err)
 	}
@@ -298,9 +298,9 @@ func FuzzEngineClaimHTTPKindsNeverWidenGrants(f *testing.F) {
 func TestEngineClaimHTTPAuthenticatesBeforeNamedLookupErrors(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	raw := engineHTTPRoot(t, e, "a", "named", []capability.Grant{capability.TriggersClaim})
-	e.Store.SetClaimProfileResolver(engineProfileFake{})
+	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	body := `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/runs/missing/claim", body, 401)
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/missing/claim", body, 404)

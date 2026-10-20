@@ -367,7 +367,7 @@ var errSignInIdentityChanged = errors.New("store: sign-in identity changed durin
 // Only a new account meets the sign-up gate: c and the stored gate decide
 // whether it is admitted or waitlisted. An account that already exists, or an
 // identity that links to one, is never gated.
-func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
+func (o *Operator) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
 	p.Email = NormalizeEmail(p.Email)
 	switch {
 	case p.Provider == "" || p.Subject == "":
@@ -379,7 +379,7 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpCond
 	// after a concurrent sign-in or unlink changes the first decision.
 	var last error
 	for range 5 {
-		res, err := s.resolveSignInOnce(ctx, p, c, now)
+		res, err := o.s.resolveSignInOnce(ctx, p, c, now)
 		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken) && !errors.Is(err, errSignInIdentityChanged)) {
 			return res, err
 		}
@@ -392,7 +392,7 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 	var result SignInResult
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = resolveSignInTx(ctx, tx, p, c, now)
+		result, err = tx.operator.resolveSignInTx(ctx, tx, p, c, now)
 		return err
 	})
 	if err != nil {
@@ -401,7 +401,7 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 	return result, nil
 }
 
-func resolveSignInTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
+func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
 	at := now.UTC().UnixNano()
 
 	var res SignInResult
@@ -518,7 +518,7 @@ func resolveSignInTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUp
 		}
 		res.PersonalTeam = slug
 	}
-	if err := settleActiveTeamTx(ctx, tx, accountID, at); err != nil {
+	if err := tx.operator.settleActiveTeamTx(ctx, tx, accountID, at); err != nil {
 		return SignInResult{}, err
 	}
 	if res.Account, err = accountTx(ctx, tx, accountID); err != nil {
@@ -527,7 +527,7 @@ func resolveSignInTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUp
 	return res, nil
 }
 
-func settleActiveTeamTx(ctx context.Context, tx *storeTx, accountID string, at int64) error {
+func (op *Operator) settleActiveTeamTx(ctx context.Context, tx *storeTx, accountID string, at int64) error {
 	var active string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT active_team FROM accounts WHERE id = ?`, accountID).Scan(&active); err != nil {
@@ -583,8 +583,8 @@ func scanAccount(row rowScanner) (Account, error) {
 }
 
 // Account reads one account.
-func (s *Store) Account(ctx context.Context, id string) (Account, error) {
-	return scanAccount(s.queryRow(ctx, accountSelect+` WHERE id = ?`, id))
+func (o *Operator) Account(ctx context.Context, id string) (Account, error) {
+	return scanAccount(o.s.queryRow(ctx, accountSelect+` WHERE id = ?`, id))
 }
 
 func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error) {
@@ -645,7 +645,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 		string(slug), accountID, string(RoleOwner), now.UTC().UnixNano()); err != nil {
 		return fmt.Errorf("identity: add owner: %w", err)
 	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
+	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
 		At: now, Team: slug, Account: accountID, Kind: BusinessEventTeamCreated,
 		SubjectID: string(slug), Actor: actor,
 	}); err != nil {
@@ -667,8 +667,8 @@ func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error) {
 }
 
 // AccountMemberships lists the teams an account belongs to.
-func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error) {
-	rows, err := s.query(ctx, `
+func (o *Operator) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error) {
+	rows, err := o.s.query(ctx, `
 		SELECT m.team, t.display_name, m.role FROM memberships m
 		JOIN teams t ON t.name = m.team
 		WHERE m.account_id = ? ORDER BY m.created_at, m.team`, accountID)
@@ -695,8 +695,8 @@ func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []M
 
 // OpenInvitationsForEmail lists the unaccepted, unexpired invitations to an
 // address, from every team.
-func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error) {
-	rows, err := s.query(ctx, invitationSelect+`
+func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error) {
+	rows, err := o.s.query(ctx, invitationSelect+`
 		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
 		ORDER BY i.created_at`, NormalizeEmail(email), now.UTC().UnixNano())
 	if err != nil {
@@ -742,7 +742,7 @@ type InvitationAcceptance struct {
 	GateClosed *SignUpGate
 }
 
-func acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
+func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
 	var none InvitationAcceptance
 	at := now.UTC().UnixNano()
 
@@ -845,19 +845,19 @@ func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) err
 }
 
 // CreateAccountSession opens a session for a current team member.
-func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error) {
-	return s.createAccountSession(ctx, acct, team, "", "", ttl)
+func (o *Operator) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error) {
+	return o.createAccountSession(ctx, acct, team, "", "", ttl)
 }
 
 // CreateIdentityAccountSession opens a session while the provider identity remains linked.
-func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
+func (o *Operator) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
 	if provider == "" || subject == "" {
 		return "", "", nil, fmt.Errorf("%w: provider and subject required", ErrInvalidInput)
 	}
-	return s.createAccountSession(ctx, acct, team, provider, subject, ttl)
+	return o.createAccountSession(ctx, acct, team, provider, subject, ttl)
 }
 
-func (s *Store) createAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
+func (o *Operator) createAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
 	if acct.ID == "" || ttl <= 0 {
 		return "", "", nil, fmt.Errorf("%w: account and positive ttl required", ErrInvalidInput)
 	}
@@ -865,11 +865,11 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 	if err != nil {
 		return "", "", nil, err
 	}
-	csrf, err := s.deriveCSRFToken(ctx, raw)
+	csrf, err := o.deriveCSRFToken(ctx, raw)
 	if err != nil {
 		return "", "", nil, err
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -974,7 +974,7 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 }
 
 func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) error {
-	if err := settleActiveTeamTx(ctx, tx, accountID, now.UTC().UnixNano()); err != nil {
+	if err := tx.operator.settleActiveTeamTx(ctx, tx, accountID, now.UTC().UnixNano()); err != nil {
 		return err
 	}
 	var active string

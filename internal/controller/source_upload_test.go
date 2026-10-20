@@ -29,15 +29,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func sourceUploadFixture(t *testing.T, opts ...store.Option) (*Server, client.EngineOptions, runspec.Request, string) {
+func sourceUploadFixture(t *testing.T, opts ...store.Option) (*serverFixture, client.EngineOptions, runspec.Request, string) {
 	t.Helper()
-	s, session := credentialSessionServer(t, opts...)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.WithSecretsCipher(cipher)
-	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +44,8 @@ func sourceUploadFixture(t *testing.T, opts ...store.Option) (*Server, client.En
 			t.Error(err)
 		}
 	})
-	s.WithDataObjects(objects)
+	s, session := credentialSessionServerWith(t, func(s *Server) { s.WithSecretsCipher(cipher).WithDataObjects(objects) }, opts...)
+	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	h := s.Handler()
 	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.write","runs.read","runs.control"]}`, false)
 	var credential credentialResponse
@@ -98,9 +96,9 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	if err := teststore.SQL(t, s.store).QueryRow("SELECT bytes,objects FROM storage_run_usage WHERE team='a' AND run_id=?", created.RunID).Scan(&used, &objects); err != nil || used != info.Size() || objects != 1 {
 		t.Fatalf("run storage: bytes=%d objects=%d %v", used, objects, err)
 	}
-	runner := engineHTTPRoot(t, &EngineController{Store: s.store}, "a", "snapshot-runner", []capability.Grant{capability.TriggersClaim})
-	s.store.SetClaimProfileResolver(engineProfileFake{})
-	claim, err := s.store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "snapshot-runner", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: created.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	runner := engineHTTPRoot(t, newEngineFixture(s.store, EngineController{}), "a", "snapshot-runner", []capability.Grant{capability.TriggersClaim})
+	s.engine.claimProfiles = engineProfileFake{}
+	claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "snapshot-runner", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: created.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil || len(claim.Bearer) == 0 {
 		t.Fatalf("claim: %+v %v", claim, err)
 	}

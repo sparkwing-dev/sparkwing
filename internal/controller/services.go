@@ -48,7 +48,7 @@ func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request
 
 func (s *Server) dataUploadsAvailable() bool {
 	d := s.dataController
-	return d != nil && d.ResolveAuthority != nil && d.Access != nil && d.Objects != nil && (d.Store != nil || d.ResolveTenant != nil)
+	return d != nil && d.ResolveAuthority != nil && d.Access != nil && d.Objects != nil && d.ResolveTenant != nil
 }
 
 func (s *Server) dataDownloadURL() string {

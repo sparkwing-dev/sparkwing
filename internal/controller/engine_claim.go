@@ -42,10 +42,10 @@ func (p *SignedRunnerAdmission) CheckRunner(ctx context.Context, version string)
 
 // CheckRunner revalidates the claimant and selects version policy from its persisted subject.
 func (s *EngineController) CheckRunner(ctx context.Context, authority capability.AuthorityRef, version string) (capability.Principal, error) {
-	if s.Store == nil || s.RunnerPolicy == nil {
+	if s.authority == nil || s.RunnerPolicy == nil {
 		return capability.Principal{}, &apierr.Error{Code: apierr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
 	}
-	principal, err := s.Store.ResolveAuthority(ctx, authority)
+	principal, err := s.authority.ResolveAuthority(ctx, authority)
 	if err != nil {
 		return capability.Principal{}, err
 	}
@@ -70,7 +70,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
-	profile, _, err := s.Store.ReadClaimProfile(ctx, principal.Authority)
+	profile, _, err := s.authority.ReadClaimProfile(ctx, principal.Authority)
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
@@ -89,11 +89,11 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	c := principal.Capability
 	machine := c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush)
 	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectLocal || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
-		if err := s.Store.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
+		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
-	claim, err := s.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
+	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
 		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil
@@ -134,7 +134,7 @@ func engineClaimTarget(body controllerwire.ClaimRequest) (*store.UnitRef, error)
 }
 
 func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClaim) (controllerwire.ClaimedUnit, error) {
-	principal, err := s.Store.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	principal, err := s.authority.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		return controllerwire.ClaimedUnit{}, err
 	}
@@ -168,7 +168,7 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	case capability.UnitTrigger:
 		unit.Execution = nil
 	}
-	unit.CloudResources, err = s.Store.CloudAwardResources(ctx, principal.Authority)
+	unit.CloudResources, err = s.authority.CloudAwardResources(ctx, principal.Authority)
 	if err != nil {
 		return controllerwire.ClaimedUnit{}, err
 	}
@@ -179,7 +179,7 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 		}
 	}
 	if parent := principal.Capability.Parent; parent != nil {
-		p, err := s.Store.ResolveAuthority(ctx, *parent)
+		p, err := s.authority.ResolveAuthority(ctx, *parent)
 		if err != nil {
 			return controllerwire.ClaimedUnit{}, err
 		}
@@ -189,19 +189,19 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 }
 
 func (s *EngineController) exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error) {
-	if s.Store == nil {
+	if s.authority == nil {
 		return controllerwire.ExchangeResponse{}, missingEndpointPolicy()
 	}
 	ref := authorized.Principal.Authority
 	if ref.Kind != capability.AuthorityCapability || ref.ID == "" || ref.ID != authorized.Principal.Capability.Prefix {
 		return controllerwire.ExchangeResponse{}, invalidEngineBody("exchange requires bootstrap authority")
 	}
-	issued, err := s.Store.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: ref.ID})
+	issued, err := s.authority.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: ref.ID})
 	if err != nil {
 		return controllerwire.ExchangeResponse{}, err
 	}
 	c := issued.Capability
-	snapshot, err := s.Store.ReadAuthentication(ctx, capability.CredentialLookup{Class: capability.CredentialBearer, Digest: c.Digest, Audience: capability.Controller}, capability.RequestEvidence{})
+	snapshot, err := s.authority.ReadAuthentication(ctx, capability.CredentialLookup{Class: capability.CredentialBearer, Digest: c.Digest, Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil {
 		return controllerwire.ExchangeResponse{}, err
 	}

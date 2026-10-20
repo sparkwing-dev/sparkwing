@@ -139,7 +139,7 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if role != RoleOwner {
 			return ErrRoleAboveOwn
 		}
-		hasOther, err := accountHasOtherTeamTx(ctx, tx, p.Capability.Subject.ID, string(t.team))
+		hasOther, err := tx.operator.accountHasOtherTeamTx(ctx, tx, p.Capability.Subject.ID, string(t.team))
 		if err != nil {
 			return err
 		}
@@ -158,7 +158,7 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 	return out, nil
 }
 
-func accountHasOtherTeamTx(ctx context.Context, tx *storeTx, accountID, excludedTeam string) (bool, error) {
+func (op *Operator) accountHasOtherTeamTx(ctx context.Context, tx *storeTx, accountID, excludedTeam string) (bool, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships WHERE account_id=? AND team<>?`, accountID, excludedTeam).Scan(&count)
 	return count > 0, err

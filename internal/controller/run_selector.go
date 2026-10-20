@@ -29,7 +29,7 @@ func (s *EngineController) resolveRunSelector(ctx context.Context, principal cap
 		_, err = tenant.ReadRun(ctx, target.RunID)
 		return target, engineLookupError(err)
 	}
-	if s.Store == nil {
+	if s.ResolveTenant == nil {
 		return target, missingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(ctx, store.Team(target.Team))

@@ -167,7 +167,7 @@ func TestOAuthHTTPSessionAndReplay(t *testing.T) {
 	if !session.HttpOnly || !session.Secure || session.Value == f.raw || csrf.Value == f.csrf || csrf.HttpOnly || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("invalid session cookie")
 	}
-	if _, err := f.store.LookupSession(t.Context(), f.raw); err == nil {
+	if _, err := f.store.AsOperator().LookupSession(t.Context(), f.raw); err == nil {
 		t.Fatal("replaced session remains live")
 	}
 	r := httptest.NewRequest("GET", oauthOrigin+"/api/v1/auth/whoami", nil)
@@ -280,7 +280,7 @@ func TestOAuthHTTPWaitlistedSessionHasNoTeamAuthority(t *testing.T) {
 	if w.Code != 200 || cookie == nil || cookie.Value == "" || w.Header().Get("Cache-Control") != "no-store" || strings.Contains(w.Body.String(), "private-") || strings.Contains(f.logs.String(), "private-") || strings.Contains(f.logs.String(), cookie.Value) {
 		t.Fatalf("HTTP %d %s logs=%s", w.Code, w.Body, f.logs)
 	}
-	session, err := f.store.LookupSession(t.Context(), cookie.Value)
+	session, err := f.store.AsOperator().LookupSession(t.Context(), cookie.Value)
 	if err != nil || session.Team != "" || len(session.Scopes) != 0 {
 		t.Fatalf("waitlisted session gained authority: %+v %v", session, err)
 	}

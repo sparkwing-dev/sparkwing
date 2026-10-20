@@ -30,7 +30,7 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 					t.Fatalf("withdrawal replay: %+v, %v", replay, err)
 				}
 				demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}
-				if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+				if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 					t.Fatal("withdrawn job remained claimable")
 				}
 				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeReady, Cause: CauseRelease}); err != nil {
@@ -50,7 +50,7 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 			case 3:
 				*now = owner.Award.LeaseExpiresAt
 			case 4, 5, 6:
-				claim, err := s.ClaimUnit(t.Context(), demand)
+				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil {
 					t.Fatal(err)
 				}

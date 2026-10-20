@@ -180,7 +180,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE team = ?`, string(t.team)); err != nil {
 		return nil, err
 	}
-	revoked, err := revokeSelectedCapabilitiesTx(ctx, tx, `team=?`, t.team)
+	revoked, err := tx.operator.revokeSelectedCapabilitiesTx(ctx, tx, `team=?`, t.team)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (t *Tenant) memberIDsTx(ctx context.Context, tx *storeTx) (_ []string, err 
 	return ids, rows.Err()
 }
 
-func revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string, args ...any) ([]string, error) {
+func (op *Operator) revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string, args ...any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, tx.now().UnixNano())...)
 	if err != nil {
 		return nil, err
@@ -233,7 +233,7 @@ func revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string
 		return nil, err
 	}
 	for _, prefix := range prefixes {
-		if err := revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+		if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
 			return nil, err
 		}
 	}
@@ -314,11 +314,11 @@ func (s *Store) listTeamDeletions(ctx context.Context, where string, args ...any
 
 // TeamDeletionsRequestedBy lists the deletions an account asked for, so the
 // requester can watch one it no longer has a team to look from.
-func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error) {
+func (o *Operator) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error) {
 	if accountID == "" {
 		return nil, nil
 	}
-	return s.listTeamDeletions(ctx, `requested_by = ?`, accountID)
+	return o.s.listTeamDeletions(ctx, `requested_by = ?`, accountID)
 }
 
 // PendingTeamDeletions lists every deletion with work left: those the purge
@@ -482,13 +482,13 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 	var result AccountDeletion
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = s.deleteAccountTx(ctx, tx, accountID, now)
+		result, err = tx.operator.deleteAccountTx(ctx, tx, accountID, now)
 		return err
 	})
 	return result, err
 }
 
-func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (AccountDeletion, error) {
+func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (AccountDeletion, error) {
 	acct, err := accountTx(ctx, tx, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
@@ -497,10 +497,10 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	if err != nil {
 		return AccountDeletion{}, err
 	}
-	if err := lockOwnedTeamsTx(ctx, tx, s, accountID, names); err != nil {
+	if err := tx.operator.lockOwnedTeamsTx(ctx, tx, o.s, accountID, names); err != nil {
 		return AccountDeletion{}, err
 	}
-	sole, blocked, err := ownedTeamsTx(ctx, tx, accountID)
+	sole, blocked, err := tx.operator.ownedTeamsTx(ctx, tx, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
 	}
@@ -509,7 +509,7 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	}
 	res := AccountDeletion{AccountID: accountID}
 	for _, team := range sole {
-		t := &Tenant{s: s, team: team}
+		t := &Tenant{s: o.s, team: team}
 		if err := t.lockTeamTx(ctx, tx); err != nil {
 			return AccountDeletion{}, err
 		}
@@ -526,13 +526,13 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE account_id = ?`, accountID); err != nil {
 		return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 	}
-	minted, err := revokeSelectedCapabilitiesTx(ctx, tx, `created_by=? OR (subject_kind='account' AND subject_id=?)`, accountID, accountID)
+	minted, err := tx.operator.revokeSelectedCapabilitiesTx(ctx, tx, `created_by=? OR (subject_kind='account' AND subject_id=?)`, accountID, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
 	}
 	res.RevokedPrefixes = append(res.RevokedPrefixes, minted...)
 	for _, name := range names {
-		if err := relabelPrincipalTx(ctx, tx, name); err != nil {
+		if err := tx.operator.relabelPrincipalTx(ctx, tx, name); err != nil {
 			return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 		}
 	}
@@ -566,7 +566,7 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 	return res, nil
 }
 
-func ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Team, blocked []TeamInfo, err error) {
+func (op *Operator) ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Team, blocked []TeamInfo, err error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT m.team, t.display_name,
 		       (SELECT COUNT(*) FROM memberships o WHERE o.team = m.team AND o.account_id <> m.account_id AND o.role = ?),
@@ -599,7 +599,7 @@ func ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Te
 // other as the owner who stays; locking every team the account owns first,
 // in one order, makes the second count see the first's departure without
 // two deletions deadlocking on each other's teams.
-func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID string, names []principalName) error {
+func (op *Operator) lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID string, names []principalName) error {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT team FROM memberships WHERE account_id = ? AND role = ? ORDER BY team`, accountID, string(RoleOwner))
 	if err != nil {
@@ -611,7 +611,7 @@ func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID stri
 	}
 	ledgerTeams := slices.Clone(teams)
 	for _, name := range names {
-		touched, err := grantCreatorTeamsTx(ctx, tx, name)
+		touched, err := tx.operator.grantCreatorTeamsTx(ctx, tx, name)
 		if err != nil {
 			return err
 		}
@@ -662,7 +662,7 @@ func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ 
 	return names, rows.Err()
 }
 
-func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error {
+func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error {
 	label := DeletedUserLabel
 	scope, args := "", []any{label, n.name}
 	if n.team != "" {
@@ -705,7 +705,7 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 // safety: a relabel can reach grants on teams the account does not own, so it takes each touched team's ledger lock
 // in name order before rewriting that team's grants.
 func relabelGrantCreatorTx(ctx context.Context, tx *storeTx, n principalName, label string) error {
-	teams, err := grantCreatorTeamsTx(ctx, tx, n)
+	teams, err := tx.operator.grantCreatorTeamsTx(ctx, tx, n)
 	if err != nil {
 		return err
 	}
@@ -721,7 +721,7 @@ func relabelGrantCreatorTx(ctx context.Context, tx *storeTx, n principalName, la
 	return nil
 }
 
-func grantCreatorTeamsTx(ctx context.Context, tx *storeTx, n principalName) ([]string, error) {
+func (op *Operator) grantCreatorTeamsTx(ctx context.Context, tx *storeTx, n principalName) ([]string, error) {
 	query, args := `SELECT DISTINCT team FROM credit_grants WHERE created_by=?`, []any{n.name}
 	if n.team != "" {
 		query, args = query+` AND team=?`, append(args, n.team)
@@ -742,8 +742,8 @@ const MaxInvitationEmailsPerDay = 5
 // reports false instead when its address has already been mailed
 // [MaxInvitationEmailsPerDay] times in the last 24 hours, counting every
 // team. A claimed invitation is never claimed twice.
-func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error) {
-	tx, err := s.beginTx(ctx)
+func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error) {
+	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}

@@ -18,16 +18,16 @@ func (f delegationValidationFunc) ValidateDelegation(parent capability.Principal
 
 func TestDelegationRetainsAwardIdentityWithoutAnotherBillingAward(t *testing.T) {
 	s, demand := unitClaimFixture(t)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.delegation = delegationValidationFunc(func(capability.Principal, capability.DelegateSpec, time.Time) error { return nil })
-	child, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Binding: p.Capability.Binding, Repositories: p.Capability.Repositories, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: p.Capability.ExpiresAt})
+	child, err := s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Binding: p.Capability.Binding, Repositories: p.Capability.Repositories, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: p.Capability.ExpiresAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,11 +36,11 @@ func TestDelegationRetainsAwardIdentityWithoutAnotherBillingAward(t *testing.T) 
 		t.Fatal("narrowed child lost the immutable award identity")
 	}
 	target := capability.Target{Team: "a", RunID: "run", ClaimID: c.UnitID, Unit: c.Unit, UnitGeneration: c.Binding.Generation, UnitHolder: c.Binding.Holder}
-	if err := s.CheckBinding(t.Context(), capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}}, capability.BindOwnClaim, target); err != nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}}, capability.BindOwnClaim, target); err != nil {
 		t.Fatal(err)
 	}
 	target.UnitGeneration++
-	if err := s.CheckBinding(t.Context(), capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}}, capability.BindOwnClaim, target); err == nil {
+	if err := s.AsOperator().CheckBinding(t.Context(), capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}}, capability.BindOwnClaim, target); err == nil {
 		t.Fatal("narrowed child replaced its generation")
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 1)
@@ -61,16 +61,16 @@ func TestDelegationPersistsOnlyTheValidatedNarrowing(t *testing.T) {
 		}
 		return nil
 	})
-	issued, err := s.DelegateCapability(t.Context(), spec)
+	issued, err := s.AsOperator().DelegateCapability(t.Context(), spec)
 	if err != nil || called != 1 || issued.Raw == "" || issued.Capability.Parent == nil || *issued.Capability.Parent != spec.Parent || issued.Capability.Subject != root.Subject || !slices.Equal(issued.Capability.Grants, spec.Grants) || !slices.Equal(issued.Capability.ReservedPools, root.ReservedPools) || issued.Capability.Billing != nil || issued.Capability.Unit != "" {
 		t.Fatalf("delegation: %+v, %v", issued.Capability, err)
 	}
-	principal, err := s.LookupCapability(t.Context(), issued.Capability.Digest)
+	principal, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest)
 	if err != nil || principal.Authority.ID != issued.Capability.Prefix {
 		t.Fatalf("committed delegate: %+v, %v", principal.Authority, err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='root'`)
-	if _, err := s.LookupCapability(t.Context(), issued.Capability.Digest); err == nil {
+	if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err == nil {
 		t.Fatal("ordinary delegation detached from revoked parent")
 	}
 }
@@ -98,7 +98,7 @@ func TestDelegationReturnsNoBearerAfterValidationOrPersistenceFailure(t *testing
 			if problem == "persistence" {
 				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_delegate BEFORE INSERT ON capabilities BEGIN SELECT RAISE(ABORT,'storage refused'); END`)
 			}
-			issued, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &until})
+			issued, err := s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &until})
 			if err == nil || issued.Raw != "" || issued.Capability.Prefix != "" {
 				t.Fatalf("failed delegation exposed bearer: %v", err)
 			}

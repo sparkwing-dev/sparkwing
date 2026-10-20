@@ -19,14 +19,14 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetSessionKeyCipher(cipher)
-	if _, err := s.csrfSigningKey(t.Context()); err != nil {
+	s.csrfCipher, s.csrfKey = cipher, nil
+	if _, err := s.AsOperator().csrfSigningKey(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	owner := authorityMember(t, s, "owner", RoleOwner)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, _ capability.ProvisionSpec) error { return nil }))
+	s.provisions = provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, _ capability.ProvisionSpec) error { return nil })
 	registration := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:runner", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}}
-	_, err = s.ProvisionCapability(t.Context(), registration)
+	_, err = s.AsOperator().ProvisionCapability(t.Context(), registration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 		root.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}
 		root.Grants = []capability.Grant{capability.RunsRead, capability.TeamAdmin}
 		authorityPersist(t, s, root)
-		raw, _, err := s.CreateCapabilitySession(t.Context(), root.Prefix, time.Hour)
+		raw, _, err := s.AsOperator().CreateCapabilitySession(t.Context(), root.Prefix, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,18 +44,18 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 		var failure *apierr.Error
 		for _, origin := range []capability.AuthorityRef{derived, {Kind: capability.AuthorityCapability, ID: root.Prefix}} {
 			registration.Authority = &origin
-			issued, err := s.ProvisionCapability(t.Context(), registration)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), registration)
 			if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || issued.Raw != "" {
 				t.Fatalf("capability-derived %s machine provisioning: issued=%v err=%v", origin.Kind, issued.Raw != "", err)
 			}
 		}
 		spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &derived, Subject: root.Subject, Team: "a", Grants: root.Grants, Binding: root.Binding}
-		issued, err := s.ProvisionCapability(t.Context(), spec)
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 		if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || issued.Raw != "" {
 			t.Fatalf("capability-derived session member provisioning: issued=%v err=%v", issued.Raw != "", err)
 		}
 		spec.Authority = &owner.Authority
-		if issued, err := s.ProvisionCapability(t.Context(), spec); err != nil || issued.Raw == "" {
+		if issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err != nil || issued.Raw == "" {
 			t.Fatalf("direct session could not provision: %v", err)
 		}
 	}
@@ -68,7 +68,7 @@ func TestMachineProvisionGrantsProperty(t *testing.T) {
 	deployment.Subject.Kind = capability.SubjectService
 	deployment.Grants = []capability.Grant{capability.OperatorTokens}
 	authorityPersist(t, s, deployment)
-	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 	random := rand.New(rand.NewPCG(453, 28))
 	for originIndex, origin := range []capability.AuthorityRef{owner.Authority, {Kind: capability.AuthorityCapability, ID: deployment.Prefix}} {
 		for grantIndex, grant := range capability.Grants() {
@@ -78,7 +78,7 @@ func TestMachineProvisionGrantsProperty(t *testing.T) {
 			}
 			name := fmt.Sprintf("runner-%d-%d", originIndex, grantIndex)
 			spec := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Repositories: []string{"github.com/acme/*"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}}
-			issued, err := s.ProvisionCapability(t.Context(), spec)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if grant == capability.NodesClaim || grant == capability.TriggersClaim {
 				if err != nil || issued.Raw == "" {
 					t.Fatalf("%s origin with %s: %v", origin.Kind, grant, err)

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -17,11 +16,6 @@ func TestCapabilityMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
 	for _, name := range []string{"member", "machine"} {
 		t.Run(name, func(t *testing.T) {
 			st := storetest.OpenPostgres(t)
-			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-			if err != nil {
-				t.Fatal(err)
-			}
-			st.SetSessionKeyCipher(cipher)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			owner := signIn(t, st, "owner-"+name, "owner-"+name+"@example.com")
@@ -31,11 +25,11 @@ func TestCapabilityMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+			if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
 				t.Fatal(err)
 			}
 
-			raw, _, _, err := st.CreateAccountSession(ctx, member.Account, owner.PersonalTeam, time.Hour)
+			raw, _, _, err := st.AsOperator().CreateAccountSession(ctx, member.Account, owner.PersonalTeam, time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,7 +60,7 @@ func TestCapabilityMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
 			}
 			done := make(chan result, 1)
 			go func() {
-				issued, err := st.ProvisionCapability(ctx, spec)
+				issued, err := st.AsOperator().ProvisionCapability(ctx, spec)
 				done <- result{issued.Raw, err}
 			}()
 			var early *result

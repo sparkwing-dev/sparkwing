@@ -33,18 +33,18 @@ func (f engineEnrollmentFunc) ResolveClaimProfile(ctx context.Context, principal
 func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 	server, tenant := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
-	root, err := server.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"})
+	root, err := server.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	authorized := capability.Authorized{Principal: root, Binding: root.Capability.Binding, Target: capability.Target{Team: "a"}}
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
-	server.Store.SetClaimProfileResolver(engineEnrollmentFunc(func(_ context.Context, principal capability.Principal) (match.Profile, match.Resources, error) {
+	server.claimProfiles = engineEnrollmentFunc(func(_ context.Context, principal capability.Principal) (match.Profile, match.Resources, error) {
 		if principal.Authority.ID != "runner" {
 			t.Fatal("enrollment received a caller-selected identity")
 		}
 		return match.Profile{Name: "forged", Capacity: match.Resources{Cores: 8}}, match.Resources{Cores: 8}, nil
-	}))
+	})
 	allowed := false
 	server.RunnerPolicy = runnerAdmissionFunc(func(_ context.Context, version string) error {
 		if version != "v1.2.3" {
@@ -85,7 +85,7 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 func TestEngineClaimRequiresTrustedServicesBeforeAward(t *testing.T) {
 	server, _ := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
-	root, err := server.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"})
+	root, err := server.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 	server, tenant := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	holder, err := server.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	holder, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,11 +196,11 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 				target.NodeID = "job"
 				engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 			}
-			claim, err := server.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			claim, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			principal, err := server.Store.LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+			principal, err := server.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -224,7 +224,7 @@ func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
 		server, tenant := engineRuntimeStore(t)
 		owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
 		engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-		holder, err := server.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+		holder, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 		if err != nil {
 			t.Fatal(err)
 		}

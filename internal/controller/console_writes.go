@@ -33,9 +33,7 @@ func (s *Server) consoleWriter() (ConsoleWriter, error) {
 	if s.consoleWrites != nil {
 		return s.consoleWrites, nil
 	}
-	if s.store != nil {
-		return s.store.AsConsole(s.operatorAccount), nil
-	}
+
 	return nil, missingEndpointPolicy()
 }
 

@@ -36,7 +36,7 @@ func authorityPersist(t *testing.T, s *Store, c capability.Capability) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	if err := persistCapabilityTx(t.Context(), tx, c); err != nil {
+	if err := tx.operator.persistCapabilityTx(t.Context(), tx, c); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -289,7 +289,7 @@ func TestRemoteCacheReadsNeedTheRoleThatRunsCode(t *testing.T) {
 			child.Repositories = []string{"gh:1"}
 			child.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:1", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
 			authorityPersist(t, s, child)
-			p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix})
+			p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix})
 			if err != nil {
 				t.Fatal(err)
 			}

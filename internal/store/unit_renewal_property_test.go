@@ -35,7 +35,7 @@ func TestRenewUnitRequiresCurrentAwardProperty(t *testing.T) {
 					prefix = fmt.Sprintf("missing-%x", random.Uint64())
 				case 2:
 					if err := s.inTx(t.Context(), func(tx *storeTx) error {
-						return revokeAuthorityTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+						return tx.operator.revokeAuthorityTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 					}); err != nil {
 						t.Fatal(err)
 					}
@@ -46,7 +46,7 @@ func TestRenewUnitRequiresCurrentAwardProperty(t *testing.T) {
 				case 5:
 					rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET claimed_by=?`, fmt.Sprintf("other-%x", random.Uint64()))
 				}
-				_, err := s.RenewUnit(t.Context(), prefix, random.IntN(2) == 0)
+				_, err := s.AsOperator().RenewUnit(t.Context(), prefix, random.IntN(2) == 0)
 				var transition *ErrIllegalTransition
 				var denied *apierr.Error
 				if !(errors.As(err, &transition) && transition.Reason == ReasonHolderRights || errors.As(err, &denied) && denied.Code == apierr.Unauthenticated) {
@@ -65,7 +65,7 @@ func TestRenewUnitRequiresCurrentAwardProperty(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=NULL,authority_json=? WHERE prefix=?`, root, demand.CapabilityPrefix)
 				rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET generation=?,claimed_by=?`, claim.Award.Generation, claim.Award.Holder)
 			}
-			if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 				t.Fatalf("current award refused after generated failures: %v", err)
 			}
 		})

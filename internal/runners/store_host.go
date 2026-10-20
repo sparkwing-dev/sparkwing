@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -31,15 +32,21 @@ type NativeServices struct {
 
 // StoreHosting constructs the shared hosts over the controller's existing store handle.
 type StoreHosting struct {
-	Store *store.Store
-	Bind  func(context.Context, StoreBinding) (NativeServices, error)
+	Controller *controller.EngineController
+	router     *controller.PolicyRouter
+	Bind       func(context.Context, StoreBinding) (NativeServices, error)
 }
 
 // Host authenticates before binding services; shared hosts own acquisition, renewal and joining.
 func (h StoreHosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) error {
-	if h.Store == nil || h.Bind == nil {
+	if h.Controller == nil || h.Bind == nil {
 		return errors.New("store hosting requires the owned store and native services")
 	}
+	router, err := h.Controller.ClaimPolicyRouter()
+	if err != nil {
+		return err
+	}
+	h.router = router
 	return hostAward(ctx, unit, h.bind)
 }
 
@@ -49,11 +56,11 @@ type storeInputs struct {
 }
 
 func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {
-	principal, err := h.authenticate(ctx, unit)
+	ctx, principal, err := h.authenticate(ctx, unit)
 	if err != nil {
 		return NativeServices{}, storeInputs{}, err
 	}
-	tenant, err := h.Store.ForTeam(ctx, store.Team(principal.Capability.Team))
+	tenant, err := controller.ScopedTenantPort[*store.Tenant](ctx, store.Team(principal.Capability.Team), h.Controller.ResolveTenant)
 	if err != nil {
 		return NativeServices{}, storeInputs{}, err
 	}
@@ -63,7 +70,8 @@ func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUn
 	}
 	lifetime, retire := context.WithCancel(context.WithoutCancel(ctx))
 	binding := StoreBinding{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
-		return h.authenticate(ctx, unit)
+		_, p, err := h.authenticate(ctx, unit)
+		return p, err
 	}, Bearer: func(request context.Context) (string, error) {
 		if err := errors.Join(context.Cause(lifetime), context.Cause(request)); err != nil {
 			return "", err
@@ -141,31 +149,19 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 	return storeInputs{run: input, node: node}, nil
 }
 
-func (h StoreHosting) authenticate(ctx context.Context, unit controllerwire.ClaimedUnit) (capability.Principal, error) {
+func (h StoreHosting) authenticate(ctx context.Context, unit controllerwire.ClaimedUnit) (context.Context, capability.Principal, error) {
 	if err := context.Cause(ctx); err != nil {
-		return capability.Principal{}, err
-	}
-	pattern := "/api/v1/claims/{claim}/heartbeat"
-	route, ok := capability.LookupRoute("POST", pattern)
-	if !ok {
-		return capability.Principal{}, errors.New("store hosting renewal policy is unavailable")
+		return ctx, capability.Principal{}, err
 	}
 	target := capability.Target{Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, ClaimID: unit.UnitID}
-	authenticated, err := capability.NewAuthenticator(h.Store).Authenticate(ctx, capability.Presentation{
-		Raw: unit.Capability, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target},
-	}, route)
+	ctx, authorized, err := h.router.Authorize(ctx, "POST", "/api/v1/claims/{claim}/heartbeat", capability.Presentation{Raw: unit.Capability, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}})
 	if err != nil {
-		return capability.Principal{}, err
+		return ctx, capability.Principal{}, err
 	}
-	authorized, err := capability.Authorize(ctx, h.Store, route, authenticated, target)
-	if err != nil {
-		return capability.Principal{}, err
+	if err := ValidateAwardPrincipal(unit, authorized.Principal); err != nil {
+		return ctx, capability.Principal{}, err
 	}
-	principal := authorized.Principal
-	if err := ValidateAwardPrincipal(unit, principal); err != nil {
-		return capability.Principal{}, err
-	}
-	return principal, nil
+	return ctx, authorized.Principal, nil
 }
 
 // ValidateAwardPrincipal checks an award against its authenticated persisted authority.

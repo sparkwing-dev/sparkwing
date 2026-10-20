@@ -29,9 +29,9 @@ type creditsFixture struct {
 	writer   string
 }
 
-func newCreditsFixture(t *testing.T) creditsFixture {
+func newCreditsFixture(t *testing.T, opts ...store.Option) creditsFixture {
 	t.Helper()
-	browser := newDeploymentBrowserFixture(t, deploymenttest.Cloud(t, "https://controller.test"), nil)
+	browser := newDeploymentBrowserFixture(t, deploymenttest.Cloud(t, "https://controller.test"), nil, opts...)
 	st := browser.st
 	now := time.Now().UTC()
 	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)})

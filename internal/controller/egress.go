@@ -42,7 +42,7 @@ func (s *Server) meterResponse(w http.ResponseWriter, r *http.Request, class egr
 		defer release()
 	}
 	var tenant *store.Tenant
-	if s.store != nil {
+	if s.operator != nil {
 		var err error
 		tenant, err = s.tenantForTeam(r.Context(), team)
 		if err != nil {
@@ -108,7 +108,7 @@ func (s *Server) egressHealth() (map[string]any, []string) {
 }
 
 func (s *Server) loadEgressUsage(ctx context.Context) {
-	if s.egress == nil || s.store == nil {
+	if s.egress == nil || s.operator == nil {
 		return
 	}
 	now := time.Now().UTC()

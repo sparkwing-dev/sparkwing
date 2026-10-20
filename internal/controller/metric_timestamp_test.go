@@ -182,7 +182,7 @@ func TestMetricsHTTPReadsPagedSamplesFromAuthorizedTenant(t *testing.T) {
 		return engine.Store.ForTeam(ctx, team)
 	})
 	f.facts.snapshot.Authorities[0].Principal.Capability.Team = "a"
-	f.s.WithEngineController(engine)
+	f.s.WithEngineController(engine.EngineController)
 	var first, second metricsPage
 	f.call(t, "GET", "/api/v1/runs/run/jobs/job/metrics?team=foreign&limit=1", "", "", 200, &first)
 	if len(first.Points) != 1 || first.Points[0].CPUMillicores != 1 || first.NextCursor != "1970-01-01T00:00:01Z" {

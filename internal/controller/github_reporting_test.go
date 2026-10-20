@@ -24,7 +24,7 @@ func (f *githubCompletionFixture) pending() func() {
 	if err := teststore.SQL(f.t, f.server.store).QueryRow(`SELECT capability_prefix FROM triggers WHERE team='a' AND id='run'`).Scan(&prefix); err != nil {
 		f.t.Fatal(err)
 	}
-	owner, err := f.server.store.ResolveAuthority(f.t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	owner, err := f.server.store.AsOperator().ResolveAuthority(f.t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
 	if err != nil {
 		f.t.Fatal(err)
 	}

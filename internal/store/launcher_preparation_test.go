@@ -12,7 +12,7 @@ func TestLauncherPreparationKeepsBootstrapUntilExchange(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand, claim, now := launcherSnapshotFixture(t, kind)
 			root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-			awards, _, err := s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 			if err != nil || len(awards) != 1 {
 				t.Fatalf("initial award: %+v %v", awards, err)
 			}
@@ -23,7 +23,7 @@ func TestLauncherPreparationKeepsBootstrapUntilExchange(t *testing.T) {
 				if _, err = s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 					t.Fatal(err)
 				}
-				awards, _, err = s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+				awards, _, err = s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 				if err != nil || len(awards) != 1 || !awards[0].Claim.Award.LeaseExpiresAt.After(previous) {
 					t.Fatalf("preparation lost lease: %+v %v", awards, err)
 				}
@@ -32,14 +32,14 @@ func TestLauncherPreparationKeepsBootstrapUntilExchange(t *testing.T) {
 					t.Fatal("preparation broadened bootstrap authority")
 				}
 			}
-			if _, err = s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
+			if _, err = s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
 				t.Fatal(err)
 			}
 			*now = now.Add(20 * time.Second)
 			if _, err = s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 				t.Fatal(err)
 			}
-			awards, _, err = s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+			awards, _, err = s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 			if err != nil || len(awards) != 1 || !awards[0].Claim.Award.LeaseExpiresAt.Equal(previous) {
 				t.Fatalf("launcher renewed exchanged authority: %+v %v", awards, err)
 			}
@@ -60,7 +60,7 @@ func FuzzLauncherPreparationKeepsExactUnexchangedFence(f *testing.F) {
 	f.Fuzz(func(t *testing.T, change uint8, offset uint16) {
 		s, demand, claim, now := launcherSnapshotFixture(t, capability.UnitNode)
 		root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-		awards, _, err := s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+		awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 		if err != nil || len(awards) != 1 {
 			t.Fatal(err)
 		}
@@ -99,14 +99,14 @@ func TestLauncherPreparationSkipsEndedOwnAwards(t *testing.T) {
 			s, demand, first, now := launcherSnapshotFixture(t, capability.UnitNode)
 			rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','other','pending',1,?,?)`, []byte(`{"id":"other"}`), []byte(`{}`))
 			demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "other"}
-			second, err := s.ClaimUnit(t.Context(), demand)
+			second, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
 			}
 			root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
 			fences := []capability.LeaseRef{}
 			for _, claim := range []UnitClaim{first, second} {
-				p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+				p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -137,7 +137,7 @@ func FuzzLauncherPreparationBillingAndGrace(f *testing.F) {
 		kind := []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[selector%3]
 		s, demand, claim, now := launcherSnapshotFixture(t, kind)
 		root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-		awards, _, err := s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+		awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 		if err != nil || len(awards) != 1 {
 			t.Fatal(err)
 		}
@@ -166,11 +166,11 @@ func FuzzLauncherPreparationBillingAndGrace(f *testing.F) {
 		if prepared, err := s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil || len(prepared) != 0 {
 			t.Fatalf("an unpaid balance kept preparing: %+v %v; want a hard stop at the next renewal", prepared, err)
 		}
-		awards, _, err = s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+		awards, _, err = s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 		if err != nil || len(awards) != 0 {
 			t.Fatalf("financially cancelled preparation remained exchangeable: %+v %v", awards, err)
 		}
-		if _, err = s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err == nil {
+		if _, err = s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err == nil {
 			t.Fatal("cancelled preparation exchanged authority")
 		}
 	})
@@ -182,7 +182,7 @@ func TestLauncherPreparationReturnsCapabilityBound(t *testing.T) {
 			s, demand, claim, now := launcherSnapshotFixtureExpiry(t, kind, 17*time.Second)
 			expires := now.Add(17 * time.Second)
 			root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-			awards, _, err := s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 			if err != nil || len(awards) != 1 {
 				t.Fatalf("initial award: %+v %v", awards, err)
 			}
@@ -191,7 +191,7 @@ func TestLauncherPreparationReturnsCapabilityBound(t *testing.T) {
 			if err != nil || len(prepared) != 1 || prepared[0].Fence != fence || !prepared[0].ExpiresAt.Equal(expires) {
 				t.Fatalf("preparation deadline: %+v %v; want %v", prepared, err, expires)
 			}
-			awards, _, err = s.ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
+			awards, _, err = s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil)
 			if err != nil || len(awards) != 1 || !awards[0].Claim.Award.LeaseExpiresAt.Equal(prepared[0].ExpiresAt) {
 				t.Fatalf("committed preparation deadline: %+v %v; returned %v", awards, err, prepared[0].ExpiresAt)
 			}

@@ -11,7 +11,7 @@ import (
 func onboardingCookieRequest(t *testing.T, f *appFixture, who signedIn, method, path, body string) *http.Request {
 	t.Helper()
 	raw := strings.TrimPrefix(who.auth, "Session ")
-	session, err := f.store.LookupSession(context.Background(), raw)
+	session, err := f.store.AsOperator().LookupSession(context.Background(), raw)
 	if err != nil {
 		t.Fatal(err)
 	}

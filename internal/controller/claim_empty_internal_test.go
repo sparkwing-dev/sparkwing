@@ -11,11 +11,11 @@ import (
 
 func TestClaimEmptyCountsPollsThatMatchNothingByClaimant(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
-	e.Store.SetClaimProfileResolver(engineProfileFake{})
+	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	launcher := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	runner := engineHTTPRoot(t, e, "a", "runner", []capability.Grant{capability.NodesClaim})
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	series := func(claimant string) string { return `sparkwing_claim_empty_total{claimant="` + claimant + `"}` }
 	before := scrapeRegistry(t)
 	engineClaimHTTP(t, h, launcher, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan","eval","node"],"available_cores":1}`, 200)
