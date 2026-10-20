@@ -946,3 +946,9 @@ their slot for signed webhook settlement. Separate operation paths make an
 older checkout service fail closed instead of treating reconciliation as
 implicit authorization to charge. Eligibility commits and Stripe calls are
 separate operations; no database transaction stays open across a provider call.
+
+## 2026-10-20 Korey decision 35: wave 2 proceeds; growth is fine when it is healthy
+
+- Wave 1 of the simplification plan grew production Go by about 3,100 lines. Korey accepts growth that buys the right abstractions and single owners ("sometimes a codebase has to grow to become simpler").
+- Wave 2 proceeds: deletion-heavy lanes first (WS12 Sol's cuts, WS6 tenant handle, WS7 authority), and each lane reports its net lines and justifies growth in the merge request. The second time a reviewer finds the same mechanism in a lane, the lane stops patching and builds a single owner.
+- Barrier B1 (pkg/store, pkg/controller, client, storage, teststore under internal/) runs before wave 2 starts.
