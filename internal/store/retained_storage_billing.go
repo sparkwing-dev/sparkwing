@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"math"
 	"time"
 )
@@ -14,8 +13,17 @@ import (
 // The initial sample starts billing without charging for earlier storage.
 func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLease) (StorageChargeSweep, error) {
 	var out StorageChargeSweep
+	var rate, free int64
 	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-		return assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now())
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+			return err
+		}
+		var err error
+		if rate, err = creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0); err != nil {
+			return err
+		}
+		free, err = creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, 0)
+		return err
 	}); err != nil {
 		return out, err
 	}
@@ -23,20 +31,23 @@ func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLea
 	if err != nil {
 		return out, err
 	}
-	for _, team := range teams {
-		charge, err := o.chargeRetainedTeam(ctx, lease, team)
+	err = o.EachTeam(ctx, teams, func(t *Tenant) error {
+		charge, err := o.chargeRetainedTeam(ctx, lease, t.team, rate, free)
 		if err != nil {
-			return out, fmt.Errorf("storage: bill team %s: %w", team, err)
+			return err
 		}
 		if charge != nil {
 			out.Charges = append(out.Charges, *charge)
-			if out.ChargedMicro > math.MaxInt64-charge.AmountMicro {
-				return out, errors.New("storage: billed total exceeds report range")
-			}
-			out.ChargedMicro += charge.AmountMicro
 		}
+		return nil
+	})
+	for _, charge := range out.Charges {
+		if out.ChargedMicro > math.MaxInt64-charge.AmountMicro {
+			return out, errors.Join(err, errors.New("storage: billed total exceeds report range"))
+		}
+		out.ChargedMicro += charge.AmountMicro
 	}
-	return out, nil
+	return out, err
 }
 
 func (o *Operator) retainedStorageTeams(ctx context.Context) (_ []Team, err error) {
@@ -60,7 +71,7 @@ ORDER BY t.name`)
 	return teams, rows.Err()
 }
 
-func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease, team Team) (_ *CreditCharge, err error) {
+func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease, team Team, rate, free int64) (_ *CreditCharge, err error) {
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -69,7 +80,7 @@ func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease,
 	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
 		return nil, err
 	}
-	charge, err := chargeRetainedTeamTx(ctx, tx, team)
+	charge, err := chargeRetainedTeamTx(ctx, tx, team, rate, free)
 	if err != nil {
 		return nil, err
 	}
@@ -79,21 +90,13 @@ func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease,
 	return charge, tx.Commit()
 }
 
-func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team) (*CreditCharge, error) {
-	rate, err := creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
-	if err != nil {
-		return nil, err
-	}
+func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, free int64) (*CreditCharge, error) {
 	if rate == 0 {
 		_, err := tx.ExecContext(ctx, "UPDATE team_storage SET storage_charged_through=0 WHERE team=? AND store IN ('cache','logs') AND storage_charged_through<>0", team)
 		if err != nil {
 			return nil, err
 		}
 		return nil, nil
-	}
-	free, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, 0)
-	if err != nil {
-		return nil, err
 	}
 	through, err := lockRetainedWatermarksTx(ctx, tx, team)
 	if err != nil {

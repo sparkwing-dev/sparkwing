@@ -809,22 +809,29 @@ own their retained responsibilities. Seeded startup bootstrap uses the gated
 
 ## Launcher award snapshots
 
-`Store.ReadLauncherAwards(ctx, authority, reservations)` validates each observed
-reservation fence against its original bootstrap award, then reads current awards,
-seals, job settings and parent expiry in one snapshot. Root ancestry and the
-service subject determine ownership across teams. The snapshot excludes ended
-leases, cancelled or terminal work, replaced generations and completed evals.
-Eval liveness checks both its source generation and the current controller lease.
-Exchange replaces the stored credential without changing the award fence.
+`Operator.ReconcileLauncherAwards(ctx, authority, observed, reservations,
+preparing, rejected)` correlates observations through unit rows before validating
+capability envelopes and their lookup projections. Root ancestry and service
+subject determine ownership across teams. Exchange replaces the stored credential
+without changing the observed award fence. Current seals, job settings, committed
+resources and parent expiry are read together. Eval liveness checks its source
+generation and the current controller lease.
 
-Root ancestry and service subject must match even after the original award expires
-or is exchanged. An unknown or foreign reservation refuses the entire snapshot.
-The controller's default `LauncherSyncReader` uses this snapshot. It validates
-unique Job and award observations, retains exact matching fences and returns
-only the observed namespace/name/UID for cleanup. A sync response describes the
-original bootstrap award even after exchange. It carries no bearer and performs
-no lifecycle, reservation or billing write. Infrastructure or integrity errors
-discard the complete response.
+One reconciliation owner isolates typed `integrity_failure` errors during
+preparation renewal, rejection, reservation validation and snapshot decoding.
+Each damaged award is deferred under its observed identity while healthy siblings
+proceed. JSON decoding, semantic job state and persisted billing validators use
+this category. Database and launcher-authority failures discard the response.
+
+Preparation renews an exact bootstrap fence. Rejection fails only an exact owned
+award. Reservations must match the original bootstrap's ancestry and subject even
+after expiry or exchange. An unknown or foreign reservation refuses the request.
+
+The default `LauncherSyncReader` validates unique Job and award observations. It
+returns cleanup only after confirming an ended lease, cancelled or terminal unit,
+replaced fence or different launcher owner. Missing snapshot entries are deferred.
+Cleanup names only the observed namespace/name/UID or reservation identity. The
+response carries no bearer material.
 
 `Store.SyncLaunchJobs`, its types and helpers, and `Client.LauncherSync` are
 removed. Unstarted release uses `ReleaseUnit`. The owner redispatches pending

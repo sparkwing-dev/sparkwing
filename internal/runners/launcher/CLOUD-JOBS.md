@@ -257,10 +257,13 @@ Jobs. One controller call reconciles all live observations. Decisions may arrive
 in any order; each must match exactly one observed binding before any live Job
 is retired. Duplicate, changed, extra or missing decisions preserve live Jobs
 and return an error. A corrupt persisted award receives an explicit deferred
-decision bound to its observed lease. One store reconciliation owner applies
-this rule through preparation renewal, reservation validation and snapshot
-decoding: its Job and reservation stay intact while
-other awards continue through retirement. Expired or locally terminal Jobs can still be cleaned up
+decision bound to its observed lease. Unit rows supply that identity independently
+of capability lookup projections. Persisted JSON and semantic validators report
+`integrity_failure`. One store reconciliation owner applies this category through
+preparation renewal, reservation validation and snapshot decoding. Its Job and
+reservation stay intact while other awards continue through retirement. Removal
+requires a confirmed ended or replaced unit fence. An absent snapshot entry
+receives a deferred decision. Expired or locally terminal Jobs can still be cleaned up
 when the controller is unavailable.
 Teardown deletes only the recorded bootstrap UID and retains the node reservation
 while a Job container remains. `KubernetesBoundary.Release` also requires pod

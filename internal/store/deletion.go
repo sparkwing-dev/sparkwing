@@ -143,8 +143,8 @@ func refuseDeletionWithMoneyInFlightTx(ctx context.Context, tx *storeTx, team Te
 }
 
 // safety: every way into the team closes before any row is removed; the rows go later, in
-// [Operator.PurgeTeam], because they may not fit one transaction. Physical logs and blobs are
-// removed separately by the controller's log cleanup and CAS collection.
+// [Operator.PurgeTeam], because they may not fit one transaction. The controller removes
+// physical logs and the complete team object namespace before purging SQL rows.
 func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy string, now time.Time) ([]string, error) {
 	if t.team == DefaultTeam {
 		return nil, fmt.Errorf("%w: the default team holds every single-team install's rows", ErrInvalidInput)

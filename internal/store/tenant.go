@@ -3,11 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
+
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // Team is a tenant key. It is a defined type rather than a bare string
@@ -129,7 +132,7 @@ func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 const liveTeamsSQL = `SELECT name FROM teams WHERE NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name AND d.state = 'pending')`
 
 // EachTeam visits selected live tenants, or all live tenants when query is nil.
-// A tenant's failure is logged and cannot prevent another tenant's maintenance.
+// Tenant failures are logged; database failures and loss of the maintenance lease stop the sweep.
 func (o *Operator) EachTeam(ctx context.Context, query []Team, fn func(*Tenant) error) error {
 	rows, err := o.s.query(ctx, liveTeamsSQL+` ORDER BY name`)
 	if err != nil {
@@ -153,6 +156,23 @@ func (o *Operator) EachTeam(ctx context.Context, query []Team, fn func(*Tenant) 
 			return err
 		}
 		if err := fn(&Tenant{s: o.s, team: team}); err != nil {
+			var sqlite interface{ Code() int }
+			var postgres interface{ SQLState() string }
+			global := errors.Is(err, ErrLockHeld) || errors.Is(err, driver.ErrBadConn) || errors.Is(err, sql.ErrConnDone)
+			if errors.As(err, &sqlite) {
+				code := sqlite.Code() & 0xff
+				global = global || code != sqlite3.SQLITE_CONSTRAINT && code != sqlite3.SQLITE_MISMATCH
+			}
+			if errors.As(err, &postgres) {
+				state := postgres.SQLState()
+				global = global || !strings.HasPrefix(state, "22") && !strings.HasPrefix(state, "23")
+			}
+			if global {
+				return err
+			}
+			if dbErr := o.Ping(ctx); dbErr != nil {
+				return errors.Join(err, dbErr)
+			}
 			slog.ErrorContext(ctx, "tenant maintenance failed", "team", team, "err", err)
 		}
 	}

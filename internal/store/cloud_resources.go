@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -47,6 +48,9 @@ func cloudAwardResourcesTx(ctx context.Context, tx *storeTx, ref capability.Auth
 		return nil, authorityError(apierr.IntegrityFailure, "Cloud award has no metered allocation")
 	}
 	award, err := readBillingAwardTx(ctx, tx, Team(c.Team), c.Billing.ReservationID)
+	if errors.Is(err, ErrNotFound) {
+		err = authorityError(apierr.IntegrityFailure, "Cloud award has no billing record")
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -92,6 +92,9 @@ func (r CapabilityRecord) Validate() error {
 		if !ok || p.Unit != c.Unit || c.UnitID == "" || c.Parent == nil || c.Team == "" || c.Billing == nil {
 			return authorityError(apierr.IntegrityFailure, "invalid award identity")
 		}
+		if _, err := decodeAwardUnit(c.Unit, c.UnitID); err != nil {
+			return authorityError(apierr.IntegrityFailure, "invalid persisted award unit identity")
+		}
 		if c.Delivery != capability.DeliveryDirect && c.Delivery != capability.DeliveryBootstrap {
 			return authorityError(apierr.IntegrityFailure, "invalid award delivery")
 		}
@@ -111,6 +114,11 @@ func (r CapabilityRecord) Validate() error {
 		}
 	}
 	return nil
+}
+
+func isIntegrityError(err error) bool {
+	var integrity *apierr.Error
+	return errors.As(err, &integrity) && integrity.Code == apierr.IntegrityFailure
 }
 
 func authorityError(code apierr.Code, message string) error {

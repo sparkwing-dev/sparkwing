@@ -25,6 +25,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).dueRunEffects":             "the completion worker discovers due effects across tenants before dispatching each tenant run",
 	"(*Operator).expiredUnits":              "the leased reaper discovers expired execution units across tenants before expiring each exact unit",
 	"(*Operator).queuedClaimQuery":          "launcher claims scan deployment queues; ordinary claimant queries append their bound tenant predicate",
+	"(*Operator).launcherKeysTx":            "launcher observations name global unit identities whose stored fence and capability ancestry prove ownership before any award is returned",
 	"(*Operator).launcherPrefixesTx":        "launcher reconciliation discovers every tenant award before validating each exact award",
 	"(*Operator).lockMaintenanceCapacityTx": "the leased concurrency pass locks capacity entries across tenants before maintaining each tenant key",
 	"(*Operator).retainedStorageTeams":      "storage billing discovers every live tenant holding retained records or blobs",

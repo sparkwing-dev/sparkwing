@@ -152,8 +152,8 @@ func TestStoreDataRetainedStorageLeaseFencesAndRollback(t *testing.T) {
 		t.Fatalf("forged lease=%v", err)
 	}
 	rewriteSchemaExec(t, s.db, "CREATE TRIGGER refuse_storage_charge BEFORE INSERT ON credit_charges BEGIN SELECT RAISE(ABORT,'ledger unavailable'); END")
-	if _, err := s.AsOperator().ChargeRetainedStorage(t.Context(), lease); err == nil {
-		t.Fatal("ledger failure ignored")
+	if sweep, err := s.AsOperator().ChargeRetainedStorage(t.Context(), lease); err != nil || len(sweep.Charges) != 0 {
+		t.Fatalf("failed tenant charge was retained or stopped the sweep: %+v %v", sweep, err)
 	}
 	rewriteSchemaCount(t, s.db, "credit_charges", 0)
 	var through int64
@@ -212,8 +212,8 @@ func TestStoreDataRetainedStorageOverflowFailsWithoutAdvancing(t *testing.T) {
 	s, lease, now := retainedBillingFixture(t)
 	retainedBlob(t, s, "a", "a", math.MaxInt64, *now)
 	retainedBlob(t, s, "a", "b", 1, *now)
-	if _, err := s.AsOperator().ChargeRetainedStorage(t.Context(), lease); err == nil {
-		t.Fatal("overflow ignored")
+	if sweep, err := s.AsOperator().ChargeRetainedStorage(t.Context(), lease); err != nil || len(sweep.Charges) != 0 {
+		t.Fatalf("overflowing tenant was charged or aborted the sweep: %+v %v", sweep, err)
 	}
 	rewriteSchemaCount(t, s.db, "team_storage", 0)
 	rewriteSchemaCount(t, s.db, "credit_charges", 0)
@@ -353,10 +353,45 @@ func TestStoreDataRetainedStorageCorruptSettingsAndWatermarks(t *testing.T) {
 			case "inventory":
 				rewriteSchemaExec(t, s.db, "UPDATE blobs SET created_at=0 WHERE team='a'")
 			}
-			if _, err := s.AsOperator().ChargeRetainedStorage(t.Context(), lease); err == nil {
-				t.Fatal("corruption billed successfully")
+			sweep, err := s.AsOperator().ChargeRetainedStorage(t.Context(), lease)
+			if fault == "price" && err == nil || fault != "price" && err != nil || len(sweep.Charges) != 0 {
+				t.Fatalf("corrupt %s sweep=%+v, %v", fault, sweep, err)
 			}
 			rewriteSchemaCount(t, s.db, "credit_charges", 0)
 		})
+	}
+}
+
+func TestRetainedStorageSweepIsolatesTeamDamageAndDeletion(t *testing.T) {
+	for _, badTeam := range []string{"a", "b"} {
+		for _, damage := range []string{"watermarks", "deletion"} {
+			t.Run(badTeam+"/"+damage, func(t *testing.T) {
+				s, lease, now := retainedBillingFixture(t)
+				for _, team := range []string{"a", "b"} {
+					retainedBlob(t, s, team, "a", StorageBytesPerGB, *now)
+				}
+				retainedBill(t, s, lease)
+				*now = now.Add(24 * time.Hour)
+				if damage == "watermarks" {
+					rewriteSchemaExec(t, s.db, "UPDATE team_storage SET storage_charged_through=0 WHERE team=? AND store='logs'", badTeam)
+				} else {
+					if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), Team(badTeam), *now); err != nil {
+						t.Fatal(err)
+					}
+				}
+				sweep := retainedBill(t, s, lease)
+				if len(sweep.Charges) != 1 || sweep.Charges[0].Team == Team(badTeam) || sweep.ChargedMicro != CloudStorageRateMicroPerGBDay {
+					t.Fatalf("sweep=%+v", sweep)
+				}
+			})
+		}
+	}
+}
+
+func TestRetainedStorageSweepReturnsDatabaseFailures(t *testing.T) {
+	s, lease, _ := retainedBillingFixture(t)
+	rewriteSchemaExec(t, s.db, "DROP TABLE blobs")
+	if _, err := s.AsOperator().ChargeRetainedStorage(t.Context(), lease); err == nil {
+		t.Fatal("database failure was treated as tenant damage")
 	}
 }

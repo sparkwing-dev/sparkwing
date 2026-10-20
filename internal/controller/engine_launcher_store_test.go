@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"testing/quick"
 
@@ -143,6 +144,9 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *testing.T) {
 	for _, damage := range []struct{ name, query string }{
 		{"capability-envelope", `UPDATE capabilities SET authority_json='{' WHERE prefix=?`},
+		{"capability-projection", `UPDATE capabilities SET unit_id='damaged' WHERE prefix=?`},
+		{"node-state", `UPDATE nodes SET status='running',attempt=0 WHERE run_id='run'`},
+		{"billing-price", `UPDATE credit_charges SET cpu_class=0 WHERE kind='reservation' AND run_id='run'`},
 		{"node-syntax", `UPDATE nodes SET execution_json='{' WHERE run_id='run'`},
 		{"node-type", `UPDATE nodes SET execution_json='[]' WHERE run_id='run'`},
 		{"run-syntax", `UPDATE runs SET request_json='{' WHERE id='run'`},
@@ -176,7 +180,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 					badPrefix = claim.Award.CapabilityPrefix
 				}
 			}
-			if damage.name == "capability-envelope" {
+			if strings.HasPrefix(damage.name, "capability-") {
 				engineSQL(t, e.Store, damage.query, badPrefix)
 			} else {
 				engineSQL(t, e.Store, damage.query)
@@ -185,7 +189,11 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			response, err := e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed, Preparing: preparing})
+			response, err := e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed})
+			if err != nil || len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Remove) != 0 {
+				t.Fatalf("observed-only response=%+v, %v", response, err)
+			}
+			response, err = e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed, Preparing: preparing})
 			if err != nil {
 				t.Fatal(err)
 			}

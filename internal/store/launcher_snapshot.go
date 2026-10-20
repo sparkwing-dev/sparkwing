@@ -18,6 +18,8 @@ import (
 
 // LauncherAward contains persisted execution inputs without reusable bearer material.
 type LauncherAward struct {
+	// Gone confirms that the observed unit fence has ended or belongs to another launcher.
+	Gone                   bool
 	CloudResources         *match.Resources
 	Fence                  capability.LeaseRef
 	Failure                error
@@ -29,16 +31,15 @@ type LauncherAward struct {
 }
 
 // ReconcileLauncherAwards isolates each persisted award through renewal, rejection and snapshot validation.
-func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, reservations, preparing, rejected []capability.LeaseRef) ([]LauncherAward, []LauncherPreparation, error) {
+func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, observed, reservations, preparing, rejected []capability.LeaseRef) ([]LauncherAward, []LauncherPreparation, error) {
 	if err := validateLauncherPreparationFences(preparing); err != nil {
 		return nil, nil, err
 	}
-	selected := append(append(slices.Clone(reservations), preparing...), rejected...)
-	owned, err := o.s.launcherAwardOwnership(ctx, authority, selected)
+	selected := append(append(append(slices.Clone(observed), reservations...), preparing...), rejected...)
+	owner, err := o.s.launcherAwardOwnership(ctx, authority, observed, selected)
 	if err != nil {
 		return nil, nil, err
 	}
-	owner := launcherAwardResults{failed: map[capability.LeaseRef]error{}, owned: owned}
 	var prepared []LauncherPreparation
 	for _, fence := range preparing {
 		if err := owner.apply(ctx, fence, func() error {
@@ -73,20 +74,26 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 			return nil, nil, err
 		}
 	}
-	prefixes, err := tx.operator.launcherPrefixesTx(ctx, tx, root.Authority, claimant.Subject, selected)
+	prefixes, err := tx.operator.launcherKeysTx(ctx, tx, root.Authority, claimant.Subject, observed, selected)
 	if err != nil {
 		return nil, nil, err
 	}
 	out := []LauncherAward{}
 	for _, key := range prefixes {
+		if owner.failed[key.fence] != nil {
+			continue
+		}
 		owner.owned[key.fence] = true
 		if !key.live {
+			if observed != nil {
+				out = append(out, LauncherAward{Fence: key.fence, Gone: true})
+			}
 			continue
 		}
 		if err := owner.apply(ctx, key.fence, func() error {
 			award, live, err := readLauncherAwardTx(ctx, tx, key.prefix, claimant, root)
-			if err == nil && live && slices.Contains(reservations, key.fence) {
-				award.CloudResources, err = cloudAwardResourcesTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: key.prefix})
+			if err == nil && !live && observed != nil {
+				out = append(out, LauncherAward{Fence: key.fence, Gone: true})
 			}
 			if err == nil && live {
 				award.Fence = key.fence
@@ -110,8 +117,8 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 	return out, prepared, nil
 }
 
-// Raw projected ownership survives an unreadable authority envelope without granting a foreign fence a deferred result.
-func (s *Store) launcherAwardOwnership(ctx context.Context, authority capability.AuthorityRef, selected []capability.LeaseRef) (map[capability.LeaseRef]bool, error) {
+// Unit rows retain the observed fence when capability lookup projections are damaged.
+func (s *Store) launcherAwardOwnership(ctx context.Context, authority capability.AuthorityRef, observed, selected []capability.LeaseRef) (*launcherAwardResults, error) {
 	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return nil, err
@@ -126,16 +133,23 @@ func (s *Store) launcherAwardOwnership(ctx context.Context, authority capability
 		return nil, bindingRefusal()
 	}
 	root := chain[len(chain)-1].principal.Authority
-	keys, err := tx.operator.launcherPrefixesTx(ctx, tx, root, claimant.Subject, selected)
+	keys, err := tx.operator.launcherKeysTx(ctx, tx, root, claimant.Subject, observed, selected)
 	if err != nil {
 		return nil, err
 	}
-	owned := map[capability.LeaseRef]bool{}
+	owner := &launcherAwardResults{failed: map[capability.LeaseRef]error{}, owned: map[capability.LeaseRef]bool{}}
 	for _, key := range keys {
-		owned[key.fence] = true
+		owner.owned[key.fence] = true
+		if key.live {
+			if err := owner.apply(ctx, key.fence, func() error {
+				_, _, err := readLauncherAwardTx(ctx, tx, key.prefix, claimant, chain[len(chain)-1].principal)
+				return err
+			}); err != nil {
+				return nil, err
+			}
+		}
 	}
-
-	return owned, tx.Commit()
+	return owner, tx.Commit()
 }
 
 type launcherAwardResults struct {
@@ -148,7 +162,7 @@ func (r *launcherAwardResults) apply(ctx context.Context, fence capability.Lease
 		return nil
 	}
 	err := fn()
-	if err == nil || !r.owned[fence] || !corruptLauncherAward(err) {
+	if err == nil || !r.owned[fence] || !isIntegrityError(err) {
 		return err
 	}
 	slog.ErrorContext(ctx, "launcher award deferred", "award", fence, "err", err)
@@ -156,18 +170,84 @@ func (r *launcherAwardResults) apply(ctx context.Context, fence capability.Lease
 	return nil
 }
 
-// corruptLauncherAward separates damaged persisted input from a failed database read.
-func corruptLauncherAward(err error) bool {
-	var integrity *apierr.Error
-	var syntax *json.SyntaxError
-	var shape *json.UnmarshalTypeError
-	return errors.As(err, &integrity) && integrity.Code == apierr.IntegrityFailure || errors.As(err, &syntax) || errors.As(err, &shape) || errors.Is(err, ErrNotFound)
-}
-
 type launcherAwardKey struct {
 	live   bool
 	prefix string
 	fence  capability.LeaseRef
+}
+
+func (op *Operator) launcherKeysTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject capability.Subject, observed, selected []capability.LeaseRef) ([]launcherAwardKey, error) {
+	if observed == nil {
+		return op.launcherPrefixesTx(ctx, tx, root, subject, selected)
+	}
+	var keys []launcherAwardKey
+	seen := map[capability.LeaseRef]bool{}
+	for _, fence := range selected {
+		if seen[fence] {
+			continue
+		}
+		seen[fence] = true
+		unit, err := decodeAwardUnit(fence.Kind, fence.ID)
+		if err != nil {
+			if slices.Contains(selected[len(observed):], fence) {
+				return nil, bindingRefusal()
+			}
+			keys = append(keys, launcherAwardKey{fence: fence})
+			continue
+		}
+		var prefix, holder string
+		var generation int64
+		var live bool
+		var query string
+		args := []any{unit.RunID}
+		switch fence.Kind {
+		case capability.UnitPlan:
+			query = `SELECT capability_prefix,COALESCE(claimed_by,''),generation,status='claimed' AND finished_at IS NULL FROM triggers WHERE id=? AND unit_kind='plan'`
+		case capability.UnitNode:
+			query = `SELECT capability_prefix,COALESCE(claimed_by,''),generation,status<>'done' FROM nodes WHERE run_id=? AND node_id=?`
+			args = append(args, unit.NodeID)
+		case capability.UnitEval:
+			query = `SELECT capability_prefix,COALESCE(claimed_by,''),generation,status IN ('claimed','running') FROM eval_units WHERE run_id=? AND source_node_id=? AND source_generation=?`
+			args = append(args, unit.NodeID, unit.SourceGeneration)
+		default:
+			return nil, bindingRefusal()
+		}
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&prefix, &holder, &generation, &live)
+		key := launcherAwardKey{fence: fence}
+		if errors.Is(err, sql.ErrNoRows) || err == nil && (!live || holder != fence.Holder || generation != fence.Generation) {
+			keys = append(keys, key)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		var parentKind, parentID, subjectKind, subjectID string
+		var body []byte
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(parent_kind,''),COALESCE(parent_id,''),subject_kind,subject_id,authority_json FROM capabilities WHERE prefix=?`, prefix).Scan(&parentKind, &parentID, &subjectKind, &subjectID, &body)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		owned := parentKind == string(root.Kind) && parentID == root.ID && subjectKind == string(subject.Kind) && subjectID == subject.ID
+		var record CapabilityRecord
+		if json.Unmarshal(body, &record) == nil && record.Validate() == nil {
+			c := record.Value
+			owned = owned || c.Parent != nil && *c.Parent == root && c.Subject == subject
+		}
+		if !owned && !errors.Is(err, sql.ErrNoRows) {
+			if slices.Contains(selected[len(observed):], fence) {
+				return nil, bindingRefusal()
+			}
+			if _, err := loadCapabilityTx(ctx, tx, prefix); err == nil {
+				keys = append(keys, key)
+				continue
+			} else if !isIntegrityError(err) {
+				return nil, err
+			}
+		}
+		key.prefix, key.live = prefix, true
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 func (op *Operator) launcherPrefixesTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject capability.Subject, selected []capability.LeaseRef) ([]launcherAwardKey, error) {
@@ -203,11 +283,18 @@ FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=?
 
 func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claimant capability.Capability, root capability.Principal) (LauncherAward, bool, error) {
 	c, err := loadCapabilityTx(ctx, tx, prefix)
+	var missing *apierr.Error
+	if errors.As(err, &missing) && missing.Code == apierr.Unauthenticated {
+		return LauncherAward{}, false, authorityError(apierr.IntegrityFailure, "live launcher unit has no capability")
+	}
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
 	if c.Parent == nil || *c.Parent != root.Authority || c.Subject != claimant.Subject || c.Audience != capability.Controller || !slices.Contains([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, c.Unit) || c.Purpose != claimPurpose(c.Unit) || c.Billing == nil || c.Billing.ExecutorClass != launcherExecutor(claimant) || c.Delivery != capability.DeliveryBootstrap && c.Issuance != capability.Exchange {
 		return LauncherAward{}, false, authorityError(apierr.IntegrityFailure, "invalid persisted launcher award")
+	}
+	if c.RevokedAt != nil && !c.RevokedAt.After(tx.now()) || c.ExpiresAt != nil && !c.ExpiresAt.After(tx.now()) {
+		return LauncherAward{}, false, nil
 	}
 	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
 	var refusal *apierr.Error
@@ -232,6 +319,9 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 		return LauncherAward{}, false, nil
 	}
 	run, err := readRunTx(ctx, tx, Team(c.Team), unit.RunID)
+	if errors.Is(err, ErrNotFound) {
+		err = authorityError(apierr.IntegrityFailure, "launcher award has no run")
+	}
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
@@ -243,6 +333,9 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	}
 	if c.Unit == capability.UnitNode || c.Unit == capability.UnitEval {
 		award.Node, err = readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
+		if errors.Is(err, ErrNotFound) {
+			err = authorityError(apierr.IntegrityFailure, "launcher award has no job")
+		}
 		if err != nil {
 			return LauncherAward{}, false, err
 		}
@@ -253,7 +346,8 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 			}
 		}
 	}
-	return award, true, nil
+	award.CloudResources, err = cloudAwardResourcesTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	return award, err == nil, err
 }
 
 func launcherEvalLiveTx(ctx context.Context, tx *storeTx, award LauncherAward) (bool, error) {

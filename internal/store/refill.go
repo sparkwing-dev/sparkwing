@@ -246,19 +246,19 @@ func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
 		return nil, err
 	}
 	var due []Refill
-	for _, team := range teams {
+	err = o.EachTeam(ctx, teams, func(t *Tenant) error {
+		var r *Refill
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-			r, err := dueRefillTx(ctx, tx, team)
-			if err == nil && r != nil {
-				due = append(due, *r)
-			}
+			var err error
+			r, err = dueRefillTx(ctx, tx, t.team)
 			return err
 		})
-		if err != nil {
-			return nil, err
+		if err == nil && r != nil {
+			due = append(due, *r)
 		}
-	}
-	return due, nil
+		return err
+	})
+	return due, err
 }
 
 func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {

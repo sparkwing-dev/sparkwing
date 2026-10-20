@@ -128,3 +128,27 @@ func FuzzEngineLauncherSyncOmitsBearer(f *testing.F) {
 		}
 	})
 }
+
+type launcherAwardSnapshot []store.LauncherAward
+
+func (s launcherAwardSnapshot) ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef) ([]store.LauncherAward, []store.LauncherPreparation, error) {
+	return s, nil, nil
+}
+
+func TestLauncherCleanupRequiresPositiveAbsence(t *testing.T) {
+	observed := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 1}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "job", UID: "uid"}, NodeUID: "node"}
+	for _, gone := range []bool{false, true} {
+		var snapshot launcherAwardSnapshot
+		if gone {
+			snapshot = append(snapshot, store.LauncherAward{Fence: observed.Award, Gone: true})
+		}
+		reader := storeLauncherSync{store: snapshot}
+		response, err := reader.ReadLauncherSync(t.Context(), capability.AuthorityRef{}, []controllerwire.LauncherObservation{observed}, nil)
+		if err != nil || len(response.Awards) != 0 || len(response.Remove) != btoi(gone) || len(response.Deferred) != btoi(!gone) {
+			t.Fatalf("gone=%v: %+v, %v", gone, response, err)
+		}
+		if !gone && response.Deferred[0] != observed.Award {
+			t.Fatal("deferred another fence")
+		}
+	}
+}

@@ -724,3 +724,53 @@ func TestBoundRefillConfirmationRechecksEligibility(t *testing.T) {
 		})
 	}
 }
+
+func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
+	for _, fault := range []string{"a", "b", "constraint", "database", "deletion"} {
+		t.Run(fault, func(t *testing.T) {
+			s, _, now := refillFixture(t, true)
+			b := &Tenant{s: s, team: "b"}
+			if err := b.TestOnlySaveCard(t.Context(), Card{Customer: "cus_b", PaymentMethod: "pm_b", Fingerprint: "fp_b", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {
+				t.Fatal(err)
+			}
+			for _, team := range []Team{"a", "b"} {
+				if err := setRefill(t, s, team, RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 1000}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch fault {
+			case "database":
+				rewriteSchemaExec(t, s.db, "DROP TABLE credit_checkouts")
+			case "constraint":
+				rewriteSchemaExec(t, s.db, "CREATE TRIGGER reject_refill BEFORE INSERT ON credit_checkouts WHEN NEW.team='b' BEGIN SELECT RAISE(ABORT,'unavailable'); END")
+			case "deletion":
+				if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), "a", now); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				rewriteSchemaExec(t, s.db, "UPDATE teams SET card_added_at='damaged' WHERE name=?", fault)
+			}
+			due, err := s.AsOperator().DueRefills(t.Context())
+			if fault == "database" {
+				if err == nil || len(due) != 0 {
+					t.Fatalf("database failure: due=%+v, %v", due, err)
+				}
+				return
+			}
+			if err != nil || len(due) != 1 {
+				t.Fatalf("due=%+v, %v", due, err)
+			}
+			want := Team("a")
+			if fault == "a" || fault == "deletion" {
+				want = "b"
+			}
+			if due[0].Team != want {
+				t.Fatalf("due=%+v", due)
+			}
+			var count int
+			if err := s.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM credit_checkouts WHERE kind='refill'").Scan(&count); err != nil || count != 1 {
+				t.Fatalf("refills=%d, %v", count, err)
+			}
+		})
+	}
+}
