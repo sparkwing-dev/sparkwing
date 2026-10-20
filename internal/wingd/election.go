@@ -13,24 +13,42 @@ import (
 var errPeerClosed = errors.New("wingd: peer closed connection")
 
 func (d *Daemon) elect() (bool, error) {
-	if err := d.layout.ensureDir(); err != nil {
-		return false, err
-	}
-	f, err := fssecure.OpenFile(d.layout.lock, os.O_CREATE|os.O_RDWR)
+	f, err := acquireProcessLock(d.layout)
+	d.lockFile = f
+	return f != nil, err
+}
+
+// AcquireControllerLock excludes other controllers and wingd for this home.
+// Close the returned file only after the controller has stopped using its store.
+func AcquireControllerLock(home string) (*os.File, error) {
+	l, err := resolveLayout(home)
 	if err != nil {
-		return false, fmt.Errorf("wingd: open lock %s: %w", d.layout.lock, err)
+		return nil, err
+	}
+	f, err := acquireProcessLock(l)
+	if err == nil && f == nil {
+		err = fmt.Errorf("another controller or wingd already owns store directory %s", home)
+	}
+	return f, err
+}
+
+func acquireProcessLock(l layout) (*os.File, error) {
+	if err := l.ensureDir(); err != nil {
+		return nil, err
+	}
+	f, err := fssecure.OpenFile(l.lock, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		return nil, fmt.Errorf("wingd: open lock %s: %w", l.lock, err)
 	}
 	ok, err := flockTry(f)
-	if err != nil {
+	if err != nil || !ok {
 		_ = f.Close()
-		return false, fmt.Errorf("wingd: flock %s: %w", d.layout.lock, err)
+		if err != nil {
+			return nil, fmt.Errorf("wingd: flock %s: %w", l.lock, err)
+		}
+		return nil, nil
 	}
-	if !ok {
-		_ = f.Close()
-		return false, nil
-	}
-	d.lockFile = f
-	return true, nil
+	return f, nil
 }
 
 func (d *Daemon) releaseLock() {

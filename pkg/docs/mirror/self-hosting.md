@@ -70,10 +70,16 @@ integration evidence. See [log completeness](observability.md#log-completeness).
 A store has one active controller. Before migrations, startup writes or serving,
 a PostgreSQL controller takes a session advisory lock derived from the database
 and Sparkwing schema on a dedicated connection. A second controller blocks as a
-standby. The active controller checks that connection and lock every second,
+standby. Promotion bumps the `controller_epoch` row in the same transaction
+that takes the lock. Every write transaction holds a shared lock on that row
+and checks its promoted epoch. Promotion waits for in-flight writes to finish.
+The former controller's later writes abort and trigger fail-stop, even before
+its lock watchdog runs. The active controller checks the connection and lock every second,
 with a five-second query timeout. Losing either exits the process non-zero
 immediately, without draining. Its supervisor restarts it, and a waiting standby
-can take over. SQLite deployments run one controller process.
+can take over. SQLite controllers hold the home's `wingd/d.lock` OS file lock
+before opening the store, through shutdown. Another controller or wingd on the
+same home fails fast. Break-glass admin can still use the store.
 
 Webhook ordering, bucket measurement and write guards, request budgets and live
 log tails use the active process's state. Cross-controller webhook ordering and

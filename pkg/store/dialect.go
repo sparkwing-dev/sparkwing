@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -90,11 +92,16 @@ func (s *Store) sqlRunner() sqlRunner {
 }
 
 func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	return s.sqlRunner().ExecContext(ctx, rewritePh(s.dialect, q), args...)
+	var result sql.Result
+	err := s.inTx(ctx, func(tx *storeTx) (err error) {
+		result, err = tx.ExecContext(ctx, q, args...)
+		return err
+	})
+	return result, err
 }
 
 func (s *Store) execNoCtx(q string, args ...any) (sql.Result, error) {
-	return s.sqlRunner().ExecContext(context.Background(), rewritePh(s.dialect, q), args...)
+	return s.exec(context.Background(), q, args...)
 }
 
 func (s *Store) query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
@@ -199,10 +206,25 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s, snapshotRead: true}, nil
 }
 
+var errControllerFenced = errors.New("controller superseded by promotion")
+
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 	tx, err := s.sqlRunner().BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
+	}
+	if s.controllerEpoch != 0 {
+		var epoch int64
+		err := tx.QueryRowContext(ctx, `SELECT convert_from(value,'UTF8')::bigint FROM settings WHERE key='controller_epoch' FOR SHARE`).Scan(&epoch)
+		if err != nil || epoch != s.controllerEpoch {
+			fenced := err == nil || errors.Is(err, sql.ErrNoRows)
+			err = errors.Join(err, tx.Rollback())
+			if fenced {
+				err = errors.Join(fmt.Errorf("controller epoch lost (promoted=%d, current=%d): %w", s.controllerEpoch, epoch, errControllerFenced), err)
+				s.controllerFailStop(err)
+			}
+			return nil, err
+		}
 	}
 	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s}, nil
 }

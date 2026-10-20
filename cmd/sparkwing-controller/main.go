@@ -31,6 +31,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -454,6 +455,13 @@ func run(args []string) error {
 	defer stop()
 	ctx := sigCtx
 
+	if cfg.Store() == deployment.StoreSQLite {
+		lock, err := wingd.AcquireControllerLock(p.Root)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = lock.Close() }()
+	}
 	st, serr := openControllerStore(ctx, cfg, p.StateDB())
 	if serr != nil {
 		return fmt.Errorf("open state db: %w", serr)

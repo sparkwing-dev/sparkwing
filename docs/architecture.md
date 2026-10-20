@@ -61,7 +61,10 @@ proof. Aggregate scratch includes DinD and remains bounded by the shared limit.
 
 A database has one active controller. PostgreSQL standbys wait on a dedicated
 session advisory lock. Losing the lock or its connection exits the active
-process immediately without draining. SQLite runs one controller process.
+process immediately without draining. Promotion also bumps a `controller_epoch`
+row. Every write transaction locks and checks that epoch, so promotion waits for
+in-flight writes and fences later writes from the former controller. SQLite
+controllers and wingd share one OS file lock per home. Admin remains available.
 Webhook ordering, bucket write guards, request budgets and live log tails use
 the active process's state.
 

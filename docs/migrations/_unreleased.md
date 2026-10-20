@@ -2891,12 +2891,16 @@ the Secret whenever convenient. Charts that set
 
 PostgreSQL controllers take a dedicated session advisory lock before migrations
 or startup writes. A second controller waits as a standby. Loss of the lock or
-its connection causes an immediate non-zero exit without draining. SQLite
-remains single-process. Webhook ordering and bucket write guards use the active
+its connection causes an immediate non-zero exit without draining. Promotion
+bumps a `controller_epoch` row in the lock transaction. Every write transaction
+locks and checks that epoch, so promotion waits for in-flight writes and the
+former controller's later writes abort and fail-stop. SQLite controllers and
+wingd share the home's `wingd/d.lock` OS file lock. A second owner fails fast,
+while admin remains available. Webhook ordering and bucket write guards use the active
 process's state, so cross-controller ordering and storage-state propagation do
 not apply. `--payment-mode` and `--free-team-slots` remain matching shared
 settings.
 
 Break-glass admin checks the actual table schema and transport endpoint,
 including Unix sockets, and keeps verification and writes on that connection.
-An empty `--addr` refuses startup before opening the store.
+Schema-validation and connection-configuration errors omit credentials. An empty `--addr` refuses startup before opening the store.

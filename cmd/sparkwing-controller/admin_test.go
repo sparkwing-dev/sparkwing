@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -279,5 +280,36 @@ func TestAdminActsOnlyOnTheRecordedStore(t *testing.T) {
 	}
 	if err := freeze(); err == nil || !strings.Contains(err.Error(), "connected to") {
 		t.Fatalf("admin on another connection target = %v, want a target refusal", err)
+	}
+}
+
+func TestSQLiteControllerLockPreservesAdminAccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	lock, err := wingd.AcquireControllerLock(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	st := openState(t)
+	defer func() { _ = st.Close() }()
+	if err := runAdmin([]string{"freeze", "--team=default", "--reason=abuse"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("admin while controller owns store: %v", err)
+	}
+}
+
+func TestSQLiteControllerRefusesAnOwnedStore(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	lock, err := wingd.AcquireControllerLock(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	if err := run([]string{"--addr=127.0.0.1:0"}); err == nil || !strings.Contains(err.Error(), "already owns store directory") {
+		t.Fatalf("second controller: %v", err)
+	}
+	if _, err := os.Stat(home + "/state.db"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("second controller opened the store: %v", err)
 	}
 }

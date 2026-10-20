@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,8 +49,15 @@ func TestOpenExistingNeverCreatesASQLiteStore(t *testing.T) {
 
 func TestOpenExistingNeverCreatesAPostgresStore(t *testing.T) {
 	target := storetest.NewPostgres(t)
+	u, err := url.Parse(target.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, _ := u.User.Password()
 	if _, err := store.OpenExisting(t.Context(), store.DialectPostgres, target.DSN()); err == nil {
 		t.Fatal("OpenExisting opened an empty database")
+	} else if strings.Contains(err.Error(), target.DSN()) || (password != "" && strings.Contains(err.Error(), password)) {
+		t.Fatalf("schema error leaked credentials: %v", err)
 	}
 	target.Open(t)
 	st, err := store.OpenExisting(t.Context(), store.DialectPostgres, target.DSN())
@@ -62,5 +70,13 @@ func TestOpenExistingNeverCreatesAPostgresStore(t *testing.T) {
 	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPostgresConfigurationErrorsOmitCredentials(t *testing.T) {
+	const password = "private-admin-password"
+	_, err := store.OpenExisting(t.Context(), store.DialectPostgres, "postgres://admin:"+password+"@localhost:bad-port/db")
+	if err == nil || strings.Contains(err.Error(), password) || strings.Contains(err.Error(), "postgres://") {
+		t.Fatalf("configuration error must omit credentials: %v", err)
 	}
 }

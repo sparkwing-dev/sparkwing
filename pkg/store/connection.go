@@ -60,7 +60,8 @@ func (c postgresSocket) RemoteAddr() net.Addr { return c.endpoint }
 func postgresConfig(dsn string) (*pgx.ConnConfig, error) {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		return nil, err
+		// pgx parse errors retain the complete connection string.
+		return nil, errors.New("invalid PostgreSQL connection settings")
 	}
 	dial := cfg.DialFunc
 	cfg.DialFunc = func(ctx context.Context, network, address string) (net.Conn, error) {

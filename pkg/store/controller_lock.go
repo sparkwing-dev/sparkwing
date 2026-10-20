@@ -12,7 +12,7 @@ import (
 
 // OpenControllerPostgres waits for the store's single-controller lock before
 // migrations. failStop must terminate the process immediately, without draining.
-// The dedicated session stays locked until Close, including during shutdown.
+// Promotion fences writes even before the former process detects session loss.
 func OpenControllerPostgres(ctx context.Context, dsn string, failStop func(error)) (*Store, error) {
 	cfg, err := postgresConfig(dsn)
 	if err != nil {
@@ -21,6 +21,10 @@ func OpenControllerPostgres(ctx context.Context, dsn string, failStop func(error
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
+	}
+	promotion, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, errors.Join(err, conn.Close(context.WithoutCancel(ctx)))
 	}
 	var key int64
 	err = conn.QueryRow(ctx, `SELECT hashtextextended('sparkwing.controller:' || current_database() || '/' || `+postgresStoreSchema+`, 0)`).Scan(&key)
@@ -36,6 +40,23 @@ func OpenControllerPostgres(ctx context.Context, dsn string, failStop func(error
 	cfg.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return dial(ctx, endpoint.Network(), endpoint.String())
 	}
+	st, err := openPostgresConfig(ctx, cfg)
+	if err == nil {
+		// Row locks held by writes make promotion wait for their commits.
+		err = promotion.QueryRow(ctx, `INSERT INTO settings(key,value) VALUES ('controller_epoch',convert_to('1','UTF8'))
+ON CONFLICT(key) DO UPDATE SET value=convert_to((convert_from(settings.value,'UTF8')::bigint+1)::text,'UTF8')
+RETURNING convert_from(value,'UTF8')::bigint`).Scan(&st.controllerEpoch)
+	}
+	if err == nil {
+		err = promotion.Commit(ctx)
+	}
+	if err != nil {
+		if st != nil {
+			err = errors.Join(err, st.Close())
+		}
+		return nil, errors.Join(err, conn.Close(context.WithoutCancel(ctx)))
+	}
+	st.controllerFailStop = failStop
 	watchCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
 	go func() {
@@ -65,10 +86,6 @@ func OpenControllerPostgres(ctx context.Context, dsn string, failStop func(error
 		cancel()
 		<-done
 		return conn.Close(context.WithoutCancel(ctx))
-	}
-	st, err := openPostgresConfig(ctx, cfg)
-	if err != nil {
-		return nil, errors.Join(err, cleanup())
 	}
 	closeConfig := st.cleanup
 	st.cleanup = func() error { return errors.Join(closeConfig(), cleanup()) }

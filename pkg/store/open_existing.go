@@ -43,7 +43,11 @@ func OpenExisting(ctx context.Context, dialect Dialect, target string) (*Store, 
 		return nil, errors.Join(err, db.Close())
 	}
 	st := &Store{db: db, conn: conn, dialect: dialect, provisions: nativeProvisionPolicy{}}
-	if err := requireCurrentSchema(ctx, conn, driver, target); err != nil {
+	label := target
+	if dialect == DialectPostgres {
+		label = "PostgreSQL target"
+	}
+	if err := requireCurrentSchema(ctx, conn, driver, label); err != nil {
 		return nil, errors.Join(err, st.Close())
 	}
 	return st, nil

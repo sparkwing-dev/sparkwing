@@ -84,7 +84,9 @@ const RetrySourceManual = "manual"
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	creditMeteringOff atomic.Bool
+	creditMeteringOff  atomic.Bool
+	controllerEpoch    int64
+	controllerFailStop func(error)
 
 	runEnvCipher     SessionKeyCipher
 	localSecrets     sync.Map
