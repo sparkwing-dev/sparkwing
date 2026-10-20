@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
@@ -76,7 +77,27 @@ func (b *dataBackend) Fetch(ctx context.Context, key, dir string) (int64, error)
 }
 
 // RestoreArchive publishes a dependency directory only after verified EOF and staged extraction.
-func RestoreArchive(ctx context.Context, r blob.VerifiedReader, dir string) (n int64, err error) {
+func RestoreArchive(ctx context.Context, r blob.VerifiedReader, dir string) (int64, error) {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return 0, errors.Join(err, closeReader(r))
+	}
+	parent, err := os.OpenRoot(filepath.Dir(dir))
+	if err != nil {
+		return 0, errors.Join(err, closeReader(r))
+	}
+	defer parent.Close()
+	return RestoreArchiveIn(ctx, r, parent, filepath.Base(dir))
+}
+
+func closeReader(r blob.VerifiedReader) error {
+	if r == nil {
+		return nil
+	}
+	return r.Close()
+}
+
+// RestoreArchiveIn restores name inside parent, opening every path through parent.
+func RestoreArchiveIn(ctx context.Context, r blob.VerifiedReader, parent *os.Root, name string) (n int64, err error) {
 	if r == nil {
 		return 0, fmt.Errorf("dependency cache returned no reader")
 	}
@@ -103,7 +124,7 @@ func RestoreArchive(ctx context.Context, r blob.VerifiedReader, dir string) (n i
 	if _, err = f.Seek(0, io.SeekStart); err != nil {
 		return n, err
 	}
-	return n, depcache.ExtractArchiveStaged(ctx, f, dir)
+	return n, depcache.ExtractArchiveStagedRoot(ctx, f, parent, name)
 }
 
 func (b *dataBackend) Store(ctx context.Context, key, dir string) (size int64, err error) {

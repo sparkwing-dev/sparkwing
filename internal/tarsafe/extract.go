@@ -4,6 +4,9 @@ package tarsafe
 
 import (
 	"archive/tar"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -37,7 +40,12 @@ func ExtractInRoot(tr *tar.Reader, dir string, policy Policy) error {
 		return err
 	}
 	defer root.Close()
+	return ExtractIntoRoot(tr, root, policy)
+}
 
+// ExtractIntoRoot writes every entry of tr under an opened root, with the
+// same refusals as ExtractInRoot.
+func ExtractIntoRoot(tr *tar.Reader, root *os.Root, policy Policy) error {
 	type dirMode struct {
 		path string
 		mode fs.FileMode
@@ -249,42 +257,56 @@ func refuseSymlinkedAncestors(root *os.Root, rel string) error {
 	return nil
 }
 
-// ExtractIntoDirStaged runs extract into a fresh directory beside dir and
-// renames it over dir, so a concurrent reader sees the previous contents or
-// the new ones, never a partial tree, and a failed extraction leaves the
-// previous contents in place.
-func ExtractIntoDirStaged(dir, stagePattern string, extract func(stage string) error) error {
-	parent := filepath.Dir(dir)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
+// ExtractIntoRootStaged runs extract into a fresh directory beside name inside
+// parent and renames it over name, so a concurrent reader sees the previous
+// contents or the new ones, never a partial tree, and a failed extraction leaves
+// the previous contents in place. Every step goes through parent, so a symlink
+// on the way cannot move the restore outside it.
+func ExtractIntoRootStaged(parent *os.Root, name, stagePrefix string, extract func(stage *os.Root) error) error {
+	if !filepath.IsLocal(name) {
+		return fmt.Errorf("restore target %q leaves its root", name)
+	}
+	dir := filepath.Dir(name)
+	if err := parent.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	stage, err := os.MkdirTemp(parent, stagePattern)
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return err
+	}
+	stage := filepath.Join(dir, stagePrefix+hex.EncodeToString(suffix[:]))
+	if err := parent.Mkdir(stage, 0o700); err != nil {
+		return err
+	}
+	stageRoot, err := parent.OpenRoot(stage)
 	if err != nil {
+		_ = parent.RemoveAll(stage)
 		return err
 	}
-	if err := extract(stage); err != nil {
-		_ = os.RemoveAll(stage)
+	err = extract(stageRoot)
+	err = errors.Join(err, stageRoot.Close())
+	if err != nil {
+		_ = parent.RemoveAll(stage)
 		return err
 	}
-
 	retired := stage + ".retired"
 	swapped := false
-	switch err := os.Rename(dir, retired); {
+	switch err := parent.Rename(name, retired); {
 	case err == nil:
 		swapped = true
 	case !os.IsNotExist(err):
-		_ = os.RemoveAll(stage)
+		_ = parent.RemoveAll(stage)
 		return err
 	}
-	if err := os.Rename(stage, dir); err != nil {
+	if err := parent.Rename(stage, name); err != nil {
 		if swapped {
-			_ = os.Rename(retired, dir)
+			_ = parent.Rename(retired, name)
 		}
-		_ = os.RemoveAll(stage)
+		_ = parent.RemoveAll(stage)
 		return err
 	}
 	if swapped {
-		_ = os.RemoveAll(retired)
+		_ = parent.RemoveAll(retired)
 	}
 	return nil
 }

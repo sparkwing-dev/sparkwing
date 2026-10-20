@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
@@ -86,17 +85,17 @@ func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declarati
 			return directoryCache{}, errors.New("cache resolver returned a relative directory")
 		}
 	} else {
-		cache.workspace, cache.declared = sdkWorkingDirectory(input.Entry), declaration.Path
-		if cache.dir, err = cache.confined(); err != nil {
-			return directoryCache{}, err
+		if !filepath.IsLocal(declaration.Path) {
+			return directoryCache{}, errors.New("cache path must be relative and stay inside the workspace")
 		}
+		cache.workspace, cache.declared = sdkWorkingDirectory(input.Entry), declaration.Path
+		cache.dir = filepath.Join(cache.workspace, cache.declared)
 	}
-	dir := cache.dir
-	entries, err := os.ReadDir(dir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	empty, err := cache.empty()
+	if err != nil {
 		return cache, err
 	}
-	if len(entries) != 0 {
+	if !empty {
 		return cache, nil
 	}
 	restored, err := d.restore(ctx, input, cache)
@@ -189,7 +188,12 @@ func (d DepcacheRecords) restore(ctx context.Context, input NodeInput, cache dir
 		}
 		return false, err
 	}
-	if _, err := depcacheblob.RestoreArchive(ctx, reader, cache.dir); err != nil {
+	parent, name, err := cache.open()
+	if err != nil {
+		return false, errors.Join(err, reader.Close())
+	}
+	defer parent.Close()
+	if _, err := depcacheblob.RestoreArchiveIn(ctx, reader, parent, name); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -203,33 +207,41 @@ func (d DepcacheRecords) warning(message string) {
 	}
 }
 
-// safety: the host archives and overwrites this directory, so a path outside the workspace or
-// through a symlink would let a job read or replace files only the host can reach.
-func (c directoryCache) confined() (string, error) {
+// safety: the host archives and overwrites this directory, so a declared path outside the
+// workspace, or a symlink swapped in while the job runs, must not reach files only the host can.
+// Every open goes through an os.Root, which refuses a path that resolves outside it.
+func (c directoryCache) open() (parent *os.Root, name string, err error) {
 	if c.workspace == "" {
-		return c.dir, nil
+		if err := os.MkdirAll(filepath.Dir(c.dir), 0o755); err != nil {
+			return nil, "", err
+		}
+		parent, err = os.OpenRoot(filepath.Dir(c.dir))
+		return parent, filepath.Base(c.dir), err
 	}
 	if !filepath.IsLocal(c.declared) {
-		return "", errors.New("cache path must be relative and stay inside the workspace")
+		return nil, "", errors.New("cache path must be relative and stay inside the workspace")
 	}
-	root, err := os.OpenRoot(c.workspace)
+	parent, err = os.OpenRoot(c.workspace)
+	return parent, filepath.Clean(c.declared), err
+}
+
+func (c directoryCache) empty() (bool, error) {
+	parent, name, err := c.open()
 	if err != nil {
-		return "", err
+		return false, err
 	}
-	defer func() { _ = root.Close() }()
-	current := ""
-	for _, part := range strings.Split(filepath.Clean(c.declared), string(filepath.Separator)) {
-		current = filepath.Join(current, part)
-		info, err := root.Lstat(current)
-		if errors.Is(err, fs.ErrNotExist) {
-			break
-		}
-		if err != nil {
-			return "", err
-		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			return "", errors.New("cache path passes through a symlink")
-		}
+	defer parent.Close()
+	dir, err := parent.Open(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
 	}
-	return filepath.Join(c.workspace, c.declared), nil
+	if err != nil {
+		return false, err
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(1)
+	if errors.Is(err, io.EOF) {
+		return true, nil
+	}
+	return len(entries) == 0, err
 }

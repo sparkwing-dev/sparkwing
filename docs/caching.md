@@ -76,8 +76,9 @@ declaration, platform and lockfile content inside that workspace. An escaping
 path, missing input or read failure returns an error.
 
 A `Dir()` path is relative to the workspace. Plan validation refuses an absolute
-path or one that leaves the workspace, and the host refuses a path that passes
-through a symlink when it restores or saves the cache. `GoModules()` and `Npm()`
+path or one that leaves the workspace, and the host opens the directory through
+the workspace when it restores or saves the cache, so a symlink cannot lead it
+outside. `GoModules()` and `Npm()`
 on a runner the run's owner does not own use the runner's own `GOMODCACHE` and
 npm cache, never values the job declares.
 

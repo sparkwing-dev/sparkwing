@@ -18,6 +18,11 @@ func WriteGzip(ctx context.Context, dst io.Writer, dir string) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, root.Close()) }()
+	return WriteGzipRoot(ctx, dst, root)
+}
+
+// WriteGzipRoot captures an opened root without reading through escaping symlinks.
+func WriteGzipRoot(ctx context.Context, dst io.Writer, root *os.Root) (err error) {
 	gzipWriter := gzip.NewWriter(dst)
 	tarWriter := tar.NewWriter(gzipWriter)
 	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
