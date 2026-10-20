@@ -20,7 +20,7 @@ import (
 func bootstrapPlanFile(t testing.TB) (BootstrapOptions, launcher.CloudJobAward) {
 	t.Helper()
 	expires := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
-	award := launcher.CloudJobAward{Binding: launcher.CloudJobBinding{Kind: launcher.CloudPlan, UnitID: "plan", RunID: "run", Team: "team", Holder: "holder", Generation: 7, ParentCapabilityExpiry: expires}, Bootstrap: []byte("private-bootstrap"), CPUCores: 1, Memory: 1 << 30}
+	award := launcher.CloudJobAward{LeaseExpiresAt: expires, Binding: launcher.CloudJobBinding{Kind: launcher.CloudPlan, UnitID: "plan", RunID: "run", Team: "team", Holder: "holder", Generation: 7, ParentCapabilityExpiry: expires}, Bootstrap: []byte("private-bootstrap"), CPUCores: 1, Memory: 1 << 30}
 	directory := t.TempDir()
 	body, err := json.Marshal(award)
 	if err != nil {

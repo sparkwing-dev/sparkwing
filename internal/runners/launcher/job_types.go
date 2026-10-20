@@ -57,12 +57,13 @@ func (binding CloudJobBinding) LeaseRef() capability.LeaseRef {
 
 // CloudJobAward carries only a single-use bootstrap, never the launcher's root credential.
 type CloudJobAward struct {
-	Engine    *engine.Identity `json:"engine,omitempty"`
-	Source    source.Spec      `json:"source"`
-	Binding   CloudJobBinding  `json:"binding"`
-	Bootstrap []byte           `json:"-"`
-	CPUCores  float64          `json:"cpu_cores"`
-	Memory    int64            `json:"memory_bytes"`
+	LeaseExpiresAt time.Time        `json:"lease_expires_at"`
+	Engine         *engine.Identity `json:"engine,omitempty"`
+	Source         source.Spec      `json:"source"`
+	Binding        CloudJobBinding  `json:"binding"`
+	Bootstrap      []byte           `json:"-"`
+	CPUCores       float64          `json:"cpu_cores"`
+	Memory         int64            `json:"memory_bytes"`
 }
 
 // CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped.

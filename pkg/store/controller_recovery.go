@@ -12,7 +12,27 @@ type ControllerRun struct {
 	RunID string
 }
 
-const controllerRunActive = `dispatch='controller' AND intake_mode='execute' AND sealed_at IS NOT NULL AND plan_accepted_generation>0 AND status IN ('pending','running')`
+// A stopped metered host cannot settle its accepted graph. The controller uses the same scheduler for that graph.
+const controllerRunOwnership = `r.plan_accepted_generation>0 AND
+ (r.dispatch='controller' OR (r.dispatch='host' AND r.intake_mode='execute' AND r.sealed_at IS NOT NULL AND EXISTS (
+ SELECT 1 FROM triggers t JOIN billing_awards a ON a.team=t.team AND a.run_id=t.id AND a.generation=t.generation AND a.unit_kind=t.unit_kind
+ WHERE t.team=r.team AND t.id=r.id AND t.unit_kind='trigger' AND t.status='failed' AND a.metered=1 AND a.stop_reason<>'')))`
+
+const controllerRunScheduling = controllerRunOwnership + ` AND r.intake_mode='execute' AND r.sealed_at IS NOT NULL`
+
+const controllerRunActive = controllerRunScheduling + ` AND r.status IN ('pending','running')`
+
+func controllerOwnershipTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
+	var owned bool
+	err := tx.QueryRowContext(ctx, `SELECT `+controllerRunOwnership+` AND r.intake_mode='execute' FROM runs r WHERE team=? AND id=?`, team, runID).Scan(&owned)
+	return owned, err
+}
+
+func controllerSchedulingTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
+	var active bool
+	err := tx.QueryRowContext(ctx, `SELECT `+controllerRunScheduling+` FROM runs r WHERE team=? AND id=?`, team, runID).Scan(&active)
+	return active, err
+}
 
 // ReconcileControllerRuns resumes settlement under the elected controller fence.
 // Pages use the last returned RunID as after; an empty page ends the sweep.
@@ -28,7 +48,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner", tx.now()); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT team,id FROM runs WHERE `+controllerRunActive+` AND id>? ORDER BY id LIMIT ?`, after, limit)
+		rows, err := tx.QueryContext(ctx, `SELECT r.team,r.id FROM runs r WHERE `+controllerRunActive+` AND r.id>? ORDER BY r.id LIMIT ?`, after, limit)
 		if err != nil {
 			return err
 		}
@@ -55,7 +75,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 				return err
 			}
 			var active bool
-			if err := tx.QueryRowContext(ctx, `SELECT `+controllerRunActive+` FROM runs WHERE team=? AND id=?`, ref.Team, ref.RunID).Scan(&active); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT `+controllerRunActive+` FROM runs r WHERE team=? AND id=?`, ref.Team, ref.RunID).Scan(&active); err != nil {
 				return err
 			}
 			if !active {

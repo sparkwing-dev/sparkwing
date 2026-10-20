@@ -955,9 +955,9 @@ func capacityLeaseCeilingTx(ctx context.Context, tx *storeTx, team Team, run, jo
 	var lease sql.NullInt64
 	var err error
 	if job != "" {
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(n.lease_expires_at,CASE WHEN r.dispatch='controller' AND r.plan_accepted_generation>0 THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END) FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=? AND n.run_id=? AND n.node_id=?`, team, run, job).Scan(&lease)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(n.lease_expires_at,CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END) FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=? AND n.run_id=? AND n.node_id=?`, team, run, job).Scan(&lease)
 	} else {
-		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN dispatch='controller' AND plan_accepted_generation>0 THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END FROM runs r WHERE team=? AND id=?`, team, run).Scan(&lease)
+		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END FROM runs r WHERE team=? AND id=?`, team, run).Scan(&lease)
 	}
 	if err != nil {
 		return 0, err

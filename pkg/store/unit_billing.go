@@ -183,7 +183,7 @@ func settleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitR
 }
 
 // safety: a renewal charges what the work used and pays for its next slice in one step. A balance or hold that cannot
-// pay writes the award's durable stop, a drain deadline one slice out and the run's cancellation in the same
+// pay writes the award's durable stop, a drain deadline one slice out and the job's cancellation in the same
 // transaction, so every later renewal reports the refusal and no lease outlives the drain. It returns the unit's
 // funded bound for leaseBoundTx.
 func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64, beat *LeaseBeat) (time.Time, error) {
@@ -249,7 +249,7 @@ func stopHeldAwardsTx(ctx context.Context, tx *storeTx, team Team) error {
 		if err != nil {
 			return err
 		}
-		// Cancellation refunds unstarted siblings, which can no longer start or renew.
+		// A prior stop may already have settled this unstarted award.
 		if a.settled.Valid || a.stop != "" {
 			continue
 		}
@@ -264,14 +264,26 @@ func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, re
 	if _, err := tx.ExecContext(ctx, `UPDATE billing_awards SET stop_reason=?,drain_deadline_at=? WHERE team=? AND reservation_id=? AND stop_reason=''`, reason, drain.UnixNano(), team, a.provenance.ReservationID); err != nil {
 		return err
 	}
-	run, err := readRunTx(ctx, tx, team, a.run)
-	if err != nil || run.FinishedAt != nil || run.CancelRequestedAt != nil {
+	if a.unit != capability.UnitNode {
+		var intervals int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM billable_intervals WHERE team=? AND reservation_id=?`, team, a.provenance.ReservationID).Scan(&intervals); err != nil {
+			return err
+		}
+		if intervals == 0 {
+			_, err := accountBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, tx.now(), true)
+			return err
+		}
+		return nil
+	}
+	ref := NodeRef{RunID: a.run, NodeID: a.node}
+	row, err := readNodeTx(ctx, tx, team, ref)
+	if err != nil || row.Status == StatusDone || row.Generation != a.generation || row.CancelRequestedAt != nil {
 		return err
 	}
 	previous := tx.cancelingTeam
 	tx.cancelingTeam = team
 	defer func() { tx.cancelingTeam = previous }()
-	_, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: a.run, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: reason}, tx.now())
+	_, err = transitionNodeStateTx(ctx, tx, team, NodeTransition{Ref: ref, To: NodeCancelled, Actor: Actor{Kind: ActorOperator}, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}}, tx.now())
 	return err
 }
 

@@ -40,6 +40,7 @@ func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	deadline := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	identity := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}
 	unit := controllerwire.ClaimedUnit{
+		LeaseExpiresAt: deadline.Add(time.Hour),
 		CloudResources: &match.Resources{Cores: 1.5, MemoryBytes: 2 << 30},
 		Unit:           kind, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
 		UnitID: "awarded-unit", RunID: "run", JobID: "job", Capability: "one-time-bootstrap",
@@ -397,7 +398,7 @@ func TestLauncherObservesCreatedJobIdentity(t *testing.T) {
 		if len(observations) != 1 || observations[0].JobNamespace != "cloud" || observations[0].JobUID != "created-job-uid" || observations[0].NodeUID != "uid" {
 			t.Fatalf("lost observed Job or node identity: %+v", observations)
 		}
-		return []CloudJobState{{Binding: observations[0].Binding}}, nil
+		return []CloudJobState{{Binding: observations[0].Binding, LeaseExpiresAt: time.Now().Add(time.Hour)}}, nil
 	}}
 	if _, err := l.LaunchOne(t.Context()); err != nil {
 		t.Fatal(err)

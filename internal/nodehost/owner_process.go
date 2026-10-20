@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -18,7 +19,7 @@ func (h *OwnerEvaluator) withProcess(ctx context.Context, input EvaluationInput,
 		}
 		if process != nil {
 			closeErr := process.Close()
-			err = errors.Join(err, closeErr, process.Cleanup(context.WithoutCancel(ctx)))
+			err = errors.Join(err, closeErr, process.Cleanup(lease.ExecutionContext(ctx)))
 		}
 	}()
 	resolved, err := h.deps.EnsureEngine(ctx, spec.Resolved.Engine, input.Engine.Target)

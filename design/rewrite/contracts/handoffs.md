@@ -913,3 +913,36 @@ Assigned to an Opus implementer (env 1087).
 - A child run inherits its parent's verified identity, and the parent pipeline's secrets and OIDC, only when it runs the parent's exact commit; otherwise it is asserted (trigger:manual, no ref or sha claims). Children may start only pipelines their parent's accepted plan declares (decision 28 item 11). This matches GitHub reusable workflows.
 - A pipeline whose `source:` pins a branch is unverified but still receives that pipeline's secrets, matching GitHub repository secrets. Both rules are documented plainly for launch.
 - Protected secrets (released only to verified default-branch runs, including decision 31 schedules) are a post-launch feature.
+
+
+## WS4 integration: explicit refill payment operations
+
+The controller requires these authenticated checkout-service operations before
+refills can resume. Each uses the existing refill request fields (`team`,
+`deployment`, `refill_id`, `amount_cents`, `customer`, `payment_method`,
+`receipt_email`, `payment_intent`) and responds with `payment_intent` and
+`status`. A bound response must name the requested payment.
+
+- `POST /internal/refill` creates an unconfirmed intent only, requires an empty
+  `payment_intent`, and returns `status=created`. It never confirms a payment.
+- `POST /internal/refill/reconcile` retrieves the bound intent, validates its
+  refill identity, deployment, amount, customer and card, and returns its raw
+  Stripe status. It never confirms or cancels a payment.
+- `POST /internal/refill/confirm` validates those same facts and confirms only a
+  `requires_confirmation` intent, under the refill's existing confirmation
+  idempotency key. Any processing or succeeded intent is returned unchanged.
+- `POST /internal/refill/cancel` validates those same facts, cancels an
+  unconfirmed intent at Stripe, and reports the resulting Stripe status. It
+  returns processing or succeeded payments unchanged; it never confirms them.
+  Cancellation is replayable after a lost response. Reconciliation and
+  cancellation accept legacy oversized reservations so they can be resolved;
+  creation and confirmation enforce the $1,000 maximum.
+
+The controller rechecks current card eligibility, refill opt-in, holds and
+limits immediately before asking for confirmation. An ineligible unconfirmed
+intent is canceled. A `canceled` response closes the reservation while retaining
+its payment binding; no credit moves. Processing and succeeded payments keep
+their slot for signed webhook settlement. Separate operation paths make an
+older checkout service fail closed instead of treating reconciliation as
+implicit authorization to charge. Eligibility commits and Stripe calls are
+separate operations; no database transaction stays open across a provider call.

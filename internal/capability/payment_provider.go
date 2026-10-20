@@ -187,7 +187,7 @@ func (event *PaymentEvent) setPaidCardFacts(charge paymentObject) {
 	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint
 	if secure := charge.PaymentMethodDetails.Card.ThreeDSecure; secure != nil {
 		event.ThreeDS = secure.Result
-		event.LiabilityShift = secure.Result == "authenticated" || secure.Result == "attempt_acknowledged"
+		event.LiabilityShift = secure.Result == "authenticated"
 	}
 }
 

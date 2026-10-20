@@ -68,7 +68,7 @@ func TestAwardMismatchDeletesJobAndFailsAward(t *testing.T) {
 				states := make([]CloudJobState, len(obs))
 				for i, o := range obs {
 					rejected = rejected || o.Rejected
-					states[i] = CloudJobState{Binding: o.Binding, Delete: o.Rejected}
+					states[i] = CloudJobState{Binding: o.Binding, LeaseExpiresAt: time.Now().Add(time.Hour), Delete: o.Rejected}
 				}
 				return states, nil
 			}}

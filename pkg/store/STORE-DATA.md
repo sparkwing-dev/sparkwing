@@ -76,9 +76,10 @@ The raw paid-credit grant path is removed. `Tenant.GrantCredits` is removed.
 `Tenant.RecordCreditGrant` accepts free grants only. Payment reversals use verified
 provider settlement or the authorized console refund transaction.
 Paid checkout credit uses `Store.SettlePayment`, which derives the team and
-amount from the committed checkout. Actionable fraud warnings refuse that
-transaction before a grant or event receipt commits. C2's verified-event
-implementation and controller adapter remain integration dependencies.
+amount from the committed checkout. Actionable fraud warnings refuse
+unprotected payments before a grant commits. A protected same-payment warning
+preserves the credit under its hold. The verified event receipt commits with
+settlement.
 
 The service-token storage and download counter routes are removed.
 `Store.RenewStorage` and its rolling block replay helpers are removed with them.
@@ -441,16 +442,25 @@ in one transaction.
 
 Refill reservations persist amount, customer, payment method and receipt email.
 Unbound reservations may expire or be explicitly replaced. A bound payment
-keeps the team's single refill slot until its signed outcome arrives. Every
-bound payment counts against refill limits, including refusals and refunds.
+keeps the team's single refill slot until its payment outcome is known.
+`CanConfirmRefill` rechecks current card eligibility, refill authorization,
+holds and limits before the worker confirms an unconfirmed intent. The worker
+reconciles processing and succeeded intents without confirming again. An
+ineligible unconfirmed intent is canceled at Stripe; `RecordRefillCanceled`
+retains its binding and closes the reservation only after Stripe reports
+cancellation. Unresolved reservations and every confirmed payment count against
+refill limits, including refusals and refunds; canceled payments do not.
 Resolved outcomes enter their spending windows when recorded, so delayed
 settlement cannot age a new charge out of its limits.
 `credit_checkouts.refill_blocked` records an active failure independently of
 its historical decline text. An accepted card save or successful Add funds
 clears that marker in the same transaction. Settings changes leave it blocked.
 
-`credit_checkouts.liability_shift` snapshots the first verified paid outcome,
-including a refused payment, and later deliveries cannot change it. A fraud
+`credit_checkouts.three_d_secure` stores the authentication result from the
+first verified paid outcome, including a refused payment. The separate
+`liability_shift` stores Sparkwing's protection decision: only `authenticated`
+is protected. Missing, unknown and `attempt_acknowledged` results are
+unprotected. Later deliveries cannot change either value. A fraud
 warning keeps protected credit under a payment-specific team hold. Without
 protection, it reverses the credit and queues a refund. Both paths block the
 card deployment-wide. Held credit cannot fund storage growth or retention.
@@ -494,8 +504,8 @@ and record graphs still protect a shared digest.
 
 Every metered renewal charges usage and reserves the next slice under the team's
 ledger lock. A refusal writes `billing_awards.stop_reason` and
-`drain_deadline_at` (one slice out) and cancels the run in the same
-transaction. Placing a dispute, warning or operator hold, or revoking standing,
+`drain_deadline_at` (one slice out) and cancels the metered job in the same
+transaction. Independent unmetered jobs retain their state. Placing a dispute, warning or operator hold, or revoking standing,
 also writes the stop and cancellation for active metered awards before the hold
 commits. Releasing a hold never clears that stop. These billing mutations use
 the same whole-transaction retry as other admin/work lock-order exceptions.
@@ -508,6 +518,10 @@ award without a stop cannot renew. Launcher preparation returns the committed
 expiry to its keeper, including capability bounds shorter than a slice.
 An owner renewing self-claimed jobs uses those jobs' authority bounds as well
 as their funded horizons, so its keeper cannot outlive any child it renews.
+A stopped trigger cannot schedule its accepted graph. Once that metered trigger
+fails, the elected controller settles the sealed graph through the existing
+scheduler, preserving independent customer jobs and normal dependency outcomes.
+The run retains its sealed dispatch, and the stopped generation cannot requeue.
 
 The schema enforces one billing award per capability and per unit generation.
 Refill settlement scopes its checkout and grant to the same team. Every new job attempt clears its job summary and annotations.

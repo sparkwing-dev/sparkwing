@@ -18,7 +18,7 @@ func TestBillingModelDocumentationTracksPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := strings.ReplaceAll(string(raw), ",", "")
-	for _, term := range []string{fmt.Sprintf("at most $%d", MaxCardPaymentCents/100), "including High", "larger payments", "operator console queue", "authenticated", "attempt_acknowledged", "liability_shift", "frozen"} {
+	for _, term := range []string{fmt.Sprintf("at most $%d", MaxCardPaymentCents/100), "including High", "larger payments", "operator console queue", "authenticated", "attempt_acknowledged", "three_d_secure", "liability_shift", "unprotected", "frozen", "cancels the metered job", "unmetered customer runners continues", "dependency settlement"} {
 		if !strings.Contains(body, term) {
 			t.Errorf("billing documentation omits %q", term)
 		}

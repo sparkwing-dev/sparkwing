@@ -325,6 +325,11 @@ when supplied. The host masks text before applying record bounds.
 | Registered cleanups | 16 per job |
 | Cleanup arguments | 64 per registration |
 
+SDK cancellation and registered cleanup commands share the time remaining under
+the funded lease and drain deadline. At that bound the host kills the process
+tree, including cleanup descendants. Cloud Jobs retain the same bound in their
+Kubernetes deadline; a controller outage cannot extend it.
+
 Operator ceilings and inherited deadlines also apply. Invalid declarations fail
 when accepted. Dependency-cache failures allow cold execution. Artifact staging
 failures and missing required output reads fail the job.

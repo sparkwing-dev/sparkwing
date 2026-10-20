@@ -53,12 +53,11 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor Actor,
 		if actor.Kind != ActorController || ref.Name != "controller.owner" {
 			return holderRefusal()
 		}
-		var dispatch, mode string
-		var accepted int64
-		if err := tx.QueryRowContext(ctx, `SELECT dispatch,intake_mode,plan_accepted_generation FROM runs WHERE team=? AND id=?`, team, runID).Scan(&dispatch, &mode, &accepted); err != nil {
+		scheduled, err := controllerOwnershipTx(ctx, tx, team, runID)
+		if err != nil {
 			return err
 		}
-		if dispatch != "controller" || mode != "execute" || accepted <= 0 {
+		if !scheduled {
 			return holderRefusal()
 		}
 		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: ref.Generation}, "controller.owner", now)
@@ -192,7 +191,7 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 	return nil
 }
 
-// safety: the store's own cancellation of a team's runs, for a team deletion or a funding stop, needs no credential.
+// safety: the store's own cancellation of a team's work, for a team deletion or a funding stop, needs no credential.
 func storeCancelActor(tx *storeTx, team Team, actor Actor) bool {
 	return team != "" && tx.cancelingTeam == team && actor == (Actor{Kind: ActorOperator})
 }

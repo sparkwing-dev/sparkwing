@@ -13,7 +13,7 @@ import (
 
 // Beat carries cancellation and watch demand on the existing renewal cadence.
 type Beat struct {
-	// ExpiresAt is the store's lease bound; the keeper never lets the unit outlive it, whatever its own Lease says.
+	// ExpiresAt bounds execution and cleanup independently of requested cancellation.
 	ExpiresAt       time.Time `json:"expires_at,omitzero"`
 	CancelRequested bool      `json:"cancel_requested"`
 	CancelReason    string    `json:"cancel_reason,omitempty"`
@@ -54,14 +54,15 @@ var ErrSilent = errors.New("lease renewal silent")
 
 // Run returns the unit context and a stop function that cancels and joins renewal.
 func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
-	unit, cancel := context.WithCancelCause(ctx)
+	hard, hardCancel := context.WithCancelCause(ExecutionContext(ctx))
+	unit, cancel := context.WithCancelCause(context.WithValue(ctx, executionKey{}, hard))
 	done := make(chan struct{})
 	watchDone := make(chan struct{})
 	renewed := make(chan time.Time)
 	expires := time.Now().Add(k.Lease)
 	go func(expires time.Time) {
 		defer close(watchDone)
-		watch(unit, cancel, renewed, expires)
+		watch(hard, func(err error) { hardCancel(err); cancel(err) }, renewed, expires)
 	}(expires)
 	go func() {
 		defer close(done)
@@ -69,6 +70,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		every := k.Interval
 		for unit.Err() == nil {
 			if !time.Now().Before(expires) {
+				hardCancel(ErrSilent)
 				cancel(ErrSilent)
 				return
 			}
@@ -78,15 +80,17 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 				return
 			}
 			if !time.Now().Before(expires) {
+				hardCancel(ErrSilent)
 				cancel(ErrSilent)
 				return
 			}
-			if err == nil && !beat.CancelRequested {
+			if err == nil {
 				expires = sent.Add(k.Lease)
 				if !beat.ExpiresAt.IsZero() && beat.ExpiresAt.Before(expires) {
 					expires = beat.ExpiresAt
 				}
 				if !expires.After(time.Now()) {
+					hardCancel(ErrSilent)
 					cancel(ErrSilent)
 					return
 				}
@@ -94,18 +98,17 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			}
 			next := time.Now().Add(max(every, retryAfter(err)))
 			if err == nil {
+				select {
+				case renewed <- expires:
+				case <-hard.Done():
+					return
+				}
 				if beat.CancelRequested {
 					reason := beat.CancelReason
 					if reason == "" {
 						reason = "cancel_requested"
 					}
 					cancel(&CancelError{Reason: reason})
-				} else {
-					select {
-					case renewed <- expires:
-					case <-unit.Done():
-						return
-					}
 				}
 				if k.Observe != nil {
 					k.Observe(beat)
@@ -116,6 +119,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			}
 			var failure *apierr.Error
 			if errors.As(err, &failure) && failure != nil && (failure.Code == apierr.LockHeld || failure.Code == apierr.Unauthenticated || failure.Code == apierr.Forbidden) {
+				hardCancel(ErrLeaseLost)
 				cancel(ErrLeaseLost)
 				return
 			}
@@ -130,6 +134,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 	}()
 	return unit, func() {
 		cancel(context.Canceled)
+		hardCancel(context.Canceled)
 		<-done
 		<-watchDone
 	}

@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -58,7 +59,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		}
 		if process != nil {
 			closeErr := process.Close()
-			cleanupErr := process.Cleanup(context.WithoutCancel(parent))
+			cleanupErr := process.Cleanup(lease.ExecutionContext(parent))
 			if cleanupFailure := errors.Join(closeErr, cleanupErr); cleanupFailure != nil {
 				err = errors.Join(err, cleanupFailure)
 				result = h.failure(err)

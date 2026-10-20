@@ -84,7 +84,7 @@ terminal event after reporting a result.
 Exact replay creates no second event. Native host and controller integration
 must preserve these store decisions.
 
-A funding refusal or hold records a run cancellation naming the balance
+A funding refusal or hold records a metered job cancellation naming the balance
 shortfall or hold and its remedy. The owner and keeper stop when they receive
 it. Its lease cannot renew past the funded horizon or the durable drain
 deadline. Add funds, enable automatic refill or resolve the named hold before

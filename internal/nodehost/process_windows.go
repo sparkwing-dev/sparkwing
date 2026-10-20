@@ -54,6 +54,8 @@ type jobProcess struct {
 	waitErr error
 }
 
+func (p *jobProcess) Kill() error { return p.job.Terminate() }
+
 func (p *jobProcess) LeaderExited() <-chan struct{} { return p.exited }
 
 func (p *jobProcess) Finish(ctx context.Context, _ time.Duration) error {

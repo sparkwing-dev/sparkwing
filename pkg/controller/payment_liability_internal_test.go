@@ -14,7 +14,7 @@ import (
 
 func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 	for _, kind := range []string{"checkout", "refill"} {
-		for _, result := range []string{"authenticated", "attempt_acknowledged", "", "failed"} {
+		for _, result := range []string{"authenticated", "attempt_acknowledged", "", "failed", "unknown"} {
 			for _, warningFirst := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/warning_first=%t", kind, result, warningFirst), func(t *testing.T) {
 					e, tenant := refillFixture(t)
@@ -46,7 +46,7 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 							t.Fatalf("%s: %d %s", id, response.Code, response.Body)
 						}
 					}
-					protected := result == "authenticated" || result == "attempt_acknowledged"
+					protected := result == "authenticated"
 					opposite := "authenticated"
 					if protected {
 						opposite = "failed"
@@ -98,12 +98,12 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 					if err != nil || standing.Tier != "Held" || standing.CloudVCPU != 0 {
 						t.Fatalf("held spending = %+v: %v", standing, err)
 					}
+					var persistedResult string
+					var persistedShift bool
+					if err := teststore.SQL(t, s).QueryRow(`SELECT three_d_secure,liability_shift FROM credit_checkouts WHERE team='a' AND payment_id=?`, payment).Scan(&persistedResult, &persistedShift); err != nil || persistedResult != result || persistedShift != protected {
+						t.Fatalf("settled authentication/protection = %q/%t, want %q/%t: %v", persistedResult, persistedShift, result, protected, err)
+					}
 					if protected {
-						var persistedResult string
-						var persistedShift int
-						if err := teststore.SQL(t, s).QueryRow(`SELECT three_d_secure,liability_shift FROM credit_checkouts WHERE team='a' AND payment_id=?`, payment).Scan(&persistedResult, &persistedShift); err != nil || persistedResult != result || persistedShift != 1 {
-							t.Fatalf("settled protection = %q/%d: %v", persistedResult, persistedShift, err)
-						}
 						if count, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "dispute window closed", time.Now()); err != nil || count != 1 {
 							t.Fatalf("release = %d: %v", count, err)
 						}

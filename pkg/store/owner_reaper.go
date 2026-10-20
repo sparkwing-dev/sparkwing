@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -45,6 +46,11 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	if owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 > now.UnixNano() {
 		return nil, nil
 	}
+	award, err := unitBillingAwardTx(ctx, tx, target.team, UnitRef{Kind: target.kind, RunID: target.ref.RunID}, owner.generation)
+	if err != nil {
+		return nil, err
+	}
+	stopped := award != nil && award.stop != ""
 	cancelled := owner.cancelled.Valid || run.CancelRequestedAt != nil
 	expired := owner.deadline.Valid && owner.deadline.Int64 <= now.UnixNano()
 	lapsed := owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 <= now.UnixNano()
@@ -53,13 +59,13 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	if !cancelled && !expired && !lapsed && !queuedOut && owner.status != "failed" && owner.status != "done" {
 		return nil, nil
 	}
-	if lapsed || expired {
+	if (lapsed || expired) && !(stopped && !cancelled) {
 		tx.finishedLocalSecrets = append(tx.finishedLocalSecrets, localSecretKey{target.team, run.ID})
 	}
-	if lapsed && owner.started.Valid && !cancelled && owner.disruptions < limits.MaxDisruptions {
+	if lapsed && owner.started.Valid && !cancelled && !stopped && owner.disruptions < limits.MaxDisruptions {
 		owner.disruptions++
 	}
-	failed := owner.status == "failed" || expired || queuedOut || owner.disruptions >= limits.MaxDisruptions || lapsed && owner.started.Valid && run.Request.Request.Origin == runspec.OriginLocal
+	failed := stopped || owner.status == "failed" || expired || queuedOut || owner.disruptions >= limits.MaxDisruptions || lapsed && owner.started.Valid && run.Request.Request.Origin == runspec.OriginLocal
 	result := &ReapedUnit{Team: target.team, RunID: target.ref.RunID, Kind: string(target.kind), Generation: owner.generation, Disruptions: owner.disruptions, Requeued: !cancelled && !failed, Cancelled: cancelled, Failed: failed && !cancelled}
 	if result.Requeued {
 		return result, writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", actor, now)
@@ -76,11 +82,22 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 			return nil, err
 		}
 	}
-	if err := cancelRunNodesTx(ctx, tx, target.team, run.ID, actor, run.CancelReason, now); err != nil {
-		return nil, err
+	if stopped && !cancelled {
+		controller, err := controllerSchedulingTx(ctx, tx, target.team, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		if controller {
+			return result, settleControllerTx(ctx, tx, target.team, run.ID, now)
+		}
+	}
+	if !stopped || cancelled {
+		if err := cancelRunNodesTx(ctx, tx, target.team, run.ID, actor, run.CancelReason, now); err != nil {
+			return nil, err
+		}
 	}
 	var claims int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE team=? AND run_id=? AND claimed_by IS NOT NULL AND status<>'done'`, target.team, run.ID).Scan(&claims); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND (claimed_by IS NOT NULL OR ?=1)`, target.team, run.ID, boolInt(stopped && !cancelled)).Scan(&claims); err != nil {
 		return nil, err
 	}
 	if claims != 0 {
@@ -90,6 +107,8 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	cause := RunOwnerLost
 	if cancelled {
 		to, reason, message = RunCancelled, "cancelled", ""
+	} else if stopped {
+		reason, message = award.stop, ""
 	} else if expired {
 		reason, message = "timeout", "owner execution deadline exceeded"
 		if run.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
@@ -145,17 +164,22 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 		}
 		return &ReapedUnit{Team: target.team, RunID: target.ref.RunID, NodeID: target.ref.NodeID, Kind: "eval", Generation: unit.generation, Disruptions: unit.disruptions, Cancelled: status == "cancelled", Failed: status == "failed"}, settleControllerTx(ctx, tx, target.team, target.ref.RunID, now)
 	}
+	award, err := unitBillingAwardTx(ctx, tx, target.team, UnitRef{Kind: capability.UnitEval, RunID: target.ref.RunID, NodeID: target.ref.NodeID, SourceGeneration: target.sourceGeneration}, unit.generation)
+	if err != nil {
+		return nil, err
+	}
+	stopped := award != nil && award.stop != ""
 	cancelled := run.CancelRequestedAt != nil
 	expired := unit.deadline.Valid && unit.deadline.Int64 <= now.UnixNano()
 	lapsed := unit.lease.Valid && unit.lease.Int64 <= now.UnixNano()
 	if !cancelled && !expired && !lapsed {
 		return nil, nil
 	}
-	if lapsed && unit.started.Valid && !cancelled && unit.disruptions < limits.MaxDisruptions {
+	if lapsed && unit.started.Valid && !cancelled && !stopped && unit.disruptions < limits.MaxDisruptions {
 		unit.disruptions++
 	}
 	status := "pending"
-	if expired || unit.disruptions >= limits.MaxDisruptions {
+	if stopped || expired || unit.disruptions >= limits.MaxDisruptions {
 		status = "failed"
 	}
 	if cancelled {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -37,7 +38,7 @@ func TestSyncReconcilesAllPersistedJobsTogether(t *testing.T) {
 			if observation.JobName != jobName(observation.Binding) || observation.NodeUID != "uid" {
 				t.Fatal("lost Kubernetes identity")
 			}
-			states[len(states)-1-i] = CloudJobState{Binding: observation.Binding, Delete: observation.Binding.UnitID == "first"}
+			states[len(states)-1-i] = CloudJobState{Binding: observation.Binding, LeaseExpiresAt: time.Now().Add(time.Hour), Delete: observation.Binding.UnitID == "first"}
 		}
 		return states, nil
 	}}
@@ -73,7 +74,7 @@ func FuzzSyncRejectsUnboundCleanup(f *testing.F) {
 		l.Control = syncControl{control, func(observations []CloudJobObservation) ([]CloudJobState, error) {
 			states := make([]CloudJobState, len(observations))
 			for i, observation := range observations {
-				states[i] = CloudJobState{Binding: observation.Binding, Delete: true}
+				states[i] = CloudJobState{Binding: observation.Binding, LeaseExpiresAt: time.Now().Add(time.Hour), Delete: true}
 			}
 			if reverse {
 				slices.Reverse(states)

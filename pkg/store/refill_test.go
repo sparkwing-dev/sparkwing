@@ -650,12 +650,75 @@ func TestRefillDoesNotConfirmOversizedReservations(t *testing.T) {
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE credit_checkouts SET amount_minor=?,amount_micro=? WHERE id=?`, MaxCardPaymentCents+1, (MaxCardPaymentCents+1)*MicroCreditsPerCent, first[0].ID)
 			due := dueRefillsFor(t, s, "a")
-			if bound && len(due) != 0 {
-				t.Fatalf("bound oversized refill returned for confirmation: %+v", due)
+			if bound {
+				if len(due) != 1 || due[0].ID != first[0].ID {
+					t.Fatalf("bound oversized refill lost its reconciliation slot: %+v", due)
+				}
+				if allowed, err := s.AsOperator().CanConfirmRefill(t.Context(), due[0]); err != nil || allowed {
+					t.Fatalf("oversized refill confirmation = %v, %v", allowed, err)
+				}
+				return
 			}
 			for _, refill := range due {
 				if refill.AmountCents > MaxCardPaymentCents || refill.ID == first[0].ID {
 					t.Fatalf("oversized reservation retried: %+v", refill)
+				}
+			}
+		})
+	}
+}
+
+func TestBoundRefillConfirmationRechecksEligibility(t *testing.T) {
+	for _, restriction := range []string{"none", "disabled", "hold", "blocked", "changed card", "weekly limit", "monthly limit", "standing limit"} {
+		t.Run(restriction, func(t *testing.T) {
+			s, tenant, now := refillFixture(t, true)
+			settings := RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}
+			if err := setRefill(t, s, "a", settings); err != nil {
+				t.Fatal(err)
+			}
+			r := dueRefillsFor(t, s, "a")[0]
+			r.PaymentIntent = "pi_unconfirmed"
+			if err := s.AsOperator().RecordRefillIntent(t.Context(), r.Team, r.ID, r.PaymentIntent); err != nil {
+				t.Fatal(err)
+			}
+			switch restriction {
+			case "disabled":
+				settings.Enabled = false
+			case "weekly limit":
+				settings.WeekLimitCents = 999
+			case "monthly limit":
+				settings.MonthLimitCents = 999
+			case "hold":
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES ('operator:test','a','review','operator','owner',1)`)
+			case "blocked":
+				rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings (warning_id,payment_intent,fingerprint,actionable,created_at) VALUES ('warning','earlier','fp_1',1,1)`)
+			case "changed card":
+				rewriteSchemaExec(t, s.db, `UPDATE teams SET card_payment_method='replacement' WHERE name='a'`)
+			case "standing limit":
+				rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='' WHERE name='a'`)
+				rewriteSchemaExec(t, s.db, `UPDATE credit_checkouts SET amount_minor=6000,amount_micro=? WHERE id=?`, 6000*MicroCreditsPerCent, r.ID)
+			}
+			if err := setRefill(t, s, "a", settings); err != nil {
+				t.Fatal(err)
+			}
+			if allowed, err := s.AsOperator().CanConfirmRefill(t.Context(), r); err != nil || allowed != (restriction == "none") {
+				t.Fatalf("confirmation allowed=%v, %v", allowed, err)
+			}
+			if again := dueRefillsFor(t, s, "a"); len(again) != 1 || again[0].ID != r.ID {
+				t.Fatalf("reservation lost before payment outcome: %+v", again)
+			}
+			if restriction != "none" {
+				if err := s.AsOperator().RecordRefillCanceled(t.Context(), r); err != nil {
+					t.Fatal(err)
+				}
+				var payment, failure string
+				var closed int64
+				if err := s.db.QueryRow(`SELECT payment_id,closed_at,failure FROM credit_checkouts WHERE id=?`, r.ID).Scan(&payment, &closed, &failure); err != nil || payment != r.PaymentIntent || closed == 0 || failure != "canceled" {
+					t.Fatalf("canceled reservation = %q %d %q, %v", payment, closed, failure, err)
+				}
+				state, err := tenant.SpendStanding(t.Context(), now)
+				if err != nil || state.Refill.DayCount != 0 || state.Refill.WeekCents != 0 || state.Refill.MonthCents != 0 {
+					t.Fatalf("canceled payment consumed refill limits: %+v, %v", state.Refill, err)
 				}
 			}
 		})

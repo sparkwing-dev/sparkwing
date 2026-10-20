@@ -113,9 +113,8 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 	})
 }
 
-// safety: matched by payment and by the card that paid, so a warning that came
-// first, or one on the same card, refuses the payment while another card's
-// payment is granted; a non-actionable warning is never refunded, so it refuses nothing.
+// A same-payment warning preserves protected credit under a hold; other actionable
+// warnings refuse the payment. Non-actionable warnings do not affect settlement.
 func paymentWarningTx(ctx context.Context, tx *storeTx, paymentIntent, fingerprint string) (string, error) {
 	var id string
 	err := tx.QueryRowContext(ctx, `SELECT warning_id FROM payment_warnings

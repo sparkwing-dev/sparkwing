@@ -29,9 +29,10 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 	if run.FinishedAt != nil || run.CancelRequestedAt != nil || run.Request.Request.Mode != runspec.IntakeExecute {
 		return nil, nil
 	}
+	controller := run.Dispatch == string(runspec.DispatchController) || run.Owner != nil && run.Owner.Kind == OwnerController
 	query := `SELECT unit_kind AS kind,'' AS node,available_at AS since FROM triggers WHERE team=? AND id=? AND status='pending' AND claimed_by IS NULL AND cancel_requested_at IS NULL`
 	args := []any{team, run.ID}
-	if run.Dispatch == string(runspec.DispatchController) {
+	if controller {
 		query += ` UNION ALL SELECT 'node',node_id,ready_at FROM nodes WHERE team=? AND run_id=? AND ready_at IS NOT NULL AND claimed_by IS NULL AND status='pending' AND cancel_requested_at IS NULL
  UNION ALL SELECT 'eval',e.source_node_id,n.finished_at FROM eval_units e JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id
  WHERE e.team=? AND e.run_id=? AND e.status='pending' AND e.claimed_by IS NULL AND n.finished_at IS NOT NULL`
@@ -55,7 +56,7 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-	if run.Dispatch == string(runspec.DispatchController) {
+	if controller {
 		ref := UnitRef{Kind: unit.Kind, RunID: run.ID, NodeID: unit.NodeID}
 		standings, err := unitStandingsTx(ctx, tx, team, ref)
 		if err != nil || slices.ContainsFunc(standings, func(e eligibility) bool { return e.ok() && !e.unobserved }) {

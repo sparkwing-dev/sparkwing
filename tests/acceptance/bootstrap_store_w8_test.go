@@ -96,7 +96,7 @@ func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.Cl
 	if err != nil {
 		t.Fatal(err)
 	}
-	return server, launcher.CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: unit.CloudResources.Cores, Memory: unit.CloudResources.MemoryBytes, Source: projection}
+	return server, launcher.CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: unit.CloudResources.Cores, Memory: unit.CloudResources.MemoryBytes, Source: projection}
 }
 
 func cloudStoreClientW8(t *testing.T, server *controller.EngineController) func(client.EngineOptions) (controllerwire.Controller, error) {

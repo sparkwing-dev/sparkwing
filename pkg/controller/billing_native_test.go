@@ -184,12 +184,15 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.test/setup"}`
 		case "/internal/checkout":
 			body = `{"id":"cs_prepay","url":"https://checkout.test/prepay"}`
-		case "/internal/refill":
+		case "/internal/refill", "/internal/refill/reconcile", "/internal/refill/confirm":
 			if in["amount_cents"] != float64(1000) || in["customer"] != "cus_native" || in["payment_method"] != "pm_native" {
 				t.Fatalf("refill=%v", in)
 			}
 			status := "created"
-			if counts[r.URL.Path] > 1 {
+			switch r.URL.Path {
+			case "/internal/refill/reconcile":
+				status = "requires_confirmation"
+			case "/internal/refill/confirm":
 				status = "processing"
 			}
 			body = fmt.Sprintf(`{"payment_intent":"pi_auto","status":%q}`, status)
@@ -288,7 +291,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	if !spend.Billing.History.LastIncidentAt.IsZero() {
 		t.Fatalf("a successful refill restarted clean days: %+v", spend.Billing.History)
 	}
-	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/refill"] != 3 {
+	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/refill"] != 1 || counts["/internal/refill/reconcile"] != 2 || counts["/internal/refill/confirm"] != 2 {
 		t.Fatalf("provider calls: %v; want one page each, then creation and two confirmations of one refill", counts)
 	}
 }

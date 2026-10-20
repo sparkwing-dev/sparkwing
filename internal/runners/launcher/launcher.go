@@ -44,9 +44,10 @@ type CloudJobObservation struct {
 
 // CloudJobState carries the controller's teardown decision and committed allocation for one immutable award.
 type CloudJobState struct {
-	Binding   CloudJobBinding
-	Delete    bool
-	Resources *match.Resources
+	Binding        CloudJobBinding
+	LeaseExpiresAt time.Time
+	Delete         bool
+	Resources      *match.Resources
 }
 
 // Launcher creates Cloud Jobs without executing pipeline code in the launcher process.
@@ -246,11 +247,16 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
+	state := retirements[created.Name]
+	r.JobDeadline, err = cloudLeaseDeadline(time.Now(), award.Binding, state.LeaseExpiresAt)
+	if err != nil {
+		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
+	}
 	remaining := int64(time.Until(r.JobDeadline) / time.Second)
 	if remaining <= 0 {
 		return true, errors.Join(limits.ErrNoTime, l.teardown(ctx, created, r.Reservation))
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]string{"resourceVersion": created.ResourceVersion}, "spec": map[string]any{"suspend": false, "activeDeadlineSeconds": remaining}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"resourceVersion": created.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: r.JobDeadline.Format(time.RFC3339Nano)}}, "spec": map[string]any{"suspend": false, "activeDeadlineSeconds": remaining}})
 	if err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
@@ -260,6 +266,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	}
 	expected := created.DeepCopy()
 	expected.Spec.Suspend, expected.Spec.ActiveDeadlineSeconds = ptr(false), &remaining
+	expected.Annotations[deadlineAnnotation] = r.JobDeadline.Format(time.RFC3339Nano)
 	if err := validateAdmittedJob(expected, activated); err != nil {
 		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation, rejectedPod))
 	}

@@ -125,14 +125,18 @@ type refillResult struct {
 	Status        string `json:"status"`
 }
 
-func (c *billingCheckout) refill(ctx context.Context, deployment string, r store.Refill) (refillResult, error) {
+func (c *billingCheckout) refill(ctx context.Context, deployment string, r store.Refill, action string) (refillResult, error) {
 	var out refillResult
-	err := c.post(ctx, "/internal/refill", map[string]any{
+	path := "/internal/refill"
+	if action != "" {
+		path += "/" + action
+	}
+	err := c.post(ctx, path, map[string]any{
 		"team": string(r.Team), "deployment": deployment, "refill_id": r.ID, "amount_cents": r.AmountCents,
 		"customer": r.Customer, "payment_method": r.PaymentMethod, "receipt_email": r.ReceiptEmail, "payment_intent": r.PaymentIntent,
 	}, &out)
-	if err == nil && (out.PaymentIntent == "" || out.Status == "") {
-		err = fmt.Errorf("%w: it named no payment and status", errCheckoutRefused)
+	if err == nil && (out.PaymentIntent == "" || out.Status == "" || r.PaymentIntent != "" && out.PaymentIntent != r.PaymentIntent) {
+		err = fmt.Errorf("%w: missing or mismatched payment or status", errCheckoutRefused)
 	}
 	return out, err
 }

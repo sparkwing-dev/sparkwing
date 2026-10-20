@@ -87,7 +87,7 @@ func TestSyncSuspendedJobRefusesMismatchedAuthority(t *testing.T) {
 	l.Control = publicationControl{CloudControl: control, sync: func(bindings []CloudJobObservation) ([]CloudJobState, error) {
 		binding := bindings[0].Binding
 		binding.Generation++
-		return []CloudJobState{{Binding: binding, Delete: true}}, nil
+		return []CloudJobState{{Binding: binding, LeaseExpiresAt: time.Now().Add(time.Hour), Delete: true}}, nil
 	}}
 	if err := l.Sync(t.Context()); err == nil {
 		t.Fatal("mismatched retirement decision accepted")
@@ -104,7 +104,7 @@ func TestLauncherChecksAuthorityAfterBootstrapPublication(t *testing.T) {
 		state func(CloudJobBinding) ([]CloudJobState, error)
 	}{
 		{name: "cancelled", state: func(b CloudJobBinding) ([]CloudJobState, error) {
-			return []CloudJobState{{Binding: b, Delete: true}}, nil
+			return []CloudJobState{{Binding: b, LeaseExpiresAt: time.Now().Add(time.Hour), Delete: true}}, nil
 		}},
 		{name: "unreachable", state: func(CloudJobBinding) ([]CloudJobState, error) {
 			return nil, failure
@@ -114,19 +114,19 @@ func TestLauncherChecksAuthorityAfterBootstrapPublication(t *testing.T) {
 		}},
 		{name: "mismatched", state: func(b CloudJobBinding) ([]CloudJobState, error) {
 			b.Generation++
-			return []CloudJobState{{Binding: b}}, nil
+			return []CloudJobState{{Binding: b, LeaseExpiresAt: time.Now().Add(time.Hour)}}, nil
 		}},
 		{name: "owner_deadline", state: func(b CloudJobBinding) ([]CloudJobState, error) {
 			b.OwnerDeadline = b.OwnerDeadline.Add(time.Nanosecond)
-			return []CloudJobState{{Binding: b}}, nil
+			return []CloudJobState{{Binding: b, LeaseExpiresAt: time.Now().Add(time.Hour)}}, nil
 		}},
 		{name: "attempt_deadline", state: func(b CloudJobBinding) ([]CloudJobState, error) {
 			b.AttemptDeadline = b.AttemptDeadline.Add(time.Nanosecond)
-			return []CloudJobState{{Binding: b}}, nil
+			return []CloudJobState{{Binding: b, LeaseExpiresAt: time.Now().Add(time.Hour)}}, nil
 		}},
 		{name: "parent_expiry", state: func(b CloudJobBinding) ([]CloudJobState, error) {
 			b.ParentCapabilityExpiry = b.ParentCapabilityExpiry.Add(time.Nanosecond)
-			return []CloudJobState{{Binding: b}}, nil
+			return []CloudJobState{{Binding: b, LeaseExpiresAt: time.Now().Add(time.Hour)}}, nil
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -189,7 +189,7 @@ func TestLauncherAcceptsRoundTrippedBindingTimes(t *testing.T) {
 			t.Fatal(err)
 		}
 		binding.OwnerDeadline = binding.OwnerDeadline.In(time.FixedZone("controller", 3600))
-		return []CloudJobState{{Binding: binding}}, nil
+		return []CloudJobState{{Binding: binding, LeaseExpiresAt: time.Now().Add(time.Hour)}}, nil
 	}}
 	if claimed, err := l.LaunchOne(t.Context()); !claimed || err != nil {
 		t.Fatalf("equivalent binding refused after transport: claimed=%t err=%v", claimed, err)

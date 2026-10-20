@@ -71,6 +71,9 @@ func (c *ProcessCleanups) Run(ctx context.Context, scope CleanupScope) error {
 	}
 	var failures []error
 	for _, item := range slices.Backward(items) {
+		if ctx.Err() != nil {
+			break
+		}
 		if err := runCleanup(ctx, item, scope.Dir, append([]string{}, scope.Env...), log); err != nil {
 			failures = append(failures, err)
 		}

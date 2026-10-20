@@ -122,14 +122,19 @@ refill's own id, so a retried or interrupted refill never charges twice. The
 payment is created before it is confirmed. A refill whose payment was never
 created is closed after 23 hours, or when the team saves a different card first,
 and the next one starts fresh. Once its payment exists, the refill keeps the
-team's one refill slot until Stripe's signed webhook settles it, however long
-that takes. A refill settles only from that webhook, through the same path as
-Add funds: the same card pinning, refund ordering and standing update apply. No
-refill starts while the team is held, or for a card pinned to another team.
+team's one refill slot until its payment outcome is known. Before confirming
+an unconfirmed payment, the controller rechecks that refills remain enabled,
+the team has no hold, the saved card is still eligible, and the payment fits
+the current limits. Otherwise it cancels the unconfirmed payment at Stripe and
+retains its reservation record. Processing and succeeded payments are
+reconciled without another confirmation. Credits settle only from Stripe's
+signed webhook, through the same path as Add funds: the same card pinning,
+refund ordering and standing update apply.
 
-Every refill whose payment exists counts against the limits, whether it is
-granted, declined, refused or refunded. A refill that a team limit or a cap
-would exceed is not made. The credits run down and Cloud work stops at zero; the
+Every unresolved reservation and confirmed refill counts against the limits,
+whether granted, declined, refused or refunded. A payment Stripe confirms was
+canceled releases its reservation without consuming the limits. A refill
+that would exceed a team limit or a cap is not made. The credits run down and Cloud work stops at zero; the
 billing page names the limit that stopped the refill (`refill.limit` in
 `GET /api/v1/team/billing`).
 
@@ -151,15 +156,17 @@ renewal charges the time used and reserves the next slice in the same
 transaction, and a metered lease never runs past the time already paid for, so
 a job whose runner loses the controller stops, and is settled, within what it
 paid. When the balance cannot pay the next slice, the renewal records
-the stop and cancels the run in the same transaction. Placing a hold does the
-same for active metered work. The reason names the shortfall or hold and what
-resolves it. The owner and keeper stop execution
-when they receive that cancellation. The lease ends at the earlier of its paid
-horizon and a drain deadline at most one slice away. Renewals cannot move the
-deadline, even if the runner ignores cancellation. There is no grace period,
-and lifting the hold or adding
-funds does not resume the stopped run. Final settlement refunds the unused part
-of the last slice.
+the stop and cancels the metered job in the same transaction. Placing a hold
+does the same for active metered work. The reason names the shortfall or hold
+and what resolves it. The owner and keeper stop execution when they receive that
+cancellation. The lease ends at the earlier of its paid horizon and a drain deadline at most one slice away. The host kills the SDK
+process tree at that bound, including commands that ignore cancellation.
+SDK cancellation and cleanup share the time remaining under the bound.
+Kubernetes Jobs use the committed lease deadline and zero termination grace.
+Renewals cannot move a funding stop's deadline. There is no grace period,
+and lifting the hold or adding funds does not resume the stopped job.
+Final settlement refunds the unused part of the last slice. Independent work on unmetered customer runners continues;
+normal dependency settlement decides which descendants can run.
 
 Retained storage is charged only from the balance there is: once the balance
 reaches zero, storage accounting advances without a debit. The unfunded part
@@ -231,14 +238,18 @@ saved on another team.
 
 An actionable early fraud warning on a payment this controller settled always
 holds the team and blocks the card: it is removed wherever it is saved and
-cannot be saved again. If Stripe verified liability shift at settlement through
-a 3-D Secure result of `authenticated` or `attempt_acknowledged`, the warning
-leaves the payment's credits frozen under its hold and queues no refund. Without
-that protection, it takes back the credit even when that leaves the balance
-negative and queues a full refund unless Stripe already returned it. The
-controller persists `liability_shift` with the paid charge and does not read it
-again when a warning arrives. A later payment by a blocked card holds its team
-and is refunded. A refused payment raises the
+cannot be saved again. Sparkwing treats a settled 3-D Secure result of
+`authenticated` as protected. The warning leaves that payment's credits frozen
+under its hold and queues no refund. `attempt_acknowledged`, missing results and
+all other results are unprotected. For those payments, the warning takes back
+the credit even when that leaves the balance negative and queues a full refund
+unless Stripe already returned it. The controller stores the authentication
+result in `three_d_secure` and its protection decision separately in
+`liability_shift` when the payment settles. This decision follows Sparkwing's
+warning policy. Stripe's authentication result does not prove liability
+protection in every case. Neither stored value changes on replay or gets read
+from Stripe again when a warning arrives. A later payment by a blocked card
+holds its team and is refunded. A refused payment raises the
 `card_payment_refused` alert, and each refund made raises `card_refund`.
 
 A refund and a fraud warning are kept against their payment whatever order Stripe

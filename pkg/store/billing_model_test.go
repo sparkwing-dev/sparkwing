@@ -262,7 +262,7 @@ func TestBillingModelCloudReclaimCannotRestartJobDeadline(t *testing.T) {
 	}
 }
 
-// A funding stop cancels the run durably and bounds future renewals even after the balance or hold recovers.
+// A funding stop persists on the metered job even after the balance or hold recovers.
 func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 	for _, hold := range []struct{ name, id, cause, says string }{
 		{"dispute", "dp_1", HoldCauseDispute, "dispute"},
@@ -305,9 +305,9 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			if !beat.ExpiresAt.After(*now) || beat.ExpiresAt.After(claim.Award.LeaseExpiresAt) {
 				t.Fatalf("lease runs to %v from %v; want a drain within the funded slice", beat.ExpiresAt, *now)
 			}
-			run, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil || run.CancelRequestedAt == nil || !strings.Contains(run.CancelReason, hold.says) {
-				t.Fatalf("the stop left the run uncancelled: %+v %v", run.CancelRequestedAt, err)
+			node, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
+			if err != nil || node.CancelRequestedAt == nil || !strings.Contains(node.CancelReason, hold.says) {
+				t.Fatalf("the stop left the job uncancelled: %+v %v", node, err)
 			}
 			rewriteSchemaExec(t, s.db, `DELETE FROM credit_freezes`)
 			rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='' WHERE name='a'`)

@@ -105,7 +105,7 @@ type PaymentEvent struct {
 	Actionable     bool
 }
 
-// Identity is the event as Stripe signed it. Card facts and liability shift come from provider reads made
+// Identity is the event as Stripe signed it. Settlement snapshots card facts and protection policy
 // after verification, so a replay identifies the event without them.
 func (e PaymentEvent) Identity() PaymentEvent {
 	e.Fingerprint, e.Brand, e.Last4, e.ThreeDS = "", "", "", ""

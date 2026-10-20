@@ -68,7 +68,7 @@ func TestRunQuarantinesTamperedNodeAndKeepsClaiming(t *testing.T) {
 					if test.refuse && observed[0].NodeUID == "tampered-uid" {
 						return nil, apierr.Authorization(apierr.ReasonBinding, "unknown award fence")
 					}
-					return []CloudJobState{{Binding: observed[0].Binding, Delete: true}}, nil
+					return []CloudJobState{{Binding: observed[0].Binding, LeaseExpiresAt: time.Now().Add(time.Hour), Delete: true}}, nil
 				}}, claimed: claimed}
 				ctx, cancel := context.WithCancel(t.Context())
 				done := make(chan error, 1)

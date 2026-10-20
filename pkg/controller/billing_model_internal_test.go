@@ -209,7 +209,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
 	var calls []string
 	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/internal/refill" {
+		if !strings.HasPrefix(r.URL.Path, "/internal/refill") {
 			t.Fatalf("unexpected checkout call: %s", r.URL.Path)
 		}
 		var body map[string]any
@@ -227,15 +227,18 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 				t.Fatalf("confirmed before the intent was recorded: %q %v", recorded, err)
 			}
 		}
-		calls = append(calls, intent)
+		calls = append(calls, r.URL.Path+":"+intent)
 		status := "created"
-		if intent != "" {
+		switch r.URL.Path {
+		case "/internal/refill/reconcile":
+			status = "requires_confirmation"
+		case "/internal/refill/confirm":
 			status = "processing"
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"payment_intent":"pi_refill","status":%q}`, status)))}, nil
 	})
 	worker.refillPass(t.Context())
-	if !slices.Equal(calls, []string{"", "pi_refill"}) {
+	if !slices.Equal(calls, []string{"/internal/refill:", "/internal/refill/reconcile:pi_refill", "/internal/refill/confirm:pi_refill"}) {
 		t.Fatalf("checkout calls %q; want creation then confirmation of the recorded intent", calls)
 	}
 	balance := func() int64 {
@@ -474,5 +477,77 @@ func TestPaymentOwnershipFollowsTheStoredIdentityNotTheHost(t *testing.T) {
 		if w := deliver(fmt.Sprintf("evt_conflict_%d", i), "checkout.session.completed", session("dep-another")); w.Code < 500 || grants() != 1 {
 			t.Fatalf("%s: recorded payment stamped elsewhere = %d, grants %d; want a retryable refusal and no settlement", host, w.Code, grants())
 		}
+	}
+}
+
+func TestRefillRestartReconcilesBeforeConfirmingABlockedCard(t *testing.T) {
+	for _, status := range []string{"requires_confirmation", "processing", "succeeded"} {
+		t.Run(status, func(t *testing.T) {
+			e, tenant := refillFixture(t)
+			engineSQL(t, e.Store, `UPDATE teams SET refill_threshold_cents=10000 WHERE name='a'`)
+			billingModelCheckout(t, e.Store, tenant, "cs_earlier", 2000)
+			provider := paymenttest.Provider{}.Charge("pi_earlier", false, "authenticated", "fp_refill")
+			_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server { return s })
+			if response := deliver("evt_earlier", "checkout.session.completed", stolenCardSession("cs_earlier", "pi_earlier")); response.Code != http.StatusNoContent {
+				t.Fatalf("earlier payment: %d %s", response.Code, response.Body)
+			}
+			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
+			var calls []string
+			worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+				calls = append(calls, r.URL.Path)
+				if r.URL.Path == "/internal/refill" {
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"payment_intent":"pi_bound","status":"created"}`))}, nil
+				}
+				if r.URL.Path != "/internal/refill/reconcile" {
+					t.Fatalf("charged before simulated crash: %s", r.URL.Path)
+				}
+				return nil, fmt.Errorf("controller stopped after binding, before confirming")
+			})
+			worker.refillPass(t.Context())
+			var id, payment string
+			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT id,payment_id FROM credit_checkouts WHERE team='a' AND kind='refill' AND closed_at IS NULL`).Scan(&id, &payment); err != nil || payment != "pi_bound" {
+				t.Fatalf("bound refill: %q %q, %v", id, payment, err)
+			}
+			if response := deliver("evt_warning", "radar.early_fraud_warning.created", stolenCardWarning("issfr_earlier", "pi_earlier")); response.Code != http.StatusNoContent {
+				t.Fatalf("warning: %d %s", response.Code, response.Body)
+			}
+			standing, err := tenant.SpendStanding(t.Context(), time.Now())
+			if err != nil || standing.Refill.Enabled || standing.Card.PaymentMethod != "" || standing.Billing.HoldCause == "" {
+				t.Fatalf("warning did not restrict team: %+v, %v", standing, err)
+			}
+			calls = nil
+			worker = NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
+			worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if body["payment_intent"] != "pi_bound" || body["refill_id"] != id {
+					t.Fatalf("reconciliation changed payment: %v", body)
+				}
+				calls = append(calls, r.URL.Path)
+				result := status
+				switch r.URL.Path {
+				case "/internal/refill/reconcile":
+				case "/internal/refill/cancel":
+					result = "canceled"
+				default:
+					t.Fatalf("blocked card was newly charged: %s", r.URL.Path)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"payment_intent":"pi_bound","status":%q}`, result)))}, nil
+			})
+			worker.refillPass(t.Context())
+			want := []string{"/internal/refill/reconcile"}
+			if status == "requires_confirmation" {
+				want = append(want, "/internal/refill/cancel")
+			}
+			if !slices.Equal(calls, want) {
+				t.Fatalf("after restart calls=%v, want %v", calls, want)
+			}
+			var closed bool
+			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT payment_id,closed_at IS NOT NULL FROM credit_checkouts WHERE id=?`, id).Scan(&payment, &closed); err != nil || payment != "pi_bound" || closed != (status == "requires_confirmation") {
+				t.Fatalf("reservation after restart: payment=%q closed=%v, %v", payment, closed, err)
+			}
+		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -214,7 +215,7 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 		if process != nil {
 			closeErr = process.Close()
 		}
-		cleanupCtx := context.WithoutCancel(ctx)
+		cleanupCtx := lease.ExecutionContext(ctx)
 		if process != nil {
 			err = errors.Join(err, closeErr, process.Cleanup(cleanupCtx))
 		}

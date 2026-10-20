@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -138,8 +139,8 @@ type protocolCall struct {
 	reply    chan nodeproto.Reply
 }
 
-// ProtocolSession owns one SDK process until Close. Start's context bounds setup;
-// individual requests cancel independently so deadline cleanup can still run.
+// ProtocolSession owns one SDK process tree until Close or the keeper execution
+// bound. Requests cancel independently within the remaining execution lifetime.
 type ProtocolSession struct {
 	cfg                       ProtocolSessionConfig
 	cmd                       *exec.Cmd
@@ -158,6 +159,7 @@ type ProtocolSession struct {
 	streams                   sync.WaitGroup
 	writes                    sync.WaitGroup
 	logCtx                    context.Context
+	executionCtx              context.Context
 	stopLogs                  context.CancelFunc
 	closeOnce                 sync.Once
 	closeErr                  error
@@ -215,12 +217,20 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 		return nil, fmt.Errorf("start SDK process: %w", err)
 	}
 	logCtx, stopLogs := context.WithCancel(context.WithoutCancel(ctx))
-	s := &ProtocolSession{cfg: cfg, cmd: cmd, process: process, requests: parent[0], reads: parent[1:], pending: make(map[string]protocolCall), done: make(chan struct{}), joined: make(chan struct{}), framesDone: make(chan struct{}), logCtx: logCtx, stopLogs: stopLogs}
+	s := &ProtocolSession{cfg: cfg, cmd: cmd, process: process, requests: parent[0], reads: parent[1:], pending: make(map[string]protocolCall), done: make(chan struct{}), joined: make(chan struct{}), framesDone: make(chan struct{}), logCtx: logCtx, stopLogs: stopLogs, executionCtx: lease.ExecutionContext(ctx)}
 	s.streams.Add(3)
 	go s.readProtocolFrames(parent[1])
 	go s.readProtocolText(parent[2], "info")
 	go s.readProtocolText(parent[3], "warn")
 	go s.watchProtocolProcess()
+	go func() {
+		select {
+		case <-s.executionCtx.Done():
+			_ = s.process.Kill()
+			s.failProtocol(context.Cause(s.executionCtx))
+		case <-s.joined:
+		}
+	}()
 	if err := context.Cause(ctx); err != nil {
 		return s, err
 	}
@@ -360,7 +370,7 @@ func (s *ProtocolSession) cancelProtocolRequest(call protocolCall, cause error) 
 		return cause
 	default:
 	}
-	ctx, cancel := context.WithTimeout(s.logCtx, limits.CleanupTimeout)
+	ctx, cancel := context.WithTimeout(s.executionCtx, limits.CleanupTimeout)
 	defer cancel()
 	request := nodeproto.Request{Op: nodeproto.OpCancel}
 	if call.request.Op == nodeproto.OpEval {
@@ -579,7 +589,14 @@ func (s *ProtocolSession) Cleanup(ctx context.Context) error {
 		if env == nil {
 			env = s.cfg.Environment
 		}
-		return s.cfg.RunCleanups(ctx, CleanupScope{Dir: s.cfg.Directory, Env: append([]string{}, env...)})
+		cleanup, cancel := context.WithCancelCause(ctx)
+		stop := context.AfterFunc(s.executionCtx, func() { cancel(context.Cause(s.executionCtx)) })
+		defer stop()
+		defer cancel(context.Canceled)
+		if s.executionCtx.Err() != nil {
+			cancel(context.Cause(s.executionCtx))
+		}
+		return s.cfg.RunCleanups(cleanup, CleanupScope{Dir: s.cfg.Directory, Env: append([]string{}, env...)})
 	}
 	return nil
 }

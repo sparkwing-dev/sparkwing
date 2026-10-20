@@ -159,9 +159,9 @@ func TestPaidCheckoutReadsThreeDSecureAndCardFromTheSettledCharge(t *testing.T) 
 		proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)}, testPaymentScope)
 		return proof, headers.version, err
 	}
-	for _, result := range []string{"authenticated", "attempt_acknowledged", "failed", "processing_error", "exempted", "not_supported", ""} {
+	for _, result := range []string{"authenticated", "attempt_acknowledged", "failed", "processing_error", "exempted", "not_supported", "unknown", ""} {
 		proof, versions, err := verify(paymenttest.Provider{}.SettledCheckout("pi_fixture", false, result))
-		shifted := result == "authenticated" || result == "attempt_acknowledged"
+		shifted := result == "authenticated"
 		if err != nil || proof == nil || proof.Event().ThreeDS != result || proof.Event().LiabilityShift != shifted || proof.Event().Fingerprint != "fp_ch_fixture" {
 			t.Fatalf("%q: proof=%+v err=%v", result, proof, err)
 		}

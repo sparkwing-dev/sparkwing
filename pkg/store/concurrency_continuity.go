@@ -8,9 +8,9 @@ import (
 )
 
 const capacityRunLiveSQL = `r.status IN ('pending','running') AND r.finished_at IS NULL AND (
- (r.dispatch='controller' AND r.plan_accepted_generation>0 AND EXISTS (
+ ((` + controllerRunOwnership + `) AND EXISTS (
   SELECT 1 FROM leases l WHERE l.name='controller.owner' AND l.holder<>'' AND l.until>?))
- OR ((r.dispatch<>'controller' OR r.plan_accepted_generation=0) AND EXISTS (
+ OR ((NOT (` + controllerRunOwnership + `)) AND EXISTS (
   SELECT 1 FROM triggers t WHERE t.team=r.team AND t.id=r.id AND t.status='claimed' AND t.lease_expires_at>?))
  OR EXISTS (SELECT 1 FROM nodes n WHERE n.team=r.team AND n.run_id=r.id
   AND n.status<>'done' AND n.claimed_by IS NOT NULL AND n.lease_expires_at>?))`
@@ -21,7 +21,7 @@ func capacityGenerationTx(ctx context.Context, tx *storeTx, team Team, runID, no
 	if nodeID != "" {
 		err = tx.QueryRowContext(ctx, `SELECT generation FROM nodes WHERE team=? AND run_id=? AND node_id=? AND status<>'done'`, team, runID, nodeID).Scan(&generation)
 	} else {
-		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN dispatch='controller' AND plan_accepted_generation>0
+		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN `+controllerRunOwnership+`
  THEN (SELECT generation FROM leases WHERE name='controller.owner')
  ELSE (SELECT generation FROM triggers WHERE team=r.team AND id=r.id) END
  FROM runs r WHERE r.team=? AND r.id=? AND r.status IN ('pending','running')`, team, runID).Scan(&generation)

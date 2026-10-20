@@ -38,8 +38,8 @@ const (
 
 // safety: Stripe keeps an idempotency key for 24 hours, so a refill still unbound after this is closed and the next
 // one gets a new key. Unbound means the checkout service never returned an intent, and an intent is only confirmed
-// after the controller binds it, so an unbound refill moved no money. A bound refill keeps its slot until its signed
-// outcome arrives.
+// after the controller binds it, so an unbound refill moved no money. A bound refill keeps its slot until its
+// payment outcome is known.
 const refillKeyLife = 23 * time.Hour
 
 // safety: these closures moved no money, so they neither count against limits nor stop later refills.
@@ -89,7 +89,7 @@ type RefillState struct {
 	Limit string
 }
 
-// Refill is one refill the worker must ask the checkout service to make, or to confirm once PaymentIntent is set.
+// Refill is one refill the worker must create, or reconcile once PaymentIntent is set.
 // Its amount, customer, card and receipt address are fixed when it opens, so every retry under its idempotency key
 // sends the same request.
 type Refill struct {
@@ -131,7 +131,7 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillWeek)+` THEN amount_minor ELSE 0 END), 0),
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillMonth)+` THEN amount_minor ELSE 0 END), 0)
 	  FROM credit_checkouts WHERE team = ? AND kind = ? AND (COALESCE(closed_at, opened_at) >= ? OR closed_at IS NULL)
-	    AND NOT (payment_id = '' AND closed_at IS NOT NULL)`,
+	    AND NOT ((payment_id = '' OR failure = 'canceled') AND closed_at IS NOT NULL)`,
 		string(team), CheckoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
 		return s, err
 	}
@@ -280,9 +280,6 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	case err != nil:
 		return nil, err
 	case r.PaymentIntent != "":
-		if r.AmountCents > MaxCardPaymentCents {
-			return nil, nil
-		}
 		return &r, nil
 	case r.AmountCents > MaxCardPaymentCents || !st.Refill.Enabled || !st.Refill.FailedAt.IsZero() || st.Billing.HoldCause != "":
 		closed = refillReplaced
@@ -367,5 +364,67 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 			return cmp.Or(err, authorityError(apierr.Conflict, "refill is closed or bound to another payment"))
 		}
 		return nil
+	})
+}
+
+// CanConfirmRefill rechecks a bound refill against the team's current authorization and limits.
+// A reservation preserves the payment's identity, not permission to charge its card.
+func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error) {
+	var allowed bool
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
+			return err
+		}
+		var opened, amount int64
+		var customer, method string
+		err := tx.QueryRowContext(ctx, `SELECT opened_at, amount_minor, customer_id, payment_method FROM credit_checkouts
+		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
+			string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent).Scan(&opened, &amount, &customer, &method)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		now := tx.now()
+		st, err := spendStandingTx(ctx, tx, r.Team, now)
+		if err != nil {
+			return err
+		}
+		if !st.Refill.Enabled || !st.Refill.FailedAt.IsZero() || st.Billing.HoldCause != "" ||
+			customer != st.Card.Customer || method != st.Card.PaymentMethod {
+			return nil
+		}
+		refusal, err := cardRefusalTx(ctx, tx, r.Team, r.PaymentIntent, st.Card.Fingerprint)
+		if err != nil || refusal.reason != "" {
+			return err
+		}
+		// The windows already include this reservation; replace its contribution with the charge being authorized.
+		refill := st.Refill
+		refill.AmountCents = amount
+		age := now.Sub(time.Unix(0, opened))
+		if age <= refillDay {
+			refill.DayCount--
+		}
+		if age <= refillWeek {
+			refill.WeekCents -= amount
+		}
+		if age <= refillMonth {
+			refill.MonthCents -= amount
+		}
+		allowed = refill.limit() == ""
+		return nil
+	})
+	return allowed, err
+}
+
+// RecordRefillCanceled closes a bound reservation after the checkout service reports Stripe canceled its intent.
+// The record and payment binding remain available for reconciliation and audit.
+func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
+		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
+			tx.now().UnixNano(), string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent)
+		return err
 	})
 }

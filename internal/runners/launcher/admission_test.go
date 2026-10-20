@@ -96,7 +96,9 @@ func TestLauncherAcceptsKubernetesDefaults(t *testing.T) {
 		job.Spec.Template.Labels["batch.kubernetes.io/controller-uid"] = "uid"
 		pod := &job.Spec.Template.Spec
 		pod.DNSPolicy, pod.SchedulerName = corev1.DNSClusterFirst, corev1.DefaultSchedulerName
-		pod.TerminationGracePeriodSeconds = ptr(int64(30))
+		if pod.TerminationGracePeriodSeconds == nil {
+			pod.TerminationGracePeriodSeconds = ptr(int64(30))
+		}
 		pod.DeprecatedServiceAccount = pod.ServiceAccountName
 		for _, containers := range [][]corev1.Container{pod.Containers, pod.InitContainers} {
 			for i := range containers {

@@ -312,7 +312,7 @@ func awardedStates(award CloudJobAward, ended func(CloudJobBinding) bool) func([
 	return func(obs []CloudJobObservation) ([]CloudJobState, error) {
 		states := make([]CloudJobState, len(obs))
 		for i, o := range obs {
-			states[i] = CloudJobState{Binding: o.Binding, Delete: ended(o.Binding), Resources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}}
+			states[i] = CloudJobState{Binding: o.Binding, LeaseExpiresAt: time.Now().Add(time.Hour), Delete: ended(o.Binding), Resources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}}
 		}
 		return states, nil
 	}
@@ -384,7 +384,7 @@ func TestCapacityDemandIsAuthenticatedOutsideTheAdmittedPod(t *testing.T) {
 			restarted := &Launcher{Kube: kube, Config: l.Config, Boundary: boundary, Control: publicationControl{CloudControl: control, sync: func(obs []CloudJobObservation) ([]CloudJobState, error) {
 				states := make([]CloudJobState, len(obs))
 				for i, o := range obs {
-					states[i] = CloudJobState{Binding: o.Binding, Resources: resources}
+					states[i] = CloudJobState{Binding: o.Binding, LeaseExpiresAt: time.Now().Add(time.Hour), Resources: resources}
 				}
 				return states, nil
 			}}}

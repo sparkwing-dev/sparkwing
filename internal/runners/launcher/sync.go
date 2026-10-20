@@ -81,6 +81,10 @@ func (l *Launcher) sync(ctx context.Context) error {
 			job := &jobs.Items[live[observation.JobName]]
 			_, reservation, err := jobOwnership(*job)
 			if err == nil && !retirements[observation.JobName].Delete {
+				if err := l.renewJobDeadline(ctx, job, observation.Binding, retirements[observation.JobName].LeaseExpiresAt); err != nil {
+					errs = append(errs, err)
+					continue
+				}
 				errs = append(errs, l.enforceAward(ctx, job, observation.Binding, reservation))
 				continue
 			}
@@ -93,6 +97,36 @@ func (l *Launcher) sync(ctx context.Context) error {
 		}
 	}
 	return errors.Join(append(errs, l.syncReservations(ctx), l.syncCapacity(ctx))...)
+}
+
+func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, expires time.Time) error {
+	expires, err := cloudLeaseDeadline(time.Now(), binding, expires)
+	if err != nil {
+		return err
+	}
+	start := time.Now()
+	if job.Status.StartTime != nil {
+		start = job.Status.StartTime.Time
+	}
+	seconds := int64(expires.Sub(start) / time.Second)
+	if seconds <= 0 {
+		return errors.New("Cloud lease deadline has elapsed")
+	}
+	if job.Spec.ActiveDeadlineSeconds != nil && *job.Spec.ActiveDeadlineSeconds == seconds && job.Annotations[deadlineAnnotation] == expires.Format(time.RFC3339Nano) {
+		return nil
+	}
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "resourceVersion": job.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: expires.Format(time.RFC3339Nano)}}, "spec": map[string]any{"activeDeadlineSeconds": seconds}})
+	if err != nil {
+		return err
+	}
+	updated, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Patch(ctx, job.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	expected := job.DeepCopy()
+	expected.Spec.ActiveDeadlineSeconds = &seconds
+	expected.Annotations[deadlineAnnotation] = expires.Format(time.RFC3339Nano)
+	return validateAdmittedJob(expected, updated)
 }
 
 func (l *Launcher) syncReservations(ctx context.Context) error {

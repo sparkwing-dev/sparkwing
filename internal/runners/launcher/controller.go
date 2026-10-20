@@ -66,7 +66,7 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 	if resources == nil {
 		return nil, errors.New("Cloud award is missing its committed allocation")
 	}
-	award := &CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores, Memory: resources.MemoryBytes}
+	award := &CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores, Memory: resources.MemoryBytes}
 	if err := validateAward(*award); err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
 			return nil, errAwardMismatch
 		}
-		states[i].Binding, states[i].Resources = observations[i].Binding, c.resources(unit)
+		states[i].Binding, states[i].Resources, states[i].LeaseExpiresAt = observations[i].Binding, c.resources(unit), unit.LeaseExpiresAt
 	}
 	for _, job := range response.Remove {
 		i, ok := byJob[job.Name]

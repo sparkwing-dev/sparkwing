@@ -36,8 +36,12 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if run.CancelRequestedAt == nil {
-				t.Error("hold committed without durable run cancellation")
+			if run.CancelRequestedAt != nil {
+				t.Error("hold cancelled the whole run")
+			}
+			node, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
+			if err != nil || node.CancelRequestedAt == nil {
+				t.Fatalf("hold committed without durable job cancellation: %+v %v", node, err)
 			}
 			var drain int64
 			if err := s.db.QueryRow(`SELECT drain_deadline_at FROM billing_awards WHERE team='a' AND settled_at IS NULL`).Scan(&drain); err != nil || drain != now.Add(SliceSeconds*time.Second).UnixNano() {
@@ -139,5 +143,54 @@ func TestHoldRollbackRestoresRunningAward(t *testing.T) {
 	beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 	if err != nil || beat.CancelRequested {
 		t.Fatalf("rollback stopped renewal: %+v, %v", beat, err)
+	}
+}
+
+func TestFundingStopPreservesIndependentCustomerRunner(t *testing.T) {
+	for _, refusal := range []string{"balance", "hold"} {
+		t.Run(refusal, func(t *testing.T) {
+			s, demand, now := billingModelFixture(t)
+			cloud, cloudActor := meteredUnitClaim(t, s, demand)
+			tenant := &Tenant{s: s, team: "a"}
+			billingModelJob(t, s, "customer")
+			demand.Target.NodeID, demand.CapabilityPrefix = "customer", "runner"
+			customer, customerActor := meteredUnitClaim(t, s, demand)
+			for _, actor := range []Actor{cloudActor, customerActor} {
+				node := "job"
+				if actor.CapabilityPrefix == customerActor.CapabilityPrefix {
+					node = "customer"
+				}
+				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", node}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if refusal == "hold" {
+				if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "mixed", "", "dispute opened", *now); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=600`)
+			}
+			*now = now.Add(10 * time.Second)
+			beat, err := s.RenewUnit(t.Context(), cloud.Award.CapabilityPrefix, true)
+			if err != nil || !beat.CancelRequested {
+				t.Fatalf("Cloud stop: %+v %v", beat, err)
+			}
+			stopped, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
+			if err != nil || stopped.CancelRequestedAt == nil {
+				t.Fatalf("Cloud stop not persisted: %+v %v", stopped, err)
+			}
+			run, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil || run.CancelRequestedAt != nil {
+				t.Fatalf("funding stop cancelled whole run: %+v %v", run, err)
+			}
+			beat, err = s.RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true)
+			if err != nil || beat.CancelRequested {
+				t.Fatalf("independent customer job cancelled: %+v %v", beat, err)
+			}
+			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

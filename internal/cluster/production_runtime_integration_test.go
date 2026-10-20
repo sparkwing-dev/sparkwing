@@ -280,7 +280,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			award := launcher.CloudJobAward{Binding: binding, Engine: unit.Engine, Source: spec, Bootstrap: []byte(productionTestBearer("bootstrap")), CPUCores: 1, Memory: 1 << 30}
+			award := launcher.CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Engine: unit.Engine, Source: spec, Bootstrap: []byte(productionTestBearer("bootstrap")), CPUCores: 1, Memory: 1 << 30}
 			boundary := errors.New("awarded unit renewal boundary")
 			exchanges, renewals := 0, 0
 			previousTransport := http.DefaultTransport
