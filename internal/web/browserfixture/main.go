@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -73,11 +74,11 @@ func parseFixtureConfig(args []string) (fixtureConfig, error) {
 
 // safety: the control listener is a second loopback server, so the dashboard's own origin answers only what a
 // deployed controller answers.
-func controlHandler(st *store.Store) http.Handler {
+func controlHandler(db *sql.DB) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /__fixture/state", func(w http.ResponseWriter, _ *http.Request) {
 		var sessions int
-		if err := st.DB().QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&sessions); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&sessions); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -86,7 +87,7 @@ func controlHandler(st *store.Store) http.Handler {
 		}
 	})
 	mux.HandleFunc("POST /__fixture/revoke", func(w http.ResponseWriter, _ *http.Request) {
-		if _, err := st.DB().Exec(`DELETE FROM sessions`); err != nil {
+		if _, err := db.Exec(`DELETE FROM sessions`); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -153,7 +154,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	controlListener, controlServer, err := listen(controlHandler(st))
+	// safety: the fixture inspects sessions through its own connection, so
+	// the store keeps no raw handle.
+	raw, err := sql.Open("sqlite", "file:"+home.StateDB()+"?_pragma=busy_timeout(30000)")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if err := raw.Close(); err != nil {
+			log.Printf("browser fixture sql close: %v", err)
+		}
+	}()
+	controlListener, controlServer, err := listen(controlHandler(raw))
 	if err != nil {
 		if err := dashboardServer.Close(); err != nil {
 			log.Printf("browser fixture close: %v", err)

@@ -139,9 +139,7 @@ func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 							t.Error(err)
 						}
 					})
-					if err := st.AsOperator().CreateTeam(t.Context(), "customer"); err != nil {
-						t.Fatal(err)
-					}
+					teststore.SeedTeam(t, st, "customer")
 				}
 				s := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
 				w := httptest.NewRecorder()
@@ -190,9 +188,7 @@ func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = st.Close() })
-			if err := st.AsOperator().CreateTeam(context.Background(), "customer"); err != nil {
-				t.Fatal(err)
-			}
+			teststore.SeedTeam(t, st, "customer")
 			b := consoleBoundary()
 			var audit bytes.Buffer
 			s := controller.New(st, slog.New(slog.NewJSONHandler(&audit, nil))).WithAuthorization(consoleAuthorization(b)).WithConsoleWriter(consoleStoreFake{store: st})

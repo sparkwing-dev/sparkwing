@@ -171,7 +171,7 @@ func sqlLiteralDialects(t *testing.T, run func(*testing.T, *cronsFixture, *store
 	}{{"sqlite", openSQLiteStore}, {"postgres", openPostgresStore}} {
 		t.Run(dialect.name, func(t *testing.T) {
 			st := dialect.open(t)
-			if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('literal-a',1,1),('literal-b',1,1)`); err != nil {
+			if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('literal-a',1,1),('literal-b',1,1)`); err != nil {
 				t.Fatal(err)
 			}
 			token, _, err := teststore.ProvisionCredential(t.Context(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "literal-a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "literal-owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}})

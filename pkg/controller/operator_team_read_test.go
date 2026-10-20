@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestOperatorTeamReadRequiresCurrentDeploymentGrantProperty(t *testing.T) {
-	e, _ := engineRuntimeStore(t)
 	clock := time.Now().UTC()
-	e.Store.SetTestClock(t, func() time.Time { return clock })
+	e, _ := engineRuntimeStore(t, teststore.WithClock(func() time.Time { return clock }))
 	raw := reviewSeed(t, e.Store)
 	parent, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {

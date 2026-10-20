@@ -358,8 +358,7 @@ Allowance-driven physical eviction still requires the final record/log adapter.
 models and `DefaultStorageReservationTTL` are removed. Tenant blob tickets own
 public reserve, verified commit and abort. The controller's log-retention probe
 uses `StorageStanding` and slot availability without mutating storage rows.
-Legacy direct-upload and node-log reservation writers are removed. The pod log
-sink consumes `logseg.Data` through `SubjectUploader`. The old segment-signing
+Legacy direct-upload and node-log reservation writers are removed. The old segment-signing
 client, upload wire types and unused engine-log wrapper are removed. Missing
 authenticated bindings report an error while pod stdout remains available.
 Production signing, verification and recording adapters remain with the controller,

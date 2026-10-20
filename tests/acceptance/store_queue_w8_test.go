@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
@@ -81,7 +82,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 			t.Fatalf("queue claim: %+v: %v; want %s", response, err, want)
 		}
 		var claims int
-		if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM triggers WHERE status='claimed'`).Scan(&claims); err != nil || claims != 0 {
+		if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM triggers WHERE status='claimed'`).Scan(&claims); err != nil || claims != 0 {
 			t.Fatalf("refused claim changed the queue: count=%d: %v", claims, err)
 		}
 	})

@@ -26,9 +26,7 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 					team := store.DefaultTeam
 					if scope == "foreign" {
 						team = "foreign"
-						if err := st.AsOperator().CreateTeam(t.Context(), team); err != nil {
-							t.Fatal(err)
-						}
+						teststore.SeedTeam(t, st, team)
 					}
 					if scope != "pruned" {
 						if err := teststore.SeedRun(st, t.Context(), team, store.Run{ID: "selected", Pipeline: "ci", Status: "pending"}); err != nil {

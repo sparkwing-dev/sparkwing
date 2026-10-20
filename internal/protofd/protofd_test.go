@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testleak"
+
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
@@ -20,7 +22,7 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	testleak.Main(m)
 }
 
 func exchange() error {

@@ -29,7 +29,6 @@ func storageBoundaryChecks() map[string]func(*testing.T) {
 		"storage-owner-receipts-and-stream-verification": checkStorageOwnerReceipts,
 		"storage-hasmany-large-budget":                   checkStoragePresence,
 		"storage-memo-materialization-failures":          checkStorageMemoFailures,
-		"storage-log-segments-and-fallback":              checkStorageLogs,
 		"storage-local-remote-cache-opt-in":              checkStorageRemoteCache,
 	}
 }

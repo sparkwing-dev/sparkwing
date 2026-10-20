@@ -7,30 +7,6 @@ import (
 	"testing"
 )
 
-func TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest(t *testing.T) {
-	t.Setenv("SPARKWING_CONFIG", "")
-	if err := os.Unsetenv("SPARKWING_CONFIG"); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("XDG_CONFIG_HOME", "")
-
-	got, err := DefaultPath()
-	if err != nil {
-		t.Fatalf("DefaultPath: %v", err)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("resolve home: %v", err)
-	}
-	live := filepath.Join(home, ".config", "sparkwing", "config.yaml")
-	if got == live {
-		t.Fatalf("DefaultPath resolved to the developer's own registry %s", live)
-	}
-	if !strings.HasPrefix(got, os.TempDir()) {
-		t.Errorf("DefaultPath = %q, want a path under %s", got, os.TempDir())
-	}
-}
-
 func TestDefaultPath_StillHonorsAnExplicitOverride(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "explicit.yaml")
 	t.Setenv("SPARKWING_CONFIG", want)

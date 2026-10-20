@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -36,7 +37,7 @@ func registeredRunnerZeroHeadroom(t *testing.T, execution string, available floa
 	handler := server.WithEngineController(e).Handler()
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	var requestBody []byte
-	if err := e.Store.DB().QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&requestBody); err != nil {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&requestBody); err != nil {
 		t.Fatal(err)
 	}
 	var sealed runspec.SealedRequest

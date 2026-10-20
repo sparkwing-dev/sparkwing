@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestPlanTopologyStrangerLearnsNothingProperty(t *testing.T) {
@@ -65,7 +66,7 @@ func TestPlanTopologyStrangerLearnsNothingProperty(t *testing.T) {
 			t.Fatalf("stranger changed run: %+v: %v", after, err)
 		}
 		var rows int
-		if err := s.store.DB().QueryRow(`SELECT (SELECT COUNT(*) FROM nodes)+(SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM run_effects)`).Scan(&rows); err != nil || rows != 0 {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT (SELECT COUNT(*) FROM nodes)+(SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM run_effects)`).Scan(&rows); err != nil || rows != 0 {
 			t.Fatalf("stranger persisted topology or effects=%d: %v", rows, err)
 		}
 		return true

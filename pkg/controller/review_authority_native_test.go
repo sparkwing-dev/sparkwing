@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func reviewSeed(t *testing.T, st *store.Store) string {
@@ -52,10 +53,10 @@ func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 		t.Fatalf("service administrator readiness: %v %v", ready, err)
 	}
 	var ended int
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE prefix IN (?,?) AND revoked_at IS NOT NULL AND revocation_generation>0`, parent.Authority.ID, child.Capability.Prefix).Scan(&ended); err != nil || ended != 2 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE prefix IN (?,?) AND revoked_at IS NOT NULL AND revocation_generation>0`, parent.Authority.ID, child.Capability.Prefix).Scan(&ended); err != nil || ended != 2 {
 		t.Fatalf("descendant revocation: %d %v", ended, err)
 	}
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM sessions WHERE hash='bootstrap-session' AND revoked_at IS NOT NULL AND auth_generation>0`).Scan(&ended); err != nil || ended != 1 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM sessions WHERE hash='bootstrap-session' AND revoked_at IS NOT NULL AND auth_generation>0`).Scan(&ended); err != nil || ended != 1 {
 		t.Fatalf("session revocation: %d %v", ended, err)
 	}
 	for _, secret := range []string{raw, child.Raw} {
@@ -65,7 +66,7 @@ func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 		t.Fatalf("used seed accepted: %v %v", created, err)
 	}
 	var generation int64
-	if err := e.Store.DB().QueryRow(`SELECT revocation_generation FROM capabilities WHERE prefix=?`, parent.Authority.ID).Scan(&generation); err != nil || generation == 0 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT revocation_generation FROM capabilities WHERE prefix=?`, parent.Authority.ID).Scan(&generation); err != nil || generation == 0 {
 		t.Fatalf("generation=%d %v", generation, err)
 	}
 }
@@ -184,7 +185,7 @@ func TestReviewConsoleCommitRevalidatesProofProperty(t *testing.T) {
 	s, raw, _ := reviewAccount(t, "reader")
 	s.WithOperatorAccounts([]string{"member"})
 	var route capability.RoutePolicy
-	for _, candidate := range capability.Routes {
+	for _, candidate := range capability.Routes() {
 		if candidate.Method == "POST" && candidate.Path == "/api/v1/operator/tokens" {
 			route = candidate
 		}
@@ -223,7 +224,7 @@ func TestReviewSetupRollbackPreservesBootstrap(t *testing.T) {
 	engineSQL(t, e.Store, `CREATE TRIGGER refuse_bootstrap_revoke BEFORE UPDATE OF revoked_at ON capabilities WHEN OLD.subject_id='bootstrap:admin' BEGIN SELECT RAISE(ABORT,'refuse setup'); END`)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/operator/tokens", `{"name":"administrator","grants":["operator.tokens"]}`, 500)
 	var count int
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE subject_id='administrator'`).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE subject_id='administrator'`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("partial setup: %d %v", count, err)
 	}
 	engineClaimHTTP(t, h, raw, "GET", "/api/v1/operator/tokens", "", 200)

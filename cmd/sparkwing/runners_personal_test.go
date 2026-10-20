@@ -40,19 +40,17 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			if err := state.AsOperator().CreateTeam(t.Context(), "personal-test"); err != nil {
-				t.Fatal(err)
-			}
+			teststore.SeedTeam(t, state, "personal-test")
 			for _, query := range []string{
 				`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 				`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('personal-test','member','editor',1)`,
 			} {
-				if _, err := state.DB().ExecContext(t.Context(), query); err != nil {
+				if _, err := teststore.SQL(t, state).ExecContext(t.Context(), query); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if mode == "disabled" {
-				if _, err := state.DB().ExecContext(t.Context(), `UPDATE teams SET members_can_add_machines=0 WHERE name='personal-test'`); err != nil {
+				if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `UPDATE teams SET members_can_add_machines=0 WHERE name='personal-test'`); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -75,7 +73,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 			})
 			t.Cleanup(func() { http.DefaultTransport = original })
 			if mode == "settings" {
-				if _, err := state.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+				if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
 					t.Fatal(err)
 				}
 				digest := sha256.Sum256([]byte(session))
@@ -94,7 +92,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 						t.Fatalf("settings CLI %v: %s %v", args, out, callErr)
 					}
 				}
-				if _, err := state.DB().ExecContext(t.Context(), `UPDATE memberships SET role='editor'`); err != nil {
+				if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `UPDATE memberships SET role='editor'`); err != nil {
 					t.Fatal(err)
 				}
 				if err := runSparkwing([]string{"team", "settings", "set", "--profile", "prod", "--members-can-add-machines", "true"}); err == nil {
@@ -126,7 +124,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 					t.Fatalf("refusal must name %s: %v", want, err)
 				}
 				var count int
-				if err := state.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE subject_kind='machine'`).Scan(&count); err != nil || count != 0 {
+				if err := teststore.SQL(t, state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE subject_kind='machine'`).Scan(&count); err != nil || count != 0 {
 					t.Fatalf("refused enrollment persisted credentials: %d %v", count, err)
 				}
 				return

@@ -153,7 +153,7 @@ func TestReplicaDownloadCapSurvivesReopening(t *testing.T) {
 	target := storetest.New(t)
 	first, second := target.Open(t), target.Open(t)
 	team := store.Team("download-team")
-	if err := first.AsOperator().CreateTeam(t.Context(), team); err != nil {
+	if err := first.AsOperator().TestOnlyCreateTeam(t.Context(), team); err != nil {
 		t.Fatal(err)
 	}
 	teams := []*store.Tenant{tenant(t, first, team), tenant(t, second, team)}

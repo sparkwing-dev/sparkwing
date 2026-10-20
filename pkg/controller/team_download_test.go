@@ -89,9 +89,7 @@ func TestTeamLogReadsAreNotRefusedPastTheDownloadCap(t *testing.T) {
 func freeTeamToken(t *testing.T, st *store.Store, team store.Team) string {
 	t.Helper()
 	ctx := context.Background()
-	if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, st, team)
 	tenant, err := st.ForTeam(ctx, team)
 	if err != nil {
 		t.Fatal(err)

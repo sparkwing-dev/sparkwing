@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 var accountReadPaths = []string{"/api/v1/me", "/api/v1/me/identities", "/api/v1/me/team-deletions"}
@@ -141,7 +142,7 @@ func TestAccountReadHTTPRefusesUnrelatedAuthority(t *testing.T) {
 
 func TestAccountReadHTTPDoesNotRenewOrSwitchSession(t *testing.T) {
 	f := newSessionFlow(t)
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE accounts SET active_team='team' WHERE id='member'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE accounts SET active_team='team' WHERE id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	h := f.server.Handler()
@@ -154,7 +155,7 @@ func TestAccountReadHTTPDoesNotRenewOrSwitchSession(t *testing.T) {
 			t.Fatalf("%s: HTTP %d %s state=%d/%d -> %d/%d", path, w.Code, w.Body.String(), count, expires, gotCount, gotExpires)
 		}
 		var account, team string
-		if err := f.store.DB().QueryRowContext(t.Context(), `SELECT account_id,team FROM sessions`).Scan(&account, &team); err != nil || account != "member" || team != "team" {
+		if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT account_id,team FROM sessions`).Scan(&account, &team); err != nil || account != "member" || team != "team" {
 			t.Fatalf("session=%s/%s, %v", account, team, err)
 		}
 		if path == "/api/v1/me" && !strings.Contains(w.Body.String(), `"id":"member"`) {
@@ -201,7 +202,7 @@ func TestSelfServiceAccountDeletionIsGoneProperty(t *testing.T) {
 		h.ServeHTTP(w, r)
 		after, expiry := f.state(t)
 		var accountCount int
-		err = f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM accounts WHERE id='member'`).Scan(&accountCount)
+		err = teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM accounts WHERE id='member'`).Scan(&accountCount)
 		var failure apierr.Envelope
 		return err == nil && accountCount == 1 && count == after && expires == expiry &&
 			w.Code == 405 && w.Header().Get("Allow") == "GET" && json.Unmarshal(w.Body.Bytes(), &failure) == nil &&
@@ -218,7 +219,7 @@ func TestConsoleAccountDeletionRetainsLastOwnerConflict(t *testing.T) {
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('target','target@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','target','owner',1)`,
 	} {
-		if _, err := f.store.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}

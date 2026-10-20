@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type rootIssuer struct {
@@ -252,7 +253,7 @@ func TestRootProvisioningHTTPEnrollmentConflicts(t *testing.T) {
 
 func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 	for _, service := range []bool{false, true} {
-		for _, grant := range capability.Grants {
+		for _, grant := range capability.Grants() {
 			b, path, body := rootFixture(service)
 			var request map[string]any
 			if err := json.Unmarshal([]byte(body), &request); err != nil {
@@ -285,7 +286,7 @@ func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 
 func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 	f := newSessionFlow(t)
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
 		t.Fatal(err)
 	}
 	h := f.server.Handler()
@@ -305,7 +306,7 @@ func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		if status == 201 {
 			role = "owner"
 		}
-		if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role=?`, role); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role=?`, role); err != nil {
 			t.Fatal(err)
 		}
 		w = httptest.NewRecorder()
@@ -313,7 +314,7 @@ func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		if status == 403 {
 			assertEngineError(t, w, 403, apierr.Forbidden)
 			var count int
-			if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
+			if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("count=%d err=%v", count, err)
 			}
 			continue

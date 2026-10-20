@@ -71,7 +71,7 @@ func TestMachineProvisionGrantsProperty(t *testing.T) {
 	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
 	random := rand.New(rand.NewPCG(453, 28))
 	for originIndex, origin := range []capability.AuthorityRef{owner.Authority, {Kind: capability.AuthorityCapability, ID: deployment.Prefix}} {
-		for grantIndex, grant := range capability.Grants {
+		for grantIndex, grant := range capability.Grants() {
 			grants := []capability.Grant{grant}
 			if random.IntN(2) == 0 && grant != capability.NodesClaim {
 				grants = append(grants, capability.NodesClaim)

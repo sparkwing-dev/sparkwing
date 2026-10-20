@@ -13,11 +13,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 	f := newDeploymentSessionFlow(t, deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam))
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner' WHERE team='team' AND account_id='member'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner' WHERE team='team' AND account_id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	actions := newActionsExchangeFixture(t)
@@ -46,7 +47,7 @@ func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 		t.Fatalf("persisted enrollment: %+v %v", row, err)
 	}
 	var storedAt int64
-	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT created_at FROM github_runner_bindings WHERE team='team' AND repository_id=42`).Scan(&storedAt); err != nil || storedAt != row.CreatedAt.UnixNano() {
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT created_at FROM github_runner_bindings WHERE team='team' AND repository_id=42`).Scan(&storedAt); err != nil || storedAt != row.CreatedAt.UnixNano() {
 		t.Fatalf("enrollment timestamp: %d %v", storedAt, err)
 	}
 	w := actions.request(t, "POST", actions.token(t), "team", nil)
@@ -75,7 +76,7 @@ func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 	if w.Code != 403 {
 		t.Fatalf("removed enrollment exchanged: %d %s", w.Code, w.Body.String())
 	}
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team='team' AND account_id='member'`); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team='team' AND account_id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	call("POST", "/api/v1/runners/github", `{"repository":"acme/widgets","repository_id":42,"repository_owner_id":7}`, 403)

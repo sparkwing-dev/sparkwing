@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -540,9 +539,6 @@ func gatherExecutable() InfoExecutable {
 		return InfoExecutable{}
 	}
 	out := InfoExecutable{Path: self}
-	if paths.UnderTest() {
-		return out
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = ""

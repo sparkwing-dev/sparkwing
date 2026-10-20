@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type sessionFlow struct {
@@ -42,7 +43,7 @@ func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','member','editor',1)`,
 	} {
-		if _, err := s.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -68,7 +69,7 @@ func (f sessionFlow) request(method, path, body string) *http.Request {
 func (f sessionFlow) state(t *testing.T) (int64, int64) {
 	t.Helper()
 	var count, expires int64
-	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*),COALESCE(MAX(expires_at),0) FROM sessions`).Scan(&count, &expires); err != nil {
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*),COALESCE(MAX(expires_at),0) FROM sessions`).Scan(&count, &expires); err != nil {
 		t.Fatal(err)
 	}
 	return count, expires
@@ -192,7 +193,7 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 		now := time.Now().UTC()
 		elapsed := (time.Duration(age%96) - 24) * time.Hour
 		created, expires := now.Add(-elapsed), now.Add(10*time.Minute)
-		if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), expires.UnixNano()); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), expires.UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		w := httptest.NewRecorder()
@@ -297,7 +298,7 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 				if state == "removed member" || state == "backend" {
 					args = nil
 				}
-				if _, err := f.store.DB().ExecContext(t.Context(), query, args...); err != nil {
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), query, args...); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -319,7 +320,7 @@ func TestSessionFlowHTTPRolelessAccountHasNoTeamAuthority(t *testing.T) {
 		`INSERT INTO accounts(id,email,email_verified,created_at,updated_at,waitlist_reason) VALUES ('waitlisted','waitlisted@example.test',1,1,1,'signup_gate')`,
 		`INSERT INTO identities(provider,subject,account_id,email_verified,created_at) VALUES ('github','waitlisted','waitlisted',1,1)`,
 	} {
-		if _, err := f.store.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}

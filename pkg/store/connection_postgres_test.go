@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestPostgresIdentityUsesTableSchema(t *testing.T) {
@@ -20,7 +21,7 @@ func TestPostgresIdentityUsesTableSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := second.DB().ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET applied_at = $1`, id.Created); err != nil {
+	if _, err := teststore.SQL(t, second).ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET applied_at = $1`, id.Created); err != nil {
 		t.Fatal(err)
 	}
 	prefix, _ := url.Parse(empty.DSN())
@@ -72,7 +73,7 @@ func TestPostgresExistingSessionCannotReconnectAfterVerification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.DB().ExecContext(t.Context(), `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1`, app); err != nil {
+	if _, err := teststore.SQL(t, admin).ExecContext(t.Context(), `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1`, app); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.HoldByOperator(t.Context(), "test", "lost verified session", time.Now()); err == nil {
@@ -84,7 +85,7 @@ func TestPostgresIdentityRetainsUnixSocketEndpoint(t *testing.T) {
 	target := storetest.NewPostgres(t)
 	admin := target.Open(t)
 	var dirs, port string
-	if err := admin.DB().QueryRowContext(t.Context(), `SELECT current_setting('unix_socket_directories'), current_setting('port')`).Scan(&dirs, &port); err != nil {
+	if err := teststore.SQL(t, admin).QueryRowContext(t.Context(), `SELECT current_setting('unix_socket_directories'), current_setting('port')`).Scan(&dirs, &port); err != nil {
 		t.Fatal(err)
 	}
 	var socketDir string

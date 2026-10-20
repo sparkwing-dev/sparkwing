@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func FuzzRunIntakeRejectsLegacyEnvironmentProvenance(f *testing.F) {
@@ -43,7 +45,7 @@ func FuzzRunIntakeRejectsLegacyEnvironmentProvenance(f *testing.F) {
 			}
 		}
 		var count int
-		if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 1 {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("legacy intake wrote execution state: %d %v", count, err)
 		}
 	})

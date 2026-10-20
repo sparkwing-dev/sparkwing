@@ -220,10 +220,10 @@ func mustGet(t *testing.T, url string) *http.Response {
 func seedControllerCapacityHolder(t *testing.T, s *store.Store, team store.Team, key, holder, run, node string, queueArrival int64) {
 	t.Helper()
 	now := time.Now()
-	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ($1,$2,1,$3) ON CONFLICT(team,key) DO NOTHING`, team, key, now.UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ($1,$2,1,$3) ON CONFLICT(team,key) DO NOTHING`, team, key, now.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,queue_arrived_at,lease_expires_at,cost,declared_capacity) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,1)`, team, key, holder, run, node, now.UnixNano(), queueArrival, now.Add(time.Hour).UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,queue_arrived_at,lease_expires_at,cost,declared_capacity) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,1)`, team, key, holder, run, node, now.UnixNano(), queueArrival, now.Add(time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 }

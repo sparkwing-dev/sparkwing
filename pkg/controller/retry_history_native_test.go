@@ -14,12 +14,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func seedRetryHistory(t *testing.T, s *Server, secret string) {
 	t.Helper()
 	var raw []byte
-	if err := s.store.DB().QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&raw); err != nil {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var sealed runspec.SealedRequest

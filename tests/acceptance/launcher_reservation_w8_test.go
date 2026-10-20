@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestStoreLauncherReservationW8(t *testing.T) {
@@ -29,7 +30,7 @@ func TestStoreLauncherReservationW8(t *testing.T) {
 			if err := runtime.Sync(t.Context()); err != nil || *clears != 0 {
 				t.Fatalf("live reservation: clears=%d: %v", *clears, err)
 			}
-			if _, err := server.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET lease_expires_at=? WHERE run_id='run' AND node_id='job'`, time.Now().Add(-time.Hour).UnixNano()); err != nil {
+			if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `UPDATE nodes SET lease_expires_at=? WHERE run_id='run' AND node_id='job'`, time.Now().Add(-time.Hour).UnixNano()); err != nil {
 				t.Fatal(err)
 			}
 			switch obstruction {
@@ -122,7 +123,7 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := server.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET lease_expires_at=? WHERE run_id='run' AND node_id='job'`, time.Now().Add(-time.Hour).UnixNano()); err != nil {
+		if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `UPDATE nodes SET lease_expires_at=? WHERE run_id='run' AND node_id='job'`, time.Now().Add(-time.Hour).UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		sum := sha256.Sum256(input)
@@ -153,16 +154,16 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 		case 5:
 			held.Award.Kind, award.Kind = capability.UnitEval, launcher.CloudEval
 		case 6:
-			if _, err := server.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET generation=generation+1, claimed_by=? WHERE run_id='run' AND node_id='job'`, foreign); err != nil {
+			if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `UPDATE nodes SET generation=generation+1, claimed_by=? WHERE run_id='run' AND node_id='job'`, foreign); err != nil {
 				t.Fatal(err)
 			}
 		case 7:
-			if _, err := server.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET cancel_requested_at=? WHERE run_id='run' AND node_id='job'`, time.Now().UnixNano()); err != nil {
+			if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `UPDATE nodes SET cancel_requested_at=? WHERE run_id='run' AND node_id='job'`, time.Now().UnixNano()); err != nil {
 				t.Fatal(err)
 			}
 		case 8:
 			var parent string
-			if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&parent); err != nil {
+			if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&parent); err != nil {
 				t.Fatal(err)
 			}
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent}
@@ -181,7 +182,7 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 		}
 		if mode == 1 || mode == 2 || mode == 3 || mode == 5 {
 			var prefix string
-			if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='launcher' AND unit_id IS NULL`).Scan(&prefix); err != nil {
+			if err := teststore.SQL(t, server.Store).QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='launcher' AND unit_id IS NULL`).Scan(&prefix); err != nil {
 				t.Fatal(err)
 			}
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}

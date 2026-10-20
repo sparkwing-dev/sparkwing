@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
@@ -31,7 +32,7 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 		t.Helper()
 		srv.sweepClaimAttention(t.Context(), now, claimAttentionBatch)
 		var got string
-		if err := st.DB().QueryRow(`SELECT attention_reason FROM nodes WHERE team='a' AND run_id='run' AND node_id='apply'`).Scan(&got); err != nil {
+		if err := teststore.SQL(t, st).QueryRow(`SELECT attention_reason FROM nodes WHERE team='a' AND run_id='run' AND node_id='apply'`).Scan(&got); err != nil {
 			t.Fatal(err)
 		}
 		if got != want {
@@ -111,7 +112,7 @@ func TestClaimAttentionPassWrapsDespiteNewNodes(t *testing.T) {
 		srv.sweepClaimAttention(t.Context(), tick, 2)
 	}
 	var reason string
-	if err := st.DB().QueryRow(`SELECT attention_reason FROM nodes WHERE team='a' AND run_id='run' AND node_id='a'`).Scan(&reason); err != nil {
+	if err := teststore.SQL(t, st).QueryRow(`SELECT attention_reason FROM nodes WHERE team='a' AND run_id='run' AND node_id='a'`).Scan(&reason); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(reason, "needs an agent") {

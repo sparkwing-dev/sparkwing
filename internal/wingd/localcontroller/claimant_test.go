@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func FuzzClaimantIdentityIgnoresAmbientInput(f *testing.F) {
@@ -19,7 +20,7 @@ func FuzzClaimantIdentityIgnoresAmbientInput(f *testing.F) {
 	f.Fuzz(func(t *testing.T, subject, bearer string) {
 		t.Setenv("SPARKWING_RUNNER_NAME", hex.EncodeToString([]byte(subject)))
 		t.Setenv("SPARKWING_TOKEN", hex.EncodeToString([]byte(bearer)))
-		s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+		s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,9 +56,13 @@ func FuzzLocalClaimProfileRequiresCapturedAccount(f *testing.F) {
 	f.Add("local:0", uint8(1))
 	f.Fuzz(func(t *testing.T, forged string, mutation uint8) {
 		c := Claimant{subject: "local:verified"}
-		p := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claimant"},
-			Capability: capability.Capability{Prefix: "claimant", Team: string(store.DefaultTeam), Audience: capability.Controller,
-				Subject: capability.Subject{Kind: capability.SubjectLocal, ID: c.subject}}}
+		p := capability.Principal{
+			Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claimant"},
+			Capability: capability.Capability{
+				Prefix: "claimant", Team: string(store.DefaultTeam), Audience: capability.Controller,
+				Subject: capability.Subject{Kind: capability.SubjectLocal, ID: c.subject},
+			},
+		}
 		switch mutation % 6 {
 		case 1:
 			p.Capability.Subject.ID = "foreign:" + forged

@@ -50,7 +50,7 @@ func TestGitHubCronWithdrawalUsesExactStoredIdentity(t *testing.T) {
 
 func TestGitHubCronWithdrawalNeverReachesAnotherTeam(t *testing.T) {
 	st := storetest.New(t).Open(t)
-	if err := st.AsOperator().CreateTeam(t.Context(), "other"); err != nil {
+	if err := st.AsOperator().TestOnlyCreateTeam(t.Context(), "other"); err != nil {
 		t.Fatal(err)
 	}
 	arm := func(team store.Team, id string, installation int64) *store.Tenant {

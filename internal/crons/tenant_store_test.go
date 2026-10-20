@@ -10,7 +10,7 @@ import (
 )
 
 func TestTickRefreshesAndEvaluatesThroughEachTenant(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "schedules.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "schedules.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,9 +19,7 @@ func TestTickRefreshesAndEvaluatesThroughEachTenant(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if err := s.AsOperator().CreateTeam(t.Context(), "other"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, s, "other")
 	now := time.Unix(1700000000, 37).UTC()
 	next := now.Add(time.Hour)
 	for _, team := range []store.Team{store.DefaultTeam, "other"} {

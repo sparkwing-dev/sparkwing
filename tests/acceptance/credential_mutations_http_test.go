@@ -28,7 +28,7 @@ import (
 
 func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "credentials.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "credentials.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,9 +38,7 @@ func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 		}
 	})
 	for _, team := range []store.Team{"team", "foreign"} {
-		if err := s.AsOperator().CreateTeam(t.Context(), team); err != nil {
-			t.Fatal(err)
-		}
+		teststore.SeedTeam(t, s, team)
 	}
 	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{34}, secrets.KeySize))
 	if err != nil {
@@ -502,15 +500,15 @@ func TestCredentialMutationsHTTPEncryptionFailuresStoreNothing(t *testing.T) {
 
 func credentialSeedAuthority(t testing.TB, s *store.Store, team store.Team) capability.Authorized {
 	t.Helper()
-	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','credential-fixture@example.test',1,1) ON CONFLICT(id) DO NOTHING`); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','credential-fixture@example.test',1,1) ON CONFLICT(id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'account','owner',1) ON CONFLICT(team,account_id) DO NOTHING`, team); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'account','owner',1) ON CONFLICT(team,account_id) DO NOTHING`, team); err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte("credential-fixture:" + team))
 	hash := hex.EncodeToString(digest[:])
-	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'account','',?,?,?,'account') ON CONFLICT(hash) DO NOTHING`, hash, time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), team); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'account','',?,?,?,'account') ON CONFLICT(hash) DO NOTHING`, hash, time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), team); err != nil {
 		t.Fatal(err)
 	}
 

@@ -44,7 +44,7 @@ func unitBillingCalculation(p capability.BillingProvenance, intervals []capabili
 		elapsed += interval.End.Sub(interval.Start)
 	}
 	result.BillableSeconds = int64((elapsed + time.Second - 1) / time.Second)
-	for _, rule := range capability.BillingRules {
+	for _, rule := range capability.BillingRules() {
 		if rule.Unit == p.Unit {
 			result.BillableSeconds = max(result.BillableSeconds, rule.MinimumSeconds)
 		}

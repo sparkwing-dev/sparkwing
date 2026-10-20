@@ -96,10 +96,10 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 			}
 			before := capacityRow(t, fixture, "finished")
 			expired := time.Now().UnixNano()
-			if _, err := fixture.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE id=?`, expired, fixture.Input.RunID); err != nil {
+			if _, err := teststore.SQL(t, fixture.Store).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE id=?`, expired, fixture.Input.RunID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := fixture.Store.DB().ExecContext(t.Context(), `UPDATE concurrency_holders SET lease_expires_at=? WHERE run_id=?`, expired, fixture.Input.RunID); err != nil {
+			if _, err := teststore.SQL(t, fixture.Store).ExecContext(t.Context(), `UPDATE concurrency_holders SET lease_expires_at=? WHERE run_id=?`, expired, fixture.Input.RunID); err != nil {
 				t.Fatal(err)
 			}
 			if reaped, err := teststore.ReapUnits(t.Context(), fixture.Store); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
@@ -185,7 +185,7 @@ func assertOwnerRefusal(t *testing.T, f *storeHostFixture, id, policy string) {
 	}
 	if policy == "queue" {
 		var reason string
-		if err := f.Store.DB().QueryRowContext(t.Context(), `SELECT failure_reason FROM nodes WHERE run_id=? AND node_id=?`, f.Input.RunID, id).Scan(&reason); err != nil || reason != store.FailureQueueTimeout {
+		if err := teststore.SQL(t, f.Store).QueryRowContext(t.Context(), `SELECT failure_reason FROM nodes WHERE run_id=? AND node_id=?`, f.Input.RunID, id).Scan(&reason); err != nil || reason != store.FailureQueueTimeout {
 			t.Errorf("queue reason=%q err=%v", reason, err)
 		}
 	}
@@ -338,7 +338,7 @@ func TestOwnerDrainsPendingSupersessionIntent(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET cancel_requested_at=?,cancel_reason='superseded' WHERE run_id=? AND node_id='old'`, time.Now().UnixNano(), f.Input.RunID); err != nil {
+			if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), `UPDATE nodes SET cancel_requested_at=?,cancel_reason='superseded' WHERE run_id=? AND node_id='old'`, time.Now().UnixNano(), f.Input.RunID); err != nil {
 				t.Fatal(err)
 			}
 			f.Host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error {

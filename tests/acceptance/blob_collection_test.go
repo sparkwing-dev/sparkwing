@@ -11,15 +11,17 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"path/filepath"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func checkBlobCollection(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
-	s, err := store.Open(filepath.Join(root, "collection.db"))
+func checkBlobCollection(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
+	s, err := teststore.OpenExisting(filepath.Join(root, "collection.db"))
 	if err != nil {
 		return err
 	}
@@ -31,7 +33,7 @@ func checkBlobCollection(ctx context.Context, root string, objects blob.ObjectBa
 	}
 	random := rand.New(rand.NewPCG(24, 66))
 	for seed := range 12 {
-		if err := checkBlobCollectionGraph(ctx, s.DB(), operator, lease, objects, transfers, random, seed); err != nil {
+		if err := checkBlobCollectionGraph(ctx, teststore.SQL(t, s), operator, lease, objects, transfers, random, seed); err != nil {
 			return fmt.Errorf("graph %d: %w", seed, err)
 		}
 	}

@@ -15,7 +15,7 @@ func TestOperationalBillingClassification(t *testing.T) {
 		capability.UnitPlan:    capability.BillingPlan,
 		capability.UnitEval:    capability.BillingEval,
 	}
-	for _, mapping := range capability.UnitBillingMappings {
+	for _, mapping := range capability.UnitBillingMappings() {
 		billing, ok := want[mapping.Operational]
 		if !ok || billing != mapping.Billing {
 			t.Errorf("invalid or duplicate billing mapping: %+v", mapping)
@@ -34,7 +34,7 @@ func TestBillingMinimumsUseLimits(t *testing.T) {
 		capability.BillingJob:  int64(limits.WorkBillingMinimum / time.Second),
 		capability.BillingHost: int64(limits.HostBillingMinimum / time.Second),
 	}
-	for _, rule := range capability.BillingRules {
+	for _, rule := range capability.BillingRules() {
 		minimum, ok := want[rule.Unit]
 		if !ok || rule.MinimumSeconds != minimum || !rule.PerSecond || !rule.ExcludeCustomerRunnerWait {
 			t.Errorf("invalid billing rule: %+v", rule)

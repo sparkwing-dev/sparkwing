@@ -13,14 +13,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestTeamBoundary_ANodeCannotAdoptAnotherTeamsAttemptHistory(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		if _, err := f.st.DB().ExecContext(t.Context(), `UPDATE nodes SET status='done',outcome='failed',attempt=1,generation=1,finished_at=$3 WHERE team=$1 AND run_id=$2 AND node_id='n1'`, f.teamA.Team(), f.runA, time.Now().UnixNano()); err != nil {
+		if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `UPDATE nodes SET status='done',outcome='failed',attempt=1,generation=1,finished_at=$3 WHERE team=$1 AND run_id=$2 AND node_id='n1'`, f.teamA.Team(), f.runA, time.Now().UnixNano()); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.st.DB().ExecContext(t.Context(), `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason) VALUES ($1,$2,'n1',1,1,'holder-a','claim-a','runner','team-a-box','self-hosted',$3,$3,'failed','team A private failure')`, f.teamA.Team(), f.runA, time.Now().UnixNano()); err != nil {
+		if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason) VALUES ($1,$2,'n1',1,1,'holder-a','claim-a','runner','team-a-box','self-hosted',$3,$3,'failed','team A private failure')`, f.teamA.Team(), f.runA, time.Now().UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		if code, body := f.do("GET", "/api/v1/runs/"+f.runA+"/jobs/n1/attempts", f.ownerA, nil); code != 200 || !strings.Contains(body, "team A private failure") || !strings.Contains(body, `"attempt":1`) {

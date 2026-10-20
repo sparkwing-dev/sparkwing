@@ -72,12 +72,12 @@ func newKeyRotationFixture(t *testing.T, st *store.Store) *keyRotationFixture {
 		if err := teststore.SeedSecret(st, team, store.Secret{Name: "TOKEN", Pipeline: "build", Masked: true, Principal: "seed", Value: seal(t, f.old, secrets.PurposeSecret, team, "TOKEN", "build", "secret-"+string(team))}, now); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.DB().ExecContext(ctx, `INSERT INTO git_credentials(id,team,host,kind,secret,created_at,updated_at) VALUES ($1,$2,'git.example','https',$3,1,1)`,
+		if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO git_credentials(id,team,host,kind,secret,created_at,updated_at) VALUES ($1,$2,'git.example','https',$3,1,1)`,
 			"gc-"+string(team), team, seal(t, f.old, secrets.PurposeGitCredential, team, "git-credential:git.example", "git-credential", "git-"+string(team))); err != nil {
 			t.Fatal(err)
 		}
 		seedRun(t, st, forTeam(t, st, team), "run-"+string(team), "build")
-		if _, err := st.DB().ExecContext(ctx, `UPDATE runs SET submitted_env=$1 WHERE team=$2 AND id=$3`, seal(t, f.old, secrets.PurposeRunEnvironment, team, "run-"+string(team), "run-environment", "env-"+string(team)), team, "run-"+string(team)); err != nil {
+		if _, err := teststore.SQL(t, st).ExecContext(ctx, `UPDATE runs SET submitted_env=$1 WHERE team=$2 AND id=$3`, seal(t, f.old, secrets.PurposeRunEnvironment, team, "run-"+string(team), "run-environment", "env-"+string(team)), team, "run-"+string(team)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -112,13 +112,13 @@ func (f *keyRotationFixture) opensUnder(t *testing.T, c *secrets.Cipher) (secret
 	ctx := context.Background()
 	for _, team := range f.teams {
 		var secret, cred, run string
-		if err := f.st.DB().QueryRowContext(ctx, `SELECT value FROM secrets WHERE team=$1 AND name='TOKEN'`, team).Scan(&secret); err != nil {
+		if err := teststore.SQL(t, f.st).QueryRowContext(ctx, `SELECT value FROM secrets WHERE team=$1 AND name='TOKEN'`, team).Scan(&secret); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.st.DB().QueryRowContext(ctx, `SELECT secret FROM git_credentials WHERE team=$1`, team).Scan(&cred); err != nil {
+		if err := teststore.SQL(t, f.st).QueryRowContext(ctx, `SELECT secret FROM git_credentials WHERE team=$1`, team).Scan(&cred); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.st.DB().QueryRowContext(ctx, `SELECT submitted_env FROM runs WHERE team=$1 AND id=$2`, team, "run-"+string(team)).Scan(&run); err != nil {
+		if err := teststore.SQL(t, f.st).QueryRowContext(ctx, `SELECT submitted_env FROM runs WHERE team=$1 AND id=$2`, team, "run-"+string(team)).Scan(&run); err != nil {
 			t.Fatal(err)
 		}
 		if v, err := c.OpenBound(secrets.PurposeSecret, string(team), "TOKEN", "build", false, true, secret); err == nil && v == "secret-"+string(team) {
@@ -132,7 +132,7 @@ func (f *keyRotationFixture) opensUnder(t *testing.T, c *secrets.Cipher) (secret
 		}
 	}
 	var envelope []byte
-	if err := f.st.DB().QueryRowContext(ctx, `SELECT value FROM settings WHERE key='session_csrf_key'`).Scan(&envelope); err != nil {
+	if err := teststore.SQL(t, f.st).QueryRowContext(ctx, `SELECT value FROM settings WHERE key='session_csrf_key'`).Scan(&envelope); err != nil {
 		t.Fatal(err)
 	}
 	_, err := c.OpenBound(secrets.PurposeSetting, "", "session_csrf_key", "settings", false, true, string(envelope))
@@ -175,7 +175,7 @@ func TestOperatorKeyRotationResealsEveryTenantUnderTheCurrentKey(t *testing.T) {
 				t.Fatalf("after rotation the current key alone opens %d secrets, %d git credentials, %d environments, session key %v", s, g, e, c)
 			}
 			var lost string
-			if err := f.st.DB().QueryRow(`SELECT value FROM secrets WHERE name='LOST'`).Scan(&lost); err != nil {
+			if err := teststore.SQL(t, f.st).QueryRow(`SELECT value FROM secrets WHERE name='LOST'`).Scan(&lost); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := f.stray.OpenBound(secrets.PurposeSecret, string(f.teams[1]), "LOST", "", false, true, lost); err != nil {

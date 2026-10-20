@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -31,14 +32,14 @@ func TestStateReconcilesLocalOrphansAndPreservesRemoteWork(t *testing.T) {
 		for _, id := range []string{"unstarted", "started", "remote", "live"} {
 			seedOwner(t, b, id, id != "unstarted")
 		}
-		if _, err := b.Store.DB().ExecContext(t.Context(), `UPDATE runs SET request_json=? WHERE id='remote'`, []byte(`{"version":1,"request":{"origin":"trigger"}}`)); err != nil {
+		if _, err := stateSQL(t, b).ExecContext(t.Context(), `UPDATE runs SET request_json=? WHERE id='remote'`, []byte(`{"version":1,"request":{"origin":"trigger"}}`)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := b.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE id='live'`, time.Now().Add(time.Hour).UnixNano()); err != nil {
+		if _, err := stateSQL(t, b).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE id='live'`, time.Now().Add(time.Hour).UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		for _, outcome := range []string{"success", "failed", "cancelled", "skipped", "superseded", "memoized"} {
-			if _, err := b.Store.DB().ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json)
+			if _, err := stateSQL(t, b).ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json)
 VALUES (?,'live',?,'done',?,1,?,?)`, b.Tenant.Team(), outcome, outcome, []byte(`{}`), []byte(`{}`)); err != nil {
 				t.Fatal(err)
 			}
@@ -82,7 +83,7 @@ func FuzzStateActivityExcludesForeignAndPublishedRuns(f *testing.F) {
 		var state *localState
 		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
 			seedOwner(t, b, "own", false)
-			if _, err := b.Store.DB().ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`); err != nil {
+			if _, err := stateSQL(t, b).ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`); err != nil {
 				t.Fatal(err)
 			}
 			foreignTenant, err := b.Store.ForTeam(t.Context(), "foreign")
@@ -95,7 +96,7 @@ func FuzzStateActivityExcludesForeignAndPublishedRuns(f *testing.F) {
 			for i := range int(published % 4) {
 				id := string(rune('k' + i))
 				seedOwner(t, b, id, false)
-				if _, err := b.Store.DB().ExecContext(t.Context(), `UPDATE runs SET intake_mode='publish' WHERE id=?`, id); err != nil {
+				if _, err := stateSQL(t, b).ExecContext(t.Context(), `UPDATE runs SET intake_mode='publish' WHERE id=?`, id); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -154,6 +155,7 @@ func FuzzStateTypeSafeKeyRequiresExactSecretBinding(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			teststore.RegisterSQLite(b.Store, filepath.Join(b.Home, "state.db"))
 			if err := teststore.SeedSecret(b.Store, b.Tenant.Team(), secret, time.Now()); err != nil {
 				t.Fatal(err)
 			}

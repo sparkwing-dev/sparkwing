@@ -19,7 +19,7 @@ import (
 
 func TestFinalCredentialRouteDeclarations(t *testing.T) {
 	expected := credentialRouteExpectations()
-	if err := compareCredentialRoutes(expected, capability.Routes); err != nil {
+	if err := compareCredentialRoutes(expected, capability.Routes()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -173,7 +173,7 @@ func compareCredentialRoutes(expected []credentialRouteExpectation, actual []cap
 }
 
 func TestFinalCredentialRouteCoverageRejectsDrift(t *testing.T) {
-	intakeIndex := slices.IndexFunc(capability.Routes, func(route capability.RoutePolicy) bool {
+	intakeIndex := slices.IndexFunc(capability.Routes(), func(route capability.RoutePolicy) bool {
 		return route.Method == "POST" && route.Path == "/api/v1/runs"
 	})
 	if intakeIndex < 0 {
@@ -254,7 +254,7 @@ func TestFinalCredentialRouteAlternativeOrder(t *testing.T) {
 }
 
 func cloneCredentialRoutes() []capability.RoutePolicy {
-	routes := slices.Clone(capability.Routes)
+	routes := slices.Clone(capability.Routes())
 	for i := range routes {
 		routes[i].Access = slices.Clone(routes[i].Access)
 		for j := range routes[i].Access {

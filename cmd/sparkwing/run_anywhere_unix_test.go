@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 var runAnywhereKinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}
@@ -101,7 +102,7 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 		t.Fatalf("run-anywhere outcome: %+v %v", detail, err)
 	}
 	var charges, metered int
-	if err := f.state.DB().QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM credit_charges),(SELECT COUNT(*) FROM billing_awards WHERE metered=1)`).Scan(&charges, &metered); err != nil || charges != 0 || metered != 0 {
+	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM credit_charges),(SELECT COUNT(*) FROM billing_awards WHERE metered=1)`).Scan(&charges, &metered); err != nil || charges != 0 || metered != 0 {
 		t.Fatalf("self-hosted run-anywhere work was billed: charges=%d metered=%d %v", charges, metered, err)
 	}
 }
@@ -158,10 +159,10 @@ func TestTeamAdminRanksCloudFirstFromTheCLI(t *testing.T) {
 
 func runAnywhereAdmin(t *testing.T, f cloudDispatch) string {
 	t.Helper()
-	if _, err := f.state.DB().ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('ranking-admin','admin@example.test',1,1)`); err != nil {
+	if _, err := teststore.SQL(t, f.state).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('ranking-admin','admin@example.test',1,1)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.state.DB().ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','ranking-admin','owner',1)`); err != nil {
+	if _, err := teststore.SQL(t, f.state).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','ranking-admin','owner',1)`); err != nil {
 		t.Fatal(err)
 	}
 	session, _, _, err := f.state.CreateAccountSession(t.Context(), store.Account{ID: "ranking-admin"}, "default", time.Hour)
@@ -205,7 +206,7 @@ func TestRunAnywhereJobWaitsForTheRunnerHeadroomItsPlanDidNotNeed(t *testing.T) 
 		}
 	}
 	var asks int
-	if err := f.state.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM unit_asks`).Scan(&asks); err != nil || asks != 0 {
+	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM unit_asks`).Scan(&asks); err != nil || asks != 0 {
 		t.Fatalf("a claimant that does not fit recorded %d asks: %v", asks, err)
 	}
 	if job := poll(2); job == nil || job.Unit != capability.UnitNode || job.JobID != "verify" {

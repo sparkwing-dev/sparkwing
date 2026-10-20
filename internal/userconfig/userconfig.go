@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -50,11 +49,6 @@ func Path() (string, error) {
 			return "", Invalid("config_path", "SPARKWING_CONFIG must not be empty")
 		}
 		return v, nil
-	}
-	// safety: a test binary that sets neither variable would otherwise read and
-	// rewrite the developer's own file, which holds live credentials.
-	if os.Getenv("XDG_CONFIG_HOME") == "" && paths.UnderTest() {
-		return filepath.Join(paths.TestSandbox(), "config", "sparkwing", Filename), nil
 	}
 	return fssecure.ConfigFile(Filename)
 }

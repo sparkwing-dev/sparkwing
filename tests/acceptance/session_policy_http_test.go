@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestSessionPolicyHTTPTransports(t *testing.T) {
@@ -70,7 +71,7 @@ func TestSessionPolicyHTTPRefusals(t *testing.T) {
 				query, code = `DROP TABLE memberships`, apierr.Unavailable
 			}
 			if query != "" {
-				if _, err := f.store.DB().ExecContext(t.Context(), query); err != nil {
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), query); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -122,7 +123,7 @@ func TestSessionPolicyHTTPProofProperty(t *testing.T) {
 		after, renewed := f.state(t)
 		var result apierr.Envelope
 		var minted int
-		if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&minted); err != nil {
+		if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&minted); err != nil {
 			t.Fatal(err)
 		}
 		return (w.Code == 401 || w.Code == 403) && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && before == after && expiry == renewed && minted == 0 && w.Header().Get("Cache-Control") == "no-store" && !strings.Contains(w.Body.String(), f.raw) && !strings.Contains(w.Body.String(), f.csrf)
@@ -139,7 +140,7 @@ func TestSessionPolicyHTTPLifetimeProperty(t *testing.T) {
 	property := func(age uint8, header bool) bool {
 		elapsed := (time.Duration(age%96) - 24) * time.Hour
 		created := time.Now().Truncate(time.Millisecond).Add(-elapsed)
-		if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE sessions SET created_at=?`, created.UnixNano()); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE sessions SET created_at=?`, created.UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		r := f.request("GET", "/api/v1/auth/whoami", "")
@@ -178,7 +179,7 @@ func TestSessionFlowHTTPLifetimeCases(t *testing.T) {
 			f := newSessionFlow(t)
 			now := time.Now().UTC()
 			created := now.Add(-test.age)
-			if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), now.Add(test.expiry).UnixNano()); err != nil {
+			if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), now.Add(test.expiry).UnixNano()); err != nil {
 				t.Fatal(err)
 			}
 			w := httptest.NewRecorder()
@@ -303,7 +304,7 @@ func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 				r.Header.Set("Content-Type", "application/x-www-form-urlencoded; invalid")
 			}
 			if query != "" {
-				if _, err := f.store.DB().ExecContext(t.Context(), query); err != nil {
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), query); err != nil {
 					t.Fatal(err)
 				}
 			}

@@ -44,7 +44,7 @@ func TestOpenSQLiteWithoutHardLinks(t *testing.T) {
 		t.Fatal(errno)
 	}
 	path := filepath.Join(t.TempDir(), "state.db")
-	st, err := store.Open(path)
+	st, err := teststore.OpenExisting(path)
 	if err != nil {
 		t.Fatal(err)
 	}

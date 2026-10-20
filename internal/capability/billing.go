@@ -34,7 +34,7 @@ type UnitBilling struct {
 }
 
 // UnitBillingMappings survives here issuance and bootstrap exchange unchanged.
-var UnitBillingMappings = []UnitBilling{
+var unitBillingMappings = []UnitBilling{
 	{UnitTrigger, BillingHost},
 	{UnitNode, BillingJob},
 	{UnitPlan, BillingPlan},
@@ -62,7 +62,7 @@ type BillingRule struct {
 
 // BillingRules retains the host minimum while separating plan/eval compute from it.
 // A minimum is charged only after billable compute starts; an unstarted award refunds in full.
-var BillingRules = []BillingRule{
+var billingRules = []BillingRule{
 	{BillingPlan, 0, true, true, true},
 	{BillingEval, 0, true, true, false},
 	{BillingJob, int64(limits.WorkBillingMinimum / time.Second), true, true, false},
@@ -93,9 +93,9 @@ func SettleBilling(provenance BillingProvenance, intervals []BillableInterval) (
 		return result, fmt.Errorf("incomplete billing provenance")
 	}
 	var rule *BillingRule
-	for i := range BillingRules {
-		if BillingRules[i].Unit == provenance.Unit {
-			rule = &BillingRules[i]
+	for i := range billingRules {
+		if billingRules[i].Unit == provenance.Unit {
+			rule = &billingRules[i]
 			break
 		}
 	}

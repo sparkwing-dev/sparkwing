@@ -14,7 +14,7 @@ import (
 )
 
 // NewPolicyRouter constructs the common controller/node-host authorization boundary.
-// Registration inventories come from handlers, independently of capability.Routes.
+// Registration inventories come from handlers, independently of capability.Routes().
 func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter {
 	return &PolicyRouter{mux: http.NewServeMux(), authorization: authorization, registered: make(map[string]Endpoint)}
 }

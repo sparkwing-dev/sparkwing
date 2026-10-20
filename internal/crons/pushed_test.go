@@ -17,7 +17,7 @@ const pushedRepoURL = "https://github.com/acme/widgets.git"
 
 func pushedService(t *testing.T) *crons.Service {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

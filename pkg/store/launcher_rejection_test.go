@@ -1,8 +1,9 @@
 package store
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestLauncherRejectionFailsExactAward(t *testing.T) {

@@ -61,7 +61,7 @@ type PaymentEventPolicy struct {
 
 // PaymentEventPolicies is the complete accepted Stripe settlement-event inventory.
 // Completed sessions without paid status remain pending until an asynchronous success event.
-var PaymentEventPolicies = []PaymentEventPolicy{
+var paymentEventPolicies = []PaymentEventPolicy{
 	{"checkout.session.completed", PaymentCheckoutPaid, true},
 	{"checkout.session.async_payment_succeeded", PaymentCheckoutPaid, true},
 	{"checkout.session.async_payment_failed", PaymentCheckoutFailed, false},
@@ -199,7 +199,7 @@ func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentat
 	if event.LiveMode == nil || *event.LiveMode != (a.mode == PaymentLive) {
 		return nil, forbidden(apierr.ReasonBinding)
 	}
-	for _, policy := range PaymentEventPolicies {
+	for _, policy := range paymentEventPolicies {
 		if policy.ProviderType == event.Type {
 			if strings.HasPrefix(policy.ProviderType, "checkout.session.") {
 				return a.checkoutEvent(ctx, event.ID, event.Data.Object, policy)

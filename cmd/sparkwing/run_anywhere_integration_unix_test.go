@@ -26,6 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const runAnywherePipeline = `package main
@@ -174,7 +175,7 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	if len(intake) != 1 || strings.Contains(intake[0], secret) || !strings.Contains(intake[0], `"origin_machine":"`+secret[:16]+".") {
 		t.Fatalf("the trigger must prove the runner credential without sending it: %v", intake)
 	}
-	runs, err := state.DB().QueryContext(t.Context(), `SELECT request_json FROM runs`)
+	runs, err := teststore.SQL(t, state).QueryContext(t.Context(), `SELECT request_json FROM runs`)
 	if err != nil {
 		t.Fatal(err)
 	}

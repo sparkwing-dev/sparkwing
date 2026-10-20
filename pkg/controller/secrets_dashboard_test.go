@@ -48,10 +48,10 @@ func listSecretsAs(t *testing.T, f *browserFixture, private ...string) map[strin
 
 func secretMember(t *testing.T, f *browserFixture, id string, role store.Role) *browserFixture {
 	t.Helper()
-	if _, err := f.st.DB().ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1)`, id, id+"@example.test"); err != nil {
+	if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1)`, id, id+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.st.DB().ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default',?,?,1)`, id, role); err != nil {
+	if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default',?,?,1)`, id, role); err != nil {
 		t.Fatal(err)
 	}
 	raw, csrf, _, err := f.st.CreateAccountSession(t.Context(), store.Account{ID: id, Email: id + "@example.test"}, store.DefaultTeam, time.Hour)

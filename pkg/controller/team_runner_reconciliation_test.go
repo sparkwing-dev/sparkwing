@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type tenantRunnerPolicy struct{}
@@ -78,7 +79,7 @@ func TestTeamBoundary_ARunnerClaimsItsOwnTeamsAdmittedRun(t *testing.T) {
 				}
 			}
 			var awards int
-			if err := f.st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE issuance='award'`).Scan(&awards); err != nil {
+			if err := teststore.SQL(t, f.st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE issuance='award'`).Scan(&awards); err != nil {
 				t.Fatal(err)
 			}
 			return awards == 1

@@ -90,7 +90,7 @@ func validateCredentialRequest(request credentialRequest) error {
 	}
 	seen := make(map[capability.Grant]bool, len(request.Grants))
 	for _, grant := range request.Grants {
-		if seen[grant] || !slices.Contains(capability.Grants, grant) {
+		if seen[grant] || !slices.Contains(capability.Grants(), grant) {
 			return invalidEngineBody("grants must contain unique known permissions")
 		}
 		seen[grant] = true

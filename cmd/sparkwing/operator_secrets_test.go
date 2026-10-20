@@ -75,7 +75,7 @@ func TestOperatorSecretsRotateResealsThroughTheController(t *testing.T) {
 		t.Fatalf("rotation output %s: %v", &out, err)
 	}
 	var stored string
-	if err := st.DB().QueryRow(`SELECT value FROM secrets WHERE name='TOKEN'`).Scan(&stored); err != nil {
+	if err := teststore.SQL(t, st).QueryRow(`SELECT value FROM secrets WHERE name='TOKEN'`).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if plain, err := next.OpenBound(secrets.PurposeSecret, string(store.DefaultTeam), "TOKEN", "", false, true, stored); err != nil || plain != "private" {

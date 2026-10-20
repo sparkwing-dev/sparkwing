@@ -202,7 +202,7 @@ cannot replace it.
 S3 signs `If-None-Match: *` because future slots have no known payload digest or
 length. The batch and uploader carry that header through the PUT. S3 refuses
 every existing object with HTTP 412, including an identical retry. After a
-transfer error, the uploader asks `LogTransport.VerifyUpload` to reauthorize the
+transfer error, the uploader asks the controller's `VerifyUpload` route to reauthorize the
 writer and verify that exact object's stored size and SHA-256. Only a successful
 verification permits the record commit to proceed. `logseg.UploadVerifier`
 performs the bounded object read after the controller supplies the run's

@@ -94,7 +94,7 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 		t.Fatalf("old writer: HTTP %d %s", w.Code, w.Body)
 	}
 	var count int
-	if err := f.st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, f.st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("refused old writer inserted %d runs: %v", count, err)
 	}
 }

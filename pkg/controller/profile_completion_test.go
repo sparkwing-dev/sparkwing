@@ -11,9 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func preparedProfileRun(t *testing.T) (*Server, *store.Tenant, func(store.RunState)) {
+func preparedProfileRun(t *testing.T, opts ...store.Option) (*Server, *store.Tenant, func(store.RunState)) {
 	t.Helper()
-	server, host, tenant, owner := localHostFixture(t)
+	server, host, tenant, owner := localHostFixture(t, opts...)
 	start := time.Now().Add(-time.Minute)
 	if err := teststore.SeedNode(server.store, t.Context(), store.Node{RunID: "run", NodeID: "build", Status: "running", StartedAt: &start}); err != nil {
 		t.Fatal(err)
@@ -51,9 +51,9 @@ func preparedProfileRun(t *testing.T) (*Server, *store.Tenant, func(store.RunSta
 	return server, tenant, finish
 }
 
-func completedProfileRun(t *testing.T) (*Server, *store.Tenant) {
+func completedProfileRun(t *testing.T, opts ...store.Option) (*Server, *store.Tenant) {
 	t.Helper()
-	server, tenant, finish := preparedProfileRun(t)
+	server, tenant, finish := preparedProfileRun(t, opts...)
 	finish(store.RunSuccess)
 	for node := range map[string]bool{"": true, "build": true} {
 		if p, err := tenant.GetPipelineProfile(t.Context(), "ci", node); err != nil || p != nil {
@@ -77,21 +77,22 @@ func TestProfileCompletionFromRealTerminalTransition(t *testing.T) {
 		}
 	}
 	var desired, delivered int
-	if err := server.store.DB().QueryRow(`SELECT desired_rev,delivered_rev FROM run_effects WHERE team='a' AND run_id='run' AND effect='profile_fold'`).Scan(&desired, &delivered); err != nil || desired != delivered || desired != 1 {
+	if err := teststore.SQL(t, server.store).QueryRow(`SELECT desired_rev,delivered_rev FROM run_effects WHERE team='a' AND run_id='run' AND effect='profile_fold'`).Scan(&desired, &delivered); err != nil || desired != delivered || desired != 1 {
 		t.Fatalf("delivery revision=%d/%d: %v", delivered, desired, err)
 	}
 }
 
 func TestProfileCompletionRetriesCorruptMetricsWithoutPartialFold(t *testing.T) {
-	server, tenant := completedProfileRun(t)
+	clock := &testClock{}
+	server, tenant := completedProfileRun(t, clock.option())
 	now := time.Now()
-	server.store.SetTestClock(t, func() time.Time { return now })
+	clock.pin(func() time.Time { return now })
 	engineSQL(t, server.store, `UPDATE node_metrics SET memory_bytes='corrupt' WHERE team='a' AND run_id='run' AND node_id='build'`)
 	if err := server.ReconcileRunEffects(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	var attempts, delivered, next int64
-	if err := server.store.DB().QueryRow(`SELECT attempts,delivered_rev,next_at FROM run_effects WHERE team='a' AND run_id='run' AND effect='profile_fold'`).Scan(&attempts, &delivered, &next); err != nil || attempts != 1 || delivered != 0 || next <= now.UnixNano() {
+	if err := teststore.SQL(t, server.store).QueryRow(`SELECT attempts,delivered_rev,next_at FROM run_effects WHERE team='a' AND run_id='run' AND effect='profile_fold'`).Scan(&attempts, &delivered, &next); err != nil || attempts != 1 || delivered != 0 || next <= now.UnixNano() {
 		t.Fatalf("failed delivery=%d/%d next=%d: %v", attempts, delivered, next, err)
 	}
 	if p, err := tenant.GetPipelineProfile(t.Context(), "ci", "build"); err != nil || p != nil {

@@ -2,6 +2,7 @@ package localcontroller
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type stateFixture struct {
@@ -75,18 +77,25 @@ func openFixture(t *testing.T, bind func(context.Context, Binding) (Services, er
 	return c
 }
 
+// stateSQL reaches the state database that Open created under the binding's home.
+func stateSQL(t testing.TB, b Binding) *sql.DB {
+	t.Helper()
+	teststore.RegisterSQLite(b.Store, filepath.Join(b.Home, "state.db"))
+	return teststore.SQL(t, b.Store)
+}
+
 func seedOwner(t *testing.T, binding Binding, id string, started bool) {
 	t.Helper()
 	var start any
 	if started {
 		start = int64(1)
 	}
-	_, err := binding.Store.DB().ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
+	_, err := stateSQL(t, binding).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
 VALUES (?,?,(SELECT COALESCE(MAX(number),0)+1 FROM runs),'pipeline','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, binding.Tenant.Team(), id, []byte(`{"version":1,"request":{"origin":"local"}}`), []byte(`[]`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = binding.Store.DB().ExecContext(t.Context(), `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels)
+	_, err = stateSQL(t, binding).ExecContext(t.Context(), `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels)
 VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',7,1,?,?,?)`, binding.Tenant.Team(), id, start, []byte(`[]`), []byte(`[]`))
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +121,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 				return wingd.LocalActivity{}, fmt.Errorf("started orphan was not recovered: %+v: %w", started, err)
 			}
 			var status string
-			if err := b.Store.DB().QueryRowContext(ctx, `SELECT status FROM triggers WHERE team=? AND id='unstarted'`, b.Tenant.Team()).Scan(&status); err != nil {
+			if err := stateSQL(t, b).QueryRowContext(ctx, `SELECT status FROM triggers WHERE team=? AND id='unstarted'`, b.Tenant.Team()).Scan(&status); err != nil {
 				return wingd.LocalActivity{}, err
 			}
 			if status != "pending" {
@@ -120,7 +129,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 			}
 			return wingd.LocalActivity{QueuedTriggers: 1}, nil
 		}
-		services.Close = func() error { return b.Store.DB().PingContext(t.Context()) }
+		services.Close = func() error { return b.Store.Ping(t.Context()) }
 		return services, nil
 	})
 	activity, err := c.Reconcile(t.Context())
@@ -130,10 +139,10 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Store.DB().PingContext(t.Context()); err == nil {
+	if err := binding.Store.Ping(t.Context()); err == nil {
 		t.Fatal("owned store remained open")
 	}
-	reopened, err := store.Open(filepath.Join(binding.Home, "state.db"))
+	reopened, err := teststore.OpenExisting(filepath.Join(binding.Home, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +171,7 @@ func TestCompositionCompletesRunsAfterReadinessAndJoinsOnFailure(t *testing.T) {
 				if !ready.Load() {
 					t.Error("completion ran before readiness")
 				}
-				if err := b.Store.DB().PingContext(ctx); err != nil {
+				if err := b.Store.Ping(ctx); err != nil {
 					t.Error(err)
 				}
 				return failure
@@ -195,7 +204,7 @@ func TestCompositionMaintainsStorageAfterReadinessWhileOwningStore(t *testing.T)
 				if !ready.Load() {
 					t.Error("storage scan ran before readiness")
 				}
-				if err := b.Store.DB().PingContext(ctx); err != nil {
+				if err := b.Store.Ping(ctx); err != nil {
 					t.Error("storage maintenance lost the elected store:", err)
 				}
 				select {
@@ -244,7 +253,7 @@ func TestCompositionCleansPartialBindings(t *testing.T) {
 				services := serviceFixture(b)
 				services.Close = func() error {
 					closed++
-					return errors.Join(closeFailure, b.Store.DB().PingContext(t.Context()))
+					return errors.Join(closeFailure, b.Store.Ping(t.Context()))
 				}
 				switch mode {
 				case "bind_error":
@@ -262,7 +271,7 @@ func TestCompositionCleansPartialBindings(t *testing.T) {
 				}
 				return services, nil
 			}}).Open(ctx, t.TempDir())
-			if err == nil || !errors.Is(err, closeFailure) || closed != 1 || owned.DB().PingContext(t.Context()) == nil {
+			if err == nil || !errors.Is(err, closeFailure) || closed != 1 || owned.Ping(t.Context()) == nil {
 				t.Fatalf("partial binding leaked or lost cleanup: close=%d: %v", closed, err)
 			}
 			if mode == "bind_error" && !errors.Is(err, failure) || mode == "cancelled" && !errors.Is(err, context.Canceled) {
@@ -284,7 +293,7 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 				<-ctx.Done()
 				<-release
 				defer close(joined)
-				return "", errors.Join(ctx.Err(), b.Store.DB().PingContext(t.Context()))
+				return "", errors.Join(ctx.Err(), b.Store.Ping(t.Context()))
 			}
 			services.State.(*stateFixture).watch = func(ctx context.Context, report func(wingd.LocalActivity) error) error {
 				<-started
@@ -336,9 +345,9 @@ func FuzzLocalReconciliationKeepsFence(f *testing.F) {
 			services.State.(*stateFixture).reconcile = func(ctx context.Context, _ store.SingletonLease) (wingd.LocalActivity, error) {
 				var err error
 				if expire {
-					_, err = b.Store.DB().ExecContext(ctx, `UPDATE leases SET until=1 WHERE name='controller.reaper'`)
+					_, err = stateSQL(t, b).ExecContext(ctx, `UPDATE leases SET until=1 WHERE name='controller.reaper'`)
 				} else {
-					_, err = b.Store.DB().ExecContext(ctx, `UPDATE leases SET holder='replacement',generation=generation+? WHERE name='controller.reaper'`, int64(replacement)+1)
+					_, err = stateSQL(t, b).ExecContext(ctx, `UPDATE leases SET holder='replacement',generation=generation+? WHERE name='controller.reaper'`, int64(replacement)+1)
 				}
 				return wingd.LocalActivity{}, err
 			}

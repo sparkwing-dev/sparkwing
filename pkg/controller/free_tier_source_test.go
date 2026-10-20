@@ -10,11 +10,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func freeTierStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +36,7 @@ func TestSignUpFreeTierClosesWithTheLastSlot(t *testing.T) {
 	if got, err := server.SignUpFreeTier(t.Context()); err != nil || got != FreeTierOpen {
 		t.Fatalf("with a free slot: %s, %v", got, err)
 	}
-	if err := s.AsOperator().CreateTeam(t.Context(), "first"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, s, "first")
 	if err := s.GrantFreeSlot(t.Context(), "first", time.Now()); err != nil {
 		t.Fatal(err)
 	}

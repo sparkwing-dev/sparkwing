@@ -13,7 +13,7 @@ import (
 func TestSampleSealedSecrets_ReturnsOnlySealedRowsWithTheirTeam(t *testing.T) {
 	ctx := context.Background()
 	s := storetest.Open(t)
-	if err := s.AsOperator().CreateTeam(ctx, "acme"); err != nil {
+	if err := s.AsOperator().TestOnlyCreateTeam(ctx, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	acme, err := s.ForTeam(ctx, "acme")

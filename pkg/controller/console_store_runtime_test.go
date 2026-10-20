@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
@@ -74,7 +75,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 			}
 			if tc.query != "" {
 				var count int
-				if err := st.DB().QueryRow(tc.query).Scan(&count); err != nil || count != 1 {
+				if err := teststore.SQL(t, st).QueryRow(tc.query).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("commit: %d %v", count, err)
 				}
 			} else {

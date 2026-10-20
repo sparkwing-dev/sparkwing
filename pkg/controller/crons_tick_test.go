@@ -220,9 +220,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
-	if err := st.AsOperator().CreateTeam(ctx, "team-b"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
-	}
+	teststore.SeedTeam(t, st, "team-b")
 	tenantB, err := st.ForTeam(ctx, "team-b")
 	if err != nil {
 		t.Fatalf("ForTeam team-b: %v", err)
@@ -280,9 +278,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 func TestCronLauncherRejectsChangedScheduleSnapshotsProperty(t *testing.T) {
 	st := newStoreForAuth(t)
 	sched := armPushedForTick(t, st)
-	if err := st.AsOperator().CreateTeam(t.Context(), "other"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, st, "other")
 	srv := New(st, nil)
 	launcher := srv.ScheduleLauncher()
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
