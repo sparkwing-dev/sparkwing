@@ -1449,7 +1449,7 @@ Exchange preserves provenance; settlement never looks at the current token.
 
 Exclude customer-owned runner wait intervals, including a metered run host
 waiting for a customer pool. Plan and eval compute bill per second with no
-minimum. A plan-cache hit is free. Executing jobs keep their sixty-second
+minimum. Accepted resumes retain their plan; new runs plan afresh. Executing jobs keep their sixty-second
 minimum. An unstarted award refunds in full. Intervals must not overlap or
 charge the same compute as both host and job. C4 owns
 `limits.WorkBillingMinimum` and the separate
@@ -1575,7 +1575,7 @@ T1 should implement these behavioral scenarios against the running contracts:
 | Cache and publish | Manual refs cannot poison verified refs; default-only local reads remain read-only; publication remains local provenance and does not fail the local run. |
 | Source release | Same-team Cloud or shared runner only, never a personal machine (decision 6c); repo allow-list and SSH confirmation apply; audit failure releases no secret. |
 | Operator split | Deployment tokens cannot trust, grant, freeze, refund or delete accounts, including by delegating or using a local peer. |
-| Billing | Immutable operational-to-billing mapping through here/bootstrap, unstarted refund, plan/eval per-second compute, free plan-cache hits, customer wait exclusion and no double charge. |
+| Billing | Immutable operational-to-billing mapping through here/bootstrap, unstarted refund, plan/eval per-second compute, accepted-plan resume, customer wait exclusion and no double charge. |
 | Payment callback | Signed test/live events use one verifier, bind to the committed checkout, derive team and grant once across retries and distinct duplicate events. Invalid proof, wrong mode/amount/currency, unknown checkout and human console powers remain refused. |
 | Auth cache | Both TTL and fresh full-generation equality are required. Ancestor/session revocation, cross-team launcher revocation and membership loss invalidate reuse. |
 | Windows | SID-verified local subjects, private-file ACLs and equivalent refusal semantics. |
@@ -3479,14 +3479,13 @@ team bucket. Queue shedding reads only that tenant's pending units through the
 admission transaction. Both paths return canonical rate_limited/unavailable
 errors with retry_after_ms. No new cap or default is introduced.
 
-Optional content deduplication gives normalized API requests a stable random
-intake key for the configured window, scoped by the server-derived team and
-subject. It stores no bearer or response. C1 AdmitRun owns atomic commit, replay
-and current authority checks, including concurrent first requests. Explicit
-idempotency keys win. HTTP uses the current 201/200 CreateRunResponse contract;
+Explicit idempotency keys and verified webhook delivery IDs provide replay
+identity. Equal content with distinct keys creates distinct runs. C1 AdmitRun
+owns atomic commit, replay and current authority checks, including concurrent
+first requests. HTTP uses the current 201/200 CreateRunResponse contract;
 replay carries no here bearer. Store replay lookup precedes flood charging,
-so replays spend no flood budget. Failed store transactions create no replay
-result and remain retryable inside the content window.
+so replays spend no flood budget. Failed transactions create no replay result.
+
 
 
 ## W1b run-intake validation reconciliation

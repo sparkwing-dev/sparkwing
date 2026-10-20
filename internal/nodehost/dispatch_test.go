@@ -167,7 +167,7 @@ func TestDispatchRetainsLocalSemaphoresUntilRemoteCompletion(t *testing.T) {
 				f.Host.Local = func(store.NodeRow) bool { return false }
 				d := newFakeDaemon()
 				d.hostGate = make(chan struct{})
-				configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &StoreAdmission{Store: f.Tenant, Owner: f.Actor})
+				configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &StoreAdmission{Store: f.Tenant, Owner: f.Actor}, false)
 				d.admitted = make(chan wingwire.AdmissionRequest, 3)
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				done := make(chan error, 1)
@@ -243,7 +243,7 @@ func TestDispatchAdmissionEvictionDrainsTheRemoteHolder(t *testing.T) {
 	f := newStoreHostFixture(t, plan)
 	f.Host.Local = func(store.NodeRow) bool { return false }
 	d := newFakeDaemon()
-	configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &StoreAdmission{Store: f.Tenant, Owner: f.Actor})
+	configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &StoreAdmission{Store: f.Tenant, Owner: f.Actor}, false)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	done := make(chan error, 1)
 	joined := make(chan struct{})

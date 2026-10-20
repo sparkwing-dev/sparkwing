@@ -37,7 +37,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const productionHTTPBoundary = "production HTTP boundary"
@@ -451,6 +454,130 @@ func TestProductionRunnerFetchesPrivateSourceByPlacement(t *testing.T) {
 			}
 			if commands, _ := os.ReadFile(log); strings.Contains(string(commands), `"fetch"`) {
 				t.Fatal("shared runner fetched without a controller-released credential")
+			}
+		})
+	}
+}
+
+func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *testing.T) {
+	for _, compute := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local_admission=%t", compute), func(t *testing.T) {
+			base, unit := productionNativeAward(t, capability.UnitTrigger)
+			home := filepath.Join(os.Getenv("HOME"), "state")
+			t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "machine.yaml"))
+			if compute {
+				daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.2.3", Stay: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, stop := context.WithCancel(t.Context())
+				done := make(chan error, 1)
+				go func() { done <- daemon.Run(ctx) }()
+				select {
+				case err := <-done:
+					stop()
+					t.Fatal(err)
+				case <-daemon.Ready():
+				}
+				t.Cleanup(func() {
+					stop()
+					if err := <-done; err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			identity := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
+			unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: identity}}, PlanHash: "plan-hash", Plan: json.RawMessage(`{"jobs":[{"id":"job"}]}`)}
+			unit.Accepted.Spec.Resolved.Settings.Options.Resources.Set = true
+			unit.Accepted.Spec.Resolved.Settings.Options.Resources.Value.Cores.Set = true
+			unit.Accepted.Spec.Resolved.Settings.Options.Resources.Value.Cores.Value = 0.01
+			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash", Spec: json.RawMessage(`{"id":"job"}`)}
+			row.OwnerExecution = &store.OwnerExecution{Owner: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Team: "team", Generation: unit.Binding.Generation, Node: row.Ref, NodeGeneration: row.Generation, SpecHash: row.SpecHash, Allowed: true}
+			snapshot := store.RunSnapshot{Run: store.RunRow{ID: unit.RunID, Team: "team", State: store.RunRunning, Request: unit.Request, Spec: &unit.Accepted.Spec, Plan: unit.Accepted.Plan, PlanHash: string(unit.Accepted.PlanHash), Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: unit.RunID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation}}, Nodes: []store.NodeRow{row}}
+			scheduled := make(chan struct{})
+			var once sync.Once
+			boundary := errors.New("eligible job reached self claim")
+			connection := client.EngineOptions{URL: base.ControllerURL, HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
+				var response any
+				switch r.Method + " " + r.URL.Path {
+				case "GET /api/v1/runs/run/local-host/snapshot":
+					response = snapshot
+				case "POST /api/v1/claims/unit/heartbeat":
+					response = controllerwire.RenewalResponse{ExpiresAt: unit.LeaseExpiresAt}
+				case "POST /api/v1/runs/run/local-host/nodes/job/transition":
+					var change localhostwire.LocalNodeTransition
+					if err := json.NewDecoder(r.Body).Decode(&change); err != nil {
+						return nil, err
+					}
+					if change.To != store.NodeReady {
+						return nil, fmt.Errorf("unexpected scheduled transition: %+v", change)
+					}
+					response = store.Applied{}
+				case "POST /api/v1/runs/run/jobs/job/reconcile":
+					if compute {
+						state, err := wingdclient.Query(r.Context(), wingdclient.Options{Home: home, Version: "v1.2.3"})
+						if err != nil {
+							return nil, err
+						}
+						if !slices.ContainsFunc(state.Holders, func(holder wingwire.Holder) bool {
+							return holder.DisplayRunID == unit.RunID && holder.Resources.Cores > 0
+						}) {
+							return nil, fmt.Errorf("job scheduled without its machine compute lease: %+v", state.Holders)
+						}
+					}
+					once.Do(func() { close(scheduled) })
+					return nil, boundary
+				default:
+					if strings.Contains(r.URL.Path, "events") {
+						select {
+						case <-scheduled:
+							return nil, boundary
+						case <-r.Context().Done():
+							return nil, context.Cause(r.Context())
+						}
+					}
+					return base.HTTP.Transport.RoundTrip(r)
+				}
+				body, err := json.Marshal(response)
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
+			})}}
+			hosting := productionHostingAt(home, "v1.2.3", connection, "", "", compute, procenv.SubmitAccept{})
+			controller, err := client.NewEngineClient(client.EngineOptions{URL: connection.URL, HTTP: connection.HTTP, Bearer: fixedBearer(unit.Capability)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			services, _, err := hosting.Bind(t.Context(), unit, controller)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := services.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			// The accepted resume needs no SDK planning. Source acquisition is an external boundary;
+			// all scheduling, placement and admission callbacks use production composition.
+			services.Config.Owner.Acquire = func(context.Context, nodehost.RunInput) (*source.Entry, error) {
+				return &source.Entry{Directory: t.TempDir()}, nil
+			}
+			owner, _, _, err := nodehost.NewNativeHost(services.Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input, err := nodehost.NewRunInput(unit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			_, err = owner.Run(ctx, input)
+			select {
+			case <-scheduled:
+			default:
+				t.Fatalf("eligible job never reached scheduling self claim: %v", err)
+			}
+			if err == nil || !strings.Contains(err.Error(), boundary.Error()) {
+				t.Fatalf("scheduling stopped at another boundary: %v", err)
 			}
 		})
 	}

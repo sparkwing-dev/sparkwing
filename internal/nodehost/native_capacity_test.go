@@ -17,6 +17,7 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
+	config.RequireMachineAdmission = true
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -86,5 +87,28 @@ func TestNativeHostRejectsGroupsWithoutCapacityStore(t *testing.T) {
 		return RunCompletion{}, nil
 	}); err == nil {
 		t.Fatal("missing store admitted plan group")
+	}
+}
+
+func TestNativeRunnerSchedulesWithoutMachineAdmission(t *testing.T) {
+	fixture := newStoreHostFixture(t, capacityPlan("queue", 0, "a"))
+	config, _, _, _ := nativeHostFixture(t)
+	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
+	owner, _, _, err := NewNativeHost(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executed := false
+	owner.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		executed = true
+		state, err := fixture.Tenant.GetConcurrencyState(ctx, "global:db")
+		if err != nil || len(state.Holders) != 1 {
+			t.Errorf("runner lost logical concurrency: %+v %v", state, err)
+		}
+		return fixture.report(ctx, input, store.NodeSuccess)
+	})
+	completion, err := owner.Run(t.Context(), fixture.Input)
+	if err != nil || !executed || completion.Outcome != "success" {
+		t.Fatalf("completion=%+v executed=%v error=%v", completion, executed, err)
 	}
 }

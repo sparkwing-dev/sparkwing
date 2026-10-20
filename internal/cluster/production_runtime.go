@@ -147,7 +147,7 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			machineAdmission.Controller = connection.URL
 		}
 		services, err = nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{
-			Admission: machineAdmission, ClaimAdmission: machineAdmission,
+			RequireMachineAdmission: admission, Admission: machineAdmission, ClaimAdmission: machineAdmission,
 			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
 			Home: home, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
 			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},

@@ -262,11 +262,6 @@ type HostResources struct {
 
 	MemoryBytes int64
 }
-type JevAdmissionStats struct {
-	Attempts  uint64
-	Admits    uint64
-	Fallbacks uint64
-}
 type LivenessAck struct {
 	Nonce uint64
 }
@@ -325,7 +320,6 @@ type QueueState struct {
 	Waiters   []Waiter
 
 	AdmissionMode string
-	Jev           *JevAdmissionStats
 
 	ExpectedClearMS *int64
 

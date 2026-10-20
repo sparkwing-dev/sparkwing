@@ -138,6 +138,7 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 			persistNativeAcceptance(t, state, input.Accepted)
 			if mode == "local" {
 				config.Owner.Local = func(store.NodeRow) bool { return true }
+				config.RequireMachineAdmission = true
 			}
 			if mode == "concurrency" {
 				state.row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Capacity: 1, Cost: 1, Scope: "global", OnLimit: "queue"}}

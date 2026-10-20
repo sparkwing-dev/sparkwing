@@ -38,7 +38,7 @@ cleanup commands. This remains loud even when no log writer is supplied.
 
 `PlanningProcessInput.Entrypoint` selects the registered SDK pipeline for describe
 and plan. Checkout planning resolves it from the matching project entry and
-persists it in Resolved.Entrypoint and the plan-cache identity. RunContext.Pipeline
+persists it in Resolved.Entrypoint. RunContext.Pipeline
 retains the invoked alias. Executor and owner-evaluator replans use the accepted
 entrypoint without rediscovering YAML. Tests cover deploy-prod targeting Deploy
 with required pipeline and job argument keys. CLI discovery and flag parsing

@@ -186,7 +186,7 @@ func TestNativeAdmissionCombinesStoreAndLocalGroups(t *testing.T) {
 	row.Execution.Concurrency = append(row.Execution.Concurrency, runspec.Concurrency{Group: "local", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"})
 	var owner OwnerHost
 	owner.Local = func(store.NodeRow) bool { return true }
-	configureNativeAdmission(&owner, &LocalAdmission{Daemon: daemon}, admission)
+	configureNativeAdmission(&owner, &LocalAdmission{Daemon: daemon}, admission, false)
 	_, err := owner.Around(localAdmissionContext(t), accepted, func(ctx context.Context) (RunCompletion, error) {
 		return RunCompletion{}, owner.Admit(ctx, accepted, row, func(context.Context) error {
 			if probe.holder == nil {

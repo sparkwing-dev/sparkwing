@@ -297,7 +297,7 @@ renewals, minimum enforcement and service/schedule survival.
 | --- | --- |
 | C1 `runspec.Resolved.Engine` | Seal `engine.Identity`; preserve it on retry |
 | C3 `source.Acquire` / hosts | Resolve before SDK build/describe/plan; ensure accepted identity before eval/work |
-| C3 plan cache | Include the complete engine identity in cache inputs; hits still pass acceptance |
+| C3 accepted resume | Retain the accepted plan and complete engine identity; new runs plan afresh |
 | C3 controller wire | Carry notices and preserve the twelve-month engine/controller API window |
 | C4 limits and grammar | Own refresh/compatibility constants and the `upgrade` command |
 | C2 API errors | Register `version_revoked` and `version_unsupported`; use `unavailable` for absent verified policy |

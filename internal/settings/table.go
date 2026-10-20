@@ -1,13 +1,10 @@
 package settings
 
-// Table is complete for surviving settings from the source inventory and the
-// approved additions. Operator fields share ControllerCeilings, never an author layer.
+// Table defines the sources and resolution phase for settings owned here.
 func Table() []Rule {
 	return []Rule{
 		{Key: "operator.run_retention_days", Sources: OperatorPrecedence(), Phase: Startup},
 		{Key: "operator.node_metric_retention_days", Sources: OperatorPrecedence(), Phase: Startup},
-		{Key: "config_path", Sources: []Source{Flag, Env, Default}, Phase: Startup},
-		{Key: "home", Sources: []Source{Env, Default}, Phase: Startup},
 		{Key: "profile", Sources: []Source{Flag, Run, ProjectPipeline, Default}, Phase: AcceptPlan},
 		{Key: "args", Sources: []Source{Flag, Run, ProjectPipeline, ProjectDefaults, Code, Default}, Phase: AcceptPlan},
 		{Key: "guards", Sources: []Source{Run, ProjectPipeline, ProjectDefaults, Default}, Phase: AcceptPlan},
@@ -17,13 +14,8 @@ func Table() []Rule {
 		{Key: "output", Sources: []Source{Flag, Env, Run, Default}, Phase: Intake},
 		{Key: "admission_class", Sources: []Source{Run, Code, Default}, Phase: AcceptPlan},
 		{Key: "priority", Sources: []Source{Flag, Run, Code, Default}, Phase: AcceptPlan},
-		{Key: "admission", Sources: []Source{Flag, Machine, Default}, Phase: Startup},
-		{Key: "toolchain", Sources: []Source{Env, Default}, Phase: Startup},
 		{Key: "debug.pause_timeout", Sources: []Source{Run, Machine, Default}, Phase: Intake},
 		{Key: "machine.box_id", Sources: []Source{Machine, Default}, Phase: Startup},
-		{Key: "cache", Sources: []Source{Flag, Machine, Default}, Phase: Startup},
-		{Key: "secrets_key", Sources: []Source{Env, Default}, Phase: Startup},
-		{Key: "schedule.catch_up", Sources: []Source{Flag, Run, ProjectPipeline, Default}, Phase: AcceptPlan},
 		{Key: "machine.runner", Sources: []Source{Flag, Machine, Default}, Phase: Startup},
 		{Key: "runner", Sources: []Source{Flag, Run, Default}, Phase: Intake},
 		{Key: "start_at", Sources: []Source{Flag, Run, Default}, Phase: Intake},
@@ -40,9 +32,6 @@ func Table() []Rule {
 		{Key: "job.retry", Sources: []Source{Run, Code, Default}, Phase: AcceptPlan},
 		{Key: "job.memo_ttl", Sources: []Source{Run, Code, Default}, Phase: AcceptPlan},
 		{Key: "claim_wait", Sources: []Source{Run, Code, Default}, Phase: AcceptPlan},
-		{Key: "retention", Sources: []Source{Flag, TeamDB, GlobalDB, LimitsProfile, Default}, Phase: Startup},
-		{Key: "idle_poll", Sources: []Source{Flag, Machine, Default}, Phase: Startup},
-		{Key: "connection", Sources: []Source{Flag, Machine, Default}, Phase: Startup},
 		{Key: "repo_location", Sources: []Source{Flag, Run, Machine, Default}, Phase: Intake},
 		{Key: "debug.pause", Sources: []Source{Flag, Run, Default}, Phase: Intake},
 		{Key: "debug", Sources: []Source{Env, Run, Default}, Phase: Intake},
@@ -50,7 +39,6 @@ func Table() []Rule {
 		{Key: "cache_from", Sources: []Source{Flag, Run, Machine, Default}, Phase: Intake},
 		{Key: "resources", Sources: []Source{Run, Code, Default}, Phase: AcceptPlan},
 		{Key: "source", Sources: []Source{Run, ProjectPipeline, Code, Default}, Phase: AcceptPlan},
-		{Key: "token.ttl", Sources: []Source{Flag, Default}, Phase: Startup},
 		{Key: "run.submit_env_allow", Sources: []Source{Run, Machine, Default}, Phase: Intake},
 		{Key: "operator.owner_execution", Sources: OperatorPrecedence(), Phase: Startup},
 		{Key: "operator.max_cores", Sources: OperatorPrecedence(), Phase: Startup},

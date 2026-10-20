@@ -627,8 +627,8 @@ func Scenarios() []Scenario {
 			ID: "billing-plan-eval-cache-job-minimum", Group: "billing",
 			Sections: []string{"§3.1", "§12", "A59", "decision 100"}, Requires: []Area{C1, C2, C3},
 			Placements: []Placement{RunnerHosted, Launcher, GitHubActions}, Fixtures: []string{"repo", "sdk", "store", "clock", "stripe"},
-			Steps:      []string{"At a known fixture tariff run a cold seven-second plan, eleven-second eval and seven-second work job; run the same pipeline again with a valid default-enabled plan cache hit.", "Repeat work at exactly 60 and 61 seconds and record unit-specific reservations and settlements."},
-			Assertions: []string{"Plan bills seven seconds and eval eleven with no 60-second minimum; the plan-cache hit incurs zero planning compute.", "Work bills 60, 60 and 61 seconds respectively, with per-second accounting after its minimum; unit kind determines settlement rather than placement labels."},
+			Steps:      []string{"At a known fixture tariff run a cold seven-second plan, eleven-second eval and seven-second work job; run the same pipeline as a new run, then resume its accepted owner.", "Repeat work at exactly 60 and 61 seconds and record unit-specific reservations and settlements."},
+			Assertions: []string{"Plan bills seven seconds and eval eleven with no 60-second minimum; a new run plans again while an accepted resume retains its plan.", "Work bills 60, 60 and 61 seconds respectively, with per-second accounting after its minimum; unit kind determines settlement rather than placement labels."},
 		},
 		{
 			ID: "billing-reservation-disruption-replay", Group: "billing",

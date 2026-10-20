@@ -282,7 +282,7 @@ A59 tests read the immutable award's payer, metered flag, executor class,
 reservation, start rule and unit kind. Change the root credential after award
 and prove settlement still uses the award. Hold a metered run host while work
 waits for a customer-owned runner and prove the wait is excluded. Plan/eval
-compute is per second without the job minimum, plan-cache hits are free, and
+compute is per second without the job minimum, new runs plan afresh, and
 executing work retains its 60-second minimum. Test retries, unstarted failure,
 disruption, cancellation, duplicate results and controller restart for exactly
 one settlement or refund and no negative/lost ledger delta.

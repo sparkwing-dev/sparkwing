@@ -26,7 +26,7 @@ does not create App provenance.
 Guard diagnostics carry the predicate's field and index. They contain no raw
 predicate or argument value, so escaping cannot reveal a secret. Raw predicates
 remain in the restricted declarations and spec. A refusal bypasses SDK planning
-and every plan-cache read/write, then submits a validated empty plan and the
+and submits a validated empty plan and the
 refusal through normal acceptance. The shared decider produces the final verdict.
 
 `OwnerPlanning.Resolve` computes the final proposal from the validated plan.

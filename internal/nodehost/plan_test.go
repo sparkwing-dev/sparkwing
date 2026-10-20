@@ -49,7 +49,7 @@ func TestOwnerRunAdmissionOutlivesRunFinish(t *testing.T) {
 	fixture, host, input := newOwnerFixture(t, true)
 	daemon := newFakeDaemon()
 	host.Store = leaseAtNativeFinish{ownerFixture: fixture, daemon: daemon, testing: t}
-	configureNativeAdmission(&host, &LocalAdmission{Daemon: daemon}, nil)
+	configureNativeAdmission(&host, &LocalAdmission{Daemon: daemon}, nil, false)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	if _, err := host.Run(ctx, input); err != nil {

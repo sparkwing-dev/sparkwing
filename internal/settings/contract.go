@@ -65,44 +65,18 @@ type Rule struct {
 	Phase   Phase
 }
 
-// Values combines native run preferences with parent-only startup inputs.
+// Values supplies the settings resolved by this package.
 type Values struct {
 	runspec.Options
-	ConfigPath        *string
-	Home              *string
 	Args              map[string]string
 	Guards            *projectconfig.Guards
-	Admission         *userconfig.AdmissionConfig
-	Toolchain         *string
 	BoxID             *string
-	Cache             *userconfig.CacheConfig
-	SecretsKey        *KeyInput
-	CatchUp           *time.Duration
 	RunnerPreferences *userconfig.RunnerConfig
-	Retention         *RetentionValues
-	IdlePoll          *time.Duration
-	Connection        *userconfig.Connection
-	TokenTTL          *time.Duration
 	Origins           map[string]Origin
 }
 
-// KeyInput is consumed in the parent process; diagnostics may show only presence.
-// The previous key remains independent so rotation can still decrypt old records.
-type KeyInput struct {
-	Current  *string
-	File     *string
-	Previous *string
-}
-
-// RetentionValues keeps metric and run retention separate from fixed blob/log rules.
-// Zero run or metric days disables that sweep; financial records never cascade.
-type RetentionValues struct {
-	RunDays    *int
-	MetricDays *int
-}
-
 // OperatorValues uses pointers because zero disables a documented guard; it never
-// means missing. MaxRunsPerPrincipalHour is the sole per-principal run-rate guard.
+// means missing.
 type OperatorValues struct {
 	RunRetentionDays          *int
 	MetricRetentionDays       *int
@@ -148,18 +122,14 @@ type Context struct {
 	Submitter           bool
 	Local               bool
 	Detached            bool
-	Cloud               bool
 	NumCPU              int
 	Hostname            string
-	UserHome            string
-	XDGConfigHome       string
 	Terminal            bool
 	ParentCheckout      string
 	RegisteredCheckouts []string
 	FallbackPaths       []string
 	ScheduleArgs        map[string]string
 	ScheduleHostArgs    map[string]string
-	OwnerDeadline       time.Time
 }
 
 // Inputs has a fixed field for each source, rather than caller-ordered layers.

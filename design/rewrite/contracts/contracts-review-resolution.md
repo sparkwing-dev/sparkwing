@@ -86,8 +86,8 @@ Choices recorded for implementation:
   this adds no hostPath or controller mirror.
 - Allowed checkout policies are complete typed policy tuples; an unset policy
   leaves acquisition unrestricted. Resource conversion occurs at platform edges.
-- The plan cache includes the complete SDK-visible run context. Cross-run reuse
-  needs a determinism guarantee before IDs or timestamps can be omitted.
+- New runs plan afresh. Accepted resumes retain their sealed plan and complete
+  engine identity. Persistent plan caching is removed under decision 28.
 - The host's separate sixty-second billing minimum is retained and named.
 
 Existing questions outside these repairs remain in the area notes: root

@@ -44,7 +44,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 					return nil, errors.New("machine unavailable")
 				})
 			}
-			configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: admitter}, &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor})
+			configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: admitter}, &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
 			executed := false
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				executed = true
@@ -142,7 +142,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	}
 	daemon := newFakeDaemon()
 	daemon.hostGate = make(chan struct{})
-	configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: daemon}, &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor})
+	configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: daemon}, &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
 	fixture.Host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error { t.Error("saturated host executed work"); return nil })
 	ready := make(chan string, 1)
 	wait := fixture.Host.Wait

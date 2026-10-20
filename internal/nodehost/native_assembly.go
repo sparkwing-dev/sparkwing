@@ -39,24 +39,25 @@ type NativeServices struct {
 
 // NativeConfig binds one authenticated award to shared state and authority services.
 type NativeConfig struct {
-	SubmittedEnv   map[string][]byte
-	SubmitAccept   procenv.SubmitAccept
-	Local          func(store.NodeRow) bool
-	Home           string
-	Admission      *LocalAdmission
-	ClaimAdmission *LocalAdmission
-	Store          NativeHostStore
-	Parent         capability.AuthenticationReader
-	Bindings       capability.BindingChecker
-	Principal      capability.Principal
-	Refresh        func(context.Context) (capability.Principal, error)
-	Renew          func(context.Context, string, bool) (store.LeaseBeat, error)
-	Source         source.Options
-	Services       func(context.Context, capability.Principal, nodeproto.JobSpec) (ProcessServices, error)
-	Storage        func(context.Context, capability.Principal) (StorageBinding, error)
-	Logs           func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
-	Evaluate       func(context.Context, EvaluationInput) (ProcessGrant, error)
-	ExpansionActor func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
+	SubmittedEnv            map[string][]byte
+	SubmitAccept            procenv.SubmitAccept
+	Local                   func(store.NodeRow) bool
+	Home                    string
+	RequireMachineAdmission bool
+	Admission               *LocalAdmission
+	ClaimAdmission          *LocalAdmission
+	Store                   NativeHostStore
+	Parent                  capability.AuthenticationReader
+	Bindings                capability.BindingChecker
+	Principal               capability.Principal
+	Refresh                 func(context.Context) (capability.Principal, error)
+	Renew                   func(context.Context, string, bool) (store.LeaseBeat, error)
+	Source                  source.Options
+	Services                func(context.Context, capability.Principal, nodeproto.JobSpec) (ProcessServices, error)
+	Storage                 func(context.Context, capability.Principal) (StorageBinding, error)
+	Logs                    func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
+	Evaluate                func(context.Context, EvaluationInput) (ProcessGrant, error)
+	ExpansionActor          func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
 }
 
 // NewNativeServices constructs the shared host services without opening a state store.
@@ -200,7 +201,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
 		Validation: nodeproto.ValidationContext{Placement: store.RequestPlacement(run.Run.Request.Request)},
-		Admission:  admission, ClaimAdmission: cfg.ClaimAdmission,
+		Admission:  admission, ClaimAdmission: cfg.ClaimAdmission, RequireMachineAdmission: cfg.RequireMachineAdmission,
 		Owner: OwnerOperations{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt, ExpansionActor: cfg.ExpansionActor},
 		PlanningLog: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)

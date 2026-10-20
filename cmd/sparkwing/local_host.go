@@ -59,8 +59,8 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 		return nodehost.NativeServices{}, err
 	}
 	services, err := build(ctx, nodehost.WithClient(nodehost.NativeConfig{
-		Admission: admission,
-		Home:      home, Store: state, Parent: owned, Bindings: owned,
+		RequireMachineAdmission: true, Admission: admission,
+		Home: home, Store: state, Parent: owned, Bindings: owned,
 		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: source, Local: store.OwnerCanExecute(binding.Principal),
 	}, private))
 	if err != nil {

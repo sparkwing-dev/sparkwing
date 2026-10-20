@@ -24,22 +24,23 @@ type NativeHostStore interface {
 
 // NativeHostConfig supplies external dependencies once for the shared host.
 type NativeHostConfig struct {
-	Store          NativeHostStore
-	Lease          lease.Keeper
-	Source         source.Options
-	Snapshots      CapturedEnvironmentLoader
-	Masks          *MaskRegistry
-	Processes      *NativeProcesses
-	Router         ProcessEndpointRegistrar
-	Validation     nodeproto.ValidationContext
-	Owner          OwnerOperations
-	Executor       ExecutionOperations
-	Evaluation     EvaluationOperations
-	ReadOutput     func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	PlanningLog    func(context.Context, nodeproto.FrameLog) error
-	Admission      *LocalAdmission
-	ClaimAdmission *LocalAdmission
-	Capacity       *StoreAdmission
+	Store                   NativeHostStore
+	Lease                   lease.Keeper
+	Source                  source.Options
+	Snapshots               CapturedEnvironmentLoader
+	Masks                   *MaskRegistry
+	Processes               *NativeProcesses
+	Router                  ProcessEndpointRegistrar
+	Validation              nodeproto.ValidationContext
+	Owner                   OwnerOperations
+	Executor                ExecutionOperations
+	Evaluation              EvaluationOperations
+	ReadOutput              func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	PlanningLog             func(context.Context, nodeproto.FrameLog) error
+	RequireMachineAdmission bool
+	Admission               *LocalAdmission
+	ClaimAdmission          *LocalAdmission
+	Capacity                *StoreAdmission
 }
 
 // NewNativeHost configures its owned transport and returns shared hosts and an evaluator for owner policies.
@@ -100,7 +101,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 			config.Capacity = &StoreAdmission{Store: capacity}
 		}
 	}
-	configureNativeAdmission(&owner, config.Admission, config.Capacity)
+	configureNativeAdmission(&owner, config.Admission, config.Capacity, config.RequireMachineAdmission)
 	owner.Planning.Validation = validation
 	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		var spec runspec.Spec
@@ -129,25 +130,6 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 			}
 			if job.Memo != nil || job.Closures.MemoKey != "" {
 				return OwnerLayerResult{}, errors.New("native host requires the memo owner policy adapter")
-			}
-			return OwnerLayerResult{}, nil
-		}
-	}
-	if owner.AdmissionPolicy == nil {
-		owner.AdmissionPolicy = func(_ context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
-			local := owner.Local != nil && owner.Local(row)
-			if err := requireMachineAdmission(config.Admission, local); err != nil {
-				return OwnerLayerResult{}, err
-			}
-			if config.Capacity != nil || local {
-				return OwnerLayerResult{}, nil
-			}
-			var spec runspec.Spec
-			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
-				return OwnerLayerResult{}, err
-			}
-			if len(spec.Resolved.Settings.Concurrency) != 0 || len(row.Execution.Concurrency) != 0 {
-				return OwnerLayerResult{}, errors.New("native host requires the admission owner policy adapter")
 			}
 			return OwnerLayerResult{}, nil
 		}

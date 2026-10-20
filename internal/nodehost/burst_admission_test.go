@@ -36,7 +36,7 @@ func burstAdmissionFixture(t *testing.T) (*ownerFixture, OwnerHost, RunInput, *f
 		return OwnerLayerResult{}, nil
 	})
 	d := newFakeDaemon()
-	configureNativeAdmission(&host, &LocalAdmission{Daemon: d, BoxID: testBox}, nil)
+	configureNativeAdmission(&host, &LocalAdmission{Daemon: d, BoxID: testBox}, nil, false)
 	return f, host, input, d
 }
 

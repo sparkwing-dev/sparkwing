@@ -67,7 +67,7 @@ Local, standalone and here hosting share one session lifecycle. The award suppli
 the run-host kind and trigger owner fence. The trigger fence retains the run ID,
 holder and generation with an empty name, matching C1's persisted projection.
 Binding supplies the resolved authority reference, capability prefix, storage,
-engine resolver and plan cache. It cannot replace the owner fence, request,
+engine resolver. It cannot replace the owner fence, request,
 acceptance or granted runner. Cancellation preserves its cause through cleanup.
 
 Owner adapters serialize `runspec.Request` into `RunInput.SealedRequest`, as
