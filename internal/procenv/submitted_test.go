@@ -141,9 +141,14 @@ func TestRemoteInstallsIgnoreTheHostGoEnvFile(t *testing.T) {
 }
 
 func TestSubmittedValuesNeverRedirectTheRunnersOwnState(t *testing.T) {
-	for _, name := range []string{"SPARKWING_HOME", "SPARKWING_CONFIG", "GOMODCACHE", "GOCACHE", "GOWORK", "GOENV", "npm_config_cache", "DOCKER_HOST"} {
+	for _, name := range []string{"SPARKWING_HOME", "SPARKWING_CONFIG", "GOMODCACHE", "GOCACHE", "GOWORK", "GOENV", "GOAUTH", "GOCACHEPROG", "GOEXPERIMENT", "CGO_LDFLAGS", "npm_config_cache", "npm_config_registry", "NPM_CONFIG_USERCONFIG", "YARN_RC_FILENAME", "PIP_INDEX_URL", "pip_config_file", "DOCKER_HOST", "KUBECONFIG", "AWS_PROFILE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_PARAMETERS", "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "git_askpass", "SSH_ASKPASS", "LD_PRELOAD", "ld_library_path", "DYLD_INSERT_LIBRARIES", "BASH_ENV", "ENV", "NODE_OPTIONS", "PYTHONPATH", "JAVA_TOOL_OPTIONS"} {
 		if err := CheckSubmitted(map[string][]byte{name: []byte("/attacker")}, secrets.NewMasker()); err == nil {
 			t.Errorf("submitted %s accepted", name)
+		}
+	}
+	for _, name := range []string{"BUILD_REGION", "DEPLOY_TARGET", "APP_COLOR", "AWS_REGION", "GOOGLE_CLOUD_PROJECT"} {
+		if err := CheckSubmitted(map[string][]byte{name: []byte("value")}, secrets.NewMasker()); err != nil {
+			t.Errorf("ordinary submitted name %s refused: %v", name, err)
 		}
 	}
 	accept, err := OperatorSubmitAccept([]string{"BUILD_*"})

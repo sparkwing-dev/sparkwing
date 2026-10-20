@@ -134,15 +134,16 @@ process starts, so logs show `***` in their place. A `GOPROXY` entry or
 access token there. Cloud and shared runners drop
 these settings unless the operator's allow list names them.
 
-A run cannot submit a Go toolchain or network base name (`PATH`, `HOME`,
-`TMPDIR`, the proxy and CA settings, and similar) through
-`run.submit_env_allow`: intake refuses it and the CLI does not capture it,
-because it would reconfigure the executing host. The same holds for `SPARKWING_*`
-names and the host's cache and tool settings (`GOCACHE`, `GOMODCACHE`, `GOWORK`,
-`GOBIN`, `GOENV`, `GOROOT`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`,
-`npm_config_cache`, `DOCKER_HOST`). Submitted names reach a shared runner only
-when its operator also lists them, never replace a value the host sets itself,
-and never reach the pipeline compile. Remote builds on a host the
+A run can submit only its own names through `run.submit_env_allow`. Intake
+refuses, and the CLI does not capture, any name the registry above owns other
+than `AWS_REGION`, `AWS_DEFAULT_REGION`, `NO_COLOR`, `CLICOLOR_FORCE` and
+`TERM`, any `SPARKWING_*` or Go toolchain name (`GOAUTH`, `GOCACHEPROG`, and
+similar), and any name that loads code into a job or tool, in any case:
+`LD_*`, `DYLD_*`, `GIT_*`, `SSH_*`, `CGO_*`, `NODE_*`, npm, yarn, pip and other
+package-manager settings, `BASH_ENV`, `ENV`, `PYTHONPATH`, `JAVA_TOOL_OPTIONS`,
+and similar. Submitted names reach a shared runner only when its operator also
+lists them, never replace a value the host sets itself, and never reach the
+pipeline compile. Remote builds on a host the
 run's owner does not own set `GOENV=off`, so a `go env -w` file on that host
 does not change the build.
 

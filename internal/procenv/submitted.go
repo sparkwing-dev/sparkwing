@@ -2,6 +2,7 @@ package procenv
 
 import (
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -36,17 +37,32 @@ func Submit(environment, allowed []string, masker *secrets.Masker) (map[string][
 }
 
 // safety: a submitted value comes from the requester, so it may not reconfigure the executing
-// host's Go toolchain, caches, network base or Sparkwing home, nor carry an engine-owned or
-// credential-shaped name.
+// host, nor load code into a job or tool. Names the registry owns are refused unless listed in
+// safeToolNames, and unregistered names in a code-loading family are refused in any case.
 func submittable(name string) bool {
-	row, _ := Lookup(name)
-	key := envKey(name)
-	return submitEnvName.MatchString(name) && row.Owner != "engine" && !row.GoTool && !row.RemoteBase && !credentialName(row, name) &&
-		!strings.HasPrefix(key, envKey("SPARKWING_")) && !slices.ContainsFunc(hostOwned, func(owned string) bool { return envKey(owned) == key })
+	if !submitEnvName.MatchString(name) {
+		return false
+	}
+	row, known := Lookup(name)
+	if row.Owner == "engine" || credentialName(row, name) {
+		return false
+	}
+	upper := strings.ToUpper(name)
+	if known && row.Class != User {
+		return slices.Contains(safeToolNames, upper)
+	}
+	if strings.HasPrefix(upper, "SPARKWING_") || goEnvName.MatchString(upper) || slices.Contains(loaderNames, upper) {
+		return false
+	}
+	return !slices.ContainsFunc(loaderPrefixes, func(prefix string) bool { return strings.HasPrefix(upper, prefix) })
 }
 
-// safety: the runner reads these for its own caches and tools.
-var hostOwned = []string{"GOCACHE", "GOMODCACHE", "GOWORK", "GOBIN", "GOENV", "GOROOT", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "npm_config_cache", "DOCKER_HOST"}
+var (
+	safeToolNames  = []string{"AWS_REGION", "AWS_DEFAULT_REGION", "NO_COLOR", "CLICOLOR_FORCE", "TERM"}
+	goEnvName      = regexp.MustCompile(`^GO[A-Z0-9]*$`)
+	loaderNames    = []string{"ENV", "BASH_ENV", "CDPATH", "IFS", "PROMPT_COMMAND", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "RUBYOPT", "PERL5OPT", "PERL5LIB", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME"}
+	loaderPrefixes = []string{"LD_", "DYLD_", "GIT_", "SSH_", "CGO_", "NODE_", "NPM_", "YARN_", "PIP_", "PNPM_", "BUN_", "CARGO_", "RUSTC", "BUNDLE_", "GEM_", "MAVEN_", "GRADLE_"}
+)
 
 func submitAllowed(name string, allowed []string) bool {
 	for _, pattern := range allowed {
