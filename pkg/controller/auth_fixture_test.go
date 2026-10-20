@@ -51,4 +51,4 @@ func (c *testClock) pin(at func() time.Time) {
 	c.mu.Unlock()
 }
 
-func (c *testClock) option() store.Option { return store.WithClock(c.now) }
+func (c *testClock) option() store.Option { return teststore.WithClock(c.now) }

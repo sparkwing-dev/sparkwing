@@ -16,7 +16,7 @@ import (
 
 func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 	var now time.Time
-	f := newBrowserFixture(t, nil, store.WithClock(func() time.Time {
+	f := newBrowserFixture(t, nil, teststore.WithClock(func() time.Time {
 		if now.IsZero() {
 			return time.Now()
 		}

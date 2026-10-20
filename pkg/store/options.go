@@ -1,12 +1,17 @@
 package store
 
-import "time"
+import (
+	"time"
 
-// Option configures a Store before Open returns it, so no holder can swap a
-// policy while the store serves requests.
-type Option func(*Store)
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storeclock"
+)
 
-// WithClock supplies the SQLite store clock. PostgreSQL keeps database time.
-func WithClock(clock func() time.Time) Option {
-	return func(s *Store) { s.clock = clock }
+// Option configures a Store inside Open. Its function is unexported, so an
+// option cannot be applied to a store that is already serving.
+type Option struct{ apply func(*Store) }
+
+func init() {
+	storeclock.Option = func(clock func() time.Time) any {
+		return Option{apply: func(s *Store) { s.clock = clock }}
+	}
 }

@@ -280,7 +280,7 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 
 	s := &Store{db: db, dialect: dialect, provisions: nativeProvisionPolicy{}}
 	for _, opt := range opts {
-		opt(s)
+		opt.apply(s)
 	}
 	if err := s.migrate(ctx, remedy); err != nil {
 		return nil, errors.Join(err, db.Close())

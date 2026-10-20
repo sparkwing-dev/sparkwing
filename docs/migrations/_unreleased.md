@@ -9,11 +9,12 @@ fixtures open their own connection with `teststore.SQL`, `teststore.Exec` or
 `SetTestBusyTimeout`, `Tenant.TestOnlySeedGitHubInstallation`, `OpenReadOnly`,
 `OpenReadOnlySnapshot` and `logseg.SubjectUploader` are removed. Fixtures use
 `teststore.SeedTeam` and `teststore.SeedGitHubInstallation`, and pass
-`store.WithClock` to `Open` or `OpenPostgres`. A concurrency invariant
+`teststore.WithClock` when they open a store. A concurrency invariant
 violation now fails its transaction instead of committing with a log line.
 
 `capability.Grants`, `Routes`, `BillingRules` and the other policy tables are
-functions returning copies, so no importer can change them.
+functions returning copies. `LookupRoute` returns a copy too, so reading a
+policy cannot change it.
 
 ## Local dashboard sign-in link
 

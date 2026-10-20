@@ -45,8 +45,9 @@ var snapshot = sync.OnceValues(func() (seed []byte, err error) {
 	return os.ReadFile(filepath.Join(dir, "snapshot.db"))
 })
 
-// Open creates an empty current-schema fixture at a new path, then calls store.Open.
-// Existing files are refused; reopening and migration tests must use store.Open.
+// Open creates an empty current-schema fixture at a new path, then opens it
+// with OpenExisting. Existing files are refused; reopening and migration
+// tests use OpenExisting, so SQL can still reach the store.
 func Open(path string, opts ...store.Option) (*store.Store, error) {
 	seed, err := snapshot()
 	if err != nil {

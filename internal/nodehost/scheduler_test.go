@@ -24,7 +24,7 @@ const testRunID = "run-sched"
 
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithClock(time.Now))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(time.Now))
 	if err != nil {
 		t.Fatal(err)
 	}
