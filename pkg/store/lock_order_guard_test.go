@@ -13,8 +13,8 @@ import (
 
 var rowLockClause = regexp.MustCompile(`\bFOR\s+(NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b`)
 
-// A row lock written outside lock_order.go escapes the one place lock order
-// is reviewed; B15 was such a lock taken in the wrong order.
+// Row-lock clauses may be spelled only in lock_order.go. This checks where a
+// clause is written, not the order a transaction takes its locks in.
 func TestRowLockClausesLiveInLockOrder(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {

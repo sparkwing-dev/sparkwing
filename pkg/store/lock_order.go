@@ -47,9 +47,9 @@ func compareLockTiers(a, b storeLockTier) int {
 	return cmp.Compare(slices.Index(storeLockOrder[:], a), slices.Index(storeLockOrder[:], b))
 }
 
-// lockAuthorityThenRunTx takes a writer's authority chain, then its run, in
-// store lock order. Renewal holds authority while it waits for the run, so
-// taking the run first deadlocks against it (B15).
+// lockAuthorityThenRunTx takes a writer's authority chain, then its run.
+// Renewal holds authority while it waits for the run, so taking the run first
+// deadlocks against it (B15).
 func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor) error {
 	if _, err := resolveActorTx(ctx, tx, actor); err != nil {
 		return err
@@ -90,9 +90,10 @@ func compareStoreLocks(a, b storeLockKey) int {
 	return cmp.Compare(a.generation, b.generation)
 }
 
-// Row-lock clauses live only here, so a reviewer of lock order reads one file
-// (TestRowLockClausesLiveInLockOrder). SQLite serializes writers and takes no
-// row locks; snapshot reads take none either.
+// Row-lock clauses are spelled only here (TestRowLockClausesLiveInLockOrder).
+// That fixes where a lock's strength is written, not the order callers take
+// locks in; each transaction still orders its own acquisitions. SQLite
+// serializes writers and takes no row locks; snapshot reads take none either.
 
 func (s *Store) forUpdate() string {
 	if s.dialect == DialectPostgres {
