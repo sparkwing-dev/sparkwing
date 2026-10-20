@@ -89,7 +89,7 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 		t.Fatalf("a pending refund = %+v, %v; want not due", due, err)
 	}
 	event := providerPaymentEvent(now, capability.PaymentRefund)
-	event.PaymentID, event.ObjectID, event.Status = "payment", "re_1", "failed"
+	event.PaymentID, event.ObjectID, event.Status, event.AmountMinor = "payment", "re_1", "failed", 1_000
 	if _, err := s.settlePaymentFacts(ctx, event); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,13 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 				}
 			}
 			for range 2 {
-				if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "re_1", test.response, now); err != nil {
+				err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "re_1", test.response, now)
+				conflict := test.response != "pending" && test.response != status
+				if conflict {
+					if err == nil {
+						t.Fatal("conflicting terminal response was accepted")
+					}
+				} else if err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -142,7 +148,10 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantState, wantAttempts := CardRefundDue, 1
-			if status == "succeeded" || test.response == "succeeded" {
+			if test.response != "pending" && test.response != status {
+				wantState, wantAttempts = CardRefundDue, 0
+			}
+			if status == "succeeded" && (test.response == "pending" || test.response == status) {
 				wantState, wantAttempts = CardRefundSucceeded, 0
 			}
 			if state != wantState || attempts != wantAttempts {
@@ -152,7 +161,7 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if wantState == CardRefundSucceeded && len(due) != 0 || wantState == CardRefundDue && (len(due) != 1 || due[0].Key != "payment-1") {
+			if wantState == CardRefundSucceeded && len(due) != 0 || wantState == CardRefundDue && (len(due) != 1 || due[0].Key != fmt.Sprintf("payment-%d", wantAttempts)) {
 				t.Fatalf("refund after recorded %s: %+v", status, due)
 			}
 		})
@@ -180,7 +189,12 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund", "pending", now); err != nil {
+		err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund", "pending", now)
+		if seed%4 == 1 || seed%4 == 2 {
+			if err == nil {
+				t.Fatal("refund response accepted another payment association or provider mode")
+			}
+		} else if err != nil {
 			t.Fatal(err)
 		}
 		var status, id string
@@ -191,6 +205,8 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		switch {
 		case event.Status == CardRefundSucceeded:
 			return status == CardRefundSucceeded
+		case seed%4 == 1 || seed%4 == 2:
+			return status == CardRefundDue && id == "" && attempts == 0
 		case seed%4 == 3:
 			return status == CardRefundDue && id == "bound-refund" && attempts == 1
 		}

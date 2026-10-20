@@ -718,6 +718,8 @@ CREATE TABLE credit_checkouts (
     payment_method TEXT NOT NULL DEFAULT '',
     receipt_email TEXT NOT NULL DEFAULT '',
     failure TEXT NOT NULL DEFAULT '',
+    -- Foreign-payment warnings retain the refused payer's hold after its card is forgotten.
+    warning_id TEXT NOT NULL DEFAULT '',
     refill_blocked INTEGER NOT NULL DEFAULT 0 CHECK(refill_blocked IN (0,1)),
     UNIQUE(team,id,payment_mode),
     UNIQUE(payment_mode,session_id),
@@ -746,7 +748,7 @@ CREATE TABLE payment_events (
     PRIMARY KEY(payment_mode,event_id),
     FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode),
     FOREIGN KEY(team,grant_id) REFERENCES credit_grants(team,id),
-    CHECK(team IS NOT NULL OR event_kind IN ('warning','refund')),
+    CHECK(team IS NOT NULL OR event_kind IN ('warning','refund','dispute_opened','dispute_closed','card_setup','card_paid','card_failed')),
     CHECK((event_kind IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NOT NULL AND team IS NOT NULL)
        OR (event_kind NOT IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NULL AND object_id <> '' AND event_json IS NOT NULL AND settlement_json IS NOT NULL))
 );
@@ -930,6 +932,7 @@ CREATE TABLE repos (
 );
 
 CREATE TABLE card_refunds (
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     team TEXT NOT NULL REFERENCES teams(name),
     payment_intent TEXT NOT NULL,
     reason TEXT NOT NULL,
@@ -939,17 +942,40 @@ CREATE TABLE card_refunds (
     attempts BIGINT NOT NULL DEFAULT 0,
     next_attempt_at BIGINT NOT NULL DEFAULT 0,
     created_at BIGINT NOT NULL,
-    PRIMARY KEY (team, payment_intent)
+    PRIMARY KEY (payment_mode, team, payment_intent)
 );
 
 
 
 CREATE TABLE payment_warnings (
-    warning_id TEXT NOT NULL PRIMARY KEY,
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    warning_id TEXT NOT NULL,
     payment_intent TEXT NOT NULL,
     fingerprint TEXT NOT NULL DEFAULT '',
     actionable BIGINT NOT NULL DEFAULT 1,
-    created_at BIGINT NOT NULL
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY(payment_mode,warning_id)
+);
+
+CREATE TABLE payment_states (
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    payment_id TEXT NOT NULL CHECK(payment_id <> ''),
+    status TEXT NOT NULL CHECK(status IN ('failed','succeeded')),
+    outcome_json TEXT NOT NULL,
+    PRIMARY KEY(payment_mode,payment_id)
+);
+
+CREATE TABLE payment_setups (
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    intent_id TEXT NOT NULL CHECK(intent_id <> ''),
+    customer_id TEXT NOT NULL CHECK(customer_id <> ''),
+    payment_method TEXT NOT NULL CHECK(payment_method <> ''),
+    fingerprint TEXT NOT NULL CHECK(fingerprint <> ''),
+    brand TEXT NOT NULL,
+    last4 TEXT NOT NULL,
+    created_at BIGINT NOT NULL CHECK(created_at > 0),
+    applied BIGINT NOT NULL DEFAULT 0 CHECK(applied IN (0,1)),
+    PRIMARY KEY(payment_mode,intent_id)
 );
 
 CREATE TABLE payment_refunds (

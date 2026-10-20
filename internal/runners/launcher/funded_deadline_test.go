@@ -2,9 +2,7 @@ package launcher
 
 import (
 	"errors"
-	"strconv"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,12 +53,8 @@ func TestJobDeadlineFollowsFundedLeaseAcrossRenewalAndOutage(t *testing.T) {
 	if renewed.Annotations[deadlineAnnotation] != second.Format(time.RFC3339Nano) || renewed.Spec.ActiveDeadlineSeconds == nil {
 		t.Fatal("renewed lease did not reach Kubernetes")
 	}
-	if deadline := start.Add(time.Duration(*renewed.Spec.ActiveDeadlineSeconds) * time.Second); deadline.After(second) || second.Sub(deadline) >= time.Second {
-		t.Fatalf("Kubernetes deadline %v differs from funded %v", deadline, second)
-	}
-	renewedPod, err := kube.CoreV1().Pods(l.Config.Namespace).Get(t.Context(), pod.Name, metav1.GetOptions{})
-	if err != nil || renewedPod.Annotations[lifetimeAnnotation] != strconv.FormatInt(second.Unix(), 10) {
-		t.Fatalf("renewal did not reach container watchdogs: %v %v", renewedPod, err)
+	if deadline := start.Add(time.Duration(*renewed.Spec.ActiveDeadlineSeconds) * time.Second); deadline.After(second.Add(time.Minute)) || second.Add(time.Minute).Sub(deadline) >= time.Second {
+		t.Fatalf("Kubernetes deadline %v exceeds funded %v plus one slice", deadline, second)
 	}
 	control.fail = errors.New("controller offline")
 	if err := l.Sync(t.Context()); err == nil {
@@ -97,55 +91,56 @@ func TestJobDeadlineRequiresFundingAndRespectsExecutionAuthority(t *testing.T) {
 }
 
 func TestJobDeadlineAccountsForDelayedStartTime(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		l, kube, _, control := fixture()
-		launch := time.Now()
-		bound := launch.Add(time.Minute)
-		control.award.LeaseExpiresAt = bound
-		if _, err := l.LaunchOne(t.Context()); err != nil {
-			t.Fatal(err)
-		}
-		jobs := kube.BatchV1().Jobs(l.Config.Namespace)
-		job, err := jobs.Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		start := launch.Add(45 * time.Second)
-		// Kubernetes's relative backstop can lag; every entrypoint still receives the absolute bound.
-		if got := job.Spec.Template.Annotations[lifetimeAnnotation]; got != strconv.FormatInt(bound.Unix(), 10) {
-			t.Fatalf("delayed startup lost absolute bound: %s", got)
-		}
-		time.Sleep(45 * time.Second)
-		job.Status.StartTime = &metav1.Time{Time: start}
-		if _, err := jobs.UpdateStatus(t.Context(), job, metav1.UpdateOptions{}); err != nil {
-			t.Fatal(err)
-		}
-		control.fail = errors.New("controller offline")
-		if err := l.Sync(t.Context()); err == nil {
-			t.Fatal("controller outage hidden")
-		}
-		job, err = jobs.Get(t.Context(), job.Name, metav1.GetOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if deadline := start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second); !deadline.Equal(bound) {
-			t.Fatalf("first StartTime sync gives deadline %v, want %v", deadline, bound)
-		}
-	})
-}
-
-func TestJobDeadlineDoesNotRoundAnElapsedDurationUp(t *testing.T) {
-	now := time.Now()
-	for _, duration := range []time.Duration{-time.Second, 0, time.Second / 2} {
-		if got := jobDeadlineSeconds(now.Add(duration), now); got > 0 {
-			t.Fatalf("%v rounded to %d seconds", duration, got)
-		}
+	l, kube, _, control := fixture()
+	launch := time.Now()
+	bound := launch.Add(time.Minute)
+	control.award.LeaseExpiresAt = bound
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs := kube.BatchV1().Jobs(l.Config.Namespace)
+	job, err := jobs.Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := launch.Add(45 * time.Second)
+	activated, err := time.Parse(time.RFC3339Nano, job.Annotations[launchAnnotation])
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := bound.Add(time.Minute).Add(start.Sub(activated))
+	if deadline := start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second); deadline.After(latest) || latest.Sub(deadline) >= time.Second {
+		t.Fatalf("outage deadline %v, want at most %v", deadline, latest)
+	}
+	job.Status.StartTime = &metav1.Time{Time: start}
+	if _, err := jobs.UpdateStatus(t.Context(), job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	control.fail = errors.New("controller offline")
+	if err := l.Sync(t.Context()); err == nil {
+		t.Fatal("controller outage hidden")
+	}
+	job, err = jobs.Get(t.Context(), job.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second)
+	want := bound.Add(time.Minute)
+	if deadline.After(want) || want.Sub(deadline) >= time.Second {
+		t.Fatalf("deadline %v, want at most %v", deadline, want)
 	}
 }
 
-func TestJobDeadlinePreservesShortPositiveDurations(t *testing.T) {
+func TestJobDeadlineAddsOneSliceWithoutRoundingUp(t *testing.T) {
 	now := time.Now()
-	if got := jobDeadlineSeconds(now.Add(time.Second), now); got != 1 {
-		t.Fatalf("one second of execution became %d seconds", got)
+	for _, test := range []struct {
+		remaining time.Duration
+		seconds   int64
+	}{
+		{time.Second / 2, 60}, {time.Second, 61}, {1500 * time.Millisecond, 61}, {time.Minute, 120},
+	} {
+		if got := jobDeadlineSeconds(now.Add(test.remaining), now); got != test.seconds {
+			t.Fatalf("%v plus one slice became %d seconds, want %d", test.remaining, got, test.seconds)
+		}
 	}
 }

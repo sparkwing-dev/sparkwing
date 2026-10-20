@@ -17,12 +17,9 @@ import (
 // ConsoleRefund records a provider refund and its operator receipt in one transaction.
 func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, req controllerwire.OperatorRefund, key string) (CreditReversal, error) {
 	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (CreditReversal, error) {
-		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
-		if err != nil {
-			return CreditReversal{}, err
-		}
 		req.PaymentID, req.RefundID = strings.TrimSpace(req.PaymentID), strings.TrimSpace(req.RefundID)
-		req.Reason, err = consoleReason(req.Reason)
+		reason, err := consoleReason(req.Reason)
+		req.Reason = reason
 		if err != nil {
 			return CreditReversal{}, err
 		}
@@ -30,6 +27,16 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			return CreditReversal{}, authorityError(apierr.BadRequest, "payment, refund, positive amount and idempotency key are required")
 		}
 		mode, err := paymentModeTx(ctx, tx)
+		if err != nil {
+			return CreditReversal{}, err
+		}
+		if err := lockPaymentTx(ctx, tx, mode, req.PaymentID); err != nil {
+			return CreditReversal{}, err
+		}
+		if _, err := lockLedgerTx(ctx, tx, Team(a.Target.Team)); err != nil {
+			return CreditReversal{}, err
+		}
+		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
 			return CreditReversal{}, err
 		}
@@ -72,7 +79,28 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if !found || paid.Team != t.team {
 			return CreditReversal{}, authorityError(apierr.NotFound, "payment is unavailable in this team")
 		}
-		result, err := reversePaymentTx(ctx, tx, req.PaymentID, "refund:"+string(mode)+":"+req.RefundID, actor, req.AmountCents*MicroCreditsPerCent)
+		reference := paymentConsequenceReference(mode, "refund", req.RefundID)
+		_, existed, err := creditGrantByReferenceTx(ctx, tx, paid.Team, CreditGrantReversal, reference)
+		if err != nil {
+			return CreditReversal{}, err
+		}
+		if _, err := applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentRefund, Mode: mode, ObjectID: req.RefundID, PaymentID: req.PaymentID, AmountMinor: req.AmountCents, Status: CardRefundSucceeded}, actor); err != nil {
+			return CreditReversal{}, err
+		}
+		result := CreditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
+		grant, found, err := creditGrantByReferenceTx(ctx, tx, paid.Team, CreditGrantReversal, reference)
+		if err != nil {
+			return CreditReversal{}, err
+		}
+		if found {
+			result.Grant = &grant
+			result.Created = !existed
+		}
+		result.ReversedMicro, err = reversedMicroTx(ctx, tx, paid.Team, paid.Reference)
+		if err != nil {
+			return CreditReversal{}, err
+		}
+		result.BalanceMicro, err = creditBalanceTx(ctx, tx, paid.Team)
 		if err != nil {
 			return CreditReversal{}, err
 		}

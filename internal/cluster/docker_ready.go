@@ -54,9 +54,7 @@ func dockerClient(dockerHost string) (*http.Client, error) {
 	return &http.Client{Timeout: 2 * time.Second, Transport: transport}, nil
 }
 
-// safety: API failure must still stop the daemon within the shared administrative kill budget.
-func stopDocker(ctx context.Context, client *http.Client, stopDaemon func() error) (err error) {
-	defer func() { err = errors.Join(err, stopDaemon()) }()
+func stopDocker(ctx context.Context, client *http.Client) (err error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/json", nil)
 	if err != nil {
 		return err

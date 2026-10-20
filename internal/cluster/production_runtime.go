@@ -167,13 +167,7 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			services.Config.Lease.ExecutionEnded = func() {
 				kill, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				defer cancel()
-				err := stopDocker(kill, docker, func() error {
-					err := os.Mkdir(launcher.DockerStopPath, 0o700)
-					if errors.Is(err, os.ErrExist) {
-						return nil
-					}
-					return err
-				})
+				err := stopDocker(kill, docker)
 				if err != nil {
 					slog.Error("stop Cloud Docker execution", "err", err)
 				}

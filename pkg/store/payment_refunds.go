@@ -28,7 +28,12 @@ func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.P
 		return err
 	case payment != e.PaymentID || recorded != amount:
 		return authorityError(apierr.Conflict, "payment consequence changed its payment or amount")
-	case status == CardRefundSucceeded:
+	case status == CardRefundSucceeded || status == "failed" || status == "canceled":
+		if e.Status == CardRefundSucceeded || e.Status == "failed" || e.Status == "canceled" {
+			if status != e.Status {
+				return authorityError(apierr.Conflict, "payment consequence has conflicting terminal outcomes")
+			}
+		}
 		return nil
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE payment_refunds SET status = ?, updated_at = ? WHERE payment_mode = ? AND kind = ? AND refund_id = ?`,
@@ -38,7 +43,7 @@ func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.P
 
 // safety: pending payments retain their obligations; refused payments have no grant to reverse.
 // Each consequence has one reference, and all reversals together are capped by the original grant.
-func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, team Team, paymentIntent string) error {
+func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, team Team, paymentIntent string, attribution paymentAttribution) error {
 	mode, err := paymentModeTx(ctx, tx)
 	if err != nil {
 		return err
@@ -81,17 +86,15 @@ func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, team Team, pay
 		return err
 	}
 	for _, r := range consequences {
-		reference := "refund:" + string(mode) + ":" + r.id
-		switch r.kind {
-		case "dispute":
-			reference = r.id
-		case "warning":
-			if protected.Int64 == 1 {
-				continue
-			}
-			reference = "fraud_warning:" + r.id
+		if r.kind == "warning" && protected.Int64 == 1 {
+			continue
 		}
-		reversed, err := reversePaymentTx(ctx, tx, paymentIntent, reference, "payment_provider", r.amount)
+		reference := paymentConsequenceReference(mode, r.kind, r.id)
+		actor := "payment_provider"
+		if r.kind == "refund" && r.id == attribution.refund && attribution.actor != "" {
+			actor = attribution.actor
+		}
+		reversed, err := reversePaymentTx(ctx, tx, paymentIntent, reference, actor, r.amount)
 		if err != nil {
 			return err
 		}
@@ -111,15 +114,23 @@ func closeRefundedQueueTx(ctx context.Context, tx *storeTx, paymentIntent string
 	if err != nil || refunded == 0 {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE card_refunds SET status = ? WHERE payment_intent = ? AND status = ?
-	    AND amount_micro > 0 AND amount_micro <= ?`, CardRefundSucceeded, paymentIntent, CardRefundDue, refunded)
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE card_refunds SET status = ? WHERE payment_mode=? AND payment_intent = ? AND status = ?
+	    AND amount_micro > 0 AND amount_micro <= ?`, CardRefundSucceeded, mode, paymentIntent, CardRefundDue, refunded)
 	return err
 }
 
 func refundedMicroTx(ctx context.Context, tx *storeTx, paymentIntent string) (int64, error) {
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
 	var refunded int64
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount_micro), 0) FROM payment_refunds
-	    WHERE payment_intent = ? AND kind = 'refund' AND status = ?`, paymentIntent, CardRefundSucceeded).Scan(&refunded)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount_micro), 0) FROM payment_refunds
+	    WHERE payment_mode=? AND payment_intent = ? AND kind = 'refund' AND status = ?`, mode, paymentIntent, CardRefundSucceeded).Scan(&refunded)
 	return refunded, err
 }
 
@@ -138,4 +149,102 @@ func refundOutcomeTx(ctx context.Context, tx *storeTx, paymentIntent, refundID s
 		return "", err
 	}
 	return status, nil
+}
+
+func reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, payment string, attribution paymentAttribution) error {
+	var team Team
+	var amount int64
+	var refusalWarning string
+	err := tx.QueryRowContext(ctx, `SELECT team,amount_minor,warning_id FROM credit_checkouts WHERE payment_mode=? AND payment_id=?`, mode, payment).Scan(&team, &amount, &refusalWarning)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT kind,refund_id,status FROM payment_refunds WHERE payment_mode=? AND payment_intent=? ORDER BY kind,refund_id`, mode, payment)
+	if err != nil {
+		return err
+	}
+	type state struct{ kind, id, status string }
+	var states []state
+	for rows.Next() {
+		var item state
+		if err := rows.Scan(&item.kind, &item.id, &item.status); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		states = append(states, item)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, item := range states {
+		switch item.kind {
+		case "dispute":
+			if _, err := holdCreditFreezeTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), payment, "disputed", "", tx.now()); err != nil {
+				return err
+			}
+			if item.status == "canceled" {
+				if _, err := releaseCreditFreezesTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), false, false, "", "", tx.now()); err != nil {
+					return err
+				}
+			}
+		case "refund":
+			if item.status == CardRefundSucceeded || item.status == "failed" || item.status == "canceled" {
+				if _, err := applyCardRefundTx(ctx, tx, team, payment, item.id, item.status, `refund_id = ? AND status = 'pending'`, []any{item.id}, tx.now()); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	rows, err = tx.QueryContext(ctx, `SELECT warning_id FROM payment_warnings WHERE payment_mode=? AND payment_intent=? AND actionable=1 ORDER BY warning_id`, mode, payment)
+	if err != nil {
+		return err
+	}
+	var warnings []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		warnings = append(warnings, id)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, id := range warnings {
+		if id == refusalWarning {
+			refusalWarning = ""
+		}
+		if err := holdForWarningTx(ctx, tx, team, id, payment, tx.now()); err != nil {
+			return err
+		}
+		if err := recordPaymentConsequenceTx(ctx, tx, capability.PaymentEvent{Mode: mode, ObjectID: id, PaymentID: payment, AmountMinor: amount, Status: CardRefundSucceeded}, "warning"); err != nil {
+			return err
+		}
+	}
+	if refusalWarning != "" {
+		if err := holdForWarningTx(ctx, tx, team, refusalWarning, payment, tx.now()); err != nil {
+			return err
+		}
+	}
+	if err := applyPaymentConsequencesTx(ctx, tx, team, payment, attribution); err != nil {
+		return err
+	}
+	return closeRefundedQueueTx(ctx, tx, payment)
+}
+
+func paymentConsequenceReference(mode capability.PaymentMode, kind, id string) string {
+	if kind == "warning" {
+		kind = "fraud_warning"
+	}
+	return kind + ":" + string(mode) + ":" + id
+}
+
+type paymentAttribution struct {
+	refund string
+	actor  string
 }

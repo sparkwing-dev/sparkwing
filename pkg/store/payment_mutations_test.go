@@ -51,7 +51,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 					_, err := releaseCreditFreezesTx(ctx, tx, tenant.team, "dispute", false, false, "provider", "", now)
 					return err
 				case "warning":
-					_, err := recordPaymentWarningTx(ctx, tx, PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, now)
+					_, err := applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: event.Mode, ObjectID: "warning", PaymentID: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, "payment_provider")
 					return err
 				case "queued_refund":
 					changed, err := applyCardRefundTx(ctx, tx, tenant.team, event.PaymentID, "provider-refund", "failed", `attempts = ? AND status = 'due'`, []any{0}, now)

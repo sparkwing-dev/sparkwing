@@ -221,9 +221,13 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 }
 
 func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, refundID, status, when string, whenArgs []any, now time.Time) (bool, error) {
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return false, err
+	}
 	var attempts int64
-	args := append([]any{team, paymentIntent}, whenArgs...)
-	err := tx.QueryRowContext(ctx, `SELECT attempts FROM card_refunds WHERE team = ? AND payment_intent = ? AND `+when+tx.forUpdate(), args...).Scan(&attempts)
+	args := append([]any{mode, team, paymentIntent}, whenArgs...)
+	err = tx.QueryRowContext(ctx, `SELECT attempts FROM card_refunds WHERE payment_mode=? AND team = ? AND payment_intent = ? AND `+when+tx.forUpdate(), args...).Scan(&attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -242,8 +246,8 @@ func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentInten
 		delay := cardRefundRetryAfter[min(attempts, int64(len(cardRefundRetryAfter)-1))]
 		args = []any{refundID, CardRefundDue, now.Add(delay).UnixNano()}
 	}
-	args = append(append(args, string(team), paymentIntent), whenArgs...)
-	res, err := tx.ExecContext(ctx, `UPDATE card_refunds SET `+set+` WHERE team = ? AND payment_intent = ? AND `+when, args...)
+	args = append(append(args, mode, string(team), paymentIntent), whenArgs...)
+	res, err := tx.ExecContext(ctx, `UPDATE card_refunds SET `+set+` WHERE payment_mode=? AND team = ? AND payment_intent = ? AND `+when, args...)
 	if err != nil {
 		return false, err
 	}

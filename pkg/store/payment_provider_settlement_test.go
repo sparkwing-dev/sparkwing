@@ -63,7 +63,11 @@ func TestLostDisputeBeforeDelayedPaymentReversesGrant(t *testing.T) {
 				}
 				blobAccountingDiskStore(t, s)
 			}
-			if _, err := tenant.ReleaseCreditFreezes(t.Context(), dispute.ObjectID, "operator", "reviewed", now); err != nil {
+			freeze, err := tenant.CreditFreeze(t.Context())
+			if err != nil || len(freeze.Disputes) != 1 {
+				t.Fatalf("dispute hold=%+v: %v", freeze, err)
+			}
+			if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed", now); err != nil {
 				t.Fatal(err)
 			}
 			for _, event := range events {
@@ -181,6 +185,7 @@ func TestProviderPaymentAssociationCannotChangeProperty(t *testing.T) {
 		case 2:
 			changed.PaymentID += suffix
 			changed.ObjectID = changed.PaymentID
+			changed.EventID += suffix
 		case 3:
 			changed.Currency = "eur"
 		case 4:
@@ -189,6 +194,9 @@ func TestProviderPaymentAssociationCannotChangeProperty(t *testing.T) {
 			changed.AmountMinor = 0
 		}
 		got, err := s.settlePaymentFacts(t.Context(), changed)
+		if field%6 == 2 {
+			return err == nil && got.Team == "" && got.GrantID == "" && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
+		}
 		return err != nil && got == (PaymentSettlement{}) && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(740))}); err != nil {
@@ -311,8 +319,12 @@ func TestProviderSetupReplayCannotRestoreAnOlderCard(t *testing.T) {
 		t.Fatalf("replay replaced current card: %+v: %v", standing.Card, err)
 	}
 	stale := setup("stale", "stale-method", now.Unix()+1)
-	if _, err := s.settlePaymentFacts(t.Context(), stale); err != ErrStaleCardSetup {
+	if _, err := s.settlePaymentFacts(t.Context(), stale); err != nil {
 		t.Fatalf("stale setup: %v", err)
+	}
+	standing, err = tenant.SpendStanding(t.Context(), now)
+	if err != nil || standing.Card.PaymentMethod != "new-method" {
+		t.Fatalf("stale setup replaced current card: %+v: %v", standing.Card, err)
 	}
 }
 
@@ -369,7 +381,7 @@ func TestProviderPaymentModeSwitchCannotReassignAnExistingPayment(t *testing.T) 
 			e.AmountMinor, e.Currency, e.Actionable = 0, "", true
 		}
 		got, err := s.settlePaymentFacts(t.Context(), e)
-		if kind == capability.PaymentRefund || kind == capability.PaymentWarningEvent {
+		if kind == capability.PaymentRefund || kind == capability.PaymentWarningEvent || kind == capability.PaymentDisputeOpened {
 			if err != nil || got.Team != "" || got.GrantID != "" {
 				t.Fatalf("a live %s of a test payment = %+v, %v; want it kept against no live payment", kind, got, err)
 			}

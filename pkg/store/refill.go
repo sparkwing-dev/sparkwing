@@ -4,11 +4,13 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 const (
@@ -348,22 +350,44 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	return &r, nil
 }
 
-// RecordRefillIntent binds the payment intent the checkout service created for an open refill, before it is
-// confirmed, so the signed webhook that settles it always finds its refill.
+// RecordRefillIntent binds a provider payment to its refill and reconciles provider facts that arrived before binding.
 func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, paymentIntent string) error {
 	if paymentIntent == "" {
 		return fmt.Errorf("%w: a refill intent names its payment", ErrInvalidInput)
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
+		mode, err := paymentModeTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
+			return err
+		}
+		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND id = ? AND kind = ?
-		    AND closed_at IS NULL AND payment_id IN ('', ?)`, paymentIntent, string(team), refill, CheckoutKindRefill, paymentIntent)
+		    AND payment_mode=? AND (closed_at IS NULL OR payment_id=?) AND payment_id IN ('', ?)`, paymentIntent, string(team), refill, CheckoutKindRefill, mode, paymentIntent, paymentIntent)
 		if err != nil {
 			return err
 		}
 		if n, err := res.RowsAffected(); err != nil || n == 0 {
 			return cmp.Or(err, authorityError(apierr.Conflict, "refill is closed or bound to another payment"))
 		}
-		return nil
+		var encoded []byte
+		err = tx.QueryRowContext(ctx, `SELECT outcome_json FROM payment_states WHERE payment_mode=? AND payment_id=?`, mode, paymentIntent).Scan(&encoded)
+		if errors.Is(err, sql.ErrNoRows) {
+			return reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})
+		}
+		if err != nil {
+			return err
+		}
+		var event capability.PaymentEvent
+		if err := json.Unmarshal(encoded, &event); err != nil {
+			return err
+		}
+		_, err = applyPaymentStateTx(ctx, tx, event, "payment_provider")
+		return err
 	})
 }
 

@@ -153,21 +153,21 @@ Cloud work is metered in 60-second slices. Admission reserves the first slice
 from the balance; a job whose first slice the balance cannot cover is refused
 with "out of credits", naming the balance and what the slice needs. Each lease
 renewal charges the time used and reserves the next slice in the same
-transaction, and a metered lease never runs past the time already paid for, so
-a job whose runner loses the controller stops, and is settled, within what it
-paid. When the balance cannot pay the next slice, the renewal records
+transaction. A metered lease never runs past its funded horizon. When the
+balance cannot pay the next slice, the renewal records
 the stop and cancels the metered job in the same transaction. Placing a hold
 does the same for active metered work. The reason names the shortfall or hold
 and what resolves it. The owner and keeper stop execution when they receive that
 cancellation. The lease ends at the earlier of its paid horizon and a drain deadline at most one slice away. The host kills the SDK
-process tree at that bound, including commands that ignore cancellation.
-It also kills DinD containers and stops their daemon. SDK cancellation and
-cleanup share the time remaining under the bound. Every pod container, including
-source checkout and DinD, starts under the same absolute wall-clock deadline.
-Each container kills its private process namespace at that deadline without
-waiting for the SDK, controller or launcher. Only an acknowledged renewal can
-extend it. A delayed renewal projection can stop the pod early. Kubernetes Jobs
-also have a relative deadline and zero termination grace as a backstop.
+process tree at that bound, including commands that ignore cancellation, and
+asks DinD to kill its containers within the same stop budget. SDK cancellation
+and cleanup share the time remaining under the bound. The launcher tears down
+the pod at the funded bound while it is reachable. During a launcher outage,
+Kubernetes Jobs enforce the last funded duration plus at most one extra
+60-second slice, with zero termination grace. Their clock starts at Kubernetes
+StartTime, so the pod can also outlive the funded bound by its activation-to-start
+delay, which has no fixed upper bound. This extra runtime is never charged to
+the customer. Only an acknowledged renewal extends the funded deadline.
 Renewals cannot move a funding stop's deadline. There is no grace period,
 and lifting the hold or adding funds does not resume the stopped job.
 Final settlement refunds the unused part of the last slice.
@@ -187,7 +187,11 @@ is forgiven and is not collected after a top-up.
 A hold stops new Cloud admissions and records cancellation and a drain deadline
 for active metered work in the same transaction. Running Cloud work stops when
 the owner or keeper receives the cancellation, or when its funded lease expires
-if the controller connection is lost. Releasing the hold before the next
+if the controller connection is lost. During a launcher outage, Kubernetes
+allows at most one extra 60-second slice plus the delay between Job activation
+and Kubernetes StartTime beyond the last funded deadline. That start delay has
+no fixed upper bound. The customer is never charged for this extra runtime.
+Releasing the hold before the next
 heartbeat still leaves that cancellation in place. Start a new run after the
 hold is resolved. Unmetered jobs continue when their run's owner remains active.
 A hold has one of four causes:
@@ -229,15 +233,16 @@ controller classifies each event once:
   page, intent or refill this controller recorded, is local and settles. An
   unstamped refund, dispute or fraud warning whose payment is not recorded yet
   is local only when its payment intent carries this deployment's stamp. A
-  refund or warning is then kept against its payment, and a dispute whose payer
-  is not known yet fails so Stripe redelivers it.
+  refund, dispute or warning is then kept against its payment until its payer
+  becomes known.
 - An unstamped event that resolves to nothing is acknowledged. Card setup pages
   and Add funds payment intents settle through another object, so their other
   events are acknowledged too.
 
 Card setup and Add funds pages are correlated by their Checkout Session, which
 exists before payment. A completed card setup binds its verified setup intent to
-the page's team. A refill's payment intent carries `purpose=card_refill` and
+the page's team. If setup completion arrives first, the controller keeps its
+verified facts and saves the card when the page binds that intent. A refill's payment intent carries `purpose=card_refill` and
 settles on its own events. Unsigned and badly signed requests are refused.
 
 The controller is the only consumer of Stripe events, so it also answers stolen
@@ -270,3 +275,6 @@ payment has no granted credit to reverse. All reversals together take back at
 most the original grant. Only actual refunds count toward a queued refund
 already being paid. A replay of a signed event is recognized by what Stripe
 signed, not by the card details read from Stripe afterwards.
+All events and refund responses for one payment serialize before reading its
+payer or outcomes. A terminal refund outcome survives a later pending delivery,
+and a conflicting terminal outcome is refused.

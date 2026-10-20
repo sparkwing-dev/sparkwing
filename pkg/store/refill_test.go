@@ -691,7 +691,7 @@ func TestBoundRefillConfirmationRechecksEligibility(t *testing.T) {
 			case "hold":
 				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES ('operator:test','a','review','operator','owner',1)`)
 			case "blocked":
-				rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings (warning_id,payment_intent,fingerprint,actionable,created_at) VALUES ('warning','earlier','fp_1',1,1)`)
+				rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings (payment_mode,warning_id,payment_intent,fingerprint,actionable,created_at) VALUES ('test','warning','earlier','fp_1',1,1)`)
 			case "changed card":
 				rewriteSchemaExec(t, s.db, `UPDATE teams SET card_payment_method='replacement' WHERE name='a'`)
 			case "standing limit":

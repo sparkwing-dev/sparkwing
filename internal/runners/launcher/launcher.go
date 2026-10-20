@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"sync"
 	"time"
 
@@ -258,7 +257,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if remaining <= 0 {
 		return true, errors.Join(limits.ErrNoTime, l.teardown(ctx, created, r.Reservation))
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"resourceVersion": created.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: r.JobDeadline.Format(time.RFC3339Nano), launchAnnotation: launchedAt.Format(time.RFC3339Nano)}}, "spec": map[string]any{"suspend": false, "activeDeadlineSeconds": remaining, "template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{lifetimeAnnotation: strconv.FormatInt(r.JobDeadline.Unix(), 10)}}}}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"resourceVersion": created.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: r.JobDeadline.Format(time.RFC3339Nano), launchAnnotation: launchedAt.Format(time.RFC3339Nano)}}, "spec": map[string]any{"suspend": false, "activeDeadlineSeconds": remaining}})
 	if err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
@@ -268,7 +267,6 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	}
 	expected := created.DeepCopy()
 	expected.Spec.Suspend, expected.Spec.ActiveDeadlineSeconds = ptr(false), &remaining
-	expected.Spec.Template.Annotations[lifetimeAnnotation] = strconv.FormatInt(r.JobDeadline.Unix(), 10)
 	expected.Annotations[deadlineAnnotation] = r.JobDeadline.Format(time.RFC3339Nano)
 	expected.Annotations[launchAnnotation] = launchedAt.Format(time.RFC3339Nano)
 	if err := validateAdmittedJob(expected, activated); err != nil {

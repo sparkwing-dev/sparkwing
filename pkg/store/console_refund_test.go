@@ -45,6 +45,7 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 		t.Fatalf("audit failure returned refund: %+v %v", got, err)
 	}
 	rewriteSchemaCount(t, s.db, "credit_grants", 1)
+	rewriteSchemaCount(t, s.db, "payment_refunds", 0)
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_console_refund`)
 	got, err := c.ConsoleRefund(t.Context(), a, req, "request")
 	if err != nil || !got.Created || got.Team != "a" || got.Grant == nil || got.Grant.AmountMicro != -MicroCreditsPerCent || got.Grant.CreatedBy != "operator" {
@@ -58,7 +59,15 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 	if _, err := c.ConsoleRefund(t.Context(), a, req, "request"); err == nil {
 		t.Fatal("changed replay succeeded")
 	}
-	provider := capability.PaymentEvent{Mode: event.Mode, EventID: "refund-delivery", Kind: capability.PaymentRefund, PaymentID: event.PaymentID, ObjectID: req.RefundID, ChargeID: "ch_refund", Currency: "usd", AmountMinor: 1, Status: "succeeded", Created: 1000}
+	provider := capability.PaymentEvent{Mode: event.Mode, EventID: "refund-delivery", Kind: capability.PaymentRefund, PaymentID: event.PaymentID, ObjectID: req.RefundID, ChargeID: "ch_refund", Currency: "usd", AmountMinor: 1, Status: "pending", Created: 1000}
+	if _, err := s.settlePaymentFacts(t.Context(), provider); err != nil {
+		t.Fatal(err)
+	}
+	var refundStatus string
+	if err := s.db.QueryRow(`SELECT status FROM payment_refunds WHERE payment_mode=? AND kind='refund' AND refund_id=?`, event.Mode, req.RefundID).Scan(&refundStatus); err != nil || refundStatus != CardRefundSucceeded {
+		t.Fatalf("console response regressed after pending callback: %s, %v", refundStatus, err)
+	}
+	provider.EventID, provider.Status = "refund-terminal-delivery", CardRefundSucceeded
 	if _, err := s.settlePaymentFacts(t.Context(), provider); err != nil {
 		t.Fatal(err)
 	}

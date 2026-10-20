@@ -86,9 +86,13 @@ func refuseUnfundedTx(ctx context.Context, l *ledgerTx, required int64, runID, n
 // safety: a payment is refunded once in full, so a later reason to refund it, or a refund Stripe already
 // completed for its whole amount, queues nothing.
 func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment string, amountCents int64, reason string, now time.Time) error {
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return err
+	}
 	amount := max(amountCents, 0) * MicroCreditsPerCent
 	if _, err := tx.ExecContext(ctx, `UPDATE card_refunds SET amount_micro = ?
-	    WHERE team = ? AND payment_intent = ? AND amount_micro = 0`, amount, string(team), payment); err != nil {
+	    WHERE payment_mode=? AND team = ? AND payment_intent = ? AND amount_micro = 0`, amount, mode, string(team), payment); err != nil {
 		return err
 	}
 	refunded, err := refundedMicroTx(ctx, tx, payment)
@@ -98,9 +102,9 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 	if amount > 0 && refunded >= amount {
 		return closeRefundedQueueTx(ctx, tx, payment)
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO card_refunds (payment_intent, team, reason, amount_micro, created_at)
-	    VALUES (?, ?, ?, ?, ?) ON CONFLICT (team, payment_intent) DO NOTHING`,
-		payment, string(team), reason, amount, now.UnixNano())
+	res, err := tx.ExecContext(ctx, `INSERT INTO card_refunds (payment_mode,payment_intent, team, reason, amount_micro, created_at)
+	    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (payment_mode,team, payment_intent) DO NOTHING`,
+		mode, payment, string(team), reason, amount, now.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -116,10 +120,14 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 // A same-payment warning preserves protected credit under a hold; other actionable
 // warnings refuse the payment. Non-actionable warnings do not affect settlement.
 func paymentWarningTx(ctx context.Context, tx *storeTx, paymentIntent, fingerprint string) (string, error) {
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return "", err
+	}
 	var id string
-	err := tx.QueryRowContext(ctx, `SELECT warning_id FROM payment_warnings
-	  WHERE actionable = 1 AND (payment_intent = ? OR (fingerprint != '' AND fingerprint = ?))
-	  ORDER BY CASE WHEN payment_intent = ? THEN 0 ELSE 1 END, created_at LIMIT 1`, paymentIntent, fingerprint, paymentIntent).Scan(&id)
+	err = tx.QueryRowContext(ctx, `SELECT warning_id FROM payment_warnings
+	  WHERE actionable = 1 AND ((payment_mode=? AND payment_intent = ?) OR (fingerprint != '' AND fingerprint = ?))
+	  ORDER BY CASE WHEN payment_mode=? AND payment_intent = ? THEN 0 ELSE 1 END, created_at LIMIT 1`, mode, paymentIntent, fingerprint, mode, paymentIntent).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -128,7 +136,11 @@ func paymentWarningTx(ctx context.Context, tx *storeTx, paymentIntent, fingerpri
 
 func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paymentIntent string, now time.Time) error {
 	// safety: a length prefix prevents colons in team or provider IDs from colliding.
-	freezeID := "early_fraud_warning:" + strconv.Itoa(len(team)) + ":" + string(team) + ":" + warning
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	freezeID := "early_fraud_warning:" + string(mode) + ":" + strconv.Itoa(len(team)) + ":" + string(team) + ":" + warning
 	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return err
 	}

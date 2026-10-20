@@ -44,7 +44,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 					t.Fatal(err)
 				}
 				engineSQL(t, st, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('b','refund-paid','paid',1000000,'pi_refund','provider',1)`)
-				engineSQL(t, st, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,payment_id,currency,amount_minor,amount_micro,opened_at,expires_at,paid_at,closed_at,grant_id) VALUES ('refund-checkout','b','cs_refund','test','pi_refund','usd',100,1000000,1,2,1,1,'refund-paid')`)
+				engineSQL(t, st, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,payment_id,currency,amount_minor,amount_micro,opened_at,expires_at,paid_at,closed_at,grant_id,liability_shift) VALUES ('refund-checkout','b','cs_refund','test','pi_refund','usd',100,1000000,1,2,1,1,'refund-paid',0)`)
 			}
 			engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at,waitlisted_at) VALUES ('operator','operator@example.test',1,1,0),('victim','victim@example.test',1,1,0),('waiting','waiting@example.test',1,1,1)`)
 			engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','operator','reader',1)`)

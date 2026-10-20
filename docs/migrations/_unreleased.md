@@ -9,7 +9,7 @@ opt in to automatic refill. See [Cloud billing](../billing.md).
 
 No data migration is needed: the staging and production stores had no open
 card charges, no negative balances and no saved cards at the cut. The store
-schema baseline moves to version 13, which drops `card_charges`,
+schema baseline moves to version 14, which drops `card_charges`,
 `card_attempts` and `team_spend_days` and adds the refill settings to `teams` and the immutable
 `credit_checkouts.liability_shift` payment snapshot;
 recreate stores at an earlier version. Saved cards, card pins, fraud warnings
@@ -22,6 +22,11 @@ stores the authentication result and its protection decision at settlement.
 `payment_refunds.kind` distinguishes refunds, lost disputes and warning
 obligations in the same durable settlement path. Pending obligations are
 consumed atomically when their delayed payment grants credit.
+`payment_states` and `payment_setups` retain verified outcomes that arrive
+before their payment or setup association. All events for one payment use
+the same provider-mode and payment lock, and terminal refund outcomes never
+regress to pending. Warning identities and refund queues also record provider
+mode.
 
 Clients reading these fields must stop:
 
@@ -42,13 +47,20 @@ Clients reading these fields must stop:
   `exhausted_at`.
 
 A Cloud job whose balance cannot pay its next 60-second slice now stops at that
-lease renewal, with no grace period: the renewal cancels the run with a reason
-naming the shortfall and its remedy. The job's lease ends at the earlier of
+lease renewal, with no grace period: the renewal cancels the metered job with a
+reason naming the shortfall and its remedy. If the stopped unit owns the run,
+the whole run stops. Otherwise its owner continues orchestrating independent
+unmetered jobs. The job's lease ends at the earlier of
 its funded horizon and a drain deadline at most one slice away. A held team's
 running Cloud work stops the same way, with the hold named. Retained storage no
-longer takes the balance below zero. The checkout service drops its pay-now page
-and charge route and adds `POST /internal/refill`, which charges the amount,
-card and receipt address the controller fixed when the refill opened; deploy
+longer takes the balance below zero. Kubernetes is the backstop during a launcher
+outage: a pod can run up to one extra slice plus its start delay beyond its
+funded deadline. This overage is never charged.
+The checkout service drops its pay-now page and charge route. The
+`POST /internal/refill` operation creates an unconfirmed intent using the amount,
+card and receipt address the controller fixed when the refill opened. Separate
+`/internal/refill/reconcile`, `/internal/refill/confirm` and
+`/internal/refill/cancel` operations resolve it after checking eligibility; deploy
 the matching sparkwing-platform release with this controller.
 
 Go callers of `pkg/store` lose `NoCreditsHold`, `EventKindCreditsExhausted`,

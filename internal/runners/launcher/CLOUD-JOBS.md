@@ -55,14 +55,12 @@ and the probe commands are CEL literals.
   (runner image). Capacity requests and probes run one runner-image container,
   and each probe container runs its pinned listener, witness or measurement
   command.
-- Environment names are `HOME`, `DOCKER_HOST`, the EKS region values and
-  `SPARKWING_FUNDED_DEADLINE`. Only the funded deadline uses `valueFrom`, bound
-  to the pod's `sparkwing.dev/funded-unix` annotation. No `envFrom` is allowed.
+- Environment names are `HOME`, `DOCKER_HOST` and the EKS region values.
+  No `valueFrom` or `envFrom` is allowed.
   Capacity requests and probes carry none. AWS role,
   web-identity and container-credential variables are refused, as is any
   projected token volume.
-- Volumes are only the Job's `scratch` emptyDir, its own bootstrap Secret and
-  a read-only downward projection of its funded deadline.
+- Volumes are only the Job's `scratch` emptyDir and its own bootstrap Secret.
   No hostPath, hostNetwork, hostPID, hostIPC or hostPort. No container in the
   namespace runs privileged.
 - Job Pods set `hostUsers: false` and run every container as UID 0 of the
@@ -85,7 +83,7 @@ and the probe commands are CEL literals.
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays
   unpinned until that dependency moves.
-- Every Job container runs the same lifetime wrapper. `fetch-source` and
+- `fetch-source` and
   `run-node` dispatch `sparkwing-runner` with the launcher's fixed flag grammar.
   Only the controller, run, generation and job values vary. `fetch-source`
   cannot become a sidecar.
@@ -389,30 +387,23 @@ carries the exact award LeaseRef, NodeUID and ReservationID. The launcher verifi
 all three, proves Job absence again, and requires container vacancy and matching
 node ownership before release. Parent credential lifetime cannot keep an expired
 unit's vacant reservation or authorize release of another award's reservation.
-The launcher persists the activation time and committed lease deadline. At
-activation it writes that deadline, as a wall-clock UNIX time, into the suspended
-Job template's `sparkwing.dev/funded-unix` annotation. Every container receives
-it through the downward API, both as its initial environment value and as a
-read-only file. Only the launcher can change the pod annotation. It publishes
-acknowledged renewals to pods owned by that exact Job UID. Delayed projection
-can stop work early, but cannot extend the last acknowledged funded bound.
+The launcher persists the activation time and committed funded lease deadline.
+The keeper stops its host process tree and requests Docker container kills
+within a shared two-second budget when its lease expires. A failed Docker API
+request leaves Kubernetes deletion as the backstop. The native Docker sidecar
+terminates when the workload ends or Kubernetes deletes the Pod.
+While available, the launcher deletes Jobs at that deadline and applies acknowledged
+renewals to Kubernetes. ActiveDeadlineSeconds provides an independent backstop:
+remaining funded time plus one 60-second billing slice, rounded down to seconds.
+The launcher corrects that relative duration against Job StartTime on sync,
+before contacting the controller. Pod termination grace is zero.
 
-Each container's PID 1 shell checks the deadline before starting its entrypoint
-and while it runs. Expiry kills every process in that container's private PID
-namespace, including cleanup and detached children. This covers Docker startup,
-source checkout and runner execution even when the launcher and controller are
-unreachable. The Docker wrapper kills its namespace immediately, including the
-nested customer containers, shims and daemon. It also does this when the keeper's
-shared stop marker appears. A restarted
-sidecar exits immediately if the marker exists or its deadline has passed.
-Admission forbids shared and host PID namespaces, so these kills cannot reach
-another container or Pod.
-
-ActiveDeadlineSeconds is a relative backstop, corrected against StartTime on
-the first sync that observes it, before contacting the controller. It does not
-establish the absolute lifetime because Kubernetes can start that clock late.
-Subsecond durations round down and termination grace is zero. Real-cluster
-acceptance still verifies Docker shutdown and kubelet reclamation.
+During a launcher outage, Kubernetes can allow up to one extra slice plus the
+Job's start delay beyond the last funded deadline. The start delay is the time
+between activation and Kubernetes StartTime, and has no fixed upper bound.
+That extra runtime is never charged to the customer. Kubernetes enforcement and
+node reclamation still depend on a functioning kubelet. Real-cluster acceptance
+verifies Docker shutdown and kubelet reclamation.
 
 The resulting Cloud execution deadline must remain bounded. Exchange and host dispatch run under that deadline and any earlier caller
 deadline. Expired awards fail before transport construction. Expiry during

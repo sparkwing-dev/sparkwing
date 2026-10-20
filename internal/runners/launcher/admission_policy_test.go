@@ -193,7 +193,6 @@ func TestAdmissionPolicyOnAPIServer(t *testing.T) {
 		refused(t, err, "template annotations")
 		resumed := current.DeepCopy()
 		resumed.Spec.Suspend = ptr(false)
-		resumed.Spec.Template.Annotations[lifetimeAnnotation] = "2000000000"
 		_, err = e.as(t, testIntruder).BatchV1().Jobs("cloud").Update(ctx, resumed, metav1.UpdateOptions{})
 		refused(t, err, "only the launcher changes a Job")
 		widened := current.DeepCopy()

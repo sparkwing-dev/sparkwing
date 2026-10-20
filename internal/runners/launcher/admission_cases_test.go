@@ -329,8 +329,6 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 		return j
 	}
 	cases := []admissionCase{
-		{name: "launcher_renews_lifetime", user: testLauncher, old: created, object: with(func(p *corev1.Pod) { p.Annotations[lifetimeAnnotation] = "2000000000" })},
-		{name: "other_renews_lifetime", user: testIntruder, old: created, object: with(func(p *corev1.Pod) { p.Annotations[lifetimeAnnotation] = "2000000000" }), reason: "funded deadline"},
 		{name: "vpc_annotation", user: testIntruder, old: created, object: with(func(p *corev1.Pod) { p.Annotations["vpc.amazonaws.com/pod-eni"] = "[]" })},
 		{name: "finalizer_removal", user: testJobController, old: created, object: with(func(p *corev1.Pod) { p.Finalizers = nil })},
 		{name: "orphaned_by_collector", user: testCollector, old: created, object: with(func(p *corev1.Pod) { p.OwnerReferences = nil })},
@@ -342,7 +340,6 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 		}), reason: "ephemeral containers"},
 		{name: "launcher_activates_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) {
 			j.Spec.Suspend = ptr(false)
-			j.Spec.Template.Annotations[lifetimeAnnotation] = "2000000000"
 		})},
 		{name: "collector_marks_job", user: testCollector, old: job, object: jobWith(func(j *batchv1.Job) { j.Finalizers = append(j.Finalizers, "foregroundDeletion") })},
 		{name: "launcher_annotates_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Annotations[rejectedAnnotation] = rejectedPod })},
