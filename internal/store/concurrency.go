@@ -194,6 +194,21 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 }
 
 func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req AcquireSlotRequest, fence *capacityFence, deadline time.Time) (AcquireSlotResponse, error) {
+	if fence != nil {
+		if err := prepareCapacityAcquisitionTx(ctx, tx, t.team, req.Key, *fence); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		expires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, tx.now().Add(DefaultConcurrencyLease).UnixNano())
+		if err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		deadline = time.Unix(0, expires)
+		req.Lease = DefaultConcurrencyLease
+		req, err = sealedCapacityRequestTx(ctx, tx, t.team, req)
+		if err != nil {
+			return AcquireSlotResponse{}, err
+		}
+	}
 	if req.Key == "" {
 		return AcquireSlotResponse{}, errors.New("concurrency: empty key")
 	}
@@ -224,12 +239,6 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	}
 
 	var err error
-
-	if fence != nil {
-		if err := prepareCapacityAcquisitionTx(ctx, tx, t.team, req.Key, *fence); err != nil {
-			return AcquireSlotResponse{}, err
-		}
-	}
 
 	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, req.Key); err != nil {
 		return AcquireSlotResponse{}, err

@@ -932,8 +932,13 @@ The private `capacity/adopt`, `capacity/acquire` and `capacity/resolve` POST
 endpoints admit pending jobs with the trigger owner's award credential.
 They require `trigger.host`, the live `runOfTrigger` binding and the selected
 run. Node, plan, root and foreign-team credentials cannot use them. The body
-carries the group and captured work generation. The controller derives the
-actor from the bearer and calls C1's existing capacity operations. Terminal
+carries the selected group key and captured work generation. The controller derives
+the actor and holder identity from the bearer and work binding. Capacity, cost,
+policy, cancellation timeout and lease are absent from the request. C1 reads the
+accepted concurrency declaration and unit lease bound inside admission's
+transaction. An undeclared group or an altered declaration is refused before
+any semaphore mutation. Claim and owner admission use the same declaration
+reader and existing capacity operations. Terminal
 transitions release capacity in the same transaction. There is no separate
 remote semaphore or release operation.
 

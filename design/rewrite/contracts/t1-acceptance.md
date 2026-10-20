@@ -480,4 +480,10 @@ the real controller and store with two pending jobs. The second queues until
 the first reaches a terminal transition, then adopts its promoted holder.
 `TestPrivateCapacityRejectsForeignTeamAndWrongUnit` refuses node, root and
 foreign-team credentials on every private capacity operation.
+`TestPrivateCapacityOwnerCannotChangeAcceptedDeclaration` presents a valid owner
+award with an undeclared group, altered capacity or cost, `cancel_others`, or an
+injected lease. Both the controller and direct owner admission refuse altered
+declarations. The other run's holder and cancellation state stay unchanged.
+`TestPrivateCapacityUsesSealedDeclarationAndOwnerDeadline` checks that a pending
+job receives its accepted capacity and cost with a lease bounded by its owner.
 The route inventory is checked by `TestFinalCredentialRouteDeclarations`.

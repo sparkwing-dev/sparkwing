@@ -20,31 +20,14 @@ func declaredSlotTx(ctx context.Context, tx *storeTx, c capability.Capability, t
 		!(b.Kind == capability.BindingNode && c.Unit == capability.UnitNode || b.Kind == capability.BindingTrigger && c.Unit == capability.UnitTrigger || b.Kind == capability.BindingRun && c.Unit == capability.UnitPlan) {
 		return runspec.Concurrency{}, bindingRefusal()
 	}
-	scope, identity, name, ok := runspec.ParseConcurrencyKey(target.SlotKey)
-	if !ok || scope == "run" && identity != b.RunID || scope == "box" {
-		return runspec.Concurrency{}, bindingRefusal()
-	}
-	run, err := readRunTx(ctx, tx, Team(c.Team), b.RunID)
+	group, err := declaredCapacityGroupTx(ctx, tx, Team(c.Team), b.RunID, b.NodeID, target.SlotKey)
 	if err != nil {
 		return runspec.Concurrency{}, err
 	}
-	if run.Spec == nil {
+	if group.Scope == "box" {
 		return runspec.Concurrency{}, bindingRefusal()
 	}
-	groups := run.Spec.Resolved.Settings.Concurrency
-	if b.NodeID != "" {
-		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: b.RunID, NodeID: b.NodeID})
-		if err != nil {
-			return runspec.Concurrency{}, err
-		}
-		groups = row.Execution.Concurrency
-	}
-	for _, group := range groups {
-		if group.Group == name && group.Scope == scope {
-			return group, nil
-		}
-	}
-	return runspec.Concurrency{}, bindingRefusal()
+	return group, nil
 }
 
 func bindingSlotTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
@@ -209,17 +192,10 @@ func (t *Tenant) AcquireAuthorizedSlot(ctx context.Context, a capability.Authori
 		if req.RunID != current.Binding.RunID || req.NodeID != current.Binding.NodeID || req.HolderID == "" || req.HolderID != a.Target.SlotHolderID || req.CacheKeyHash != "" || req.CacheTTL != 0 {
 			return AcquireSlotResponse{}, bindingRefusal()
 		}
-		group, err := declaredSlotTx(ctx, tx, current.Principal.Capability, a.Target)
+		var err error
+		req, err = sealedCapacityRequestTx(ctx, tx, t.team, req)
 		if err != nil {
 			return AcquireSlotResponse{}, err
-		}
-		if req.Capacity != 0 && req.Capacity != group.Capacity || req.Cost != 0 && req.Cost != group.Cost || req.Policy != "" && req.Policy != group.OnLimit {
-			return AcquireSlotResponse{}, bindingRefusal()
-		}
-		req.Capacity, req.Cost, req.Policy = group.Capacity, group.Cost, group.OnLimit
-		req.CancelTimeout = 0
-		if group.CancelTimeoutMS != nil {
-			req.CancelTimeout = time.Duration(*group.CancelTimeoutMS) * time.Millisecond
 		}
 		response, err := t.acquireConcurrencySlotTx(ctx, tx, req, nil, until)
 		if err != nil {

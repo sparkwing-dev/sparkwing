@@ -386,7 +386,7 @@ func TestControllerReconcileRenewsOnlyContinuousCapacity(t *testing.T) {
 func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(83, 117))
 	for range 12 {
-		tenant, request, _ := planFixture(t, runspec.DispatchController)
+		tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "retry", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}})
 		accepted, err := tenant.AcceptPlan(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)

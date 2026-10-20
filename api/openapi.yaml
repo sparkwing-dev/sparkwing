@@ -4326,19 +4326,12 @@ components:
     internal.localhostwire.LocalCapacityRequest:
       additionalProperties: true
       properties:
-        acquire:
-          anyOf:
-            - $ref: '#/components/schemas/internal.store.AcquireSlotRequest'
-            - type: "null"
         binding:
           $ref: '#/components/schemas/internal.store.CapacityBinding'
-        holder_id:
-          type: string
         key:
           type: string
       required:
         - key
-        - holder_id
         - binding
       type: object
       x-sparkwing-go-type: localhostwire.LocalCapacityRequest
@@ -6121,48 +6114,6 @@ components:
         - BodyHash
       type: object
       x-sparkwing-go-type: store.AcceptedExpansionRow
-    internal.store.AcquireSlotRequest:
-      additionalProperties: true
-      properties:
-        BypassRead:
-          type: boolean
-        CacheKeyHash:
-          type: string
-        CacheTTL:
-          type: integer
-        CancelTimeout:
-          type: integer
-        Capacity:
-          type: integer
-        Cost:
-          type: integer
-        HolderID:
-          type: string
-        Key:
-          type: string
-        Lease:
-          type: integer
-        NodeID:
-          type: string
-        Policy:
-          type: string
-        RunID:
-          type: string
-      required:
-        - Key
-        - HolderID
-        - RunID
-        - NodeID
-        - Capacity
-        - Policy
-        - CacheKeyHash
-        - CacheTTL
-        - CancelTimeout
-        - Lease
-        - BypassRead
-        - Cost
-      type: object
-      x-sparkwing-go-type: store.AcquireSlotRequest
     internal.store.AcquireSlotResponse:
       additionalProperties: true
       properties:

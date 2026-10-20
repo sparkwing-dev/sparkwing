@@ -518,20 +518,19 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 					response = store.Applied{}
 				case "POST /api/v1/runs/run/local-host/capacity/adopt", "POST /api/v1/runs/run/local-host/capacity/acquire":
 					var request localhostwire.LocalCapacityRequest
-					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					decoder := json.NewDecoder(r.Body)
+					decoder.DisallowUnknownFields()
+					if err := decoder.Decode(&request); err != nil {
 						return nil, err
 					}
-					if request.Key != "run:3:run:serial" || request.HolderID != "run/job" || request.Binding != (store.CapacityBinding{RunID: unit.RunID, NodeID: "job", Generation: row.Generation}) {
+					if request.Key != "run:3:run:serial" || request.Binding != (store.CapacityBinding{RunID: unit.RunID, NodeID: "job", Generation: row.Generation}) {
 						return nil, fmt.Errorf("capacity changed its job or group: %+v", request)
 					}
 					capacity.Lock()
 					defer capacity.Unlock()
 					if strings.HasSuffix(r.URL.Path, "/acquire") {
-						if request.Acquire == nil || request.Acquire.Capacity != 1 || request.Acquire.Cost != 1 || request.Acquire.Policy != "queue" || request.Acquire.RunID != unit.RunID || request.Acquire.NodeID != "job" {
-							return nil, fmt.Errorf("capacity changed its declaration: %+v", request)
-						}
-						held = &store.CapacityHolder{Key: request.Key, ID: request.HolderID, Binding: request.Binding, Cost: 1, LeaseExpiresAt: unit.LeaseExpiresAt}
-						response = store.AcquireSlotResponse{Kind: store.AcquireGranted, HolderID: request.HolderID, LeaseExpiresAt: unit.LeaseExpiresAt}
+						held = &store.CapacityHolder{Key: request.Key, ID: "run/job", Binding: request.Binding, Cost: 1, LeaseExpiresAt: unit.LeaseExpiresAt}
+						response = store.AcquireSlotResponse{Kind: store.AcquireGranted, HolderID: held.ID, LeaseExpiresAt: unit.LeaseExpiresAt}
 					} else if held == nil {
 						response = store.CapacityAdoption{Kind: store.AcquireAgain}
 					} else {

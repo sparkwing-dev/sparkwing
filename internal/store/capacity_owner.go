@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -100,33 +99,12 @@ func capacityQueueDeadlineTx(ctx context.Context, tx *storeTx, team Team, waiter
 	if !ok {
 		return time.Time{}, nil
 	}
-	var groups []runspec.Concurrency
-	if waiter.NodeID != "" {
-		var raw []byte
-		if err := tx.QueryRowContext(ctx, `SELECT execution_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, waiter.RunID, waiter.NodeID).Scan(&raw); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return time.Time{}, nil
-			}
-			return time.Time{}, err
-		}
-		var execution runspec.JobExecutionSettings
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &execution); err != nil {
-				return time.Time{}, err
-			}
-		}
-		groups = execution.Concurrency
-	} else {
-		run, err := readRunTx(ctx, tx, team, waiter.RunID)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				return time.Time{}, nil
-			}
-			return time.Time{}, err
-		}
-		if run.Spec != nil {
-			groups = run.Spec.Resolved.Settings.Concurrency
-		}
+	groups, err := capacityGroupsTx(ctx, tx, team, waiter.RunID, waiter.NodeID)
+	if errors.Is(err, ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
 	}
 	for _, group := range groups {
 		if group.Group == name && group.Scope == scope && group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 {
