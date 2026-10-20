@@ -223,7 +223,10 @@ export declare class Job<T = unknown> {
   needsGenerated(...generators: readonly Generator<unknown>[]): this;
   references(...refs: readonly PipelineRef<unknown>[]): this;
   withArgs(...args: readonly ArgSpec[]): this;
+  /** Declare child pipelines in the parent repository. Calls append targets. */
   startsChildren(...pipelines: readonly string[]): this;
+  /** Declare child pipelines using a canonical repository key, such as gh:123. */
+  startsChildrenIn(repository: string, ...pipelines: readonly string[]): this;
   step<U = unknown>(id: string, body: Body<U>): Step<U>;
   groupSteps(id: string, ...steps: readonly Step<unknown>[]): StepGroup;
   failurePolicy(policy: FailurePolicy): this;

@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -140,11 +141,11 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 			return err
 		}
 		for _, name := range []string{"ci-token", "deploy-token", "team-token"} {
-			pipeline, err := secretPipeline(row.Request)
+			selection, err := runSecretSelection(row.Request)
 			if err != nil {
 				return err
 			}
-			if _, _, err := selectedSecretTx(t.Context(), tx, tenant.team, name, pipeline, true); err == nil {
+			if _, _, err := selectedSecretTx(t.Context(), tx, tenant.team, name, selection); err == nil {
 				out.Secrets = append(out.Secrets, name)
 			} else if !errors.Is(err, ErrNotFound) {
 				return err
@@ -320,12 +321,14 @@ func admitReferenceChild(t *testing.T, s *Store, parent runspec.Provenance, pare
 		t.Fatal(err)
 	}
 	s.testOnlyExec(t, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_subject_kind,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','host','execute',?,'account','owner',1,'r30',30)`, body, []byte(`[]`))
+	s.testOnlyExec(t, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, []byte(`{"admission_key":"capability:owner","admission_subject":{"kind":"account","id":"owner"}}`))
 	s.testOnlyExec(t, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
-	s.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,started_at,lease_expires_at) VALUES ('a','run','job','running',?,?,'runner','child-parent',2,3,?,?)`, []byte(`{"id":"job","children":["deploy"]}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(time.Hour).UnixNano())
+	s.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,started_at,lease_expires_at) VALUES ('a','run','job','running',?,?,'runner','child-parent',2,3,?,?)`, []byte(`{"id":"job","children":[{"pipeline":"deploy"}]}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(time.Hour).UnixNano())
 	s.testOnlyExec(t, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','run','job',3,2,'runner','child-parent','runner','runner','remote',?)`, now.Add(-time.Minute).UnixNano())
 	expiry := now.Add(time.Hour)
 	claim := authorityRoot("child-parent", "a")
 	claim.Grants = []capability.Grant{capability.ChildrenStart}
+	claim.Children = []nodeproto.ChildPipeline{{Pipeline: "deploy", Repository: "gh:1"}, {Pipeline: "deploy", Repository: "gh:2"}}
 	claim.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}
 	claim.ExpiresAt = &expiry
 	authorityPersist(t, s, claim)

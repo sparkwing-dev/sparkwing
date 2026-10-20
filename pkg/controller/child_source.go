@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -34,8 +35,8 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 		return engineLookupError(err)
 	}
 	from := parent.Request.Request
-	if !capability.RepositoryAllowed(a.Principal.Capability.Repositories, capability.RepositoryIdentity{Key: string(request.Git.Repository.Key), Display: request.Git.Repository.Display}) {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's repository authorization")
+	if !a.Principal.Capability.AllowsChild(request.Pipeline, string(request.Git.Repository.Key)) {
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's declared children")
 	}
 	sameRepository := request.Git.Repository.Key == from.Git.Repository.Key
 	if sameRepository && request.Source.Location != from.Source.Location {
@@ -140,4 +141,24 @@ func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, ho
 
 func (*intakeRevisionAccess) BundleURL(context.Context, string) (string, error) {
 	return "", errors.New("child revision lookup cannot read bundles")
+}
+
+// CoveredChildRepositories confirms App coverage independently of event subscriptions.
+func (s *Server) CoveredChildRepositories(ctx context.Context, installations []store.GitHubAppInstallation) ([]string, error) {
+	if s.githubApp == nil {
+		return nil, nil
+	}
+	var keys []string
+	for _, in := range installations {
+		repositories, err := s.githubApp.client.InstallationRepositories(ctx, in.InstallationID)
+		if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
+			return nil, err
+		}
+		for _, repo := range repositories {
+			if repo.ID > 0 && repo.Owner.ID == in.AccountID {
+				keys = append(keys, fmt.Sprintf("gh:%d", repo.ID))
+			}
+		}
+	}
+	return keys, nil
 }

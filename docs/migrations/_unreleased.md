@@ -2870,18 +2870,26 @@ upgrading:
   must name the repository ID.
 - **Child runs.** A job may start only the child pipelines its plan declares,
   with Go `JobNode.StartsChildren("deploy", ...)` or TypeScript
-  `job.startsChildren("deploy")`; an undeclared child answers `403`. A child at
+  `job.startsChildren("deploy")`. For another repository, use Go
+  `StartsChildrenIn("gh:123", "deploy")` or TypeScript
+  `startsChildrenIn("gh:123", "deploy")`. Both methods append declarations.
+  The repository argument is its canonical key, such as `gh:123` or
+  `git:gitlab.com/acme/repo`. An undeclared child answers `403`. A child at
   its parent's exact revision inherits the parent's identity, including its
   `pipeline` claim and pipeline-scoped secrets. Any other child is asserted
   under its own pipeline name and reads only team-wide shared secrets, like a
   GitHub reusable workflow called without `secrets: inherit`. Pairing another
   ref or code commit with an explicit commit in the inherited repository
-  answers `403`. An explicit child repository must be authorized by the parent's
-  live claim and always runs as asserted. Children nest at most 10 levels deep counting the root and one
+  answers `403`. Award issuance seals declared pipeline/repository pairs the
+  team is authorized to run, separately from the claim's own source and data
+  scope. Team repository registration or live App installation coverage
+  authorizes an explicit repository. A child in another repository always
+  runs as asserted. Children nest at most 10 levels deep counting the root and one
   root starts at most 50 children, retries excluded; past either bound intake
   answers `409` with `limit` `max_child_depth` or `max_children_per_root`. A
-  child spends the hourly, flood and queue-depth budgets of whoever created its
-  root.
+  child spends the admission budget recorded on its parent. App and schedule
+  roots use the team flood bucket. A retry charges the retrier and its
+  descendants inherit that charge, while its source provenance stays unchanged.
 - **Release subscriptions.** `release_published` and `release_prereleased`
   require the new `release_tags` patterns on
   `PUT /api/v1/team/github-app/triggers`; a release subscription without them

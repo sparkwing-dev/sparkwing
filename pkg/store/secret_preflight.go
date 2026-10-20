@@ -19,9 +19,10 @@ const EventKindSecretPreflightRefused = "secret_preflight_refused"
 // member finds why, because it is answered to the planning claim; the reason
 // and owners of each are in [SecretPreflightError.Detail].
 type SecretPreflightError struct {
-	RunID    string
-	Pipeline string
-	problems []secretProblem
+	RunID      string
+	Pipeline   string
+	problems   []secretProblem
+	sharedOnly bool
 }
 
 type secretProblem struct {
@@ -56,6 +57,8 @@ func (e *SecretPreflightError) Detail() string {
 	for _, p := range e.problems {
 		set := fmt.Sprintf("sparkwing secrets set --secret %s --file <path> --profile <profile>", p.Name)
 		switch {
+		case e.sharedOnly:
+			fmt.Fprintf(&b, "\n- %s is unavailable: this run can read only shared team-wide secrets.\n  Fix: %s --shared", p.Name, set)
 		case p.Unshared:
 			fmt.Fprintf(&b, "\n- %s is set team-wide but not shared with runs, so only an admin can read it."+
 				"\n  Fix: %s --shared\n   or: %s --pipeline %s", p.Name, set, set, e.Pipeline)
@@ -105,10 +108,9 @@ func quoteList(names []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// safety: judged by the same rule the claim's release applies (the pipeline's
-// own row, else a shared team-wide row), so a run that passes here is never
-// refused a declared secret later unless a row changes in between.
-func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, required []string) (err error) {
+// The release selector also owns preflight eligibility so an unchanged row
+// cannot pass planning and fail release.
+func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, selection secretSelection, required []string) (err error) {
 	if run.Request.Request.Mode == runspec.IntakePublish {
 		return nil
 	}
@@ -116,16 +118,19 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 		return nil
 	}
 	runID := run.ID
-	pipeline, err := secretPipeline(run.Request)
-	if err != nil {
-		return err
-	}
 	readable := map[string]bool{}
 	for _, name := range run.Request.Request.LocalSecretNames {
 		if _, err := tx.store.localSecret(team, runID, name); err != nil {
 			return err
 		}
 		readable[name] = true
+	}
+	selected, err := selectedSecretsTx(ctx, tx, team, "", selection)
+	if err != nil {
+		return err
+	}
+	for _, row := range selected {
+		readable[row.secret.Name] = true
 	}
 	args := []any{string(team)}
 	for _, name := range required {
@@ -147,18 +152,20 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 			return err
 		}
 		switch {
-		case owner == pipeline, owner == "" && shared != 0:
-			readable[name] = true
-		case owner == "":
+		case owner == "" && shared == 0:
 			unshared[name] = true
-		default:
+		case owner != "":
 			others[name] = append(others[name], owner)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	refused := &SecretPreflightError{RunID: runID, Pipeline: pipeline}
+	pipeline := selection.pipeline
+	if pipeline == "" {
+		pipeline = run.Request.Request.Pipeline
+	}
+	refused := &SecretPreflightError{RunID: runID, Pipeline: pipeline, sharedOnly: selection.scope == secretSharedOnly}
 	for _, name := range required {
 		if readable[name] {
 			continue

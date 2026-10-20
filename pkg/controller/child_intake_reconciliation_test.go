@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,9 +16,14 @@ import (
 )
 
 func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) {
+	return childIntakeFixtureWith(t, nil)
+}
+
+func childIntakeFixtureWith(t *testing.T, prepare func(*EngineController)) (*EngineController, http.Handler, string) {
 	t.Helper()
 	e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
 	engineSQL(t, e.Store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
+	engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, []byte(`{"admission_key":"capability:root","admission_subject":{"kind":"account","id":"fixture"}}`))
 	declareChildren(t, e, "deploy", "Deploy", "ci", "root", "fresh")
 	var req runspec.SealedRequest
 	row, err := e.Store.ForTeam(t.Context(), "a")
@@ -38,6 +42,9 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 	req.Request.Source.Ref = req.Request.Git.SHA
 	raw := sealWith(t, req, assertedProvenance(t, "ci", req.Request.Git.Ref, req.Request.Git.SHA))
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, raw)
+	if prepare != nil {
+		prepare(e)
+	}
 	claimed := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(claimed.Body.Bytes(), &award); err != nil || award.Claim == nil {
@@ -50,7 +57,11 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 // declareChildren makes the parent job's plan declare the child pipelines it may start.
 func declareChildren(t *testing.T, e *EngineController, pipelines ...string) {
 	t.Helper()
-	spec, err := json.Marshal(map[string]any{"id": "job", "children": pipelines})
+	children := make([]map[string]string, len(pipelines))
+	for i, pipeline := range pipelines {
+		children[i] = map[string]string{"pipeline": pipeline}
+	}
+	spec, err := json.Marshal(map[string]any{"id": "job", "children": children})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +172,8 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 
 func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 	property := func(seed uint32) bool {
-		e, h, claim := childIntakeFixture(t)
+		private := fmt.Sprintf("private-pipeline-%x", seed)
+		e, h, claim := childIntakeFixtureWith(t, func(e *EngineController) { declareChildren(t, e, "ci", private) })
 		team, err := e.Store.ForTeam(t.Context(), "a")
 		if err != nil {
 			t.Fatal(err)
@@ -171,14 +183,12 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 			t.Fatal(err)
 		}
 		teststore.SeedTeam(t, e.Store, "foreign")
-		private := fmt.Sprintf("private-pipeline-%x", seed)
 		ancestor := fmt.Sprintf("ancestor-%x", seed)
 		if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{ID: ancestor, Pipeline: private, Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
 		cycle := childIntakeBody(t, parent.Request.Request.Pipeline, parent.Request.Request.Git)
 		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", cycle, 409)
-		declareChildren(t, e, private)
 		body := childIntakeBody(t, private, parent.Request.Request.Git)
 		var replies []string
 		for _, id := range []string{ancestor, ancestor + "-missing"} {
@@ -201,66 +211,12 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 	}
 }
 
-func TestChildIntakeCannotBroadenParentSourceAuthority(t *testing.T) {
+func TestChildIntakeCannotBroadenIssuedChildren(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil {
-		t.Fatal(err)
-	}
-	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	property := func(seed uint32) bool {
-		git := parent.Request.Request.Git
-		git.Repository = runspec.Repository{Key: runspec.RepoKey(fmt.Sprintf("git:gitlab.com/foreign/repo-%x", seed))}
-		record := principal.Capability
-		record.Repositories = []string{string(parent.Request.Request.Git.Repository.Key)}
-		setScope := func() {
-			encoded, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: record})
-			if err != nil {
-				t.Fatal(err)
-			}
-			scope, err := json.Marshal(record.Repositories)
-			if err != nil {
-				t.Fatal(err)
-			}
-			engineSQL(t, e.Store, `UPDATE capabilities SET authority_json=?,repo_scope=? WHERE prefix=?`, encoded, scope, record.Prefix)
-		}
-		setScope()
-		declareChildren(t, e, fmt.Sprintf("deploy-%x", seed))
-		body := childIntakeBody(t, fmt.Sprintf("deploy-%x", seed), git)
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 403)
-		record.Repositories = append(record.Repositories, string(git.Repository.Key))
-		setScope()
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 201)
-		return true
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func childSourceRepositories(t *testing.T, e *EngineController, claim string, repositories []string) {
-	t.Helper()
-	p, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	p.Capability.Repositories = repositories
-	body, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: p.Capability})
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope, err := json.Marshal(repositories)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engineSQL(t, e.Store, `UPDATE capabilities SET authority_json=?,repo_scope=? WHERE prefix=?`, body, scope, p.Capability.Prefix)
+	// A later declaration cannot enlarge an already issued job capability.
+	declareChildren(t, e, "undeclared")
+	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "undeclared", runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), 403)
+	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 403)
 }
 
 func TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority(t *testing.T) {
@@ -308,8 +264,6 @@ func TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority(t
 			t.Fatal(err)
 		}
 		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 403)
-		childSourceRepositories(t, e, claim, []string{string(parent.Request.Request.Git.Repository.Key), foreign})
-		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 201)
 		return true
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {

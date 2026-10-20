@@ -27,7 +27,20 @@ func (sharedPlanContracts) CanonicalHash(value any) (runspec.Hash, error) {
 }
 
 func (sharedPlanContracts) ValidatePlan(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-	return nodeproto.ValidatePlan(raw, ctx)
+	plan, err := nodeproto.ValidatePlan(raw, ctx)
+	if err != nil {
+		return nodeproto.PlanDoc{}, err
+	}
+	for _, job := range plan.Jobs {
+		for _, child := range job.Children {
+			if child.Repository != "" {
+				if err := runspec.ValidateRepoUse(runspec.RepoKey(child.Repository), runspec.RepoMachineStore); err != nil {
+					return nodeproto.PlanDoc{}, authorityError(apierr.PlanInvalid, "child repository must be a canonical repository key")
+				}
+			}
+		}
+	}
+	return plan, nil
 }
 
 func (sharedPlanContracts) ResolveExpansion(in settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
@@ -59,7 +72,7 @@ func (values planSecretValues) ContainsSecret(identifier string) bool {
 	return slices.ContainsFunc(values, func(value string) bool { return value != "" && strings.Contains(identifier, value) })
 }
 
-func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec) (planSecretValues, error) {
+func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, selection secretSelection) (planSecretValues, error) {
 	values := planSecretValues{}
 	if spec.Request.Request.Origin != runspec.OriginLocal && len(spec.Request.Request.Env.Names) > 0 {
 		submitted, err := (&Tenant{s: tx.store, team: team}).readSubmittedEnvironmentTx(ctx, tx, spec.Request.RunID)
@@ -86,20 +99,12 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 		}
 		values = append(values, value)
 	}
-	pipeline, err := secretPipeline(spec.Request)
+	rows, err := selectedSecretsTx(ctx, tx, team, "", selection)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared FROM secrets WHERE team=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY name,pipeline`+tx.forShare(), team, pipeline)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var secret Secret
-		if err := rows.Scan(&secret.Name, &secret.Value, &secret.Principal, &secret.Pipeline, &secret.Masked, &secret.Shared); err != nil {
-			return nil, err
-		}
+	for _, row := range rows {
+		secret := row.secret
 		if !secret.Masked {
 			continue
 		}
@@ -112,7 +117,7 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 		}
 		values = append(values, value)
 	}
-	return values, rows.Err()
+	return values, nil
 }
 
 // RequestPlacement classifies execution consistently at intake and plan acceptance.

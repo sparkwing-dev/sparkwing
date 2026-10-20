@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -29,8 +28,9 @@ import (
 type FloodPolicy struct {
 	// RunsPerPrincipalHour caps the runs one principal may create in a rolling
 	// hour. Zero is unlimited. Each run a GitHub App delivery creates counts
-	// against the team the installation is bound to, because a delivery has
-	// no principal of its own.
+	// against the team the installation is bound to. Scheduled runs also count
+	// against their team. Retries count against the retrier; descendants inherit
+	// the admission identity of their parent.
 	RunsPerPrincipalHour int
 
 	// ShedQueueDepth is the pending-trigger depth of one team past which that
@@ -217,37 +217,37 @@ func admitWithFlood[T any](ctx context.Context, s *Server, admit func(context.Co
 	return admit(context.WithValue(ctx, intakeRunTokenKey{}, pending.key))
 }
 
-func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest, p capability.Principal) error {
-	if s.flood == nil {
-		return nil
-	}
-	authority, delivered := p.Authority, request.VerifiedDeliveryID != ""
-	// A child's submitting runner does not own its admission budget. Resolve
-	// the root before choosing the key so App roots and their descendants share it.
+func admissionFloodKey(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest, p capability.Principal) (string, error) {
 	if parent := request.Request.Lineage.ParentRunID; parent != "" {
-		root, err := store.ChildRootRequest(ctx, resolver, store.Team(p.Capability.Team), parent)
-		if err != nil {
-			return err
-		}
-		authority, delivered = root.AuthorityRef, root.Request.Origin == runspec.OriginApp
+		return store.ChildAdmissionKey(ctx, resolver, store.Team(p.Capability.Team), parent)
 	}
-	if authority.Kind == "schedule" {
-		return nil
+	if request.VerifiedDeliveryID != "" || p.Authority.Kind == "schedule" {
+		return "team:" + p.Capability.Team, nil
 	}
-	key := string(authority.Kind) + ":" + authority.ID
-	if delivered {
-		key = "team:" + p.Capability.Team
+	return string(p.Authority.Kind) + ":" + p.Authority.ID, nil
+}
+
+func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest, p capability.Principal) (string, error) {
+	key, err := admissionFloodKey(ctx, resolver, request, p)
+	if err != nil {
+		return key, err
+	}
+	if s.flood == nil {
+		return key, nil
+	}
+	if key == "" && (s.flood.runs != nil || s.flood.policy.ShedQueueDepth > 0) {
+		return "", &apierr.Error{Code: apierr.IntegrityFailure, Message: "parent run has no admission identity"}
 	}
 	if s.flood.policy.ShedQueueDepth > 0 {
 		team := store.Team(p.Capability.Team)
 		if err := s.depthRefusal(team, key, "intake", func() (int, error) { return store.IntakeQueueDepth(ctx, resolver, team) }); err != nil {
-			return err
+			return key, err
 		}
 	}
 	if s.flood.runs != nil && ctx.Value(intakeRunTokenKey{}) != key {
-		return &intakeRunToken{key: key}
+		return key, &intakeRunToken{key: key}
 	}
-	return nil
+	return key, nil
 }
 
 func (s *Server) dedupeIntake(a capability.Authorized, body *controllerwire.CreateRunRequest) error {

@@ -405,3 +405,35 @@ func TestOriginHeadFillsOnlyMissingDefaultBranch(t *testing.T) {
 		t.Fatal("second seal rewrote intake")
 	}
 }
+
+func TestRetryAcceptsRequestSealedBeforeAdmissionSubject(t *testing.T) {
+	body, err := json.Marshal(fixture(t).Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]any
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&legacy); err != nil {
+		t.Fatal(err)
+	}
+	delete(legacy["request"].(map[string]any)["lineage"].(map[string]any), "admission_subject")
+	delete(legacy, "hash")
+	delete(legacy, "admitted_at")
+	hash, err := CanonicalHash(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy["hash"] = hash
+	body, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source SealedRequest
+	if err := json.Unmarshal(body, &source); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CarryRetry(RetryInput{Request: source, SourceRunID: source.RunID}); err != nil {
+		t.Fatalf("old sealed request refused: %v", err)
+	}
+}

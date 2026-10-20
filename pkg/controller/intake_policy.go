@@ -24,7 +24,8 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if err != nil {
 		return store.IntakePolicyFacts{}, err
 	}
-	if err := s.admissionFloodRefusal(ctx, resolver, request, principal); err != nil {
+	admissionKey, err := s.admissionFloodRefusal(ctx, resolver, request, principal)
+	if err != nil {
 		return store.IntakePolicyFacts{}, err
 	}
 	team := store.Team(principal.Capability.Team)
@@ -65,7 +66,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if override := s.logRetention[team]; override > 0 {
 		days = override
 	}
-	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
+	facts := store.IntakePolicyFacts{AdmissionKey: admissionKey, Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
 	if request.Authority.Kind == "schedule" {
 		location, err := store.VerifiedScheduleIntake(ctx, resolver, request)
 		facts.SourceLocation = &location

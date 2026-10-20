@@ -25,7 +25,7 @@ type JobSpec struct {
 	Consumes       []ArtifactInput     `json:"consumes,omitempty"`
 	References     []PipelineReference `json:"pipeline_refs,omitempty"`
 	// Children names the pipelines this job may start as child runs; intake refuses any other.
-	Children            []string          `json:"children,omitempty"`
+	Children            []ChildPipeline   `json:"children,omitempty"`
 	Approval            *ApprovalSpec     `json:"approval,omitempty"`
 	OnFailureOf         string            `json:"on_failure_of,omitempty"`
 	Retry               *RetrySpec        `json:"retry,omitempty"`
@@ -45,6 +45,12 @@ type JobSpec struct {
 	Steps               []StepSpec        `json:"steps,omitempty"`
 	ResultStep          string            `json:"result_step,omitempty"`
 	FailurePolicy       string            `json:"failure_policy,omitempty"`
+}
+
+// ChildPipeline names an allowed child pipeline; an empty repository inherits the parent repository.
+type ChildPipeline struct {
+	Pipeline   string `json:"pipeline"`
+	Repository string `json:"repository,omitempty"`
 }
 
 // EnvValue distinguishes interpreter startup from SDK-applied body environment.

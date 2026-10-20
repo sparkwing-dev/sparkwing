@@ -5,7 +5,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // IntakeSettings reads deployment guards and funding from the admission transaction.
@@ -25,20 +24,14 @@ func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, 
 	return guards, funded, err
 }
 
-// IntakeQueueDepth reads pending work from the admission transaction.
-// ChildRootRequest returns the sealed request of the root run a child descends from,
-// whose admission budgets the child spends.
-func ChildRootRequest(ctx context.Context, resolver capability.AuthorityResolver, team Team, parent string) (runspec.SealedRequest, error) {
+// ChildAdmissionKey returns the charged identity inherited from the parent admission.
+func ChildAdmissionKey(ctx context.Context, resolver capability.AuthorityResolver, team Team, parent string) (string, error) {
 	tx, ok := resolver.(*storeTx)
 	if !ok {
-		return runspec.SealedRequest{}, authorityError(apierr.Unavailable, "child root requires the admission transaction")
+		return "", authorityError(apierr.Unavailable, "child root requires the admission transaction")
 	}
 	run, err := readRunTx(ctx, tx, team, parent)
-	if err != nil || run.Lineage.RootRunID == "" {
-		return run.Request, err
-	}
-	root, err := readRunTx(ctx, tx, team, run.Lineage.RootRunID)
-	return root.Request, err
+	return run.Lineage.AdmissionKey, err
 }
 
 func IntakeQueueDepth(ctx context.Context, resolver capability.AuthorityResolver, team Team) (int, error) {

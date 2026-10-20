@@ -166,14 +166,16 @@ type SourceLocation struct {
 }
 
 // safety: Lineage records retriers separately from immutable original actor and git facts.
-// RootRunID is server-derived at child intake and names the run whose budget the child spends.
+// RootRunID bounds structural nesting and descendant counts; admission identity follows the parent.
 type Lineage struct {
-	RepoInherited bool            `json:"repo_inherited,omitempty"`
-	ParentRunID   string          `json:"parent_run_id"`
-	RootRunID     string          `json:"root_run_id,omitempty"`
-	ParentJobID   string          `json:"parent_job_id"`
-	RetryOf       string          `json:"retry_of"`
-	Retrier       Optional[Actor] `json:"retrier"`
+	AdmissionSubject capability.Subject `json:"admission_subject,omitzero"`
+	AdmissionKey     string             `json:"admission_key,omitempty"`
+	RepoInherited    bool               `json:"repo_inherited,omitempty"`
+	ParentRunID      string             `json:"parent_run_id"`
+	RootRunID        string             `json:"root_run_id,omitempty"`
+	ParentJobID      string             `json:"parent_job_id"`
+	RetryOf          string             `json:"retry_of"`
+	Retrier          Optional[Actor]    `json:"retrier"`
 }
 
 // safety: Layer names the source to report when an explicit setting is invalid.

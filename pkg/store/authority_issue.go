@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -132,7 +134,7 @@ type awardRow struct {
 	team, run, node, holder, prefix, repo, display string
 	generation, attempt, created                   int64
 	expiry, lease, cancel                          sql.NullInt64
-	request                                        []byte
+	request, spec                                  []byte
 }
 
 func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec) (awardRow, error) {
@@ -148,7 +150,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 	case capability.UnitTrigger, capability.UnitPlan:
 		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at,created_at,cancel_requested_at FROM triggers WHERE id = ? AND unit_kind = ?"+tx.forUpdate(), unit.RunID, string(spec.Unit)).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease, &row.created, &row.cancel)
 	case capability.UnitNode:
-		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,attempt,lease_expires_at,cancel_requested_at FROM nodes WHERE run_id = ? AND node_id = ? AND status <> 'done'"+tx.forUpdate(), unit.RunID, unit.NodeID).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.attempt, &row.lease, &row.cancel)
+		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,attempt,lease_expires_at,cancel_requested_at,spec_json FROM nodes WHERE run_id = ? AND node_id = ? AND status <> 'done'"+tx.forUpdate(), unit.RunID, unit.NodeID).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.attempt, &row.lease, &row.cancel, &row.spec)
 	case capability.UnitEval:
 		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at FROM eval_units WHERE run_id = ? AND source_node_id = ? AND source_generation = ? AND status IN ('pending','claimed','running')"+tx.forUpdate(), unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease)
 	default:
@@ -362,6 +364,9 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 			}
 		}
 	}
+	if c.Children, err = awardChildrenTx(ctx, tx, row, spec.Unit); err != nil {
+		return capability.Capability{}, err
+	}
 	if c.Data, err = awardDataScope(row, sealed, c); err != nil {
 		return capability.Capability{}, err
 	}
@@ -403,6 +408,76 @@ func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Cap
 		scope.WriteRef = ""
 	}
 	return scope, nil
+}
+
+// awardChildrenTx seals the accepted plan's execution authority without widening
+// the claim's authority to read its own repository, secrets or data.
+func awardChildrenTx(ctx context.Context, tx *storeTx, row awardRow, unit capability.UnitKind) ([]nodeproto.ChildPipeline, error) {
+	if unit != capability.UnitNode {
+		return nil, nil
+	}
+	var spec nodeproto.JobSpec
+	if err := json.Unmarshal(row.spec, &spec); err != nil {
+		return nil, err
+	}
+	var children []nodeproto.ChildPipeline
+	var covered []string
+	coverageLoaded := false
+	for _, child := range spec.Children {
+		if child.Repository == "" {
+			child.Repository = row.repo
+		}
+		if child.Repository != row.repo {
+			var allowed bool
+			err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+    SELECT 1 FROM repos WHERE team=? AND repo_key=?
+    UNION ALL SELECT 1 FROM github_runner_bindings WHERE team=? AND repo_key=?
+   )`, row.team, child.Repository, row.team, child.Repository).Scan(&allowed)
+			if err != nil {
+				return nil, err
+			}
+
+			if !allowed && strings.HasPrefix(child.Repository, "gh:") {
+				if !coverageLoaded {
+					covered, err = childAppRepositoriesTx(ctx, tx, Team(row.team))
+					if err != nil {
+						return nil, err
+					}
+					coverageLoaded = true
+				}
+				allowed = slices.Contains(covered, child.Repository)
+			}
+			if !allowed {
+				continue
+			}
+		}
+		if !slices.Contains(children, child) {
+			children = append(children, child)
+		}
+	}
+	return children, nil
+}
+
+// childRepositoryCoverage is the provider portion of the installed intake policy.
+// Installation bindings come from the award transaction, never from a job's request.
+type childRepositoryCoverage interface {
+	CoveredChildRepositories(context.Context, []GitHubAppInstallation) ([]string, error)
+}
+
+func childAppRepositoriesTx(ctx context.Context, tx *storeTx, team Team) ([]string, error) {
+	provider, ok := tx.store.intakePolicy.(childRepositoryCoverage)
+	if !ok {
+		return nil, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT `+githubAppInstallationCols+` FROM github_app_installations WHERE team=? AND suspended=0`+tx.forShare(), team)
+	if err != nil {
+		return nil, err
+	}
+	installations, err := scanGitHubAppInstallations(rows)
+	if err != nil {
+		return nil, err
+	}
+	return provider.CoveredChildRepositories(ctx, installations)
 }
 
 func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ExchangeSpec) (capability.Capability, error) {

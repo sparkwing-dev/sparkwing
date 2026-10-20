@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -14,6 +13,7 @@ import (
 )
 
 type expansionAcceptance struct {
+	selection     secretSelection
 	state         ExpansionState
 	hash          string
 	body, failure []byte
@@ -45,7 +45,12 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 			priorJobs[job.ID] = true
 		}
 	}
-	secrets, err := planSecretsTx(ctx, tx, team, *snapshot.Run.Spec)
+	selection, err := runSecretSelection(snapshot.Run.Request)
+	if err != nil {
+		return result, err
+	}
+	result.selection = selection
+	secrets, err := planSecretsTx(ctx, tx, team, *snapshot.Run.Spec, selection)
 	if err != nil {
 		return result, err
 	}
@@ -102,7 +107,7 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 	if len(executionSettings) != len(accepted.plan.Jobs) {
 		return nil, errors.New("resolved execution settings do not match expansion jobs")
 	}
-	if err := checkExpansionSecretPoolsTx(ctx, tx, team, *snapshot.Run.Spec, executionSettings); err != nil {
+	if err := checkExpansionSecretPoolsTx(ctx, tx, team, *snapshot.Run.Spec, executionSettings, accepted.selection); err != nil {
 		return nil, err
 	}
 	var nodes []NodeRow
@@ -142,18 +147,13 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 	return nodes, nil
 }
 
-func checkExpansionSecretPoolsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, jobs map[string]runspec.JobExecutionSettings) error {
-	pipeline, err := secretPipeline(spec.Request)
-	if err != nil {
-		return err
-	}
+func checkExpansionSecretPoolsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, jobs map[string]runspec.JobExecutionSettings, selection secretSelection) error {
 	for _, name := range spec.Resolved.SecretNames {
 		if slices.Contains(spec.Request.Request.LocalSecretNames, name) {
 			continue
 		}
-		var pool string
-		err := tx.QueryRowContext(ctx, `SELECT only_on FROM secrets WHERE team=? AND name=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY CASE WHEN pipeline='' THEN 1 ELSE 0 END LIMIT 1`+tx.forShare(), team, name, pipeline).Scan(&pool)
-		if errors.Is(err, sql.ErrNoRows) {
+		_, pool, err := selectedSecretTx(ctx, tx, team, name, selection)
+		if errors.Is(err, ErrNotFound) {
 			continue
 		}
 		if err != nil {

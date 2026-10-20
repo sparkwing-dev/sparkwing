@@ -2,13 +2,21 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
-	"testing/quick"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -98,20 +106,16 @@ func TestCycleDetect_ParentNotFound(t *testing.T) {
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/missing/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), 404)
 }
 
-func TestChildCycleWalkStaysInsideItsTeamProperty(t *testing.T) {
+func TestChildCycleWalkStaysInsideItsTeam(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
 	teststore.SeedTeam(t, e.Store, "foreign")
 	if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{ID: "private-root", Pipeline: "private-pipeline", Status: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	setChildAncestor(t, e, "run", "private-root")
-	property := func(pipeline string) bool {
-		declareChildren(t, e, "safe-"+pipeline)
-		w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "safe-"+pipeline, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), 404)
-		return !strings.Contains(w.Body.String(), "private-pipeline") && !strings.Contains(w.Body.String(), "private-root")
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
-		t.Fatal(err)
+	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), 404)
+	if strings.Contains(w.Body.String(), "private-pipeline") || strings.Contains(w.Body.String(), "private-root") {
+		t.Fatalf("foreign ancestry disclosed: %s", w.Body)
 	}
 }
 
@@ -125,7 +129,16 @@ func (c childRecorderTransport) RoundTrip(r *http.Request) (*http.Response, erro
 
 func setChildAncestor(t *testing.T, e *EngineController, id, parent string) {
 	t.Helper()
-	lineage, err := json.Marshal(runspec.Lineage{ParentRunID: parent})
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Lineage.ParentRunID = parent
+	lineage, err := json.Marshal(run.Lineage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,20 +148,55 @@ func setChildAncestor(t *testing.T, e *EngineController, id, parent string) {
 // The same pipeline name in another authorized repository is not a cycle and
 // cannot inherit the first repository's identity, even at the same ref and SHA.
 func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
-	e, h, claim := childIntakeFixture(t)
-	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
-	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:3"}}), 403)
-	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 201)
-	var result struct {
-		Request runspec.SealedRequest `json:"request"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
 		t.Fatal(err)
 	}
-	p := result.Request.Provenance
-	trigger, repo, ref, sha := p.OIDC()
-	if p.Trust() != runspec.TrustAsserted || !p.SharedSecretsOnly() || trigger != "manual" || repo != 0 || ref != "" || sha != "" {
-		t.Fatalf("explicit child inherited identity: %+v", p)
+	for _, source := range []string{"registration", "app_coverage"} {
+		t.Run(source, func(t *testing.T) {
+			e, h, claim := childIntakeFixtureWith(t, func(e *EngineController) {
+				if source == "registration" {
+					registerChildRepository(t, e, 2)
+				} else {
+					teststore.SeedGitHubInstallation(t, e.Store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "owner", GitHubUserID: 71}, time.Now())
+					cfg := githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
+						var payload string
+						switch r.URL.Path {
+						case "/app/installations/7/access_tokens":
+							payload = `{"token":"private","expires_at":"2100-01-01T00:00:00Z","permissions":{"metadata":"read"}}`
+						case "/installation/repositories":
+							payload = `{"total_count":1,"repositories":[{"id":2,"full_name":"acme/child","owner":{"id":70,"login":"acme"}}]}`
+						default:
+							return nil, fmt.Errorf("unexpected GitHub request %s", r.URL)
+						}
+						return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
+					})}}
+					New(e.Store, nil).WithGitHubApp(cfg)
+				}
+				engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"ci","repository":"gh:2"},{"pipeline":"ci","repository":"gh:3"}]}`))
+			})
+			issued, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(issued.Capability.Repositories, []string{"gh:1"}) || issued.Capability.Data.RepositoryKey != "gh:1" || !issued.Capability.AllowsChild("ci", "gh:2") || issued.Capability.AllowsChild("ci", "gh:3") {
+				t.Fatalf("child authority widened source/data scope or ignored team consent: %+v", issued.Capability)
+			}
+			engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:3"}}), 403)
+			engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 403)
+			w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 201)
+			var result struct {
+				Request runspec.SealedRequest `json:"request"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			p := result.Request.Provenance
+			trigger, repo, ref, sha := p.OIDC()
+			if p.Trust() != runspec.TrustAsserted || !p.SharedSecretsOnly() || trigger != "manual" || repo != 0 || ref != "" || sha != "" {
+				t.Fatalf("explicit child inherited identity: %+v", p)
+			}
+		})
 	}
 }
 
@@ -163,5 +211,21 @@ func TestChildCycleWalkRefusesRepeatedAncestorIDs(t *testing.T) {
 	var count int
 	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("cyclic lineage persisted a child: %d: %v", count, err)
+	}
+}
+
+func registerChildRepository(t *testing.T, e *EngineController, id int64) {
+	t.Helper()
+	_, owner, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "child-owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TeamAdmin}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}}, Target: capability.Target{Team: "a"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	if _, err := tenant.RegisterGitHubRunner(t.Context(), a, store.GitHubRunnerBinding{RepositoryID: id, RepositoryOwnerID: 7, Repository: "acme/child"}); err != nil {
+		t.Fatal(err)
 	}
 }

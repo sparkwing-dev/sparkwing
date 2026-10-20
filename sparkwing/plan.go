@@ -248,7 +248,7 @@ type JobNode struct {
 
 	prefers []string
 	// children are the pipelines this job may start with RunAndAwait.
-	children []string
+	children []nodeproto.ChildPipeline
 
 	inline bool
 
@@ -491,13 +491,21 @@ func (n *JobNode) Requires(labels ...string) *JobNode {
 	return n
 }
 
-// StartsChildren declares the pipelines this job may start as child runs with
+// StartsChildren appends pipelines in the parent repository that this job may start with
 // RunAndAwait. The controller refuses a child the job did not declare, so a job
 // that runs untrusted code cannot start a pipeline its plan never named.
 //
 //	sw.Job(plan, "release", &Release{}).StartsChildren("deploy-us", "deploy-eu")
 func (n *JobNode) StartsChildren(pipelines ...string) *JobNode {
-	n.children = append([]string(nil), pipelines...)
+	return n.StartsChildrenIn("", pipelines...)
+}
+
+// StartsChildrenIn declares child pipelines in a canonical repository key such as
+// "gh:123" or "git:host/org/repo". An empty repository inherits the parent repository.
+func (n *JobNode) StartsChildrenIn(repository string, pipelines ...string) *JobNode {
+	for _, pipeline := range pipelines {
+		n.children = append(n.children, nodeproto.ChildPipeline{Pipeline: pipeline, Repository: repository})
+	}
 	return n
 }
 

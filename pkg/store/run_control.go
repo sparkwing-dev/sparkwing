@@ -206,7 +206,11 @@ func controlTextTx(ctx context.Context, tx *storeTx, team Team, run RunRow, text
 			}
 		}
 	}
-	values, err := planSecretsTx(ctx, tx, team, spec)
+	selection, err := runSecretSelection(spec.Request)
+	if err != nil {
+		return "", err
+	}
+	values, err := planSecretsTx(ctx, tx, team, spec, selection)
 	if err != nil {
 		return "", err
 	}

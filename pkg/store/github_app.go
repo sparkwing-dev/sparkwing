@@ -138,6 +138,10 @@ func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInsta
 	if err != nil {
 		return nil, err
 	}
+	return scanGitHubAppInstallations(rows)
+}
+
+func scanGitHubAppInstallations(rows *sql.Rows) (_ []GitHubAppInstallation, err error) {
 	defer closeRowsInto(rows, &err)
 	var out []GitHubAppInstallation
 	for rows.Next() {

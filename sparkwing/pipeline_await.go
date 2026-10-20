@@ -38,9 +38,8 @@ import (
 //     via WithFreshInputs(in In). Pipelines that take no flags use
 //     sparkwing.NoInputs.
 //
-// Cross-repo is the primary use case: pipeline A in repo foo can
-// spawn pipeline B from repo bar without importing bar's Go packages.
-// The contract is the wire shape: pipeline name + JSON output schema.
+// Declare allowed targets with StartsChildren or StartsChildrenIn before
+// starting child runs. Cross-repository targets use canonical repository keys.
 //
 // Cycle protection: RunAndAwait carries the current run id as
 // parent_run_id on the spawned trigger; the controller walks the

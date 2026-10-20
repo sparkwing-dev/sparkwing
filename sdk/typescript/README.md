@@ -31,6 +31,10 @@ definePipeline({
 await main();
 ```
 
+Declare allowed child runs with `job.startsChildren("deploy")` for the parent
+repository or `job.startsChildrenIn("gh:123", "publish")` for an explicit canonical
+repository key. Calls append targets and can be chained.
+
 Use an exact package version in `.sparkwing/package.json`. Its version selects
 the matching engine. The package requires Node.js 22.18 or later. The public
 API is [index.d.ts](index.d.ts).

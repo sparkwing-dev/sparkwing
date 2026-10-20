@@ -12,7 +12,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -143,13 +142,17 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 				return admissionResultTx(ctx, tx, team, previous)
 			}
 		}
-		depth, err := validateChildLineageTx(ctx, tx, team, &input, principal.Capability.Repositories)
+		depth, err := validateChildLineageTx(ctx, tx, team, &input, principal.Capability)
 		if err != nil {
 			return AdmissionResult{}, err
 		}
 		if depth > 0 {
-			if charge, err = enforceChildLimitsTx(ctx, tx, team, input.Lineage.RootRunID, depth); err != nil {
+			if err = enforceChildLimitsTx(ctx, tx, team, input.Lineage.RootRunID, depth); err != nil {
 				return AdmissionResult{}, err
+			}
+			charge = input.Lineage.AdmissionSubject
+			if charge.Kind == "" {
+				return AdmissionResult{}, authorityError(apierr.IntegrityFailure, "parent run has no charged admission subject")
 			}
 		}
 		if input.Origin == runspec.OriginSchedule && tx.scheduleAdmission == nil {
@@ -180,6 +183,8 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		}
 		snapshot.lineage = input.Lineage
 	}
+	snapshot.lineage.AdmissionKey = policy.AdmissionKey
+	snapshot.lineage.AdmissionSubject = charge
 	if _, err = intakeAuthorityTx(ctx, tx, team, request); err != nil {
 		return AdmissionResult{}, err
 	}
@@ -357,6 +362,8 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 
 func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Team, policy IntakePolicyFacts) (runspec.Request, error) {
 	input := request.Request
+	input.Lineage.AdmissionKey = ""
+	input.Lineage.AdmissionSubject = capability.Subject{}
 	if input.Burst != nil {
 		if p.Capability.Subject.Kind != capability.SubjectAccount {
 			return input, bindingRefusal()
@@ -489,7 +496,7 @@ func appReplayKey(input runspec.Request) string {
 
 // validateChildLineageTx checks a child against every ancestor and returns its depth,
 // counting the root as one level, or zero for a run that is not a child.
-func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, repositories []string) (int, error) {
+func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, claim capability.Capability) (int, error) {
 	input.Lineage.RootRunID = ""
 	if input.Lineage.ParentRunID == "" {
 		if input.Lineage.RepoInherited {
@@ -497,9 +504,8 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 		}
 		return 0, nil
 	}
-	git := input.Git
-	if !capability.RepositoryAllowed(repositories, capability.RepositoryIdentity{Key: string(git.Repository.Key), Display: git.Repository.Display}) {
-		return 0, authorityError(apierr.Forbidden, "child source is outside the parent claim's repository authorization")
+	if !claim.AllowsChild(input.Pipeline, string(input.Git.Repository.Key)) {
+		return 0, authorityError(apierr.Forbidden, "child source is outside the parent claim's declared children")
 	}
 	seen := map[string]bool{}
 	depth := 1
@@ -519,11 +525,9 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 				return 0, authorityError(apierr.SpecDrift, "child environment differs from its parent")
 			}
 			input.Env, input.EnvironmentSource = parent.Env, parent.EnvironmentSource
+			input.Lineage.AdmissionSubject = ancestor.Lineage.AdmissionSubject
 			if parent.Git.Repository.Key == input.Git.Repository.Key {
 				input.Git.Repository.Display = parent.Git.Repository.Display
-			}
-			if err := childDeclaredTx(ctx, tx, team, input.Lineage, input.Pipeline); err != nil {
-				return 0, err
 			}
 		}
 		if parent.Git.Repository.Key == input.Git.Repository.Key && parent.Pipeline == input.Pipeline {
@@ -533,22 +537,6 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 		id = ancestor.Lineage.ParentRunID
 	}
 	return depth, nil
-}
-
-// childDeclaredTx refuses a child pipeline the creating job's accepted plan did not declare.
-func childDeclaredTx(ctx context.Context, tx *storeTx, team Team, lineage runspec.Lineage, pipeline string) error {
-	node, err := readNodeTx(ctx, tx, team, NodeRef{RunID: lineage.ParentRunID, NodeID: lineage.ParentJobID})
-	if err != nil {
-		return err
-	}
-	var spec nodeproto.JobSpec
-	if err := json.Unmarshal(node.Spec, &spec); err != nil {
-		return err
-	}
-	if !slices.Contains(spec.Children, pipeline) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: fmt.Sprintf("job %q does not declare child pipeline %q", lineage.ParentJobID, pipeline), Details: map[string]any{"reason": apierr.ReasonBinding}}
-	}
-	return nil
 }
 
 // provenanceOnBranch reports whether a verified run speaks for a branch the selector names.

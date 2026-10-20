@@ -94,7 +94,11 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if err = validateResolvedIntake(&input); err != nil {
 		return runspec.Spec{}, nil, err
 	}
-	secrets, err := planSecretsTx(ctx, tx, team, runspec.Spec{Request: run.Request, Resolved: input.Resolved})
+	selection, err := runSecretSelection(run.Request)
+	if err != nil {
+		return runspec.Spec{}, nil, err
+	}
+	secrets, err := planSecretsTx(ctx, tx, team, runspec.Spec{Request: run.Request, Resolved: input.Resolved}, selection)
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
@@ -118,10 +122,10 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if !localSecretDeclared(input.Resolved.SecretNames, run.Request.Request.LocalSecretNames) {
 		return runspec.Spec{}, nil, authorityError(apierr.PlanInvalid, "local secrets must be declared by the pipeline")
 	}
-	if err = secretPreflightTx(ctx, tx, team, run, input.Resolved.SecretNames); err != nil {
+	if err = secretPreflightTx(ctx, tx, team, run, selection, input.Resolved.SecretNames); err != nil {
 		return runspec.Spec{}, nil, err
 	}
-	if err = checkExpansionSecretPoolsTx(ctx, tx, team, runspec.Spec{Request: run.Request, Resolved: input.Resolved}, resolved.Jobs); err != nil {
+	if err = checkExpansionSecretPoolsTx(ctx, tx, team, runspec.Spec{Request: run.Request, Resolved: input.Resolved}, resolved.Jobs, selection); err != nil {
 		return runspec.Spec{}, nil, err
 	}
 	body, err := json.Marshal(plan)

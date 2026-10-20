@@ -423,3 +423,11 @@ test("boolean arguments accept the retained Go spellings without changing their 
   }
   assert.throws(() => resolveArgs([{ name: "flag", type: "bool" }], { flag: "yes" }), /argument/);
 });
+
+test("child targets compose parent and explicit repositories", () => {
+  const plan = new Plan();
+  plan.job("release", () => undefined).startsChildren("deploy").startsChildrenIn("gh:123", "publish").startsChildren("smoke");
+  assert.deepEqual(plan.toDoc().jobs[0]!.children, [
+    { pipeline: "deploy" }, { pipeline: "publish", repository: "gh:123" }, { pipeline: "smoke" },
+  ]);
+});

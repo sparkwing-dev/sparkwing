@@ -287,3 +287,16 @@ func TestValidatePlanRefusesCachePathsOutsideTheWorkspace(t *testing.T) {
 		checkPlan(t, `{"jobs":[{"id":"a","caches":[{"name":"deps","path":"`+path+`","key_files":["go.sum"]}],"steps":[{"id":"s"}]}]}`, planContext(), apierr.PlanInvalid)
 	}
 }
+
+func TestValidatePlanChildTargets(t *testing.T) {
+	plan := checkPlan(t, `{"jobs":[{"id":"release","children":[{"pipeline":"deploy"},{"pipeline":"publish","repository":"git:host/org/repo"}],"steps":[{"id":"run"}]}]}`, planContext(), "")
+	if len(plan.Jobs[0].Children) != 2 || plan.Jobs[0].Children[1].Repository != "git:host/org/repo" {
+		t.Fatalf("children = %+v", plan.Jobs[0].Children)
+	}
+	for _, children := range []string{`["deploy"]`, `[{"pipeline":""}]`} {
+		raw := fmt.Sprintf(`{"jobs":[{"id":"release","children":%s,"steps":[{"id":"run"}]}]}`, children)
+		if _, err := ValidatePlan(json.RawMessage(raw), planContext()); err == nil {
+			t.Fatalf("accepted children %s", children)
+		}
+	}
+}

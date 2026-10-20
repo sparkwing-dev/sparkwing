@@ -129,8 +129,8 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 			return err
 		}
 	}
-	for i, pipeline := range job.Children {
-		if err := v.identifier(pipeline, fmt.Sprintf("%s.children[%d]", path, i)); err != nil {
+	for i, child := range job.Children {
+		if err := v.identifier(child.Pipeline, fmt.Sprintf("%s.children[%d].pipeline", path, i)); err != nil {
 			return err
 		}
 	}

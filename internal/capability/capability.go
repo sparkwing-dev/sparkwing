@@ -4,6 +4,8 @@ package capability
 import (
 	"slices"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // SubjectKind keeps accountability independent of token spelling and placement.
@@ -93,28 +95,29 @@ type AuthorityRef struct {
 
 // Capability contains no reusable secret. Digest is SHA-256 of a generated reference token.
 type Capability struct {
-	Digest        [32]byte           `json:"-"`
-	Prefix        string             `json:"prefix"`
-	Team          string             `json:"team"`
-	Subject       Subject            `json:"subject"`
-	Audience      Audience           `json:"audience"`
-	Grants        []Grant            `json:"grants"`
-	Binding       Binding            `json:"binding"`
-	Issuance      IssuanceKind       `json:"issuance"`
-	Unit          UnitKind           `json:"unit,omitempty"`
-	UnitID        string             `json:"unit_id,omitempty"`
-	Purpose       AwardPurpose       `json:"purpose,omitempty"`
-	Delivery      DeliveryPurpose    `json:"delivery,omitempty"`
-	Parent        *AuthorityRef      `json:"parent,omitempty"`
-	ReservedPools []string           `json:"reserved_pools"`
-	Trust         Trust              `json:"trust,omitempty"`
-	Repositories  []string           `json:"repositories"`
-	Data          *DataScope         `json:"data,omitempty"`
-	Billing       *BillingProvenance `json:"billing,omitempty"`
-	RootMetered   bool               `json:"root_metered"`
-	IssuedAt      time.Time          `json:"issued_at"`
-	ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
-	RevokedAt     *time.Time         `json:"revoked_at,omitempty"`
+	Digest        [32]byte                  `json:"-"`
+	Prefix        string                    `json:"prefix"`
+	Team          string                    `json:"team"`
+	Subject       Subject                   `json:"subject"`
+	Audience      Audience                  `json:"audience"`
+	Grants        []Grant                   `json:"grants"`
+	Binding       Binding                   `json:"binding"`
+	Issuance      IssuanceKind              `json:"issuance"`
+	Unit          UnitKind                  `json:"unit,omitempty"`
+	UnitID        string                    `json:"unit_id,omitempty"`
+	Purpose       AwardPurpose              `json:"purpose,omitempty"`
+	Delivery      DeliveryPurpose           `json:"delivery,omitempty"`
+	Parent        *AuthorityRef             `json:"parent,omitempty"`
+	ReservedPools []string                  `json:"reserved_pools"`
+	Trust         Trust                     `json:"trust,omitempty"`
+	Repositories  []string                  `json:"repositories"`
+	Children      []nodeproto.ChildPipeline `json:"children,omitempty"`
+	Data          *DataScope                `json:"data,omitempty"`
+	Billing       *BillingProvenance        `json:"billing,omitempty"`
+	RootMetered   bool                      `json:"root_metered"`
+	IssuedAt      time.Time                 `json:"issued_at"`
+	ExpiresAt     *time.Time                `json:"expires_at,omitempty"`
+	RevokedAt     *time.Time                `json:"revoked_at,omitempty"`
 }
 
 // CredentialClass prevents deployment tokens from substituting for console sessions.
@@ -174,4 +177,9 @@ func Launcher(c Capability) bool {
 // CloudLauncher distinguishes deployment capacity from a team's own pool.
 func CloudLauncher(c Capability) bool {
 	return Launcher(c) && c.Subject.Kind == SubjectService
+}
+
+// AllowsChild checks execution authority independently of source and data scope.
+func (c Capability) AllowsChild(pipeline, repository string) bool {
+	return slices.Contains(c.Children, nodeproto.ChildPipeline{Pipeline: pipeline, Repository: repository})
 }
