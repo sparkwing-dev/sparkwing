@@ -254,6 +254,12 @@
           },
           "type": "array"
         },
+        "children": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "closures": {
           "$ref": "#/$defs/ClosureSpec"
         },

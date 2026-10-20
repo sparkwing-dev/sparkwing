@@ -247,6 +247,8 @@ type JobNode struct {
 	tools    []string
 
 	prefers []string
+	// children are the pipelines this job may start with RunAndAwait.
+	children []string
 
 	inline bool
 
@@ -486,6 +488,16 @@ func (n *JobNode) Verify(fn VerifyFn) *JobNode {
 // For a soft preference, use Prefers.
 func (n *JobNode) Requires(labels ...string) *JobNode {
 	n.requires = normalizeLabels(labels)
+	return n
+}
+
+// StartsChildren declares the pipelines this job may start as child runs with
+// RunAndAwait. The controller refuses a child the job did not declare, so a job
+// that runs untrusted code cannot start a pipeline its plan never named.
+//
+//	sw.Job(plan, "release", &Release{}).StartsChildren("deploy-us", "deploy-eu")
+func (n *JobNode) StartsChildren(pipelines ...string) *JobNode {
+	n.children = append([]string(nil), pipelines...)
 	return n
 }
 

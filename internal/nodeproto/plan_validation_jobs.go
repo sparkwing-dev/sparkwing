@@ -125,6 +125,11 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 			return err
 		}
 	}
+	for i, pipeline := range job.Children {
+		if err := v.identifier(pipeline, fmt.Sprintf("%s.children[%d]", path, i)); err != nil {
+			return err
+		}
+	}
 	if len(job.Concurrency) > 0 {
 		if err := v.feature(CapabilityJobConcurrency, path+".concurrency"); err != nil {
 			return err

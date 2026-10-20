@@ -48,6 +48,11 @@ func VisitPlanIdentifiers(plan PlanDoc, visit func(value, path string) error) er
 				return err
 			}
 		}
+		for k, pipeline := range job.Children {
+			if err := visit(pipeline, fmt.Sprintf("%s.children[%d]", path, k)); err != nil {
+				return err
+			}
+		}
 		for k, ref := range job.References {
 			at := fmt.Sprintf("%s.pipeline_refs[%d]", path, k)
 			if err := visit(ref.Pipeline, at+".pipeline"); err != nil {
