@@ -53,10 +53,10 @@ TestTheChargeRowCarriesThePinnedClass
 TestTheDefaultLadderRefusesAClassAboveEight
     credit_rates_test.go:311: mint a metered token: SQL logic error: no such table: tokens (1)
 
-Intermediate final run: TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField failed because pkg/store/teststore/run.go was absent from the reviewed-reader inventory. Added its reporting-fixture reason. The focused guard and final full suite pass that check.
+Intermediate final run: TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField failed because internal/store/teststore/run.go was absent from the reviewed-reader inventory. Added its reporting-fixture reason. The focused guard and final full suite pass that check.
 
 Original source-guard failure:
 === RUN   TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField
-    declared_repo_guard_test.go:57: pkg/store/teststore/run.go reads a run's declared repository and is not in declaredRepoReaders; add it with the reason it may, or route the decision through something proven
+    declared_repo_guard_test.go:57: internal/store/teststore/run.go reads a run's declared repository and is not in declaredRepoReaders; add it with the reason it may, or route the decision through something proven
     declared_repo_guard_test.go:83: declaredRepoReaders holds 5 entries and 6 files read the field
 --- FAIL: TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField (0.28s)

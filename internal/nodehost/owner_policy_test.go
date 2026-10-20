@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput, *executorStore, EvaluationDependencies, *[]*executorProcess) {

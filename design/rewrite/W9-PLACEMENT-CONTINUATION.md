@@ -43,8 +43,8 @@ session-index lock is outside the writable roots, so the CLI was built directly
 under task scratch. The lead needs a socket-capable run to continue native QA.
 
 Shared files touched are `internal/wingd/localcontroller/native.go`, its
-`native_config_test.go`, `pkg/store/plan_contracts.go` and the new
-`pkg/store/request_placement_test.go`. W9 documentation and its embedded mirror
+`native_config_test.go`, `internal/store/plan_contracts.go` and the new
+`internal/store/request_placement_test.go`. W9 documentation and its embedded mirror
 describe the shared placement validation. No acceptance cell was newly
 unskipped and no archived test was ported. No foreign contract change or new
 mechanism is needed. Open product questions for this fix: none.

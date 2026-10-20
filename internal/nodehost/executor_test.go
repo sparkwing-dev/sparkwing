@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -23,7 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type executorStore struct {
@@ -40,7 +41,7 @@ func (s *executorStore) ReadSnapshot(_ context.Context, runID string) (store.Run
 	return store.RunSnapshot{Run: store.RunRow{ID: runID}, Nodes: []store.NodeRow{s.row}, Expansions: s.expansions}, nil
 }
 
-func (s *executorStore) ReadNode(_ context.Context, ref store.NodeRef) (store.NodeRow, error) {
+func (s *executorStore) ReadNode(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
 	if ref == s.row.Ref {
 		return s.row, nil
 	}
@@ -146,7 +147,7 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	input := NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: raw, SpecHash: "seal", Plan: plan, PlanHash: string(planHash)}, Engine: resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "build", Generation: 3, Attempt: 4, SpecHash: string(jobHash), Execution: execution, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "build"}}
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	jobJSON, _ := json.Marshal(job)
-	s := &executorStore{row: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
+	s := &executorStore{row: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
 	processes := []*executorProcess{}
 	deps := ExecutorDependencies{Store: s, Start: func(_ context.Context, _ NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
 		p := &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success"}}
@@ -669,11 +670,11 @@ func TestNodeExecutorGeneratorReplayChecksCompleteAcceptedMembership(t *testing.
 			other := nodeproto.JobSpec{ID: "other", Groups: []string{"generator"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 			otherHash, _ := executorHash(other)
 			otherJSON, _ := json.Marshal(other)
-			s.nodes = map[string]store.NodeRow{"other": {Ref: store.NodeRef{RunID: "run", NodeID: "other"}, Spec: otherJSON, SpecHash: string(otherHash)}}
+			s.nodes = map[string]store.NodeRow{"other": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "other"}, Spec: otherJSON, SpecHash: string(otherHash)}}
 			accepted := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{generated, other}}
 			body, _ := json.Marshal(accepted)
 			bodyHash, _ := executorHash(accepted)
-			s.expansions = []store.AcceptedExpansionRow{{Source: store.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 2, Body: body, BodyHash: string(bodyHash)}}
+			s.expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 2, Body: body, BodyHash: string(bodyHash)}}
 			input.Replay = []GeneratorReplay{{SourceJob: "source", SourceGeneration: 2, GeneratorID: "generator", Output: json.RawMessage(`{"seed":1}`)}}
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
@@ -744,17 +745,17 @@ func recordedReplayFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDep
 	for i, declaration := range []nodeproto.JobSpec{root, parent, unrelated} {
 		body, _ := json.Marshal(declaration)
 		hash, _ := executorHash(declaration)
-		state.nodes[declaration.ID] = store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: declaration.ID}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: int64(i + 2), Spec: body, SpecHash: string(hash)}
+		state.nodes[declaration.ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: declaration.ID}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: int64(i + 2), Spec: body, SpecHash: string(hash)}
 	}
 	for i, declaration := range []nodeproto.JobSpec{parent, job, {ID: "unused", Groups: []string{"other"}}} {
 		body := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{declaration}}
 		raw, _ := json.Marshal(body)
 		hash, _ := executorHash(body)
-		state.expansions = append(state.expansions, store.AcceptedExpansionRow{Source: store.NodeRef{RunID: "run", NodeID: []string{"root", "parent", "unrelated"}[i]}, SourceGeneration: int64(i + 2), Body: raw, BodyHash: string(hash)})
+		state.expansions = append(state.expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: []string{"root", "parent", "unrelated"}[i]}, SourceGeneration: int64(i + 2), Body: raw, BodyHash: string(hash)})
 	}
 	reads := []string{}
 	deps.Store = recordedReplayStore{state}
-	deps.ReadOutput = func(_ context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
+	deps.ReadOutput = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 		if ref.RunID != "run" || ref.NodeID != "root" && ref.NodeID != "parent" || generation != state.nodes[ref.NodeID].Generation {
 			t.Fatal("read outside the persisted ancestor generations")
 		}
@@ -881,9 +882,9 @@ func TestNodeExecutorRecoveryReceivesPersistedFailure(t *testing.T) {
 	job := input.Accepted.Plan.Jobs[0]
 	job.OnFailureOf = "source"
 	executorChangeJob(t, &input, s, job)
-	s.nodes = map[string]store.NodeRow{"source": {Ref: store.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeFailed}}
+	s.nodes = map[string]store.NodeRow{"source": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeFailed}}
 	failure := nodeproto.JobFailure{Job: "source", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
-	deps.ReadFailure = func(_ context.Context, ref store.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+	deps.ReadFailure = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
 		if generation != s.nodes[ref.NodeID].Generation {
 			t.Fatal("failure reader lost the source generation")
 		}

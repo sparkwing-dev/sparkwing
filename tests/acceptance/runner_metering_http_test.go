@@ -12,7 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 )
 
 type runnerMeteringWriter func(context.Context, capability.Authorized, string, bool) error

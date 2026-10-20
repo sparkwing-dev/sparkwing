@@ -11,16 +11,17 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
-	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: job.ID}
+	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: job.ID}
 	if _, err := f.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, To: store.NodeReady, Actor: f.Actor, Cause: store.CauseRelease}); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +54,9 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 			repositories []string
 			allowed      bool
 		}{
-			{nil, false}, {[]string{}, true}, {parent.Capability.Repositories, true},
+			{nil, false},
+			{[]string{}, true},
+			{parent.Capability.Repositories, true},
 			{[]string{fmt.Sprintf("gh:foreign-%d", seed)}, false},
 		} {
 			child := spec

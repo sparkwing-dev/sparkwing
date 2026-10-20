@@ -185,7 +185,7 @@ its users. No new product decision or customer limit was introduced.
 Shared paths touched to resolve the merge or regenerate its surface:
 
 - internal/orchestrator/hosted_retry_test.go and the two deleted wingd_api files
-- pkg/controller/client/client.go and pkg/storage/state.go
+- internal/controller/client/client.go and internal/storage/state.go
 - api/openapi.yaml and .apidiff snapshots
 - docs/auth.md, security.md, migrations/_unreleased.md and api-reference.md
 - CHANGELOG.md and their generated pkg/docs mirrors

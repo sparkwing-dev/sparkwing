@@ -11,9 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, EvaluationDependencies, *executorProcess) {
@@ -37,7 +38,7 @@ func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, Evaluatio
 	st.row.ClaimedBy, st.row.CapabilityPrefix = "", ""
 	p := &executorProcess{plan: input.Accepted.Plan}
 	in := EvaluationInput{Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: string(hash), Entry: input.Entry, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding}
-	deps := EvaluationDependencies{Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ValidatePlan: exec.ValidatePlan, CanonicalHash: exec.CanonicalHash, ChildContext: exec.ChildContext, Mask: func(s string) string { return strings.ReplaceAll(s, "private", "***") }, ReadOutput: func(_ context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
+	deps := EvaluationDependencies{Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ValidatePlan: exec.ValidatePlan, CanonicalHash: exec.CanonicalHash, ChildContext: exec.ChildContext, Mask: func(s string) string { return strings.ReplaceAll(s, "private", "***") }, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 		if ref != st.row.Ref || generation != st.row.Generation {
 			t.Fatal("read output without source fence")
 		}
@@ -138,7 +139,7 @@ func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 			case "drift":
 				p.plan.Jobs = []nodeproto.JobSpec{{ID: "changed"}}
 			case "output":
-				deps.ReadOutput = func(context.Context, store.NodeRef, int64) (json.RawMessage, error) { return nil, cause }
+				deps.ReadOutput = func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) { return nil, cause }
 			case "close":
 				p.closeErr = cause
 			case "cleanup":
@@ -290,10 +291,10 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}}
 	hash, _ = executorHash(expansion)
 	raw, _ := json.Marshal(expansion)
-	st.expansions = []store.AcceptedExpansionRow{{Source: store.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 0, Body: raw, BodyHash: string(hash)}}
+	st.expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 0, Body: raw, BodyHash: string(hash)}}
 	rootBody, _ := json.Marshal(root)
 	rootHash, _ := executorHash(root)
-	st.nodes = map[string]store.NodeRow{"root": {Ref: store.NodeRef{RunID: "run", NodeID: "root"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Spec: rootBody, SpecHash: string(rootHash)}}
+	st.nodes = map[string]store.NodeRow{"root": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "root"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Spec: rootBody, SpecHash: string(rootHash)}}
 	deps.Store = recordedReplayStore{st}
 	rootKey := blob.MaterializedRecordKey("a", "run", "root", 0, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
 	sourceKey := blob.MaterializedRecordKey("a", "run", in.NodeID, 0, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)

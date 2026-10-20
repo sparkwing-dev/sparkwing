@@ -133,7 +133,7 @@ func fixturesReady(ctx context.Context) error {
 
 const pgGatedRun = "Postgres|Pg"
 
-var pgGatedPackages = []string{"./pkg/store"}
+var pgGatedPackages = []string{"./internal/store"}
 
 func runIntegrationSuite(ctx context.Context) error {
 	root, err := mainModuleRoot()

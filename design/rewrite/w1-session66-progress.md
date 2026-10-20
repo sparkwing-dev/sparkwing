@@ -89,10 +89,10 @@ No cross-area contract change was made.
 ## Shared files and friction
 
 Production callers outside store: internal/crons/tick.go and
-pkg/controller/{compute_limits,local_doctor,profiles,server}.go. Controller and
+internal/controller/{compute_limits,local_doctor,profiles,server}.go. Controller and
 cron fixture caller changes are listed in
 [w1-session66-files.txt](w1-session66-files.txt). The only W1b-file edit is the
-AppendEvent caller substitution in pkg/store/storage_test.go, covered by the
+AppendEvent caller substitution in internal/store/storage_test.go, covered by the
 lead's raw-API caller-migration exception. Its storage/accounting behavior and
 other W1b files are unchanged.
 

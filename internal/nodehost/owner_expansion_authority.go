@@ -8,7 +8,7 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // OwnerDelegator resolves current owner ceilings and persists source expansion authority.

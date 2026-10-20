@@ -16,7 +16,7 @@ Sparkwing follows semantic versioning with explicit scope: only certain parts of
 
 | Scope | Status |
 |---|---|
-| `internal/...` packages | Implementation detail. Can change anytime, even in patch releases. External consumers cannot import these (Go-enforced). |
+| `internal/...` packages, including `internal/store`, `internal/controller`, its client and cipher tests, and `internal/storage` | Implementation detail. Can change anytime, even in patch releases. External consumers cannot import these (Go-enforced). Wire JSON remains covered regardless of its Go package. |
 | `cmd/...` binary internals | The CLI flag surface is covered (above), but the internals of how each binary is built are not. |
 | Test fixtures, test helpers, `_test.go` files | Not part of the API surface. |
 | Embedded documentation, examples, scaffold templates | May be revised at any time. |
@@ -118,7 +118,7 @@ them. The promise:
 
 A deterministic text snapshot of the entire covered public API
 lives under `.apidiff/`, one file per package
-(`pkg_storage.txt`, `sparkwing.txt`, …). The snapshot is the
+(`pkg_wingwire.txt`, `sparkwing.txt`, …). The snapshot is the
 machine-readable source of truth for what the API looks like at HEAD;
 godoc comments are deliberately excluded so the file diff captures
 only contract-affecting changes.
@@ -143,25 +143,14 @@ Snapshot diffs are the single most useful artifact in API-affecting
 review: a reviewer scanning the PR sees exactly which exported
 symbols moved, in what direction, with no other noise.
 
-## Conformance suites for plug-in interfaces
+## Internal conformance suites
 
-`pkg/controller/ciphertest.TestCipher` checks custom implementations of
-[`controller.Cipher`](./pkg/controller/cipher.go). Its factory returns a fresh
-implementation per subtest.
-
-The raw `storage.ArtifactStore` interface and `pkg/storage/conformance` suite
-are removed. Immutable bytes use the common signed-data backend, and records
-supply read authority. Filesystem deployment measurement uses
-`fs.NewUsageReporter` and exposes only usage totals.
-
-Tagged log sinks and committed readers are tested in `pkg/storage/logseg`.
-The append/delete `TestLogStore` suite and its test-only facade are removed.
-`LogStore` exposes reads and streams. Writers publish tagged segments, and
-the controller's run-deletion API owns log cleanup.
-
-The conformance contract counts as part of the public API: changes
-to what an implementation must support to pass are breaking, and
-follow the same removal procedure as Go-level API changes.
+Controller cipher tests live in `internal/controller/ciphertest`.
+Tagged log sink and committed reader tests live in `internal/storage/logseg`.
+These packages test implementation contracts and carry no public Go API promise.
+External callers use the documented HTTP API, the author SDK and public wire
+packages such as `pkg/wingwire`. Moving an implementation type does not
+change its JSON contract.
 
 ## Migration help
 

@@ -100,10 +100,10 @@ fixture ports, obsolete storage tables and billing/blob/log integrations.
 
 ## Shared files and friction
 
-Shared production file: pkg/controller/agents.go adds compile-time conformance.
-Shared test: pkg/controller/runner_inventory_test.go adds a real default-adapter
+Shared production file: internal/controller/agents.go adds compile-time conformance.
+Shared test: internal/controller/runner_inventory_test.go adds a real default-adapter
 proof and makes the missing dependency case explicit. No production caller was
-migrated or removed outside pkg/store. Shared documents are C1, t1-port-inventory,
+migrated or removed outside internal/store. Shared documents are C1, t1-port-inventory,
 CHANGELOG.md, the migration guide, their embedded copies and .apidiff/pkg_store.txt.
 Lead-owned handoffs and amendments are unchanged.
 

@@ -82,7 +82,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
 
 - Whole-repository go build ./... passes on the final Go tree.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/orchestrator,
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/orchestrator,
   internal/opsview, internal/acceptance/... and tests/acceptance/....
 - The final store selection passes **324 top-level tests / 964 cases**, without
   skips. Its file list is w1-session14-tests.txt. Extract Test names, omit names
@@ -108,7 +108,7 @@ review pass is claimed. The lead retains those checks.
 
 ## Shared files and caller migrations
 
-Production callers outside pkg/store are pkg/controller/server.go,
+Production callers outside internal/store are internal/controller/server.go,
 internal/orchestrator/wingd_daemon.go and internal/opsview/doctor.go. Test callers
 are internal/orchestrator/wingd_runstore_test.go and
 internal/opsview/doctor_plain_coverage_test.go. Store caller migrations are

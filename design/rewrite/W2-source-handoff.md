@@ -4,7 +4,7 @@
 
 ## Implemented
 
-The merge conflict in `pkg/controller/engine_contract.go` has resolved contents.
+The merge conflict in `internal/controller/engine_contract.go` has resolved contents.
 W2's split implementations remain. The incoming signed version-policy field and
 compatibility implementation remain, with calls adapted to invalidEngineBody.
 The stored run-detail reader adds verified version notices before projecting its
@@ -171,7 +171,7 @@ Tests used at most -p 4. Scratch is deleted after verification.
 The controller selection is reproducible with:
 
 ```sh
-go test -p 4 ./pkg/controller -run '^(TestEngine|TestPolicyRouter|TestServerPolicy|TestAuthorizedHandlers|TestFilesystemSignedObjectBoundary|TestS3SignedObjectBoundary|TestSourceController|TestPlanSecretOpener|FuzzPlanSecretOpener)' -count=1
+go test -p 4 ./internal/controller -run '^(TestEngine|TestPolicyRouter|TestServerPolicy|TestAuthorizedHandlers|TestFilesystemSignedObjectBoundary|TestS3SignedObjectBoundary|TestSourceController|TestPlanSecretOpener|FuzzPlanSecretOpener)' -count=1
 ```
 
 The passing shared suite is:

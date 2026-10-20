@@ -176,7 +176,7 @@ Production caller migration outside W2: cmd/sparkwing-controller/main.go and
 internal/web/browserfixture/main.go remove the retired enable call. Test caller
 migration: cmd/sparkwing/crons_profile_test.go; internal/orchestrator's
 trigger_host_test.go, trigger_host_here_test.go, event_payload_mask_test.go and
-secret_args_execution_test.go; pkg/controller/client/coordination_test.go; and
+secret_args_execution_test.go; internal/controller/client/coordination_test.go; and
 tests/acceptance/storage_filesystem_test.go. These are constructor/API changes.
 
 Discovery: internal/apiroutes/apiroutes.go and its business registration test.

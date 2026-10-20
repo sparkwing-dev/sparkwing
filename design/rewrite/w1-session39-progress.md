@@ -39,7 +39,7 @@ Production Go line accounting, excluding tests, testdata and acceptance:
 - Actual source adds 329 and deletes 562, net -233 lines.
 - The lead's budget filter also excludes contract files. The 233 deleted lines
   from those files therefore do not count as deletions after promotion. The
-  budget-counted session delta is 0, all in pkg/store.
+  budget-counted session delta is 0, all in internal/store.
 - W1+W1b remains +3,261 against main, versus its -4,250 target: 7,511 lines over.
   No budget waiver is requested. Legacy code remains and W1 is not COMPLETE.
 
@@ -67,8 +67,8 @@ GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR under /tmp/sw-astra-W1. Recreate
 that scratch directory before reproducing. w1-session39-tests.txt records every
 passing store and controller selector.
 
-- Whole-repository go build -p 4 ./... passes. Scoped vet passes for pkg/store/...
-  and pkg/controller/.... The final focused run passes 140 store tests without
+- Whole-repository go build -p 4 ./... passes. Scoped vet passes for internal/store/...
+  and internal/controller/.... The final focused run passes 140 store tests without
   skips. Eleven distinct controller tests also pass without skips.
 - Existing SQLite plan seals, transitions, generated dependencies, matching,
   launcher synchronization, owner recovery and all eight recovery proofs pass.

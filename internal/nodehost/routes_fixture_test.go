@@ -12,11 +12,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 type routeParent struct {
@@ -126,6 +126,7 @@ func start(t testing.TB) *server {
 	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
+
 func admitService(t testing.TB, s *server, service *nodehost.ProcessServices) string {
 	t.Helper()
 	bearer, _, err := s.Admit(routeNode{Service: service})

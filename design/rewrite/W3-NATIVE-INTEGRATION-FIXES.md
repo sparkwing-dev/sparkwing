@@ -27,7 +27,7 @@ The OIDC test was stale against C1's sealed-event contract. Its AppFacts lacked
 Event, and it expected replay-ledger expiry to erase the retained run's identity.
 The fixture now supplies the sealed event and requires the same identity after
 deleting the delivery. The existing forged-selector property and every event
-case pass. No OIDC production behavior changed. The test lives in pkg/controller,
+case pass. No OIDC production behavior changed. The test lives in internal/controller,
 rather than cmd/sparkwing.
 
 The offline test also used removed compile-progress text and
@@ -81,7 +81,7 @@ No contract change in another area remains requested. The lead-owned handoffs
 and amendment files were not edited.
 
 Shared files touched are internal/runners/store_runner.go,
-pkg/controller/engine_claim.go, pkg/controller/review_oidc_native_test.go,
+internal/controller/engine_claim.go, internal/controller/review_oidc_native_test.go,
 cmd/sparkwing/local_services_test.go, cmd/sparkwing/run_offline_unix_test.go,
 internal/wingd/LOCAL-CONTROLLER.md and the two C3 contract files. The production
 claim caller was migrated to the shared policy method. No API was removed.

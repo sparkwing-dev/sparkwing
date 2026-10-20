@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type reconciliationFixture struct {
@@ -29,7 +30,7 @@ func TestFollowReconciliationPreservesCancellationDuringStoreCall(t *testing.T) 
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	cause := errors.New("owner lease rejected")
-	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 	f := &reconciliationFixture{
 		onCall:  func() { cancel(cause) },
 		results: []store.ReconciledNode{{Kind: store.KeepTerminal, Node: store.NodeRow{Ref: ref, Status: store.StatusDone, Outcome: store.NodeSuccess}}},
@@ -41,7 +42,7 @@ func TestFollowReconciliationPreservesCancellationDuringStoreCall(t *testing.T) 
 
 func TestFollowReconciliationWaitsAndReclaims(t *testing.T) {
 	expires := time.Unix(60, 0)
-	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 	f := &reconciliationFixture{results: []store.ReconciledNode{
 		{Kind: store.WaitHolder, Node: store.NodeRow{Ref: ref, Status: store.StatusRunning, StateSeq: 4, Generation: 2, Attempt: 3}},
 		{Kind: store.WaitHolder, Node: store.NodeRow{Ref: ref, Status: store.StatusRunning, StateSeq: 5, Generation: 2, Attempt: 3}},
@@ -49,7 +50,7 @@ func TestFollowReconciliationWaitsAndReclaims(t *testing.T) {
 	}}
 	var followed []int64
 	request := store.ReconcileRequest{Ref: ref, Actor: store.Actor{Holder: "owner"}, Policy: store.SourceResume}
-	result, err := FollowReconciliation(t.Context(), f, request, func(_ context.Context, got store.NodeRef, after int64) error {
+	result, err := FollowReconciliation(t.Context(), f, request, func(_ context.Context, got controllerwire.NodeRef, after int64) error {
 		if got != ref {
 			t.Fatalf("ref = %#v", got)
 		}
@@ -73,26 +74,29 @@ func TestFollowReconciliationWaitsAndReclaims(t *testing.T) {
 }
 
 func TestFollowReconciliationKeepsTerminalWithoutWriting(t *testing.T) {
-	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 	f := &reconciliationFixture{results: []store.ReconciledNode{{Kind: store.KeepTerminal, Node: store.NodeRow{Ref: ref, Status: store.StatusDone, Outcome: store.NodeSuccess}}}}
-	result, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref}, func(context.Context, store.NodeRef, int64) error { t.Fatal("terminal row followed"); return nil })
+	result, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref}, func(context.Context, controllerwire.NodeRef, int64) error {
+		t.Fatal("terminal row followed")
+		return nil
+	})
 	if err != nil || result.Kind != store.KeepTerminal {
 		t.Fatalf("result = %#v, %v", result, err)
 	}
 }
 
 func TestFollowReconciliationStopsOnWaitFailure(t *testing.T) {
-	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 	f := &reconciliationFixture{results: []store.ReconciledNode{{Kind: store.WaitHolder, Node: store.NodeRow{Ref: ref, StateSeq: 4}}}}
 	sentinel := errors.New("event stream unavailable")
-	_, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref}, func(context.Context, store.NodeRef, int64) error { return sentinel })
+	_, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref}, func(context.Context, controllerwire.NodeRef, int64) error { return sentinel })
 	if !errors.Is(err, sentinel) || len(f.requests) != 1 {
 		t.Fatalf("error = %v; requests %d", err, len(f.requests))
 	}
 }
 
 func TestFollowReconciliationRejectsUnfencedExecution(t *testing.T) {
-	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 	for _, mutation := range []string{"no claim", "no expiry", "wrong holder", "wrong generation", "finished"} {
 		t.Run(mutation, func(t *testing.T) {
 			expires := time.Unix(60, 0)
@@ -123,7 +127,7 @@ func TestFollowReconciliationRejectsUnfencedExecution(t *testing.T) {
 }
 
 func TestFollowReconciliationMaterializeMissNeverAwardsExecution(t *testing.T) {
-	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 	for _, kind := range []store.ReconcileKind{store.Dispatch, store.Execute} {
 		f := &reconciliationFixture{results: []store.ReconciledNode{{Kind: kind, Node: store.NodeRow{Ref: ref, Status: store.StatusPending}}}}
 		got, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref, MaterializeOnly: true}, nil)
@@ -141,7 +145,7 @@ func TestFollowReconciliationMaterializeMissNeverAwardsExecution(t *testing.T) {
 }
 
 func TestFollowReconciliationAcceptsReadyPlacementDispatch(t *testing.T) {
-	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 	ready := time.Unix(60, 0)
 	f := &reconciliationFixture{results: []store.ReconciledNode{{Kind: store.Dispatch, Node: store.NodeRow{Ref: ref, Status: store.StatusPending, ReadyAt: &ready}}}}
 	got, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref}, nil)

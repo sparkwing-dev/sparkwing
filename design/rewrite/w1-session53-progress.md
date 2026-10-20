@@ -55,8 +55,8 @@ Go used GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
 GOTMPDIR=/tmp/sw-astra-W1 and TMPDIR=/tmp/sw-astra-W1. Tests used -p 4.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- Vet passes for pkg/store, pkg/controller and pkg/store/teststore.
-- All 21 functions declared in pkg/store/acceptance*_test.go pass. The same
+- Vet passes for internal/store, internal/controller and internal/store/teststore.
+- All 21 functions declared in internal/store/acceptance*_test.go pass. The same
   selection includes the changed metric, usage and cron checks: 8.773s.
 - Focused store race checks pass in 26.588s. They cover forged reporting
   authority, retry/cancellation, owner reporting, conflicting metric writers,
@@ -130,8 +130,8 @@ they do not pretend that legacy projection works.
 
 ## Shared files and assumptions
 
-Outside store, production changes are limited to pkg/controller/crons.go
-(select Operator) and pkg/controller/metric_writes.go (concrete adapter).
+Outside store, production changes are limited to internal/controller/crons.go
+(select Operator) and internal/controller/metric_writes.go (concrete adapter).
 Shared controller tests are metric_timestamp_test.go, profiles_test.go,
 profiles_coverage_test.go and profiles_aggregation_test.go. Profile projection
 fixtures use teststore.SeedMetric after the raw production writer is removed.

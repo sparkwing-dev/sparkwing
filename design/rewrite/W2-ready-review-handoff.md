@@ -21,7 +21,7 @@ the -250 budget. Counts use the lead's ownership and exclusion rules.
 | 07:40 item 5 | Server.HTTP returns LocalHTTP with shared API/dashboard handlers and verified peer context. Local HTTP, console and peer tests pass. | W1 peer authentication and console committing transactions. W8 owns serving and drain. |
 | 07:40 item 7 | Legacy GitHub permission, token-metering and credits.grant registrations remain deleted. Final runner routes, docs and migration notes remain in place. | Native composition and lead ratification. |
 | 07:40 item 10 | SyncLauncher forwards authenticated authority and immutable observations to LauncherSyncReader and strips returned bearers. HTTP and fuzz seeds pass. | W1 Operator.ReadLauncherSync and W8 native award/Job correlation evidence. |
-| 09:40 item 1 | The independent expected table remains in pkg/controller/credential_route_expectations_test.go. internal/acceptance/credential_routes.go is absent. Declaration, drift and ordering tests pass. | None in W2. |
+| 09:40 item 1 | The independent expected table remains in internal/controller/credential_route_expectations_test.go. internal/acceptance/credential_routes.go is absent. Declaration, drift and ordering tests pass. | None in W2. |
 
 The W2 portions of A1-01/03/05/08/09/11/14/15/16/19/20/21/22/23,
 A1-24 through A1-35, and A1-38/39/40/49/55 remain implemented against the

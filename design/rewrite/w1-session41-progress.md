@@ -17,8 +17,8 @@ is 1 added, 337 deleted, net -336. W1+W1b is +2,481 against main, versus the
 
 Verification on the final source passes:
 
-- Whole-repository go build -p 4 ./.... Scoped go vet -p 4 on pkg/store/...,
-  pkg/controller/... and internal/orchestrator/.... All Go checks use GOWORK=off,
+- Whole-repository go build -p 4 ./.... Scoped go vet -p 4 on internal/store/...,
+  internal/controller/... and internal/orchestrator/.... All Go checks use GOWORK=off,
   GOFLAGS=-buildvcs=false, GOMAXPROCS=4, GOCACHE=/tmp/sw-gocache and
   GOTMPDIR/TMPDIR under /tmp/sw-astra-W1.
 - 156 store tests / 680 cases and 11 controller tests / 14 cases pass without
@@ -77,8 +77,8 @@ Foreign caller migrations are test-only:
 - internal/orchestrator/submission_environment_test.go
 - internal/orchestrator/trigger_consumer_test.go
 - internal/orchestrator/trigger_host_test.go
-- pkg/controller/claim_route_internal_test.go
-- pkg/controller/claim_run_test.go
+- internal/controller/claim_route_internal_test.go
+- internal/controller/claim_run_test.go
 
 Store test callers changed in claim_tokens_test.go, not_found_message_test.go,
 run_filter_display_test.go, tenant_node_state_test.go, trigger_absorbing_test.go

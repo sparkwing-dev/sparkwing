@@ -90,7 +90,7 @@ Passed:
 - Commentcheck against HEAD is clean across 21 Go files. Diff whitespace passes.
 
 Commentcheck against main reports the inherited pinnedClock comment at
-pkg/store/store.go:108. The complete pkg/docs suite cannot run because its web
+internal/store/store.go:108. The complete pkg/docs suite cannot run because its web
 client tests open forbidden loopback listeners. Its embedded-doc checks pass.
 The public CLI probes compile and explicitly skip on socket refusal. The native
 SDK HTTP probe also compiled, then its httptest listener was refused before
@@ -109,7 +109,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' -count=1 -v
 ```
 
@@ -136,8 +136,8 @@ Shared implementation/test files:
   controller_resources_test.go.
 - internal/wingd/localcontroller/native.go, native_artifacts_test.go and
   node_pipeline_test.go.
-- pkg/store/cloud_resources.go and cloud_resources_test.go.
-- pkg/controller/engine_claim.go and burst acceptance/SDK/Cloud Job tests.
+- internal/store/cloud_resources.go and cloud_resources_test.go.
+- internal/controller/engine_claim.go and burst acceptance/SDK/Cloud Job tests.
 - tests/acceptance/bootstrap_store_w8_test.go, bootstrap_w8_test.go and
   runner_identity_w8_test.go. These migrate the existing Cloud award consumers
   to physical allocations while retaining their author-setting assertions.

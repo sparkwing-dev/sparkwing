@@ -66,7 +66,7 @@ The unchanged controller tests TestEngineJobLifecycleRenewsAndReplaysUnderStoreF
 and TestEngineOwnerReconcilesExecutesAndFinishes now fail at their first start
 because the existing wire cannot carry the required ordinal. They are neither
 deleted nor skipped. W1b must add `SourceAttempt: &a.Attempt` to blobResultFixture
-in pkg/store/blob_result_records_test.go. Its unchanged
+in internal/store/blob_result_records_test.go. Its unchanged
 TestBlobResultRecordsCommitAndReplayWithTerminalState fails for the same missing
 input. W1b files were not edited.
 
@@ -80,12 +80,12 @@ each original absolute path to its copy in a Go overlay's Replace object:
 | File | Probe substitution |
 | --- | --- |
 | internal/controllerwire/contracts.go | Add `SourceAttempt *int64` with JSON `source_attempt,omitempty` to JobTransitionRequest. |
-| pkg/controller/engine_store.go | Copy `body.SourceAttempt` into NodeTransition.SourceAttempt. |
-| pkg/controller/engine_store_runtime_test.go | Supply pointer-to-zero for the two starts and pointer-to-one for the report bodies. |
-| pkg/store/blob_result_records_test.go | Add `SourceAttempt: &a.Attempt` to blobResultFixture's transition. |
+| internal/controller/engine_store.go | Copy `body.SourceAttempt` into NodeTransition.SourceAttempt. |
+| internal/controller/engine_store_runtime_test.go | Supply pointer-to-zero for the two starts and pointer-to-one for the report bodies. |
+| internal/store/blob_result_records_test.go | Add `SourceAttempt: &a.Attempt` to blobResultFixture's transition. |
 
 Run the environment below with `go test -p 4
--overlay=/tmp/sw-astra-W1/contract-overlay.json ./pkg/controller ./pkg/store
+-overlay=/tmp/sw-astra-W1/contract-overlay.json ./internal/controller ./internal/store
 -run '^TestEngine|^TestBlobResult' -count=1`.
 
 ## Amendment and handoff audit
@@ -118,11 +118,11 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is at most four.
 
 - Whole-repository go build ./... passes before and after implementation.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The W1 selection passes **335 top-level tests / 1,007 cases**, without skips.
   Extract Test function names from w1-session16-tests.txt, omit names beginning
-  TestPostgres, and pass their anchored alternation to go test -json -p 4 ./pkg/store.
+  TestPostgres, and pass their anchored alternation to go test -json -p 4 ./internal/store.
 - tests/acceptance with `-skip '^TestProtocol$'` passes. Recovery and placement also
   pass separately. Required skeleton and platform skips remain.
 - commentcheck -base main is clean across 1,025 Go files. sleepcheck -base HEAD
@@ -141,7 +141,7 @@ overrides. Scratch is removed before reporting.
 
 ## Shared files and friction
 
-The only production caller migration is pkg/store/unit_release.go. Direct W1
+The only production caller migration is internal/store/unit_release.go. Direct W1
 store tests supply explicit source ordinals. Shared acceptance callers are
 internal/acceptance/store_capacity.go, store_recovery.go, store_retry.go,
 store_started.go and store_unstarted.go. Shared documentation is c1-data.md,

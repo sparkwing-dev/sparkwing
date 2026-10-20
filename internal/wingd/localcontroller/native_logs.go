@@ -8,12 +8,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type localLogs struct {
@@ -22,7 +23,7 @@ type localLogs struct {
 	masker   *secrets.Masker
 	current  func(context.Context) (capability.Principal, error)
 	claims   *nodeClaims
-	readNode func(context.Context, store.NodeRef) (store.NodeRow, error)
+	readNode func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	upload   func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
 	sinks    map[string]*logseg.Sink
 	closed   bool
@@ -98,11 +99,11 @@ func (l *localLogs) subject(ctx context.Context, node string) (capability.Princi
 		subject.Unit.Source = &blob.LogSource{NodeID: b.NodeID, Generation: b.Generation}
 	}
 	if node != "" {
-		row, err := l.readNode(ctx, store.NodeRef{RunID: l.run, NodeID: node})
+		row, err := l.readNode(ctx, controllerwire.NodeRef{RunID: l.run, NodeID: node})
 		if err != nil {
 			return p, blob.LogSubject{}, err
 		}
-		if row.Ref != (store.NodeRef{RunID: l.run, NodeID: node}) {
+		if row.Ref != (controllerwire.NodeRef{RunID: l.run, NodeID: node}) {
 			return p, blob.LogSubject{}, nodeClaimMismatch()
 		}
 		if row.Status == store.StatusRunning && row.Attempt > 0 && row.CapabilityPrefix != "" {

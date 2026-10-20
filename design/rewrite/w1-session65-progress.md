@@ -78,11 +78,11 @@ still prevent completion. No contract change in another area was made.
 
 ## Shared files and friction
 
-The production caller change outside store is pkg/controller/log_pages.go.
+The production caller change outside store is internal/controller/log_pages.go.
 Shared controller tests are log_pages_test.go, team_boundary_test.go and
 invitation_lifecycle_team_test.go. Three billing-related files receive only raw
 account caller substitutions under the lead's scope clarification:
-pkg/store/business_events_test.go, credit_freeze_standing_test.go and
+internal/store/business_events_test.go, credit_freeze_standing_test.go and
 deletion_billing_test.go. W1b production and billing/storage fixtures beyond those
 caller substitutions are unchanged.
 

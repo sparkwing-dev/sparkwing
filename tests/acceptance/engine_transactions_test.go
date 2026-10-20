@@ -16,11 +16,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type engineTransactions struct {
@@ -52,7 +52,7 @@ type engineTransactions struct {
 	err               error
 	readErr           error
 	failure           *nodeproto.JobFailure
-	failureRef        store.NodeRef
+	failureRef        controllerwire.NodeRef
 	failureGeneration int64
 	failureActor      store.Actor
 	failureReads      int
@@ -62,7 +62,7 @@ func (f *engineTransactions) ReconcileNode(context.Context, store.ReconcileReque
 	return store.ReconciledNode{}, f.err
 }
 
-func (f *engineTransactions) ReadFailure(_ context.Context, source store.NodeRef, generation int64, actor store.Actor) (*nodeproto.JobFailure, error) {
+func (f *engineTransactions) ReadFailure(_ context.Context, source controllerwire.NodeRef, generation int64, actor store.Actor) (*nodeproto.JobFailure, error) {
 	f.failureRef, f.failureGeneration, f.failureActor = source, generation, actor
 	f.failureReads++
 	return f.failure, f.readErr
@@ -155,7 +155,7 @@ func (f *engineTransactions) ReadSnapshot(context.Context, string) (store.RunSna
 	return store.RunSnapshot{}, f.readErr
 }
 
-func (f *engineTransactions) ReadNode(_ context.Context, ref store.NodeRef) (store.NodeRow, error) {
+func (f *engineTransactions) ReadNode(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
 	if ref != f.node.Ref {
 		return store.NodeRow{}, &apierr.Error{Code: apierr.NotFound, Message: "job not found"}
 	}
@@ -195,7 +195,7 @@ func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 		accepted: store.AcceptedPlan{PlanHash: "second-seal", Plan: json.RawMessage(`{"jobs":[]}`), Replayed: true},
 		expanded: store.AcceptedExpansion{
 			SourceGeneration: 4, State: store.ExpansionAccepted, BodyHash: "expansion-seal", Replayed: true,
-			Nodes: []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "generated"}, Spec: json.RawMessage(`{"id":"generated"}`), SpecHash: "generated-seal", Status: store.StatusRunning, Generation: 8, Attempt: 3, StateSeq: 12, ClaimedBy: "current-holder", ApplicationRetries: 2, Disruptions: 1}},
+			Nodes: []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}, Spec: json.RawMessage(`{"id":"generated"}`), SpecHash: "generated-seal", Status: store.StatusRunning, Generation: 8, Attempt: 3, StateSeq: 12, ClaimedBy: "current-holder", ApplicationRetries: 2, Disruptions: 1}},
 		},
 	}
 	e := fakeEngine(t, f)
@@ -282,7 +282,7 @@ func TestEngineExpansionHTTP(t *testing.T) {
 			b.snapshot.Binding.FinishedAt = &finished
 			b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *a.Binding.Expansion, ExpiresAt: leaseUntil, ControllerLeaseExpiresAt: &leaseUntil}
 			f := &engineTransactions{
-				node:     store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4},
+				node:     store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4},
 				expanded: store.AcceptedExpansion{SourceGeneration: 4, State: store.ExpansionAccepted, BodyHash: "committed"},
 			}
 			path := "/api/v1/runs/run/jobs/job/expansion"

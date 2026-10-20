@@ -92,10 +92,10 @@ TestInstalledRunnerRuntimeComposition/launch remains open at the Cloud boundary.
 
 ## Scope, size and assumptions
 
-Shared production files are pkg/controller/log_search_pages.go,
-pkg/controller/run_selection.go, pkg/controller/log_pages.go,
-pkg/controller/reporting_routes.go and pkg/store/run_view.go. Shared tests are
-pkg/controller/log_search_pages_test.go and pkg/store/run_view_test.go.
+Shared production files are internal/controller/log_search_pages.go,
+internal/controller/run_selection.go, internal/controller/log_pages.go,
+internal/controller/reporting_routes.go and internal/store/run_view.go. Shared tests are
+internal/controller/log_search_pages_test.go and internal/store/run_view_test.go.
 Tenant.ListRunViews and RunView.Failures are concrete read projections for C3.
 The local-execution guide and its generated mirror describe search pagination.
 Lead-owned handoffs and amendments are unchanged.

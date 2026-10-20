@@ -8,18 +8,19 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // EvaluationStore exposes accepted declarations without granting state writes.
 type EvaluationStore interface {
-	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 }
 
@@ -55,7 +56,7 @@ type EvaluationDependencies struct {
 	CanonicalHash func(any) (runspec.Hash, error)
 	ChildContext  func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation    nodeproto.ValidationContext
-	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
+	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
 	Mask          func(string) string
 	Masks         *MaskRegistry
 }
@@ -157,7 +158,7 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	if string(hash) != input.Accepted.PlanHash {
 		return spec, row, job, executorError(apierr.PlanDrift, "evaluation plan does not match its accepted hash")
 	}
-	row, err = h.Store.ReadNode(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+	row, err = h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
 	if err != nil {
 		return spec, row, job, err
 	}

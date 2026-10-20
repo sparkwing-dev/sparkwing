@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {

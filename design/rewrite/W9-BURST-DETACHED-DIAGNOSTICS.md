@@ -73,7 +73,7 @@ TMPDIR=/tmp/sw-astra-W9 and GOTMPDIR=/tmp/sw-astra-W9/go, with -p 4 at most.
 The native profile-cache test compiles and skips both children at this sandbox's
 socket refusal. The lead must rerun its existing native families without skips:
 `^TestBurstPublicRun` in cmd/sparkwing and
-`^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$` in pkg/controller,
+`^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$` in internal/controller,
 both with -tags rewrite_integration. The updated detached failure output should
 name the daemon's host error or show the stalled run state if it still hangs.
 

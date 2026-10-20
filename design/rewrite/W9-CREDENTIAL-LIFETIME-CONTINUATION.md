@@ -80,8 +80,8 @@ W9-owned production Go versus main is **+16,961/-23,817, net -6,856**, within
 the -2,900 budget. Mechanisms added: the existing bearer provider now checks the
 existing host lifetime. It adds no public API, setting, route or storage.
 
-The shared file touched is `pkg/controller/private_host_test.go`. The other
-changes are W9's `pkg/controller/client/private_host.go`, C3 wire documentation
+The shared file touched is `internal/controller/private_host_test.go`. The other
+changes are W9's `internal/controller/client/private_host.go`, C3 wire documentation
 and this report. Lead-owned handoffs/amendments and foreign contracts remain
 unchanged. Independent review and native pipeline execution remain with the lead.
 

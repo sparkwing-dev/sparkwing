@@ -71,7 +71,7 @@ added.
 The new owner-metadata regression can be reproduced without a listener:
 
 ```text
-go test -p 4 -tags rewrite_integration ./pkg/controller -run '^TestReviewOwnerEvaluationReportsBeforeWorkAward$' -count=1
+go test -p 4 -tags rewrite_integration ./internal/controller -run '^TestReviewOwnerEvaluationReportsBeforeWorkAward$' -count=1
 ```
 
 Its two failures are recorded as failures. No native acceptance cell or archived
@@ -111,9 +111,9 @@ Production Go this session: **+28/-42, net -14**. No whole production file was
 deleted. W9-owned production versus main: **+16,896/-23,796, net -6,900**, within
 the -2,900 budget. Counts exclude tests, testdata and contract declaration files.
 
-Shared files touched: internal/apispec/wire.go, pkg/controller/engine_routes.go,
-pkg/controller/annotation_client_native_test.go,
-pkg/controller/owner_metadata_integration_test.go, api/openapi.yaml and generated
+Shared files touched: internal/apispec/wire.go, internal/controller/engine_routes.go,
+internal/controller/annotation_client_native_test.go,
+internal/controller/owner_metadata_integration_test.go, api/openapi.yaml and generated
 pkg/docs copies. All other source/interface/caller changes are W9-owned. The
 only caller migrations are cmd/sparkwing/annotations.go, its fake, the shared
 client tests and NativeProcessClient.Annotation. No other area's caller needed

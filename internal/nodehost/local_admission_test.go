@@ -12,9 +12,10 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -29,7 +30,7 @@ func localAdmissionSeal(t *testing.T, options runspec.Options) AcceptedRun {
 }
 
 func localAdmissionRow(id string) store.NodeRow {
-	return store.NodeRow{Ref: store.NodeRef{RunID: testRunID, NodeID: id}}
+	return store.NodeRow{Ref: controllerwire.NodeRef{RunID: testRunID, NodeID: id}}
 }
 
 func localAdmissionOptions() runspec.Options {

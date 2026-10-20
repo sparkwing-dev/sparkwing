@@ -48,15 +48,15 @@ Go commands used -C /home/bombuntu/.xwing/envs/1081/sparkwing. Tests used -p 4.
 
 Passed:
 
-- Whole-repository go build ./... and go vet of ./cmd/sparkwing and ./pkg/controller.
+- Whole-repository go build ./... and go vet of ./cmd/sparkwing and ./internal/controller.
 - TestProductionLocalControllerAdmitsRun, TestReceiptEndpoint_RoundTrip,
   TestSecretArgs_* and TestSecretArgsPublicReadsProperty. The regular run took
-  1.140s for cmd/sparkwing and 1.319s for pkg/controller.
+  1.140s for cmd/sparkwing and 1.319s for internal/controller.
 - The burst transient-file repro passed in 6.743s after failing in 3.853s before
   the fix. TestBurstUploadedSDKBuildsAndExecutesEveryAward covers here, personal
   and cloud awards through real SDK compilation and execution.
 - Race runs of the repaired admission, receipt, secret-display and burst tests.
-  cmd/sparkwing took 12.063s and pkg/controller took 38.244s.
+  cmd/sparkwing took 12.063s and internal/controller took 38.244s.
 - Source ownership guard and its detector, local/remote checkout-policy parity,
   moved-HEAD behavior, verified-commit pass-through, executable-seal property and
   native SDK-classification regression. Source took 5.505s, runspec 0.008s and
@@ -84,9 +84,9 @@ No new cross-area contract change is needed for these fixture repairs.
 Shared test files changed:
 
 - cmd/sparkwing/local_controller_policy_test.go
-- pkg/controller/burst_sdk_source_test.go
-- pkg/controller/receipts_test.go
-- pkg/controller/secret_args_display_test.go
+- internal/controller/burst_sdk_source_test.go
+- internal/controller/receipts_test.go
+- internal/controller/secret_args_display_test.go
 
 The inventory and this report are W3 artifacts. W9's action_plan.go,
 preview/describe, child local-secret inheritance and public docs were untouched.

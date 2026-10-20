@@ -36,7 +36,7 @@ credential lookup. These changes preserve the existing raw-event refusal test.
 
 The 258-line handwritten permission table moved from
 internal/acceptance/credential_routes.go to
-pkg/controller/credential_route_expectations_test.go. Its declaration,
+internal/controller/credential_route_expectations_test.go. Its declaration,
 mutation-sensitivity and order tests moved from tests/acceptance beside it.
 The production harness file and old comparison test file are deleted. The
 expected literals are unchanged. The remaining executable policy tests iterate
@@ -127,8 +127,8 @@ GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp. Tests use -p 4
   No dependency setup error occurred.
 - Commentcheck -base main is clean. Final formatting and diff checks pass.
 
-Shared production callers: pkg/controller/client/client.go,
-pkg/controller/client/logs.go and web/src/lib/api.ts. Source route discovery:
+Shared production callers: internal/controller/client/client.go,
+internal/controller/client/logs.go and web/src/lib/api.ts. Source route discovery:
 internal/apiroutes/apiroutes.go. Shared test/harness edits: deleted
 internal/acceptance/credential_routes.go and
 tests/acceptance/credential_routes_test.go; updated

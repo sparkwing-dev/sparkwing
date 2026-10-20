@@ -60,7 +60,7 @@ GOTMPDIR=/tmp/sw-astra-W9/go, with at most four Go package workers.
   projectconfig, store, controller and controller/client. Final cmd/store vet passes.
 - Burst, LocalSecrets, RequesterLocalSecret, Publication, RunRouting,
   HostileProject and ProjectUntracked test families pass in cmd/sparkwing,
-  pkg/controller and pkg/store. The final machine-source/classification, publication
+  internal/controller and internal/store. The final machine-source/classification, publication
   deadline, provenance, usage-index and owner-expiry regressions pass.
 - Complete userconfig, projectconfig, controllerwire and controller/client tests
   pass. Nodehost availability/secret renewal composition tests pass.
@@ -70,7 +70,7 @@ GOTMPDIR=/tmp/sw-astra-W9/go, with at most four Go package workers.
   FuzzBurstCLIClaimantsStayInsidePreferenceSet each pass four fixed-count
   executions with real CLI/store paths. Initial three-second runs completed no
   baseline cases and are not cited as fuzz evidence.
-- Native-tag compile passes for cmd/sparkwing and pkg/controller with
+- Native-tag compile passes for cmd/sparkwing and internal/controller with
   -tags rewrite_integration -run '^$'. This executes no native acceptance test.
 - OpenAPI/contract, embedded-doc synchronization/privacy/link checks,
   commentcheck against main, sleepcheck against HEAD and git diff --check pass.
@@ -98,8 +98,8 @@ Shared files outside W9 ownership:
 - internal/userconfig/routing.go; pkg/projectconfig/contract.go and validate.go.
 - internal/nodehost/remote_host_store.go and burst_availability_test.go;
   internal/wingd/client/api_http.go exposes its existing request timeout constant.
-- pkg/controller/engine_lifecycle.go, local_secrets_test.go and burst_overflow_test.go.
-- pkg/store/burst_placement.go, unit_matching.go, secret_reads.go, local_secrets.go,
+- internal/controller/engine_lifecycle.go, local_secrets_test.go and burst_overflow_test.go.
+- internal/store/burst_placement.go, unit_matching.go, secret_reads.go, local_secrets.go,
   owner_reaper.go, deletion.go, run_state.go, publication_attempt.go and schema.sql;
   burst_placement_test.go, local_secrets_test.go, publication_runtime_test.go,
   publication_attempt_test.go and burst_overflow_retention_test.go.

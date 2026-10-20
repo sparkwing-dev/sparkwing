@@ -2,7 +2,7 @@
 
 STATUS remains CONTINUE. Trusted schedule/App admission, legacy schema callers
 and the store budget remain open. The integration merge has resolved working
-contents, with no conflict markers. `pkg/store/authority_provision.go` remains
+contents, with no conflict markers. `internal/store/authority_provision.go` remains
 unmerged in the index because the brief prohibits Git writes. The lead must
 stage the resolution and finish the merge. Integration deletions stay deleted.
 
@@ -77,7 +77,7 @@ GOTMPDIR=/tmp/sw-astra-W1. Tests use -p 4. Final commands also pin TMPDIR there.
   changelog and whitespace checks pass.
 
 The broader four-package short suite was interrupted. No pass is claimed.
-`go test -p 4 ./pkg/store -run '^TestTenantEventsStayInTheRunsTeam$' -count=1`
+`go test -p 4 ./internal/store -run '^TestTenantEventsStayInTheRunsTeam$' -count=1`
 reproduces the remaining legacy fixture failure: `runs` has no `args_json`
 column. That test's raw fixture and `createRunTx` predate this session. The
 same baseline failure is recorded in W2-opus-review-fixes.md. Remaining raw
@@ -119,8 +119,8 @@ and amendments are unchanged.
 
 ## Shared files and friction
 
-Outside store, production edits are limited to `pkg/controller/handlers.go`
-(the dead source-upload branch). `pkg/store/event_accounting.go` changes only
+Outside store, production edits are limited to `internal/controller/handlers.go`
+(the dead source-upload branch). `internal/store/event_accounting.go` changes only
 the caller migration after deletion of the unused context-fence helpers.
 W1b credit/output fixtures change only their removed Store API calls.
 
@@ -128,11 +128,11 @@ Shared test files touched:
 
 - `internal/backend/`: `store_backend_test.go`.
 - `internal/web/`: `logpretty_test.go`, `server_test.go`.
-- `pkg/controller/`: `bootstrap_store_test.go`, `browser_pages_test.go`, `claim_dispatch_internal_test.go`, `compute_limits_test.go`, `concurrency_team_test.go`, `credits_test.go`, `crons_test.go`, `crons_tick_test.go`, `cycle_detection_test.go`, `egress_test.go`, `fixture_isolation_test.go`, `flood_test.go`, `github_app_test.go`, `github_checks_test.go`, `log_segments_internal_test.go`, `node_claim_fixture_test.go`, `node_output_internal_test.go`, `principal_limit_test.go`, `profiles_aggregation_test.go`, `profiles_coverage_test.go`, `profiles_test.go`, `prom_internal_test.go`, `reaped_run_conflict_test.go`, `retry_root_team_test.go`, `retry_test.go`, `secret_args_display_test.go`, `server_test.go`, `team_boundary_test.go`, `trends_test.go`, `trigger_test.go`.
+- `internal/controller/`: `bootstrap_store_test.go`, `browser_pages_test.go`, `claim_dispatch_internal_test.go`, `compute_limits_test.go`, `concurrency_team_test.go`, `credits_test.go`, `crons_test.go`, `crons_tick_test.go`, `cycle_detection_test.go`, `egress_test.go`, `fixture_isolation_test.go`, `flood_test.go`, `github_app_test.go`, `github_checks_test.go`, `log_segments_internal_test.go`, `node_claim_fixture_test.go`, `node_output_internal_test.go`, `principal_limit_test.go`, `profiles_aggregation_test.go`, `profiles_coverage_test.go`, `profiles_test.go`, `prom_internal_test.go`, `reaped_run_conflict_test.go`, `retry_root_team_test.go`, `retry_test.go`, `secret_args_display_test.go`, `server_test.go`, `team_boundary_test.go`, `trends_test.go`, `trigger_test.go`.
 
 C1, the port inventory, CHANGELOG, the unreleased migration, their embedded
 mirrors and .apidiff/pkg_store.txt are updated. The new property is
-pkg/store/metrics_scope_runtime_test.go. The old artifact_manifest_test.go is
+internal/store/metrics_scope_runtime_test.go. The old artifact_manifest_test.go is
 deleted. No foreign Go contract signature changed. No mechanism was added.
 
 Friction: the broader suite still contains raw-schema fixtures. The changelog

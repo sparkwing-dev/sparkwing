@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -20,9 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type cliOwnerStore struct {
@@ -209,7 +209,7 @@ func cliNativeOwner(t *testing.T, state nodehost.NativeHostStore, owner nodehost
 			Bind: func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
 				return nodehost.ProcessGrant{}, errors.New("unexpected evaluation delegation")
 			},
-			ReadOutput: func(context.Context, store.NodeRef, int64) (json.RawMessage, error) {
+			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 				return nil, errors.New("unexpected output read")
 			},
 		},

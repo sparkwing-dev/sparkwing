@@ -119,7 +119,7 @@ intact. Their current acceptance and rotation tests pass.
 
 ## Shared files and friction
 
-Outside pkg/store, code/test edits are limited to pkg/controller
+Outside internal/store, code/test edits are limited to internal/controller
 `engine_claim.go`, `engine_claim_routes.go`, `engine_claim_http_test.go`,
 `claim_attention_internal_test.go` and `console_fixture_test.go`. These carry
 poll observations and placement configuration, test HTTP composition and remove

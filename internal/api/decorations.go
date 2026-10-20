@@ -1,4 +1,4 @@
-// Package api carries wire-shape helpers used by the pkg/controller
+// Package api carries wire-shape helpers used by the internal/controller
 // HTTP handlers. The controller serves the same /api/v1/* surface in
 // both laptop and cluster mode (selected by functional options at
 // New-time); response shapes that aren't covered by raw store.*
@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // Decorations is the per-node plan-snapshot-derived render envelope.

@@ -159,7 +159,7 @@ ports remain in the passing runner/launcher suites.
 
 Shared production files touched are cmd/sparkwing/wingd.go and the conflicted
 orchestrator files listed above. Shared tests are cmd/sparkwing/wingd_runtime_test.go
-and pkg/store/default_team_callers_test.go. The lead-owned handoff file is only
+and internal/store/default_team_callers_test.go. The lead-owned handoff file is only
 restored to integration's exact contents. No amendment file was edited.
 
 The lead retains independent review, merge staging/commit, native verification

@@ -85,10 +85,10 @@ a fixture engine executable, rather than a Kubernetes pod.
 Shared implementation files: internal/doccheck/cliverbs.go;
 internal/runspec/contracts.go;
 internal/source/{revisions,projection,checkout}.go;
-pkg/controller/{schedule_source,run_selector}.go;
-pkg/store/submitted_environment.go. Shared tests:
-pkg/controller/{export_test,schedules_local_test,w9_mechanisms_test}.go and
-pkg/store/submitted_environment_test.go. Contract amendments are recorded in
+internal/controller/{schedule_source,run_selector}.go;
+internal/store/submitted_environment.go. Shared tests:
+internal/controller/{export_test,schedules_local_test,w9_mechanisms_test}.go and
+internal/store/submitted_environment_test.go. Contract amendments are recorded in
 c1-data.md, c3-controller-wire.md and c4-surface-config.md. No further contract
 change is requested.
 

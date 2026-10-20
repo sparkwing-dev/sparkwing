@@ -7,7 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runspec.Resolved, plan *nodeproto.PlanDoc, nodes []store.NodeRow) error {

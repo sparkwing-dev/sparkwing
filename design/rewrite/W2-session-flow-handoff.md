@@ -59,7 +59,7 @@ legacy login fixtures and their ports remain with the browser cutover.
 ## Other areas and remaining W2 work
 
 No foreign contract signature changed. W1 must consistently wrap session
-infrastructure failures with ErrSessionBackend. In pkg/store/auth.go, the
+infrastructure failures with ErrSessionBackend. In internal/store/auth.go, the
 authorityChainTx and RowsAffected error returns omit that marker. A temporary
 test overlay created a valid real account session, dropped memberships, and
 called GET /api/v1/auth/session. It failed with HTTP 401 unauthenticated instead
@@ -86,7 +86,7 @@ handoff is partly completed by the session work here.
 
 ## Shared files
 
-The sole production caller/registration migration outside pkg/controller is
+The sole production caller/registration migration outside internal/controller is
 internal/apiroutes/apiroutes.go: its discovery list includes sessionEndpoints.
 No other package needed an API caller migration. Other shared edits are
 tests/acceptance/session_flow_http_test.go, contracts/c2-credentials.md,

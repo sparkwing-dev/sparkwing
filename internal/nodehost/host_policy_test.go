@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestOwnerApprovalPolicies(t *testing.T) {
@@ -29,7 +30,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 			spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{Engine: identity}}
 			rawSpec, _ := json.Marshal(spec)
 			rawJob, _ := json.Marshal(job)
-			st := newExpansionHostStore(store.RunRow{}, store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending, Spec: rawJob, SpecHash: string(jobHash)})
+			st := newExpansionHostStore(store.RunRow{}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending, Spec: rawJob, SpecHash: string(jobHash)})
 			value := json.RawMessage("false")
 			if mode == "skip" {
 				value = json.RawMessage("true")
@@ -55,7 +56,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 					bounded, cancel := context.WithTimeout(ctx, budget)
 					return bounded, cancel, nil
 				},
-				ReadOutput: func(context.Context, store.NodeRef, int64) (json.RawMessage, error) {
+				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 					return nil, errors.New("approval cannot read its own unexecuted output")
 				},
 				Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") },

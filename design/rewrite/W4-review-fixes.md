@@ -82,7 +82,7 @@ All Go commands used `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`, `-p 4`, 
 | Secret-default discovery fuzzing | Pass after red reproductions. |
 | Independent focused checks | Discovery has no blocker/major finding. Settlement lifecycle findings reproduced and fixed, then rechecked without a remaining hole in that boundary. |
 | `git diff --check` | Pass. |
-| `go run ./internal/commentcheck -base main .` | Fails on two pre-existing W1 comments: `pkg/store/state_materialize.go:15` and `pkg/store/state_result_records.go:9`. No W4 violations. |
+| `go run ./internal/commentcheck -base main .` | Fails on two pre-existing W1 comments: `internal/store/state_materialize.go:15` and `internal/store/state_result_records.go:9`. No W4 violations. |
 | Broader SDK git/services tests | Blocked: empty sandbox `/tmp/.git` changes no-repository fixture discovery; service tests cannot bind sockets. |
 | Node-host retained tests | Cannot compile on removed APIs, as detailed above. |
 

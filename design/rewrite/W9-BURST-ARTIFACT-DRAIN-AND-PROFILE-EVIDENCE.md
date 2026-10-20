@@ -97,8 +97,8 @@ refusal and replaced owner composition lines.
 
 Shared production files: `internal/blob/remote.go`,
 `internal/localhostwire/private_host.go`, `internal/nodehost/owner.go`,
-`pkg/controller/private_host.go`, and `internal/apispec/wire.go`.
-W9's `pkg/controller/client/private_host.go` consumes the new private shape.
+`internal/controller/private_host.go`, and `internal/apispec/wire.go`.
+W9's `internal/controller/client/private_host.go` consumes the new private shape.
 Shared tests: blob remote verification, nodehost owner lifecycle, runner renewal
 ownership, controller artifact projection and profile publication. Source docs,
 contracts, generated OpenAPI and embedded mirrors changed with the behavior.
@@ -112,7 +112,7 @@ Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache`,
 The focused regressions use these selections from the worktree:
 
 ```sh
-go test -p 4 ./pkg/controller -run 'Test(ClaimedHostReadsOnlyDeclaredProducerManifestSelectors|ProfilePublicationImportsRecordsAndLogsWithoutClaims)' -count=1
+go test -p 4 ./internal/controller -run 'Test(ClaimedHostReadsOnlyDeclaredProducerManifestSelectors|ProfilePublicationImportsRecordsAndLogsWithoutClaims)' -count=1
 go test -p 4 -race ./internal/nodehost -run '^TestOwnerHost(AuthorityLoss|Cancellation)' -count=1
 ```
 

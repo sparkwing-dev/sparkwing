@@ -52,7 +52,7 @@ TMPDIR=/tmp/sw-astra-W9. Tests used at most four package workers.
 Passed:
 
 - Whole-repository `go build ./...`.
-- `go vet -p 4 ./internal/cluster ./internal/runners/... ./cmd/sparkwing ./pkg/controller/client`.
+- `go vet -p 4 ./internal/cluster ./internal/runners/... ./cmd/sparkwing ./internal/controller/client`.
 - Full short suites for cluster, runners, controller/client and localcontroller.
 - New production transport regressions, race tests and fuzzing.
 - `go test -p 4 -tags rewrite_integration ./internal/cluster -run '^TestInstalledRunnerRuntimeComposition/(start|warm|fetch-source|run-node)$' -count=1 -v`.

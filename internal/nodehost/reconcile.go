@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // WaitNodeChange waits for a committed change after a node's StateSeq. An event
 // reader compares StateEvent.StateSeq for this node, not the per-run event Seq.
 // It must catch up from persistence before waiting for notification.
-type WaitNodeChange func(context.Context, store.NodeRef, int64) error
+type WaitNodeChange func(context.Context, controllerwire.NodeRef, int64) error
 
 // FollowReconciliation waits for persisted holder changes and repeats the atomic
 // store decision. It never converts elapsed wall time or an executor's previous

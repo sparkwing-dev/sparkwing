@@ -84,7 +84,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
 
 - Whole-repository go build ./... passes.
-- Scoped vet passes for pkg/store/..., pkg/controller/..., internal/orchestrator,
+- Scoped vet passes for internal/store/..., internal/controller/..., internal/orchestrator,
   internal/runners/k8s, internal/cluster, internal/acceptance/..., tests/acceptance/...
   and cmd/sparkwing.
 - The store selection passes **332 top-level tests / 998 cases**, with no skips.
@@ -111,12 +111,12 @@ independent-review pass is claimed.
 
 ## Shared files and friction
 
-Caller removals/migrations outside pkg/store are:
+Caller removals/migrations outside internal/store are:
 
 - internal/runners/warmpool/*.go and internal/runners/k8s/warm_fallback_test.go.
 - internal/orchestrator/warm_runner_factory.go and trigger_runner_factory.go.
 - internal/cluster/runner_pool_cli.go, runner_pool_cli_test.go and trigger_loop.go.
-- pkg/controller/client/client.go, handlers.go, server.go, tenant_routes.go,
+- internal/controller/client/client.go, handlers.go, server.go, tenant_routes.go,
   runner_presence.go, runner_presence_test.go, runner_scopes_test.go,
   node_claim_ownership_test.go, principal_limit.go, credits.go, credits_test.go,
   direct_source_e2e_test.go and client/poll_advice.go.

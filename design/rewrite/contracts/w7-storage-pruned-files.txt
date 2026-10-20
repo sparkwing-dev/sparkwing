@@ -27,8 +27,8 @@ D	internal/bincache/trusted_source_test.go
 M	internal/bincache/workspace_baseline.go
 M	internal/bincache/workspace_baseline_test.go
 M	internal/blob/README.md
-M	pkg/controller/retry_test.go
-M	pkg/controller/trigger_test.go
+M	internal/controller/retry_test.go
+M	internal/controller/trigger_test.go
 
 New files:
 design/rewrite/contracts/w7-storage-pruned-files.txt

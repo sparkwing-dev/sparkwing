@@ -93,7 +93,7 @@ Production Go additions/deletions: **+42/-10, net +32**. W9 versus main:
 the obsolete refusal and separate function-field runtime bindings.
 
 Shared edits outside W9-owned paths are only
-`pkg/controller/debug_client_native_test.go` and
+`internal/controller/debug_client_native_test.go` and
 `tests/acceptance/debug_contract_test.go`, plus the generated
 `pkg/docs/mirror/debugging.md`. No production API was removed, so no foreign
 caller migration was needed. The local C3 addition is recorded above.

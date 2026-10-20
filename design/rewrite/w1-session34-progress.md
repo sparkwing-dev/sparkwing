@@ -26,7 +26,7 @@ The old cross-run batch rollback test retires with the batch API. Per-run
 owner/outbox rollback remains covered by TestFinishRunAndUnitCommitsTogetherAndReplays.
 The port inventory records these replacements.
 
-Two harness checks move into pkg/store tests and their source files are deleted:
+Two harness checks move into internal/store tests and their source files are deleted:
 
 - TestStoreClaimMatching replaces store_matching.go and retains sixteen
   named/queued cases. Accounts, machines and the metered machine root are issued
@@ -59,13 +59,13 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes on the final production source.
-- Vet passes for pkg/store/..., pkg/controller/..., internal/orchestrator,
+- Vet passes for internal/store/..., internal/controller/..., internal/orchestrator,
   internal/acceptance/... and tests/acceptance/.... Controller/orchestrator vet
   passes again after the final fixture edits.
 - The W1 batch passes 490 selected top-level tests and 1,540 test/subtest results
   without skips. w1-session34-tests.txt records the package-local source files.
   Extract their Test names, exclude names containing Postgres and names starting
-  TestPg, and pass their anchored alternation to go test -p 4 ./pkg/store -run
+  TestPg, and pass their anchored alternation to go test -p 4 ./internal/store -run
   with -count=1 -timeout=5m.
 - Nine remaining store-sqlite acceptance cells pass. The selector is
   ^(TestLifecycle|TestRecovery|TestPlacement|TestCredentials|TestBilling|TestSurface)/[^/]+/store-sqlite$.
@@ -104,8 +104,8 @@ Contract changes and real integration points left open:
 - PostgreSQL, native placements, Kubernetes adoption/teardown, real HTTP/api.sock
   composition, providers and repository QA remain unverified here.
 
-Shared caller files are pkg/controller/claim_dispatch_internal_test.go,
-pkg/controller/log_segments_internal_test.go and
+Shared caller files are internal/controller/claim_dispatch_internal_test.go,
+internal/controller/log_segments_internal_test.go and
 internal/orchestrator/wingd_e2e_test.go. The log fixture change removes only the
 obsolete API call, under the lead's caller-migration exception. Other shared
 artifacts are tests/acceptance/placement_test.go, c1-data.md,

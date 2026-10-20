@@ -156,7 +156,7 @@ trigger_host_yaml_test.go and trigger_run_context_test.go. The orphan
 orchestrator/testdata/podnodefixture/main.go is deleted. Shared test additions
 are checkout_fixture_test.go and hosted_policy_test.go. Shared test edits are
 pipeline_requires_test.go, internal/source/acquire_test.go,
-cmd/sparkwing/profile_guard_test.go and pkg/storage/logseg/sink_test.go.
+cmd/sparkwing/profile_guard_test.go and internal/storage/logseg/sink_test.go.
 Shared documentation edits are c3-engine-version.md and t1-port-inventory.md.
 W8 edits are engine/install.go, its tests, runner environment/proxy test ports
 and HOSTING.md. Lead-owned handoffs and amendments are untouched.

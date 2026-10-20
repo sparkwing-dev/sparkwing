@@ -12,10 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -27,11 +29,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func nativeStoreFixtureW8(t *testing.T, kind capability.UnitKind) (*controller.EngineController, capability.Issued) {
@@ -165,7 +165,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				Bind: func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
 					return nodehost.ProcessGrant{}, errors.New("unexpected evaluation")
 				},
-				ReadOutput: func(context.Context, store.NodeRef, int64) (json.RawMessage, error) {
+				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 					return nil, errors.New("unexpected output read")
 				},
 			},

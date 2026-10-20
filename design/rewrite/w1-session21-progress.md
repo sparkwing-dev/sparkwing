@@ -65,13 +65,13 @@ All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4, and
 GOCACHE/GOTMPDIR/TMPDIR below /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes on the final source tree.
-- Scoped go vet -p 4 passes for pkg/store/..., pkg/controller/..., pkg/storage/...,
+- Scoped go vet -p 4 passes for internal/store/..., internal/controller/..., internal/storage/...,
   internal/nodehost/..., internal/orchestrator/..., internal/opsview/...,
   internal/runners/k8s/..., internal/acceptance/..., tests/acceptance/... and
   cmd/sparkwing/.... The final contention-label edit also passes scoped vet.
 - The W1 selection passes 400 top-level tests / 1,143 cases, with no skips.
   Select the Test functions from w1-session21-tests.txt, omit TestPostgres names
-  and run their anchored alternation against ./pkg/store. The final rerun passes.
+  and run their anchored alternation against ./internal/store. The final rerun passes.
 - The final owner-liveness property plus all TestRenewUnit tests pass separately.
 - All eight SQLite recovery cells pass on the final source tree with
   go test -p 4 ./internal/acceptance ./tests/acceptance
@@ -149,16 +149,16 @@ Kubernetes and Doctor removals also delete their sole caller behavior.
 - internal/orchestrator/wingd_api_test.go
 - internal/runners/k8s/dead_token_test.go
 - internal/runners/k8s/k8s.go
-- pkg/controller/client/client.go
-- pkg/controller/client/watch_test.go
-- pkg/controller/handlers.go
-- pkg/controller/log_segments_internal_test.go
-- pkg/controller/node_claim_ownership_test.go
-- pkg/controller/node_client_contract_test.go
-- pkg/controller/runner_scopes_test.go
-- pkg/controller/server.go
-- pkg/controller/tenant_routes.go
-- pkg/storage/state.go
+- internal/controller/client/client.go
+- internal/controller/client/watch_test.go
+- internal/controller/handlers.go
+- internal/controller/log_segments_internal_test.go
+- internal/controller/node_claim_ownership_test.go
+- internal/controller/node_client_contract_test.go
+- internal/controller/runner_scopes_test.go
+- internal/controller/server.go
+- internal/controller/tenant_routes.go
+- internal/storage/state.go
 
 Shared prose is c1-data.md, handoffs.md, t1-port-inventory.md, CHANGELOG.md,
 docs/auth.md, docs/observability.md and docs/migrations/_unreleased.md. Generated

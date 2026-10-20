@@ -50,8 +50,8 @@ this observation carries no ancestry proof or authority. No route or grant
 changes. C1/C2/W3 implementations and the materialization state-machine path
 remain unchanged.
 
-Shared files touched: `pkg/controller/data_cache_routes.go` and the new
-`pkg/controller/data_memo_client_test.go`; `tests/acceptance/data_cache_http_test.go`;
+Shared files touched: `internal/controller/data_cache_routes.go` and the new
+`internal/controller/data_memo_client_test.go`; `tests/acceptance/data_cache_http_test.go`;
 C3; `internal/apispec/wire.go`, generated `api/openapi.yaml`,
 `docs/data-uploads.md` and its generated mirror; CHANGELOG.md and its generated
 mirror. Other implementation and client tests
@@ -95,7 +95,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   TMPDIR=/var/tmp/sw-lead-tmp GOTMPDIR=/var/tmp/sw-lead-tmp \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' \
   -count=1 -v -timeout=5m
 ```

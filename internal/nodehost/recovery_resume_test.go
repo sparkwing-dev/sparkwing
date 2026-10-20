@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestResumeOnlyAdoptsTerminalRecoveryResults(t *testing.T) {
@@ -14,9 +15,9 @@ func TestResumeOnlyAdoptsTerminalRecoveryResults(t *testing.T) {
 			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 			releaseRemote(t, f, "job")
 			claim, input := claimRemote(t, f, "job")
-			ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "job"}
+			ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "job"}
 			waits := 0
-			result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone}, func(context.Context, store.NodeRef, int64) error {
+			result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone}, func(context.Context, controllerwire.NodeRef, int64) error {
 				waits++
 				if terminal {
 					return f.report(t.Context(), input, store.NodeFailed)

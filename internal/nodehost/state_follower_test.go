@@ -8,31 +8,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type followerReader struct {
 	snapshot func(context.Context, string) (store.RunSnapshot, error)
-	node     func(context.Context, store.NodeRef) (store.NodeRow, error)
+	node     func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 }
 
 func (r followerReader) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
 	return r.snapshot(ctx, run)
 }
 
-func (r followerReader) ReadNode(ctx context.Context, ref store.NodeRef) (store.NodeRow, error) {
+func (r followerReader) ReadNode(ctx context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
 	return r.node(ctx, ref)
 }
 
 func TestStateFollowerCatchesUpAfterSubscribing(t *testing.T) {
 	for _, terminal := range []bool{false, true} {
 		t.Run(map[bool]string{false: "requeue", true: "terminal"}[terminal], func(t *testing.T) {
-			ref := store.NodeRef{RunID: "run", NodeID: "build"}
+			ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
 			row := store.NodeRow{Ref: ref, StateSeq: 7, Status: store.StatusRunning, Generation: 2, Attempt: 5}
 			subscribed, closed := false, false
 			f := StateFollower{
-				Store: followerReader{node: func(context.Context, store.NodeRef) (store.NodeRow, error) {
+				Store: followerReader{node: func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
 					if !subscribed {
 						t.Fatal("read preceded subscription")
 					}
@@ -59,7 +60,7 @@ func TestStateFollowerCatchesUpAfterSubscribing(t *testing.T) {
 }
 
 func TestStateFollowerNotificationsAreOnlyHints(t *testing.T) {
-	ref := store.NodeRef{RunID: "run", NodeID: "build"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
 	changed := make(chan struct{}, 1)
 	changed <- struct{}{}
 	reads := make(chan int)
@@ -68,7 +69,7 @@ func TestStateFollowerNotificationsAreOnlyHints(t *testing.T) {
 	defer cancel(nil)
 	cause := errors.New("owner lost")
 	f := StateFollower{
-		Store: followerReader{node: func(ctx context.Context, _ store.NodeRef) (store.NodeRow, error) {
+		Store: followerReader{node: func(ctx context.Context, _ controllerwire.NodeRef) (store.NodeRow, error) {
 			select {
 			case reads <- 1:
 			case <-ctx.Done():
@@ -90,12 +91,12 @@ func TestStateFollowerNotificationsAreOnlyHints(t *testing.T) {
 }
 
 func TestStateFollowerReadsCommittedChangeAfterNotification(t *testing.T) {
-	ref := store.NodeRef{RunID: "run", NodeID: "build"}
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
 	changed, read := make(chan struct{}, 1), make(chan struct{}, 1)
 	var mu sync.Mutex
 	sequence := int64(7)
 	f := StateFollower{
-		Store: followerReader{node: func(context.Context, store.NodeRef) (store.NodeRow, error) {
+		Store: followerReader{node: func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
 			mu.Lock()
 			row := store.NodeRow{Ref: ref, StateSeq: sequence, Status: store.StatusRunning}
 			mu.Unlock()
@@ -125,8 +126,8 @@ func followerSnapshot() store.RunSnapshot {
 	return store.RunSnapshot{
 		Run: store.RunRow{ID: "run", StateSeq: 3},
 		Nodes: []store.NodeRow{
-			{Ref: store.NodeRef{RunID: "run", NodeID: "build"}, StateSeq: 5},
-			{Ref: store.NodeRef{RunID: "run", NodeID: "test"}, StateSeq: 1},
+			{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, StateSeq: 5},
+			{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "test"}, StateSeq: 1},
 		},
 	}
 }
@@ -142,7 +143,7 @@ func TestStateFollowerWaitsForPersistedGraphChanges(t *testing.T) {
 			case "job":
 				current.Nodes[0].StateSeq++
 			case "new job":
-				current.Nodes = append(current.Nodes, store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "generated"}})
+				current.Nodes = append(current.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}})
 			case "empty expansion":
 				current.Expansions = []store.AcceptedExpansionRow{{Source: current.Nodes[0].Ref, SourceGeneration: 0, BodyHash: "empty"}}
 			case "failed expansion":

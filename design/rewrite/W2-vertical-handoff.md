@@ -46,7 +46,7 @@ now read separate run/job intent, with job intent taking precedence.
 
 ## Deleted and ported
 
-Deleted pkg/store/launch_sync.go (154 production lines) and its replaced
+Deleted internal/store/launch_sync.go (154 production lines) and its replaced
 53-line billing test. Native ReleaseUnit and immutable-billing tests retain
 unstarted refund and started-work refusal coverage. The old latest-run private
 query is deleted (33 lines). Six latest-run fixtures now use native admission.

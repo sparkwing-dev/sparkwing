@@ -9,19 +9,20 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type scriptedHostStore struct {
 	readSnapshot     func(context.Context, string) (store.RunSnapshot, error)
-	readNode         func(context.Context, store.NodeRef) (store.NodeRow, error)
+	readNode         func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	transitionNode   func(context.Context, store.NodeTransition) (store.Applied, error)
 	transitionRun    func(context.Context, store.RunTransition) (store.Applied, error)
 	recordStep       func(context.Context, store.StepReport) error
 	renewOwner       func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
-	renewNodeClaim   func(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error)
+	renewNodeClaim   func(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
 	acceptPlan       func(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	finishRunAndUnit func(context.Context, store.FinishRunRequest) (store.Applied, error)
 	acceptExpansion  func(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
@@ -33,60 +34,70 @@ func (s *scriptedHostStore) ReadSnapshot(ctx context.Context, run string) (store
 	}
 	return s.readSnapshot(ctx, run)
 }
-func (s *scriptedHostStore) ReadNode(ctx context.Context, ref store.NodeRef) (store.NodeRow, error) {
+
+func (s *scriptedHostStore) ReadNode(ctx context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
 	if s.readNode == nil {
 		return store.NodeRow{}, errors.New("unexpected node read")
 	}
 	return s.readNode(ctx, ref)
 }
+
 func (s *scriptedHostStore) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
 	if s.transitionNode == nil {
 		return store.Applied{}, errors.New("unexpected node transition")
 	}
 	return s.transitionNode(ctx, change)
 }
+
 func (s *scriptedHostStore) TransitionRun(ctx context.Context, change store.RunTransition) (store.Applied, error) {
 	if s.transitionRun == nil {
 		return store.Applied{}, errors.New("unexpected run transition")
 	}
 	return s.transitionRun(ctx, change)
 }
+
 func (s *scriptedHostStore) RecordStep(ctx context.Context, step store.StepReport) error {
 	if s.recordStep == nil {
 		return errors.New("unexpected step report")
 	}
 	return s.recordStep(ctx, step)
 }
+
 func (s *scriptedHostStore) RenewOwner(ctx context.Context, actor store.Actor, computing bool) (store.LeaseBeat, error) {
 	if s.renewOwner == nil {
 		return store.LeaseBeat{}, errors.New("unexpected owner renewal")
 	}
 	return s.renewOwner(ctx, actor, computing)
 }
-func (s *scriptedHostStore) RenewNodeClaim(ctx context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+
+func (s *scriptedHostStore) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
 	if s.renewNodeClaim == nil {
 		return store.LeaseBeat{}, errors.New("unexpected claim renewal")
 	}
 	return s.renewNodeClaim(ctx, ref, actor)
 }
+
 func (s *scriptedHostStore) AcceptPlan(ctx context.Context, plan store.PlanAcceptance) (store.AcceptedPlan, error) {
 	if s.acceptPlan == nil {
 		return store.AcceptedPlan{}, errors.New("unexpected plan acceptance")
 	}
 	return s.acceptPlan(ctx, plan)
 }
+
 func (s *scriptedHostStore) FinishRunAndUnit(ctx context.Context, finish store.FinishRunRequest) (store.Applied, error) {
 	if s.finishRunAndUnit == nil {
 		return store.Applied{}, errors.New("unexpected run completion")
 	}
 	return s.finishRunAndUnit(ctx, finish)
 }
+
 func (s *scriptedHostStore) AcceptExpansion(ctx context.Context, in store.ExpansionSubmission) (store.AcceptedExpansion, error) {
 	if s.acceptExpansion == nil {
 		return store.AcceptedExpansion{}, errors.New("unexpected expansion")
 	}
 	return s.acceptExpansion(ctx, in)
 }
+
 func (s *scriptedHostStore) ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error) {
 	return store.ReconciledNode{}, errors.New("unexpected reconciliation")
 }
@@ -159,19 +170,20 @@ func newOwnerSealStore(row store.RunRow) *ownerSealFixture {
 	}
 	return s
 }
+
 func newClaimedHostStore(snapshot store.RunSnapshot, mode string) *claimedHostFixture {
 	s := &claimedHostFixture{scriptedHostStore: &scriptedHostStore{}, snapshot: snapshot, mode: mode}
 	s.readSnapshot = func(context.Context, string) (store.RunSnapshot, error) {
 		return s.snapshot, nil
 	}
-	s.readNode = func(context.Context, store.NodeRef) (store.NodeRow, error) {
+	s.readNode = func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
 		return s.snapshot.Nodes[0], nil
 	}
 	s.transitionNode = func(_ context.Context, transition store.NodeTransition) (store.Applied, error) {
 		s.reports = append(s.reports, transition)
 		return store.Applied{}, nil
 	}
-	s.renewNodeClaim = func(_ context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+	s.renewNodeClaim = func(_ context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
 		row := s.snapshot.Nodes[0]
 		if ref != row.Ref || actor.Kind != store.ActorHolder || actor.Holder != row.ClaimedBy || actor.CapabilityPrefix != row.CapabilityPrefix || actor.Generation != row.Generation || actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) {
 			return store.LeaseBeat{}, errors.New("renewal changed claim authority")
@@ -190,6 +202,7 @@ func newClaimedHostStore(snapshot store.RunSnapshot, mode string) *claimedHostFi
 	}
 	return s
 }
+
 func newExecutionHostStore(snapshot store.RunSnapshot) *executionHostFixtureState {
 	s := &executionHostFixtureState{claimedHostFixture: newClaimedHostStore(snapshot, "")}
 	s.recordStep = func(context.Context, store.StepReport) error { return nil }
@@ -209,12 +222,13 @@ func newExecutionHostStore(snapshot store.RunSnapshot) *executionHostFixtureStat
 	}
 	return s
 }
+
 func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostFixture {
 	s := &expansionHostFixture{ownerSealFixture: newOwnerSealStore(row), node: node}
 	s.readSnapshot = func(context.Context, string) (store.RunSnapshot, error) {
 		return store.RunSnapshot{Run: s.row, Nodes: append([]store.NodeRow{s.node}, s.nodes...), Expansions: s.expansions}, nil
 	}
-	s.readNode = func(_ context.Context, ref store.NodeRef) (store.NodeRow, error) {
+	s.readNode = func(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
 		if ref != s.node.Ref {
 			return store.NodeRow{}, errors.New("unexpected source read")
 		}
@@ -248,7 +262,7 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 				if err != nil {
 					return store.AcceptedExpansion{}, err
 				}
-				s.nodes = append(s.nodes, store.NodeRow{Ref: store.NodeRef{RunID: in.Source.RunID, NodeID: job.ID}, Spec: spec, SpecHash: string(hash), Status: store.StatusDone, Outcome: store.NodeSuccess})
+				s.nodes = append(s.nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: in.Source.RunID, NodeID: job.ID}, Spec: spec, SpecHash: string(hash), Status: store.StatusDone, Outcome: store.NodeSuccess})
 			}
 		}
 		return store.AcceptedExpansion{Source: in.Source, SourceGeneration: in.SourceGeneration, State: s.node.Expansion}, nil

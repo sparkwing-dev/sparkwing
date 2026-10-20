@@ -1,0 +1,256 @@
+package store_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+)
+
+func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "w1", RunID: "r1", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "w2", RunID: "r2", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+
+	released, followers, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "leader", "success", "", "", 0, 0)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if !released {
+		t.Fatal("expected released=true")
+	}
+	if len(followers) != 0 {
+		t.Fatalf("expected 0 coalesce followers, got %d", len(followers))
+	}
+	if len(promoted) != 1 || promoted[0].HolderID != "w1" {
+		t.Fatalf("expected w1 promoted, got %+v", promoted)
+	}
+
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
+	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
+		t.Fatalf("holders = %+v", state.Holders)
+	}
+	if len(state.Waiters) != 1 || state.Waiters[0].RunID != "r2" {
+		t.Fatalf("waiters = %+v", state.Waiters)
+	}
+}
+
+func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "w1", RunID: "r1", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	createLiveRunT(t, s, "r1")
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
+		"k", "leader"); err != nil {
+		t.Fatalf("manual drop: %v", err)
+	}
+
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
+	if len(state.Holders) != 0 || len(state.Waiters) != 1 {
+		t.Fatalf("setup: expected 0 holders + 1 waiter, got %+v", state)
+	}
+
+	result, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if result.Promoted != 1 {
+		t.Fatalf("expected 1 waiter promoted, got %d", result.Promoted)
+	}
+
+	state, _ = tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
+	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
+		t.Fatalf("post-reconcile holders: %+v", state.Holders)
+	}
+}
+
+func TestConcurrency_ResolveWaiterPromotesOrphanedQueue(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "w1", RunID: "r1", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
+		"k", "leader"); err != nil {
+		t.Fatalf("manual drop: %v", err)
+	}
+
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "r1", "n", "", "", "", false)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "w1" {
+		t.Fatalf("resolution = %+v", resolution)
+	}
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
+	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
+		t.Fatalf("holders = %+v", state.Holders)
+	}
+	if len(state.Waiters) != 0 {
+		t.Fatalf("waiters = %+v", state.Waiters)
+	}
+}
+
+func TestConcurrency_ResolveWaiterSkipsAbandonedFIFOHead(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "abandoned", RunID: "abandoned", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "live", RunID: "live", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
+		"k", "leader"); err != nil {
+		t.Fatalf("manual drop: %v", err)
+	}
+
+	if err := teststore.SeedRunFinish(s, ctx, store.DefaultTeam, "abandoned", "cancelled", ""); err != nil {
+		t.Fatal(err)
+	}
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "live", "n", "", "", "", false)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "live" {
+		t.Fatalf("resolution = %+v, want live promoted", resolution)
+	}
+	if holderExists(t, s, "k", "abandoned") {
+		t.Fatalf("abandoned FIFO head was promoted into a holder")
+	}
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
+	if len(state.Waiters) != 0 {
+		t.Fatalf("waiters = %+v", state.Waiters)
+	}
+}
+
+func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader/-", RunID: "leader", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "waiter/-", RunID: "waiter", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
+		"k", "leader/-"); err != nil {
+		t.Fatalf("manual drop: %v", err)
+	}
+
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "waiter", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "waiter/-" {
+		t.Fatalf("resolution = %+v", resolution)
+	}
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
+	if len(state.Holders) != 1 || state.Holders[0].RunID != "waiter" || state.Holders[0].NodeID != "" {
+		t.Fatalf("holders = %+v", state.Holders)
+	}
+}
+
+func TestConcurrency_ResolveWaiterSeesAlreadyPromotedHolder(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder", RunID: "waiter", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "waiter", "n", "", "", "", false)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "holder" {
+		t.Fatalf("resolution = %+v", resolution)
+	}
+}
+
+func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "w1", RunID: "r1", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+
+	oneHourAgo := time.Now().Add(-time.Hour).UnixNano()
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = ?,lease_expires_at=? WHERE key = ? AND run_id = ?`),
+		oneHourAgo, oneHourAgo, "k", "r1"); err != nil {
+		t.Fatalf("rewrite arrived_at: %v", err)
+	}
+
+	result, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: 10 * time.Minute})
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if len(result.StaleWaiters) != 1 {
+		t.Fatalf("expected 1 reaped, got %d", len(result.StaleWaiters))
+	}
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "w2", RunID: "r2", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	result, err = teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: 10 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.StaleWaiters) != 0 {
+		t.Fatalf("fresh waiter should not be reaped: %+v", result.StaleWaiters)
+	}
+}
+
+var _ = context.Background

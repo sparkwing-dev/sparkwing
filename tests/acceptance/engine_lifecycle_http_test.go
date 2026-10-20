@@ -12,9 +12,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func ownerBoundary() *credentialBoundary {
@@ -103,7 +103,7 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 				switch operation {
 				case "transition":
 					change := f.nodeChange
-					if change.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Authority != p.Authority || change.Actor.Kind != store.ActorHolder || change.Actor.Generation != 4 || change.Actor.Holder != "runner" || change.Cause != store.CauseReport || change.SourceAttempt == nil || *change.SourceAttempt != 0 || change.To != store.NodeFailed || change.Extra.Result.MaskedError != "masked" {
+					if change.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Authority != p.Authority || change.Actor.Kind != store.ActorHolder || change.Actor.Generation != 4 || change.Actor.Holder != "runner" || change.Cause != store.CauseReport || change.SourceAttempt == nil || *change.SourceAttempt != 0 || change.To != store.NodeFailed || change.Extra.Result.MaskedError != "masked" {
 						t.Fatalf("node transition = %+v", change)
 					}
 				case "owner finish":

@@ -89,7 +89,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
 
 - Whole-repository go build ./... passes.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The existing final store selection plus the new property passes **318 top-level
   tests / 950 cases**, with no skips. Its file list is w1-session13-tests.txt.
@@ -132,7 +132,7 @@ PostgreSQL, race, lint, provider, native platform, pipeline or review pass is cl
 
 ## Shared files and caller migrations
 
-Outside pkg/store, caller migrations are pkg/controller/reaper_test.go,
+Outside internal/store, caller migrations are internal/controller/reaper_test.go,
 internal/orchestrator/trigger_host_test.go and trigger_host_generators_test.go.
 The orchestrator fixtures use one tagged node+trigger pass and expect the lost
 node to be pending. Their full host/credential fixture port remains W3 integration.

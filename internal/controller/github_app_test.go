@@ -1,0 +1,1604 @@
+package controller_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth/githubtest"
+	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
+	"github.com/sparkwing-dev/sparkwing/internal/googleauth/googletest"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+)
+
+const appCallback = "http://localhost:4343/github/app/callback"
+
+const headSHA = "89abcdef0123456789abcdef0123456789abcdef"
+
+type appFixture struct {
+	*identityFixture
+	app     *githubapptest.GitHub
+	logs    *syncBuffer
+	replica func() (*controller.Server, string)
+}
+
+func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Server) *appFixture {
+	t.Helper()
+	return newDeploymentAppFixture(t, deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam), opts...)
+}
+
+func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*controller.Server) *controller.Server) *appFixture {
+	t.Helper()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	google, gh, app := googletest.New(t), githubtest.New(t), githubapptest.New(t)
+	app.AddInstallation(githubapptest.Installation{
+		ID: 7, Account: githubapp.Account{ID: 70, Login: "acme", Type: "Organization"},
+		Repos: []githubapptest.Repo{{ID: 701, FullName: "acme/widgets"}, {ID: 702, FullName: "acme/plans", Private: true}},
+	})
+	app.AddInstallation(githubapptest.Installation{
+		ID: 8, Account: githubapp.Account{ID: 502, Login: "bob", Type: "User"},
+		Repos: []githubapptest.Repo{{ID: 801, FullName: "bob/tools"}},
+	})
+	logs := &syncBuffer{}
+	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	replica := func() (*controller.Server, string) {
+		srv := controller.NewDeployment(st, cfg, logger).WithSecretsCipher(testCipher(t)).
+			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
+			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect, appCallback}).
+			WithDashboardURL("https://dash.example.com").
+			WithDashboard(controller.Dashboard{}).
+			WithGitHubApp(app.Config())
+		for _, opt := range opts {
+			srv = opt(srv)
+		}
+		configureGitHubClaims(srv, st)
+		ts := httptest.NewServer(srv.Handler())
+		t.Cleanup(ts.Close)
+		return srv, ts.URL
+	}
+	srv, url := replica()
+	return &appFixture{
+		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin, srv: srv},
+		app:             app, replica: replica, logs: logs,
+	}
+}
+
+func (f *appFixture) ghUser(id int64, login string) signedIn {
+	f.t.Helper()
+	out := f.signInGitHub(ghPerson(id, login, login+"@example.com"))
+	return signedIn{auth: sessionAuth(out.SessionID), id: out.User.ID, team: out.ActiveTeam.Slug}
+}
+
+type connectStart struct {
+	InstallURL   string
+	AuthorizeURL string
+	State        string
+	Verifier     string
+}
+
+func appFlowCookie(t *testing.T, flow map[string]any) *http.Cookie {
+	t.Helper()
+	raw, err := json.Marshal(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Cookie{Name: "__Host-sw_github_app", Value: base64.RawURLEncoding.EncodeToString(raw)}
+}
+
+func readAppFlow(t *testing.T, c *http.Cookie) map[string]any {
+	t.Helper()
+	raw, err := base64.RawURLEncoding.DecodeString(c.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flow map[string]any
+	if err := json.Unmarshal(raw, &flow); err != nil {
+		t.Fatal(err)
+	}
+	return flow
+}
+
+func (f *appFixture) start(who signedIn) connectStart {
+	f.t.Helper()
+	resp := f.browserSend("POST", who.auth, "/github/app/connect", url.Values{})
+	if resp.StatusCode != http.StatusOK {
+		f.t.Fatalf("connect start = %d", resp.StatusCode)
+	}
+	cookie := responseCookie(resp, "__Host-sw_github_app")
+	if cookie == nil {
+		f.t.Fatal("connect start set no flow cookie")
+	}
+	flow := readAppFlow(f.t, cookie)
+	_, after, _ := strings.Cut(responseBody(f.t, resp), `content="0;url=`)
+	install, _, _ := strings.Cut(after, `"`)
+	state, _ := flow["state"].(string)
+	verifier, _ := flow["verifier"].(string)
+	authorize, _ := flow["authorize_url"].(string)
+	return connectStart{InstallURL: install, AuthorizeURL: authorize, State: state, Verifier: verifier}
+}
+
+var codeSeq int
+
+func (f *appFixture) issueCode(ghID int64, verifier string, orgs map[string]githubapp.OrgMembership) string {
+	codeSeq++
+	code := "code-" + string(rune('a'+codeSeq%26)) + time.Now().Format("150405.000000000")
+	f.app.IssueCode(code, githubapp.User{ID: ghID, Login: "u"}, verifier, appCallback, orgs)
+	return code
+}
+
+func connected(resp *browserResponse) int {
+	if resp.StatusCode == http.StatusSeeOther && strings.HasPrefix(resp.Header.Get("Location"), "/team/github?connected=") {
+		return http.StatusCreated
+	}
+	return resp.StatusCode
+}
+
+func (f *appFixture) finish(who signedIn, s connectStart, verifier string, ghID, installation int64, orgs map[string]githubapp.OrgMembership) int {
+	f.t.Helper()
+	cookie := appFlowCookie(f.t, map[string]any{
+		"state": s.State, "verifier": verifier, "authorize_url": s.AuthorizeURL,
+		"installation_id": installation, "code": f.issueCode(ghID, verifier, orgs),
+	})
+	return connected(f.browserSend("GET", who.auth, "/github/app/complete", nil, cookie))
+}
+
+type availableAnswer struct {
+	status        int
+	installations []int64
+	page          string
+	authorization string
+}
+
+var pickerInstallation = regexp.MustCompile(`name="installation_id" value="(\d+)"`)
+
+func (f *appFixture) available(who signedIn, s connectStart, code string) availableAnswer {
+	f.t.Helper()
+	cookie := appFlowCookie(f.t, map[string]any{
+		"state": s.State, "verifier": s.Verifier, "authorize_url": s.AuthorizeURL, "existing": true, "code": code,
+	})
+	resp := f.browserSend("GET", who.auth, "/github/app/available", nil, cookie)
+	out := availableAnswer{status: resp.StatusCode, page: responseBody(f.t, resp)}
+	if resp.StatusCode != http.StatusOK {
+		return out
+	}
+	for _, m := range pickerInstallation.FindAllStringSubmatch(out.page, -1) {
+		id, err := strconv.ParseInt(m[1], 10, 64)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		out.installations = append(out.installations, id)
+	}
+	if next := responseCookie(resp, "__Host-sw_github_app"); next != nil {
+		out.authorization, _ = readAppFlow(f.t, next)["authorization"].(string)
+	}
+	return out
+}
+
+func (f *appFixture) pick(who signedIn, s connectStart, authorization string, id int64) (int, string) {
+	f.t.Helper()
+	cookie := appFlowCookie(f.t, map[string]any{
+		"state": s.State, "verifier": s.Verifier, "authorize_url": s.AuthorizeURL, "existing": true,
+		"authorization": authorization,
+	})
+	resp := f.browserSend("POST", who.auth, "/github/app/select",
+		url.Values{"installation_id": {strconv.FormatInt(id, 10)}}, cookie)
+	return connected(resp), responseBody(f.t, resp)
+}
+
+var acmeAdmin = map[string]githubapp.OrgMembership{"acme": {State: "active", Role: "admin"}}
+
+func (f *appFixture) connect(who signedIn, ghID, installation int64, orgs map[string]githubapp.OrgMembership) {
+	f.t.Helper()
+	s := f.start(who)
+	if code := f.finish(who, s, s.Verifier, ghID, installation, orgs); code != http.StatusCreated {
+		f.t.Fatalf("connect installation %d = %d", installation, code)
+	}
+}
+
+func (f *appFixture) installations(who signedIn) []int64 {
+	f.t.Helper()
+	var out struct {
+		Installations []struct {
+			InstallationID int64 `json:"installation_id"`
+		} `json:"installations"`
+	}
+	if code := f.call("GET", "/api/v1/team/github-app", who.auth, nil, &out); code != http.StatusOK {
+		f.t.Fatalf("show = %d", code)
+	}
+	var ids []int64
+	for _, in := range out.Installations {
+		ids = append(ids, in.InstallationID)
+	}
+	return ids
+}
+
+func TestGitHubAppConnectBindsAnInstallationItsOrgAdminProves(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	s := f.start(olga)
+	if !strings.HasPrefix(s.InstallURL, f.app.URL+"/apps/sparkwing-test/installations/new?state=") ||
+		!strings.Contains(s.AuthorizeURL, "code_challenge=") {
+		t.Fatalf("start = %+v", s)
+	}
+	if code := f.finish(olga, s, s.Verifier, 501, 7, acmeAdmin); code != http.StatusCreated {
+		t.Fatalf("complete = %d, want 201", code)
+	}
+	if ids := f.installations(olga); len(ids) != 1 || ids[0] != 7 {
+		t.Fatalf("installations = %v, want [7]", ids)
+	}
+	var caps struct {
+		GitHubApp *struct {
+			Slug string `json:"slug"`
+		} `json:"github_app"`
+	}
+	f.call("GET", "/api/v1/capabilities", "", nil, &caps)
+	if caps.GitHubApp == nil || caps.GitHubApp.Slug != "sparkwing-test" {
+		t.Fatalf("capabilities github_app = %+v", caps.GitHubApp)
+	}
+}
+
+func TestGitHubAppExistingInstallationPicker(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	bob := f.ghUser(502, "bob")
+	f.connect(bob, 502, 8, nil)
+	start := f.start(olga)
+	f.app.IssueCode("existing-code", githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback, acmeAdmin)
+	available := f.available(olga, start, "existing-code")
+	if available.status != http.StatusOK {
+		t.Fatalf("available = %d, want 200: %s", available.status, available.page)
+	}
+	if !slices.Equal(available.installations, []int64{7}) || available.authorization == "" {
+		t.Fatalf("available = %+v, want administered installation 7 and a proof", available)
+	}
+	if code, page := f.pick(olga, start, available.authorization, 7); code != http.StatusCreated {
+		t.Fatalf("administered installation = %d, want 201: %s", code, page)
+	}
+	if ids := f.installations(olga); !slices.Equal(ids, []int64{7}) {
+		t.Fatalf("bound installations = %v, want [7]", ids)
+	}
+	if code, _ := f.pick(olga, start, available.authorization, 7); code != http.StatusForbidden {
+		t.Fatalf("replayed selection = %d, want 403", code)
+	}
+}
+
+func TestGitHubAppExistingPickerOnlyBindsListedInstallations(t *testing.T) {
+	selectInstallation := func(code string, id int64) (int, string) {
+		t.Helper()
+		f := newAppFixture(t)
+		olga := f.ghUser(501, "olga")
+		start := f.start(olga)
+		f.app.IssueCode(code, githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback, acmeAdmin)
+		available := f.available(olga, start, code)
+		if available.status != http.StatusOK || !slices.Equal(available.installations, []int64{7}) {
+			t.Fatalf("available = %+v, want only installation 7", available)
+		}
+		f.app.AddInstallation(githubapptest.Installation{
+			ID: 9, Account: githubapp.Account{ID: 70, Login: "acme", Type: "Organization"},
+		})
+		status, page := f.pick(olga, start, available.authorization, id)
+		if id != 7 {
+			if replay, _ := f.pick(olga, start, available.authorization, 7); replay != http.StatusForbidden {
+				t.Fatalf("selection after failed attempt = %d, want 403", replay)
+			}
+		}
+		return status, page
+	}
+	status, unlisted := selectInstallation("unlisted-existing", 9)
+	if status != http.StatusNotFound {
+		t.Fatalf("unlisted existing installation = %d, want 404", status)
+	}
+	status, missing := selectInstallation("missing-existing", 999)
+	if status != http.StatusNotFound || unlisted != missing {
+		t.Fatalf("missing installation = %d %q, want the same 404 as unlisted %q", status, missing, unlisted)
+	}
+	status, _ = selectInstallation("listed-existing", 7)
+	if status != http.StatusCreated {
+		t.Fatalf("listed installation = %d, want 201", status)
+	}
+}
+
+func TestGitHubAppExistingPickerRefusesForeignIdentityAndBoundInstallation(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	bob := f.ghUser(502, "bob")
+	f.connect(bob, 502, 7, acmeAdmin)
+	start := f.start(olga)
+	f.app.IssueCode("foreign-existing", githubapp.User{ID: 666, Login: "mallory"}, start.Verifier, appCallback, acmeAdmin)
+	if got := f.available(olga, start, "foreign-existing"); got.status != http.StatusForbidden {
+		t.Fatalf("foreign linked identity = %d, want 403", got.status)
+	}
+	f.app.IssueCode("admin-existing", githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback, acmeAdmin)
+	available := f.available(olga, start, "admin-existing")
+	if available.status != http.StatusOK || !slices.Equal(available.installations, []int64{7}) {
+		t.Fatalf("bound installation = %+v, want it listed", available)
+	}
+	if !strings.Contains(available.page, "acme (Organization)") || strings.Contains(available.page, "bob") {
+		t.Fatalf("listed installation shows binding state: %s", available.page)
+	}
+	code, refused := f.pick(olga, start, available.authorization, 7)
+	if code != http.StatusConflict {
+		t.Fatalf("bound selection = %d, want 409", code)
+	}
+	if msg := strings.ToLower(refused); strings.Contains(msg, "bob") || strings.Contains(msg, "another team") {
+		t.Fatalf("conflict names another team: %s", refused)
+	}
+}
+
+func TestGitHubAppExistingPickerHidesVisibleInstallationWithoutAdminMembership(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	start := f.start(olga)
+	f.app.IssueCode("member-existing", githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback,
+		map[string]githubapp.OrgMembership{"acme": {State: "active", Role: "member"}})
+	available := f.available(olga, start, "member-existing")
+	if available.status != http.StatusOK {
+		t.Fatalf("available = %d", available.status)
+	}
+	if len(available.installations) != 0 || !strings.Contains(available.page, "No existing installations") {
+		t.Fatalf("member sees %v, want no selectable installations", available.installations)
+	}
+}
+
+// The state and verifier are what bind a flow to the account, team and
+// browser that started it. Each case below is otherwise a valid completion by
+// an org admin, so the one check it names is all that stands in its way.
+func TestGitHubAppConnectRefusesForgedReplayedAndForeignState(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	mallory := f.ghUser(666, "mallory")
+	malloryAdmin := acmeAdmin
+
+	cases := map[string]func() (signedIn, connectStart, string, int64){
+		"state with a forged expiry": func() (signedIn, connectStart, string, int64) {
+			s := f.start(olga)
+			body, sig, _ := strings.Cut(s.State, ".")
+			payload, _ := base64.RawURLEncoding.DecodeString(body)
+			var st map[string]any
+			_ = json.Unmarshal(payload, &st)
+			st["e"] = time.Now().Add(24 * time.Hour).Unix()
+			re, _ := json.Marshal(st)
+			s.State = base64.RawURLEncoding.EncodeToString(re) + "." + sig
+			return olga, s, s.Verifier, 501
+		},
+		"another browser's verifier": func() (signedIn, connectStart, string, int64) {
+			s := f.start(olga)
+			return olga, s, f.start(olga).Verifier, 501
+		},
+		"another account's state": func() (signedIn, connectStart, string, int64) {
+			s := f.start(olga)
+			return mallory, s, s.Verifier, 666
+		},
+		"a state from another flow": func() (signedIn, connectStart, string, int64) {
+			s := f.start(olga)
+			s.State = f.start(olga).State
+			return olga, s, s.Verifier, 501
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			who, s, verifier, ghID := c()
+			if code := f.finish(who, s, verifier, ghID, 7, malloryAdmin); code != http.StatusForbidden {
+				t.Fatalf("complete = %d, want 403", code)
+			}
+		})
+	}
+	if ids := f.installations(olga); len(ids) != 0 {
+		t.Fatalf("a refused flow bound %v", ids)
+	}
+	if ids := f.installations(mallory); len(ids) != 0 {
+		t.Fatalf("a refused flow bound %v to mallory", ids)
+	}
+
+	s := f.start(olga)
+	if code := f.finish(olga, s, s.Verifier, 501, 7, acmeAdmin); code != http.StatusCreated {
+		t.Fatalf("control: an intact flow = %d, want 201", code)
+	}
+	if code := f.finish(olga, s, s.Verifier, 501, 7, acmeAdmin); code != http.StatusForbidden {
+		t.Fatalf("replayed state = %d, want 403", code)
+	}
+}
+
+// A state finishes one flow across every replica and restart, because the
+// used nonce is kept in the store rather than in one controller's memory.
+func TestGitHubAppConnectStateIsSingleUseAcrossReplicas(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	s := f.start(olga)
+	_, other := f.replica()
+	first := f.url
+	f.url = other
+	if code := f.finish(olga, s, s.Verifier, 501, 7, acmeAdmin); code != http.StatusCreated {
+		t.Fatalf("control: completing on another replica = %d, want 201", code)
+	}
+	f.url = first
+	if code := f.finish(olga, s, s.Verifier, 501, 7, acmeAdmin); code != http.StatusForbidden {
+		t.Fatalf("the same state on the replica that issued it = %d, want 403", code)
+	}
+}
+
+// Seeing an installation is not administering its account: a member, a
+// stranger, and a GitHub user other than the account's linked one bind nothing.
+func TestGitHubAppConnectNeedsTheAccountsAdmin(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	cases := map[string]struct {
+		ghID         int64
+		installation int64
+		orgs         map[string]githubapp.OrgMembership
+	}{
+		"organization member who is not an admin": {501, 7, map[string]githubapp.OrgMembership{"acme": {State: "active", Role: "member"}}},
+		"pending organization admin":              {501, 7, map[string]githubapp.OrgMembership{"acme": {State: "pending", Role: "admin"}}},
+		"not in the organization at all":          {501, 7, nil},
+		"another user's personal installation":    {501, 8, nil},
+		"a GitHub user other than the linked one": {777, 7, acmeAdmin},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := f.start(olga)
+			if code := f.finish(olga, s, s.Verifier, c.ghID, c.installation, c.orgs); code != http.StatusForbidden {
+				t.Fatalf("complete = %d, want 403", code)
+			}
+		})
+	}
+	if ids := f.installations(olga); len(ids) != 0 {
+		t.Fatalf("a refused flow bound %v", ids)
+	}
+	bob := f.ghUser(502, "bob")
+	f.connect(bob, 502, 8, nil)
+
+	googleOnly := f.user("g-1", "gina@example.com")
+	resp := f.browserSend("POST", googleOnly.auth, "/github/app/connect", url.Values{})
+	if page := responseBody(t, resp); resp.StatusCode != http.StatusForbidden || !strings.Contains(page, "Link GitHub first") {
+		t.Fatalf("connect with no linked GitHub identity = %d, want 403 offering to link GitHub: %s", resp.StatusCode, page)
+	}
+}
+
+func TestGitHubAppInstallationBelongsToOneTeam(t *testing.T) {
+	f := newAppFixture(t)
+	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
+	f.connect(olga, 501, 7, acmeAdmin)
+	s := f.start(bob)
+	if code := f.finish(bob, s, s.Verifier, 502, 7, acmeAdmin); code != http.StatusConflict {
+		t.Fatalf("second team's connect of a bound installation = %d, want 409", code)
+	}
+	if ids := f.installations(bob); len(ids) != 0 {
+		t.Fatalf("bob's team holds %v", ids)
+	}
+	if code := f.call("DELETE", "/api/v1/operator/github-app/installations/7", f.consoleAuth(), nil, nil); code != http.StatusNoContent {
+		t.Fatalf("operator unbind = %d", code)
+	}
+	f.connect(bob, 502, 7, acmeAdmin)
+	if ids := f.installations(bob); len(ids) != 1 || ids[0] != 7 {
+		t.Fatalf("after the operator's move bob's team holds %v", ids)
+	}
+}
+
+func (f *appFixture) deliver(event string, payload any, signature string) (int, map[string]any) {
+	f.t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if signature == "" {
+		signature = githubapptest.Sign(body)
+	}
+	req, err := http.NewRequest(http.MethodPost, f.url+"/webhooks/github-app", bytes.NewReader(body))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	req.Header.Set("X-GitHub-Event", event)
+	req.Header.Set("X-GitHub-Delivery", "delivery-"+time.Now().Format("150405.000000000"))
+	req.Header.Set("X-Hub-Signature-256", signature)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func pushPayload(installation, repoID int64, repo, sha string) map[string]any {
+	return map[string]any{
+		"ref": "refs/heads/main", "before": strings.Repeat("0", 40), "after": sha,
+		"installation": map[string]any{"id": installation},
+		"repository":   map[string]any{"id": repoID, "full_name": repo, "pushed_at": time.Now().Unix()},
+		"pusher":       map[string]any{"name": "olga"},
+	}
+}
+
+func prPayload(installation, repoID int64, repo string, headRepoID int64) map[string]any {
+	return map[string]any{
+		"action": "opened", "number": 12,
+		"installation": map[string]any{"id": installation},
+		"repository":   map[string]any{"id": repoID, "full_name": repo},
+		"pull_request": map[string]any{
+			"updated_at": time.Now().UTC().Format(time.RFC3339),
+			"head":       map[string]any{"ref": "feature", "sha": headSHA, "repo": map[string]any{"id": headRepoID, "full_name": "x/y"}},
+			"base":       map[string]any{"ref": "main", "sha": strings.Repeat("1", 40), "repo": map[string]any{"id": repoID, "full_name": repo}},
+			"user":       map[string]any{"login": "contributor"},
+		},
+	}
+}
+
+func (f *appFixture) subscribe(who signedIn, repo, pipeline string, body map[string]any) int {
+	f.t.Helper()
+	req := map[string]any{"repository": repo, "pipeline": pipeline, "push": true}
+	for k, v := range body {
+		req[k] = v
+	}
+	return f.call("PUT", "/api/v1/team/github-app/triggers", who.auth, req, nil)
+}
+
+func (f *appFixture) triggers(team string) []*store.Trigger {
+	f.t.Helper()
+	tn, err := f.store.ForTeam(context.Background(), store.Team(team))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	list, err := tn.ListTriggers(context.Background(), store.TriggerFilter{})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return list
+}
+
+func (f *appFixture) sealedRequest(runID string) runspec.Request {
+	f.t.Helper()
+	team, err := f.store.AsOperator().RunTeam(f.t.Context(), runID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(f.t.Context(), team)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	row, err := tenant.ReadRun(f.t.Context(), runID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if row.Request.Request.Origin == runspec.OriginApp && row.Request.Request.Mode == runspec.IntakeExecute {
+		selected, err := source.ForRequest(row.Request)
+		if err != nil || selected.SHA != row.Request.Request.Git.SHA || !runspec.IsCommitID(selected.PipelineSHA) || row.Request.Request.Source.RequestedRef == "" && selected.PipelineSHA != selected.SHA {
+			f.t.Fatalf("App intake did not seal the verified commit pair: %+v, %v", selected, err)
+		}
+	}
+	return row.Request.Request
+}
+
+func TestGitHubAppWebhookSignature(t *testing.T) {
+	f := newAppFixture(t)
+	payload := map[string]any{"zen": "hi"}
+	if code, _ := f.deliver("ping", payload, "sha256="+strings.Repeat("0", 64)); code != http.StatusUnauthorized {
+		t.Fatalf("wrong signature = %d, want 401", code)
+	}
+	body, _ := json.Marshal(payload)
+	if code, _ := f.deliver("ping", payload, githubapptest.SignWith("another-secret", body)); code != http.StatusUnauthorized {
+		t.Fatalf("signature by another secret = %d, want 401", code)
+	}
+	if code, _ := f.deliver("ping", payload, "garbage"); code != http.StatusUnauthorized {
+		t.Fatalf("malformed signature = %d, want 401", code)
+	}
+	if code, _ := f.deliver("ping", payload, ""); code != http.StatusOK {
+		t.Fatalf("control: the App's signature = %d, want 200", code)
+	}
+}
+
+// A delivery runs in the team its installation is bound to, for the pipelines
+// that team subscribed, and a team can subscribe only a repository one of its
+// own installations covers.
+func TestGitHubAppPushRunsOnlyInTheInstallationsTeam(t *testing.T) {
+	f := newAppFixture(t)
+	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.connect(bob, 502, 8, nil)
+
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	if code := f.subscribe(bob, "acme/widgets", "steal", nil); code != http.StatusNotFound {
+		t.Fatalf("bob subscribing a repository of olga's installation = %d, want 404", code)
+	}
+	if code := f.subscribe(bob, "bob/tools", "build", nil); code != http.StatusOK {
+		t.Fatalf("bob subscribing his own repository = %d", code)
+	}
+
+	code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
+	if code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("push = %d %v", code, out)
+	}
+	got := f.triggers(olga.team)
+	if len(got) != 1 || got[0].Pipeline != "build" || got[0].GitSHA != headSHA || got[0].Repo != "acme/widgets" {
+		t.Fatalf("olga's triggers = %+v", got)
+	}
+	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := team.GetRun(t.Context(), got[0].ID)
+	if err != nil || run.Status != "pending" {
+		t.Fatalf("app run = (%+v, %v), want a pending run alongside the trigger", run, err)
+	}
+	if request := f.sealedRequest(got[0].ID); request.Git.App.Value.Event != "push" || request.Git.Repository.Key != "gh:701" {
+		t.Fatalf("app push facts = %+v", request.Git)
+	}
+	if n := len(f.triggers(bob.team)); n != 0 {
+		t.Fatalf("a push through olga's installation started %d runs in bob's team", n)
+	}
+
+	if code, out := f.deliver("push", pushPayload(7, 801, "bob/tools", headSHA), ""); code != http.StatusAccepted || out["status"] != "ignored" {
+		t.Fatalf("push naming bob's repository through olga's installation = %d %v, want ignored", code, out)
+	}
+	if n := len(f.triggers(bob.team)); n != 0 {
+		t.Fatalf("bob's team got %d runs from olga's installation", n)
+	}
+
+	if code, out := f.deliver("push", pushPayload(99, 701, "acme/widgets", headSHA), ""); code != http.StatusAccepted || out["status"] != "ignored" {
+		t.Fatalf("push through an unbound installation = %d %v", code, out)
+	}
+}
+
+func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 1}); err != nil {
+		t.Fatal(err)
+	}
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	if code, out := f.deliver("push", payload, ""); code != http.StatusTooManyRequests || computeLimitReason(out) != controller.ComputeLimitRefusedCode {
+		t.Fatalf("limited app webhook = %d %v, want compute-limit 429", code, out)
+	}
+	if got := f.triggers(olga.team); len(got) != 0 {
+		t.Fatalf("limited app webhook left triggers: %+v", got)
+	}
+	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := f.deliver("push", payload, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("retry after quota clears = %d %v, want dispatched", code, out)
+	}
+}
+
+func TestGitHubAppTagPushRequiresTagSubscription(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	tag := pushPayload(7, 701, "acme/widgets", headSHA)
+	tag["ref"] = "refs/tags/v1.2.3"
+	if _, out := f.deliver("push", tag, ""); out["status"] != "ignored" {
+		t.Fatalf("default subscription started tag: %v", out)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "tags": []string{"v*"}}); code != http.StatusOK {
+		t.Fatalf("tag-only subscription = %d", code)
+	}
+	var listed struct {
+		Triggers []struct {
+			Push bool     `json:"push"`
+			Tags []string `json:"tags"`
+		} `json:"triggers"`
+	}
+	if code := f.call("GET", "/api/v1/team/github-app/triggers", olga.auth, nil, &listed); code != http.StatusOK ||
+		len(listed.Triggers) != 1 || listed.Triggers[0].Push || len(listed.Triggers[0].Tags) != 1 || listed.Triggers[0].Tags[0] != "v*" {
+		t.Fatalf("listed tag subscription = %d %+v", code, listed)
+	}
+	branch := pushPayload(7, 701, "acme/widgets", headSHA)
+	if _, out := f.deliver("push", branch, ""); out["status"] != "ignored" {
+		t.Fatalf("tag-only subscription started branch: %v", out)
+	}
+	if _, out := f.deliver("push", tag, ""); out["status"] != "dispatched" {
+		t.Fatalf("tag push = %v", out)
+	}
+	got := f.triggers(olga.team)
+	if len(got) != 1 {
+		t.Fatalf("tag runs = %+v", got)
+	}
+	request := f.sealedRequest(got[0].ID)
+	if request.Git.Ref != "refs/tags/v1.2.3" || request.Git.SHA != headSHA || request.Git.App.Value.Event != "push" || request.Git.App.Value.DefaultBranchPush {
+		t.Fatalf("tag request = %+v", request.Git)
+	}
+
+	deleted := pushPayload(7, 701, "acme/widgets", headSHA)
+	deleted["ref"], deleted["deleted"] = "refs/tags/v1.2.4", true
+	if _, out := f.deliver("push", deleted, ""); out["status"] != "ignored" {
+		t.Fatalf("deleted tag = %v", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 1 {
+		t.Fatalf("deleted tag left %d triggers", n)
+	}
+}
+
+func TestGitHubAppTagPatternsFilterPushes(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "tags": []string{"v*"}}); code != http.StatusOK {
+		t.Fatalf("pattern subscription = %d", code)
+	}
+	for _, tc := range []struct {
+		ref, status string
+	}{
+		{"refs/tags/canary", "ignored"},
+		{"refs/tags/v1/nested", "ignored"},
+		{"refs/tags/v1.2.3", "dispatched"},
+	} {
+		payload := pushPayload(7, 701, "acme/widgets", headSHA)
+		payload["ref"] = tc.ref
+		if _, out := f.deliver("push", payload, ""); out["status"] != tc.status {
+			t.Fatalf("%s = %v, want %s", tc.ref, out, tc.status)
+		}
+	}
+	if got := len(f.triggers(olga.team)); got != 1 {
+		t.Fatalf("tag patterns started %d runs, want 1", got)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": true, "tags": []string{}}); code != http.StatusOK {
+		t.Fatalf("empty pattern list = %d", code)
+	}
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	payload["ref"] = "refs/tags/v2.0.0"
+	if _, out := f.deliver("push", payload, ""); out["status"] != "ignored" {
+		t.Fatalf("empty pattern list started tag: %v", out)
+	}
+}
+
+func TestGitHubAppTagPatternsValidateBounds(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, patterns := range [][]string{
+		{"["},
+		{strings.Repeat("v", 129)},
+		{""},
+		{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"},
+	} {
+		if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"tags": patterns}); code != http.StatusBadRequest {
+			t.Fatalf("invalid tag patterns %q accepted: %d", patterns, code)
+		}
+	}
+}
+
+func TestGitHubAppTagBooleanRejected(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "tags": true}); code != http.StatusBadRequest {
+		t.Fatalf("boolean tags accepted: %d", code)
+	}
+}
+
+func TestGitHubAppPushBranchSubscription(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "deploy", map[string]any{"branches": []string{"main", "release/*"}}); code != http.StatusOK {
+		t.Fatalf("subscribe with branches = %d, want 200", code)
+	}
+	feature := pushPayload(7, 701, "acme/widgets", headSHA)
+	feature["ref"] = "refs/heads/feature/risky"
+	if code, out := f.deliver("push", feature, ""); code != http.StatusAccepted || out["status"] != "ignored" || out["reason"] == "" {
+		t.Fatalf("nonmatching push = %d %v, want ignored with reason", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("nonmatching push started %d runs", n)
+	}
+	nested := pushPayload(7, 701, "acme/widgets", headSHA)
+	nested["ref"] = "refs/heads/release/one/two"
+	if code, out := f.deliver("push", nested, ""); code != http.StatusAccepted || out["status"] != "ignored" {
+		t.Fatalf("nested release push = %d %v, want ignored by path.Match", code, out)
+	}
+	release := pushPayload(7, 701, "acme/widgets", headSHA)
+	release["ref"] = "refs/heads/release/1.0"
+	if code, out := f.deliver("push", release, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("matching push = %d %v, want dispatched", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 1 {
+		t.Fatalf("matching push started %d runs, want 1", n)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "deploy", map[string]any{"branches": []string{}}); code != http.StatusOK {
+		t.Fatalf("clear branch filter = %d", code)
+	}
+	feature["after"] = strings.Repeat("2", 40)
+	if code, out := f.deliver("push", feature, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("push with empty filter = %d %v, want dispatched", code, out)
+	}
+}
+
+func TestGitHubAppPullRequestBaseBranchSubscription(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{
+		"push": false, "pull_request": true, "base_branches": []string{"main", "release/*"},
+	}); code != http.StatusOK {
+		t.Fatalf("subscribe with base_branches = %d, want 200", code)
+	}
+	feature := prPayload(7, 701, "acme/widgets", 701)
+	feature["pull_request"].(map[string]any)["base"].(map[string]any)["ref"] = "feature"
+	if code, out := f.deliver("pull_request", feature, ""); code != http.StatusAccepted || out["status"] != "ignored" || out["reason"] == "" {
+		t.Fatalf("nonmatching PR base = %d %v, want ignored with reason", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("nonmatching PR base started %d runs", n)
+	}
+	if code, out := f.deliver("pull_request", prPayload(7, 701, "acme/widgets", 701), ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("matching PR base = %d %v, want dispatched", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 1 {
+		t.Fatalf("matching PR base started %d runs, want 1", n)
+	}
+}
+
+func TestGitHubAppSubscriptionRejectsInvalidBranchPatterns(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"too many push patterns", map[string]any{"branches": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}}},
+		{"long push pattern", map[string]any{"branches": []string{strings.Repeat("x", 129)}}},
+		{"push pattern exceeds byte limit", map[string]any{"branches": []string{strings.Repeat("é", 65)}}},
+		{"malformed push pattern", map[string]any{"branches": []string{"["}}},
+		{"empty push pattern", map[string]any{"branches": []string{""}}},
+		{"too many base patterns", map[string]any{"base_branches": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}}},
+		{"long base pattern", map[string]any{"base_branches": []string{strings.Repeat("x", 129)}}},
+		{"malformed base pattern", map[string]any{"base_branches": []string{"["}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if code := f.subscribe(olga, "acme/widgets", "build", tc.body); code != http.StatusBadRequest {
+				t.Fatalf("invalid patterns = %d, want 400", code)
+			}
+		})
+	}
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"branches": []string{strings.Repeat("x", 128)}}); code != http.StatusOK {
+		t.Fatalf("128-byte pattern = %d, want 200", code)
+	}
+}
+
+func TestGitHubAppBranchFilterLeavesTagPatternsAlone(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "deploy", map[string]any{
+		"branches": []string{"main"}, "tags": []string{"v*"},
+	}); code != http.StatusOK {
+		t.Fatalf("subscribe with branches and tags = %d", code)
+	}
+	for _, tc := range []struct {
+		ref, sha, status string
+	}{
+		{"refs/heads/feature", strings.Repeat("1", 40), "ignored"},
+		{"refs/tags/canary", strings.Repeat("2", 40), "ignored"},
+		{"refs/heads/main", strings.Repeat("3", 40), "dispatched"},
+		{"refs/tags/v1.0.0", strings.Repeat("4", 40), "dispatched"},
+	} {
+		payload := pushPayload(7, 701, "acme/widgets", tc.sha)
+		payload["ref"] = tc.ref
+		if _, out := f.deliver("push", payload, ""); out["status"] != tc.status {
+			t.Fatalf("%s = %v, want %s", tc.ref, out, tc.status)
+		}
+	}
+	if n := len(f.triggers(olga.team)); n != 2 {
+		t.Fatalf("branch and tag filters started %d runs, want 2", n)
+	}
+}
+
+func TestGitHubAppRedeliveryStartsOneRun(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	if code, _ := f.deliver("push", payload, ""); code != http.StatusAccepted {
+		t.Fatal("first delivery refused")
+	}
+	_, out := f.deliver("push", payload, "")
+	runs, _ := out["runs"].([]any)
+	if len(runs) != 1 || runs[0].(map[string]any)["status"] != "duplicate" {
+		t.Fatalf("redelivery = %v, want one duplicate", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 1 {
+		t.Fatalf("a redelivery left %d triggers, want 1", n)
+	}
+}
+
+func TestGitHubAppUninstallUnbinds(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	if code, _ := f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7, "app_id": githubapptest.AppID}}, ""); code != http.StatusOK {
+		t.Fatalf("uninstall = %d", code)
+	}
+	if ids := f.installations(olga); len(ids) != 0 {
+		t.Fatalf("installations after uninstall = %v", ids)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "ignored" {
+		t.Fatalf("push after uninstall = %v, want ignored", out)
+	}
+}
+
+type claimedNode struct {
+	RunID      string `json:"run_id"`
+	NodeID     string `json:"node_id"`
+	ClaimToken string `json:"claim_token"`
+}
+
+func TestGitHubAppForkPullRequestIsNotRun(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "pull_request": true, "fork_pull_requests": true}); code != http.StatusBadRequest {
+		t.Fatalf("subscribing with fork_pull_requests = %d, want 400", code)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "pull_request": true}); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	if _, out := f.deliver("pull_request", prPayload(7, 701, "acme/widgets", 999), ""); out["status"] != "ignored" {
+		t.Fatalf("fork PR = %v, want ignored", out)
+	}
+	gone := prPayload(7, 701, "acme/widgets", 0)
+	gone["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = nil
+	if _, out := f.deliver("pull_request", gone, ""); out["status"] != "ignored" {
+		t.Fatalf("PR from a deleted head repository = %v, want ignored", out)
+	}
+	unnamed := prPayload(7, 701, "acme/widgets", 0)
+	unnamed["pull_request"].(map[string]any)["base"].(map[string]any)["repo"] = map[string]any{"full_name": "acme/widgets"}
+	if _, out := f.deliver("pull_request", unnamed, ""); out["status"] != "ignored" {
+		t.Fatalf("PR whose head and base repositories carry no id = %v, want ignored", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("fork PRs started %d runs", n)
+	}
+	if _, out := f.deliver("pull_request", prPayload(7, 701, "acme/widgets", 701), ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a same-repository PR = %v, want dispatched", out)
+	}
+}
+
+func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, ref := range []string{"refs/tags/v1-published", "refs/tags/v1-prereleased", "refs/heads/topic-create", "refs/heads/main"} {
+		f.app.SetCommit("acme/widgets", ref, headSHA)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "baseline", map[string]any{"push": false, "pull_request": true}); code != http.StatusOK {
+		t.Fatalf("baseline subscription = %d", code)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "opted", map[string]any{
+		"push": false, "pull_request": false, "pull_request_closed": true,
+		"pull_request_labeled": true, "pull_request_labels": []string{"ship"},
+		"pull_request_ready_for_review": true, "release_published": true,
+		"release_prereleased": true, "branch_create": true, "branch_delete": true, "tags": []string{"v1-*"}, "release_tags": []string{"v1-*"},
+	}); code != http.StatusOK {
+		t.Fatalf("opt-in subscription = %d", code)
+	}
+	check := func(event string, payload map[string]any, want string) {
+		t.Helper()
+		_, out := f.deliver(event, payload, "")
+		if out["status"] != want {
+			t.Fatalf("%s delivery = %v, want %s", event, out, want)
+		}
+	}
+	pr := prPayload(7, 701, "acme/widgets", 701)
+	pr["action"] = "labeled"
+	pr["label"] = map[string]any{"name": "skip"}
+	check("pull_request", pr, "ignored")
+	pr["action"] = "closed"
+	check("pull_request", pr, "ignored")
+	pr["label"] = map[string]any{"name": "ship"}
+	pr["action"] = "labeled"
+	check("pull_request", pr, "dispatched")
+	pr["action"] = "closed"
+	pr["pull_request"].(map[string]any)["merged"] = true
+	pr["pull_request"].(map[string]any)["merge_commit_sha"] = strings.Repeat("3", 40)
+	check("pull_request", pr, "dispatched")
+	pr["action"] = "ready_for_review"
+	check("pull_request", pr, "dispatched")
+	pr["action"] = "opened"
+	check("pull_request", pr, "dispatched")
+	pr["action"] = "labeled"
+	pr["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]any{"id": 999}
+	check("pull_request", pr, "ignored")
+	check("release", map[string]any{
+		"action": "draft", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
+	}, "ignored")
+	for _, action := range []string{"published", "prereleased"} {
+		check("release", map[string]any{
+			"action": action, "installation": map[string]any{"id": 7},
+			"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
+			"release":    map[string]any{"tag_name": "v1-" + action, "target_commitish": "main", "published_at": time.Now().UTC().Format(time.RFC3339)},
+		}, "dispatched")
+	}
+	for _, event := range []string{"create", "delete"} {
+		branch := map[string]any{
+			"ref": "topic-" + event, "ref_type": "branch", "pusher_type": "user",
+			"installation": map[string]any{"id": 7},
+			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "main"},
+			"sender":       map[string]any{"login": "olga"},
+		}
+		if event == "create" {
+			branch["master_branch"] = "main"
+		}
+		check(event, branch, "dispatched")
+		branch["ref_type"] = "tag"
+		check(event, branch, "ignored")
+	}
+	got := f.triggers(olga.team)
+	if len(got) != 8 {
+		t.Fatalf("triggers = %d, want 8", len(got))
+	}
+	counts := map[string]int{}
+	for _, tr := range got {
+		request := f.sealedRequest(tr.ID)
+		event := request.Git.App.Value.Event
+		counts[event]++
+		if tr.Pipeline == "baseline" && event != "pull_request" {
+			t.Fatalf("baseline received %s", event)
+		}
+		if tr.Pipeline != "opted" {
+			continue
+		}
+		ref := request.Git.Ref
+		want := headSHA
+		if request.Git.App.Value.Action == "closed" {
+			want = strings.Repeat("3", 40)
+		}
+		if ref == "" || request.Git.SHA != want {
+			t.Fatalf("missing ref or resolved commit: %+v", request.Git)
+		}
+		switch event {
+		case "pull_request":
+			pr := request.PullRequest
+			// A merged closed pull request runs the merge commit on its base branch.
+			wantRef := "refs/pull/12/head"
+			if pr.Value.Action == "closed" {
+				wantRef = "refs/heads/main"
+			}
+			if ref != wantRef || !pr.Set || pr.Value.Action == "" {
+				t.Fatalf("PR facts = %+v", request)
+			}
+			if pr.Value.Action == "closed" && !pr.Value.Merged.Set {
+				t.Fatalf("closed PR facts = %+v", pr.Value)
+			}
+		case "release":
+			if !strings.HasPrefix(ref, "refs/tags/v1-") {
+				t.Fatalf("release ref = %s", ref)
+			}
+		case "create", "delete":
+			if !strings.HasPrefix(ref, "refs/heads/topic-") {
+				t.Fatalf("branch ref = %s", ref)
+			}
+		}
+	}
+
+	if counts["pull_request"] != 4 || counts["release"] != 2 || counts["create"] != 1 || counts["delete"] != 1 {
+		t.Fatalf("event counts = %v", counts)
+	}
+}
+
+func TestGitHubAppRepositoryIdentitySurvivesRenameAndTransfer(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	f.app.SetRepos(7, githubapptest.Repo{ID: 999, FullName: "acme/gadgets"})
+	if _, out := f.deliver("repository", map[string]any{
+		"action": "renamed", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/gadgets"},
+	}, ""); out["status"] != "ignored" {
+		t.Fatalf("rename to a different repository id = %v", out)
+	}
+	f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: "acme/gadgets"})
+	if code, out := f.deliver("repository", map[string]any{
+		"action": "renamed", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/gadgets"},
+	}, ""); code != http.StatusOK || out["status"] != "updated" {
+		t.Fatalf("rename = %d %v", code, out)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/gadgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("push after rename = %v", out)
+	}
+	f.app.AddInstallation(githubapptest.Installation{
+		ID: 9, Account: githubapp.Account{ID: 90, Login: "other", Type: "Organization"},
+		Repos: []githubapptest.Repo{{ID: 701, FullName: "other/gadgets"}},
+	})
+	f.connect(olga, 501, 9, map[string]githubapp.OrgMembership{"other": {State: "active", Role: "admin"}})
+	f.app.SetRepos(7)
+	if code, out := f.deliver("repository", map[string]any{
+		"action": "transferred", "installation": map[string]any{"id": 9},
+		"repository": map[string]any{"id": 701, "full_name": "other/gadgets"},
+	}, ""); code != http.StatusOK || out["status"] != "updated" {
+		t.Fatalf("transfer = %d %v", code, out)
+	}
+	if _, out := f.deliver("push", pushPayload(9, 701, "other/gadgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("push after transfer = %v", out)
+	}
+	got := f.triggers(olga.team)
+	if len(got) != 2 {
+		t.Fatalf("runs after repository changes = %d, want 2", len(got))
+	}
+	for _, tr := range got {
+		if tr.Repo != "acme/gadgets" && tr.Repo != "other/gadgets" {
+			t.Fatalf("unexpected repository %q", tr.Repo)
+		}
+	}
+}
+
+func TestGitHubAppReleaseReplayAndCoverage(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "release_published": true, "release_tags": []string{"*"}}); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	f.app.SetCommit("acme/widgets", "refs/tags/v1", headSHA)
+	payload := map[string]any{
+		"action": "published", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
+		"release":    map[string]any{"tag_name": "v1", "published_at": time.Now().UTC().Format(time.RFC3339)},
+	}
+	if _, out := f.deliver("release", payload, ""); out["status"] != "dispatched" {
+		t.Fatalf("release = %v", out)
+	}
+	f.app.SetCommit("acme/widgets", "refs/tags/v1", "")
+	f.app.SetRepos(7)
+	if _, out := f.deliver("release", payload, ""); out["status"] != "duplicate" {
+		t.Fatalf("redelivery = %v", out)
+	}
+	payload["release"].(map[string]any)["tag_name"] = "v2"
+	if _, out := f.deliver("release", payload, ""); out["status"] != "ignored" {
+		t.Fatalf("release after installation lost repository = %v", out)
+	}
+	if got := f.triggers(olga.team); len(got) != 1 {
+		t.Fatalf("replay and uncovered release started %d runs", len(got))
+	}
+}
+
+func TestGitHubAppPushOfNoCommitIsIgnored(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", strings.Repeat("0", 40)), ""); out["status"] != "ignored" {
+		t.Fatalf("push to the zero commit = %v, want ignored", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("a push of no commit started %d runs", n)
+	}
+}
+
+// An event whose time cannot be read cannot be held to the binding's age, so
+// it starts nothing.
+func TestGitHubAppUndatedEventIsIgnored(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": true, "pull_request": true})
+	push := pushPayload(7, 701, "acme/widgets", headSHA)
+	delete(push["repository"].(map[string]any), "pushed_at")
+	if _, out := f.deliver("push", push, ""); out["status"] != "ignored" {
+		t.Fatalf("push without pushed_at = %v, want ignored", out)
+	}
+	pr := prPayload(7, 701, "acme/widgets", 701)
+	pr["pull_request"].(map[string]any)["updated_at"] = "yesterday"
+	if _, out := f.deliver("pull_request", pr, ""); out["status"] != "ignored" {
+		t.Fatalf("pull request with an unreadable updated_at = %v, want ignored", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("undated events started %d runs", n)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a dated push = %v, want dispatched", out)
+	}
+}
+
+// A redelivery of a partly shed delivery spends allowance only on the runs it
+// did not start the first time.
+func TestGitHubAppRedeliveryChargesOnlyShedRuns(t *testing.T) {
+	f := newAppFixture(t)
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	f.subscribe(olga, "acme/widgets", "test", nil)
+	push := pushPayload(7, 701, "acme/widgets", headSHA)
+	if _, out := f.deliver("push", push, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+		t.Fatalf("first delivery = %v, want one run and one shed", out)
+	}
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	if code, out := f.deliver("push", push, ""); code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
+		t.Fatalf("redelivery with one run of allowance = %d %v, want the shed run started", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 2 {
+		t.Fatalf("the team has %d runs, want 2", n)
+	}
+}
+
+func TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit(t *testing.T) {
+	f := newAppFixture(t)
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, pipeline := range []string{"build", "test"} {
+		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"push": false, "release_published": true, "release_tags": []string{"*"}}); code != http.StatusOK {
+			t.Fatal(code)
+		}
+	}
+	f.app.SetCommit("acme/widgets", "refs/tags/v1", headSHA)
+	payload := map[string]any{
+		"action": "published", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
+		"release":    map[string]any{"tag_name": "v1", "published_at": time.Now().UTC().Format(time.RFC3339)},
+	}
+	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+		t.Fatalf("first release = %v", out)
+	}
+	f.app.SetCommit("acme/widgets", "refs/tags/v1", strings.Repeat("a", 40))
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
+		t.Fatalf("release redelivery = %v", out)
+	}
+	for _, tr := range f.triggers(olga.team) {
+		if tr.GitSHA != headSHA {
+			t.Fatalf("redelivery changed release commit to %s", tr.GitSHA)
+		}
+	}
+}
+
+func runStatuses(out map[string]any) []string {
+	runs, _ := out["runs"].([]any)
+	var got []string
+	for _, r := range runs {
+		got = append(got, r.(map[string]any)["status"].(string))
+	}
+	return got
+}
+
+// The hourly cap binds the team, counts each run a delivery creates, and is
+// not spent by a redelivery.
+func TestGitHubAppFloodCapCountsTheTeamsRuns(t *testing.T) {
+	f := newAppFixture(t)
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 3})
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, sub := range [][2]string{{"acme/widgets", "build"}, {"acme/widgets", "test"}, {"acme/plans", "build"}, {"acme/plans", "test"}} {
+		if code := f.subscribe(olga, sub[0], sub[1], nil); code != http.StatusOK {
+			t.Fatalf("subscribe %v = %d", sub, code)
+		}
+	}
+	widgets := pushPayload(7, 701, "acme/widgets", headSHA)
+	if code, out := f.deliver("push", widgets, ""); code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "dispatched"}) {
+		t.Fatalf("first push = %d %v", code, out)
+	}
+	if code, out := f.deliver("push", widgets, ""); code == http.StatusTooManyRequests || !slices.Equal(runStatuses(out), []string{"duplicate", "duplicate"}) {
+		t.Fatalf("redelivery = %d %v, want duplicates that spend nothing", code, out)
+	}
+	code, out := f.deliver("push", pushPayload(7, 702, "acme/plans", headSHA), "")
+	if code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+		t.Fatalf("push to another repository = %d %v, want one run and one shed", code, out)
+	}
+	if code, _ := f.deliver("push", pushPayload(7, 702, "acme/plans", strings.Repeat("2", 40)), ""); code != http.StatusTooManyRequests {
+		t.Fatalf("push past the team's cap = %d, want 429", code)
+	}
+	if n := len(f.triggers(olga.team)); n != 3 {
+		t.Fatalf("the team has %d runs, want the cap of 3", n)
+	}
+}
+
+func pushedAt(p map[string]any, at time.Time) map[string]any {
+	p["repository"].(map[string]any)["pushed_at"] = at.Unix()
+	return p
+}
+
+// After the operator moves an installation, a delivery the old team already
+// ran, or any event from before the move, starts nothing in the new team.
+func TestGitHubAppReplayAfterAMoveStartsNothing(t *testing.T) {
+	f := newAppFixture(t)
+	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	old := pushedAt(pushPayload(7, 701, "acme/widgets", headSHA), time.Now())
+	if _, out := f.deliver("push", old, ""); out["status"] != "dispatched" {
+		t.Fatalf("olga's push = %v", out)
+	}
+	unsent := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("3", 40)), time.Now().Add(-time.Hour))
+	if code := f.call("DELETE", "/api/v1/operator/github-app/installations/7", f.consoleAuth(), nil, nil); code != http.StatusNoContent {
+		t.Fatalf("operator unbind = %d", code)
+	}
+	f.connect(bob, 502, 7, acmeAdmin)
+	f.subscribe(bob, "acme/widgets", "build", nil)
+
+	if _, out := f.deliver("push", old, ""); out["status"] == "dispatched" {
+		t.Fatalf("replay of olga's delivery in bob's team = %v", out)
+	}
+	if _, out := f.deliver("push", unsent, ""); out["status"] != "ignored" {
+		t.Fatalf("an event from before bob connected = %v, want ignored", out)
+	}
+	if n := len(f.triggers(bob.team)); n != 0 {
+		t.Fatalf("bob's team got %d runs from events before it held the installation", n)
+	}
+	fresh := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("4", 40)), time.Now())
+	if _, out := f.deliver("push", fresh, ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a push after bob connected = %v, want dispatched", out)
+	}
+}
+
+// A repository removed from the installation on GitHub starts nothing, even
+// though the team's subscription to it remains.
+func TestGitHubAppRunNeedsTheRepositoryStillCovered(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	// bug: The cached subscription is recent, and no installation_repositories delivery has invalidated it.
+	f.app.SetRepos(7, githubapptest.Repo{ID: 702, FullName: "acme/plans", Private: true})
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "ignored" {
+		t.Fatalf("push to a repository the installation no longer covers = %v, want ignored", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("an uncovered repository started %d runs", n)
+	}
+}
+
+func TestGitHubAppBranchFiltersGateBranchAndPullRequestEvents(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, ref := range []string{"refs/heads/main", "refs/heads/release", "refs/heads/topic"} {
+		f.app.SetCommit("acme/widgets", ref, headSHA)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "deploy", map[string]any{
+		"push": false, "branch_create": true, "branch_delete": true, "pull_request_closed": true,
+		"branches": []string{"main", "release"}, "base_branches": []string{"main"},
+	}); code != http.StatusOK {
+		t.Fatalf("filtered subscription = %d", code)
+	}
+	for _, tc := range []struct {
+		event, ref, want string
+	}{
+		{"create", "topic", "ignored"},
+		{"create", "release", "dispatched"},
+		{"delete", "topic", "ignored"},
+		{"delete", "release", "dispatched"},
+	} {
+		payload := map[string]any{
+			"ref": tc.ref, "ref_type": "branch", "pusher_type": "user",
+			"installation": map[string]any{"id": 7},
+			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "main"},
+			"sender":       map[string]any{"login": "olga"},
+		}
+		if tc.event == "create" {
+			payload["master_branch"] = "main"
+		}
+		if _, out := f.deliver(tc.event, payload, ""); out["status"] != tc.want {
+			t.Fatalf("%s %s = %v, want %s", tc.event, tc.ref, out, tc.want)
+		}
+	}
+	pr := prPayload(7, 701, "acme/widgets", 701)
+	pr["action"] = "closed"
+	pr["pull_request"].(map[string]any)["merged"] = true
+	pr["pull_request"].(map[string]any)["merge_commit_sha"] = strings.Repeat("3", 40)
+	pr["pull_request"].(map[string]any)["base"].(map[string]any)["ref"] = "topic"
+	if _, out := f.deliver("pull_request", pr, ""); out["status"] != "ignored" {
+		t.Fatalf("closed PR into an unlisted base = %v", out)
+	}
+	pr["pull_request"].(map[string]any)["base"].(map[string]any)["ref"] = "main"
+	if _, out := f.deliver("pull_request", pr, ""); out["status"] != "dispatched" {
+		t.Fatalf("closed PR into main = %v", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 3 {
+		t.Fatalf("branch filters started %d runs, want 3", n)
+	}
+}
+
+// GitHub signs only the body, so a captured body re-sent under another
+// X-GitHub-Event must not be read as that event.
+func TestGitHubAppSignedBodyKeepsItsEvent(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "refs/heads/main", headSHA)
+	if code := f.subscribe(olga, "acme/widgets", "teardown", map[string]any{"push": true, "branch_delete": true}); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	repoDeleted := map[string]any{
+		"action":       "deleted",
+		"installation": map[string]any{"id": 7},
+		"repository":   map[string]any{"id": 702, "full_name": "acme/plans"},
+	}
+	if code, out := f.deliver("repository", repoDeleted, ""); code != http.StatusOK {
+		t.Fatalf("repository deleted = %d %v", code, out)
+	}
+	if code, out := f.deliver("installation", repoDeleted, ""); code != http.StatusConflict {
+		t.Fatalf("repository body re-sent as installation = %d %v, want 409", code, out)
+	}
+	if ids := f.installations(olga); len(ids) != 1 {
+		t.Fatalf("installations after a re-sent repository body = %v", ids)
+	}
+	createBody := map[string]any{
+		"ref": "feature-y", "ref_type": "branch", "master_branch": "main", "description": nil, "pusher_type": "user",
+		"installation": map[string]any{"id": 7},
+		"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "main"},
+		"sender":       map[string]any{"login": "olga"},
+	}
+	if _, out := f.deliver("create", createBody, ""); out["status"] != "ignored" {
+		t.Fatalf("create without a create subscription = %v", out)
+	}
+	if code, out := f.deliver("delete", createBody, ""); code != http.StatusConflict {
+		t.Fatalf("create body re-sent as delete = %d %v, want 409", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("re-sent bodies started %d runs", n)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("push after refused re-sends = %v", out)
+	}
+}
+
+// Only installation events carry the full installation object, so its App id
+// tells an installation event from another App's body.
+func TestGitHubAppInstallationEventNamesThisApp(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, appID := range []any{nil, githubapptest.AppID + 1} {
+		inst := map[string]any{"id": 7}
+		if appID != nil {
+			inst["app_id"] = appID
+		}
+		if _, out := f.deliver("installation", map[string]any{"action": "deleted", "installation": inst}, ""); out["status"] != "ignored" {
+			t.Fatalf("uninstall naming app %v = %v, want ignored", appID, out)
+		}
+	}
+	if ids := f.installations(olga); len(ids) != 1 {
+		t.Fatalf("installations after foreign uninstalls = %v", ids)
+	}
+}
+
+// GitHub's delete payload names the deleted ref and the repository, and has
+// no master_branch, so the run starts at the repository's default branch.
+func TestGitHubAppBranchDeleteRunsOnGitHubsPayload(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "refs/heads/trunk", headSHA)
+	if code := f.subscribe(olga, "acme/widgets", "teardown", map[string]any{"push": false, "branch_delete": true}); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	deleted := func(ref string) map[string]any {
+		return map[string]any{
+			"ref": ref, "ref_type": "branch", "pusher_type": "user",
+			"installation": map[string]any{"id": 7},
+			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "trunk"},
+			"sender":       map[string]any{"login": "olga"},
+		}
+	}
+	if _, out := f.deliver("delete", deleted("feature-x"), ""); out["status"] != "dispatched" {
+		t.Fatalf("GitHub-shaped delete = %v, want dispatched", out)
+	}
+	createShaped := deleted("feature-z")
+	createShaped["master_branch"] = "trunk"
+	if _, out := f.deliver("delete", createShaped, ""); out["status"] != "ignored" {
+		t.Fatalf("delete carrying master_branch = %v, want ignored", out)
+	}
+	got := f.triggers(olga.team)
+	if len(got) != 1 {
+		t.Fatalf("triggers = %d, want 1", len(got))
+	}
+	if tr := got[0]; tr.Pipeline != "teardown" || tr.GitSHA != headSHA {
+		t.Fatalf("branch_delete trigger = %+v", tr)
+	}
+	if request := f.sealedRequest(got[0].ID); request.Git.Ref != "refs/heads/feature-x" || request.Git.DefaultBranch.Value != "trunk" || request.Git.App.Value.Event != "delete" || request.Git.App.Value.DefaultBranchPush {
+		t.Fatalf("branch_delete request = %+v", request.Git)
+	}
+}
+
+// An event older than the delivery digest's retention is refused outright:
+// its digest may be gone, and GitHub never redelivers anything that old.
+func TestGitHubAppEventOlderThanTheReplayWindowIsRefused(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "deploy", nil)
+	if _, err := teststore.SQL(t, f.store).Exec(`UPDATE github_app_installations SET created_at = ? WHERE installation_id = 7`,
+		time.Now().Add(-2*store.GitHubAppDeliveryRetention).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	stale := pushedAt(pushPayload(7, 701, "acme/widgets", headSHA), time.Now().Add(-store.GitHubAppDeliveryRetention-time.Hour))
+	code, out := f.deliver("push", stale, "")
+	if code != http.StatusConflict {
+		t.Fatalf("push older than the replay window = %d %v, want 409", code, out)
+	}
+	if !strings.Contains(f.logs.String(), "older than the replay window") {
+		t.Fatalf("refusal left no log line:\n%s", f.logs.String())
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("a stale push started %d runs", n)
+	}
+	recent := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("4", 40)), time.Now().Add(-store.GitHubAppDeliveryRetention+time.Hour))
+	if _, out := f.deliver("push", recent, ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a push inside the window = %v, want dispatched", out)
+	}
+}
+
+// safety: a GitHub App run's default branch reaches its run row, where a controller-dispatched run's planning claim
+// reads it for git:branch=default guards; its checkout has no origin HEAD and no credential to ask origin.
+func TestGitHubAppRunRecordsTheDefaultBranch(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	payload["repository"].(map[string]any)["default_branch"] = "trunk"
+	if code, out := f.deliver("push", payload, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("push = %d %v", code, out)
+	}
+	got := f.triggers(olga.team)
+	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil || len(got) != 1 {
+		t.Fatalf("triggers = %+v, %v", got, err)
+	}
+	run, err := team.ReadRun(t.Context(), got[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch := run.Request.Request.Git.DefaultBranch; !branch.Set || branch.Value != "trunk" {
+		t.Fatalf("sealed git = %+v, want default branch trunk", run.Request.Request.Git)
+	}
+}
+
+func computeLimitReason(out map[string]any) any {
+	failure, _ := out["error"].(map[string]any)
+	details, _ := failure["details"].(map[string]any)
+	return details["reason"]
+}

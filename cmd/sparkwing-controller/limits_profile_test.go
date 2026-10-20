@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 )
 
 func TestApplyLimitsProfile_AnInstallThatSetsNothingIsUnchanged(t *testing.T) {

@@ -7,14 +7,15 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func claimedFixtureNode(t *testing.T, f *storeHostFixture, id string) NodeInput {
 	t.Helper()
-	ref := store.NodeRef{RunID: f.Accepted.RunID, NodeID: id}
+	ref := controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id}
 	if _, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +45,7 @@ func acceptedFixtureExpansion(t *testing.T, f *storeHostFixture, source NodeInpu
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Accepted.RunID, NodeID: source.NodeID})
+	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: source.NodeID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,11 +83,11 @@ func TestAResumedRunKeepsAFailedGeneratedNode(t *testing.T) {
 	if err != nil || completion.Outcome != "failed" {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Accepted.RunID, NodeID: child.ID})
+	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: child.ID})
 	if err != nil || row.Outcome != store.NodeFailed {
 		t.Fatalf("child=%+v error=%v", row, err)
 	}
-	summary, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Accepted.RunID, NodeID: "summary"})
+	summary, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "summary"})
 	if err != nil || summary.Outcome != store.NodeCancelled {
 		t.Fatalf("waiter=%+v error=%v", summary, err)
 	}

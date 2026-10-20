@@ -49,10 +49,10 @@ All commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false`,
   passed the new queue properties, current completion/release properties,
   rotation-grace property, all launcher-snapshot tests and final-attempt
   authentication snapshot. It completed in 6.789 seconds.
-- `go test -race -p 4 ./pkg/store -run '^TestQueuedTrigger' -count=1` passed
+- `go test -race -p 4 ./internal/store -run '^TestQueuedTrigger' -count=1` passed
   after the broader-root and skipped-owner assertions were added, in 29.732 seconds.
-- `go vet -p 4 ./pkg/store ./pkg/controller ./internal/nodehost` passed.
-- `go test -p 4 ./pkg/store ./pkg/controller ./internal/nodehost -run '^$'`
+- `go vet -p 4 ./internal/store ./internal/controller ./internal/nodehost` passed.
+- `go test -p 4 ./internal/store ./internal/controller ./internal/nodehost -run '^$'`
   passed, compiling every test in the changed packages.
 - `go run ./internal/commentcheck -base main .` passed across 2,140 files.
 - The tenant SQL scope and default-team caller guards passed in 1.680 seconds.
@@ -69,13 +69,13 @@ and final independent review.
 
 ## Shared caller files
 
-Outside pkg/store, the minimal fixture migrations are:
+Outside internal/store, the minimal fixture migrations are:
 
 - internal/nodehost/rehydrate_resume_test.go.
-- pkg/controller/egress_test.go, execution_location_test.go and server_test.go.
-- pkg/controller/claim_test.go is deleted after its FIFO test is ported.
+- internal/controller/egress_test.go, execution_location_test.go and server_test.go.
+- internal/controller/claim_test.go is deleted after its FIFO test is ported.
 
-Inside pkg/store, named fixture selection changes are in
+Inside internal/store, named fixture selection changes are in
 claim_team_boundary_test.go, compute_limits_test.go,
 execution_attribution_test.go, lease_test.go, node_usage_bounds_test.go,
 secret_scope_test.go, trigger_absorbing_test.go, trigger_claim_identity_test.go

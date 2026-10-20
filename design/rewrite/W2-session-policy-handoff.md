@@ -134,7 +134,7 @@ The lead retains independent review, pipelines, staging and landing.
 
 ## Shared files
 
-The only production caller/discovery migration outside pkg/controller is
+The only production caller/discovery migration outside internal/controller is
 internal/apiroutes/apiroutes.go and its parser test. No removed exported Go API
 required another package's production caller to change. Shared acceptance
 edits are tests/acceptance/session_flow_http_test.go and the new
@@ -166,7 +166,7 @@ GOCACHE=/tmp/sw-astra-W2/cache, and GOTMPDIR and TMPDIR under
 With that environment, reproduce the focused boundary checks using:
 
 ```sh
-go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./tests/acceptance ./pkg/controller -run '^(TestSession|TestBrowserLogoutHTTP|TestPolicyRouter|TestAuthorizedHandlersDoNotAuthorize|TestCredential|Test.*Registration|Test.*Route.*Guard)' -count=1
+go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./tests/acceptance ./internal/controller -run '^(TestSession|TestBrowserLogoutHTTP|TestPolicyRouter|TestAuthorizedHandlersDoNotAuthorize|TestCredential|Test.*Registration|Test.*Route.*Guard)' -count=1
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./internal/capability ./internal/apierr ./internal/apiroutes ./internal/apiref ./internal/apispec -count=1
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./pkg/docs -run '^(TestPkgDocsContentMatchesDocsRoot|TestEmbeddedChangelogMatchesRoot)$' -count=1
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing build -p 4 ./...

@@ -23,12 +23,12 @@ import (
 type StorePostgres struct{ sparkwing.Base }
 
 func (StorePostgres) ShortHelp() string {
-	return "Run the pkg/store suite against Postgres (embedded, no Docker)"
+	return "Run the internal/store suite against Postgres (embedded, no Docker)"
 }
 
 func (StorePostgres) Help() string {
-	return "Runs `go test ./pkg/store/...` with SPARKWING_TEST_STORE=postgres, so every " +
-		"store test that opens through pkg/store/storetest exercises the Postgres dialect " +
+	return "Runs `go test ./internal/store/...` with SPARKWING_TEST_STORE=postgres, so every " +
+		"store test that opens through internal/store/storetest exercises the Postgres dialect " +
 		"instead of a SQLite file. When SPARKWING_TEST_PG_URL is already set the run uses " +
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
 		"directory under a temporary root and its binaries under the persistent tool cache, " +
@@ -248,7 +248,7 @@ func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 			if err != nil {
 				return fmt.Errorf("store suite against postgres: %w", err)
 			}
-			sparkwing.Info(ctx, "go test ./pkg/store/...: passed against postgres")
+			sparkwing.Info(ctx, "go test ./internal/store/...: passed against postgres")
 			return nil
 		})
 	})
@@ -256,9 +256,9 @@ func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 
 func storePostgresGoCommand(h hostShape) string {
 	if h.cpus == overlappedGoSuiteCPUs && h.singleTenant {
-		return goCommandWithLimits(1, 2, "test", "-timeout 25m -count=1 ./pkg/store/...")
+		return goCommandWithLimits(1, 2, "test", "-timeout 25m -count=1 ./internal/store/...")
 	}
-	return boundedGoCommand(h, "test", "-timeout 25m -count=1 ./pkg/store/...")
+	return boundedGoCommand(h, "test", "-timeout 25m -count=1 ./internal/store/...")
 }
 
 func init() {
@@ -266,13 +266,13 @@ func init() {
 }
 
 func runStorePostgresIfTouched(ctx context.Context) error {
-	files, scope, err := changeScope(ctx, "pkg/store file(s)", storeFiles)
+	files, scope, err := changeScope(ctx, "internal/store file(s)", storeFiles)
 	if err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "store-postgres: %s", scope)
 	if len(files) == 0 {
-		sparkwing.Info(ctx, "store-postgres: pkg/store unchanged; pre-push runs the suite against postgres regardless")
+		sparkwing.Info(ctx, "store-postgres: internal/store unchanged; pre-push runs the suite against postgres regardless")
 		return nil
 	}
 	return (&StorePostgres{}).run(ctx)
@@ -281,7 +281,7 @@ func runStorePostgresIfTouched(ctx context.Context) error {
 func storeFiles(all []string) []string {
 	out := make([]string, 0, len(all))
 	for _, f := range all {
-		if strings.HasPrefix(f, "pkg/store/") && !isTestdataPath(f) {
+		if strings.HasPrefix(f, "internal/store/") && !isTestdataPath(f) {
 			out = append(out, f)
 		}
 	}

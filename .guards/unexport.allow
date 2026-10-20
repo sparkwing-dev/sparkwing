@@ -2,6 +2,8 @@
 # package uses, satisfy no interface and no used type exposes. Counts only
 # fall: lower or delete a line when you unexport or delete one. See
 # .guards/README.md.
+# The package move accepts the existing exports in controller, storage and store
+# once. These counts measure declarations newly within internal/, not added code.
 internal/acceptance	13
 internal/admission	10
 internal/agentconfig	1
@@ -19,6 +21,8 @@ internal/chaos	11
 internal/clisurface	11
 internal/cluster	3
 internal/configguard	2
+internal/controller	67
+internal/controller/client	2
 internal/crons	39
 internal/discovery	4
 internal/diskspace	1
@@ -74,6 +78,11 @@ internal/settings	55
 internal/sourceurl	7
 internal/sparks	5
 internal/sparkwingruntime	5
+internal/storage/logseg	24
+internal/storage/s3	1
+internal/store	268
+internal/store/internal/storetest	1
+internal/store/teststore	5
 internal/tokenpark	3
 internal/toolchain	2
 internal/userconfig	3

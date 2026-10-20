@@ -37,7 +37,7 @@ context helpers, name matcher, SQL matcher and principal-prefix constant.
 
 Removed the Store attempt-history reader. Its tenant replacement reads current
 `node_attempts` in one snapshot instead of the deleted legacy attempts table.
-The two production callers in `pkg/store/store.go` now use the tenant reader.
+The two production callers in `internal/store/store.go` now use the tenant reader.
 The old lineage test is ported to 24 generated cases using real claim, start and
 finish transactions. Foreign tenant/run selectors reveal no history and leave
 the owner's history unchanged.
@@ -64,7 +64,7 @@ GOTMPDIR/TMPDIR under /tmp/sw-astra-W1 and package parallelism -p 4.
 
 - Whole-repository `go build -p 4 ./...` passes.
 - Store/controller/nodehost compilation and scoped vet pass.
-- All 21 W1 acceptance functions in `pkg/store/acceptance_*_test.go` pass in
+- All 21 W1 acceptance functions in `internal/store/acceptance_*_test.go` pass in
   9.448s. No native acceptance cell is newly claimed.
 - Provider/payment, final-schema, SQL-scope, purge, placement and attempt-history
   selections pass in 17.852s.
@@ -133,12 +133,12 @@ remain W1b's implementation ownership.
 
 ## Shared files and ownership
 
-Production caller migration is confined to `pkg/store/store.go`. Outside store,
+Production caller migration is confined to `internal/store/store.go`. Outside store,
 the only new code edit is funding the existing Cloud award fixture in
-`pkg/controller/launcher_fixture_test.go`.
+`internal/controller/launcher_fixture_test.go`.
 
 W1b test changes are caller/schema migrations only:
-`pkg/store/payment_provider_settlement_test.go` drops the replacement schema,
+`internal/store/payment_provider_settlement_test.go` drops the replacement schema,
 `operator_card_billing_test.go` drops its schema-helper call, and conflict files
 retain retired APIs' caller cuts while adopting Operator methods. No billing,
 blob, log or materialization production implementation was edited.

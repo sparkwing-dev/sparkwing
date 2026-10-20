@@ -1641,8 +1641,8 @@ now pass the team slug. W1 must also supply authority-bearing atomic settings
 mutations, including a single signup update for mode and limits, and derive
 audit identity inside that transaction. Those C1 contract changes remain open.
 
-This cut also updates shared callers in `pkg/controller/client/admin.go`,
-`pkg/controller/client/objectstore.go`, `cmd/sparkwing/help_registry.go` and
+This cut also updates shared callers in `internal/controller/client/admin.go`,
+`internal/controller/client/objectstore.go`, `cmd/sparkwing/help_registry.go` and
 `cmd/sparkwing-controller/main.go`. The old launcher test seeds its dispatch
 input through the store because the HTTP mutation is removed. API generators,
 OpenAPI, source docs and their embedded mirrors follow the actual endpoint
@@ -1872,7 +1872,7 @@ contracts carry actor authority/generation but no expected attempt, unlike
 `StepReport`. The store/wire owners must confirm whether the persisted
 capability binding is sufficient or add that fence. No C1 signature is changed.
 
-Shared edits are the seven path strings in `pkg/controller/client/client.go`,
+Shared edits are the seven path strings in `internal/controller/client/client.go`,
 the classification strings in `internal/orchestrator/wingd_api_routes_test.go`,
 and removal of the retired breaker read path from `internal/orchestrator/wingd_api.go`.
 The classification check also exposed stale entries from the earlier operator
@@ -1945,7 +1945,7 @@ remain. Token list/create/lookup/rotation still need their full policy/issuance
 cutover. The daemon classification and legacy tenant table match the changed
 registrations.
 
-Shared source/caller paths are `pkg/controller/client/admin.go`,
+Shared source/caller paths are `internal/controller/client/admin.go`,
 `web/src/lib/teams.ts`, `web/src/lib/teams.test.ts`,
 `internal/orchestrator/wingd_api_routes_test.go`,
 `internal/apiroutes/apiroutes.go`, `internal/apiroutes/apiroutes_test.go`,
@@ -2073,8 +2073,8 @@ cutovers. W2 is incomplete.
 
 Shared edits are `internal/apiroutes/apiroutes.go`, its test,
 `internal/apiref/main.go`, the discovery handler removal from
-`pkg/controller/direct_upload.go`, its direct services caller in
-`pkg/controller/data_download_test.go`, `cmd/sparkwing/profiles_test_cmd.go`
+`internal/controller/direct_upload.go`, its direct services caller in
+`internal/controller/data_download_test.go`, `cmd/sparkwing/profiles_test_cmd.go`
 and its test, OpenAPI, API/auth/migration docs,
 changelog and embedded mirrors. No exported controller API changed. The
 controller API snapshot matches regeneration. No new configuration, limit,
@@ -2252,10 +2252,10 @@ Reproduce with the brief's `GOWORK`, `GOFLAGS`, `GOCACHE`, `GOTMPDIR` and
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./pkg/controller/client ./tests/acceptance ./internal/apiroutes
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./internal/controller/client ./tests/acceptance ./internal/apiroutes
 go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
-go test -p 4 ./pkg/controller/client -run '^TestSizing|^TestRecordProfileObservationSendsPartialFlag$'
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$'
+go test -p 4 ./internal/controller/client -run '^TestSizing|^TestRecordProfileObservationSendsPartialFlag$'
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$'
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$|^TestHostedRetryPolicy_'
 go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
 go run ./internal/commentcheck -base HEAD /home/bombuntu/.xwing/envs/1080/sparkwing

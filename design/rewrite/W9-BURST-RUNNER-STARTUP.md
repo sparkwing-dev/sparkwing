@@ -74,7 +74,7 @@ Passed:
   Go files and diff whitespace.
 
 Commentcheck against main reports the unchanged pinnedClock comment at
-pkg/store/store.go:108. The native public probes compile but skip on the explicit
+internal/store/store.go:108. The native public probes compile but skip on the explicit
 sandbox loopback-listener refusal. No native execution or whole-repository test
 pass is claimed. An initial doccheck invocation omitted its required directory
 arguments. The corrected invocation passed all checks.
@@ -91,7 +91,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 ```
 
 Also retain TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards in
-pkg/controller from the preceding handoff.
+internal/controller from the preceding handoff.
 
 The personal public fixture uses the same development test executable for CLI
 and production runner entrypoints because local SDK replacements bind the

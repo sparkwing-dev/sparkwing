@@ -111,9 +111,9 @@ release-version stamp. Launch remains red until its deployment boundary exists.
 
 ## Scope, size and assumptions
 
-Shared production files: pkg/controller/run_pages.go, run_selection.go,
+Shared production files: internal/controller/run_pages.go, run_selection.go,
 log_search_pages.go, engine_run_detail.go and handlers.go. Shared test files:
-pkg/controller/run_pages_test.go and log_search_pages_test.go. Documentation:
+internal/controller/run_pages_test.go and log_search_pages_test.go. Documentation:
 docs/local-execution.md and pkg/docs/mirror/local-execution.md. Lead-owned
 handoffs and amendments are unchanged.
 

@@ -76,7 +76,7 @@ Passed:
 
 No native matrix cell is newly unskipped. No archived test is newly ported.
 Commentcheck against main still fails on the inherited untagged comment at
-pkg/store/store.go:108. The first doccheck executable call omitted its required
+internal/store/store.go:108. The first doccheck executable call omitted its required
 arguments. The corrected invocation supplies docs and repository paths.
 
 The five public CLI burst execution cases still skip because this sandbox
@@ -106,8 +106,8 @@ the dependency-cache refusal stub (2 lines) and duplicate response declaration
 
 Shared files touched: internal/nodehost/depcache_archive.go and
 host_scripted_storage_test.go; internal/wingd/localcontroller/native_caches_test.go;
-internal/apispec/wire.go; pkg/controller/data_cache_routes.go;
-pkg/controller/burst_sdk_execution_test.go, burst_sdk_source_test.go and
+internal/apispec/wire.go; internal/controller/data_cache_routes.go;
+internal/controller/burst_sdk_execution_test.go, burst_sdk_source_test.go and
 testdata/burst-sdk/main.go; CHANGELOG.md, generated api/openapi.yaml and pkg/docs
 mirrors; the C2 conflict resolution and two C3 contract documents. Other edits
 are W9's controllerwire/client implementation, client tests and run guide.

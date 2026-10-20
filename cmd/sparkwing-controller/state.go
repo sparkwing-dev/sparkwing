@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"path/filepath"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func newControllerServer(st *store.Store, cfg deployment.Config, root, version string, policy *http.Client) (*controller.Server, error) {

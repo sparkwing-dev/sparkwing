@@ -411,7 +411,7 @@ func TestParseActionsEndpointUsesActualProof(t *testing.T) {
 
 func TestParseConcurrencyEndpointsUsesActualRegistrations(t *testing.T) {
 	src := writeFile(t, "server.go", "s.concurrencyEndpoints()")
-	data, err := os.ReadFile(filepath.Join("..", "..", "pkg", "controller", "concurrency_routes.go"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "controller", "concurrency_routes.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestParseConcurrencyEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseControllerBusinessRegistrations(t *testing.T) {
-	routes, err := Parse("../../pkg/controller/server.go", nil)
+	routes, err := Parse("../../internal/controller/server.go", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

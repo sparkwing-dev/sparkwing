@@ -9,7 +9,7 @@ The lead must commit this work and rerun native verification before accepting it
 
 Resolved the contents of all five conflicted files: .apidiff/pkg_store.txt,
 contracts/c1-data.md, contracts/c3-controller-wire.md,
-contracts/c4-surface-config.md and pkg/store/node_state.go. Both launcher-rejection
+contracts/c4-surface-config.md and internal/store/node_state.go. Both launcher-rejection
 and unpriced-claim transition edges survive. Both sides' independent contract
 amendments survive. The store API snapshot is regenerated from the resulting
 source, so integration-deleted APIs remain deleted. No integration-deleted file
@@ -78,11 +78,11 @@ Integration authority was used for these contract changes:
 
 Shared production files: internal/capability/routes.go,
 internal/clisurface/registry.go, internal/controllerwire/operator.go,
-pkg/controller/operator.go, pkg/controller/client/operator.go,
+internal/controller/operator.go, internal/controller/client/operator.go,
 cmd/sparkwing/operator_team.go and cmd/sparkwing/help_registry.go.
 The only shared transition edit is the node_state.go merge resolution.
 
-Shared caller migrations: pkg/controller/burst_cloud_job_test.go and six
+Shared caller migrations: internal/controller/burst_cloud_job_test.go and six
 launcher_*_w8_test.go acceptance fixtures. The burst fake gains Retire and
 supplies Pods on read. The acceptance boundary fixtures now provide NodeClaims
 and NodePools. A new operator_team_read_test.go tests the deployment projection.

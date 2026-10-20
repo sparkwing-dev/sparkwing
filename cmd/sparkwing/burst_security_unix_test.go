@@ -15,14 +15,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestHostileProjectCannotAuthorizeBurst(t *testing.T) {
@@ -234,7 +234,7 @@ func burstCLIClaimantBoundary(t *testing.T, personal, listed, allowed bool, forg
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine, err := manager.EnrollRunner(t.Context(), client.EnrollRunnerRequest{Name: "untrusted", Repos: []string{"example.test/acme/*"}, Personal: personal})
+	machine, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "untrusted", Repos: []string{"example.test/acme/*"}, Personal: personal})
 	if err != nil {
 		t.Fatal(err)
 	}

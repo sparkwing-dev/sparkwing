@@ -120,7 +120,7 @@ The repository build, scoped vet, full source/lease/acceptance suites and focuse
 current host suite pass. The host suite uses the selection in w3-amendment-handoff.md.
 Sleepcheck against HEAD passes. Commentcheck against main reports three inherited
 comments in internal/controllerwire/contracts.go:47,
-pkg/store/state_materialize.go:15 and pkg/store/state_result_records.go:9. It
+internal/store/state_materialize.go:15 and internal/store/state_result_records.go:9. It
 reports no W3 finding.
 
 The initial broader test selection reached legacy failures for missing

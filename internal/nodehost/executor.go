@@ -12,18 +12,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // NodeTransitionStore is the executor's fenced state boundary.
 type NodeTransitionStore interface {
-	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
 	RecordStep(context.Context, store.StepReport) error
@@ -76,8 +77,8 @@ type ExecutorDependencies struct {
 	PrepareLayer  func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
 	PublishOutput func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
 	Annotate      func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
-	ReadFailure   func(context.Context, store.NodeRef, int64) (*nodeproto.JobFailure, error)
-	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
+	ReadFailure   func(context.Context, controllerwire.NodeRef, int64) (*nodeproto.JobFailure, error)
+	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
 	Mask          func(string) string
 	Masks         *MaskRegistry
 }
@@ -170,7 +171,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if string(hash) != input.Accepted.PlanHash {
 		return spec, row, job, executorError(apierr.PlanDrift, "accepted plan hash does not match its declarations")
 	}
-	row, err = h.deps.Store.ReadNode(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+	row, err = h.deps.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -308,7 +309,7 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause st
 		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Mask)
 		extra.Result = &result
 	}
-	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), SourceAttempt: &input.Attempt, Extra: extra})
+	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), SourceAttempt: &input.Attempt, Extra: extra})
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
 	}

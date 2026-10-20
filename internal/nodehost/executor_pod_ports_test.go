@@ -13,9 +13,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
@@ -45,9 +46,9 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.expansions[1].BodyHash = string(hash)
-	state.nodes["failed"] = store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "failed"}, Status: store.StatusDone, Outcome: store.NodeFailed, Generation: 9, Spec: json.RawMessage(`{"id":"failed"}`)}
+	state.nodes["failed"] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "failed"}, Status: store.StatusDone, Outcome: store.NodeFailed, Generation: 9, Spec: json.RawMessage(`{"id":"failed"}`)}
 	failure := &nodeproto.JobFailure{Job: "failed", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded source failure"}}
-	deps.ReadFailure = func(_ context.Context, ref store.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+	deps.ReadFailure = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
 		if ref != state.nodes["failed"].Ref || generation != 9 {
 			t.Fatalf("failure source: %+v generation %d", ref, generation)
 		}
@@ -215,7 +216,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		state.nodes[jobs[i].ID] = store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: jobs[i].ID}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: int64(i + 1), Spec: body, SpecHash: string(hash)}
+		state.nodes[jobs[i].ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: jobs[i].ID}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: int64(i + 1), Spec: body, SpecHash: string(hash)}
 		expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{jobs[i+1]}}
 		body, err = json.Marshal(expansion)
 		if err != nil {
@@ -230,7 +231,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 	input.NodeID = jobs[depth].ID
 	deps.Store = recordedReplayStore{state}
 	reads := 0
-	deps.ReadOutput = func(_ context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
+	deps.ReadOutput = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 		if ref != state.nodes[jobs[reads].ID].Ref || generation != int64(reads+1) {
 			t.Fatalf("ancestor %d: %+v generation %d", reads, ref, generation)
 		}

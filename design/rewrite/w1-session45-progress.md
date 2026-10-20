@@ -79,7 +79,7 @@ prefix to supply. Current store and engine HTTP proofs use real capabilities.
 
 ## Shared files and remaining work
 
-Outside pkg/store, the caller changes are `pkg/controller/handlers.go`,
+Outside internal/store, the caller changes are `internal/controller/handlers.go`,
 `server.go`, `engine_claim_http_test.go` and `agents_test.go`, plus
 `internal/nodehost/dispatch_test.go` and `rehydrate_resume_test.go`.
 

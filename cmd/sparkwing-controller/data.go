@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
+	s3store "github.com/sparkwing-dev/sparkwing/internal/storage/s3"
 )
 
 func openFilesystemData(root, externalURL, address string) (*blob.Filesystem, error) {

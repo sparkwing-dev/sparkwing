@@ -64,8 +64,8 @@ All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
 GOCACHE/GOTMPDIR/TMPDIR below /tmp/sw-astra-W1. Run from this worktree with go -C.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet -p 4 passes for pkg/store/..., pkg/controller/..., pkg/storage/..., internal/nodehost/..., internal/orchestrator/..., internal/acceptance/... and tests/acceptance/....
-- The W1 store selection passes **403 top-level tests / 1,210 cases**, with no skips. Extract Test function names from the files in w1-session23-tests.txt, omit names containing Postgres, and run their anchored alternation against ./pkg/store with -count=1.
+- Scoped go vet -p 4 passes for internal/store/..., internal/controller/..., internal/storage/..., internal/nodehost/..., internal/orchestrator/..., internal/acceptance/... and tests/acceptance/....
+- The W1 store selection passes **403 top-level tests / 1,210 cases**, with no skips. Extract Test function names from the files in w1-session23-tests.txt, omit names containing Postgres, and run their anchored alternation against ./internal/store with -count=1.
 - **Eleven SQLite cells** pass with go test -p 4 ./internal/acceptance ./tests/acceptance -run '^(TestLifecycle|TestRecovery)$/[^/]+/store-sqlite$' -count=1. These are three lifecycle cells and eight recovery cells.
 - The new host wait test, both TestHostedRetryPolicy_ tests and the three Engine enrollment/trusted-service/bootstrap adapter tests pass.
 - internal/apiref and internal/apispec tests pass. check-api-spec and sync-docs --check pass. Embedded scrub, changelog drift and selected migration tests pass.
@@ -113,13 +113,13 @@ is requested. Existing integration points remain:
 
 ## Shared files
 
-The caller-migration exception covers these Go files outside pkg/store:
+The caller-migration exception covers these Go files outside internal/store:
 
 - internal/nodehost/expand.go and expand_test.go
 - internal/orchestrator/backends.go, hosted_retry.go, hosted_retry_test.go and wingd_api_routes_test.go
-- pkg/controller/client/client.go
-- pkg/controller/handlers.go, node_client_contract_test.go, runner_scopes_test.go, server.go, server_test.go and tenant_routes.go
-- pkg/storage/state.go
+- internal/controller/client/client.go
+- internal/controller/handlers.go, node_client_contract_test.go, runner_scopes_test.go, server.go, server_test.go and tenant_routes.go
+- internal/storage/state.go
 
 Shared acceptance files are internal/acceptance/store_generated_dependencies.go,
 internal/acceptance/store_recovery.go and tests/acceptance/lifecycle_test.go.

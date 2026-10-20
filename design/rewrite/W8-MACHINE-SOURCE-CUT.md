@@ -88,7 +88,7 @@ and `submission_environment.go`. Shared production files deleted are
 `internal/orchestrator/run_node_remote.go` and `warmgc.go`.
 Shared test changes are orchestrator's submission/Windows/standalone tests,
 the deleted repository-admission/source-URL/warm-root suites,
-`cmd/sparkwing/profile_guard_test.go`, `pkg/store/default_team_callers_test.go`
+`cmd/sparkwing/profile_guard_test.go`, `internal/store/default_team_callers_test.go`
 and `tests/acceptance/native_store_w8_test.go`. Documentation changes are
 `internal/runners/HOSTING.md`, `internal/wingd/LOCAL-CONTROLLER.md` and the port
 inventory. Lead-owned handoffs and amendments are untouched.

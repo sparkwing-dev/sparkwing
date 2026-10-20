@@ -8,10 +8,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type nodeClaims struct {
@@ -19,7 +20,7 @@ type nodeClaims struct {
 	bindings  capability.BindingChecker
 	masker    *secrets.Masker
 	current   func(context.Context) (capability.Principal, error)
-	readNode  func(context.Context, store.NodeRef) (store.NodeRow, error)
+	readNode  func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	processes *nodehost.NativeProcesses
 	services  func(context.Context, capability.Principal, nodeproto.JobSpec) (nodehost.ProcessServices, error)
 	mu        sync.Mutex
@@ -105,11 +106,11 @@ func (c *nodeClaims) delegate(ctx context.Context, node string, generation, atte
 		return nodehost.ProcessGrant{}, err
 	}
 	fence := principal.Capability.Binding
-	row, err := c.readNode(ctx, store.NodeRef{RunID: fence.RunID, NodeID: node})
+	row, err := c.readNode(ctx, controllerwire.NodeRef{RunID: fence.RunID, NodeID: node})
 	if err != nil {
 		return nodehost.ProcessGrant{}, err
 	}
-	if row.Ref != (store.NodeRef{RunID: fence.RunID, NodeID: node}) || row.Generation != generation || row.Attempt != attempt || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != fence.Holder {
+	if row.Ref != (controllerwire.NodeRef{RunID: fence.RunID, NodeID: node}) || row.Generation != generation || row.Attempt != attempt || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != fence.Holder {
 		return nodehost.ProcessGrant{}, nodeClaimMismatch()
 	}
 	var job nodeproto.JobSpec

@@ -206,22 +206,22 @@ file. Other syntax and workflow checks remain active.
   This corrects execution accounting; fitting the whole gate deadline and
   improving cold-start latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
   hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
-  in `pkg/controller` or `pkg/store` while the active tests had run for 0s.
+  in `internal/controller` or `internal/store` while the active tests had run for 0s.
   The 25-minute value matches the existing `store-postgres` command. Lint waits
   for both Go suites. The conditional PostgreSQL
   suite waits for the full Go suite, then uses its released two-package capacity while
   the race suite continues. Machines with one to three or more than four
   logical CPUs retain their existing dependency schedule and Go parallelism.
-  `pkg/store` is not among the gate's race targets. It measures 2148 s under
+  `internal/store` is not among the gate's race targets. It measures 2148 s under
   the race detector against the step's 1800 s budget, and the cost is spread
   over 828 tests rather than a few, so there is nothing to trim that fits it:
   the 25 slowest account for 17.4 s of the 186 s the suite takes without race.
   Left in, the step always times out, which is a check that cannot pass.
   `pre-release` runs it instead, as `race-store`, and no release ships past it.
-  That step compiles one race-enabled `pkg/store` test binary, lists its top-level
+  That step compiles one race-enabled `internal/store` test binary, lists its top-level
   Test, Example and Fuzz names, sorts them and assigns each exactly once across
   four processes. Every shard runs with `GOMAXPROCS=1`; the separate
-  `pkg/store/internal/storetest` package runs once. The step stops sibling
+  `internal/store/internal/storetest` package runs once. The step stops sibling
   processes on a failure and retains each shard's output in the run log. It
   gives the suite a fresh `SPARKWING_HOME`, clears inherited runner credentials
   and service bindings, and passes `GOWORK=off` into Go commands in worktrees.
@@ -258,8 +258,8 @@ file. Other syntax and workflow checks remain active.
   host with a warm cache at source `2eefff146`, the release cut's three
   members cost 17.001 s (build), 73.455 s (full lint), and 439.746 s
   (`go test -short`). Every check passed; the span exceeded the former
-  five-minute budget. `pkg/store` took 361.767 s inside that run. A focused
-  `pkg/store -short` run without concurrent build or lint took 347.558 s,
+  five-minute budget. `internal/store` took 361.767 s inside that run. A focused
+  `internal/store -short` run without concurrent build or lint took 347.558 s,
   with 1,214 top-level passes and a 240 ms median test duration; 1,130
   exceeded 200 ms. Repeated current-schema SQLite setup remains in this
   coverage. The ten-minute budget keeps the entire short suite and its
@@ -325,7 +325,7 @@ file. Other syntax and workflow checks remain active.
   runs in a hook tier:
   the fast test class belongs to the release cut, and the hooks run formatters,
   sweeps, contract gates and linters. The suites are the wrong shape for a
-  ten-second tier -- the short suite of `pkg/store` alone measured 53 s,
+  ten-second tier -- the short suite of `internal/store` alone measured 53 s,
   because several hundred of its tests each cost between 50 and 200 ms in
   fixture setup.
 - **Cheap:** format touched Go files and run the affected package tests, for
@@ -402,7 +402,7 @@ file. Other syntax and workflow checks remain active.
   whose Go files changed (staged, or since origin/main when nothing is
   staged), so a change never reaches main without the race detector having
   seen its own package, and runs `store-postgres` when that change touches
-  `pkg/store`. `pkg/store` itself is the one exception to that race rule: it
+  `internal/store`. `internal/store` itself is the one exception to that race rule: it
   cannot finish inside the step's budget, so `pre-release` races it and the
   gate names the deferral in its log rather than skipping it silently. Unit and ESLint run in parallel; the production build then
   feeds the browser suite.
@@ -468,7 +468,7 @@ file. Other syntax and workflow checks remain active.
   edited. `GOWORK=off go run ./internal/sleepcheck .` judges every test file in
   the tree, which is how to size the remaining purge. Korey approved two
   external-boundary exceptions: the process-exit bound and paced status poll
-  in `pkg/controller/direct_source_e2e_test.go`, which bound cleanup of an
+  in `internal/controller/direct_source_e2e_test.go`, which bound cleanup of an
   external runner and avoid a busy HTTP loop.
   Each `time.After` has a `// sleepcheck:external-boundary` reason immediately
   above its select receive arm. The checker allows only the listed path,
@@ -552,8 +552,8 @@ file. Other syntax and workflow checks remain active.
   directory to force full verification without `--exhaustive`.
 
 - **Store dialect matrix:** `sparkwing run store-postgres` runs
-  `go test ./pkg/store/...` with `SPARKWING_TEST_STORE=postgres`, so every
-  store test that opens through `pkg/store/storetest` exercises the Postgres
+  `go test ./internal/store/...` with `SPARKWING_TEST_STORE=postgres`, so every
+  store test that opens through `internal/store/storetest` exercises the Postgres
   dialect instead of a SQLite file. It reuses `SPARKWING_TEST_PG_URL` when
   that is set and otherwise starts an embedded Postgres on a free port (data
   under a temporary root, binaries cached in `$TMPDIR`), then stops it and
@@ -576,7 +576,7 @@ file. Other syntax and workflow checks remain active.
   uses that server without downloading embedded binaries. The separate
   Postgres conformance job verifies the backup drill with a matching client
   and rejects skipped tests. Its no-skip selection also includes
-  `TestCLITokenMintUsesCommittedMembershipAuthority` in `pkg/controller`,
+  `TestCLITokenMintUsesCommittedMembershipAuthority` in `internal/controller`,
   retaining the PostgreSQL bearer-token regression for demotion and removal.
   It also retains both SQL literal regressions, which verify that run filters
   and secret mutations treat SQL metacharacters as data and preserve team
@@ -589,7 +589,7 @@ file. Other syntax and workflow checks remain active.
   --name sw-pg -e POSTGRES_PASSWORD=postgres -p 5433:5432 postgres:17`,
   then run `SPARKWING_REQUIRE_PG=1
   SPARKWING_TEST_PG_URL=postgres://postgres:postgres@localhost:5433/postgres?sslmode=disable
-  go test -v -run 'Postgres|Pg' ./pkg/store ./internal/backend
+  go test -v -run 'Postgres|Pg' ./internal/store ./internal/backend
   ./internal/orchestrator`. `SPARKWING_REQUIRE_PG` turns an unset URL and
   `SPARKWING_INTEGRATION_DISABLE=1` into failures. That is not proof on
   its own, so both lanes that promise Postgres coverage run those suites
@@ -609,13 +609,13 @@ file. Other syntax and workflow checks remain active.
   of quietly sending the tests back to skipping. `sparkwing run
   integration` installs nothing and takes whatever client the developer's
   machine has.
-- **Backup and restore drill:** `TestBackupRestoreDrill` in `pkg/store`
+- **Backup and restore drill:** `TestBackupRestoreDrill` in `internal/store`
   runs the procedure in `docs/backup-restore.md` end to end. Its SQLite
   subtests always run. Its Postgres subtest shells out to `pg_dump` and
   `pg_restore`, taking them from `SPARKWING_PG_BIN` or `PATH` and
   skipping when neither supplies them. Run it against a server with
   `SPARKWING_TEST_PG_URL=... SPARKWING_PG_BIN=/usr/lib/postgresql/17/bin
-  go test -run TestBackupRestoreDrill -v ./pkg/store`. The drill's name
+  go test -run TestBackupRestoreDrill -v ./internal/store`. The drill's name
   carries no dialect, so the hosted no-skip step selects it by name:
   `-run 'Postgres|Pg|BackupRestoreDrill'`. That is what turns a missing
   or too-old client into a red lane rather than a green one with a

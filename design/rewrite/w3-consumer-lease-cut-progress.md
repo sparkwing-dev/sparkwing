@@ -61,7 +61,7 @@ as recorded in the earlier W3 audit and continuation reports. This session close
 no whole native-placement amendment.
 
 Shared edits are C3, this report and removal of the deleted helper's stale entry
-in pkg/store/default_team_callers_test.go. No foreign production caller changed.
+in internal/store/default_team_callers_test.go. No foreign production caller changed.
 Lead-owned handoffs and amendments are unchanged. No git write, Sparkwing binary,
 pipeline, install or release ran. Scratch is removed after all checks join. The
 shared build cache remains.

@@ -140,7 +140,7 @@ and one credit fixture needed minimal migration after the integration merge.
   incomplete. There is no new product or architecture decision to ratify.
 
 Shared files touched for merge resolution or the minimal caller migration are
-pkg/controller/client/client.go, pkg/storage/state.go,
+internal/controller/client/client.go, internal/storage/state.go,
 internal/orchestrator/wingd_api.go and wingd_api_routes_test.go,
 internal/apiroutes/apiroutes.go, controller accounting/credit fixtures, source
 auth/security/migration docs, API/OpenAPI and .apidiff snapshots, CHANGELOG and

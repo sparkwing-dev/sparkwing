@@ -98,13 +98,13 @@ The Go module pipeline authors import:
   Job, Work, Step, modifiers, runtime helpers (`sparkwing.Bash`,
   `sparkwing.Path`, etc.), wire types. This is the package with
   stability guarantees.
-- **Other `pkg/` packages** -- `pkg/controller/client`,
-  `pkg/storage`, `pkg/runner`, `pkg/wingwire` and the rest. Exported
+- **Other `pkg/` packages** -- `pkg/backends`, `pkg/match`,
+  `pkg/wingwire` and the rest. Exported
   and covered by the same stability promise as `sparkwing/` (see
   [VERSIONING.md](./VERSIONING.md)), but they are CLI and controller
   plumbing rather than pipeline-authoring API.
-- **Everything under `internal/`** -- the orchestrator, admission,
-  bincache, otelutil, profile, repos, secrets and friends.
+- **Everything under `internal/`** -- the controller and its client, store,
+  storage backends, orchestrator, admission and similar implementation packages.
   Implementation detail that changes at any time; Go forbids importing
   it from outside this module.
 
@@ -162,16 +162,15 @@ spec at
 [`api/openapi.yaml`](./api/openapi.yaml). Every route, request
 shape, response shape, and security requirement is described there.
 The route inventory and each route's `x-sparkwing-scope` are written
-from `pkg/controller/server.go` by `bash bin/gen-api-docs.sh`, and
+from `internal/controller/server.go` by `bash bin/gen-api-docs.sh`, and
 `bash bin/check-api-spec.sh` fails when the file and the router
 disagree.
 
 To view it: paste the file into [editor.swagger.io](https://editor.swagger.io)
 for an interactive renderer, or open with any OpenAPI-aware tool
-(Redoc, Stoplight, Postman, etc.). The Go client at
-[`pkg/controller/client/`](./pkg/controller/client) implements the
-same routes; new clients in other languages should be able to be
-generated from the spec.
+(Redoc, Stoplight, Postman, etc.). Sparkwing's internal Go client at
+[`internal/controller/client/`](./internal/controller/client) implements these
+routes. External clients use the HTTP contract described by the spec.
 
 ## Stability
 

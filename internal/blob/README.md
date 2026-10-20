@@ -98,7 +98,7 @@ can publish a replacement archive. Authentication and host construction remain
 contract fixtures in these checks.
 
 Record transactions, read-set construction, unique-byte accounting, GC and
-retention belong to `pkg/store`. Controller authorization and upload tickets belong
+retention belong to `internal/store`. Controller authorization and upload tickets belong
 to the controller and capability packages.
 
 `ObjectBackend.VerifyManifest` streams the selected tenant's CAS bytes against
@@ -359,8 +359,8 @@ Local host construction does not open an artifact backend from
 contract takes live byte and record clients through `nodehost.StorageBinding`.
 Runtime bindings still need integration.
 
-The raw `pkg/storage.ArtifactStore` contract and filesystem adapter are removed.
-`pkg/storage/s3.MeasurementStore` exposes physical bucket measurement only.
+The raw `internal/storage.ArtifactStore` contract and filesystem adapter are removed.
+`internal/storage/s3.MeasurementStore` exposes physical bucket measurement only.
 Tagged log reads use the configured blob backend through `logseg.CommittedReader`.
 The separate raw S3 reader, listing reader and create-only writer are removed.
 Dashboard reads select subjects through `Tenant.ReadRunView`; each byte read and
@@ -416,5 +416,5 @@ output handlers, raw log adapter and log PUT handler are removed.
 
 The implemented byte and record types live in `types.go`, tagged log subjects
 in `logs.go`, and the physical backend interface in `objects.go`. Their former
-contract files and forwarding declarations are removed. `pkg/storage` has no
+contract files and forwarding declarations are removed. `internal/storage` has no
 legacy state-store interface. Native hosts use their existing tenant boundaries.

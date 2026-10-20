@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -18,8 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestHostLifecycleEvents(t *testing.T) {
@@ -35,7 +36,7 @@ func TestHostLifecycleEvents(t *testing.T) {
 				fixture = executionStoreFixture(t, deps)
 			})
 			input = storedExecutionInput(t, fixture, host)
-			row := store.NodeRow{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}}
+			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}}
 			if mode == "result_refused" {
 				if _, err := teststore.SQL(t, fixture.Store).ExecContext(ctx, `CREATE TRIGGER refuse_result BEFORE UPDATE OF outcome ON nodes WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'result transaction refused'); END`); err != nil {
 					t.Fatal(err)
@@ -121,7 +122,7 @@ func TestHostStepPersistence(t *testing.T) {
 			input, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
 				fixture = executionStoreFixture(t, deps)
 				deps.Log = func(ctx context.Context, in NodeInput, log nodeproto.FrameLog) error {
-					row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: in.Accepted.RunID, NodeID: "job"})
+					row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: in.Accepted.RunID, NodeID: "job"})
 					if err != nil || row.Generation != in.Generation || row.Attempt != in.Attempt || row.ClaimedBy != in.Authority.Holder || row.CapabilityPrefix != in.Authority.CapabilityPrefix {
 						t.Fatalf("diagnostic differs from committed attempt: %+v, %v", row, err)
 					}
@@ -219,7 +220,7 @@ func TestHostStepPersistence(t *testing.T) {
 					t.Fatal("diagnostic failure leaked a process")
 				}
 			}
-			persisted, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: "job"})
+			persisted, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: "job"})
 			outcome := store.NodeSuccess
 			if mode == "before_refused" || mode == "step_failed" || mode == "step_write_refused" || mode == "diagnostic_refused" {
 				outcome = store.NodeFailed
@@ -270,7 +271,7 @@ func TestClaimedHostForeignAwards(t *testing.T) {
 				input.Attempt++
 			}
 			observed := false
-			observer := &scriptedHostStore{readSnapshot: fixture.Tenant.ReadSnapshot, readNode: fixture.Tenant.ReadNode, transitionNode: fixture.Tenant.TransitionNode, recordStep: fixture.Tenant.RecordStep, renewNodeClaim: func(ctx context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+			observer := &scriptedHostStore{readSnapshot: fixture.Tenant.ReadSnapshot, readNode: fixture.Tenant.ReadNode, transitionNode: fixture.Tenant.TransitionNode, recordStep: fixture.Tenant.RecordStep, renewNodeClaim: func(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
 				observed = true
 				return fixture.Tenant.RenewNodeClaim(ctx, ref, actor)
 			}}
@@ -336,7 +337,7 @@ func fixtureEngine(t *testing.T, accepted AcceptedRun) engine.Identity {
 func storedExecutionInput(t *testing.T, fixture *storeHostFixture, host *ClaimedNodeHost) NodeInput {
 	t.Helper()
 	ctx := t.Context()
-	ref := store.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "job"}
+	ref := controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "job"}
 	if _, err := fixture.Tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: fixture.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
 		t.Fatal(err)
 	}

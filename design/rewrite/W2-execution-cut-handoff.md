@@ -68,7 +68,7 @@ debug and remaining business endpoints. Reuse the shared wire and transaction
 contracts, or record the missing contract before extending another area. Missing
 foreign implementations must use fakes without restoring the retired endpoints.
 
-Old HTTP clients in pkg/controller/client/client.go, claim.go, coordination.go,
+Old HTTP clients in internal/controller/client/client.go, claim.go, coordination.go,
 livelogs.go and output.go still name retired paths. Their legacy runtime consumers
 need migration or deletion with the final W3/W9 compositions. No forwarding
 client adapter was added. The repository builds, but these old runtime paths

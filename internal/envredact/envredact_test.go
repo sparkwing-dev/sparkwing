@@ -247,7 +247,7 @@ func TestCredentialFileName(t *testing.T) {
 		{"docs/author.txt", false},
 		{"config/authority.yaml", false},
 		{"certs/certificates.txt", false},
-		{"pkg/controller/auth.go", false},
+		{"internal/controller/auth.go", false},
 		{"cmd/sparkwing/secret.go", false},
 		{"web/package.json", false},
 		{"Makefile", false},

@@ -82,12 +82,12 @@ All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and caches
 temporary files and test scratch beneath /tmp/sw-astra-W1. Tests use -p 4.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- `go vet -p 4` passes for pkg/store/..., internal/acceptance/...,
-  tests/acceptance/..., pkg/controller/... and internal/orchestrator/....
+- `go vet -p 4` passes for internal/store/..., internal/acceptance/...,
+  tests/acceptance/..., internal/controller/... and internal/orchestrator/....
 - The final W1 selection passes **398 top-level tests / 1,093 cases**, with
   no skips or failures. Select Test names from the files in
   w1-session19-tests.txt, omit TestPostgres names and run their anchored
-  alternation against ./pkg/store.
+  alternation against ./internal/store.
 - internal/acceptance and tests/acceptance with `-skip '^TestProtocol$'`
   pass **19 top-level tests / 200 cases**, with **2,422 native/platform skips**.
   Protocol process coverage is not claimed.
@@ -127,9 +127,9 @@ recorded in earlier reports and handoffs.
 
 The next legacy cut must migrate the StateStoreOld users and claim/trigger
 writers. CreatePlanNode still has four fixture callers:
-pkg/controller/claim_dispatch_internal_test.go,
-pkg/controller/data_download_claim_provenance_test.go,
-pkg/controller/log_segments_internal_test.go and
+internal/controller/claim_dispatch_internal_test.go,
+internal/controller/data_download_claim_provenance_test.go,
+internal/controller/log_segments_internal_test.go and
 internal/orchestrator/segment_logs_test.go. They have not been converted into
 passing final-contract HTTP proofs. Keeping their constructor avoids a new
 package compilation failure while that migration remains open.
@@ -138,9 +138,9 @@ package compilation failure while that migration remains open.
 
 Shared production caller changes are:
 
-- pkg/controller/claim_dispatch.go removes the legacy handler and binding.
-- pkg/controller/server.go removes that branch from the plan route.
-- pkg/controller/client/claim.go removes SubmitPlan.
+- internal/controller/claim_dispatch.go removes the legacy handler and binding.
+- internal/controller/server.go removes that branch from the plan route.
+- internal/controller/client/claim.go removes SubmitPlan.
 - internal/orchestrator/claim_exec.go removes the old launched planner.
 
 Shared acceptance files are internal/acceptance/store_plan_seals.go and
@@ -148,9 +148,9 @@ tests/acceptance/lifecycle_test.go. Shared prose is c1-data.md, handoffs.md,
 t1-port-inventory.md, the migration note and changelog with generated mirrors.
 
 The lead's caller-migration exception authorizes both W1b test changes.
-pkg/store/node_output_test.go loses the two tests tied to dispatchRun and
+internal/store/node_output_test.go loses the two tests tied to dispatchRun and
 retains the digest helper its other tests use. One SourceAttempt field is added
-to pkg/store/blob_result_records_test.go. W1b persistence, billing and log
+to internal/store/blob_result_records_test.go. W1b persistence, billing and log
 implementations are unchanged.
 
 Friction came from legacy fixtures still calling CreatePlanNode, missing steps

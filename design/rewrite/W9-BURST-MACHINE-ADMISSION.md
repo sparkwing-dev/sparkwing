@@ -91,7 +91,7 @@ Passed:
   award-property selections pass. No native matrix cell was newly unskipped.
 - Embedded docs, doccheck, auth example grammar, mirror drift and whitespace.
   Commentcheck against HEAD is clean. Against main it still reports the
-  inherited pinnedClock comment at pkg/store/store.go:108.
+  inherited pinnedClock comment at internal/store/store.go:108.
 
 The first broad test expression also selected listener-based docs, Google-auth,
 daemon-capacity and daemon-spawn tests. Those could not run because this sandbox
@@ -112,7 +112,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' -count=1 -v
 ```
 
@@ -155,7 +155,7 @@ Shared implementation/test files:
 - internal/wingd/machine_sampler.go, client/capacity.go, client/capacity_test.go,
   client/local_lifecycle.go and client/local_process.go.
 - internal/wingd/localcontroller/admission.go and remote_admission_test.go.
-- pkg/controller/engine_claim.go and runner_capacity_test.go.
+- internal/controller/engine_claim.go and runner_capacity_test.go.
 - pkg/wingwire/identity.go and remote_identity_test.go.
 - tests/acceptance/native_store_w8_test.go, .apidiff/pkg_wingwire.txt,
   CHANGELOG.md, generated pkg/docs mirrors and the three contract files above.

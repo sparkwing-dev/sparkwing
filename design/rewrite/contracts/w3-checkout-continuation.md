@@ -89,7 +89,7 @@ safe diagnostics, and keeps DEL as an explicit seed.
 ## Contract changes needed in other areas
 
 New C1/W6 gap: optional secret declarations cannot survive the current seal.
-`Resolved.SecretNames` authorizes secret release in `pkg/store/binding_secret.go`,
+`Resolved.SecretNames` authorizes secret release in `internal/store/binding_secret.go`,
 while `preparePlanSealTx` sends every name to required-secret preflight. There is
 no place to retain `SecretDeclaration.Optional`. Omitting optional names would
 deny their release. Keeping them makes absent optional secrets fail preflight.

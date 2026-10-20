@@ -70,9 +70,9 @@ The final checks can be reproduced from the worktree with the environment above:
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/acceptance ./internal/apiroutes
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./tests/acceptance ./internal/acceptance ./internal/apiroutes
 go test -p 4 ./internal/capability ./internal/apierr ./internal/acceptance ./tests/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestRouteGuard_|^TestTenantRoutes_|^TestCredentialIssuance|^TestSourceController|^TestPlanSecretOpener' -count=1
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestRouteGuard_|^TestTenantRoutes_|^TestCredentialIssuance|^TestSourceController|^TestPlanSecretOpener' -count=1
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$' -count=1
 go run ./internal/commentcheck -base main .
 bash bin/check-api-spec.sh

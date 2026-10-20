@@ -1,4 +1,0 @@
-# pkg/controller/ciphertest
-
-func TestBoundCipher(t *testing.T, factory func() controller.BoundCipher)
-func TestCipher(t *testing.T, factory func() controller.Cipher)

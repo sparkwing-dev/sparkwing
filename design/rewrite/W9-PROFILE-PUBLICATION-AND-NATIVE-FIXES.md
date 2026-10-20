@@ -42,7 +42,7 @@ The exploratory broad short suites also exposed existing cron fixtures using rem
 
 Production versus HEAD: +817/-80, net +737, excluding tests, testdata and contract declaration files. W9-owned production: +521/-18, net +503. W9 versus main: +19,010/-23,818, net **-4,808**, inside the -2,900 budget. The new volume implements the previously missing profile/publication slice. Burst-named production files are unchanged. Deleted code includes duplicate transition conversion, duplicate data-authority construction, the private-row typed-output read and the pre-intake publication refusal.
 
-Shared production files: internal/apispec/wire.go; internal/capability/{issuance,policy,routes}.go; internal/runspec/publication.go; internal/nodehost/executor.go; internal/wingd/localcontroller/native_client.go; pkg/controller/{credential_issuance,data_authority,data_request_binding,engine_lifecycle,private_host}.go; pkg/store/{authority_binding,authority_delegate,blob_authority_projection,capabilities_contract,local_publication,node_state,publication_attempt,result_proof,secret_preflight,state_contract,state_materialize}.go. Shared tests are the controller projection/publication/output/route fixtures, store publication tests, nodehost/cache and capability properties, API-route expectations, and acceptance policy/cache fixtures. API generation, source docs, changelog and embedded mirrors were updated. No API was removed that needed foreign caller migration.
+Shared production files: internal/apispec/wire.go; internal/capability/{issuance,policy,routes}.go; internal/runspec/publication.go; internal/nodehost/executor.go; internal/wingd/localcontroller/native_client.go; internal/controller/{credential_issuance,data_authority,data_request_binding,engine_lifecycle,private_host}.go; internal/store/{authority_binding,authority_delegate,blob_authority_projection,capabilities_contract,local_publication,node_state,publication_attempt,result_proof,secret_preflight,state_contract,state_materialize}.go. Shared tests are the controller projection/publication/output/route fixtures, store publication tests, nodehost/cache and capability properties, API-route expectations, and acceptance policy/cache fixtures. API generation, source docs, changelog and embedded mirrors were updated. No API was removed that needed foreign caller migration.
 
 ## Lead integration
 
@@ -58,7 +58,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   TMPDIR=/var/tmp/sw-lead-tmp GOTMPDIR=/var/tmp/sw-lead-tmp \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' \
   -count=1 -v -timeout=5m
 ```

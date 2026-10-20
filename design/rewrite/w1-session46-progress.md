@@ -109,7 +109,7 @@ replay remains open.
 
 ## Shared files
 
-Beyond pkg/store, merge resolutions touch pkg/controller handlers.go, server.go,
+Beyond internal/store, merge resolutions touch internal/controller handlers.go, server.go,
 engine_launcher_sync.go, engine_claim_http_test.go, claim_run_test.go,
 claim_dispatch_internal_test.go, log_segments_internal_test.go,
 metric_timestamp_test.go, prom_internal_test.go, team_tokens_test.go and the eight

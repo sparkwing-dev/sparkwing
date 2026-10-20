@@ -92,9 +92,9 @@ Reproduce with the paths and Go environment above:
 
 ```sh
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing build -p 4 ./...
-go -C /home/bombuntu/.xwing/envs/1080/sparkwing vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/apiroutes
+go -C /home/bombuntu/.xwing/envs/1080/sparkwing vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./tests/acceptance ./internal/apiroutes
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./internal/capability ./internal/apierr ./internal/acceptance ./tests/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
-go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestRouteGuard_|^TestTenantRoutes_|^TestCredentialIssuance|^TestSourceController|^TestPlanSecretOpener|^TestGitHubRunnerWorkflowDocMatchesTheRenderedTemplate$' -count=1
+go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestRouteGuard_|^TestTenantRoutes_|^TestCredentialIssuance|^TestSourceController|^TestPlanSecretOpener|^TestGitHubRunnerWorkflowDocMatchesTheRenderedTemplate$' -count=1
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$' -count=1
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing run ./internal/commentcheck -base main .
 env -C /home/bombuntu/.xwing/envs/1080/sparkwing bash /home/bombuntu/.xwing/envs/1080/sparkwing/bin/check-api-spec.sh

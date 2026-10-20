@@ -111,9 +111,9 @@ Materialization and W1b's production files are untouched.
 ## Shared files and handoff
 
 Outside store, source changes remove dead `runLimitStatus` from
-`pkg/controller/metrics.go` and `StateStoreOld` from `pkg/storage/state.go`.
-`pkg/controller/team_boundary_test.go` replaces one removed approval fixture call
-with a tenant-bound fixture insert. `pkg/controller/claim_run_test.go` preserves
+`internal/controller/metrics.go` and `StateStoreOld` from `internal/storage/state.go`.
+`internal/controller/team_boundary_test.go` replaces one removed approval fixture call
+with a tenant-bound fixture insert. `internal/controller/claim_run_test.go` preserves
 both branches' compatible API retirement. The settlement-only test export is
 removed from `claim_tokens_export_internal_test.go`; its billing helper remains.
 

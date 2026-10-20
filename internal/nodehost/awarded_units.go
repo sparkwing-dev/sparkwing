@@ -8,9 +8,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // Plan accepts a controller-owned run's plan under its planning lease and leaves scheduling to the controller.
@@ -81,7 +82,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	}
 	var row store.NodeRow
 	for _, current := range snapshot.Nodes {
-		if current.Ref == (store.NodeRef{RunID: input.RunID, NodeID: sourceID}) {
+		if current.Ref == (controllerwire.NodeRef{RunID: input.RunID, NodeID: sourceID}) {
 			row = current
 			break
 		}

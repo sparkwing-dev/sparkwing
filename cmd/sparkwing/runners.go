@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 
 	"go.yaml.in/yaml/v3"
 
@@ -26,9 +26,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: the runner loop lives in this binary, so the service runs a second executable.
@@ -156,7 +156,7 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 }
 
 func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enrollment runnerEnrollment) error {
-	request := client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal}
+	request := controllerwire.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal}
 	if enrollment.launcher {
 		request.Grants = []string{string(capability.ClaimsLaunch)}
 	}

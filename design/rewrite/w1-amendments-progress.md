@@ -51,11 +51,11 @@ obsolete documentation. Their tenant methods remain for legacy callers. No
 forwarding shim was added. The 22-line member-only provisioning implementation
 was replaced by the origin-aware issuer.
 
-The production caller migration outside pkg/store is
-pkg/controller/claim_attention.go. Its fixture change is
-pkg/controller/claim_attention_internal_test.go. Other shared files are
+The production caller migration outside internal/store is
+internal/controller/claim_attention.go. Its fixture change is
+internal/controller/claim_attention_internal_test.go. Other shared files are
 internal/acceptance/store_credentials.go, tests/acceptance/credentials_test.go,
-design/rewrite/contracts/c1-data.md and t1-port-inventory.md. Inside pkg/store,
+design/rewrite/contracts/c1-data.md and t1-port-inventory.md. Inside internal/store,
 store.go gains only the policy dependency and wrapper removal. concurrency.go
 and claim_attention.go carry the handle changes. Their existing tests and the
 SQL-scope guard follow those changes. W1b files are unchanged.
@@ -65,7 +65,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
 
 - Whole-repository go build -p 4 ./... passes.
-- go vet -p 4 on pkg/store, pkg/controller, internal/acceptance and
+- go vet -p 4 on internal/store, internal/controller, internal/acceptance and
   tests/acceptance passes.
 - The earlier exact store selection plus provision_origins_test.go passes
   254 top-level tests / 716 cases, without skips. The filenames for that
@@ -219,7 +219,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Test package parallelism is at most -p 4.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- `go vet -p 4 ./pkg/store ./pkg/controller ./pkg/match ./internal/acceptance
+- `go vet -p 4 ./internal/store ./internal/controller ./pkg/match ./internal/acceptance
   ./tests/acceptance` passes.
 - The exact store selection passes 248 top-level tests / 695 cases, without skips.
 - Controller `-run '^TestEngine'` passes 33 top-level tests / 56 cases.
@@ -233,8 +233,8 @@ TMPDIR=/tmp/sw-astra-W1/tmp. Test package parallelism is at most -p 4.
   `-base HEAD` is clean for this continuation.
 
 To reproduce the exact store selection, extract top-level Test names from these
-files under pkg/store, join them into an anchored alternation, and run
-`go test -p 4 ./pkg/store -count=1 -run "$expression"`:
+files under internal/store, join them into an anchored alternation, and run
+`go test -p 4 ./internal/store -count=1 -run "$expression"`:
 
     authority_runtime_test.go authority_adapters_test.go rewrite_authority_test.go
     rewrite_schema_test.go state_runtime_test.go scheduling_contract_test.go
@@ -264,10 +264,10 @@ remain integration work.
 
 ## Earlier shared files, mechanisms and friction
 
-Shared runtime support changed only in pkg/store/dialect.go, capabilities_contract.go,
+Shared runtime support changed only in internal/store/dialect.go, capabilities_contract.go,
 schema.sql, schema_contract.go and tenant.go. Other owned store changes are the
 binding adapter, its tests and private-interface comment cleanup. Outside
-pkg/store, this continuation adds internal/acceptance/store_recovery.go and
+internal/store, this continuation adds internal/acceptance/store_recovery.go and
 changes tests/acceptance/recovery_test.go. No other package's production caller
 was migrated or deleted. C1, T1 and this handoff document the evidence.
 

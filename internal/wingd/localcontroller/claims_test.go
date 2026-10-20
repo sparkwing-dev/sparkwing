@@ -11,10 +11,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func localClaimsFixture(t testing.TB) (*nodeClaims, *nativeAuthentication, store.ReconciledNode, *bool) {
@@ -35,7 +36,7 @@ func localClaimsFixture(t testing.TB) (*nodeClaims, *nativeAuthentication, store
 		}
 		return owner, context.Cause(ctx)
 	}}
-	award := store.ReconciledNode{Kind: store.Execute, Node: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, CapabilityPrefix: "node", OwnerCapabilityPrefix: "owner", ClaimedBy: "account", Generation: 2}, Claim: &store.ClaimAward{CapabilityPrefix: "node", Holder: "account", Generation: 2, LeaseExpiresAt: state.snapshot.Binding.LeaseExpiresAt}, Bearer: []byte(raw)}
+	award := store.ReconciledNode{Kind: store.Execute, Node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, CapabilityPrefix: "node", OwnerCapabilityPrefix: "owner", ClaimedBy: "account", Generation: 2}, Claim: &store.ClaimAward{CapabilityPrefix: "node", Holder: "account", Generation: 2, LeaseExpiresAt: state.snapshot.Binding.LeaseExpiresAt}, Bearer: []byte(raw)}
 	return claims, state, award, &lost
 }
 
@@ -167,7 +168,7 @@ func TestLocalAdoptedClaimDelegatesMatchingSDKProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims.readNode = func(context.Context, store.NodeRef) (store.NodeRow, error) { return row, nil }
+	claims.readNode = func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) { return row, nil }
 	claims.processes = processes
 	grant, err := claims.delegate(t.Context(), row.Ref.NodeID, row.Generation, row.Attempt)
 	if err != nil {
@@ -231,7 +232,7 @@ func FuzzLocalProcessDelegationFence(f *testing.F) {
 		case 6:
 			row.Spec = json.RawMessage(`{"id":"other"}`)
 		}
-		claims.readNode = func(context.Context, store.NodeRef) (store.NodeRow, error) { return row, nil }
+		claims.readNode = func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) { return row, nil }
 		claims.processes = processes
 		grant, err := claims.delegate(t.Context(), "job", 2, 1)
 		if err == nil || grant.Binding.Routes.Bearer != "" || grant.Revoke != nil {
@@ -290,7 +291,7 @@ func TestLocalOwnerDelegatesEvaluationBeforeAnyNodeAward(t *testing.T) {
 	source.CapabilityPrefix, source.ClaimedBy = "", ""
 	source.SpecHash = "accepted-job-hash"
 	source.Spec = []byte(`{"id":"job"}`)
-	claims.readNode = func(context.Context, store.NodeRef) (store.NodeRow, error) { return source, nil }
+	claims.readNode = func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) { return source, nil }
 	input := nodehost.EvaluationInput{Accepted: nodehost.AcceptedRun{RunID: "run"}, NodeID: "job", SpecHash: source.SpecHash}
 	grant, err := claims.evaluate(t.Context(), input)
 	if err != nil {

@@ -3,8 +3,8 @@ package backend
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/internal/storage"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 type segmentCompleteness interface {

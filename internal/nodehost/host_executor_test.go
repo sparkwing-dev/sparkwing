@@ -12,13 +12,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func executionHostFixture(t *testing.T, mode string, trace *[]string, processes *[]*scriptedSDK, configure ...func(*ExecutorDependencies)) (NodeInput, *executionHostFixtureState, *ClaimedNodeHost) {
@@ -76,12 +77,12 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	raw, _ := json.Marshal(spec)
 	body, _ := json.Marshal(plan)
 	jobBody, _ := json.Marshal(job)
-	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 0, Spec: jobBody, SpecHash: string(jobHash), Execution: execution}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 0, Spec: jobBody, SpecHash: string(jobHash), Execution: execution}
 	s := newExecutionHostStore(store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: body}, Nodes: []store.NodeRow{row}})
 	if mode == "artifact_retry" {
 		producer, _ := json.Marshal(plan.Jobs[1])
 		producerHash, _ := expansionHash(plan.Jobs[1])
-		s.snapshot.Nodes = append(s.snapshot.Nodes, store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "producer"}, Status: store.StatusDone, Outcome: "success", Spec: producer, SpecHash: string(producerHash)})
+		s.snapshot.Nodes = append(s.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "producer"}, Status: store.StatusDone, Outcome: "success", Spec: producer, SpecHash: string(producerHash)})
 	}
 	if mode == "result_refused" {
 		s.reject = store.CauseReport

@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **go api (Breaking):** Move the store, controller, controller client, cipher tests and storage backends under `internal/`. External Go imports of their former `pkg/` paths are removed. HTTP credential DTOs and `NodeRef` live in `internal/controllerwire`; JSON contracts are unchanged. Use the author SDK, public wire packages or the documented HTTP API. See [migration](docs/migrations/_unreleased.md#controller-and-store-packages-are-internal).
+
 - **billing:** Payment events and refund responses share one state owner, including operator refunds and outcomes delivered before the payer is known. Terminal refunds cannot regress to pending. Refunds, disputes and warning consequences commit with the paid grant, and only actual refunds count as provider money returned.
 - **launcher:** The keeper kills the SDK process tree and asks DinD to kill its containers at the funded bound. Cleanup receives only the time remaining. Kubernetes is the backstop during a launcher outage: a pod can run up to one extra 60-second slice plus its start delay beyond the funded deadline, and that overage is never charged. Customer-controlled in-pod watchdogs are removed.
 - **billing (Breaking):** Each Add funds payment and automatic refill is at most $1,000, including for High-standing teams. Larger amounts point to the billing contact request, which now accepts requests from High teams for higher limits or larger payments. See [migration](docs/migrations/_unreleased.md#maximum-card-payment).
@@ -743,7 +745,7 @@ unlock.
 
 - **runner + controller:** Cluster runners keep each node's log as segments the controller stores
   Against a controller that advertises `logs.segments` in `GET /api/v1/capabilities`, the Kubernetes Job, warm runner, self-hosted agent, GitHub Actions runner, launcher Job and the trigger runner's in-process nodes and compile output upload a gzip segment every 10 seconds or 1 MiB, and seal the log with a manifest when the binary exits, whether or not they have a logs URL; before, a runner without one left the log on a disk that died with the pod. A runner lost mid-node loses at most the segment it was filling; the controller seals the attempt 60 seconds after the node finished, and the log reads `incomplete`. While a node runs, its runner posts each line to the live ring with its byte offset (`X-Sparkwing-Log-Offset`), so a follow joins the ring to the segments without repeating or skipping a line. New routes: `POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments` (claim or `runs.state`) signs one compressed segment's PUT for its exact size and Content-MD5 and charges the team that size, `POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest` seals the attempt with a manifest the controller checks against the segments it signed, and `PUT /api/v1/log-segments/{key...}` stores a segment on a controller without a cache bucket. A node holds at most 65 MiB of stored segments, and a launcher pod's claim or a runner's node claim may finish its own attempt's log for 60 seconds after its node reports its outcome. While the controller is unreachable a runner keeps cut segments in its spool and retries them, so a runner lost during an outage loses what it had not uploaded. A controller that keeps no segments sees no change. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
-- **storage:** `pkg/storage/logseg` stores one node attempt's log as numbered segments sealed by a manifest
+- **storage:** `internal/storage/logseg` stores one node attempt's log as numbered segments sealed by a manifest
   It carries the `Sink` that spools and uploads, the reader (`Open`, `Log.Read`, `Log.Completeness`), the controller's `SealAbandoned` and the key layout. `storage.ReadOpts.Apply` is the one filter every log store applies; the filesystem and S3 stores use it.
 - **client:** `Client.LogSegment`, `Client.SealLog`, `Client.NewLogSegmentUploader` and `Client.KeepsLogSegments` sign, upload and seal a node attempt's log segments, and `Client.NodeLogs` reads, follows and greps node logs through the controller's log routes
 - **store:** Schemas v95 and v100 record where each node attempt's log segments live and which segments the controller signed
@@ -915,7 +917,7 @@ unlock.
 
 - **runner + controller:** Cluster runners keep each node's log as segments the controller stores
   Against a controller that advertises `logs.segments` in `GET /api/v1/capabilities`, the Kubernetes Job, warm runner, self-hosted agent, GitHub Actions runner, launcher Job and the trigger runner's in-process nodes and compile output upload a gzip segment every 10 seconds or 1 MiB, and seal the log with a manifest when the binary exits, whether or not they have a logs URL; before, a runner without one left the log on a disk that died with the pod. A runner lost mid-node loses at most the segment it was filling; the controller seals the attempt 60 seconds after the node finished, and the log reads `incomplete`. While a node runs, its runner posts each line to the live ring with its byte offset (`X-Sparkwing-Log-Offset`), so a follow joins the ring to the segments without repeating or skipping a line. New routes: `POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments` (claim or `runs.state`) signs one compressed segment's PUT for its exact size and Content-MD5 and charges the team that size, `POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest` seals the attempt with a manifest the controller checks against the segments it signed, and `PUT /api/v1/log-segments/{key...}` stores a segment on a controller without a cache bucket. A node holds at most 65 MiB of stored segments, and a launcher pod's claim or a runner's node claim may finish its own attempt's log for 60 seconds after its node reports its outcome. While the controller is unreachable a runner keeps cut segments in its spool and retries them, so a runner lost during an outage loses what it had not uploaded. A controller that keeps no segments sees no change. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
-- **storage:** `pkg/storage/logseg` stores one node attempt's log as numbered segments sealed by a manifest
+- **storage:** `internal/storage/logseg` stores one node attempt's log as numbered segments sealed by a manifest
   It carries the `Sink` that spools and uploads, the reader (`Open`, `Log.Read`, `Log.Completeness`), the controller's `SealAbandoned` and the key layout. `storage.ReadOpts.Apply` is the one filter every log store applies; the filesystem and S3 stores use it.
 - **client:** `Client.LogSegment`, `Client.SealLog`, `Client.NewLogSegmentUploader` and `Client.KeepsLogSegments` sign, upload and seal a node attempt's log segments, and `Client.NodeLogs` reads, follows and greps node logs through the controller's log routes
 - **store:** Schemas v95 and v100 record where each node attempt's log segments live and which segments the controller signed
@@ -1043,8 +1045,8 @@ unlock.
   `Open` refuses a store at any other schema version and names the file to delete or the database to drop; nothing upgrades it. Removed with the upgrade path: the `sparkwing_requirements` table and the refusal of older binaries it drove, `store.SkewError`, `store.SetBinaryVersion`, the `min_binary_version` stamp, the copy under `backups/` before an upgrade, `sparkwing-controller migrate-logs` and `migrate-outputs`, the per-schema standalone store fallback, `store_requirements` in the daemon handshake, `missing_requirements` and `daemon_store_skew` in `sparkwing daemon status`, and the `schema` block of `sparkwing repos info`.
 - **controller (Breaking):** Operator powers answer only the operator console; the admin token no longer reaches them
   `GET`/`POST /api/v1/teams/{team}/trust`, `GET /api/v1/signups/waitlist` and `POST /api/v1/signups/waitlist/approve` are removed. Paid checkout events use the signed `/webhooks/stripe` callback. `POST /api/v1/credits/freezes` holds by payment only, and every `credits.grant` route answers `403` to an admin token. Trust, free grants, holds, releases and the waitlist go through `/api/v1/operator/`, which a listed operator's own session reaches. No API call mints or rotates a `credits.grant` token; the controller seeds the checkout service's token from its new `credits-token` credential, and the `credits.grant` routes answer only a service token, refusing an anonymous caller even on an open controller. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
-- **logs (Breaking):** `sparkwing-logs`, its image and release binaries, `pkg/logs` and `pkg/storage/sparkwinglogs` are removed; the controller keeps node logs as segments
-  Nothing converts the service's logs; they become unreadable when it retires. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `pkg/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+- **logs (Breaking):** `sparkwing-logs`, its image and release binaries, `pkg/logs` and `internal/storage/sparkwinglogs` are removed; the controller keeps node logs as segments
+  Nothing converts the service's logs; they become unreadable when it retires. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `internal/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **controller (Breaking):** `--logs-url`, `--logs-archive-store`, the `logs-delete-token` credential file, the `logs.write` and `logs.delete` scopes, `GET /api/v1/runs/{id}/log-access`, `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate`, the `logs` field of `GET /api/v1/services` and signed `kind=log` downloads are removed
   Read logs through `GET /api/v1/runs/{id}/logs/{node}`. Minting a token with a removed scope is refused, and runner tokens no longer carry `logs.write`. In Go, `Server.WithLogsURL`, `ScopeLogsWrite`, `ScopeLogsDelete`, `store.LogsDeleteScope`, `TeamStorage.LogsURL` and `LogsToken`, and `ServicesResponse.Logs` are gone, and `WithSignedDownloads` takes the cache store alone. Leased maintenance bills committed blob and tagged-log inventory. The independent bucket-listing reconciliation pass is removed. Team deletion deletes segments, and the storage counter routes answer only the cache's operator token. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
@@ -1060,7 +1062,7 @@ unlock.
   The logs Deployment, Service, ServiceAccount and PVC template, the `logs:` values and the runner's `--logs` argument are gone; a values file that still sets `logs` or `controller.logs` fails to render. The logs PVC is kept by its resource policy until you delete it. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **cli (Breaking):** A profile's `logs` and `cache` surfaces, the log batching keys, the `stdout` logs type and `sparkwing serve --log-store` and `--artifact-store` are removed
-  Nothing wrote what they read once S3 and Postgres state went. A profile naming `logs`, `cache`, `batch_interval`, `batch_bytes`, `max_log_objects` or `max_log_bytes` fails to load as an unknown field. Read verbs take node logs from this machine's run directories or the profile's controller, `configure profiles list` drops its `LOGS` column, and `configure profiles show -o json` drops `logs` and `cache`. In Go, `pkg/storage/logbatch`, `pkg/storage/stdoutlogs`, the S3 `LogStore`, `storeurl.OpenLogStore`, `OpenLogStoreFromSpec` and `OpenArtifactStoreFromSpec`, `storage.FlushNode` and `FlushLosses`, `backends.Surfaces.Cache` and `Logs`, `localws.Options.LogStore` and `ArtifactStore`, and `controller.Dashboard.Logs` are gone.
+  Nothing wrote what they read once S3 and Postgres state went. A profile naming `logs`, `cache`, `batch_interval`, `batch_bytes`, `max_log_objects` or `max_log_bytes` fails to load as an unknown field. Read verbs take node logs from this machine's run directories or the profile's controller, `configure profiles list` drops its `LOGS` column, and `configure profiles show -o json` drops `logs` and `cache`. In Go, `internal/storage/logbatch`, `internal/storage/stdoutlogs`, the S3 `LogStore`, `storeurl.OpenLogStore`, `OpenLogStoreFromSpec` and `OpenArtifactStoreFromSpec`, `storage.FlushNode` and `FlushLosses`, `backends.Surfaces.Cache` and `Logs`, `localws.Options.LogStore` and `ArtifactStore`, and `controller.Dashboard.Logs` are gone.
 
 - **cli (Breaking):** `sparkwing run --sw-local-only` and `SPARKWING_LOCAL_ONLY` are removed
   Every `sparkwing run` already records to this machine, so the flag only kept node processes off `SPARKWING_CACHE_URL`; unset that variable instead. `--sw-local-only` is refused as an unknown runner flag, and a managed git hook installed before this release fails until `sparkwing pipeline hooks install` rewrites it.
@@ -1071,7 +1073,7 @@ unlock.
 - **cli (Breaking):** `sparkwing run --profile` and S3 and Postgres state profiles are removed; a run records to this machine's store
   `run --profile P` fails before compiling, naming `sparkwing pipeline trigger <pipeline> --profile P`. A profile whose `state:` is `s3` or `postgres` fails to load naming the key and the migration section, and `url_source`, `mirror_local` and `cache.binaries` fail as unknown fields. `sparkwing serve start` drops `--profile` and `--no-local-store`, `run` drops `--sw-artifact-digest-backfill`, the `profile:name=` guard token fails to load, a run no longer dumps `runs/<id>/state.ndjson` into its cache directory, and a pipeline binary refuses a run an older CLI started with `--profile`. A controller on PostgreSQL is unchanged. See [migration guide](docs/migrations/_unreleased.md#s3-and-postgres-state-profiles-are-removed).
 
-- **sdk + storage (Breaking):** `pkg/storage/s3state` and the controller's run loopback (`controller.Loopback`, `LoopbackState`, `LoopbackConcurrency`, `NewLoopback`) are removed
+- **sdk + storage (Breaking):** `internal/storage/s3state` and the controller's run loopback (`controller.Loopback`, `LoopbackState`, `LoopbackConcurrency`, `NewLoopback`) are removed
   `backends.TypePostgres`, `Spec.Binaries`, `Spec.URLSource`, `Surfaces.BinaryCache`, `localws.Options.NoLocalStore`, `pipelines.KindProfileName` and `GuardContext.ProfileName` are gone, `backends.MigrationGuideURL` is added, `stdoutlogs.CheckSpec` drops its `urlSource` parameter, and `storeurl.OpenStateStoreFromSpec` opens `sqlite` and `controller` only. The controller's health drops `object_store.stalled`. See [migration guide](docs/migrations/_unreleased.md#s3-and-postgres-state-profiles-are-removed).
 - **controller + runner (Breaking):** `POST /api/v1/runs/{id}/git-credential` is removed; `POST /api/v1/runs/{id}/source-credential` is the one route that releases a run's source credential, to claim tokens only, and a repository a run names by hand gets a GitHub App token only once the team subscribed it
   Before, `git-credential` answered a runner's bearer holding a claim on the run and minted an App token for whatever repository the run named, so an editor who typed a private repository of the installation into a run got a token for it. Now `source-credential` answers the claim token of a launcher's plan or work claim or a runner's node or trigger claim, and any bearer gets `403 claim_token_required`; `git-credential` answers 404. The App token reads, by GitHub ID, the repository the App's webhook recorded on the run's trigger, or a repository the run names by hand when one of the team's App trigger subscriptions names it, plus the owner's extra repositories. A runner's claim falls back to the team's stored host credential with its existing opt-in, host-key confirmation, audit row and ten-a-minute limit; a Cloud Job's claim never gets one. A node's claim gets at most three credentials and none once its attempt starts, every App token issued is recorded with the team's git credential releases, and an extra repository no longer covered answers 409 instead of 403. The answer is `store.SourceCredential`, which gains `kind`, `host`, `username`, `secret` and `known_hosts`; `repositories` replaces `extra_repositories` and names the run's repository first. `controller.GitCredentialResponse`, `controller.SourceTokenResponse`, `store.SourceSpend.RepoID` and `store.GitCredentialRelease.Claimant` are removed; `store.Tenant.SpendSourceCredential` and `ReleaseGitCredential` take the claim token and a `GitCredentialRelease`; `store.Tenant.SourceClaimant` and `GitHubAppSubscribedRepository` are new. A runner older than this release fetches no source straight from this controller. See [migration guide](docs/migrations/_unreleased.md#source-credentials-go-to-claim-tokens-only).
@@ -1106,7 +1108,7 @@ unlock.
 
 - **store:** Schema v94 records repository automation consent
   Consent is scoped to the team, repository and installation. Revocation, suspension and disconnection prevent delayed automatic dispatch; revoking and enabling again does not authorize an earlier plan.
-- **client:** `pkg/controller/client` gains the token, user and compute-limit admin calls
+- **client:** `internal/controller/client` gains the token, user and compute-limit admin calls
   `CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`, `RotateToken`, `CreateUser`, `ListUsers`, `DeleteUser`, `ComputeLimits` and `SetComputeLimits` wrap the existing `/api/v1/tokens`, `/api/v1/users` and `/api/v1/compute-limits` routes. `sparkwing cluster tokens`, `users`, `limits`, `runners add/remove` and `cloud connect/disconnect` now use them, so those commands retry a shed request, escape query and path values, and report errors in the client's form.
 - **controller:** The controller serves the dashboard, browser sign-in and the dashboard's log, event and capacity reads on its own listener
   `Server.WithDashboard` attaches the surface; `sparkwing-controller` always attaches it. A `__Host-sw_session` cookie authenticates a request that carries no `Authorization` header, and a cookie-authenticated write must pass the same-origin check and send the session's CSRF token in `X-CSRF-Token`, matching the `__Host-sw_csrf` cookie. Bearer, claim-token and `Session` requests are unchanged, and a browser write from another site is refused. Pages need a signed-in browser whenever the controller authenticates its API. New routes: `GET /api/v1/runs/{id}/logs`, `/logs/search`, `/logs/{node}`, `/logs/{node}/stream`, `/logs/{node}/completeness`, `GET /api/v1/runs/grep`, `GET /api/v1/runs/{id}/events/stream` and `GET /api/v1/capacity/profiles` and `/explain`; log reads go through the logs service named by `--logs-url` with the caller's own credential. New flags `--hsts` and `--insecure-cookies`. `GET /api/v1/capabilities` adds `mode`, `storage`, `features` and `read_only` when a dashboard is attached. See [migration guide](docs/migrations/v0.67.0.md#the-controller-serves-the-dashboard).
@@ -1129,8 +1131,8 @@ unlock.
   **Newer**, **Older** and **Newest** walk the history by cursor, and the page is in the URL (`older=` or `newer=`), so links reopen it. Only the newest page polls; new runs arrive there without moving the rows on screen, and an older page offers **Refresh**. Status, trigger, repository, pipeline, branch, commit, tag, date and search filters now run in the store, so they match runs past the loaded page. Log search continues past 200 runs with **Search older runs** and reports how many runs it searched. `GET /api/v1/runs` adds `exclude_pipeline`, `exclude_status`, `exclude_git_sha`, `exclude_git_branch`, `trigger_source`, `exclude_trigger_source`, `repo_name`, `exclude_repo_name`, `started_after`, `started_before`, `finished_after`, `finished_before`, `q` and a `before_id`/`before_started_at` cursor, and announces `X-Sparkwing-Run-Filter-Version: 3`; `GET /api/v1/runs/grep` applies its `n`-prefixed exclusions before `limit`, takes `after_id`/`after_started_at`, and answers `next_cursor` while older runs remain. `store.RunFilter` gains the matching fields, `store.FilterRuns` applies one to runs held in memory, and the S3 dashboard reader now honours every run-list filter and cursor.
 - **cli (Breaking):** `-C DIR` before the verb replaces `--sw-cd`, `--sparkwing-dir`, `--dir` and the path form of `--repo`; `--home` gives way to `SPARKWING_HOME`; `--profile` may precede the verb and falls back to `SPARKWING_PROFILE`
   `sparkwing -C DIR <verb>` works for every verb, as in git. `--sw-cd`/`-C` after the verb, `pipeline sparks * --sparkwing-dir`, `cache explain --dir`, and `--repo DIR` on `pipeline hooks install/uninstall/status/fire` and `crons install/uninstall` are gone; `pipeline lint --dir` (the source directory to scan) and `--repo` that names a registered repo or an `OWNER/NAME` filter stay. `--home` is gone from `queue`, `daemon`, `doctor`, `serve`, `runs cancel/retry/bounce` and `runs consumer`; set `SPARKWING_HOME`. A verb that reads runs without `--profile` now resolves `SPARKWING_PROFILE` before the project's `defaults.profile`, and `runs stats` follows that chain as `runs status` does instead of reading the local store. See [migration guide](docs/migrations/v0.67.0.md#root-flags-replace-per-verb-directory-and-home-flags).
-- **storage (Breaking):** `storeurl.OpenS3`, `storeurl.SDKMaxAttempts` and `storeurl.SDKMaxBackoff` move to `pkg/storage/s3` as `Open`, `SDKMaxAttempts` and `SDKMaxBackoff`
-  `pkg/storage/s3` also gains `ParseURL` and `NewClient`, the one S3 client constructor. `sparkwing-logs` and `sparkwing-cache` no longer link `storeurl`, which took the controller client, the cron scheduler and the toolchain fetcher with it. See the [migration guide](docs/migrations/v0.67.0.md#storage-and-store-names-that-moved).
+- **storage (Breaking):** `storeurl.OpenS3`, `storeurl.SDKMaxAttempts` and `storeurl.SDKMaxBackoff` move to `internal/storage/s3` as `Open`, `SDKMaxAttempts` and `SDKMaxBackoff`
+  `internal/storage/s3` also gains `ParseURL` and `NewClient`, the one S3 client constructor. `sparkwing-logs` and `sparkwing-cache` no longer link `storeurl`, which took the controller client, the cron scheduler and the toolchain fetcher with it. See the [migration guide](docs/migrations/v0.67.0.md#storage-and-store-names-that-moved).
 
 - **runner:** A run's trigger claim gets one heartbeat, from the process that claimed it
   The runner's trigger loop and the `handle-trigger` child it starts each posted `/api/v1/triggers/{id}/heartbeat`, every 3 and 5 seconds. The child now heartbeats only when its parent passes `--heartbeat`, as `sparkwing cluster worker` does; the trigger loop, which holds the claim, stays the only one beating for the runs it starts. An older pipeline binary under a newer runner still beats as before.
@@ -1274,7 +1276,7 @@ unlock.
 - **cli + orchestrator (Breaking):** `sparkwing run --profile` accepts only a profile with S3 or Postgres state; `--sw-secrets` and `pipeline hooks install --profile` are removed, and a pipeline's `profile:` pins it to a controller
   `run --profile P` with a controller profile, or one without S3 or Postgres state, refuses and names `sparkwing pipeline trigger <pipeline> --profile P`. A run under an S3 or Postgres state profile behaves as before; that is a temporary exception slated for removal. A local run otherwise reads only this machine's secrets, and no part of it contacts a controller. A pinned pipeline is refused by `run`, detached runs, crons and local child pipelines; `pipeline trigger` refuses any `--profile` other than the pin; `pipeline describe` and `plan` show it. Hooks always run `--sw-local-only`. `profile:local` guards hold for every run this machine dispatches. `sparkwing run` and the run consumer drop an inherited `SPARKWING_PROFILE` and `SPARKWING_SECRETS_PROFILE` before starting a pipeline binary. See [migration guide](docs/migrations/v0.67.0.md#sparkwing-run-takes---profile-only-for-s3-or-postgres-state).
 - **cli + orchestrator (Breaking):** The remaining laptop and test variables are removed
-  `SPARKWING_DISPATCH_WAIT_TIMEOUT` becomes `run.dispatch_wait` in config.yaml, `SPARKWING_NAMESPACE` becomes `sparkwing debug attach --namespace`, and the admission daemon reads `TYPESAFE_API_KEY` from the local secret store. `SPARKWING_STORE_WEDGE_BUDGET`, `SPARKWING_SQLITE_BUSY_TIMEOUT_MS`, `SPARKWING_DOCS_BASE_URL` and `SPARKWING_DEV_ENV_DISABLE` are gone, as is the run-node and trigger fallback to `$SPARKWING_HOME/dev.env`. `pkg/store.BusyTimeoutEnvVar` and `pkg/docs.BaseURLEnvVar` give way to `store.SetTestBusyTimeout` and `docs.SetTestBaseURL`. See [migration guide](docs/migrations/v0.67.0.md#the-remaining-laptop-variables-are-removed).
+  `SPARKWING_DISPATCH_WAIT_TIMEOUT` becomes `run.dispatch_wait` in config.yaml, `SPARKWING_NAMESPACE` becomes `sparkwing debug attach --namespace`, and the admission daemon reads `TYPESAFE_API_KEY` from the local secret store. `SPARKWING_STORE_WEDGE_BUDGET`, `SPARKWING_SQLITE_BUSY_TIMEOUT_MS`, `SPARKWING_DOCS_BASE_URL` and `SPARKWING_DEV_ENV_DISABLE` are gone, as is the run-node and trigger fallback to `$SPARKWING_HOME/dev.env`. `internal/store.BusyTimeoutEnvVar` and `pkg/docs.BaseURLEnvVar` give way to `store.SetTestBusyTimeout` and `docs.SetTestBaseURL`. See [migration guide](docs/migrations/v0.67.0.md#the-remaining-laptop-variables-are-removed).
 
 - **cli (Breaking):** One-off run switches are `--sw-*` flags, not environment variables
   `sparkwing run` gains `--sw-no-bincache`, `--sw-hash-all-files`, `--sw-artifact-digest-backfill` and `--sw-allow-unadmitted`; `SPARKWING_NO_BINCACHE`, `SPARKWING_HASH_ALL_FILES` and `SPARKWING_ARTIFACT_DIGEST_BACKFILL` are no longer read, and `SPARKWING_NO_SPARKS_RESOLVE` gives way to the existing `--sw-no-update`. `SPARKWING_ALLOW_UNADMITTED` stays only as the variable that carries the flag to the pipeline binary. See [migration guide](docs/migrations/v0.67.0.md#one-off-run-switches-become---sw--flags).
@@ -1292,10 +1294,10 @@ unlock.
   None of the 41 configuration variables it read is read any more; each has a flag or is gone. `--cloudfront-domain`, `--cloudfront-key-pair-id` and `--object-store-budget` (`class:window=count` entries) are new, replacing the variables that had no flag. `SPARKWING_OBJECT_STORE_BREAKER` and `SPARKWING_OBJECT_STORE_TRIP_RESET` are gone without replacement, and no process reads the object-store budget variables any more. `sparkwing-full` passes `--dashboard-url` and `--cache-url`, and gains `controller.externalURL`, `controller.oauthRedirectURIs`, `controller.operatorAccounts`, `controller.github`, `controller.google`, `controller.email`, `controller.cloudfront` and a `controller.extraArgs` passthrough, which replace settings an install set through `controller.extraEnv`. See [migration guide](docs/migrations/v0.67.0.md#sparkwing-controller-reads-settings-from-flags-only).
 
 - **controller (Breaking):** The controller never stores a secret as plaintext
-  Without the `secrets-key` credential a single-team SQLite controller creates its key on the first secret write and keeps it in `secrets.key` beside `state.db`, and a single-team PostgreSQL controller starts but refuses secret writes with `409`. A multi-team controller still refuses to start without a key. Plaintext rows an older controller wrote are sealed at startup; a PostgreSQL controller without a key refuses to start while any remain. A `pkg/controller` server with no cipher refuses secret reads and writes. See [migration guide](docs/migrations/v0.67.0.md#the-controller-never-stores-a-secret-as-plaintext).
+  Without the `secrets-key` credential a single-team SQLite controller creates its key on the first secret write and keeps it in `secrets.key` beside `state.db`, and a single-team PostgreSQL controller starts but refuses secret writes with `409`. A multi-team controller still refuses to start without a key. Plaintext rows an older controller wrote are sealed at startup; a PostgreSQL controller without a key refuses to start while any remain. A `internal/controller` server with no cipher refuses secret reads and writes. See [migration guide](docs/migrations/v0.67.0.md#the-controller-never-stores-a-secret-as-plaintext).
 
 - **controller (Breaking):** `sparkwing-controller` reads every secret from `--credentials-dir`, one file per credential
-  The files are `pg-url`, `secrets-key`, `secrets-key.previous`, `bootstrap-admin-token`, `license`, `oidc-key`, `oidc-key.published`, `google-client-secret`, `github-client-secret`, `github-app-key`, `github-app-webhook-secret`, `cloudfront-key`, `logs-delete-token`, `billing-token`, `cache-token` and `cache-grant-key`. The sixteen environment variables they replace are no longer read, and `--secrets-key-file`, `--secrets-previous-key-file`, `--bootstrap-admin-token-file`, `--license-file`, `--oidc-key-file` and `--oidc-published-key-file` are gone. `sparkwing-full` projects its existing Secret values into the directory and adds `controller.credentialsSecret` for the rest. In `pkg/controller`, `Server.WithCacheGrantKey` sets the grant key and the server reads neither it nor the cache token from the environment. See [migration guide](docs/migrations/v0.67.0.md#sparkwing-controller-reads-its-secrets-from-a-credentials-directory).
+  The files are `pg-url`, `secrets-key`, `secrets-key.previous`, `bootstrap-admin-token`, `license`, `oidc-key`, `oidc-key.published`, `google-client-secret`, `github-client-secret`, `github-app-key`, `github-app-webhook-secret`, `cloudfront-key`, `logs-delete-token`, `billing-token`, `cache-token` and `cache-grant-key`. The sixteen environment variables they replace are no longer read, and `--secrets-key-file`, `--secrets-previous-key-file`, `--bootstrap-admin-token-file`, `--license-file`, `--oidc-key-file` and `--oidc-published-key-file` are gone. `sparkwing-full` projects its existing Secret values into the directory and adds `controller.credentialsSecret` for the rest. In `internal/controller`, `Server.WithCacheGrantKey` sets the grant key and the server reads neither it nor the cache token from the environment. See [migration guide](docs/migrations/v0.67.0.md#sparkwing-controller-reads-its-secrets-from-a-credentials-directory).
 
 - **sdk (Breaking):** Remove `JobSpawn` and `JobSpawnEach`; `JobFanOutDynamic` inserts runtime-decided Jobs
   `JobSpawn`, `JobSpawnEach`, `SpawnSpec`, `SpawnGenSpec`, `SpawnHandler`, `SpawnHandlerFunc`, `Work.Spawns`, `Work.SpawnGens`, `CoerceSpawnEachJob` and `NewDetachedNode` are gone, with the engine's spawn handlers and the `spawn_dispatched` event. Split the spawned unit into its own Job ordered with `Needs`, or produce the item list from a Job and expand it with `JobFanOutDynamic`; the source Job's runner exits before its children dispatch instead of staying suspended. Plan snapshots, `pipeline plan --json`, `pipeline explain` and the run API's node work tree no longer carry `spawns` or `spawn_each`; a plan recorded by an older SDK that has them still gets no execution policy. See [migration guide](docs/migrations/v0.67.0.md#jobspawn-and-jobspawneach-are-removed).
@@ -1323,7 +1325,7 @@ unlock.
 - **controller (Breaking):** The JSON halves of the browser sign-in and connect flows are gone; the controller's browser surface runs those flows itself
   `POST /api/v1/auth/oauth/google/start`, `POST /api/v1/auth/oauth/google/exchange`, `POST /api/v1/auth/oauth/github/start`, `POST /api/v1/auth/oauth/github/exchange`, `POST /api/v1/me/identities/{provider}/link`, `POST /api/v1/me/identities/{provider}/link/complete`, `POST /api/v1/team/github-app/connect`, `POST /api/v1/team/github-app/connect/available`, `POST /api/v1/team/github-app/connect/select`, `POST /api/v1/team/github-app/connect/complete`, `GET /api/v1/operator/session` and `GET /api/v1/auth/bootstrap-needed` answer 404. The dashboard's `/login`, `/auth/{provider}/...` and `/github/app/...` pages on the controller replace them. `POST /api/v1/auth/login`, `GET /api/v1/auth/session` and `POST /api/v1/auth/logout` remain for API clients. See the [migration guide](docs/migrations/v0.67.0.md#the-controller-serves-the-dashboard).
 - **sdk (Breaking):** Remove six exported SDK names nothing called and no guide documented
-  `sparkwing.Cache`, `sparkwing.Logs` and `sparkwing.State` (aliases for `pkg/storage.ArtifactStore`, `LogStore` and `StateStore`), `sparkwing.TypeName`, `sparkwing.FailureFromContext` and `(*SpawnSpec).ResolvedID` are gone. Import `pkg/storage` for the store interfaces, and read the `Failure` an `OnFailure` handler receives as its second argument. `ResolvedID` always returned an empty string because the engine never set it. See [migration guide](docs/migrations/v0.67.0.md#six-unused-sdk-names-are-removed).
+  `sparkwing.Cache`, `sparkwing.Logs` and `sparkwing.State` (aliases for `internal/storage.ArtifactStore`, `LogStore` and `StateStore`), `sparkwing.TypeName`, `sparkwing.FailureFromContext` and `(*SpawnSpec).ResolvedID` are gone. Import `internal/storage` for the store interfaces, and read the `Failure` an `OnFailure` handler receives as its second argument. `ResolvedID` always returned an empty string because the engine never set it. See [migration guide](docs/migrations/v0.67.0.md#six-unused-sdk-names-are-removed).
 
 - **controller (Breaking):** Remove `controller.Dispatcher`, `RunRequest`, `NoopDispatcher` and `Server.WithDispatcher`
   Every build installed the no-op dispatcher, so a trigger was already only recorded for runners to claim by polling. A program embedding the controller drops its `WithDispatcher` call; a run it wants started is claimed from the trigger queue. See the [migration guide](docs/migrations/v0.67.0.md#the-controllers-dispatcher-hook-is-removed).
@@ -1392,7 +1394,7 @@ unlock.
 - **controller + cache (Breaking):** Remove four operator routes nothing called
   The controller no longer serves `GET /api/v1/egress`, `GET /api/v1/credits/teams/{team}` or
   `PUT /api/v1/storage/teams/{team}/free-slot`, and `sparkwing-cache` no longer serves `GET /repos`. Neither the CLI,
-  the dashboard nor `sparkwing-ops` called them. `pkg/controller.StorageTierResponse` is gone. See
+  the dashboard nor `sparkwing-ops` called them. `internal/controller.StorageTierResponse` is gone. See
   [Four operator routes are removed](docs/migrations/v0.67.0.md#four-operator-routes-are-removed).
 - **controller + cli + helm chart (Breaking):** Remove the per-pipeline GitHub webhook; the GitHub App is the only signed GitHub trigger
   `POST /webhooks/github/{pipeline}`, `POST` and `DELETE /api/v1/webhooks/github/bindings`, `sparkwing cluster webhooks` (`connect`, `disconnect`, `list`, `deliveries`, `replay`), the `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN` controller settings, the commit-status reporter `GITHUB_TOKEN` drove, the chart's `controller.githubWebhookSecret` and `controller.githubStatusToken`, and `client.ConnectGitHubWebhook` / `DisconnectGitHubWebhook` are gone. Schema v92 drops `github_webhook_bindings` with the sealed secrets it held, and the store's `GitHubWebhookBinding` API and the unscoped `Store.FindTriggerByWebhookReplay` go with it. A delivery to the old URL answers `404`, so the webhook on GitHub shows the failure in its Recent Deliveries. A run whose trigger names a GitHub event without a repository id, which only this path created, now mints an OIDC token with `trigger:manual`. Install the GitHub App and subscribe each pipeline to its repository; see [migration guide](docs/migrations/v0.67.0.md#per-pipeline-github-webhooks-are-removed).
@@ -1559,7 +1561,7 @@ unlock.
 ## [v0.66.2] - 2026-10-02
 ### Changed
 
-- **store:** `pkg/store/teststore` provides shared isolated SQLite test fixtures.
+- **store:** `internal/store/teststore` provides shared isolated SQLite test fixtures.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.1, so a fresh scaffold compiles against that release.
 
@@ -3114,7 +3116,7 @@ unlock.
   previous holder's account. To add the second provider, sign in with the
   first and link the other from **Account -> Linked sign-ins**; sign-ins
   attached before this change keep working. `SignInResult.Linked` is removed
-  from `pkg/store`.
+  from `internal/store`.
 
 - **controller + store:** `POST /api/v1/data/upload` refuses a zero-byte
   declaration with 400, and a team holds at most 100 uncommitted, unexpired
@@ -3971,7 +3973,7 @@ unlock.
   default keeps labeled work agent-only, and outer pool labels are never
   inherited.
 
-- **checks:** Race tests start `pkg/store` first when selected. On exactly
+- **checks:** Race tests start `internal/store` first when selected. On exactly
   four logical CPUs, the PostgreSQL suite starts after the ordinary Go suite
   while race tests continue. Lint waits for both Go suites.
 
@@ -4264,7 +4266,7 @@ unlock.
 
 ### Removed
 
-- **pkg/controller (Breaking):** `RecommendedClaimsPerMinute` and
+- **internal/controller (Breaking):** `RecommendedClaimsPerMinute` and
   `RecommendedClaimsPerMinuteForSlots` are gone. They sized a claim budget as
   `1200 x max_concurrent` from a model where every offer slot spends a
   preparation plus an offer per round, which no shipped runner does: a pool
@@ -4301,7 +4303,7 @@ unlock.
 ## [v0.50.6] - 2026-09-14
 ### Added
 
-- **controller + CLI + pkg/store (schema v47):** Retained storage is charged
+- **controller + CLI + internal/store (schema v47):** Retained storage is charged
   against the credit ledger, against an allowance the customer sets. A team's
   allowance (`storage_allowance_bytes`, written with
   `PUT /api/v1/storage/quotas/{principal}/allowance` on the `admin` scope or
@@ -4338,16 +4340,16 @@ unlock.
 
 ### Fixed
 
-- **tests:** Fifteen sleeps and wall-clock poll loops left `pkg/store` and
-  `pkg/controller`
+- **tests:** Fifteen sleeps and wall-clock poll loops left `internal/store` and
+  `internal/controller`
   Each site now waits on what the code already signals: a claim expired through
   the store's own expiry helper, an offer time or a placement hold stamped into
   the fixture, a bubble whose clock only moves once every hash is parked, or
   the log line the reporter writes. The reaper's metric samples moved into a
   method of their own, and a test drives the reaper on a synthetic clock so the
   loop is still held to calling it.
-  `go run ./internal/sleepcheck .` now counts 28 waits under `pkg/store` (was
-  34) and 47 under `pkg/controller` (was 56).
+  `go run ./internal/sleepcheck .` now counts 28 waits under `internal/store` (was
+  34) and 47 under `internal/controller` (was 56).
 
 - **cli:** A step's `Risk` labels refuse a run on the first invocation in a
   machine's `SPARKWING_HOME`, not only on later ones. The labels are declared
@@ -4443,7 +4445,7 @@ unlock.
 ## [v0.50.4] - 2026-09-14
 ### Added
 
-- **controller + CLI + pkg/store:** Metered nodes are routed by cpu class. A
+- **controller + CLI + internal/store:** Metered nodes are routed by cpu class. A
   class is a whole number of cores carrying 4 GiB of memory for each of them,
   and a node takes the smallest class covering both halves of what it pinned,
   so a pin of three cores and 20 GB takes the 8-core class. A node above the
@@ -4487,7 +4489,7 @@ unlock.
   ones its `--rate-micro`, `--grace-seconds` and `--max-charge-seconds` flags
   name. The defaults are unchanged: a self-hosted controller still gives a node
   60 seconds of grace.
-- **pkg/store:** `PoolHeartbeatInterval` and `DispatchedHeartbeatInterval` name
+- **internal/store:** `PoolHeartbeatInterval` and `DispatchedHeartbeatInterval` name
   the node heartbeat cadences in one place, and the pooled, dispatched and
   warm-pool runners read their defaults from them instead of each carrying a
   literal. No cadence changed.
@@ -4634,7 +4636,7 @@ unlock.
   workflow has not published yet no longer fails every hook with a 404. The
   toolchain fetch warns and falls back to the newest published release, so a
   repository can pin a version the moment its tag exists.
-- **pkg/store + controller:** The credit surfaces added this cycle carry less
+- **internal/store + controller:** The credit surfaces added this cycle carry less
   machinery. The derived runner cap is cached once rather than once per
   principal, because the ledger records no principal and every principal
   derived the same cap, so `store.RunnerCapFor` takes only a time. The grant
@@ -4658,7 +4660,7 @@ unlock.
   `sparkwing cluster credits settings --rate-table` sets a ladder of your own,
   and charges already written keep the class and rate they were billed at. See the
   [migration guide](docs/migrations/v0.50.4.md#metered-runner-seconds-are-priced-by-cpu-class).
-- **pkg/store:** The credit setters now bound what they accept, because a rate
+- **internal/store:** The credit setters now bound what they accept, because a rate
   near the int64 maximum overflowed the reservation a claim takes and let a
   claim the ledger had to refuse succeed, then billed the next heartbeat
   9.2e18 micro-credits. `SetCreditSettings` takes a rate of 1 to
@@ -5224,7 +5226,7 @@ unlock.
   `controller.secretsPreviousKey.name`, and now delivers the encryption keys and
   the bootstrap token as mounted files rather than environment variables; the
   controller clears either variable from its environment as it reads it.
-- **pkg/store:** `Store.CreateTokenIfNoneExist` writes a caller-supplied token
+- **internal/store:** `Store.CreateTokenIfNoneExist` writes a caller-supplied token
   when the tokens table is empty, checking and inserting in one transaction, and
   `Store.RotateSecretValues` rewrites every secret row's stored value through a
   caller-supplied function in one transaction. `store.ValidateRawToken` reports
@@ -5324,7 +5326,7 @@ unlock.
   it.
 - **controller + runner:** `POST /api/v1/nodes/claim` accepts a `capacity`
   object carrying the runner's `max_concurrent` and `active_claims`, which
-  `pkg/controller/client.Client.ClaimNodeWithCapacity` sends and the agents
+  `internal/controller/client.Client.ClaimNodeWithCapacity` sends and the agents
   view reports for a claim-mode runner alongside the labels it asserted. A
   runner that sends no `capacity` block, one at its ceiling, and one this
   controller has never awarded a node to each hold nothing back.
@@ -6616,13 +6618,13 @@ under `.apidiff/` are the machine-readable form of this list.
 ## [v0.42.0] - 2026-09-05
 ### Added
 
-- **pipelines:** `sparkwing run store-postgres` runs the `pkg/store` suite against
+- **pipelines:** `sparkwing run store-postgres` runs the `internal/store` suite against
   Postgres without Docker. It uses `SPARKWING_TEST_PG_URL` when that is set and
   otherwise starts an embedded Postgres on a free port, stopping it and removing its
   data directory whether the suite passes, fails, or is interrupted; a run killed
   outright before its teardown finishes can leave that directory under `TMPDIR`. A
   failing suite prints the tail of the server log. `pre-push` runs it after the race
-  gate, and `pre-commit` runs it when the change touches `pkg/store`.
+  gate, and `pre-commit` runs it when the change touches `internal/store`.
 
 - **cli + orchestrator:** `sparkwing runs submit --sw-ref REF` submits a worktree of
   that ref. The ref resolves to a commit when you submit, so the run executes that
@@ -6675,7 +6677,7 @@ under `.apidiff/` are the machine-readable form of this list.
   `/contention`, and `/waits` carry the capacity measurements a later run is priced
   from; `POST /api/v1/runs/{id}/nodes/{nodeID}/usage` folds a reaped process's CPU and
   memory accounting into its node row; and `POST /api/v1/maintenance/reconcile-orphans`
-  closes runs whose orchestrator process died. `pkg/controller/client` gains a method
+  closes runs whose orchestrator process died. `internal/controller/client` gains a method
   for each, plus `ListNodeMetrics` over the metrics route, which now returns the
   per-command CPU time it always accepted. The capacity writes are bound to a live claim
   on a run of that pipeline, which an orchestrator holds as the run's trigger claim, and
@@ -7813,7 +7815,7 @@ under `.apidiff/` are the machine-readable form of this list.
   that same laptop boundary beside the admission daemon's. `api/openapi.yaml` now
   describes every registered controller route and carries each route's authorization as
   `x-sparkwing-scope` instead of prose that could disagree with the router: `bash
-  bin/gen-api-docs.sh` writes it from `pkg/controller/server.go` and `bash
+  bin/gen-api-docs.sh` writes it from `internal/controller/server.go` and `bash
   bin/check-api-spec.sh` fails the `pre-push` gate when the two drift. That check now
   also rejects a response object carrying a field OpenAPI 3.0 does not allow, which an
   unquoted comma in a flow-style description produces, and it recognizes a scope named
@@ -8240,11 +8242,11 @@ under `.apidiff/` are the machine-readable form of this list.
 
 ### Added
 
-- **sdk:** `pkg/store` exports the sentinel errors authentication turns on --
+- **sdk:** `internal/store` exports the sentinel errors authentication turns on --
   `ErrInvalidCredentials`, `ErrInvalidToken`, `ErrUnknownToken`, `ErrNoTokenCandidates`,
   `ErrTokenRevoked`, and `ErrHashingBusy` -- plus `Argon2Slots` and
   `SetArgon2AcquireTimeout`, so a caller can tell a rejected credential from a
-  controller that could not answer. `pkg/controller` gains
+  controller that could not answer. `internal/controller` gains
   `Authenticator.WithTrustedProxyCIDRs` and `Authenticator.WithLogger`.
 
 ### Fixed
@@ -12068,7 +12070,7 @@ breaking changes and upgrade steps.
   that pins an older sparkwing and shares the same state database must bump the pin. See
   [migration guide](docs/migrations/v0.11.0.md#runs-store-schema-4-to-5).
 
-- **storage (Breaking):** The exported `pkg/storage.StateStore` interface gained
+- **storage (Breaking):** The exported `internal/storage.StateStore` interface gained
   `SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest string) error`. The
   bundled backends implement it; a custom `StateStore` implementation must add the
   method to satisfy the interface. See [migration
@@ -12284,7 +12286,7 @@ migration guide for upgrade steps.
 - **docs:** the `observability.md` failure-reason table now matches the real
   `failure_reason` set: dropped the non-existent `pod_error`, added `verify`,
   `runner_lease_expired`, and `logs_auth`. A gate keeps the documented set complete
-  against the `pkg/store` constants.
+  against the `internal/store` constants.
 
 - **sdk:** A concurrency heartbeat that arrives after the lease has already expired no
   longer revives the holder. Admission may have freed and reassigned that budget once
@@ -13008,13 +13010,13 @@ Release tooling uses each version's changelog entry as its GitHub Release body.
   `POST /api/v1/runs/{id}/retry` for the "rerun all" mode. Matches the laptop
   controller's surface.
 
-- **controller:** `pkg/controller.Server` functional options `WithArtifactStore`
+- **controller:** `internal/controller.Server` functional options `WithArtifactStore`
   (enables `GET /api/v1/artifacts/{key}` for laptop mode) and `WithReconcileHook` (runs
   a sweep closure before list-runs / get-run reads, eliminating stale "running" rows
   from crashed in-process orchestrators). Pool routes (`GET /api/v1/pool*`) are
   registered only when `AttachPool` is also called.
 
-- **controller:** Stdout logs backend (`pkg/storage/stdoutlogs`) for cluster runs that
+- **controller:** Stdout logs backend (`internal/storage/stdoutlogs`) for cluster runs that
   route logs to container stdout.
 
 - **controller:** SQLite state backend wired through the backend factory.
@@ -13031,7 +13033,7 @@ Release tooling uses each version's changelog entry as its GitHub Release body.
   pool (cluster) and artifacts (laptop) routes. Two security schemes (`Authorization:
   Bearer <token>` for service callers, `Authorization: Session <id>` for dashboard
   browser flow) wired to the operations that require auth. 26 component schemas mirror
-  `pkg/store` types. The HTTP surface is now a formal contract (see VERSIONING.md).
+  `internal/store` types. The HTTP surface is now a formal contract (see VERSIONING.md).
 
 - **wire:** Checked-in API surface snapshots under `.apidiff/` for every covered public
   package (21 files). The new `cmd/apidiff` tool walks each package's AST and emits a
@@ -13042,13 +13044,13 @@ Release tooling uses each version's changelog entry as its GitHub Release body.
   as the surface-change artifact.
 
 - **wire:** Conformance test suites for the three plug-in interfaces:
-  `pkg/storage.ArtifactStore`, `pkg/storage.LogStore`, and `pkg/controller.Cipher`. Each
+  `internal/storage.ArtifactStore`, `internal/storage.LogStore`, and `internal/controller.Cipher`. Each
   suite lives in a sibling conformance subpackage and exposes a `TestX(t, factory)`
   function any implementation can call from its own `*_test.go` to verify it satisfies
   the contract. Operations a partial implementation opts out of (e.g., `Read` on the
   write-only `stdoutlogs.LogStore`) skip rather than fail.
 
-- **wire:** `pkg/storage.ErrNotSupported` sentinel for operations a partial
+- **wire:** `internal/storage.ErrNotSupported` sentinel for operations a partial
   implementation deliberately doesn't perform. Conformance suites use `errors.Is`
   against this to know which subtests to skip.
 
@@ -13234,18 +13236,18 @@ Release tooling uses each version's changelog entry as its GitHub Release body.
   - `orchestrator/` → `internal/orchestrator/`. User repos MUST migrate
     to `pkg/runner.Main()`.
   - `secrets/` → `internal/secrets/`. External consumers implement
-    `pkg/controller.Cipher` (two methods, `Seal` + `Open`).
+    `internal/controller.Cipher` (two methods, `Seal` + `Open`).
   - `logs/` → `pkg/logs/` (promoted: now part of the public surface).
-  - `controller/client/` → `pkg/controller/client/` (promoted).
+  - `controller/client/` → `internal/controller/client/` (promoted).
   - `logutil`, `bincache`, `otelutil`, `profile`, `repos` → `internal/`
     (demoted: implementation detail).
-  - `internal/local/` collapsed into `pkg/controller/`; mode is now
+  - `internal/local/` collapsed into `internal/controller/`; mode is now
     determined by functional options (`AttachPool` for cluster;
     `WithArtifactStore` + `WithReconcileHook` for laptop).
   - `InProcessDispatcher` moved to `internal/inprocdispatch/`.
 
   See [migration guide](docs/migrations/v0.4.0.md#package-relocations).
-- **runtime (Breaking):** Maintenance methods on `pkg/store.Store` hidden
+- **runtime (Breaking):** Maintenance methods on `internal/store.Store` hidden
   behind the `store.Maintenance` bridge. The 9 reaper / sweep methods
   (`ReapExpiredTriggers`, `FailNodesInRun`, `FailStaleQueuedNodes`,
   `FailExpiredNodeClaims`, `ReapStaleConcurrencyHolders`,
@@ -13254,8 +13256,8 @@ Release tooling uses each version's changelog entry as its GitHub Release body.
   on the public `Store` API. Call them via
   `store.Maintenance.<Name>(s, ctx, ...)`. See
   [migration guide](docs/migrations/v0.4.0.md#store-maintenance).
-- **controller (Breaking):** `pkg/controller.Server.WithSecretsCipher`
-  now takes a `pkg/controller.Cipher` interface instead of a concrete
+- **controller (Breaking):** `internal/controller.Server.WithSecretsCipher`
+  now takes a `internal/controller.Cipher` interface instead of a concrete
   `*secrets.Cipher`. Concrete-type callers continue to work via
   structural typing; external consumers can now supply custom cipher
   implementations without depending on sparkwing's secrets package. See
@@ -13318,7 +13320,7 @@ shape now matches what the web emits so agents can consume either source with on
 schema. See [migration guide](docs/migrations/v0.4.0.md#pkg-docs-entry-reshape). -
 **cache:** `sparkwing-cache` business logic moved from `cmd/sparkwing-cache/main.go`
 (~1700 LOC) into a new `internal/cache` package. HTTP wire protocol unchanged; same
-routes, same shapes; existing clients (`pkg/storage/sparkwingcache` adapter, etc.) work
+routes, same shapes; existing clients (`internal/storage/sparkwingcache` adapter, etc.) work
 without modification. Knobs (`APIToken`, `AutoRegisterRepos`, `SSHKeyDir`,
 `GitForkLimit`) resolved from `cache.Config` instead of ad-hoc env / hardcoded path
 reads inside the package; env-var fallback now lives at the binary entry point. -
@@ -13356,7 +13358,7 @@ Mechanical mix: gofumpt + goimports formatting, US-locale spelling normalization
   no row existed yet.
 
 - **controller:** Dead route registration for `GET /api/v1/auth/session` removed. The
-  route was registered twice in `pkg/controller/server.go`; Go's `http.ServeMux`
+  route was registered twice in `internal/controller/server.go`; Go's `http.ServeMux`
   specificity made the outer (unauthenticated) registration win, leaving the inner copy
   as unreachable dead code. Resolved to the intended unauthenticated path (the handler
   reads `Authorization: Session <id>`, not a bearer token).
@@ -13398,12 +13400,12 @@ under **Changed**. Quick inventory: `sparkwing.SetDebug` (debug flag now
 `job_stack` JSON tags), `TriggerInfo.Env`, `pipelines.yaml` `group:` field, `--group`
 flag on `pipeline new`, `--sw-retry-of` / `--sw-full` / `--sw-job` / `--sw-prefer` /
 `--sw-backends-env` / `--sw-config` / `--help-all` CLI flags, the `wing` CLI binary,
-`internal/local/` package (collapsed into `pkg/controller/`).
+`internal/local/` package (collapsed into `internal/controller/`).
 
 Non-breaking removals (no replacement needed): `PoolListForTesting` on
-`pkg/controller.Server` (had zero callers anywhere; add a same-package test helper in a
+`internal/controller.Server` (had zero callers anywhere; add a same-package test helper in a
 `*_test.go` file if you need PVC introspection in tests). Vestigial `sdk_doc.go` files
-under `pkg/store/`, `pkg/logs/`, and `pkg/controller/client/` (replaced by `doc.go`
+under `internal/store/`, `pkg/logs/`, and `internal/controller/client/` (replaced by `doc.go`
 files describing the actual public surface).
 
 ## [v0.3.0] - 2026-05-13

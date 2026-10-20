@@ -7,9 +7,9 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func TestOwnerHostsCannotOutliveAwardProperty(t *testing.T) {

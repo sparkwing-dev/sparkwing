@@ -63,8 +63,8 @@ production versus main remains **+19,011/-23,818, net -4,807**, within -2,900.
 This continuation adds three lines to the existing burst production delta.
 
 Shared files: `internal/nodehost/{owner_schedule.go,owner_test.go}`,
-`pkg/store/{result_proof.go,cancellation_intent_runtime_test.go}`,
-`pkg/controller/private_host_test.go`, and contracts C1/C2/C3. W9 changes its
+`internal/store/{result_proof.go,cancellation_intent_runtime_test.go}`,
+`internal/controller/private_host_test.go`, and contracts C1/C2/C3. W9 changes its
 native CLI test and own handoff/report. No public API shape, flag, environment
 variable, schema, service, limit or retry-selection rule changed.
 
@@ -95,8 +95,8 @@ The three new/extended regression commands are:
 
 ```sh
 go test -p 4 ./internal/nodehost -run '^TestOwnerHostWaitsForAlreadyRequestedRemoteCancellation$' -count=1
-go test -p 4 ./pkg/store -run '^TestOwnerCancellationProofKeepsIssuerAttemptAndFenceProperty$' -count=1
-go test -p 4 ./pkg/controller -run '^TestLocalHostPrivateTransportDrainsCancelledOwner$' -count=1
+go test -p 4 ./internal/store -run '^TestOwnerCancellationProofKeepsIssuerAttemptAndFenceProperty$' -count=1
+go test -p 4 ./internal/controller -run '^TestLocalHostPrivateTransportDrainsCancelledOwner$' -count=1
 ```
 
 No archived test was newly ported and no native acceptance cell is closed.

@@ -87,7 +87,7 @@ No legacy file was deleted. W9-owned production Go versus main is
 Shared files touched are `internal/nodehost/remote_store.go`,
 `internal/nodehost/remote_contract_test.go`,
 `internal/wingd/localcontroller/node_pipeline_test.go` and
-`pkg/controller/engine_snapshot.go`. W9-owned changes are
+`internal/controller/engine_snapshot.go`. W9-owned changes are
 `internal/controllerwire/engine.go`, `design/rewrite/contracts/c3-controller-wire.md`,
 `docs/local-execution.md` and its embedded mirror, plus this report.
 No foreign contract changes are needed. Lead-owned handoffs and amendments

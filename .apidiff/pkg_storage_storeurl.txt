@@ -1,3 +1,0 @@
-# pkg/storage/storeurl
-
-func OpenMeasurementStore(ctx context.Context, raw string, maxPages int) (storage.UsageReporter, error)

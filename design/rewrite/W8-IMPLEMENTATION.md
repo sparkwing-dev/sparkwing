@@ -424,7 +424,7 @@ Third-session edits outside `internal/wingd`:
 - `internal/orchestrator/hosted_backends.go`, `hosted_backends_test.go`,
   `local_secrets.go` and `wingd_e2e_test.go` retain independent behavior after the
   deleted owner disappears.
-- `pkg/store/default_team_callers_test.go` removes the deleted methods from its
+- `internal/store/default_team_callers_test.go` removes the deleted methods from its
   allowlist.
 - Deleted `internal/orchestrator/wingd_daemon.go`, `wingd_api.go`,
   `wingd_runstore.go`, `wingd_runstore_identity_unix.go`,
@@ -1824,8 +1824,8 @@ GOCACHE/GOTMPDIR/TMPDIR below /tmp/sw-astra-W8. Package parallelism is at most f
 - Scoped commentcheck passes across both changed runner files and all three
   changed acceptance files. Sleepcheck against HEAD and `git diff --check` pass.
 - Required `commentcheck -base main .` fails on existing merged comments in
-  internal/controllerwire/contracts.go:47, pkg/store/state_materialize.go:15 and
-  pkg/store/state_result_records.go:9. Those W1/W9 files are untouched here.
+  internal/controllerwire/contracts.go:47, internal/store/state_materialize.go:15 and
+  internal/store/state_result_records.go:9. Those W1/W9 files are untouched here.
 - Independent immutable-snapshot review found no actionable correctness/security
   issue and accepted the small factory seam. Its test-rendezvous concern is
   resolved with synctest.Wait and a nonblocking count assertion. Recheck accepted
@@ -1876,7 +1876,7 @@ deployed Cloud proofs remain integration obligations. The new component is not
 a working container entrypoint or evidence that native acceptance passes.
 
 Read-only inspection verifies another integration point:
-pkg/controller/engine_claim.go clears Execution for plan/eval in claimedUnit,
+internal/controller/engine_claim.go clears Execution for plan/eval in claimedUnit,
 including exchange. W1/W2 must populate those resolved Cloud resources under the
 existing wire shape. ControllerControl.Claim already requires them before creating
 a CloudJobAward. This continuation keeps that requirement and edits no other-area

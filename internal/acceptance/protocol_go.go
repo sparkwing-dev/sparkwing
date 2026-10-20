@@ -37,7 +37,7 @@ func GoSDKLinkage(ctx context.Context) ([]string, error) {
 		for _, forbidden := range []string{
 			"/internal/blob", "/internal/cache", "/internal/cluster", "/internal/depcache",
 			"/internal/engine", "/internal/nodehost", "/internal/orchestrator", "/internal/runners",
-			"/internal/settings", "/internal/wingd", "/pkg/controller", "/pkg/store",
+			"/internal/settings", "/internal/wingd", "/internal/controller", "/internal/store",
 		} {
 			if path == goSDKModule+forbidden || strings.HasPrefix(path, goSDKModule+forbidden+"/") {
 				return linked, fmt.Errorf("Go SDK links host-owned package %s", path)

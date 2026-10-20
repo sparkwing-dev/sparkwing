@@ -14,10 +14,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 const testRunID = "run-sched"
@@ -75,7 +76,7 @@ func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 		t.Fatalf("order=%v", order)
 	}
 	for _, id := range []string{"a", "b", "c", "d"} {
-		row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
 		if err != nil || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess {
 			t.Errorf("%s row=%+v error=%v", id, row, err)
 		}
@@ -115,7 +116,7 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
 	for id, want := range map[string]store.NodeState{"build": store.NodeFailed, "test": store.NodeCancelled, "deploy": store.NodeCancelled, "build-recover": store.NodeSuccess, "docs-recover": store.NodeSkipped, "after-lint": store.NodeSuccess, "after-flaky": store.NodeCancelled, "maybe": store.NodeFailed} {
-		row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
 		if err != nil || row.Outcome != want || row.Status != store.StatusDone {
 			t.Errorf("%s row=%+v error=%v, want %s", id, row, err, want)
 		}
@@ -145,11 +146,11 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 	if err != nil || completion.Outcome != "success" {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "after"})
+	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "after"})
 	if err != nil || row.Outcome != store.NodeSuccess {
 		t.Fatalf("row=%+v error=%v", row, err)
 	}
-	optional, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "maybe"})
+	optional, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "maybe"})
 	if err != nil || optional.Status != store.StatusDone || optional.Outcome != store.NodeFailed {
 		t.Fatalf("optional row=%+v error=%v", optional, err)
 	}
@@ -198,7 +199,7 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 		if input.NodeID != "slow" {
 			return errors.New("downstream body started during cancellation")
 		}
-		ref := store.NodeRef{RunID: f.Accepted.RunID, NodeID: input.NodeID}
+		ref := controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: input.NodeID}
 		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
 		started, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(input.Attempt)})
 		if err != nil {
@@ -252,7 +253,7 @@ func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
 			if !errors.Is(err, cause) {
 				t.Fatalf("error=%v, want %v", err, cause)
 			}
-			row, err := f.Tenant.ReadNode(bounded, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "next"})
+			row, err := f.Tenant.ReadNode(bounded, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "next"})
 			if err != nil || row.StartedAt != nil || row.ClaimedBy != "" {
 				t.Fatalf("downstream row=%+v error=%v", row, err)
 			}
@@ -268,7 +269,7 @@ func TestSchedulerWithoutAnExecutorFailsLoudly(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "node host") {
 		t.Fatalf("error=%v", err)
 	}
-	row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "a"})
+	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "a"})
 	if err != nil || row.StartedAt != nil {
 		t.Fatalf("row=%+v error=%v", row, err)
 	}
@@ -300,7 +301,7 @@ func TestSchedulerARefusedOutputFailsTheNodeAndDependants(t *testing.T) {
 				t.Fatalf("completion=%+v error=%v", completion, err)
 			}
 			for id, outcome := range map[string]store.NodeState{"big": store.NodeFailed, "after": store.NodeCancelled} {
-				row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+				row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
 				if err != nil || row.Outcome != outcome {
 					t.Fatalf("%s row=%+v error=%v", id, row, err)
 				}

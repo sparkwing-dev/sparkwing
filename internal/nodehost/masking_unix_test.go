@@ -11,13 +11,14 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 const splitSecret = "hunter2-straddles-the-split"
@@ -31,7 +32,7 @@ func checkMaskedNativeFailure(t *testing.T, f *storeHostFixture, input NodeInput
 	if err == nil {
 		t.Fatal("failure was lost")
 	}
-	row, readErr := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+	row, readErr := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
 	if readErr != nil {
 		t.Fatal(readErr)
 	}

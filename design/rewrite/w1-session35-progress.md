@@ -22,7 +22,7 @@ The two controller tests of the retired mint counter are deleted. Their retained
 claim ancestry and liveness concerns run in the final store tests. GitHub App
 provider integration is not established here.
 
-All eight store recovery harness cells now run as ordinary pkg/store tests.
+All eight store recovery harness cells now run as ordinary internal/store tests.
 Six harness files are deleted. Cancellation and reconciliation move out of
 store_recovery.go, and the SQLite recovery wrapper is removed. The native
 scenario catalog is unchanged. New fixtures open through storetest and seed
@@ -49,12 +49,12 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes after the final schema edit.
-- Vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The W1 batch passes 500 selected top-level tests and 1,554 test/subtest
   results without skips. w1-session35-tests.txt records the source files.
   Extract their Test names, exclude names containing Postgres and names starting
-  TestPg, and pass their anchored alternation to go test -p 4 ./pkg/store -run
+  TestPg, and pass their anchored alternation to go test -p 4 ./internal/store -run
   with -count=1 -timeout=5m. This batch ran before the final schema-only edit.
 - After that edit, 56 scoped authority, capability, source, recovery and schema
   tests pass, with 181 test/subtest results and no skips. The selector is
@@ -95,8 +95,8 @@ Contract changes and integrations left open:
 - PostgreSQL, native placements, real api.sock transport, Kubernetes, payment
   providers and repository QA remain unverified here.
 
-Shared caller files are pkg/controller/claim_source_test.go,
-pkg/controller/source_credential_test.go and tests/acceptance/recovery_test.go.
+Shared caller files are internal/controller/claim_source_test.go,
+internal/controller/source_credential_test.go and tests/acceptance/recovery_test.go.
 Other shared edits are C1, the port inventory, .apidiff/pkg_store.txt,
 CHANGELOG.md, docs/migrations/_unreleased.md and its embedded mirrors.
 The schema edit removes only the obsolete source counter. Lead-owned handoffs

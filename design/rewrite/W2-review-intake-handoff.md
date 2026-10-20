@@ -190,7 +190,7 @@ GOWORK=off GOFLAGS=-buildvcs=false \
 GOCACHE=/tmp/sw-astra-W2/root/cache \
 GOTMPDIR=/tmp/sw-astra-W2/intake/tmp \
 TMPDIR=/tmp/sw-astra-W2/intake/tmp \
-go test -p 4 ./pkg/controller -run '^TestReview' -count=1
+go test -p 4 ./internal/controller -run '^TestReview' -count=1
 ```
 
 All listed failures occurred in the real package run after the concurrent

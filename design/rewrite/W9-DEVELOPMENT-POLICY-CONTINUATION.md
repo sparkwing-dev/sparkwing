@@ -35,7 +35,7 @@ under `/tmp/sw-astra-W9`. Scratch was deleted after checks joined.
 
 Production changes this session are +15/-4 lines, net +11. W9-owned production
 Go versus main is +16,916/-23,812, net -6,896, within the -2,900 budget. No legacy
-subsystem was replaced. Shared files touched are `pkg/controller/engine_claim.go`,
+subsystem was replaced. Shared files touched are `internal/controller/engine_claim.go`,
 its new `runner_admission_test.go`, and the generated docs mirror. The exported
 policy type gains `BuildVersion` and uses a pointer receiver because its one-time
 notice is shared by queue and HTTP checks. Wire and store contracts are unchanged.

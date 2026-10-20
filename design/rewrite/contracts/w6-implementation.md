@@ -101,13 +101,13 @@ No unresolved W6 design question remains. The integration points above require i
 - `internal/repos/legacy_migrate.go`
 - `internal/wingd/budget_resolve_test.go`
 - `internal/wingd/legacy_migrate.go`
-- `pkg/controller/github_app_automation.go`
-- `pkg/controller/github_app_webhook.go`
+- `internal/controller/github_app_automation.go`
+- `internal/controller/github_app_webhook.go`
 - `pkg/localws/pipelines.go`
 - `pkg/pipelines/execution_model_test.go`
 - `pkg/pipelines/guards.go`
 - `pkg/pipelines/guards_test.go`
-- `pkg/store/default_team_callers_test.go`
+- `internal/store/default_team_callers_test.go`
 - `tests/acceptance/environment_test.go`
 - `tests/acceptance/settings_test.go`
 - `tests/acceptance/skeleton_test.go`

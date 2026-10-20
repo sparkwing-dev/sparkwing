@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // NewScheduleService binds local scheduling to the elected controller's store and sealed-intake launcher.

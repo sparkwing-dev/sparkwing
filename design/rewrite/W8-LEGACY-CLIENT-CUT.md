@@ -106,7 +106,7 @@ them. Their callers are outside W8's runtime.
 
 ## Shared files
 
-Production edits outside W8 are under `pkg/controller/client`:
+Production edits outside W8 are under `internal/controller/client`:
 `client.go`, `engine_methods.go`, `livelogs.go`, `logs.go`, `pace.go`,
 `poll_advice.go`, the deleted `claim.go`, `claim_backoff.go`, `launcher.go`, and
 the retained code in `claim_input.go` and `claim_paths.go`.

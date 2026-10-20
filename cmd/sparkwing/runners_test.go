@@ -20,9 +20,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type runnersFixture struct {
@@ -30,7 +29,7 @@ type runnersFixture struct {
 	calls     *[]string
 	tokens    []controllerwire.TokenMetadata
 	created   []controllerwire.TokenCreate
-	enrolled  []client.EnrollRunnerRequest
+	enrolled  []controllerwire.EnrollRunnerRequest
 	timeline  []string
 	mintErr   error
 	revokeErr error
@@ -100,7 +99,7 @@ func (f *runnersFixture) ReadToken(_ context.Context, prefix string) (controller
 	return controllerwire.TokenMetadata{}, errors.New("token missing")
 }
 
-func (f *runnersFixture) EnrollRunner(ctx context.Context, request client.EnrollRunnerRequest) (*client.CreatedToken, error) {
+func (f *runnersFixture) EnrollRunner(ctx context.Context, request controllerwire.EnrollRunnerRequest) (*controllerwire.CreatedToken, error) {
 	f.enrolled = append(f.enrolled, request)
 	created, err := f.CreateToken(ctx, controllerwire.TokenCreate{Kind: "runner", Principal: "runner:" + request.Name, Scopes: []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsState}})
 	if err != nil {
@@ -110,7 +109,7 @@ func (f *runnersFixture) EnrollRunner(ctx context.Context, request client.Enroll
 	for i, grant := range created.Metadata.Scopes {
 		grants[i] = string(grant)
 	}
-	return &client.CreatedToken{Capability: created.Token, Prefix: created.Metadata.Prefix, Grants: grants}, nil
+	return &controllerwire.CreatedToken{Capability: created.Token, Prefix: created.Metadata.Prefix, Grants: grants}, nil
 }
 
 func (f *runnersFixture) CreateToken(_ context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error) {
@@ -827,7 +826,7 @@ func TestRunnersPersonalEnrollmentUsesEphemeralSession(t *testing.T) {
 		if err != nil || cookie.Value != "private-csrf" {
 			t.Fatal("missing session CSRF cookie")
 		}
-		var proposal client.EnrollRunnerRequest
+		var proposal controllerwire.EnrollRunnerRequest
 		if err := json.NewDecoder(r.Body).Decode(&proposal); err != nil || !proposal.Personal || proposal.Name != "desk" {
 			t.Fatalf("personal proposal: %+v %v", proposal, err)
 		}

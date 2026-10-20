@@ -61,7 +61,7 @@ That web test did not execute its assertions. Its relevant socket-free mirror
 guard passes. Native CLI/socket, deployed Cloud/DinD, cross-machine transfers,
 platform and database lanes remain real integration points for the lead.
 The lead should rerun `^TestBurstPublicRun` in cmd/sparkwing and
-`^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$` in pkg/controller,
+`^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$` in internal/controller,
 both with rewrite_integration. No native cell is promoted by component results.
 
 Contract changes made: C4 records post-intake branch lookup and the retained

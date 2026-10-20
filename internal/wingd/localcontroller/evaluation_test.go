@@ -8,8 +8,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func FuzzOwnerEvaluationReadsOnlyItsSourceEdges(f *testing.F) {
@@ -22,7 +23,7 @@ func FuzzOwnerEvaluationReadsOnlyItsSourceEdges(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: id}, Generation: 3, SpecHash: "source-hash", Spec: raw}
+			return store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: id}, Generation: 3, SpecHash: "source-hash", Spec: raw}
 		}
 		source := row("reader", nodeproto.JobSpec{ID: "reader", Needs: []string{"needed"}, NeedsIfPresent: []string{"optional"}, OnFailureOf: "failure", NeedsGenerated: []string{"group"}})
 		rows := map[string]store.NodeRow{
@@ -71,7 +72,7 @@ func FuzzOwnerEvaluationReadsOnlyItsSourceEdges(f *testing.F) {
 			target.NodeID += "-" + suffix
 		}
 		rows["reader"] = source
-		relations := evaluationBindings{source: store.NodeRef{RunID: "run", NodeID: "reader"}, generation: 3, hash: "source-hash", readNode: func(_ context.Context, ref store.NodeRef) (store.NodeRow, error) {
+		relations := evaluationBindings{source: controllerwire.NodeRef{RunID: "run", NodeID: "reader"}, generation: 3, hash: "source-hash", readNode: func(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
 			if ref.RunID != "run" {
 				return store.NodeRow{}, store.ErrNotFound
 			}

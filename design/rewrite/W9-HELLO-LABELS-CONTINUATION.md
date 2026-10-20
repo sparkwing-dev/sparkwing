@@ -55,7 +55,7 @@ permitted`. The sandbox therefore cannot establish the next native product
 failure after the repaired handshake. No task-owned Sparkwing or SDK process
 remains. Task scratch is removed after checks join; the shared cache is retained.
 
-Shared files touched are `pkg/controller/engine_store.go`,
+Shared files touched are `internal/controller/engine_store.go`,
 `engine_store_test.go`, `engine_claim_sdk_unix_test.go` and `export_test.go`.
 The other changes are W9 documentation and this report. No foreign contract,
 lead-owned handoff, Git metadata, setting, retry or timeout was changed. No

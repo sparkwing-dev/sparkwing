@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // StoreBinding supplies authenticated, tenant-scoped facts to native service construction.
@@ -106,7 +106,7 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 	}
 	var node nodehost.NodeInput
 	if unit.Unit == capability.UnitNode {
-		row, err := state.ReadNode(ctx, store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID})
+		row, err := state.ReadNode(ctx, controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID})
 		if err != nil {
 			return storeInputs{}, err
 		}
@@ -114,16 +114,16 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 		if err != nil {
 			return storeInputs{}, err
 		}
-		if row.Ref != (store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != unit.Binding.Generation || row.Attempt != unit.Binding.Attempt || !reflect.DeepEqual(row.Execution, *unit.Execution) {
+		if row.Ref != (controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != unit.Binding.Generation || row.Attempt != unit.Binding.Attempt || !reflect.DeepEqual(row.Execution, *unit.Execution) {
 			return storeInputs{}, awardMismatch()
 		}
 	} else if unit.Unit == capability.UnitEval {
 		binding := principal.Capability.Binding
-		row, err := state.ReadNode(ctx, store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID})
+		row, err := state.ReadNode(ctx, controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID})
 		if err != nil {
 			return storeInputs{}, err
 		}
-		if row.Generation != unit.SourceGeneration || row.Ref != (store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
+		if row.Generation != unit.SourceGeneration || row.Ref != (controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
 			return storeInputs{}, awardMismatch()
 		}
 		input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: binding.Generation}

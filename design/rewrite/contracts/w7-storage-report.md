@@ -67,7 +67,7 @@ All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
 Tests used `-p 4` or fewer workers.
 
 - Whole repository `go build ./...`: pass.
-- Full tests for `internal/blob/...`, artifacts, bincache and `pkg/storage/...`: pass.
+- Full tests for `internal/blob/...`, artifacts, bincache and `internal/storage/...`: pass.
 - Focused store record/result/materialization tests and the real
   `TestMaterializedResultCopiesBytesThroughControllerAndHost`: pass.
 - Controller `TestDataStorageAttachesVerifiedResultRecords`: pass.
@@ -91,11 +91,11 @@ C1's local data contract now separates `VerifyBlobManifest` for admission from
 record lookup metadata; it is not a compatibility alias. The amendment is recorded
 in `c1-data.md`. No new foreign DESIGN request remains from this review.
 
-The minimal shared W1 integration is `pkg/store/blob_record_runtime.go`: its
+The minimal shared W1 integration is `internal/store/blob_record_runtime.go`: its
 existing reader interface gains verification, and admission passes the submitted
 members instead of reading another list. Shared tests are
-`pkg/store/blob_records_runtime_test.go` and the new
-`pkg/store/blob_manifest_stream_test.go`. Acceptance changes are confined to
+`internal/store/blob_records_runtime_test.go` and the new
+`internal/store/blob_manifest_stream_test.go`. Acceptance changes are confined to
 `data_binding_test.go`, `storage_manifests_test.go`, and
 `storage_materialization_test.go`. Lead-owned handoffs and amendments were not
 edited. Source documentation is in `internal/blob/README.md` and GoDoc.

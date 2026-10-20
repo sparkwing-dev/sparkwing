@@ -12,7 +12,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 )
 
 func TestEngineRetiredExecutionRoutesProperty(t *testing.T) {

@@ -14,8 +14,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func localRegistrationFixture(t *testing.T) (*harness, controllerwire.LocalScheduleRegistration) {

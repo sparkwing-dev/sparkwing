@@ -210,7 +210,7 @@ Sleepcheck against main reports internal/source/checkout_test.go:141 and
 tests/acceptance/session_flow_http_test.go:102. Neither file changed here.
 
 Two whole production files were deleted: cmd/sparkwing/host_state.go (114 lines,
-replaced by the shared state adapter) and pkg/controller/client/data_values.go
+replaced by the shared state adapter) and internal/controller/client/data_values.go
 (93 lines of obsolete conversion). The private JSONL writer removed another
 35 lines. Incompatible Data wire scaffolding and private-format tests were also
 removed. The following production counts include untracked Go source and exclude
@@ -270,19 +270,19 @@ Shared Go files (including their tests):
 - `internal/wingd/localcontroller/native_logs_test.go`
 - `internal/wingd/localcontroller/native_service_fixture_test.go`
 - `internal/wingd/localcontroller/native_test.go`
-- `pkg/controller/credential_route_expectations_test.go`
-- `pkg/controller/local_doctor.go`
-- `pkg/controller/local_doctor_test.go`
-- `pkg/controller/local_http.go`
-- `pkg/controller/native_host_storage_test.go`
-- `pkg/controller/peer_intake_native_test.go`
-- `pkg/controller/private_host.go`
-- `pkg/controller/private_host_data.go`
-- `pkg/controller/private_host_test.go`
-- `pkg/controller/private_node_host_test.go`
-- `pkg/controller/private_node_renewal_test.go`
-- `pkg/controller/server.go`
-- `pkg/store/result_proof.go`
+- `internal/controller/credential_route_expectations_test.go`
+- `internal/controller/local_doctor.go`
+- `internal/controller/local_doctor_test.go`
+- `internal/controller/local_http.go`
+- `internal/controller/native_host_storage_test.go`
+- `internal/controller/peer_intake_native_test.go`
+- `internal/controller/private_host.go`
+- `internal/controller/private_host_data.go`
+- `internal/controller/private_host_test.go`
+- `internal/controller/private_node_host_test.go`
+- `internal/controller/private_node_renewal_test.go`
+- `internal/controller/server.go`
+- `internal/store/result_proof.go`
 - `tests/acceptance/engine_transactions_test.go`
 - `tests/acceptance/launcher_sync_contract_test.go`
 

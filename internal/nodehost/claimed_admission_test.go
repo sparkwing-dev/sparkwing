@@ -5,8 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -39,7 +40,7 @@ func TestClaimedNodeCancellationWhileQueuedNeverAcquiresSource(t *testing.T) {
 	host.Admission = &LocalAdmission{Daemon: daemon, BoxID: testBox}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	host.Admission.Queued = func(context.Context, store.NodeRef, wingwire.Queued) { cancel() }
+	host.Admission.Queued = func(context.Context, controllerwire.NodeRef, wingwire.Queued) { cancel() }
 	host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
 		t.Error("acquired source before admission")
 		return nil, errors.New("unadmitted source acquisition")

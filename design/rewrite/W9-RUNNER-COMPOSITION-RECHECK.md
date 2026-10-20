@@ -113,8 +113,8 @@ Shared production files touched (brace groups list complete filenames):
 - `internal/runners/{hosting.go,loop.go,store_host.go}` and `launcher/{boundary.go,controller.go,job.go,launcher.go,preparation.go,production_boundary.go}`.
 - `internal/source/{acquire.go,checkout.go,source.go}`.
 - `internal/wingd/localcontroller/{native.go,native_client.go,native_logs.go}`.
-- `pkg/controller/{engine_intake.go,engine_launcher_sync.go,private_host.go,source_expansion.go}`.
-- `pkg/store/{authority_binding.go,authority_issue.go,binding_execution.go,launcher_preparation.go,node_state.go,owner_placement.go,result_metadata.go,run_state.go,source_reporting.go,state_authority.go,state_owner_read.go,state_reconcile.go,unit_claim.go,unit_matching.go,unit_renewal.go,schema.sql}`.
+- `internal/controller/{engine_intake.go,engine_launcher_sync.go,private_host.go,source_expansion.go}`.
+- `internal/store/{authority_binding.go,authority_issue.go,binding_execution.go,launcher_preparation.go,node_state.go,owner_placement.go,result_metadata.go,run_state.go,source_reporting.go,state_authority.go,state_owner_read.go,state_reconcile.go,unit_claim.go,unit_matching.go,unit_renewal.go,schema.sql}`.
 - `build/Dockerfile.runner`, `bin/check-runner-image.sh`,
   `charts/sparkwing-runner-bundle/templates/launcher-rbac.yaml` and
   `charts/sparkwing-full/charts/sparkwing-runner-bundle-0.1.12.tgz`; focused tests

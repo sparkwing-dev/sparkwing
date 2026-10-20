@@ -7,8 +7,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
@@ -34,7 +35,7 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 	}
 	attempt := int64(0)
 	applied, err := tenant.TransitionNode(ctx, store.NodeTransition{
-		Ref: store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &attempt,
+		Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &attempt,
 		Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation},
 	})
 	if err != nil {
@@ -58,7 +59,7 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 		p := binding.Principal
 		attempt := int64(0)
 		applied, err := binding.Tenant.TransitionNode(ctx, store.NodeTransition{
-			Ref: store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &attempt,
+			Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &attempt,
 			Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation},
 		})
 		if err != nil {

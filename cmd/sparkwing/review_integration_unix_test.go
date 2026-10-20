@@ -13,7 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestReviewProductionExecutionBindings(t *testing.T) {

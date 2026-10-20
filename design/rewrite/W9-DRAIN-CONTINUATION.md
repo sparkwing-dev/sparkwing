@@ -31,7 +31,7 @@ TMPDIR=/tmp/sw-astra-W9. Package workers were limited to four.
 Passed:
 
 - Whole-repository `go build -p 4 ./...`.
-- `go vet -p 4 ./internal/wingd/... ./cmd/sparkwing ./internal/cluster ./pkg/controller/client`.
+- `go vet -p 4 ./internal/wingd/... ./cmd/sparkwing ./internal/cluster ./internal/controller/client`.
 - `go test -p 4 -race ./internal/wingd -run '^TestLocalRuntime' -count=1`.
 - Focused TestLocalRuntime, TestLocalDrain, TestLocalInstall, TestLocalStop,
   TestLocalDoctor, TestDoctorCommand, TestDoctorJSON, TestDoctorFormats,

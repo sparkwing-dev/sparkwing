@@ -27,16 +27,16 @@ acceptance harnesses and contract-named files. Its budget is -250.
 
 Shared store files touched:
 
-- pkg/store/authority_provision.go
-- pkg/store/auth.go
-- pkg/store/authority_origin_test.go
-- pkg/store/auth_scope_test.go (new)
+- internal/store/authority_provision.go
+- internal/store/auth.go
+- internal/store/authority_origin_test.go
+- internal/store/auth_scope_test.go (new)
 
 Other files touched:
 
-- pkg/controller/browser_login_routes.go
-- pkg/controller/local_http.go
-- pkg/controller/bootstrap_store_test.go
+- internal/controller/browser_login_routes.go
+- internal/controller/local_http.go
+- internal/controller/bootstrap_store_test.go
 - tests/acceptance/login_http_test.go
 - docs/auth.md and pkg/docs/mirror/auth.md
 - design/rewrite/contracts/c2-credentials.md
@@ -53,15 +53,15 @@ GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp. Tests used -p 
 Run the following with go -C /home/bombuntu/.xwing/envs/1080/sparkwing:
 
 - build ./... and vet ./... pass.
-- test -p 4 ./pkg/store -run 'Test(CommittingAccountOriginProperty|MachineProvisionGrantsProperty|CapabilitySession|Session)' -count=1 passes.
-- test -p 4 ./pkg/controller -run 'Test(Bootstrap|LocalControllerHTTP|PolicyPeer|Peer)' -count=1 passes.
+- test -p 4 ./internal/store -run 'Test(CommittingAccountOriginProperty|MachineProvisionGrantsProperty|CapabilitySession|Session)' -count=1 passes.
+- test -p 4 ./internal/controller -run 'Test(Bootstrap|LocalControllerHTTP|PolicyPeer|Peer)' -count=1 passes.
 - test -p 4 ./tests/acceptance -run 'Test(LoginHTTP|RootProvisioning|Session)' -count=1 passes.
 - test -p 4 ./internal/capability ./internal/apierr -count=1 passes.
 - test -p 4 ./pkg/docs ./cmd/sparkwing -run 'Test(PkgDocsContentMatchesDocsRoot|EmbeddedChangelogMatchesRoot|AuthGuide)' -count=1 passes.
 - run ./internal/commentcheck -base main . passes across 2,195 files.
 - git diff --check passes.
 
-The full pkg/store suite fails on legacy schema/token tests, Cloud metering,
+The full internal/store suite fails on legacy schema/token tests, Cloud metering,
 tenant table classification and SQL guards. It ends with a nil-pointer panic in
 TestListTokens_FiltersKindAndRevoked. An overlay restoring both changed store
 production files to HEAD reproduces the heartbeat acquire failure, missing

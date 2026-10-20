@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 type githubAppFlags struct {

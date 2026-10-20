@@ -131,27 +131,27 @@ Shared files touched, including the minimal caller and fixture migrations:
 - `internal/wingd/localcontroller/evaluation_test.go`
 - `internal/wingd/localcontroller/native.go`
 - `internal/wingd/localcontroller/native_config_test.go`
-- `pkg/controller/browser_reads.go`
-- `pkg/controller/concurrency_routes.go`
-- `pkg/controller/data_binding_native_test.go`
-- `pkg/controller/data_request_binding.go`
-- `pkg/controller/debug_selectors_native_test.go`
-- `pkg/controller/engine_claim_routes.go`
-- `pkg/controller/engine_jobs.go`
-- `pkg/controller/engine_routes.go`
-- `pkg/controller/log_pages_test.go`
-- `pkg/controller/missing_operation_routes.go`
-- `pkg/controller/policy.go`
-- `pkg/controller/policy_router.go`
-- `pkg/controller/private_host_test.go`
-- `pkg/controller/public_selectors_native_test.go`
-- `pkg/controller/reporting_routes.go`
-- `pkg/controller/reporting_routes_test.go`
-- `pkg/controller/run_control_routes.go`
-- `pkg/controller/run_selector.go`
-- `pkg/controller/team_write_routes.go`
+- `internal/controller/browser_reads.go`
+- `internal/controller/concurrency_routes.go`
+- `internal/controller/data_binding_native_test.go`
+- `internal/controller/data_request_binding.go`
+- `internal/controller/debug_selectors_native_test.go`
+- `internal/controller/engine_claim_routes.go`
+- `internal/controller/engine_jobs.go`
+- `internal/controller/engine_routes.go`
+- `internal/controller/log_pages_test.go`
+- `internal/controller/missing_operation_routes.go`
+- `internal/controller/policy.go`
+- `internal/controller/policy_router.go`
+- `internal/controller/private_host_test.go`
+- `internal/controller/public_selectors_native_test.go`
+- `internal/controller/reporting_routes.go`
+- `internal/controller/reporting_routes_test.go`
+- `internal/controller/run_control_routes.go`
+- `internal/controller/run_selector.go`
+- `internal/controller/team_write_routes.go`
 - `pkg/docs/mirror/local-execution.md`
-- `pkg/store/binding_execution.go`
+- `internal/store/binding_execution.go`
 
 No Git write was made. Git has no local identity or core.worktree override.
 Scratch is removed after checks join; the shared Go cache is retained. Friction

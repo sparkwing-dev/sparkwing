@@ -65,26 +65,26 @@ func TestFreeLocalPortReturnsAnUnprivilegedPort(t *testing.T) {
 
 func TestStorePostgresCommandBoundsParallelismAndPackageTime(t *testing.T) {
 	t.Parallel()
-	if got, want := storePostgresGoCommand(hostShape{cpus: 4, singleTenant: true}), "GOMAXPROCS=1 go test -p 2 -timeout 25m -count=1 ./pkg/store/..."; got != want {
+	if got, want := storePostgresGoCommand(hostShape{cpus: 4, singleTenant: true}), "GOMAXPROCS=1 go test -p 2 -timeout 25m -count=1 ./internal/store/..."; got != want {
 		t.Fatalf("four-core hosted command = %q, want %q", got, want)
 	}
-	if got, want := storePostgresGoCommand(hostShape{cpus: 4}), "GOMAXPROCS=1 go test -p 1 -timeout 25m -count=1 ./pkg/store/..."; got != want {
+	if got, want := storePostgresGoCommand(hostShape{cpus: 4}), "GOMAXPROCS=1 go test -p 1 -timeout 25m -count=1 ./internal/store/..."; got != want {
 		t.Fatalf("four-core shared command = %q, want %q", got, want)
 	}
-	if got, want := storePostgresGoCommand(hostShape{cpus: 14}), "GOMAXPROCS=6 go test -p 6 -timeout 25m -count=1 ./pkg/store/..."; got != want {
+	if got, want := storePostgresGoCommand(hostShape{cpus: 14}), "GOMAXPROCS=6 go test -p 6 -timeout 25m -count=1 ./internal/store/..."; got != want {
 		t.Fatalf("store-postgres go command = %q, want %q", got, want)
 	}
 }
 
 func TestStoreFilesKeepOnlyTheStorePackage(t *testing.T) {
 	got := storeFiles([]string{
-		"pkg/store/store.go",
-		"pkg/store/storetest/storetest.go",
-		"pkg/store/testdata/v28.sql",
-		"pkg/storage/s3state/s3state.go",
+		"internal/store/store.go",
+		"internal/store/storetest/storetest.go",
+		"internal/store/testdata/v28.sql",
+		"internal/storage/s3state/s3state.go",
 		"internal/orchestrator/orchestrator.go",
 	})
-	want := []string{"pkg/store/store.go", "pkg/store/storetest/storetest.go"}
+	want := []string{"internal/store/store.go", "internal/store/storetest/storetest.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("storeFiles = %v, want %v", got, want)
 	}
@@ -99,7 +99,7 @@ func TestStorePostgresStepPassesWithoutPostgresWhenTheStoreIsUntouched(t *testin
 	t.Setenv("SPARKWING_TEST_PG_URL", "postgres://nobody@127.0.0.1:1/unreachable")
 
 	if err := runStorePostgresIfTouched(context.Background()); err != nil {
-		t.Fatalf("store-postgres ran or failed with pkg/store untouched: %v", err)
+		t.Fatalf("store-postgres ran or failed with internal/store untouched: %v", err)
 	}
 }
 

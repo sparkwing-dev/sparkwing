@@ -13,18 +13,18 @@ func TestClassifyKeysDepguardByPackageEdgeAndForbidigoByCall(t *testing.T) {
 		return i
 	}
 	got, err := classify([]lintIssue{
-		issue("depguard", "pkg/store/a.go", "import 'github.com/x/internal/source' is not allowed from list 'store-allowed-internal': why"),
-		issue("depguard", "pkg/store/b.go", "import 'github.com/x/internal/source' is not allowed from list 'store-allowed-internal': why"),
-		issue("forbidigo", "pkg/controller/c.go", "use of `s.store.ForTeam` forbidden because \"F1: widening\""),
-		issue("forbidigo", "pkg/controller/c.go", "use of `s.store.ForTeam` forbidden because \"F1: widening\""),
+		issue("depguard", "internal/store/a.go", "import 'github.com/x/internal/source' is not allowed from list 'store-allowed-internal': why"),
+		issue("depguard", "internal/store/b.go", "import 'github.com/x/internal/source' is not allowed from list 'store-allowed-internal': why"),
+		issue("forbidigo", "internal/controller/c.go", "use of `s.store.ForTeam` forbidden because \"F1: widening\""),
+		issue("forbidigo", "internal/controller/c.go", "use of `s.store.ForTeam` forbidden because \"F1: widening\""),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"pkg/store\tgithub.com/x/internal/source"}; !slices.Equal(got["depguard-store-allowed-internal.allow"], want) {
+	if want := []string{"internal/store\tgithub.com/x/internal/source"}; !slices.Equal(got["depguard-store-allowed-internal.allow"], want) {
 		t.Errorf("depguard entries = %q, want %q", got["depguard-store-allowed-internal.allow"], want)
 	}
-	if want := []string{"pkg/controller/c.go\tForTeam", "pkg/controller/c.go\tForTeam"}; !slices.Equal(got["forbidigo-f1.allow"], want) {
+	if want := []string{"internal/controller/c.go\tForTeam", "internal/controller/c.go\tForTeam"}; !slices.Equal(got["forbidigo-f1.allow"], want) {
 		t.Errorf("forbidigo entries = %q, want %q", got["forbidigo-f1.allow"], want)
 	}
 }
@@ -63,7 +63,7 @@ func TestCompareCountsAsksForTheCountToFallWithTheCode(t *testing.T) {
 }
 
 func TestClassifyRefusesAFindingFromAnotherWorktree(t *testing.T) {
-	for _, file := range []string{"../../1086/sparkwing/pkg/store/a.go", "/elsewhere/pkg/store/a.go"} {
+	for _, file := range []string{"../../1086/sparkwing/internal/store/a.go", "/elsewhere/internal/store/a.go"} {
 		i := lintIssue{FromLinter: "depguard", Text: "import 'x' is not allowed from list 'wire-is-leaf': why"}
 		i.Pos.Filename = file
 		if _, err := classify([]lintIssue{i}); err == nil {

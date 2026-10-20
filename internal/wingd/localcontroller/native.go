@@ -14,6 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -23,10 +25,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // NativeConfig binds one authenticated award to shared state and authority services.
@@ -173,7 +174,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		upload.Key.Kind = blob.KindManifest
 		return upload, err
 	}, Producer: func(ctx context.Context, input nodehost.NodeInput, producer string) (blob.RecordKey, error) {
-		row, err := cfg.Store.ReadNode(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: producer})
+		row, err := cfg.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: producer})
 		if err != nil {
 			return blob.RecordKey{}, err
 		}

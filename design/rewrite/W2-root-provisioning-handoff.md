@@ -104,7 +104,7 @@ fake. The full W2 area remains incomplete.
 
 ## Shared caller and artifact files
 
-Caller migrations outside W2 production code: pkg/controller/client/admin.go;
+Caller migrations outside W2 production code: internal/controller/client/admin.go;
 cmd/sparkwing/cloud.go, runners.go, tokens.go and help_registry.go;
 web/src/lib/teams.ts and web/src/app/team/machines/page.tsx.
 

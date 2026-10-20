@@ -102,7 +102,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
 
 - Whole-repository go build -p 4 ./... passes.
-- go vet -p 4 passes for pkg/store/..., pkg/controller/..., internal/acceptance/...,
+- go vet -p 4 passes for internal/store/..., internal/controller/..., internal/acceptance/...,
   tests/acceptance/..., internal/orchestrator/... and internal/nodehost/....
 - The exact store selection passes **302 top-level tests / 836 cases**, without
   skips. Extract Test names from w1-session10-tests.txt, omit TestPostgres-prefixed
@@ -128,7 +128,7 @@ store_capacity.go. Other shared callers are fixture changes in:
 
 - internal/nodehost/{admission,events,run_admission}_test.go
 - internal/orchestrator/{envelope_coverage,wingd_runstore}_test.go
-- pkg/controller/{queue_view,server}_test.go
+- internal/controller/{queue_view,server}_test.go
 
 Store test callers changed in concurrency_{burst,cost,heartbeat_busy,maintenance,
 observable,property,recovery,sweep,test,v091}, delete_run_cache, postgres and

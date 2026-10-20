@@ -1,5 +1,5 @@
 // safety: Package blob defines verified bytes and authorized reference edges.
-// Credential checks belong to C2 and transactional persistence belongs to pkg/store.
+// Credential checks belong to C2 and transactional persistence belongs to internal/store.
 package blob
 
 import (

@@ -8,8 +8,9 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial []nodeproto.JobSpec) ([]GeneratorReplay, error) {
@@ -184,7 +185,7 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 		if !expected[generated.ID] {
 			return nil, executorError(apierr.PlanDrift, "generator replay changed the accepted member set")
 		}
-		row, err := h.Store.ReadNode(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: generated.ID})
+		row, err := h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: generated.ID})
 		if err != nil {
 			return nil, executorError(apierr.PlanDrift, "generator replay added a job absent from the accepted expansion")
 		}

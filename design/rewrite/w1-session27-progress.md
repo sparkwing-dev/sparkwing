@@ -61,13 +61,13 @@ Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
 GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The inherited selection plus enrollment, roleless and grace tests passes
   436 top-level tests / 1,352 cases with no skips. The later invalid-metadata
   test and stronger concurrent-error assertion pass in the focused selection.
   w1-session27-tests.txt lists the files. Extract Test names, exclude
-  Postgres/Pg names and pass their anchored alternation to ./pkg/store.
+  Postgres/Pg names and pass their anchored alternation to ./internal/store.
 - Focused enrollment race tests pass with -race. These use SQLite, not Postgres.
 - Eighteen store-sqlite acceptance cells pass with no skips. Select
   ^(TestLifecycle|TestRecovery|TestPlacement|TestCredentials|TestBilling|TestSurface)$/.*/^store-sqlite$.
@@ -131,7 +131,7 @@ W2/W1b work. These are not relaxed by the enrollment implementation.
 
 Shared Go files are new internal/acceptance/store_actions_enrollment.go,
 tests/acceptance/placement_test.go and new github_enrollment_http_test.go.
-The minimal old-caller migrations are pkg/store/github_runner_bindings_test.go
+The minimal old-caller migrations are internal/store/github_runner_bindings_test.go
 and execution_attribution_test.go, using github_enrollment_fixture_test.go.
 All other implementation changes are W1-owned store files.
 

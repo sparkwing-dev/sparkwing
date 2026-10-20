@@ -50,7 +50,7 @@ liveness. No timeout, renewal, fabricated Job UID or compatibility path was adde
 
 ## Shared edits
 
-The only pkg/controller edit is engine_claim.go: import runspec and project
+The only internal/controller edit is engine_claim.go: import runspec and project
 plan/eval resources in claimedUnit, while retaining nil execution for trigger
 awards. It adds eight net production lines. Claim and exchange share this owner.
 
@@ -66,9 +66,9 @@ Finding 5 follow-up files outside W8-owned directories:
 - `internal/controllerwire/engine.go`
 - `internal/controllerwire/launcher.go`
 - `internal/controllerwire/launcher_reservation_test.go`
-- `pkg/controller/client/engine_methods.go`
-- `pkg/controller/client/engine_launcher_test.go`
-- `pkg/store/launcher_snapshot.go`
+- `internal/controller/client/engine_methods.go`
+- `internal/controller/client/engine_launcher_test.go`
+- `internal/store/launcher_snapshot.go`
 - `tests/acceptance/bootstrap_store_w8_test.go`
 - `tests/acceptance/launcher_w8_test.go`
 - `tests/acceptance/launcher_reservation_w8_test.go`

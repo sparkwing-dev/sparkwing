@@ -69,14 +69,14 @@ Go tests use at most four package workers.
 Passed:
 
 - Whole-repository `go build ./...`.
-- Focused vet of cmd/sparkwing, internal/nodehost, pkg/controller and
+- Focused vet of cmd/sparkwing, internal/nodehost, internal/controller and
   tests/acceptance.
 - All 23 originally failing test names, including their original refusal cases
   and fuzz seeds. The final grouped run completed in 2.032 s, 0.957 s and 1.620 s.
 - Full nodehost suite, 25.437 s. The strengthened pending/ready cancellation
   assertion was checked separately afterwards.
 - The broader Data, SecretRead, RootProvisioning, Login, Engine, OIDC and data fuzz
-  seed selections in tests/acceptance and pkg/controller, 6.407 s and 6.064 s.
+  seed selections in tests/acceptance and internal/controller, 6.407 s and 6.064 s.
 - The data-query fuzzer, 210 generated executions with two workers.
 - Store personal-machine ownership, sealed burst placement, non-owner refusal
   and fenced here-capacity tests, 0.898 s.
@@ -102,7 +102,7 @@ read and left unchanged.
 Shared files touched:
 
 - cmd/sparkwing/local_controller_policy_test.go and local_profile_test.go.
-- pkg/controller/data_request_binding.go and secret_reads.go.
+- internal/controller/data_request_binding.go and secret_reads.go.
 - tests/acceptance/data_reads_http_test.go, engine_lifecycle_http_test.go,
   login_http_test.go, oidc_mint_http_test.go, root_provisioning_http_test.go and
   secret_reads_http_test.go.

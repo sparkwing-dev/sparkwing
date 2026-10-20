@@ -75,14 +75,14 @@ Passed:
 - Commentcheck against HEAD across eight Go files and diff whitespace.
 
 Commentcheck against main still fails on the unchanged pinnedClock comment at
-pkg/store/store.go:108. The native public CLI test compiles and skips on the
+internal/store/store.go:108. The native public CLI test compiles and skips on the
 sandbox's explicit listener refusal. No whole-repository test pass is claimed.
 
 ## Remaining native integration
 
 The lead should run TestBurstPublicRunBuildsEditedSourceAndStreamsMaskedSecrets
 in cmd/sparkwing with tags rewrite_integration, plus the preceding
-TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards in pkg/controller.
+TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards in internal/controller.
 Use an isolated home and the normal shared module/build caches.
 
 Full launch proof still needs registered personal-runner and Cloud Job execution,

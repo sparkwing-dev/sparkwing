@@ -41,7 +41,7 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 		pkgs := targets[module]
 		sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(pkgs, " "))
 		// safety: this catches a hang, and the gate's own execution deadline is
-		// what bounds the step. pkg/controller legitimately races for 24
+		// what bounds the step. internal/controller legitimately races for 24
 		// minutes, so a 30-minute limit left a fifth of a margin and a loaded
 		// box spent it, failing work that was only slow.
 		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout 45m "+strings.Join(pkgs, " "))
@@ -57,11 +57,11 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 		len(failures), strings.Join(failures, "\n  - "))
 }
 
-// safety: pkg/store does not finish under the race detector inside this tier.
+// safety: internal/store does not finish under the race detector inside this tier.
 // It measures 2148s against the 1800s budget, and the cost is spread over 828
 // tests rather than a few, so there is nothing to trim that would fit it. Left
 // here it is a step that always times out, which is a check that cannot pass.
-const gateDeferredRaceTarget = "./pkg/store"
+const gateDeferredRaceTarget = "./internal/store"
 
 func raceTargetsForGate(targets map[string][]string) (map[string][]string, []string) {
 	kept := make(map[string][]string, len(targets))

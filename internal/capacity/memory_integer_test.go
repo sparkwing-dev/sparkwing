@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestMemoryChargeIntegers(t *testing.T) {

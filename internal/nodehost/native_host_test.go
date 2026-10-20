@@ -12,12 +12,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type nativeHostState struct {
@@ -25,7 +26,7 @@ type nativeHostState struct {
 	ClaimStore
 }
 
-func (s nativeHostState) RenewNodeClaim(ctx context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+func (s nativeHostState) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
 	return s.ClaimStore.RenewNodeClaim(ctx, ref, actor)
 }
 
@@ -58,7 +59,7 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 			Bind: func(context.Context, EvaluationInput) (ProcessGrant, error) {
 				return ProcessGrant{}, errors.New("fixture delegation unavailable")
 			},
-			ReadOutput: func(context.Context, store.NodeRef, int64) (json.RawMessage, error) {
+			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 				return json.RawMessage("null"), nil
 			},
 		},

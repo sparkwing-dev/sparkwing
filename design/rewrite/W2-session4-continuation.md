@@ -2,7 +2,7 @@
 
 HEAD is 1d8a5e89e. The previous W2 implementation and merge resolutions are
 committed. This continuation changes two controller test files and the port
-inventory. It makes no production or pkg/store edit.
+inventory. It makes no production or internal/store edit.
 
 Two console-settings tests failed because their fake session had no committed
 ancestry. They now create a real account session, seal its CSRF key and use the
@@ -65,7 +65,7 @@ W1's separate cancellation snapshot is integrated. The concrete generated
 precedence test passes, including an empty job reason overriding run intent.
 Holder result rights remain separate from sensitive-read cancellation.
 
-No shared production file or pkg/store file was touched in this continuation.
+No shared production file or internal/store file was touched in this continuation.
 The earlier vertical changes remain in authority_provision.go, source_release.go,
 authority_bootstrap.go, authentication_binding.go, blob_authority.go,
 blob_authority_projection.go, blob_data_access.go, launcher_snapshot.go,
@@ -77,7 +77,7 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2. Tests use -p 4.
 
 - Whole-repository go build ./... passes.
-- go vet ./pkg/controller and commentcheck -base main pass.
+- go vet ./internal/controller and commentcheck -base main pass.
 - Full capability, apierr, apiroutes and controller/client suites pass.
 - Focused console settings, console commits, runner error properties, bootstrap,
   launcher sync, resume, credential ports and native log tests pass.
@@ -100,8 +100,8 @@ and gets triggers has no column named pipeline. Trusted intake is W1 item (g).
 No whole controller suite, PostgreSQL, provider network, native placement matrix
 or runtime launcher integration pass is claimed.
 
-Changed files are pkg/controller/credit_settings_http_test.go,
-pkg/controller/error_response_test.go, design/rewrite/contracts/t1-port-inventory.md
+Changed files are internal/controller/credit_settings_http_test.go,
+internal/controller/error_response_test.go, design/rewrite/contracts/t1-port-inventory.md
 and this report. There are no new production mechanisms, limits or settings.
 No Git write or Sparkwing runtime was run. Git identity remains Korey Gambill and
 core.worktree is unset. Overwing reports its installed binary is ten commits

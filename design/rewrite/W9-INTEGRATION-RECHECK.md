@@ -11,7 +11,7 @@ The SDK replacement pin policy is unchanged.
   under its live owner/eval lease and source-job fence without acquiring a work
   attempt. `TestReviewOwnerEvaluationReportsBeforeWorkAward` still fails for
   both annotations and summary with HTTP 409, `reason=holder_rights`.
-  `pkg/store/result_metadata.go:checkResultWriterTx` requires a node holder and
+  `internal/store/result_metadata.go:checkResultWriterTx` requires a node holder and
   positive attempt. C1/C2 must carry and commit the independent evaluation
   source fence. This remains the previous two-strikes design handoff.
 - **C2 eval process grants and source references.** `PurposeEval` still awards

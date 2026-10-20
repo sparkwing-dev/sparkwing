@@ -45,7 +45,7 @@ fixture commits. The command uses GIT_CONFIG_COUNT=1,
 GIT_CONFIG_KEY_0=commit.gpgsign and GIT_CONFIG_VALUE_0=false, without writing Git
 configuration.
 
-Three more harness files move into pkg/store tests and are deleted from
+Three more harness files move into internal/store tests and are deleted from
 internal/acceptance:
 
 - `store_actions_enrollment.go` becomes TestStoreActionsEnrollment.
@@ -74,14 +74,14 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 
 - Whole-repository `go build -p 4 ./...` passes on the final production source.
-- Vet passes for pkg/store/..., pkg/controller/..., internal/orchestrator,
+- Vet passes for internal/store/..., internal/controller/..., internal/orchestrator,
   internal/acceptance/... and tests/acceptance/....
 - The W1 batch passes 484 top-level tests and 1,514 cases without skips.
   The final secret-display assertion passes in a focused rerun. The source
   reader guard also passes separately. The reproducible file selection in
   w1-session33-tests.txt includes that additional guard, for 485 top-level tests.
-  Extract Test names from those pkg/store files, exclude Postgres/Pg names and
-  pass their anchored alternation to `go test -p 4 ./pkg/store -run ... -count=1`.
+  Extract Test names from those internal/store files, exclude Postgres/Pg names and
+  pass their anchored alternation to `go test -p 4 ./internal/store -run ... -count=1`.
 - Eleven remaining store-sqlite acceptance cells pass without skips. Use
   `^(TestLifecycle|TestRecovery|TestPlacement|TestCredentials|TestBilling|TestSurface)/[^/]+/store-sqlite$`
   in tests/acceptance. No native cell is newly unskipped.

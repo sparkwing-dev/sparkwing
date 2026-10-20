@@ -67,10 +67,10 @@ net +1. Against main W9 is +18,513/-23,824, net **-5,311**, within the -2,900 bu
 No archived test was newly ported and no native matrix cell was newly unskipped.
 
 Shared implementation files: `internal/blob/types.go`, `internal/blob/remote.go`,
-`pkg/store/blob_lookup.go`, `pkg/controller/data_record_binding.go`, and
-`pkg/controller/data_record_routes.go`. Shared tests:
+`internal/store/blob_lookup.go`, `internal/controller/data_record_binding.go`, and
+`internal/controller/data_record_routes.go`. Shared tests:
 `internal/blob/remote_test.go`, `internal/blob/remote_selector_test.go`,
-`pkg/store/blob_remote_lookup_test.go`, `pkg/store/blob_default_lookup_test.go`,
+`internal/store/blob_remote_lookup_test.go`, `internal/store/blob_default_lookup_test.go`,
 and `tests/acceptance/data_cache_http_test.go`. The existing manual-scope fixture
 now refuses inconsistent verified facts; real verified-scope success is covered
 by the new SQLite test. C1/C3 docs, OpenAPI, the data guide, changelog and generated
@@ -146,7 +146,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   TMPDIR=/var/tmp/sw-lead-tmp GOTMPDIR=/var/tmp/sw-lead-tmp \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' \
   -count=1 -v -timeout=5m
 ```

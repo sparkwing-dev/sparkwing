@@ -61,7 +61,7 @@ The API generator also found two pre-existing controller-client snapshot
 additions (`NewDebugControl` and `ResumeDebugPause`). That unrelated snapshot
 was left unchanged.
 
-Files outside `pkg/store`, including caller migrations and documentation:
+Files outside `internal/store`, including caller migrations and documentation:
 
 - `.apidiff/pkg_controller.txt`
 - `.apidiff/pkg_store.txt`
@@ -71,29 +71,29 @@ Files outside `pkg/store`, including caller migrations and documentation:
 - `design/rewrite/contracts/t1-port-inventory.md`
 - `docs/migrations/_unreleased.md`
 - `internal/web/browserfixture/main.go`
-- `pkg/controller/compute_limits_test.go`
-- `pkg/controller/concurrency_team_test.go`
-- `pkg/controller/credential_mutations.go`
-- `pkg/controller/credential_ssh_test.go`
-- `pkg/controller/credits_test.go`
-- `pkg/controller/crons_team_test.go`
-- `pkg/controller/crons_test.go`
-- `pkg/controller/flood_team_test.go`
-- `pkg/controller/flood_test.go`
-- `pkg/controller/git_credentials_team.go`
-- `pkg/controller/github_app_test.go`
-- `pkg/controller/github_runners_test.go`
-- `pkg/controller/identity_fixture_test.go`
-- `pkg/controller/pipelines_list_test.go`
-- `pkg/controller/reaped_run_conflict_test.go`
-- `pkg/controller/refund_authority_test.go`
-- `pkg/controller/secrets.go`
-- `pkg/controller/secrets_dashboard_test.go`
-- `pkg/controller/team_boundary_test.go`
-- `pkg/controller/team_download_test.go`
-- `pkg/controller/team_tokens_test.go`
-- `pkg/controller/trigger_test.go`
-- `pkg/controller/trigger_user_test.go`
+- `internal/controller/compute_limits_test.go`
+- `internal/controller/concurrency_team_test.go`
+- `internal/controller/credential_mutations.go`
+- `internal/controller/credential_ssh_test.go`
+- `internal/controller/credits_test.go`
+- `internal/controller/crons_team_test.go`
+- `internal/controller/crons_test.go`
+- `internal/controller/flood_team_test.go`
+- `internal/controller/flood_test.go`
+- `internal/controller/git_credentials_team.go`
+- `internal/controller/github_app_test.go`
+- `internal/controller/github_runners_test.go`
+- `internal/controller/identity_fixture_test.go`
+- `internal/controller/pipelines_list_test.go`
+- `internal/controller/reaped_run_conflict_test.go`
+- `internal/controller/refund_authority_test.go`
+- `internal/controller/secrets.go`
+- `internal/controller/secrets_dashboard_test.go`
+- `internal/controller/team_boundary_test.go`
+- `internal/controller/team_download_test.go`
+- `internal/controller/team_tokens_test.go`
+- `internal/controller/trigger_test.go`
+- `internal/controller/trigger_user_test.go`
 - `pkg/docs/changelog.md`
 - `pkg/docs/mirror/migrations/_unreleased.md`
 - `tests/acceptance/credential_inventory_http_test.go`

@@ -84,7 +84,7 @@ Shared production store files:
 - signup_gate.go
 - state_authority.go
 
-New shared tests are in pkg/store/console_test.go. Controller changes are
+New shared tests are in internal/store/console_test.go. Controller changes are
 console_writes.go, console_writes_test.go, console_store_runtime_test.go,
 queue_priority.go, queue_priority_test.go, queue_view.go and server.go. C2's
 source contract and the two W2 reports are updated. Lead-owned handoffs and

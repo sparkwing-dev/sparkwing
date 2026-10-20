@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 var ErrNotSupported = errors.New("operation not supported by this backend")

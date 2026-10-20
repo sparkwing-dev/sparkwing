@@ -63,7 +63,7 @@ card and receipt address the controller fixed when the refill opened. Separate
 `/internal/refill/cancel` operations resolve it after checking eligibility; deploy
 the matching sparkwing-platform release with this controller.
 
-Go callers of `pkg/store` lose `NoCreditsHold`, `EventKindCreditsExhausted`,
+Go callers of `internal/store` lose `NoCreditsHold`, `EventKindCreditsExhausted`,
 `PoolHeartbeatInterval` and `DispatchedHeartbeatInterval`. A waiting unit's
 `CreditHold` now carries the refusal's own text.
 `Store.RenewLauncherPreparation` returns `[]LauncherPreparation` containing
@@ -1032,7 +1032,7 @@ a tagged `logseg.Sink` bound by the host. Filesystem and S3
 storage use the same immutable segment format.
 
 `conformance.TestLogStore` is removed.
-Tagged-log coverage lives in `pkg/storage/logseg` and the storage acceptance
+Tagged-log coverage lives in `internal/storage/logseg` and the storage acceptance
 cells, including verified offset reads and physical retention.
 
 Daemon handshake and status responses drop `artifact_store_error`, which
@@ -1631,9 +1631,9 @@ that keep the logs service running.
   counter routes answer only the cache's operator token.
 - **Laptop:** `sparkwing dashboard start` uses the local controller and its
   shared log segments. `sparkwing runs prune` removes completed history.
-- **Go packages:** `pkg/logs` and `pkg/storage/sparkwinglogs` are removed.
+- **Go packages:** `pkg/logs` and `internal/storage/sparkwinglogs` are removed.
   Read tagged log pages through `client.NewLogReader` from
-  `pkg/controller/client`. Each page reports whether the run and its logs
+  `internal/controller/client`. Each page reports whether the run and its logs
   are complete.
 - **Mixed versions:** upgrade the runners and the controller together. A
   runner from before segments has nowhere to send its logs once the
@@ -1842,9 +1842,9 @@ To upgrade:
    `sparkwing pipeline trigger PIPELINE --profile PROFILE --working-tree --allow-secret-file PATH` keeps it. A foreground `sparkwing run` executes
    on the machine you run it on; to spread a run across machines, trigger it
    on a controller with runners attached.
-4. Code embedding `pkg/controller/client` drops `PrepareExecutorClaim`,
+4. Code embedding `internal/controller/client` drops `PrepareExecutorClaim`,
    `OfferExecutorClaim` and `HeartbeatExecutor`, and calls `ClaimNode` where
-   it called `ClaimNodeAs`. Code embedding `pkg/store` renames
+   it called `ClaimNodeAs`. Code embedding `internal/store` renames
    `Tenant.ListLegacyAgentClaims` to `ListAgentClaims`, `LegacyAgentClaim` to
    `AgentClaim`, and drops the executor, offer and scheduling-summary methods.
    Claim-round finalization is removed entirely.
@@ -2076,7 +2076,7 @@ kept for S3 and Postgres state profiles.
   `profile` block.
   `sparkwing profiles show --profile NAME -o json` drops `mirror_local`. The
   controller's health no longer reports `object_store.stalled`.
-- **Go packages:** `pkg/storage/s3state` is removed. `pkg/controller`
+- **Go packages:** `internal/storage/s3state` is removed. `internal/controller`
   drops `Loopback`, `LoopbackState`, `LoopbackConcurrency` and
   `NewLoopback`; a local run's node processes reach the full controller.
   `pkg/backends` drops `TypePostgres`, `Spec.Binaries` and
@@ -2752,7 +2752,7 @@ as the seal or expansion. Refusal leaves no partial jobs or accepted expansion.
 Metered per-run ceilings use persisted award billing facts.
 
 `Run.RedactedForDisplay`, `Run.SecretArgNames`, `RedactedRun`, `RedactedRuns`, `RedactInvocation`,
-`RedactedArgValue` and `IncludeSecretValues` are removed from `pkg/store`.
+`RedactedArgValue` and `IncludeSecretValues` are removed from `internal/store`.
 `Run` is a redacted reporting view. Display projection belongs to
 `runspec.DisplayRequest` and `DisplaySpec`. Receipt builders consume that view
 and omit input hashes when classification is unknown or a secret is supplied.
@@ -3065,3 +3065,20 @@ settings.
 Break-glass admin checks the actual table schema and transport endpoint,
 including Unix sockets, and keeps verification and writes on that connection.
 Schema-validation and connection-configuration errors omit credentials. An empty `--addr` refuses startup before opening the store.
+
+## Controller and store packages are internal
+
+The controller, its client and cipher tests, the store and its test helpers,
+and storage backends are implementation packages under `internal/`.
+Their former public import paths are removed without aliases.
+
+Before, external Go code could import controller or store implementation
+packages under `pkg/`. After, external callers use the documented HTTP API,
+the `sparkwing` author SDK, or public wire contracts such as `pkg/wingwire`.
+Go prevents external imports of the internal implementation packages.
+
+Within Sparkwing, `NodeRef` and the credential DTOs `CreateTokenRequest`,
+`CreateServiceTokenRequest`, `EnrollRunnerRequest`, `CreatedToken` and
+`RotatedToken` live in `internal/controllerwire`.
+`RunSnapshot` remains a private host read model in `internal/store`.
+Routes, JSON field names and runtime behavior are unchanged.

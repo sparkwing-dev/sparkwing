@@ -61,8 +61,8 @@ The vet package list is `internal/apierr`, `internal/blob`, `internal/capability
 `internal/clisurface`, `internal/controllerwire`, `internal/engine`,
 `internal/limits`, `internal/nodehost`, `internal/nodeproto`,
 `internal/releaseasset`, `internal/runners`, `internal/runners/launcher`,
-`internal/runspec`, `internal/settings`, `internal/source`, `pkg/controller`,
-`pkg/controller/client`, `pkg/match` and `pkg/store`. Test commands use the same
+`internal/runspec`, `internal/settings`, `internal/source`, `internal/controller`,
+`internal/controller/client`, `pkg/match` and `internal/store`. Test commands use the same
 cache/environment values as the build and vet. The requested-cache check still
 needs a shell that can write that location; the substitute is not an exact-path pass.
 

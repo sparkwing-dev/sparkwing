@@ -28,7 +28,7 @@ and HTTP callers.
 Passed with GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache:
 
 - `go build ./...`.
-- `go vet ./pkg/store ./pkg/controller ./internal/crons`.
+- `go vet ./internal/store ./internal/controller ./internal/crons`.
 - Focused schedule, concurrency, capacity and tenant SQL guard tests across those
   three packages. Store took 13.559s, controller 0.487s and crons 0.005s.
 - The complete internal/crons suite passed earlier in the session.
@@ -166,7 +166,7 @@ policy metadata. internal/apiref and internal/apispec tests pass.
 
 Whole-repository build and scoped vet pass. Store schedule/concurrency/guard
 selection passes (7.380s), as do the focused race checks (9.724s). Full
-internal/crons, internal/apiref, internal/apispec, pkg/store/teststore and
+internal/crons, internal/apiref, internal/apispec, internal/store/teststore and
 internal/wingd/localcontroller suites pass. Schedule transport and concurrency
 HTTP acceptance selections pass (0.944s), and TestStoreScheduleBoundary passes
 (0.227s). Local/controller schedule, launcher and child-ancestry checks pass
@@ -192,7 +192,7 @@ All conflict contents are resolved. The Git index still records the merge paths
 because the swarm brief prohibits Git writes. The lead must stage resolutions
 and commit. Deleted integration files remain deleted. Lead-owned amendments and
 handoffs are untouched. C1/C2 record the unified schedule adapter and its amended
-signature. Shared caller edits are pkg/controller/crons.go, crons_tick_test.go,
+signature. Shared caller edits are internal/controller/crons.go, crons_tick_test.go,
 schedule_routes_test.go, intake_policy.go, schedule_intake_test.go,
 team_boundary_test.go, child_intake_reconciliation_test.go and
 identity_fixture_test.go, plus deletion_review_test.go, deletion_test.go,

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestRefuseBelowMinInterval(t *testing.T) {

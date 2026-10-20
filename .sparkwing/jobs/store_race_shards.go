@@ -126,10 +126,10 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) (runErr error) {
 		}
 	}()
 	binary := filepath.Join(dir, "store.test")
-	if _, err := storeRaceExec(ctx, home, "go", "test", "-c", "-race", "-o", binary, "./pkg/store").Run(); err != nil {
+	if _, err := storeRaceExec(ctx, home, "go", "test", "-c", "-race", "-o", binary, "./internal/store").Run(); err != nil {
 		return fmt.Errorf("compile store race binary: %w", err)
 	}
-	listed, err := storeRaceExec(ctx, home, binary, "-test.list", "^(Test|Example|Fuzz)").Dir("pkg/store").Capture()
+	listed, err := storeRaceExec(ctx, home, binary, "-test.list", "^(Test|Example|Fuzz)").Dir("internal/store").Capture()
 	if err != nil {
 		return fmt.Errorf("list store race tests: %w", err)
 	}
@@ -145,7 +145,7 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) (runErr error) {
 	for i, shard := range shards {
 		sparkwing.Info(ctx, "store race shard %d: %d tests, sha256=%s", i+1, len(shard), storeRaceDigest(shard))
 	}
-	if _, err := storeRaceExec(ctx, home, "go", "test", "-race", "-count=1", "./pkg/store/internal/storetest").Env("GOMAXPROCS", "1").Run(); err != nil {
+	if _, err := storeRaceExec(ctx, home, "go", "test", "-race", "-count=1", "./internal/store/internal/storetest").Env("GOMAXPROCS", "1").Run(); err != nil {
 		return fmt.Errorf("storetest race package: %w", err)
 	}
 
@@ -156,7 +156,7 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) (runErr error) {
 		go func() {
 			result, runErr := storeRaceExec(shardCtx, home, binary,
 				"-test.run", storeRacePattern(shard), "-test.count=1", "-test.timeout=80m").
-				Dir("pkg/store").Env("GOMAXPROCS", "1").Capture()
+				Dir("internal/store").Env("GOMAXPROCS", "1").Capture()
 			results <- storeRaceResult{shard: i + 1, count: len(shard), output: result, err: runErr}
 		}()
 	}

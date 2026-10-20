@@ -103,8 +103,8 @@ Shared production files touched:
 - internal/source/{source,checkout,acquire,projection}.go
 - internal/nodehost/{checkout_planning,sdk_description,sdk_planning,sdk_code}.go
 - internal/nodeproto/describe.go
-- pkg/store/{intake_runtime,submitted_environment}.go
-- pkg/controller/schedule_source.go
+- internal/store/{intake_runtime,submitted_environment}.go
+- internal/controller/schedule_source.go
 - internal/doccheck/cliverbs.go
 - api/openapi.yaml, CHANGELOG.md and embedded documentation mirrors.
 

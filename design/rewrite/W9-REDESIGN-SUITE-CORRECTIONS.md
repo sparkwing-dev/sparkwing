@@ -36,7 +36,7 @@ GOTMPDIR=/tmp/sw-astra-W9 and at most go test -p 4.
   shared-machine administration and live environment-fence properties pass.
 - TestSurface* and TestEngineAmendments* pass. No cell was newly unskipped and
   no archived test was newly ported.
-- rewrite_integration tests compile for cmd/sparkwing and pkg/controller.
+- rewrite_integration tests compile for cmd/sparkwing and internal/controller.
 - Commentcheck against main is clean across 2,860 files. Whitespace checks pass.
 
 The broader controller suite cannot complete here. TestReadHostKeyTakesTheKeyTheServerPresents,
@@ -52,8 +52,8 @@ Deleted/replaced 11 stale test lines. Production added/deleted this session:
 0/0. W9-owned production Go versus main is +19,771/-25,208, net -5,437,
 within the -2,900 budget. The previous source/child/environment redesign is retained.
 
-Shared files touched: pkg/controller/burst_acceptance_test.go,
-pkg/controller/engine_claim_sdk_unix_test.go,
+Shared files touched: internal/controller/burst_acceptance_test.go,
+internal/controller/engine_claim_sdk_unix_test.go,
 internal/wingd/localcontroller/node_pipeline_test.go,
 internal/nodehost/owner_process_store_test.go and api/openapi.yaml.
 No contracts changed or remain requested by this correction. Lead-owned

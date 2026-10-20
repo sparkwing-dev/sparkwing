@@ -15,7 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type sourceRefusalExecutor struct{ t *testing.T }
@@ -58,7 +58,7 @@ func (s *hostingState) ReadSnapshot(context.Context, string) (store.RunSnapshot,
 	return s.snapshot, nil
 }
 
-func (s *hostingState) ReadNode(context.Context, store.NodeRef) (store.NodeRow, error) {
+func (s *hostingState) ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
 	return s.node, nil
 }
 
@@ -83,7 +83,7 @@ func hostingStateFor(t *testing.T, kind capability.UnitKind) (controllerwire.Cla
 		state.snapshot.Run.Spec = &unit.Accepted.Spec
 		state.snapshot.Run.Plan = unit.Accepted.Plan
 		state.snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
-		state.node = store.NodeRow{Ref: store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: unit.Binding.Generation, Attempt: unit.Binding.Attempt, SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
+		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: unit.Binding.Generation, Attempt: unit.Binding.Attempt, SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
 	}
 	// safety: the store's snapshot must not share mutable objects with the received award.
 	body, err := json.Marshal(state.snapshot)

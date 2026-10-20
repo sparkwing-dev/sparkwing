@@ -3,7 +3,7 @@ W1 session 43
 Environment: GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache GOTMPDIR=/tmp/sw-astra-W1/build
 
 Final focused store selection:
-ok  	github.com/sparkwing-dev/sparkwing/pkg/store	16.444s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	16.444s
 
 Focused race selection: PASS (22.980s)
 Whole-repository go build ./...: PASS

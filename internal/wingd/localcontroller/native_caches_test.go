@@ -12,10 +12,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestNativeServicesSavesAndRestoresDeclaredCache(t *testing.T) {
@@ -66,7 +67,7 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 			t.Fatal(err)
 		}
 		input.SpecHash = "job-hash"
-		state.node = store.NodeRow{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Generation: input.Generation, SpecHash: input.SpecHash, Spec: body}
+		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Generation: input.Generation, SpecHash: input.SpecHash, Spec: body}
 		var spec runspec.Spec
 		if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 			t.Fatal(err)

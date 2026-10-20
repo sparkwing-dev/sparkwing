@@ -104,7 +104,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' -count=1 -v
 ```
 
@@ -119,7 +119,7 @@ persistence or relay was added. The prior retry-selection DESIGN remains with
 the lead and was not patched again.
 
 Commentcheck against main still reports the inherited pinnedClock comment at
-`pkg/store/store.go:108`. Listener-based docs web-client tests cannot run here.
+`internal/store/store.go:108`. Listener-based docs web-client tests cannot run here.
 
 ## Size and shared files
 
@@ -136,8 +136,8 @@ Shared implementation/test edits:
   `scheduler_test.go`, `store_host_fixture_test.go`, `burst_admission_test.go`
   and `burst_store_admission_test.go`.
 - `internal/wingd/server.go` and `unit_test.go`.
-- `pkg/store/unit_matching.go`.
-- `pkg/controller/local_secrets_test.go` and `runner_capacity_test.go`.
+- `internal/store/unit_matching.go`.
+- `internal/controller/local_secrets_test.go` and `runner_capacity_test.go`.
 - C1/C3/C4 contracts, CHANGELOG and generated embedded-doc mirrors.
 
 The CLI native probe and local-execution guide are W9-owned.

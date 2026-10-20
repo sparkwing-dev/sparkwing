@@ -139,7 +139,7 @@ reader to that list. No blocker is represented as completed work.
 
 ## Shared files and friction
 
-The only client caller touched is pkg/controller/client/oidc.go. Its documentation
+The only client caller touched is internal/controller/client/oidc.go. Its documentation
 now states the final authorization rule; its existing wire shape already fits
 and passes the real client/handler test. No caller outside controller needs a
 production source change in this slice.

@@ -52,7 +52,7 @@ PUT /api/v1/queue/groups/{group}/priority
 Passed with `GOWORK=off`, `GOFLAGS=-buildvcs=false`, at most four package workers and caches under `/tmp/sw-astra-W2/`:
 
 - `go build -p 4 ./...`.
-- `go vet -p 4 ./pkg/controller ./internal/capability`.
+- `go vet -p 4 ./internal/controller ./internal/capability`.
 - Route metadata, policy-router, route-drift, metrics-authority, retired-route/method and approval-vocabulary focused tests.
 - Full `go test -p 4 ./internal/apiroutes` after preserving the metrics literal in `team_read_routes.go`.
 - `go test -p 4 ./pkg/docs -run '^TestPkgDocsContentMatchesDocsRoot$'` and `bin/sync-docs.sh --check`.
@@ -62,7 +62,7 @@ No new native acceptance cell is claimed. The socket-based metrics-listener test
 
 ## Files, budget and friction
 
-Production files: `pkg/controller/{browser.go,operator_routes.go,policy_router.go,server.go,prom.go,team_read_routes.go}` and `internal/capability/routes.go`. Tests: credential route expectations/coverage, route registration, approval policy, capability policy, metrics, team boundary and the exported test helpers. Documentation: observability source and mirror.
+Production files: `internal/controller/{browser.go,operator_routes.go,policy_router.go,server.go,prom.go,team_read_routes.go}` and `internal/capability/routes.go`. Tests: credential route expectations/coverage, route registration, approval policy, capability policy, metrics, team boundary and the exported test helpers. Documentation: observability source and mirror.
 
 The six shared controller production files have a combined working diff of +20 lines at handoff, including other W2 workers' deletions. The lead owns the complete W2 delta against main and the area budget decision.
 

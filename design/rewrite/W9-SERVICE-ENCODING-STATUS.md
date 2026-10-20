@@ -60,7 +60,7 @@ within the -2,900 budget. TypeScript production changes are +9/-1.
 Shared files touched are `internal/sdkserve/routes.go`, the new shared encoder
 and their tests; `internal/nodehost/service_encoding_test.go` and
 `scheduler_test.go`; `sdk/typescript/src/routes.ts`, its route tests and the
-service-request fixture; `pkg/store/store.go`; `pkg/controller/handlers.go`,
+service-request fixture; `internal/store/store.go`; `internal/controller/handlers.go`,
 `step_status.go` and its native test; generated `.apidiff` snapshots and embedded
 documentation copies. Other changes are W9 CLI, help, docs and this report.
 Lead-owned handoffs and amendments are unchanged.

@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
@@ -30,12 +31,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	s3store "github.com/sparkwing-dev/sparkwing/internal/storage/s3"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/storeurl"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func main() {

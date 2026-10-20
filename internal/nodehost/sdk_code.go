@@ -10,15 +10,16 @@ import (
 	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type sdkCode struct {
 	Store         EvaluationStore
-	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
+	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
 	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
 	CanonicalHash func(any) (runspec.Hash, error)
 	Validation    nodeproto.ValidationContext

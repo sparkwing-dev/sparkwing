@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type burstAvailabilityWire struct {
@@ -56,7 +56,7 @@ func TestBurstAvailabilityRefreshesBeforePlacementReadsAndClaims(t *testing.T) {
 	if _, err := state.ReadSnapshot(t.Context(), "run"); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = state.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: store.NodeRef{RunID: "run", NodeID: "job"}})
+	_, _ = state.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}})
 	if !reflect.DeepEqual(calls, []string{"observe", "renew", "snapshot", "observe", "renew", "reconcile"}) {
 		t.Fatalf("stale capacity used for placement: %v", calls)
 	}
@@ -95,7 +95,7 @@ func TestBurstReservedComputeCountsOnlyForItsClaim(t *testing.T) {
 	}
 	observed := match.Resources{Cores: 1, MemoryBytes: 1024}
 	state.Available = func(context.Context) (*match.Resources, error) { return &observed, nil }
-	_, _ = state.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Reserved: &match.Resources{Cores: 4, MemoryBytes: 4096}})
+	_, _ = state.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Reserved: &match.Resources{Cores: 4, MemoryBytes: 4096}})
 	if wire.reserved == nil || *wire.reserved != (match.Resources{Cores: 4, MemoryBytes: 4096}) {
 		t.Fatalf("claim lost its private reservation: %+v", wire.reserved)
 	}

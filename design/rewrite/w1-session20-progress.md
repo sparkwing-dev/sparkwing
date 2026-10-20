@@ -68,11 +68,11 @@ GOCACHE/GOTMPDIR/TMPDIR below /tmp/sw-astra-W1. The scratch directory is removed
 at completion.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- `go vet -p 4` passes for pkg/store/..., pkg/controller/...,
+- `go vet -p 4` passes for internal/store/..., internal/controller/...,
   internal/orchestrator/..., internal/acceptance/... and tests/acceptance/....
 - The W1 selection passes **399 top-level tests / 1,118 cases**, with no skips.
   Select Test functions from w1-session19-tests.txt plus owner_requeue_port_test.go,
-  omit TestPostgres names, and run their anchored alternation against ./pkg/store.
+  omit TestPostgres names, and run their anchored alternation against ./internal/store.
   The final future-ledger variant also passes independently.
 - internal/acceptance and tests/acceptance with `-skip '^TestProtocol$'` pass
   **19 top-level tests / 200 cases**, with **2,422 native/platform skips**.
@@ -110,8 +110,8 @@ Shared caller retirement touches only tests:
 
 - internal/orchestrator/lapsed_lease_repro_test.go
 - internal/orchestrator/trigger_consumer_test.go
-- pkg/controller/runner_scopes_test.go
-- pkg/controller/trigger_claim_ownership_test.go
+- internal/controller/runner_scopes_test.go
+- internal/controller/trigger_claim_ownership_test.go
 
 Shared acceptance files are internal/acceptance/store_unstarted.go and the new
 store_owner_unstarted.go. Shared prose is c1-data.md, handoffs.md,

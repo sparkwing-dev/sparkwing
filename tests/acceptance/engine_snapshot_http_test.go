@@ -16,9 +16,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type snapshotTransactions struct {
@@ -46,8 +46,8 @@ func snapshotFixture(b *credentialBoundary) *snapshotTransactions {
 		snapshot: store.RunSnapshot{
 			Run: store.RunRow{ID: "run", Team: "team"}, StoreNow: b.snapshot.Now,
 			Nodes: []store.NodeRow{
-				{Ref: store.NodeRef{RunID: "run", NodeID: "first"}, Status: "pending", Generation: 2, Spec: json.RawMessage(`{"id":"first"}`)},
-				{Ref: store.NodeRef{RunID: "run", NodeID: "generated"}, Status: "running", Generation: 4, Attempt: 2, StateSeq: 9, Spec: json.RawMessage(`{"id":"generated","deps":["first"]}`), CapabilityPrefix: "private-prefix", ClaimedBy: "private-holder"},
+				{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "first"}, Status: "pending", Generation: 2, Spec: json.RawMessage(`{"id":"first"}`)},
+				{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}, Status: "running", Generation: 4, Attempt: 2, StateSeq: 9, Spec: json.RawMessage(`{"id":"generated","deps":["first"]}`), CapabilityPrefix: "private-prefix", ClaimedBy: "private-holder"},
 			},
 		},
 		graph: store.ScheduleSnapshot{
@@ -126,8 +126,8 @@ func TestEngineSnapshotRetainsAcceptedExpansionBodies(t *testing.T) {
 	b := ownerBoundary()
 	f := snapshotFixture(b)
 	f.snapshot.Expansions = []store.AcceptedExpansionRow{
-		{Source: store.NodeRef{RunID: "run", NodeID: "first"}, SourceGeneration: 2, Body: json.RawMessage(`{"jobs":[]}`), BodyHash: "empty-body-hash"},
-		{Source: store.NodeRef{RunID: "run", NodeID: "generated"}, SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[{"id":"nested"}]}`), BodyHash: "body-hash"},
+		{Source: controllerwire.NodeRef{RunID: "run", NodeID: "first"}, SourceGeneration: 2, Body: json.RawMessage(`{"jobs":[]}`), BodyHash: "empty-body-hash"},
+		{Source: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}, SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[{"id":"nested"}]}`), BodyHash: "body-hash"},
 	}
 	w := snapshotRequest(snapshotServer(t, b, f), b, "GET", "/api/v1/runs/run/snapshot")
 	var got controllerwire.ScheduleSnapshot

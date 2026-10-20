@@ -47,7 +47,7 @@ Verification passed with `GOWORK=off GOFLAGS=-buildvcs=false`,
 - 28 focused controller tests from audit, policy router/store, error response,
   plan secret, peer intake and repository SDK pipe files.
 - The new diagnostic property and repository example regression under `-race`.
-- `go test -p 4 ./pkg/store -run '^TestScheduling' -count=1`.
+- `go test -p 4 ./internal/store -run '^TestScheduling' -count=1`.
 - Engine client tests, embedded documentation/catalog/search tests,
   `bin/sync-docs.sh --check`, commentcheck against main and `git diff --check`.
 
@@ -60,7 +60,7 @@ also stops in a web-client listener test. Those runs establish no runtime result
 past the sandbox refusal. Native execution of `sparkwing run example` remains
 with the lead. No new numbered acceptance cell or archived test port is claimed.
 
-Shared production files touched under `pkg/controller` are `server.go`,
+Shared production files touched under `internal/controller` are `server.go`,
 `handlers.go`, `policy_router.go`, `policy_store.go`, `plan_secret_adapter.go`,
 `browser.go`, `browser_flow.go`, `browser_github_app.go`, `browser_login.go`,
 `browser_login_routes.go`, `browser_oauth_routes.go`, `billing_routes.go`,
@@ -68,7 +68,7 @@ Shared production files touched under `pkg/controller` are `server.go`,
 `github_app.go`, `github_app_extra_repos.go`, `github_app_routes.go`,
 `github_app_webhook.go`, `github_runner_admin.go`, `identity_link_routes.go`,
 `intake_policy.go`, `intake_source.go`, `oidc_token.go` and `session_routes.go`.
-The store change is `pkg/store/scheduling_contract.go`. Tests in both packages
+The store change is `internal/store/scheduling_contract.go`. Tests in both packages
 and `docs/local-execution.md` with its embedded mirror changed too.
 
 This task adds 98 production Go lines and deletes 48, net +50. No legacy file

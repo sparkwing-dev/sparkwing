@@ -58,7 +58,7 @@ Passed:
 - Commentcheck against HEAD: clean across all 15 changed Go files.
 
 Commentcheck against main still fails on the inherited untagged pinnedClock
-comment in pkg/store/store.go:108. It is present in the starting HEAD and is
+comment in internal/store/store.go:108. It is present in the starting HEAD and is
 unchanged. Broader controller secret/dashboard and pkg/docs web-client selections
 cannot run because httptest listeners are refused by the sandbox. Their
 socket-free focused replacements above pass. No full-repository test pass is
@@ -114,7 +114,7 @@ and contract declaration files. No removed API leaves callers behind.
 Shared files outside W9 ownership:
 
 - internal/nodehost/process_services.go and process_service_reads_test.go
-- pkg/controller/secret_reads.go, local_secrets_test.go,
+- internal/controller/secret_reads.go, local_secrets_test.go,
   burst_acceptance_test.go, burst_overflow_test.go and burst_sdk_execution_test.go
 - design/rewrite/contracts/c2-credentials.md, c3-controller-wire.md,
   c3-protocol-sdk.md and c4-surface-config.md

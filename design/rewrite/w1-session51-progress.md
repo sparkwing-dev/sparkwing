@@ -120,9 +120,9 @@ removed. Lead-owned amendments and handoffs are unchanged.
 ## Shared files and friction
 
 Outside store, production edits are limited to
-pkg/controller/engine_claim_routes.go (ordered policy input),
-pkg/controller/engine_launcher_sync.go (conformance to the existing concrete
-adapter), and pkg/controller/missing_operation_routes.go (the canonical
+internal/controller/engine_claim_routes.go (ordered policy input),
+internal/controller/engine_launcher_sync.go (conformance to the existing concrete
+adapter), and internal/controller/missing_operation_routes.go (the canonical
 store.ValidRunnerName caller). Controller merge/test changes are in
 bootstrap_token_test.go, bootstrap_store_test.go, egress_test.go,
 engine_launcher_sync_test.go, engine_launcher_store_test.go and

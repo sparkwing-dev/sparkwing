@@ -5,8 +5,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestARetryCopiesWhatItsSourceRunAlreadySucceededAt(t *testing.T) {
@@ -20,14 +21,14 @@ func TestARetryRunsANodeWhoseRecordedOutputIsGone(t *testing.T) {
 func testRetrySourceProbe(t *testing.T, kind store.ReconcileKind) {
 	t.Helper()
 	f, h, input := newOwnerFixture(t, true)
-	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}
 	returned := row
 	if kind == store.Materialize {
 		returned.Status, returned.Outcome = store.StatusDone, store.NodeSuccess
 	}
 	probe := &ownerReconcileProbe{OwnerStore: f, result: store.ReconciledNode{Kind: kind, Node: returned}}
 	h.Store = probe
-	sourceResult := &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: store.NodeRef{RunID: "previous", NodeID: "job"}, StateSeq: 8}}
+	sourceResult := &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: "previous", NodeID: "job"}, StateSeq: 8}}
 	h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		if layer.Name == "admission" && kind == store.Materialize {
 			t.Fatal("copied result entered compute admission")

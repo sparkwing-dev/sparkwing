@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -36,15 +36,19 @@ func seedRun(t *testing.T, runID, jobID, message string) *logPageFixture {
 func (f *logPageFixture) GetRun(context.Context, string) (*store.Run, error) {
 	return &store.Run{ID: f.runID, Pipeline: "ci", Status: "success"}, nil
 }
+
 func (f *logPageFixture) ListNodes(context.Context, string) ([]*store.Node, error) {
 	return []*store.Node{{RunID: f.runID, NodeID: f.jobID, Status: "done", Outcome: "success"}}, nil
 }
+
 func (*logPageFixture) ListEventsAfter(context.Context, string, int64, int) ([]store.Event, error) {
 	return nil, nil
 }
+
 func (f *logPageFixture) ReadNodeLog(context.Context, string, string, backend.ReadOpts) ([]byte, error) {
 	return f.body, nil
 }
+
 func (*logPageFixture) StreamNodeLog(context.Context, string, string) (io.ReadCloser, error) {
 	return nil, nil
 }

@@ -17,9 +17,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type concurrencyBoundary struct {
@@ -78,7 +78,7 @@ func (f *concurrencyTransactions) ReadAuthorizedGroup(_ context.Context, a capab
 func (f *concurrencyTransactions) ResolveAuthorizedWaiter(_ context.Context, a capability.Authorized, _, _, _, _, _, _ string, _ bool) (store.WaiterResolution, error) {
 	return store.WaiterResolution{Status: store.WaiterStillWaiting, LeaderRunID: "leader", LeaderNodeID: "leader-job"}, f.entered(a)
 }
-func (f *concurrencyTransactions) CancelAuthorizedWaiter(_ context.Context, a capability.Authorized, _ string, _ store.NodeRef) (bool, error) {
+func (f *concurrencyTransactions) CancelAuthorizedWaiter(_ context.Context, a capability.Authorized, _ string, _ controllerwire.NodeRef) (bool, error) {
 	return true, f.entered(a)
 }
 func (f *concurrencyTransactions) ForceReleaseAuthorizedSlots(_ context.Context, a capability.Authorized, _ string) ([]store.ConcurrencyHolder, error) {

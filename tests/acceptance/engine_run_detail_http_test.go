@@ -17,11 +17,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestEngineRunDetailRequiresStatusFacts(t *testing.T) {
@@ -59,7 +59,7 @@ func runStatusFacts(b *credentialBoundary) controller.RunStatusFacts {
 				Plan: json.RawMessage(`{"env":{"TOKEN":"private-secret"}}`), StateDigest: "private-state-digest",
 			},
 			Nodes: []store.NodeRow{{
-				Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusRunning, Attempt: 2, Generation: 4, StateSeq: 8,
+				Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusRunning, Attempt: 2, Generation: 4, StateSeq: 8,
 				ClaimedBy: "private-holder", CapabilityPrefix: "private-prefix", SpecHash: "private-spec-hash",
 				Spec: json.RawMessage(`{"id":"job","env":{"TOKEN":"private-secret"}}`),
 			}},

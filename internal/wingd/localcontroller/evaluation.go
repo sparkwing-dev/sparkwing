@@ -7,9 +7,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (c *nodeClaims) evaluate(ctx context.Context, input nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
@@ -23,11 +24,11 @@ func (c *nodeClaims) evaluate(ctx context.Context, input nodehost.EvaluationInpu
 	if (!owner && !evaluator) || input.Accepted.RunID != b.RunID || input.NodeID == "" || input.SpecHash == "" {
 		return nodehost.ProcessGrant{}, nodeClaimMismatch()
 	}
-	row, err := c.readNode(ctx, store.NodeRef{RunID: b.RunID, NodeID: input.NodeID})
+	row, err := c.readNode(ctx, controllerwire.NodeRef{RunID: b.RunID, NodeID: input.NodeID})
 	if err != nil {
 		return nodehost.ProcessGrant{}, err
 	}
-	if row.Ref != (store.NodeRef{RunID: b.RunID, NodeID: input.NodeID}) || row.Generation != input.Generation || row.SpecHash != input.SpecHash {
+	if row.Ref != (controllerwire.NodeRef{RunID: b.RunID, NodeID: input.NodeID}) || row.Generation != input.Generation || row.SpecHash != input.SpecHash {
 		return nodehost.ProcessGrant{}, nodeClaimMismatch()
 	}
 	var job nodeproto.JobSpec
@@ -51,8 +52,8 @@ func (c *nodeClaims) evaluate(ctx context.Context, input nodehost.EvaluationInpu
 }
 
 type evaluationBindings struct {
-	readNode   func(context.Context, store.NodeRef) (store.NodeRow, error)
-	source     store.NodeRef
+	readNode   func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
+	source     controllerwire.NodeRef
 	generation int64
 	hash       string
 }
@@ -88,7 +89,7 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 				return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
 			}
 		} else {
-			output, err := b.readNode(ctx, store.NodeRef{RunID: b.source.RunID, NodeID: target.NodeID})
+			output, err := b.readNode(ctx, controllerwire.NodeRef{RunID: b.source.RunID, NodeID: target.NodeID})
 			if err != nil {
 				if errors.Is(err, store.ErrNotFound) {
 					return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
@@ -99,7 +100,7 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 			if err := json.Unmarshal(output.Spec, &job); err != nil {
 				return err
 			}
-			if output.Ref != (store.NodeRef{RunID: b.source.RunID, NodeID: target.NodeID}) || job.ID != target.NodeID || !capability.ReadsJobOutput(source, job) {
+			if output.Ref != (controllerwire.NodeRef{RunID: b.source.RunID, NodeID: target.NodeID}) || job.ID != target.NodeID || !capability.ReadsJobOutput(source, job) {
 				return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
 			}
 		}

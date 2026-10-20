@@ -12,7 +12,7 @@ var failureConstRE = regexp.MustCompile(`Failure\w+\s*=\s*"([a-z_]+)"`)
 
 func checkFailureReasons(contentDir, repoRoot string) bool {
 	// #nosec G703 -- a build-time tool reading paths the operator names
-	store, err := os.ReadFile(filepath.Join(repoRoot, "pkg", "store", "store.go"))
+	store, err := os.ReadFile(filepath.Join(repoRoot, "internal", "store", "store.go"))
 	if err != nil {
 		fmt.Println("failure-reasons: read store.go:", err)
 		return false
@@ -40,7 +40,7 @@ func checkFailureReasons(contentDir, repoRoot string) bool {
 	fmt.Printf("doccheck/failure-reasons: %d Failure* constant(s) -- %d undocumented\n",
 		len(reasons), len(missing))
 	if len(missing) > 0 {
-		fmt.Printf("\nfailure reasons defined in pkg/store but not documented in observability.md:\n")
+		fmt.Printf("\nfailure reasons defined in internal/store but not documented in observability.md:\n")
 		for _, c := range missing {
 			fmt.Println("  " + c)
 		}

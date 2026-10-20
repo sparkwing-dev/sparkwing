@@ -228,6 +228,8 @@ func (n *JobNode) Requires(labels ...string) *JobNode
 func (n *JobNode) Resources(hints ...ResourceHint) *JobNode
 func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode
 func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode
+func (n *JobNode) StartsChildren(pipelines ...string) *JobNode
+func (n *JobNode) StartsChildrenIn(repository string, pipelines ...string) *JobNode
 func (n *JobNode) Timeout(d time.Duration) *JobNode
 func (n *JobNode) Verify(fn VerifyFn) *JobNode
 func KeyFromFile(path string) KeySource

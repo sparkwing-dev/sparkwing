@@ -50,9 +50,9 @@ so no new wire type or endpoint is needed. C3 records persisted host consumption
 The C1, C2 and C3 protocol contract documents describe these changes. No lead-owned
 handoff or amendment file changed. No further contract decision is needed.
 
-Shared production files touched are `pkg/store/intake_runtime.go`,
+Shared production files touched are `internal/store/intake_runtime.go`,
 `retry_selection.go`, `run_spec.go`, `state_contract.go`, `state_read.go`,
-`state_materialize.go`, `store.go`, and `pkg/controller/engine_intake.go` and
+`state_materialize.go`, `store.go`, and `internal/controller/engine_intake.go` and
 `engine_lifecycle.go`. The store.go edit tags one pre-existing clock comment
 reported by commentcheck. Shared tests are the controller retry-action tests and
 store retry-selection, materialization and blob-materialization tests.

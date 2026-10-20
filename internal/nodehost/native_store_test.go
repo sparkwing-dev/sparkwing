@@ -21,6 +21,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -28,9 +30,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestNativeHostFromIntakeThroughSDKAndPersistedCompletion(t *testing.T) {
@@ -141,7 +142,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 			Bind: func(context.Context, EvaluationInput) (ProcessGrant, error) {
 				return ProcessGrant{}, errors.New("unexpected owner evaluation")
 			},
-			ReadOutput: func(context.Context, store.NodeRef, int64) (json.RawMessage, error) {
+			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 				return nil, errors.New("unexpected source output read")
 			},
 		},
@@ -286,7 +287,7 @@ func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, ho
 	if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Input.RunID, To: store.RunRunning, Actor: f.Actor, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
 	}
-	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "output"}
+	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "output"}
 	if _, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, To: store.NodeReady, Actor: f.Actor, Cause: store.CauseRelease}); err != nil {
 		t.Fatal(err)
 	}

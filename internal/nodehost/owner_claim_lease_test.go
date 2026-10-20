@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestOwnerCannotExecuteBeforeItsSelfClaimRenews(t *testing.T) {
@@ -17,7 +18,7 @@ func TestOwnerCannotExecuteBeforeItsSelfClaimRenews(t *testing.T) {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				input, state, _, _ := executorFixture(t)
-				f := &ownerFixture{nodeRenew: func(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error) {
+				f := &ownerFixture{nodeRenew: func(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error) {
 					return store.LeaseBeat{}, &apierr.Error{Code: code}
 				}}
 				h := OwnerHost{Store: f, Lease: lease.Keeper{Interval: time.Second, Lease: time.Minute}, Executor: ownerNodeFunc(func(context.Context, NodeInput) error {

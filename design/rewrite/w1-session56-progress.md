@@ -124,26 +124,26 @@ Production caller migrations outside store:
 - internal/orchestrator/receipt/receipt.go
 - internal/web/reads.go
 - internal/web/runs.go
-- pkg/controller/handlers.go
-- pkg/controller/retry.go
+- internal/controller/handlers.go
+- internal/controller/retry.go
 
 Shared fixture migrations outside store:
 - internal/backend/store_backend_test.go
 - internal/orchestrator/receipt/receipt_test.go
 - internal/web/secret_args_display_test.go
-- pkg/controller/compute_limits_test.go
-- pkg/controller/concurrency_team_test.go
-- pkg/controller/credits_test.go
-- pkg/controller/github_checks_test.go
-- pkg/controller/github_runners_test.go
-- pkg/controller/node_claim_fixture_test.go
-- pkg/controller/profiles_aggregation_test.go
-- pkg/controller/profiles_coverage_test.go
-- pkg/controller/profiles_test.go
-- pkg/controller/prom_internal_test.go
-- pkg/controller/secret_args_display_test.go
-- pkg/controller/source_credential_test.go
-- pkg/controller/team_boundary_test.go
+- internal/controller/compute_limits_test.go
+- internal/controller/concurrency_team_test.go
+- internal/controller/credits_test.go
+- internal/controller/github_checks_test.go
+- internal/controller/github_runners_test.go
+- internal/controller/node_claim_fixture_test.go
+- internal/controller/profiles_aggregation_test.go
+- internal/controller/profiles_coverage_test.go
+- internal/controller/profiles_test.go
+- internal/controller/prom_internal_test.go
+- internal/controller/secret_args_display_test.go
+- internal/controller/source_credential_test.go
+- internal/controller/team_boundary_test.go
 
 Minimal W1b fixture migrations within store only change calls in
 credit_rates_test.go, credits_per_team_test.go, credits_test.go and storage_test.go.

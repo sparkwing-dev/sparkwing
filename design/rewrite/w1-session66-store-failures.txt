@@ -55,16 +55,16 @@ TestTheDefaultLadderRefusesAClassAboveEight
 The failure set is unchanged. W1b billing/storage files beyond the AppendEvent caller substitution in storage_test.go are untouched.
 
 Focused race
-ok  github.com/sparkwing-dev/sparkwing/pkg/store  17.850s
+ok  github.com/sparkwing-dev/sparkwing/internal/store  17.850s
 
 Scoped controller
-ok  	github.com/sparkwing-dev/sparkwing/pkg/controller	0.830s
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	0.830s
 
 Local doctor tenant isolation
-ok  	github.com/sparkwing-dev/sparkwing/pkg/controller	0.456s
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	0.456s
 
 Store acceptance cells
-ok  	github.com/sparkwing-dev/sparkwing/pkg/store	2.131s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	2.131s
 
 Broader controller probe (inherited failure)
 TestFinishRunFoldsPartialSamplesRaiseOnly fails in all three cases before profile folding.

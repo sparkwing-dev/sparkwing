@@ -947,6 +947,78 @@ components:
         - replayed
       type: object
       x-sparkwing-go-type: controllerwire.CreateRunResponse
+    internal.controllerwire.CreateServiceTokenRequest:
+      additionalProperties: true
+      properties:
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        name:
+          type: string
+      required:
+        - name
+        - grants
+      type: object
+      x-sparkwing-go-type: controllerwire.CreateServiceTokenRequest
+    internal.controllerwire.CreateTokenRequest:
+      additionalProperties: true
+      properties:
+        data:
+          anyOf:
+            - $ref: '#/components/schemas/internal.capability.DataScope'
+            - type: "null"
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+      required:
+        - grants
+      type: object
+      x-sparkwing-go-type: controllerwire.CreateTokenRequest
+    internal.controllerwire.CreatedToken:
+      additionalProperties: true
+      properties:
+        capability:
+          type: string
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        prefix:
+          type: string
+        principal:
+          type: string
+        team:
+          type: string
+      required:
+        - capability
+        - prefix
+        - team
+        - grants
+      type: object
+      x-sparkwing-go-type: controllerwire.CreatedToken
     internal.controllerwire.DataCommitRequest:
       additionalProperties: true
       properties:
@@ -1407,6 +1479,43 @@ components:
         - args
       type: object
       x-sparkwing-go-type: controllerwire.EffectiveView
+    internal.controllerwire.EnrollRunnerRequest:
+      additionalProperties: true
+      properties:
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        name:
+          type: string
+        personal:
+          type: boolean
+        repos:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        reserved_pools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        trust:
+          type: string
+      required:
+        - name
+        - repos
+      type: object
+      x-sparkwing-go-type: controllerwire.EnrollRunnerRequest
     internal.controllerwire.ExchangeResponse:
       additionalProperties: true
       properties:
@@ -2069,6 +2178,18 @@ components:
         - state_seq
       type: object
       x-sparkwing-go-type: controllerwire.MaterializedResultSource
+    internal.controllerwire.NodeRef:
+      additionalProperties: true
+      properties:
+        job_id:
+          type: string
+        run_id:
+          type: string
+      required:
+        - run_id
+        - job_id
+      type: object
+      x-sparkwing-go-type: controllerwire.NodeRef
     internal.controllerwire.ObjectStoreBreaker:
       additionalProperties: true
       properties:
@@ -2979,6 +3100,25 @@ components:
         - record
       type: object
       x-sparkwing-go-type: controllerwire.ReuseSource
+    internal.controllerwire.RotatedToken:
+      additionalProperties: true
+      properties:
+        capability:
+          type: string
+        new:
+          $ref: '#/components/schemas/internal.capability.Metadata'
+        old_prefix:
+          type: string
+        old_revoked_at:
+          format: date-time
+          type: string
+      required:
+        - capability
+        - new
+        - old_prefix
+        - old_revoked_at
+      type: object
+      x-sparkwing-go-type: controllerwire.RotatedToken
     internal.controllerwire.RunDetail:
       additionalProperties: true
       properties:
@@ -4183,17 +4323,17 @@ components:
         Expansions:
           anyOf:
             - items:
-                $ref: '#/components/schemas/pkg.store.AcceptedExpansionRow'
+                $ref: '#/components/schemas/internal.store.AcceptedExpansionRow'
               type: array
             - type: "null"
         Nodes:
           anyOf:
             - items:
-                $ref: '#/components/schemas/pkg.store.NodeRow'
+                $ref: '#/components/schemas/internal.store.NodeRow'
               type: array
             - type: "null"
         Run:
-          $ref: '#/components/schemas/pkg.store.RunRow'
+          $ref: '#/components/schemas/internal.store.RunRow'
         StoreNow:
           format: date-time
           type: string
@@ -5939,154 +6079,14 @@ components:
         - sealed_at
       type: object
       x-sparkwing-go-type: runspec.Spec
-    pkg.controller.client.CreateServiceTokenRequest:
-      additionalProperties: true
-      properties:
-        expires_at:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
-        grants:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        name:
-          type: string
-      required:
-        - name
-        - grants
-      type: object
-      x-sparkwing-go-type: client.CreateServiceTokenRequest
-    pkg.controller.client.CreateTokenRequest:
-      additionalProperties: true
-      properties:
-        data:
-          anyOf:
-            - $ref: '#/components/schemas/internal.capability.DataScope'
-            - type: "null"
-        expires_at:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
-        grants:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-      required:
-        - grants
-      type: object
-      x-sparkwing-go-type: client.CreateTokenRequest
-    pkg.controller.client.CreatedToken:
-      additionalProperties: true
-      properties:
-        capability:
-          type: string
-        expires_at:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
-        grants:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        prefix:
-          type: string
-        principal:
-          type: string
-        team:
-          type: string
-      required:
-        - capability
-        - prefix
-        - team
-        - grants
-      type: object
-      x-sparkwing-go-type: client.CreatedToken
-    pkg.controller.client.EnrollRunnerRequest:
-      additionalProperties: true
-      properties:
-        expires_at:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
-        grants:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        name:
-          type: string
-        personal:
-          type: boolean
-        repos:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        reserved_pools:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        trust:
-          type: string
-      required:
-        - name
-        - repos
-      type: object
-      x-sparkwing-go-type: client.EnrollRunnerRequest
-    pkg.controller.client.RotatedToken:
-      additionalProperties: true
-      properties:
-        capability:
-          type: string
-        new:
-          $ref: '#/components/schemas/internal.capability.Metadata'
-        old_prefix:
-          type: string
-        old_revoked_at:
-          format: date-time
-          type: string
-      required:
-        - capability
-        - new
-        - old_prefix
-        - old_revoked_at
-      type: object
-      x-sparkwing-go-type: client.RotatedToken
-    pkg.match.Resources:
-      additionalProperties: true
-      properties:
-        cores:
-          type: number
-        memory_bytes:
-          type: integer
-      required:
-        - cores
-        - memory_bytes
-      type: object
-      x-sparkwing-go-type: match.Resources
-    pkg.store.AcceptedExpansionRow:
+    internal.store.AcceptedExpansionRow:
       additionalProperties: true
       properties:
         Body: {}
         BodyHash:
           type: string
         Source:
-          $ref: '#/components/schemas/pkg.store.NodeRef'
+          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
         SourceGeneration:
           type: integer
       required:
@@ -6096,7 +6096,7 @@ components:
         - BodyHash
       type: object
       x-sparkwing-go-type: store.AcceptedExpansionRow
-    pkg.store.Actor:
+    internal.store.Actor:
       additionalProperties: true
       properties:
         Authority:
@@ -6114,7 +6114,7 @@ components:
         Kind:
           type: string
         Owner:
-          $ref: '#/components/schemas/pkg.store.OwnerLeaseRef'
+          $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
         Result:
           anyOf:
             - $ref: '#/components/schemas/internal.capability.RecordedResult'
@@ -6130,23 +6130,23 @@ components:
         - Owner
       type: object
       x-sparkwing-go-type: store.Actor
-    pkg.store.LocalPublication:
+    internal.store.LocalPublication:
       additionalProperties: true
       properties:
         Expansions:
           anyOf:
             - items:
-                $ref: '#/components/schemas/pkg.store.AcceptedExpansionRow'
+                $ref: '#/components/schemas/internal.store.AcceptedExpansionRow'
               type: array
             - type: "null"
         Nodes:
           anyOf:
             - items:
-                $ref: '#/components/schemas/pkg.store.NodeRow'
+                $ref: '#/components/schemas/internal.store.NodeRow'
               type: array
             - type: "null"
         Run:
-          $ref: '#/components/schemas/pkg.store.RunRow'
+          $ref: '#/components/schemas/internal.store.RunRow'
         StoreNow:
           format: date-time
           type: string
@@ -6159,7 +6159,7 @@ components:
         publication_results:
           anyOf:
             - additionalProperties:
-                $ref: '#/components/schemas/pkg.store.NodeResult'
+                $ref: '#/components/schemas/internal.store.NodeResult'
               type: object
             - type: "null"
       required:
@@ -6169,11 +6169,11 @@ components:
         - StoreNow
       type: object
       x-sparkwing-go-type: store.LocalPublication
-    pkg.store.MaterializedResultSource:
+    internal.store.MaterializedResultSource:
       additionalProperties: true
       properties:
         Ref:
-          $ref: '#/components/schemas/pkg.store.NodeRef'
+          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
         StateSeq:
           type: integer
       required:
@@ -6181,19 +6181,7 @@ components:
         - StateSeq
       type: object
       x-sparkwing-go-type: store.MaterializedResultSource
-    pkg.store.NodeRef:
-      additionalProperties: true
-      properties:
-        job_id:
-          type: string
-        run_id:
-          type: string
-      required:
-        - run_id
-        - job_id
-      type: object
-      x-sparkwing-go-type: store.NodeRef
-    pkg.store.NodeResult:
+    internal.store.NodeResult:
       additionalProperties: true
       properties:
         ExitCode:
@@ -6228,7 +6216,7 @@ components:
         - Failure
       type: object
       x-sparkwing-go-type: store.NodeResult
-    pkg.store.NodeRow:
+    internal.store.NodeRow:
       additionalProperties: true
       properties:
         ApplicationRetries:
@@ -6280,7 +6268,7 @@ components:
           type: string
         OwnerExecution:
           anyOf:
-            - $ref: '#/components/schemas/pkg.store.OwnerExecution'
+            - $ref: '#/components/schemas/internal.store.OwnerExecution'
             - type: "null"
         QueueStartedAt:
           anyOf:
@@ -6293,7 +6281,7 @@ components:
               type: string
             - type: "null"
         Ref:
-          $ref: '#/components/schemas/pkg.store.NodeRef'
+          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
         Spec: {}
         SpecHash:
           type: string
@@ -6303,7 +6291,7 @@ components:
               type: string
             - type: "null"
         StateActor:
-          $ref: '#/components/schemas/pkg.store.Actor'
+          $ref: '#/components/schemas/internal.store.Actor'
         StateDigest:
           type: string
         StateSeq:
@@ -6343,7 +6331,7 @@ components:
         - ManifestRecord
       type: object
       x-sparkwing-go-type: store.NodeRow
-    pkg.store.OwnerExecution:
+    internal.store.OwnerExecution:
       additionalProperties: true
       properties:
         Allowed:
@@ -6351,7 +6339,7 @@ components:
         Generation:
           type: integer
         Node:
-          $ref: '#/components/schemas/pkg.store.NodeRef'
+          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
         NodeGeneration:
           type: integer
         Owner:
@@ -6370,7 +6358,7 @@ components:
         - Allowed
       type: object
       x-sparkwing-go-type: store.OwnerExecution
-    pkg.store.OwnerLeaseRef:
+    internal.store.OwnerLeaseRef:
       additionalProperties: true
       properties:
         Generation:
@@ -6397,7 +6385,7 @@ components:
         - Generation
       type: object
       x-sparkwing-go-type: store.OwnerLeaseRef
-    pkg.store.RetrySelection:
+    internal.store.RetrySelection:
       additionalProperties: true
       properties:
         mode:
@@ -6405,7 +6393,7 @@ components:
         results:
           anyOf:
             - additionalProperties:
-                $ref: '#/components/schemas/pkg.store.MaterializedResultSource'
+                $ref: '#/components/schemas/internal.store.MaterializedResultSource'
               type: object
             - type: "null"
       required:
@@ -6413,7 +6401,7 @@ components:
         - results
       type: object
       x-sparkwing-go-type: store.RetrySelection
-    pkg.store.RunRow:
+    internal.store.RunRow:
       additionalProperties: true
       properties:
         AllowedPools:
@@ -6447,7 +6435,7 @@ components:
           type: integer
         Owner:
           anyOf:
-            - $ref: '#/components/schemas/pkg.store.OwnerLeaseRef'
+            - $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
             - type: "null"
         Pipeline:
           type: string
@@ -6458,7 +6446,7 @@ components:
           $ref: '#/components/schemas/internal.runspec.SealedRequest'
         Retry:
           anyOf:
-            - $ref: '#/components/schemas/pkg.store.RetrySelection'
+            - $ref: '#/components/schemas/internal.store.RetrySelection'
             - type: "null"
         Spec:
           anyOf:
@@ -6472,7 +6460,7 @@ components:
         State:
           type: string
         StateActor:
-          $ref: '#/components/schemas/pkg.store.Actor'
+          $ref: '#/components/schemas/internal.store.Actor'
         StateDigest:
           type: string
         StateSeq:
@@ -6504,6 +6492,18 @@ components:
         - StateActor
       type: object
       x-sparkwing-go-type: store.RunRow
+    pkg.match.Resources:
+      additionalProperties: true
+      properties:
+        cores:
+          type: number
+        memory_bytes:
+          type: integer
+      required:
+        - cores
+        - memory_bytes
+      type: object
+      x-sparkwing-go-type: match.Resources
     pkg.wingwire.BudgetState:
       additionalProperties: true
       properties:
@@ -9200,14 +9200,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/pkg.controller.client.CreateServiceTokenRequest'
+              $ref: '#/components/schemas/internal.controllerwire.CreateServiceTokenRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pkg.controller.client.CreatedToken'
+                $ref: '#/components/schemas/internal.controllerwire.CreatedToken'
           description: Successful response.
         default:
           content:
@@ -9339,7 +9339,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pkg.controller.client.RotatedToken'
+                $ref: '#/components/schemas/internal.controllerwire.RotatedToken'
           description: Successful response.
         default:
           content:
@@ -10227,14 +10227,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/pkg.controller.client.EnrollRunnerRequest'
+              $ref: '#/components/schemas/internal.controllerwire.EnrollRunnerRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pkg.controller.client.CreatedToken'
+                $ref: '#/components/schemas/internal.controllerwire.CreatedToken'
           description: Successful response.
         default:
           content:
@@ -13260,7 +13260,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pkg.store.LocalPublication'
+                $ref: '#/components/schemas/internal.store.LocalPublication'
           description: Successful response.
         default:
           content:
@@ -15682,14 +15682,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/pkg.controller.client.CreateTokenRequest'
+              $ref: '#/components/schemas/internal.controllerwire.CreateTokenRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pkg.controller.client.CreatedToken'
+                $ref: '#/components/schemas/internal.controllerwire.CreatedToken'
           description: Successful response.
         default:
           content:
@@ -15806,7 +15806,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pkg.controller.client.RotatedToken'
+                $ref: '#/components/schemas/internal.controllerwire.RotatedToken'
           description: Successful response.
         default:
           content:

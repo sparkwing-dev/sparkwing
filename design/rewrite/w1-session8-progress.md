@@ -94,7 +94,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
 
 - Whole-repository go build -p 4 ./... passes.
-- go vet -p 4 passes for pkg/store, pkg/controller, pkg/match,
+- go vet -p 4 passes for internal/store, internal/controller, pkg/match,
   internal/acceptance, tests/acceptance and cmd/sparkwing.
 - The previous exact store file selection plus provision_origins_test.go,
   profile_scope_property_test.go, capacity_reset_test.go, capacity_samples_test.go
@@ -102,7 +102,7 @@ TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
   Extract top-level Test names from those files and the Earlier verification
   file list in w1-amendments-progress.md, then join them into an anchored -run
   alternation. The separate -run '^TestProfileHistory$' passes **39 cases**.
-- pkg/controller -run '^(TestEngine|TestCapacityReadUsesRequestTenantProperty)'
+- internal/controller -run '^(TestEngine|TestCapacityReadUsesRequestTenantProperty)'
   passes **34 top-level tests / 57 cases**.
 - cmd/sparkwing -run '^(TestRunCapacityReset|TestGroupCapacityStats_)' passes
   **6 tests**.
@@ -121,9 +121,9 @@ The aggregate API baseline still needs regeneration with the merged rewrite.
 
 ## Shared files and friction
 
-Production caller migrations outside pkg/store are
-cmd/sparkwing/runs_capacity.go and pkg/controller/browser_reads.go. The added
-controller fixture is pkg/controller/capacity_tenant_test.go. Other shared files
+Production caller migrations outside internal/store are
+cmd/sparkwing/runs_capacity.go and internal/controller/browser_reads.go. The added
+controller fixture is internal/controller/capacity_tenant_test.go. Other shared files
 are internal/acceptance/store_recovery.go, store_unstarted.go and
 store_matching.go, tests/acceptance/placement_test.go, c1-data.md,
 t1-port-inventory.md and the W1 handoffs.

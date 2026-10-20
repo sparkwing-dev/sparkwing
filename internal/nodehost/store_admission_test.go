@@ -10,8 +10,9 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type capacityProbe struct {
@@ -139,7 +140,7 @@ func TestStoreAdmissionWaiterSurvivesOwnerLoss(t *testing.T) {
 		admission, probe, accepted, row := capacityFixture(t)
 		probe.kind = store.AcquireQueued
 		ctx, cancel := context.WithCancel(t.Context())
-		admission.Queued = func(context.Context, store.NodeRef, store.AcquireSlotResponse) error { cancel(); return nil }
+		admission.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error { cancel(); return nil }
 		err := admission.Node(ctx, accepted, row, func(context.Context) error { t.Error("ran after owner loss"); return nil })
 		if !errors.Is(err, context.Canceled) || probe.waiter == nil {
 			t.Fatalf("lost continuous waiter: %v", err)

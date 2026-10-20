@@ -60,8 +60,8 @@ and record writes continue to require an execution attempt.
 so a read does not acquire write authority from the capability's `WriteRef`.
 The HTTP policy router applies the existing data error projection to data binding
 refusals. An unreadable foreign digest returns `forbidden` rather than `internal`.
-The composed HTTP coverage is in `pkg/controller/burst_acceptance_test.go`.
-The source-read fence matrix is in `pkg/store/blob_source_setup_test.go`.
+The composed HTTP coverage is in `internal/controller/burst_acceptance_test.go`.
+The source-read fence matrix is in `internal/store/blob_source_setup_test.go`.
 
 Cloud source initialization precedes bootstrap exchange. A live Node, Plan or
 Eval bootstrap resolves `source.read` only for its sealed submitted source
@@ -741,7 +741,7 @@ and the `git_credential_machines` table are removed.
 The unused capabilities.source_mints column is removed. No token-table release
 or caller-clock fallback remains.
 
-All eight store recovery harness cells now run as ordinary `pkg/store` tests.
+All eight store recovery harness cells now run as ordinary `internal/store` tests.
 They open through storetest and seed sessions, machine registrations, admission,
 plans, owner claims and job claims through store APIs. Retry policy is accepted
 in the plan. Successor owners and competing runs use real issuance and admission.
@@ -761,7 +761,7 @@ completion intents in one transaction. Exact replay retains the finish time.
 Conflicting terminal reports fail. Completion checks include concurrent real
 SQLite connections, generated owner and tenant fences, and event-write rollback.
 
-Queue ordering and matching checks now live in `pkg/store` tests. They seed
+Queue ordering and matching checks now live in `internal/store` tests. They seed
 accounts, enrolled machines, Actions registration, intake, plans and readiness
 through store APIs. Named and queued claims retain the same matcher refusals.
 The queue check preserves the blocked job's complete row across unsuccessful
@@ -985,7 +985,7 @@ a loss line or a `log_incomplete` stream event. Completeness verifies bytes befo
 reporting the persisted seal, and never changes the job result.
 
 `Segment`, `SegmentCommit`, `LogSegments`, `RecordSegments` and `ReadLogSegments`
-live in `pkg/store/result_logs.go`. Log subject validation uses
+live in `internal/store/result_logs.go`. Log subject validation uses
 `blob.LogSubject.Validate`. Step, annotation and summary types and transactions
 live in `result_metadata.go`. The completed result contract scaffold is removed.
 
@@ -1779,7 +1779,7 @@ and checks persisted tickets, quota holds, usage and replay capacity. Physical
 verification evidence is a contract fake. Native controller checkpoints, signing
 and transfer integrity remain integration obligations.
 
-The `TestReplica` tests use `pkg/store/internal/storetest` targets to check usage
+The `TestReplica` tests use `internal/store/internal/storetest` targets to check usage
 sums, quota races, reservation release, singleton election and download caps
 across independent clients and reopening. Quota setup uses ReserveQuota and
 SettleQuota. The suite's dialect selection applies to these tests.
@@ -1829,14 +1829,14 @@ rules, both run-input seals, attempt and repository identity, blob records and
 reference authority, concurrency continuity, completion revisions and retention.
 Internal Go and SQL identifiers use node; customer JSON uses job.
 
-- `pkg/store/schema.sql` is the only baseline. `TranslateSchema` is a signature.
+- `internal/store/schema.sql` is the only baseline. `TranslateSchema` is a signature.
   Neutral types are TEXT, BIGINT, DOUBLE PRECISION and BLOB. PostgreSQL maps
   BLOB to BYTEA without changing checks, keys or predicates.
-- `pkg/store` owns transactional enforcement. `Tenant` carries an explicit,
+- `internal/store` owns transactional enforcement. `Tenant` carries an explicit,
   registered team and cannot widen itself to the raw store. `OperatorStore`
   exposes named deployment operations. `Store` keeps opening, handle creation,
   capability-derived claims and cross-team reaping.
-- `pkg/storage.StateStore` is the final host-facing interface implemented by
+- `internal/storage.StateStore` is the final host-facing interface implemented by
   `*store.Tenant`. The replaced interface and its old consumers have the `Old`
   suffix solely to compile the old implementation beside the contract. There
   is no forwarding alias or compatibility adapter. Retained account, billing,
@@ -1847,7 +1847,7 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
   supplies its signed data transport; `Tenant` supplies transactional records.
 - C2 owns capability issuance, route authentication, binding and API errors.
   C3 owns `ValidatePlan` and host interfaces. C1 owns `RunSnapshot.Scheduling`
-  and the shared pure `Decide` in `pkg/store`. Run hosts and controller
+  and the shared pure `Decide` in `internal/store`. Run hosts and controller
   settlement use that same projection and decision before transition writes. C3's host expansion interface
   calls `Tenant.AcceptExpansion`; it is not a second persistence owner.
 - C4 owns setting resolution and numeric limits. C1's retention table records
@@ -2487,7 +2487,7 @@ The controller's billing caller uses this operator method. W1's
 maintenance coordinator owns the shared retention, quota and GC ordering.
 
 The `billing-start-award-versus-start/store-sqlite` proof now lives in
-`pkg/store/store_unit_billing_boundary_test.go` as
+`internal/store/store_unit_billing_boundary_test.go` as
 `TestStoreBillingStartAwardVersusStart`. It uses the store's existing metered
 claim fixtures with the production C2 calculator and reopens SQLite after execution
 starts. Finish and replay retain the award's original price after settings change.
@@ -2795,10 +2795,10 @@ state-machine execution and end-to-end acceptance remain implementation work.
 Completed checks:
 
 - `GOWORK=off GOFLAGS=-buildvcs=false go build ./...` passed.
-- `go vet` passed for `pkg/store`, `pkg/storage/...`, `pkg/controller/client`,
+- `go vet` passed for `internal/store`, `internal/storage/...`, `internal/controller/client`,
   `internal/nodehost`, `internal/orchestrator`, `internal/blob` and `internal/runspec`,
   with the same workspace and VCS flags.
-- `go test ./pkg/store -run '^TestRewriteSchema' -count=1` passed all four tests.
+- `go test ./internal/store -run '^TestRewriteSchema' -count=1` passed all four tests.
   They exercise raw in-memory SQLite against the final embedded schema.
 - `commentcheck -base origin/main` passed for the changed Go files;
   `git diff --check` passed.
@@ -2824,34 +2824,34 @@ schema version is added.
 | Change | `internal/orchestrator/backends.go` |
 | Change | `internal/orchestrator/orchestrator.go` |
 | Change | `internal/orchestrator/pod_node_host.go` |
-| Change | `pkg/controller/client/client.go` |
-| Change | `pkg/controller/client/state_assertion.go` |
-| Change | `pkg/storage/doc.go` |
-| Change | `pkg/storage/state.go` |
-| Change | `pkg/storage/state_test.go` |
-| Change | `pkg/storage/storeurl/spec.go` |
-| Change | `pkg/store/doc.go` |
-| Delete | `pkg/store/schema_postgres.sql` |
-| Delete | `pkg/store/schema_sqlite.sql` |
-| Change | `pkg/store/schema_test.go` |
-| Change | `pkg/store/store.go` |
-| Change | `pkg/store/tenant.go` |
+| Change | `internal/controller/client/client.go` |
+| Change | `internal/controller/client/state_assertion.go` |
+| Change | `internal/storage/doc.go` |
+| Change | `internal/storage/state.go` |
+| Change | `internal/storage/state_test.go` |
+| Change | `internal/storage/storeurl/spec.go` |
+| Change | `internal/store/doc.go` |
+| Delete | `internal/store/schema_postgres.sql` |
+| Delete | `internal/store/schema_sqlite.sql` |
+| Change | `internal/store/schema_test.go` |
+| Change | `internal/store/store.go` |
+| Change | `internal/store/tenant.go` |
 | Create | `internal/blob/contracts.go` |
 | Create | `internal/runspec/contracts.go` |
-| Create | `pkg/storage/state_contract.go` |
-| Create | `pkg/store/claim_contract.go` |
-| Create | `pkg/store/completion.go` |
-| Create | `pkg/store/capacity_adoption.go` |
-| Create | `pkg/store/maintenance_contract.go` |
-| Create | `pkg/store/node_state.go` |
-| Implement | `pkg/store/result_metadata.go` |
-| Create | `pkg/store/rewrite_schema_test.go` |
-| Create | `pkg/store/run_spec.go` |
-| Create | `pkg/store/run_state.go` |
-| Create | `pkg/store/schema.sql` |
-| Create | `pkg/store/schema.go` |
-| Create | `pkg/store/source_release.go` |
-| Create | `pkg/store/state_contract.go` |
+| Create | `internal/storage/state_contract.go` |
+| Create | `internal/store/claim_contract.go` |
+| Create | `internal/store/completion.go` |
+| Create | `internal/store/capacity_adoption.go` |
+| Create | `internal/store/maintenance_contract.go` |
+| Create | `internal/store/node_state.go` |
+| Implement | `internal/store/result_metadata.go` |
+| Create | `internal/store/rewrite_schema_test.go` |
+| Create | `internal/store/run_spec.go` |
+| Create | `internal/store/run_state.go` |
+| Create | `internal/store/schema.sql` |
+| Create | `internal/store/schema.go` |
+| Create | `internal/store/source_release.go` |
+| Create | `internal/store/state_contract.go` |
 
 The existing host, orchestrator, storage and client edits are mechanical
 `StateStore` to `StateStoreOld` renames. Store startup changes only its schema
@@ -3018,13 +3018,13 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `OutputData.Put` | Checks the output cap and uploader binding, obtains a verified receipt, then commits the output record. |
 | `OutputData.Read` | Looks up the authorized output record and consumes bounded bytes through verified EOF and successful close. |
 
-### pkg/storage/state_contract.go
+### internal/storage/state_contract.go
 
 | Export | Purpose |
 |---|---|
 | `StateStore` | StateStore is the tenant-scoped host contract; status writes use transitions and source inputs use the two seals. A host borrows this handle and does not close the shared store. Claims and deployment maintenance stay unscoped. |
 
-### pkg/store/claim_contract.go
+### internal/store/claim_contract.go
 
 | Export | Purpose |
 |---|---|
@@ -3035,14 +3035,14 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Store.RenewUnit` | Renews the capability-derived unit, records owner execution starts and delivers cancellation without accepting caller-selected fences. |
 | `OperatorStore` | OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store. |
 
-### pkg/store/controller_recovery.go
+### internal/store/controller_recovery.go
 
 | Export | Purpose |
 |---|---|
 | `ControllerRun` | Carries the team and global run ID of a visited controller-owned run. |
 | `Operator.ReconcileControllerRuns` | Resumes settlement and live capacity renewal in bounded pages under the elected controller fence. |
 
-### pkg/store/completion.go
+### internal/store/completion.go
 
 | Export | Purpose |
 |---|---|
@@ -3054,7 +3054,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.AcknowledgeRunEffect` | AcknowledgeRunEffect advances delivered_rev only to the delivered revision, never to a newly observed desired_rev. |
 | `Tenant.RetryRunEffect` | RetryRunEffect records a failed delivery without overwriting a later desired state or its due work. |
 
-### pkg/store/capacity_adoption.go
+### internal/store/capacity_adoption.go
 
 | Export | Purpose |
 |---|---|
@@ -3066,7 +3066,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.AdoptCapacity` | AdoptCapacity checks continuity under the entry lock; expired holders and waiters are removed before a fresh request. |
 | `Tenant.SupersedeCapacity` | SupersedeCapacity marks the holder superseded and requests cancellation on its bound work in the same transaction. |
 
-### pkg/store/maintenance_contract.go
+### internal/store/maintenance_contract.go
 
 | Export | Purpose |
 |---|---|
@@ -3085,7 +3085,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.ReserveQuota` | ReserveQuota locks one shared team/quota row; log reads are exempt from download quota. |
 | `Tenant.SettleQuota` | SettleQuota commits actual usage or releases the reservation in one transaction. |
 
-### pkg/store/result_metadata.go
+### internal/store/result_metadata.go
 
 | Export | Purpose |
 |---|---|
@@ -3101,9 +3101,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.LookupMemo` | LookupMemo applies the claim's repo/ref/pipeline scope and the verified default-branch fallback. |
 | `Tenant.LookupDepcache` | LookupDepcache follows the single restore-order table and runs cold on absent or invalid bytes. |
 
-### pkg/store/schema.go
+### internal/store/schema.go
 
-### pkg/store/result_logs.go
+### internal/store/result_logs.go
 
 | Export | Purpose |
 |---|---|
@@ -3113,7 +3113,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.RecordSegments` | Commits immutable segments and seals under the current writer fence. |
 | `Tenant.ReadLogSegments` | Rechecks authority for the exact subject before selecting byte ranges. |
 
-### pkg/store/schema_contract.go
+### internal/store/schema_contract.go
 
 | Export | Purpose |
 |---|---|
@@ -3122,14 +3122,14 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `SchemaTable` | SchemaTable records the owner of a baseline table. |
 | `SchemaTables` | SchemaTables classifies every table created by the neutral schema. |
 
-### pkg/store/source_release.go
+### internal/store/source_release.go
 
 | Export | Purpose |
 |---|---|
 | `Tenant.ReleaseSourceCredential` | Rechecks live source authority, sealed repository, enrollment, host confirmation and a Cloud or shared-runner executor (never a personal machine, decision 6c), then commits C2's audit before returning the sealed team credential. |
 | `Tenant.OwnerMachineClaimant` | Reports whether an award's root is the run requester or a personal machine the requester enrolled; `SetSourceMachineConsent` is superseded by decision 6c. |
 
-### pkg/store/state_contract.go
+### internal/store/state_contract.go
 
 | Export | Purpose |
 |---|---|
@@ -3151,7 +3151,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `StateEventRule` | StateEventRule makes every lifecycle event name store-owned on customer surfaces. |
 | `NodeEvents` | NodeEvents matches requested To and RequestOnly; an empty cause matches every cause for that terminal outcome. Cancellation requests emit job_cancel_requested while preserving claimed/running state until the holder drains. |
 
-### pkg/store/node_state.go
+### internal/store/node_state.go
 
 | Export | Purpose |
 |---|---|
@@ -3181,7 +3181,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `ErrIllegalTransition.Error` | Error supplies a stable reason without exposing a capability or result payload. |
 | `Tenant.TransitionNode` | TransitionNode changes state, attempts, events, expansion barriers, holder release and settlement atomically. |
 
-### pkg/store/run_state.go
+### internal/store/run_state.go
 
 | Export | Purpose |
 |---|---|
@@ -3194,7 +3194,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.TransitionRun` | TransitionRun applies the run edge, its event and revisioned completion intents together. |
 | `Tenant.FinishRunAndUnit` | FinishRunAndUnit prevents a terminal run from leaving an executable owner claim behind. |
 
-### pkg/store/run_spec.go
+### internal/store/run_spec.go
 
 | Export | Purpose |
 |---|---|
@@ -3740,7 +3740,7 @@ Already delivered revisions apply no observations. The lease is rechecked after
 the writes before commit. The profile observation transaction helper is shared
 with `RecordProfileObservation`; no second folding algorithm exists.
 
-The completion implementation lives in `pkg/store/completion.go`. Its former
+The completion implementation lives in `internal/store/completion.go`. Its former
 contract scaffold is removed. `Server.ReconcileRunEffects(ctx)` consumes the
 profile lane with current tenant handles, retrying failed reads or commits
 through the existing outbox. Corrupt metric reads fail the entire observation
@@ -4082,7 +4082,7 @@ owner-loss continuity and real result materialization retain their tests. The
 native harness still owns PostgreSQL and socket verification.
 
 The implemented capacity-adoption types and transaction now live in
-`pkg/store/capacity_adoption.go`. The completed contract scaffold is removed.
+`internal/store/capacity_adoption.go`. The completed contract scaffold is removed.
 
 
 ## W1b committed output reporting and retired readers, 2026-10-17

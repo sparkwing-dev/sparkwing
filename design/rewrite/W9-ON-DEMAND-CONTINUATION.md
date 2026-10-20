@@ -34,7 +34,7 @@ GOTMPDIR=/tmp/sw-astra-W9/go and TMPDIR=/tmp/sw-astra-W9:
 - Focused CLI controller readiness, local run, doctor, schedules, daemon and
   queue tests, including under race.
 - Full short suites for internal/doccheck, internal/clisurface,
-  pkg/controller/client and internal/controllerwire.
+  internal/controller/client and internal/controllerwire.
 - `go run ./internal/commentcheck -base main .`, clean across 2,534 files.
 - `bin/sync-docs.sh --check` and `git diff --check`.
 

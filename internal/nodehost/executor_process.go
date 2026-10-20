@@ -8,11 +8,12 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec, retryAllowed bool) (result store.NodeResult, err error) {
@@ -109,7 +110,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			err = errors.New("recovery execution requires the persisted source failure")
 			return h.failure(err), err
 		}
-		source := store.NodeRef{RunID: input.Accepted.RunID, NodeID: job.OnFailureOf}
+		source := controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: job.OnFailureOf}
 		row, readErr := h.deps.Store.ReadNode(ctx, source)
 		if readErr != nil {
 			return h.failure(readErr), readErr

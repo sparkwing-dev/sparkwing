@@ -31,7 +31,7 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes on the final Go tree.
-- Vet passes for pkg/store/..., pkg/controller/..., internal/localsecrets,
+- Vet passes for internal/store/..., internal/controller/..., internal/localsecrets,
   cmd/sparkwing-controller and pkg/localws.
 - The store selections pass 57 top-level tests / 211 test and subtest results
   without skips. They cover the secret CRUD, scope, limit, sampling and tenant
@@ -96,7 +96,7 @@ The only shared production caller edit is internal/localsecrets/source.go.
 Shared test callers are internal/localsecrets/key_test.go,
 cmd/sparkwing-controller/secrets_key_test.go,
 pkg/localws/secrets_sealed_test.go and the runner_claim, runner_scopes,
-secrets_dashboard, secrets_encryption and secrets_team tests in pkg/controller.
+secrets_dashboard, secrets_encryption and secrets_team tests in internal/controller.
 The backup_restore_drill store fixture changes only its secret method owner.
 Other shared edits are C1, the test-port inventory, the store API snapshot,
 CHANGELOG.md, the migration guide and their embedded mirrors. Lead-owned

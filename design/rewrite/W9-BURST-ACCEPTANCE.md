@@ -14,7 +14,7 @@ through the real HTTP endpoint, matching the production source initializer.
 Bootstrap secrets, writes and general existence queries are refused. Exchange
 revokes the original bootstrap's source authority.
 
-`pkg/controller/burst_acceptance_test.go` proves the following in each flow:
+`internal/controller/burst_acceptance_test.go` proves the following in each flow:
 
 - The requester submits a source bundle and a declared local secret, receives
   the one-time here bearer, claims the Cloud-owned run and seals its plan.
@@ -33,7 +33,7 @@ revokes the original bootstrap's source authority.
 - A competing Cloud poll cannot acquire the awarded job. Requester cancellation
   reaches both the local owner and worker through their real renewal paths.
 
-`pkg/store/blob_source_setup_test.go` covers first acquisition and retries with
+`internal/store/blob_source_setup_test.go` covers first acquisition and retries with
 an earlier attempt ordinal. Its sixteen cases permit only the bound run's sealed
 source bundle. Foreign run/digest/kind, changed holder/generation, cancellation
 and lease expiry refuse the read. An existing output remains unreadable and
@@ -42,7 +42,7 @@ upload authority stays unavailable before the attempt starts.
 digests, attack selectors, retry ordinals, holder IDs and generation changes.
 Its sixteen seed cases pass.
 
-`pkg/store/blob_bootstrap_source_test.go` covers Node, Plan and Eval bootstrap
+`internal/store/blob_bootstrap_source_test.go` covers Node, Plan and Eval bootstrap
 downloads through the shared authenticator, route authorization, data policy and
 store projection. Its thirty cases and thirty fuzz seeds vary source digests,
 historical attempt ordinals, foreign run/digest/output records, generation,
@@ -67,18 +67,18 @@ Production files changed by this worker:
 - `internal/capability/data.go`
 - `internal/capability/policy.go`
 - `internal/capability/routes.go`
-- `pkg/controller/data_authority.go`
-- `pkg/controller/engine_routes.go`
-- `pkg/store/blob_persistence.go`
-- `pkg/store/blob_read_authority.go`
-- `pkg/store/blob_authority_projection.go`
-- `pkg/store/blob_authority.go`
-- `pkg/store/blob_data_access.go`
-- `pkg/store/authority_binding.go`
-- `pkg/store/authority_issue.go`
-- `pkg/store/authentication_binding.go`
-- `pkg/store/node_state.go`
-- `pkg/controller/policy_router.go`
+- `internal/controller/data_authority.go`
+- `internal/controller/engine_routes.go`
+- `internal/store/blob_persistence.go`
+- `internal/store/blob_read_authority.go`
+- `internal/store/blob_authority_projection.go`
+- `internal/store/blob_authority.go`
+- `internal/store/blob_data_access.go`
+- `internal/store/authority_binding.go`
+- `internal/store/authority_issue.go`
+- `internal/store/authentication_binding.go`
+- `internal/store/node_state.go`
+- `internal/controller/policy_router.go`
 
 No endpoint, grant, environment variable, schema, queue, service, or persistent
 secret store was added. Internal authentication adds the narrow `sourceBundle`
@@ -100,14 +100,14 @@ The arguments and results were:
 
 | Arguments | Result |
 | --- | --- |
-| `test -p 4 ./pkg/controller -run '^TestBurstAcceptance' -count=1` | Passed, 0.953s. |
-| `test -p 4 ./pkg/controller -run '^(TestBurst\|TestRequesterLocalSecret\|TestSourceSnapshot)' -count=1` | Passed, 4.359s. |
-| `test -p 4 ./pkg/controller -run '^TestBillingModelControllerNewCloudAwardCarriesLimits$' -count=1` | Passed, 0.225s. Retains the team New-tier Cloud admission proof beside user controls. |
-| `test -p 4 ./pkg/store -run '^TestBlobSourceSetupReadRemainsFencedWithoutAnAttempt$' -count=1` | Passed, 0.499s. |
-| `test -p 4 ./pkg/store -run '^(TestBlobSourceSetupReadRemainsFencedWithoutAnAttempt\|FuzzBlobSourceSetupReadRemainsFenced)$' -count=1` | Passed, 1.135s, including all sixteen fuzz seeds. |
-| `test -p 4 ./pkg/store -run '^(TestBlob\|TestSourceUpload)' -count=1` | Passed, 50.394s. |
-| `test -p 4 ./pkg/controller -run '^TestBurstAcceptanceSaturatedLocalOwnerCloudRetryWorker$' -count=1` | Passed, 0.390s, including pre-exchange materialization, NodeStart, exact replay and after-start source. |
-| `test -p 4 ./pkg/store -run '^(TestBootstrapSourceBundle\|FuzzBootstrapSourceBundle)' -count=1` | Passed, 1.791s, including all thirty fuzz seeds and postexchange source/upload checks. |
+| `test -p 4 ./internal/controller -run '^TestBurstAcceptance' -count=1` | Passed, 0.953s. |
+| `test -p 4 ./internal/controller -run '^(TestBurst\|TestRequesterLocalSecret\|TestSourceSnapshot)' -count=1` | Passed, 4.359s. |
+| `test -p 4 ./internal/controller -run '^TestBillingModelControllerNewCloudAwardCarriesLimits$' -count=1` | Passed, 0.225s. Retains the team New-tier Cloud admission proof beside user controls. |
+| `test -p 4 ./internal/store -run '^TestBlobSourceSetupReadRemainsFencedWithoutAnAttempt$' -count=1` | Passed, 0.499s. |
+| `test -p 4 ./internal/store -run '^(TestBlobSourceSetupReadRemainsFencedWithoutAnAttempt\|FuzzBlobSourceSetupReadRemainsFenced)$' -count=1` | Passed, 1.135s, including all sixteen fuzz seeds. |
+| `test -p 4 ./internal/store -run '^(TestBlob\|TestSourceUpload)' -count=1` | Passed, 50.394s. |
+| `test -p 4 ./internal/controller -run '^TestBurstAcceptanceSaturatedLocalOwnerCloudRetryWorker$' -count=1` | Passed, 0.390s, including pre-exchange materialization, NodeStart, exact replay and after-start source. |
+| `test -p 4 ./internal/store -run '^(TestBootstrapSourceBundle\|FuzzBootstrapSourceBundle)' -count=1` | Passed, 1.791s, including all thirty fuzz seeds and postexchange source/upload checks. |
 | `test -p 4 ./internal/capability -count=1` | Passed, 0.077s before the final transition-proof addition. The lead owns the final combined checks. |
 | `git diff --check` | Passed. |
 

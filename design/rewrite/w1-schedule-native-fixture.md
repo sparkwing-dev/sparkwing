@@ -47,7 +47,7 @@ contention assertions. The prior whole-repository SQLite native run passed.
 
 ## Scope, deletion and remaining work
 
-Only `pkg/store/schedule_lock_postgres_test.go` and this report changed. The test
+Only `internal/store/schedule_lock_postgres_test.go` and this report changed. The test
 diff adds 23 lines and deletes 3. Production additions and deletions are both
 zero. Under the lead's production filter, store remains 27,230 added and 27,383
 deleted against main, net -153, or 4,097 above the combined -4,250 budget. No

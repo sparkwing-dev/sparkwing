@@ -27,10 +27,10 @@ lease/deadline boundaries, cancellation, terminal state and eval ownership.
 Tests also cover roots sharing a service name, narrowed launcher delegation,
 ancestor revocation, storage errors and malformed persisted execution settings.
 
-Deleted 220 superseded source/test lines: pkg/store/launch_sync.go (154),
-Client.LauncherSync in pkg/controller/client/claim.go (13), and
+Deleted 220 superseded source/test lines: internal/store/launch_sync.go (154),
+Client.LauncherSync in internal/controller/client/claim.go (13), and
 TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills in
-pkg/store/claim_run_test.go (53). LaunchJob, LaunchJobResult, LaunchJobState,
+internal/store/claim_run_test.go (53). LaunchJob, LaunchJobResult, LaunchJobState,
 their constants, CapacityWaitDetail, ReleaseBackoff, cancelLaunchClaim and
 releaseLaunchClaim are gone. There are no remaining Go references. The remaining
 test in claim_run_test.go is unchanged.
@@ -54,7 +54,7 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
 GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The inherited W1 selection plus launcher snapshot tests passes 457 top-level
   tests / 1,448 cases with no skips. The file inventory is w1-session29-tests.txt.
@@ -111,12 +111,12 @@ covered by the inherited tests. A1-28/29/31-35 remain with W1b under the ownersh
 split. The previously reported C2 sameFence attempt-zero issue and broader host,
 wire and masking acceptance failures were not changed or reclassified here.
 
-Shared source/test files touched are pkg/controller/engine_launcher_sync.go,
-pkg/controller/engine_launcher_sync_test.go, the new
-pkg/controller/engine_launcher_store_test.go, pkg/controller/client/claim.go,
+Shared source/test files touched are internal/controller/engine_launcher_sync.go,
+internal/controller/engine_launcher_sync_test.go, the new
+internal/controller/engine_launcher_store_test.go, internal/controller/client/claim.go,
 the new internal/acceptance/store_launcher_sync.go and
 tests/acceptance/placement_test.go. The only W1b caller-fixture edit is deletion
-of the superseded billing test from pkg/store/claim_run_test.go, under the lead's
+of the superseded billing test from internal/store/claim_run_test.go, under the lead's
 caller-migration exception. Other shared edits are c1-data.md,
 t1-port-inventory.md, docs/api.md, CHANGELOG.md, their two embedded mirrors and
 the three changed .apidiff snapshots. No lead ledger changed.

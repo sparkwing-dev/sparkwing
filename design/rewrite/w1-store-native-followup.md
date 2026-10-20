@@ -64,7 +64,7 @@ to `/tmp/sw-astra-W1`.
 | --- | --- |
 | Whole-repository `go build -p 4 ./...` | Pass |
 | Scoped vet: store, controller, controller command and charts | Pass |
-| Full SQLite `pkg/store` | Pass, 279.878s |
+| Full SQLite `internal/store` | Pass, 279.878s |
 | Completion, observation, inventory and placement regression selection | Pass, 11.438s |
 | Completion, observation and profile properties under `-race` | Pass, 7.272s |
 | Store session/transition/seal/queue/claim/enrollment/launcher cells, reporting and GC selection | Pass, 5.091s |
@@ -106,7 +106,7 @@ trigger-writer removal remain implemented; no replacement of them was needed.
 
 Shared implementation edits are limited to caller removal in
 `cmd/sparkwing-controller/main.go` and the controller chart's deployment and
-values. Shared tests are `pkg/controller/login_limit_test.go` and
+values. Shared tests are `internal/controller/login_limit_test.go` and
 `charts/render_test.go`. Shared prose/generated changes are C1, the port
 inventory, CHANGELOG, the unreleased migration guide, their embedded copies
 and `.apidiff/pkg_store.txt`.

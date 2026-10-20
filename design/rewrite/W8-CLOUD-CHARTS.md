@@ -69,7 +69,7 @@ mutation ran.
 - Documentation mirror and changelog drift tests passed. sync-docs --check
   passed. Diff check and sleepcheck against HEAD passed.
 - Required commentcheck against main reports an inherited violation in
-  pkg/store/store.go:107. This session did not touch that file. Commentcheck
+  internal/store/store.go:107. This session did not touch that file. Commentcheck
   against HEAD passes across seven changed Go files.
 - The complete pkg/docs suite could not finish because its WebClient httptest
   listener is forbidden by the sandbox. Focused content/changelog drift tests

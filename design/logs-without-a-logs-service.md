@@ -51,28 +51,28 @@ flowchart LR
 
 | Piece | Where it lives today |
 |---|---|
-| Store interface | `storage.LogStore` in `pkg/storage/storage.go`; seal is an optional interface checked in `internal/orchestrator/httplogs.go` |
+| Store interface | `storage.LogStore` in `internal/storage/storage.go`; seal is an optional interface checked in `internal/orchestrator/httplogs.go` |
 | Node-side writer | `HTTPLogs` in `internal/orchestrator/httplogs.go`: 256 lines, 64 KiB or 100 ms batches, a per-line sequence number and a running SHA-256, `seal()` on `Close` |
 | Laptop writer | `localLogs` in `internal/orchestrator/backends.go`, writing `runs/<run>/<node>.log` (`internal/paths/paths.go`) |
-| Object-store writer | `pkg/storage/logbatch` over `pkg/storage/s3/logs.go`: one object per flush, 2 s or 256 KiB, capped at 2000 objects and 64 MiB per node |
+| Object-store writer | `internal/storage/logbatch` over `internal/storage/s3/logs.go`: one object per flush, 2 s or 256 KiB, capped at 2000 objects and 64 MiB per node |
 | Seal and completeness | `pkg/logs/seal.go` (states streaming, complete, incomplete, cut_off, unconfirmed, unknown); readers in `internal/backend/completeness.go` |
-| Live ring | `pkg/controller/livelogs.go` and `livelogs_http.go`: 512 KiB per node, 64 MiB total, 1024 nodes, 10 min idle release |
+| Live ring | `internal/controller/livelogs.go` and `livelogs_http.go`: 512 KiB per node, 64 MiB total, 1024 nodes, 10 min idle release |
 | Masking | `wrapNodeLogWithMasker` in `internal/orchestrator/nodelog_mask.go`; child output through `secrets.ChildValues.Writer` (`internal/secrets/child_values.go`) |
 | Logs service | `cmd/sparkwing-logs` (261 lines) and `pkg/logs` (5,988 non-test lines, 6,173 test lines) |
 | Archive | `pkg/logs/archive.go`: raw `.log` files under `teams/<team>/runs/<run>/`, 90 d retention, 30 d for a team without credits |
-| Dashboard reads | `pkg/controller/browser_reads.go` builds a `sparkwinglogs` client and forwards the viewer's credential; handlers in `internal/web/reads.go` |
+| Dashboard reads | `internal/controller/browser_reads.go` builds a `sparkwinglogs` client and forwards the viewer's credential; handlers in `internal/web/reads.go` |
 
 ### Write path by execution path
 
 | Execution path | Entry | Store chosen today | Credential |
 |---|---|---|---|
 | Laptop, no profile | CLI runs the pipeline binary; `internal/runners/local` spawns `run-node --coordinated` per node | `localLogs`, `runs/<run>/<node>.log` | none |
-| Laptop, profile with a logs surface | same | `OpenLogStoreFromSpec` in `pkg/storage/storeurl/spec.go`: filesystem, s3 with logbatch, stdout, or controller (which means sparkwing-logs) | the profile's token, which carries `logs.write` |
+| Laptop, profile with a logs surface | same | `OpenLogStoreFromSpec` in `internal/storage/storeurl/spec.go`: filesystem, s3 with logbatch, stdout, or controller (which means sparkwing-logs) | the profile's token, which carries `logs.write` |
 | k8s Job | `sparkwing-runner run-node` from `internal/runners/k8s/k8s.go`; `RunNodeOnce` in `internal/orchestrator/run_node.go` | `HTTPLogs` when `SPARKWING_LOGS_URL` is set, else `localLogs` on the pod's emptyDir | runner token in `SPARKWING_AGENT_TOKEN` |
 | Warm runner | `internal/cluster/runner_pool_cli.go`, `executePooledNode`, then a brokered child (`run_node_remote.go`) | the child posts to `remote_execution_broker.go`, which forwards `/api/v1/logs/*` to the logs URL with the runner token and claim fence headers | runner token |
-| Launcher | `internal/runners/launcher/job.go`; `runLaunchedNode` in `internal/orchestrator/claim_exec.go` execs the pipeline with the inherited environment | `HTTPLogs` with the `swc_` claim token and a live mirror, else `fs.LogStore` on the pod's disk | claim token `swc_` (`pkg/store/launch_claim.go`) |
+| Launcher | `internal/runners/launcher/job.go`; `runLaunchedNode` in `internal/orchestrator/claim_exec.go` execs the pipeline with the inherited environment | `HTTPLogs` with the `swc_` claim token and a live mirror, else `fs.LogStore` on the pod's disk | claim token `swc_` (`internal/store/launch_claim.go`) |
 | Self-hosted agent | `internal/cluster/runner_agent_cli.go`, same pool loop as the warm runner | as the warm runner; the logs URL comes from the agent config's `logs:` field | runner token minted by `sparkwing runners add` |
-| GitHub Actions runner | `sparkwing runner --github-actions`; Actions OIDC exchanged at `/api/v1/runners/github/exchange` (`pkg/controller/github_runners.go`) | as the warm runner; no logs URL default, so without `--logs` the log stays on the Actions VM | runner token with `logs.write` |
+| GitHub Actions runner | `sparkwing runner --github-actions`; Actions OIDC exchanged at `/api/v1/runners/github/exchange` (`internal/controller/github_runners.go`) | as the warm runner; no logs URL default, so without `--logs` the log stays on the Actions VM | runner token with `logs.write` |
 | CI-embedded | the pipeline binary inside a CI job, no controller | the profile's `s3` surface with logbatch, or `stdout` | the CI job's cloud credentials |
 
 Three paths lose logs silently today: a k8s Job, warm runner or launcher
@@ -101,7 +101,7 @@ flowchart LR
   VIEW[dashboard or CLI follow] -->|open stream: sets watched| CTL
 ```
 
-The log sink is one new component, `pkg/storage/logseg` in this design. It
+The log sink is one new component, `internal/storage/logseg` in this design. It
 takes appends, writes them to a spool file, cuts segments, uploads them
 through an uploader, pushes to the ring while watched, and writes the
 manifest. It runs in whatever process the engine owns on that host:
@@ -173,7 +173,7 @@ no limit is new.
   does, after `storage.SafeRelPath` validation.
 - `a<attempt>-g<gen>` matches the output key scheme
   (`outputs/<run>/<node>/a<attempt>-g<gen>-...` in
-  `pkg/store/node_output.go`), so a retried or re-claimed attempt never
+  `internal/store/node_output.go`), so a retried or re-claimed attempt never
   writes into another attempt's log.
 - Segment numbers are six-digit, zero-padded and dense from 1, so a
   listing sorts in write order and a gap is visible without a manifest.
@@ -240,14 +240,14 @@ Either lists the attempt's prefix and writes a manifest with `status:
 incomplete`, `reason: runner lost`, `sealed_by: controller` and the
 segments it found. A gap in segment numbers also yields `incomplete`.
 Writing the manifest is a conditional create (`If-None-Match: *`, which
-the controller's S3 client already uses in `pkg/controller/direct_upload.go`),
+the controller's S3 client already uses in `internal/controller/direct_upload.go`),
 so a late node seal and a controller seal cannot both win.
 
 ### Upload URLs from the presigned data plane
 
 Today's data plane issues one URL per call and checks size and SHA-256
-against a reservation before a commit copy (`pkg/controller/direct_upload.go`,
-`pkg/store/direct_upload.go`). That suits content-addressed artifacts and
+against a reservation before a commit copy (`internal/controller/direct_upload.go`,
+`internal/store/direct_upload.go`). That suits content-addressed artifacts and
 costs three round trips per object. Log segments need neither the commit
 copy nor content addressing: the key is fixed by run, node, attempt and
 number, and only the claim holder may write it.
@@ -268,7 +268,7 @@ POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest
 
 - Auth: the claim token route group, falling back to `runs.state` plus
   `claimedBy` for a runner token, the same pairing `output-upload` uses
-  (`outputCallerFor` in `pkg/store/node_output.go`). A laptop run against
+  (`outputCallerFor` in `internal/store/node_output.go`). A laptop run against
   a remote profile uses the run owner's token on a run it created. The
   controller refuses a superseded attempt or generation, so a fenced-out
   runner cannot write the new attempt's log.
@@ -300,7 +300,7 @@ POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest
   each URL at once.
 - A controller with no object store issues HMAC-signed PUT URLs to its own
   disk, the mechanism outputs already use (`PUT /api/v1/outputs/uploads/{id}`
-  in `pkg/controller/server.go`). The size and MD5 are signed fields, and
+  in `internal/controller/server.go`). The size and MD5 are signed fields, and
   the disk handler checks both against the body.
 
 The cost of asking per segment is availability: a controller outage pauses
@@ -308,7 +308,7 @@ uploads. The sink keeps cut segments in its spool, within the node's 64 MiB
 cap, and retries them with backoff at each later cut and at close. A runner
 that dies during an outage loses up to the outage's length of log, where
 batched URLs would have let it keep uploading for their lifetime. The
-bucket ceiling (`runBucketCeiling` in `pkg/controller/objectstore.go`)
+bucket ceiling (`runBucketCeiling` in `internal/controller/objectstore.go`)
 stays the operator's backstop, and the controller signs no log URLs while
 the ceiling has frozen writes.
 
@@ -352,8 +352,8 @@ Runners learn about watches from replies they already receive:
 
 | Heartbeat | Reply today | Change |
 |---|---|---|
-| Claim heartbeat, launched pod (`handleClaimHeartbeat`, `pkg/controller/claim_run.go`), every 5 s | `{"cancel": bool}` | add `"watched": bool` |
-| Claim heartbeat, pooled runner (`handleHeartbeatNodeClaim`, `pkg/controller/handlers.go`), every 3 s | 204, no body | 200 with `{"watched": bool}`; the client in `pkg/controller/client/client.go` accepts both so a runner of either version works with a controller of either version |
+| Claim heartbeat, launched pod (`handleClaimHeartbeat`, `internal/controller/claim_run.go`), every 5 s | `{"cancel": bool}` | add `"watched": bool` |
+| Claim heartbeat, pooled runner (`handleHeartbeatNodeClaim`, `internal/controller/handlers.go`), every 3 s | 204, no body | 200 with `{"watched": bool}`; the client in `internal/controller/client/client.go` accepts both so a runner of either version works with a controller of either version |
 | Run heartbeat (`POST /runs/{id}/heartbeat`), every 30 s | 204 | 200 with `{"watched_nodes": [...]}` for nodes that run in-process without a per-node claim, such as a trigger's own nodes and laptop runs against a remote profile |
 | `log-segments` reply | new | carries `watched` too |
 
@@ -485,7 +485,7 @@ prefix:
   whole configuration, including rules the operator owns for other
   prefixes.
 - Run deletion and team deletion delete by prefix from the controller
-  (`pkg/controller/deletion.go`), replacing the call to the logs service and
+  (`internal/controller/deletion.go`), replacing the call to the logs service and
   its `logs.delete` token.
 - The storage pass's `pruneLogsOverShare` deletes a team's oldest finished
   runs directly instead of calling `DELETE /api/v1/logs/<run>`.
@@ -500,7 +500,7 @@ prefix:
 | Log quota | the logs service reserves 1 MiB blocks from the controller over `/internal/storage/*` with a forwarded `logs.write` credential (`pkg/logs/log_quota.go`, `storage_counters.go`) | the controller commits each segment's exact size when it signs the segment's URL |
 | Reconciliation | the storage pass lists the logs archive bucket (`--logs-archive-store`) | the storage pass lists `logs/` in the controller's own object store per team |
 | Bucket ceiling | three ceilings: controller, logs service, cache | the controller's and the cache's |
-| Egress | the logs service meters in memory and Prometheus only and reports no totals; signed `kind=log` downloads skip metering (`data_download.go`) | the controller meters every log byte it serves under the existing `log` and `log_stream` classes (`pkg/controller/egress.go`); signed log downloads are removed |
+| Egress | the logs service meters in memory and Prometheus only and reports no totals; signed `kind=log` downloads skip metering (`data_download.go`) | the controller meters every log byte it serves under the existing `log` and `log_stream` classes (`internal/controller/egress.go`); signed log downloads are removed |
 | Charging | log classes do not count against a team's download cap | unchanged |
 
 ### Laptop runs
@@ -557,7 +557,7 @@ so in its first step.
 
 | Kind | Removed |
 |---|---|
-| Binary and package | `cmd/sparkwing-logs`; `pkg/logs` after `Completeness`, the seal types, `LogStreamHeader` and the loopback append handler move to `pkg/storage/logseg`; `pkg/storage/sparkwinglogs`; `.apidiff/pkg_logs.txt` (a breaking change to a public package) |
+| Binary and package | `cmd/sparkwing-logs`; `pkg/logs` after `Completeness`, the seal types, `LogStreamHeader` and the loopback append handler move to `internal/storage/logseg`; `internal/storage/sparkwinglogs`; `.apidiff/pkg_logs.txt` (a breaking change to a public package) |
 | Chart, runner bundle | `templates/logs-deployment.yaml`, `logs-pvc.yaml`, `logs-service.yaml`; the `logs:` block in `values.yaml`; logs entries in `_helpers.tpl`, `runner-deployment.yaml` (`--logs=`), `serviceaccount.yaml`, `validate.yaml`, `NOTES.txt`, `Chart.yaml`, `README.md` |
 | Chart, full | `controller.logsURL` in `_helpers.tpl`; `--logs-url` in `controller-deployment.yaml`; `controller.logs.url` in `values.yaml`; mentions in `validate.yaml`, `NOTES.txt`, `Chart.yaml`, `README.md`; logs cases in `charts/render_test.go` |
 | Controller flags and env | `--logs-url` / `SPARKWING_LOGS_URL`, `--logs-archive-store` / `SPARKWING_LOGS_ARCHIVE_STORE`, `SPARKWING_LOGS_DELETE_TOKEN` |
@@ -569,7 +569,7 @@ so in its first step.
 | Logs-service flags | all of `cmd/sparkwing-logs`'s flags go with it: `--addr`, `--root`, `--controller`, `--require-auth`, the byte and in-flight caps, `--retention`, `--sweep-interval`, search bounds, `--max-line-bytes`, `--binary-ratio`, store ceiling flags, `--archive-store`, `--archive-idle` |
 | Build and release | `sparkwing-logs` in `bin/build-release-target.sh`, `build-release-images.sh`, `assemble-image-digests.sh`, `publish-image-tags.sh`, `install.sh`, `k8s-e2e.sh`, `release_images_test.go`; `.github/workflows/release.yaml`; `.sparkwing/jobs/build.go`, `build_images.go`, `publish_image_tags_test.go`; `internal/releaseasset/target.go`; `internal/doccheck/serviceports.go`; `.golangci.yml`, `.gitignore` entries |
 | Laptop | the in-process logs service in `pkg/localws` and the `SPARKWING_LOGS_URL` it writes to `dev.env` |
-| Docs | `observability.md`, `limits.md`, `auth.md`, `self-hosting.md`, `security.md`, `deployment-modes.md`, `architecture.md`, `node-protocol.md`, `cli-runs.md`, `api.md`, `api-reference.md`, `backup-restore.md`, `cli-cloud.md`, `cli-cluster.md`, `environment-variables.md`, `getting-started.md`, `local-execution.md`, `backends.md`, `ci-embedded.md`, package docs in `pkg/backends`, `pkg/storage`, `pkg/localws`; a (Breaking) changelog entry and a migration section |
+| Docs | `observability.md`, `limits.md`, `auth.md`, `self-hosting.md`, `security.md`, `deployment-modes.md`, `architecture.md`, `node-protocol.md`, `cli-runs.md`, `api.md`, `api-reference.md`, `backup-restore.md`, `cli-cloud.md`, `cli-cluster.md`, `environment-variables.md`, `getting-started.md`, `local-execution.md`, `backends.md`, `ci-embedded.md`, package docs in `pkg/backends`, `internal/storage`, `pkg/localws`; a (Breaking) changelog entry and a migration section |
 
 The `controller` logs surface type stays: it now means segments through the
 controller rather than the logs service.
@@ -584,14 +584,14 @@ flowchart LR
   P4 --> P5[5. CI-embedded s3 surface on the same format]
 ```
 
-1. **Smallest first step.** Add `pkg/storage/logseg` (spool, cutter,
+1. **Smallest first step.** Add `internal/storage/logseg` (spool, cutter,
    manifest, uploader, reader, completeness), the controller's
    `log-segments` route, the controller-side seal for abandoned attempts,
    and a controller `LogStore` that reads segments. Turn it on only where a
    runner has no logs URL, which today loses the log with the pod. No
    configured deployment changes, no flag is removed, and the paths that
    lose logs today stop losing them. A conformance run of
-   `pkg/storage/conformance.TestLogStore` covers the reader.
+   `internal/storage/conformance.TestLogStore` covers the reader.
 2. **Watched.** Add the watch registry, `watched` in the claim and run
    heartbeat replies, and sink pushes to the ring. Remove the always-on live
    mirror (`liveLogsRedundant` in `internal/orchestrator/livelogs.go`).
@@ -725,7 +725,7 @@ before it.
 - `sparkwing runs` actions build their logs client on the profile's
   controller URL (`cmd/sparkwing/runs_actions.go`), and a `controller` logs
   surface with no announced logs URL falls back to the controller URL
-  (`pkg/storage/storeurl/spec.go`, `internal/orchestrator/profile_backend.go`).
+  (`internal/storage/storeurl/spec.go`, `internal/orchestrator/profile_backend.go`).
   The controller serves no `/api/v1/logs`, so both fail outside
   `sparkwing serve`.
 - The warm runner's `--logs` help says an empty value means pod stdout;

@@ -8,9 +8,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestPlanUnitAcceptsWithoutSchedulingOrFinishingRun(t *testing.T) {
@@ -40,7 +41,7 @@ func (s *evalUnitStore) AcceptExpansion(_ context.Context, submission store.Expa
 
 func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
-	row := store.NodeRow{Ref: store.NodeRef{RunID: input.RunID, NodeID: "source"}, Generation: 0, SpecHash: "source-hash", Status: store.StatusDone, Outcome: store.NodeMemoized, Expansion: store.ExpansionExpected}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "source"}, Generation: 0, SpecHash: "source-hash", Status: store.StatusDone, Outcome: store.NodeMemoized, Expansion: store.ExpansionExpected}
 	state.snapshot.Nodes = []store.NodeRow{row}
 	s := &evalUnitStore{ownerFixture: state}
 	host.Store = s

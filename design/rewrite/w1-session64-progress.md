@@ -85,7 +85,7 @@ completion facts remain open. Raw account, trigger and token API retirement and
 W1b's billing/blob/log cuts still prevent completion. No foreign contract
 signature changed. The new account methods match C2's existing declaration.
 
-The only shared caller file outside pkg/store is
+The only shared caller file outside internal/store is
 tests/acceptance/account_mutations_http_test.go. C1, the port inventory,
 changelog, migration guide, embedded copies and API snapshot are updated.
 The exact list is [w1-session64-files.txt](w1-session64-files.txt).

@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity *StoreAdmission) {

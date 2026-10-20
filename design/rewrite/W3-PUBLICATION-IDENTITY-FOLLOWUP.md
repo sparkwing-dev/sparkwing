@@ -60,12 +60,12 @@ exclude tests, testdata, acceptance, contract scaffolding and sourcetest helpers
 Shared production files are cmd/sparkwing/{burst_native,burst_source,local_run,
 trigger_native,trigger_prepare}.go, internal/procenv/build.go,
 internal/doccheck/sourcehints.go, internal/bincache/source_bundle.go and
-pkg/controller/client/source_upload.go. Source edits belong to W3.
+internal/controller/client/source_upload.go. Source edits belong to W3.
 Shared test changes are cmd/sparkwing/{burst_local_secret_unix,burst_source,
 local_profile,snapshot_acquisition,trigger_worktree}_test.go,
 internal/doccheck/sourcehints_test.go, internal/bincache/binary_records_test.go,
-the removed internal/bincache/source_bundle_test.go, pkg/controller/{source_upload,
-burst_acceptance}_test.go, pkg/controller/client/source_publication_test.go and
+the removed internal/bincache/source_bundle_test.go, internal/controller/{source_upload,
+burst_acceptance}_test.go, internal/controller/client/source_publication_test.go and
 tests/acceptance/storage_prefix_test.go. They migrate the removed APIs and check
 the current public boundaries. Shared prose changes are docs/{deployment,
 local-execution}.md and the existing source-selection continuation. The previous

@@ -15,9 +15,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type jobViewTransactions struct {
@@ -41,7 +41,7 @@ func jobViewFixture(b *credentialBoundary) *jobViewTransactions {
 	f := &jobViewTransactions{snapshotTransactions: *snapshotFixture(b)}
 	f.snapshot.Run.Number = 1
 	f.node = store.NodeRow{
-		Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusRunning,
+		Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusRunning,
 		Generation: 4, Attempt: 2, StateSeq: 9, Expansion: store.ExpansionExpected,
 		Spec: json.RawMessage(`{"id":"job","env":{"TOKEN":"private-secret"}}`), SpecHash: "private-spec-hash",
 		CapabilityPrefix: "private-prefix", ClaimedBy: "private-holder", StartedAt: &b.snapshot.Now,

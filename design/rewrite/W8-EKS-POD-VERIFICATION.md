@@ -92,9 +92,9 @@ check, so this report cannot claim native completion.
 ## Shared files and generated drift
 
 Shared implementation edits: internal/controllerwire/engine.go and launcher.go,
-pkg/controller/engine_launcher_sync.go, pkg/store/node_state.go, run_state.go,
+internal/controller/engine_launcher_sync.go, internal/store/node_state.go, run_state.go,
 run_spec.go, state_authority.go and new launcher_rejection.go. The deleted policy
-API's other callers were migrated in pkg/controller/burst_cloud_job_test.go and
+API's other callers were migrated in internal/controller/burst_cloud_job_test.go and
 tests/acceptance/launcher_kube_w8_test.go. The acceptance boundary fake now supplies
 real Job-owned Pod metadata. New controller/store/acceptance tests exercise failure.
 

@@ -87,7 +87,7 @@ W7 finding: the shared physical signer must reject a PUT beyond
 limits.DataUploadURLTTL. A temporary TestW2ProbeSharedUploadLifetime called both
 blob.NewS3 and blob.NewFilesystem with a valid pending key, one-byte size, valid
 SHA-256 and expiry now + 16 minutes. Both accepted it. The exact command was
-`go test -p 4 ./pkg/controller -run '^TestW2ProbeSharedUploadLifetime$' -count=1 -timeout=180s`
+`go test -p 4 ./internal/controller -run '^TestW2ProbeSharedUploadLifetime$' -count=1 -timeout=180s`
 with the common environment below. Both subtests failed with:
 `shared signer accepted a 16-minute PUT; the contract maximum is 15 minutes`.
 The probe was removed. W7's objects.go validateObject checks the GET maximum but

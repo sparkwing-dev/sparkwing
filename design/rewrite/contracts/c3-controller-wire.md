@@ -324,7 +324,7 @@ ordinal. The initial zero attempt is not a synthetic attempt for owner-unit logs
 `internal/controllerwire` owns the HTTP request and response types shared by
 fetched engines, the controller, api.sock, local status and remote status.
 `capability.Routes` owns authentication, bindings, liveness and retry policy.
-`pkg/controller.EngineController` adapts these types to C1 transactions.
+`internal/controller.EngineController` adapts these types to C1 transactions.
 `client.NewEngineClient` supplies the same interface to every fetched engine.
 The client executes this contract over HTTP. The server adapter retains stub bodies.
 

@@ -305,7 +305,7 @@ needs a shared declaration. This continuation leaves those contracts unchanged.
 W3 host construction/delegated routes/replay and W1/W2 local-service composition,
 workspace-off binary-cache hashing and native/Cloud proofs remain open.
 
-Inspection also confirms that pkg/controller/engine_claim.go clears Execution
+Inspection also confirms that internal/controller/engine_claim.go clears Execution
 for plan/eval claims and exchanges. W1/W2 must supply the resolved Cloud resources
 already required by ControllerControl.Claim and BootstrapHost. The existing wire
 shape supports this. No other-area runtime or contract was edited to work around it.

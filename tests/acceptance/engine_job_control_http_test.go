@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestEngineJobCancelHTTP(t *testing.T) {
@@ -70,7 +70,7 @@ func TestEngineJobCancelHTTP(t *testing.T) {
 				if identity == "member" {
 					kind = store.ActorOperator
 				}
-				if change.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) || change.To != store.NodeCancelled || change.Cause != store.CauseCancel || change.Actor.Kind != kind || change.Actor.Authority != p.Authority || !reflect.DeepEqual(change.Extra.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
+				if change.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || change.To != store.NodeCancelled || change.Cause != store.CauseCancel || change.Actor.Kind != kind || change.Actor.Authority != p.Authority || !reflect.DeepEqual(change.Extra.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
 					t.Fatalf("change=%+v", change)
 				}
 				if identity == "owner" && (change.Actor.Holder != p.Capability.Binding.Holder || change.Actor.Generation != p.Capability.Binding.Generation || change.Actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation})) {
@@ -135,7 +135,7 @@ func TestEngineFailureHTTP(t *testing.T) {
 			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got, f.failure) {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}
-			if f.failureRef != (store.NodeRef{RunID: "run", NodeID: "source"}) || f.failureGeneration != 7 || f.failureActor.Authority != b.snapshot.Authorities[0].Principal.Authority || f.failureActor.Generation != 4 || f.failureActor.Holder != "runner" {
+			if f.failureRef != (controllerwire.NodeRef{RunID: "run", NodeID: "source"}) || f.failureGeneration != 7 || f.failureActor.Authority != b.snapshot.Authorities[0].Principal.Authority || f.failureActor.Generation != 4 || f.failureActor.Holder != "runner" {
 				t.Fatalf("read=%+v gen=%d actor=%+v", f.failureRef, f.failureGeneration, f.failureActor)
 			}
 			if b.bindingRule != capability.BindReadSet || b.bindingTarget.SourceGeneration != 7 || b.bindingTarget.NodeID != "source" {

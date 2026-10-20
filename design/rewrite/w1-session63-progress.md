@@ -27,7 +27,7 @@ Profile aggregation still checked the retired `cached` outcome. Both retained
 SQLite profile suites now seed `memoized`, and the folding reader excludes that
 outcome. They pass with all their existing measurement and partial-evidence
 assertions. This is the sole shared production change, in
-`pkg/controller/profiles.go`.
+`internal/controller/profiles.go`.
 
 The session removes **72 production Go lines** and adds 53 for **-19 net**
 against starting HEAD under the lead's filter. The additions include 51 lines

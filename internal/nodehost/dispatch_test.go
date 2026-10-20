@@ -9,16 +9,17 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
 	t.Helper()
 	f.Host.Local = func(store.NodeRow) bool { return false }
-	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: node}
+	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: node}
 	row, err := f.Tenant.ReadNode(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +42,7 @@ func claimRemote(t *testing.T, f *storeHostFixture, node string) (store.UnitClai
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Input.RunID, NodeID: node})
+	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: node})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 		if err := f.report(t.Context(), input, store.NodeSuccess); err != nil {
 			t.Fatal(err)
 		}
-		before, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Input.RunID, NodeID: id})
+		before, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: id})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,7 +90,7 @@ func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	releaseRemote(t, f, "flaky")
 	_, input := claimRemote(t, f, "flaky")
-	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "flaky"}
+	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "flaky"}
 	held, err := f.Tenant.ReadNode(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +117,7 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	f := newStoreHostFixture(t, remotePlan())
 	releaseRemote(t, f, "build")
 	_, input := claimRemote(t, f, "build")
-	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "build"}
+	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "build"}
 	if _, err := f.Tenant.TransitionRun(t.Context(), store.RunTransition{RunID: ref.RunID, Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel}); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	if err != nil || completion.Outcome != "cancelled" {
 		t.Fatalf("completion = %+v, error %v", completion, err)
 	}
-	dependent, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: ref.RunID, NodeID: "test"})
+	dependent, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: ref.RunID, NodeID: "test"})
 	if err != nil || dependent.Outcome != store.NodeCancelled || dependent.Attempt != 0 {
 		t.Fatalf("dependent = %+v, error %v", dependent, err)
 	}
@@ -306,8 +307,8 @@ func FuzzRemoteAdmissionPreservesJobIdentity(f *testing.F) {
 	f.Add("run", "job", "spec", int64(3), int64(3), true)
 	f.Add("run", "job", "spec", int64(3), int64(4), false)
 	f.Fuzz(func(t *testing.T, run, job, hash string, generation, sequence int64, terminal bool) {
-		before := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, SpecHash: "spec", Generation: 3, StateSeq: 4}
-		row := store.NodeRow{Ref: store.NodeRef{RunID: run, NodeID: job}, SpecHash: hash, Generation: generation, StateSeq: sequence, Status: store.StatusPending}
+		before := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, SpecHash: "spec", Generation: 3, StateSeq: 4}
+		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: run, NodeID: job}, SpecHash: hash, Generation: generation, StateSeq: sequence, Status: store.StatusPending}
 		if terminal {
 			row.Status, row.Outcome = store.StatusDone, store.NodeSuccess
 		}

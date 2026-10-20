@@ -6,14 +6,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // PrivateHostState supplies award-bound execution state.
 type PrivateHostState interface {
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
-	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
 }
@@ -77,10 +77,10 @@ func (s *RemoteHostStore) AcceptPlan(ctx context.Context, request store.PlanAcce
 func (s *RemoteHostStore) RecordStep(ctx context.Context, report store.StepReport) error {
 	controller := s.controller
 	if nodes, ok := s.PrivateHostState.(interface {
-		NodeController(context.Context, store.NodeRef) (controllerwire.Controller, error)
+		NodeController(context.Context, controllerwire.NodeRef) (controllerwire.Controller, error)
 	}); ok {
 		var err error
-		controller, err = nodes.NodeController(ctx, store.NodeRef{RunID: report.Attempt.RunID, NodeID: report.Attempt.NodeID})
+		controller, err = nodes.NodeController(ctx, controllerwire.NodeRef{RunID: report.Attempt.RunID, NodeID: report.Attempt.NodeID})
 		if err != nil {
 			return err
 		}
@@ -121,9 +121,9 @@ func (s *RemoteHostStore) RenewOwner(ctx context.Context, _ store.Actor, executi
 	return s.renew(ctx, executing)
 }
 
-func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
 	if nodes, ok := s.PrivateHostState.(interface {
-		RenewNode(context.Context, store.NodeRef, store.Actor, bool) (store.LeaseBeat, error)
+		RenewNode(context.Context, controllerwire.NodeRef, store.Actor, bool) (store.LeaseBeat, error)
 	}); ok {
 		return nodes.RenewNode(ctx, ref, actor, s.executing())
 	}

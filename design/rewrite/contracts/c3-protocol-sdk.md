@@ -299,7 +299,7 @@ The capability and layer tables contain the complete target data.
 | Hello, operations, frames, describe, flat plan and shared validation | `internal/nodeproto/*_contract.go` |
 | Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
 | Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host.go` |
-| Pure graph decisions, selection dependency closure and consistent snapshot projection | `pkg/store/scheduling_contract.go` |
+| Pure graph decisions, selection dependency closure and consistent snapshot projection | `internal/store/scheduling_contract.go` |
 | Every unit's renewal loop | `internal/lease/keeper.go` |
 | Checkout and entry acquisition | `internal/source/source.go` |
 | Plan cache identity, eligibility and validated hits | `internal/nodehost/plan_cache.go` |

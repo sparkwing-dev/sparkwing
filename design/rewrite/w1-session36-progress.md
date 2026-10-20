@@ -44,7 +44,7 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 
 - Final whole-repository go build -p 4 ./... passes.
-- Vet passes for pkg/store/..., pkg/controller/..., cmd/sparkwing-controller
+- Vet passes for internal/store/..., internal/controller/..., cmd/sparkwing-controller
   and tests/acceptance/....
 - The store batch passes 106 top-level tests and 346 test/subtest results.
   The PostgreSQL subtest of TestOpenRefusesANonEmptyForeignDatabase skips
@@ -102,11 +102,11 @@ Remaining work and integration points:
 - PostgreSQL, native placements, real api.sock transport, Kubernetes, provider
   billing and repository QA remain unverified.
 
-Shared production caller files are pkg/controller/claim_run.go,
-pkg/controller/client/claim.go, pkg/controller/server.go,
+Shared production caller files are internal/controller/claim_run.go,
+internal/controller/client/claim.go, internal/controller/server.go,
 cmd/sparkwing-controller/keyless.go and cmd/sparkwing-controller/main.go.
-Shared tests are pkg/controller/claim_run_test.go,
-pkg/controller/secrets_encryption_test.go,
+Shared tests are internal/controller/claim_run_test.go,
+internal/controller/secrets_encryption_test.go,
 cmd/sparkwing-controller/secrets_key_test.go and the credential_inventory,
 credential_maintenance and credential_mutations HTTP files under tests/acceptance.
 Other shared edits are C1, the port inventory, two .apidiff snapshots,

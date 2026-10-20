@@ -72,7 +72,7 @@ Those are not attributed to W2's new source work.
 | 07:40 item 5 | Server.HTTP supplies wingd.LocalHTTP with shared API/dashboard handlers and verified connection identity. LocalControllerHTTP, PolicyPeer and default-console tests pass. | W1 peer authority and console committing transactions. W8 owns serving/drain. |
 | 07:40 item 7 | The legacy runner-permission, token-metering and credits.grant routes stay deleted. Final route expectations, discovery, payment and retired-route checks pass. | Native composition and lead ratification. |
 | 07:40 item 10 | SyncLauncher forwards authenticated authority and immutable observations, then strips returned bearers. EngineLauncherSync and fuzz seeds pass. | W1 Operator.ReadLauncherSync and native W8 award/Job correlation evidence. |
-| 09:40 item 1 | The independent table is in pkg/controller/credential_route_expectations_test.go beside the route tests. internal/acceptance/credential_routes.go is absent. Declaration, ordering and drift tests pass. | None in W2. |
+| 09:40 item 1 | The independent table is in internal/controller/credential_route_expectations_test.go beside the route tests. internal/acceptance/credential_routes.go is absent. Declaration, ordering and drift tests pass. | None in W2. |
 
 The C2 parts of A1-01/03/05/08/09/11/14/15/16/19/20/21/22/23,
 A1-24 through A1-35, A1-38/39/40/49/55 remain implemented against their
@@ -180,31 +180,31 @@ obsolete error-envelope assertion and the missing cross-area contracts above.
 - internal/orchestrator/secret_args_execution_test.go - delete retired surface or fixture
 - internal/orchestrator/trigger_host_here_test.go - delete retired surface or fixture
 - internal/orchestrator/trigger_host_test.go - delete retired surface or fixture
-- pkg/controller/agents_test.go - delete retired surface or fixture
-- pkg/controller/claim_test.go - delete retired surface or fixture
-- pkg/controller/client/client.go - delete retired surface or fixture
-- pkg/controller/client/concurrency.go - delete retired surface or fixture
-- pkg/controller/client/concurrency_test.go - delete retired surface or fixture
-- pkg/controller/client/coordination.go - delete retired surface or fixture
-- pkg/controller/client/coordination_test.go - delete retired surface or fixture
-- pkg/controller/client/logs.go - delete retired surface or fixture
-- pkg/controller/client/oidc.go - delete retired surface or fixture
-- pkg/controller/credits_team_test.go - delete retired surface or fixture
-- pkg/controller/declared_repo_grants_nothing_test.go - delete retired surface or fixture
-- pkg/controller/doc.go - use integration shape with W2 behavior preserved
-- pkg/controller/livelogs_test.go - delete retired surface or fixture
-- pkg/controller/log_segments_internal_test.go - keep W2 signer deletion and remove stale imports
-- pkg/controller/node_claim_ownership_test.go - delete retired surface or fixture
-- pkg/controller/node_claim_test.go - delete retired surface or fixture
-- pkg/controller/node_claim_token_log_segments_internal_test.go - delete retired surface or fixture
-- pkg/controller/node_placement_test.go - delete retired surface or fixture
-- pkg/controller/run_limits_test.go - delete retired surface or fixture
-- pkg/controller/runner_claim_cross_run_test.go - delete retired surface or fixture
-- pkg/controller/runner_claim_test.go - delete retired surface or fixture
-- pkg/controller/runner_scopes_test.go - delete retired surface or fixture
-- pkg/controller/secrets_team_test.go - delete retired surface or fixture
-- pkg/controller/storage_test.go - delete retired surface or fixture
-- pkg/controller/trigger_parent_claim_test.go - delete retired surface or fixture
+- internal/controller/agents_test.go - delete retired surface or fixture
+- internal/controller/claim_test.go - delete retired surface or fixture
+- internal/controller/client/client.go - delete retired surface or fixture
+- internal/controller/client/concurrency.go - delete retired surface or fixture
+- internal/controller/client/concurrency_test.go - delete retired surface or fixture
+- internal/controller/client/coordination.go - delete retired surface or fixture
+- internal/controller/client/coordination_test.go - delete retired surface or fixture
+- internal/controller/client/logs.go - delete retired surface or fixture
+- internal/controller/client/oidc.go - delete retired surface or fixture
+- internal/controller/credits_team_test.go - delete retired surface or fixture
+- internal/controller/declared_repo_grants_nothing_test.go - delete retired surface or fixture
+- internal/controller/doc.go - use integration shape with W2 behavior preserved
+- internal/controller/livelogs_test.go - delete retired surface or fixture
+- internal/controller/log_segments_internal_test.go - keep W2 signer deletion and remove stale imports
+- internal/controller/node_claim_ownership_test.go - delete retired surface or fixture
+- internal/controller/node_claim_test.go - delete retired surface or fixture
+- internal/controller/node_claim_token_log_segments_internal_test.go - delete retired surface or fixture
+- internal/controller/node_placement_test.go - delete retired surface or fixture
+- internal/controller/run_limits_test.go - delete retired surface or fixture
+- internal/controller/runner_claim_cross_run_test.go - delete retired surface or fixture
+- internal/controller/runner_claim_test.go - delete retired surface or fixture
+- internal/controller/runner_scopes_test.go - delete retired surface or fixture
+- internal/controller/secrets_team_test.go - delete retired surface or fixture
+- internal/controller/storage_test.go - delete retired surface or fixture
+- internal/controller/trigger_parent_claim_test.go - delete retired surface or fixture
 - pkg/docs/mirror/migrations/_unreleased.md - keep both migration sections
 - pkg/localws/crons.go - delete retired surface or fixture
 - pkg/localws/crons_test.go - delete retired surface or fixture

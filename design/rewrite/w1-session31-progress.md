@@ -20,7 +20,7 @@ They have no remaining Go callers. Current capability issuance, sealed intake,
 binding transactions and source release retain their responsibilities.
 The two retired SQL exceptions are removed from the scope guard.
 
-This removes 512 production Go lines: 474 in pkg/store and 38 in the client.
+This removes 512 production Go lines: 474 in internal/store and 38 in the client.
 No production code is added. The combined W1+W1b production delta against main
 is +4,393 lines under the lead's exclusions for tests, testdata, acceptance and
 contract files. The target is -4,250, leaving 8,643 lines to remove. The budget
@@ -52,12 +52,12 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- Scoped vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The W1 selection passes 468 top-level tests and 1,461 cases with no skips.
   Reproduce from w1-session31-tests.txt by extracting top-level Test names from
-  those pkg/store files, omitting names containing Postgres or Pg, then passing
-  their anchored alternation to `go test -p 4 ./pkg/store -run ... -count=1`.
+  those internal/store files, omitting names containing Postgres or Pg, then passing
+  their anchored alternation to `go test -p 4 ./internal/store -run ... -count=1`.
 - All 20 W1 store-sqlite acceptance cells pass with no skips. The selection is
   `^(TestLifecycle|TestRecovery|TestPlacement|TestCredentials|TestBilling|TestSurface)/[^/]+/store-sqlite$`.
 - Thirteen current controller/client tests pass, including 19 cases. Select
@@ -108,10 +108,10 @@ Remaining W1 work and real integration points:
   Launcher award snapshots and synchronization retain their inherited passing
   SQLite evidence. No additional native cell is unskipped or claimed complete.
 
-Shared caller files changed are pkg/controller/claim_dispatch_internal_test.go,
-pkg/controller/claim_run_test.go, pkg/controller/claim_source_test.go,
-pkg/controller/export_test.go, the new pkg/controller/launcher_fixture_test.go
-and pkg/controller/client/launcher.go. Deleting pkg/store/claim_run_test.go uses
+Shared caller files changed are internal/controller/claim_dispatch_internal_test.go,
+internal/controller/claim_run_test.go, internal/controller/claim_source_test.go,
+internal/controller/export_test.go, the new internal/controller/launcher_fixture_test.go
+and internal/controller/client/launcher.go. Deleting internal/store/claim_run_test.go uses
 the lead's explicit exception for callers in W1b test fixtures. Its sole
 remaining old ClaimLaunch billing test is ported to the W1 tests above. No W1b
 persistence, accounting or log implementation changed.

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 )
 
 func TestCapabilityManagementHTTPUsesStoreTransactions(t *testing.T) {

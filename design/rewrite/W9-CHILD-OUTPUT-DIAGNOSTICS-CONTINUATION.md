@@ -57,7 +57,7 @@ net -6,890**, within the -2,900 budget.
 Shared files touched: `internal/settings/resolvers.go` and its intake policy
 tests; `internal/wingd/localcontroller/native.go` and its two-job integration
 test; `internal/apierr/codes.go`; `internal/blob/filesystem.go`;
-`pkg/controller/{handlers,policy_router,server,browser_flow,browser_github_app}.go`
+`internal/controller/{handlers,policy_router,server,browser_flow,browser_github_app}.go`
 and its private-host/error-log tests. No lead-owned handoff or amendment changed.
 Contract changes needed: none. Open design questions: none. Existing adapters
 were connected and the cause recorder moved; no new setting or runtime service

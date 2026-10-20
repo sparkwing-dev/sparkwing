@@ -68,14 +68,14 @@ Intermediate scope-inventory failure, fixed without weakening the guard:
     tenant_sql_scope_guard_test.go:190: reviewedUnscopedSQL exempts "(*Store).UnlinkIdentity", which no longer has an unscoped statement; delete the entry
     tenant_sql_scope_guard_test.go:190: reviewedUnscopedSQL exempts "(*Store).AcceptInvitation", which no longer has an unscoped statement; delete the entry
 FAIL
-FAIL	github.com/sparkwing-dev/sparkwing/pkg/store	0.245s
+FAIL	github.com/sparkwing-dev/sparkwing/internal/store	0.245s
 FAIL
 
 Timestamp regression before the fix:
 --- FAIL: TestAccountMutationsKeepNanosecondTimestamps (0.05s)
     account_mutations_test.go:268: created=2027-01-15 08:00:00 +0000 UTC, want 2027-01-15 08:00:00.000000123 +0000 UTC: <nil>
 FAIL
-FAIL	github.com/sparkwing-dev/sparkwing/pkg/store	0.060s
+FAIL	github.com/sparkwing-dev/sparkwing/internal/store	0.060s
 FAIL
 
 Broader controller selection (inherited raw-token fixtures):
@@ -98,9 +98,9 @@ Broader controller selection (inherited raw-token fixtures):
 
 Focused final checks:
 account-time-green:
-ok  	github.com/sparkwing-dev/sparkwing/pkg/store	5.193s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	5.193s
 account-race-final:
-ok  	github.com/sparkwing-dev/sparkwing/pkg/store	25.519s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	25.519s
 account-http-final:
 ok  	github.com/sparkwing-dev/sparkwing/tests/acceptance	0.668s
 comments-final:

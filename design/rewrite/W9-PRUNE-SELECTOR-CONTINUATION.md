@@ -104,10 +104,10 @@ uses the socket-free native tests and passes. The acceptance fixture was migrate
 after its old two-result DeleteRun call failed compilation.
 
 Shared files touched: internal/apispec/wire.go,
-pkg/controller/prune_client_native_test.go,
+internal/controller/prune_client_native_test.go,
 tests/acceptance/surface_contract_test.go, api/openapi.yaml and generated pkg/docs
 copies. API callers migrated: cmd/sparkwing/runs_prune.go, its fake,
-pkg/controller/client/prune_test.go and the acceptance transport fixture.
+internal/controller/client/prune_test.go and the acceptance transport fixture.
 No caller in another production package needed migration.
 
 Mechanisms added: none. No Git write, operational Sparkwing command, pipeline,

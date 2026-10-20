@@ -15,12 +15,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 var reportRequests = []struct{ suffix, body string }{
@@ -106,7 +106,7 @@ func TestEngineStepReadsOwnerAndPublisherAttempts(t *testing.T) {
 				if authority == "publisher" {
 					b = publisherBoundary()
 				}
-				f := &engineTransactions{node: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}}}
+				f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}}}
 				status, code := 500, apierr.Internal
 				switch name {
 				case "missing":
@@ -163,7 +163,7 @@ func TestEngineReportingAuthorities(t *testing.T) {
 		for _, authority := range []string{"job", "owner", "publisher", "cancelling"} {
 			t.Run(operation.suffix+"/"+authority, func(t *testing.T) {
 				b := newCredentialBoundary()
-				f := &engineTransactions{node: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Attempt: 11, Generation: 7}}
+				f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Attempt: 11, Generation: 7}}
 				kind, generation, attemptGeneration, attempt := store.ActorHolder, int64(4), int64(4), int64(2)
 				switch authority {
 				case "owner":
@@ -294,7 +294,7 @@ func TestEngineAnnotationHTTP(t *testing.T) {
 		t.Fatalf("HTTP %d %s, writes %d", w.Code, w.Body.String(), f.writes)
 	}
 	a := f.annotation
-	if a.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) || a.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority ||
+	if a.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || a.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority ||
 		a.Actor.Kind != store.ActorHolder || a.Actor.Holder != "runner" || a.Actor.Generation != 4 || a.Actor.CapabilityPrefix != "claim" ||
 		a.StepID != "" || a.Message != "masked annotation" || a.Level != "warning" || a.File != "build.go" || a.Line == nil || *a.Line != 12 {
 		t.Fatalf("annotation = %+v", a)
@@ -310,7 +310,7 @@ func TestEngineSummaryHTTP(t *testing.T) {
 				path, body, step = "/api/v1/runs/run/jobs/job/steps/summary", `{"step_id":"compile","markdown":"## masked summary"}`, "compile"
 			}
 			w := engineHTTP(t, b, f, path, body)
-			if w.Code != http.StatusNoContent || f.writes != 1 || f.summary.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) ||
+			if w.Code != http.StatusNoContent || f.writes != 1 || f.summary.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) ||
 				f.summary.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority || f.summary.Actor.Generation != 4 ||
 				f.summary.StepID != step || f.summary.Markdown != "## masked summary" {
 				t.Fatalf("HTTP %d %s, summary %+v", w.Code, w.Body.String(), f.summary)
@@ -469,7 +469,7 @@ func TestEngineTypedStepAttemptProperty(t *testing.T) {
 				b.snapshot.Authorities[0].Principal.Capability.Binding.Attempt = current
 				b.snapshot.Binding.Current.Attempt = current
 			}
-			f := &engineTransactions{node: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Generation: 7, Attempt: current}}
+			f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Generation: 7, Attempt: current}}
 			start := time.Date(2026, 10, 14, 12, 0, 0, int(seed%1000000000), time.UTC)
 			finish := start.Add(time.Nanosecond)
 			input := controllerwire.StepReportRequest{StepID: "compile", State: "passed", SourceAttempt: observed, StartedAt: &start, FinishedAt: &finish, MaskedError: "masked"}

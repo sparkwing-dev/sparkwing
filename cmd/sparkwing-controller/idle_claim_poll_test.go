@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 )
 
 func TestCheckIdleClaimPoll(t *testing.T) {

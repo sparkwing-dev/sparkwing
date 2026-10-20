@@ -13,7 +13,7 @@ func TestRaceTargetsGroupChangedFilesByPackageAndModule(t *testing.T) {
 	files := []string{
 		"internal/orchestrator/orchestrator.go",
 		"internal/orchestrator/orchestrator_test.go",
-		"pkg/store/store.go",
+		"internal/store/store.go",
 		"main.go",
 		".sparkwing/jobs/pre_commit.go",
 		".sparkwing/main.go",
@@ -21,7 +21,7 @@ func TestRaceTargetsGroupChangedFilesByPackageAndModule(t *testing.T) {
 		"testdata/k8s-e2e/repo/.sparkwing/main.go",
 	}
 	want := map[string][]string{
-		".":          {"./", "./internal/orchestrator", "./pkg/store"},
+		".":          {"./", "./internal/orchestrator", "./internal/store"},
 		".sparkwing": {"./", "./jobs"},
 	}
 	if got := touchedPackageTargets(files, modules); !reflect.DeepEqual(got, want) {
@@ -36,7 +36,7 @@ func TestRaceTargetsAreEmptyWhenNothingChanged(t *testing.T) {
 }
 
 func TestRaceCommandBoundsPackageOverlapOnFourCPUs(t *testing.T) {
-	const args = "-race -count=1 ./internal/orchestrator ./pkg/store"
+	const args = "-race -count=1 ./internal/orchestrator ./internal/store"
 	for _, tc := range []struct {
 		cpus int
 		want string
@@ -53,7 +53,7 @@ func TestRaceCommandBoundsPackageOverlapOnFourCPUs(t *testing.T) {
 
 func TestGateRaceTargetsDeferTheStore(t *testing.T) {
 	targets := map[string][]string{
-		".":          {"./internal/orchestrator", "./pkg/store"},
+		".":          {"./internal/orchestrator", "./internal/store"},
 		".sparkwing": {"./jobs"},
 	}
 	kept, deferred := raceTargetsForGate(targets)
@@ -64,20 +64,20 @@ func TestGateRaceTargetsDeferTheStore(t *testing.T) {
 	if !reflect.DeepEqual(kept, want) {
 		t.Errorf("raceTargetsForGate kept %v, want %v", kept, want)
 	}
-	if !reflect.DeepEqual(deferred, []string{"./pkg/store"}) {
-		t.Errorf("deferred %v, want [./pkg/store]", deferred)
+	if !reflect.DeepEqual(deferred, []string{"./internal/store"}) {
+		t.Errorf("deferred %v, want [./internal/store]", deferred)
 	}
 }
 
 // A module holding nothing but the store drops out rather than running an
 // empty race command that would report success over no packages.
 func TestGateRaceTargetsDropAModuleLeftEmpty(t *testing.T) {
-	kept, deferred := raceTargetsForGate(map[string][]string{".": {"./pkg/store"}})
+	kept, deferred := raceTargetsForGate(map[string][]string{".": {"./internal/store"}})
 	if len(kept) != 0 {
 		t.Errorf("raceTargetsForGate kept %v, want nothing", kept)
 	}
-	if !reflect.DeepEqual(deferred, []string{"./pkg/store"}) {
-		t.Errorf("deferred %v, want [./pkg/store]", deferred)
+	if !reflect.DeepEqual(deferred, []string{"./internal/store"}) {
+		t.Errorf("deferred %v, want [./internal/store]", deferred)
 	}
 }
 
@@ -91,7 +91,7 @@ func TestPreReleaseRacesTheStore(t *testing.T) {
 		}
 	}
 	if found == "" {
-		t.Fatal("pre-release has no race-store check; the gate defers pkg/store to it")
+		t.Fatal("pre-release has no race-store check; the gate defers internal/store to it")
 	}
 }
 

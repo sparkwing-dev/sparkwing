@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // safety: ten fires cover the repeating step of every cadence a minute field

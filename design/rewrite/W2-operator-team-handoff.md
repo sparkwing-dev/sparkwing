@@ -102,15 +102,15 @@ integration point or question.
 
 Outside W2, changed production files are:
 
-- `pkg/store/operator_team.go`, `authority_provision.go`,
+- `internal/store/operator_team.go`, `authority_provision.go`,
   `capability_rotation.go`, `dialect.go` and `identity.go`.
 - `cmd/sparkwing/operator_team.go`, `main.go` and `help_registry.go`.
 - `internal/clisurface/registry.go`, `internal/controllerwire/operator.go` and
-  `pkg/controller/client/operator.go`.
+  `internal/controller/client/operator.go`.
 
-Shared tests are `pkg/store/operator_team_test.go`,
+Shared tests are `internal/store/operator_team_test.go`,
 `cmd/sparkwing/operator_team_test.go`, `cmd/sparkwing/docs_auth_test.go` and
-`pkg/controller/client/operator_test.go`. C1/C3 contract notes and the auth/CLI
+`internal/controller/client/operator_test.go`. C1/C3 contract notes and the auth/CLI
 documentation mirrors changed. Lead-owned handoffs and amendments were untouched.
 
 No legacy implementation was replaced by this additive operation. Removed or

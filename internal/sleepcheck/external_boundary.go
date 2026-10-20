@@ -27,12 +27,12 @@ type sourcePosition struct {
 
 var approvedExternalBoundaries = []externalBoundary{
 	{
-		file: "pkg/controller/direct_source_e2e_test.go", function: "startRunner",
+		file: "internal/controller/direct_source_e2e_test.go", function: "startRunner",
 		duration: "10 * time.Second",
 		marker:   "// sleepcheck:external-boundary external runner gets ten seconds to exit before kill",
 	},
 	{
-		file: "pkg/controller/direct_source_e2e_test.go", function: "awaitSuccess",
+		file: "internal/controller/direct_source_e2e_test.go", function: "awaitSuccess",
 		duration: "500 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary external runner status needs a paced HTTP poll",
 	},

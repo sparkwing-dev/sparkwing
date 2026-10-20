@@ -85,15 +85,15 @@ There is no new contract change request or design question.
 
 Shared production files outside W2:
 
-- Store: `pkg/store/authority_provision.go`, `capabilities_contract.go`,
+- Store: `internal/store/authority_provision.go`, `capabilities_contract.go`,
   `capability_rotation.go`, `enrollment_runtime.go`, `schema.sql`, `store.go`,
   and new `team_settings.go`.
 - CLI/wire: `cmd/sparkwing/main.go`, `help_registry.go`, new `team_settings.go`,
   `internal/clisurface/registry.go`, new `internal/controllerwire/team_settings.go`,
-  new `pkg/controller/client/team_settings.go`, and `internal/apispec/wire.go`.
+  new `internal/controller/client/team_settings.go`, and `internal/apispec/wire.go`.
 - Console: `web/src/app/team/page.tsx`, `web/src/app/team/machines/page.tsx`,
   and `web/src/lib/teams.ts`.
-- Tests: `pkg/store/team_settings_test.go`, `pkg/store/burst_placement_test.go`,
+- Tests: `internal/store/team_settings_test.go`, `internal/store/burst_placement_test.go`,
   `cmd/sparkwing/runners_personal_test.go`, `web/src/lib/teams.test.ts`,
   `tests/acceptance/runner_store_w8_test.go`, and `store_queue_w8_test.go`.
   The last two migrate shared-root revocation callers to current administration.
@@ -174,8 +174,8 @@ GOCACHE=/tmp/sw-gocache, GOTMPDIR=/tmp/sw-astra-W2/go,
 TMPDIR=/tmp/sw-astra-W2 and go -C with this worktree's absolute path.
 
 - go build -p 4 ./... passes.
-- go vet -p 4 ./pkg/store ./pkg/controller ./tests/acceptance passes.
-- go test -p 4 ./pkg/store ./pkg/controller ./cmd/sparkwing ./tests/acceptance
+- go vet -p 4 ./internal/store ./internal/controller ./tests/acceptance passes.
+- go test -p 4 ./internal/store ./internal/controller ./cmd/sparkwing ./tests/acceptance
   -run 'TestMachine|TestTeamSetting|TestSharedMachine|TestBurstPersonal|TestPersonal|TestRunnersPersonal|TestOperatorTeamsCreateCLI|TestOperatorHTTP|TestCapabilityClaimLivenessProperty|TestReleaseUnitRefusesForgedStartedAndCancelledClaims|TestRenewUnitRefusesStaleAndRootAuthority|TestCredentialClaimHTTPAncestryAndFenceProperty|TestCredentialStartedClaimHTTPConsumesContractAttempt|TestNativeLogReadEndsWithItsRoot|TestEngineClaimHTTPRefusalsDoNotAward|TestEngineClaimHTTPDeadCredentialProperty|TestTeamGitCredentialStaysWithTheTeamClaimAndHost|TestNativeTokenOwnershipRelationProperty|TestSourceControllerUsesStoreAuditAndBoundCipher|TestRootProvision|TestServing|TestCredentialRoute'
   -count=1 passes.
 - go run ./internal/commentcheck -base main . is clean across 2,812 files.
@@ -198,8 +198,8 @@ personal-enrollment setting. No contract change request or design question is
 new. The earlier C1 QueuePriorityWriter persistence handoff remains open and
 uses its existing fake-backed controller seam. Machine enrollment uses no stub.
 
-Shared files touched: pkg/store/claim_authentication_property_test.go,
-pkg/store/unit_renewal_test.go, tests/acceptance/operator_authorization_test.go,
+Shared files touched: internal/store/claim_authentication_property_test.go,
+internal/store/unit_renewal_test.go, tests/acceptance/operator_authorization_test.go,
 design/rewrite/contracts/t1-port-inventory.md, design/rewrite/test-reconciliation.md
 and design/rewrite/test-reconciliation-sockets.md. Other changes are W2-owned
 controller tests, C2 evidence and this report. Lead-owned handoffs/amendments
@@ -240,7 +240,7 @@ GOTMPDIR=/tmp/sw-astra-W2/go, TMPDIR=/tmp/sw-astra-W2 and go -C with this
 worktree's absolute path. Additional checks pass:
 
 - go build -p 4 ./... and go vet -p 4 ./tests/acceptance.
-- go test -p 4 ./pkg/store ./pkg/controller ./cmd/sparkwing -run
+- go test -p 4 ./internal/store ./internal/controller ./cmd/sparkwing -run
   'TestMachineEnrollmentTeamSettingProperty|TestTeamSetting|TestSharedMachine|TestMachineTeamSettingsHTTP|TestBurstPersonal|TestPersonal|TestRunnersPersonal|TestNativeTokenOwnershipRelationProperty|TestOperatorTeamsCreateCLI'
   -count=1. Store 2.967s, controller 0.710s, CLI 0.446s.
 - go run ./internal/commentcheck -base main . is clean across 2,812 files.

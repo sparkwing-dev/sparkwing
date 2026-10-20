@@ -35,9 +35,9 @@ Recreate the scratch directory before reproducing these commands:
 
 ```text
 go build -p 4 ./...
-go vet -p 4 ./cmd/sparkwing ./pkg/controller
+go vet -p 4 ./cmd/sparkwing ./internal/controller
 go test -p 4 ./cmd/sparkwing -run '^(TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim|TestProfileCache|TestWorkingTreeTriggerPreservesNamedReferenceIdentity|TestLocalEntryPointsWithholdSigningMaterial|FuzzPreparationGitNeverRestoresSigningMaterial)' -count=1
-go test -p 4 ./pkg/controller -run '^(TestLocalScheduleTransportRegistersPinsTicksAndDeletes|TestLocalControllerScheduleFiresOneSealedRunAtDueInstant|FuzzLocalSchedulesRequireVerifiedTransportPeer)$' -count=1 -timeout=1m
+go test -p 4 ./internal/controller -run '^(TestLocalScheduleTransportRegistersPinsTicksAndDeletes|TestLocalControllerScheduleFiresOneSealedRunAtDueInstant|FuzzLocalSchedulesRequireVerifiedTransportPeer)$' -count=1 -timeout=1m
 go test -p 4 ./internal/source ./internal/doccheck -count=1
 go run ./internal/commentcheck -base main .
 ```
@@ -52,14 +52,14 @@ Go formatting and diff whitespace checks pass.
 
 No acceptance cell or skip changed, and no archived test needed porting. Native
 socket tests and the whole-repository suite remain with the lead. The current
-native report still contains FAIL for cmd/sparkwing and pkg/controller. Those
+native report still contains FAIL for cmd/sparkwing and internal/controller. Those
 entries cannot be cleared by this sandbox's focused runs. The lead must commit
 this diff and rerun native validation before W3 can report COMPLETE.
 
 ## Scope and handoff
 
 Shared files touched are cmd/sparkwing/local_profile_queue_test.go and
-pkg/controller/schedules_local_test.go. The earlier source preparation report
+internal/controller/schedules_local_test.go. The earlier source preparation report
 now points here. No API removal, caller migration, contract change, new mechanism
 or production deletion was needed. Lead-owned amendments and handoffs are
 unchanged. Their W3 implementation assignments remain covered by the existing

@@ -7,16 +7,17 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 const defaultDebugPauseTimeout = 30 * time.Minute
 
 // DebugBoundary binds an owner-selected pause to persisted execution and sealed policy.
 type DebugBoundary struct {
-	Ref        store.NodeRef
+	Ref        controllerwire.NodeRef
 	Generation int64
 	Actor      store.Actor
 	Reason     string

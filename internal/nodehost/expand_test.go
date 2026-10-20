@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 const testGenerator = "targets/generate/0"
@@ -147,7 +148,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: job.ID}, Spec: raw, SpecHash: string(hash)}
+			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: job.ID}, Spec: raw, SpecHash: string(hash)}
 			state.nodes[job.ID] = row
 			snapshot.Nodes = append(snapshot.Nodes, row)
 		}
@@ -159,7 +160,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		snapshot.Expansions = []store.AcceptedExpansionRow{{Source: store.NodeRef{RunID: "run", NodeID: "targets"}, SourceGeneration: 1, Body: body, BodyHash: string(hash)}}
+		snapshot.Expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "targets"}, SourceGeneration: 1, Body: body, BodyHash: string(hash)}}
 		if partial {
 			delete(state.nodes, "sibling")
 		}
@@ -194,7 +195,7 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 	fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		if input.NodeID == "summary" {
 			for _, child := range children {
-				row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Accepted.RunID, NodeID: child.ID})
+				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: child.ID})
 				if err != nil || row.Outcome != store.NodeSuccess {
 					return fmt.Errorf("waiter ran before %s succeeded: %v", child.ID, err)
 				}

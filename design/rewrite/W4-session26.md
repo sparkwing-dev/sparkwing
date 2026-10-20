@@ -51,7 +51,7 @@ test compilation remains the inherited handoff and was not rerun.
 ## Remaining integration
 
 - W2/W3 must mount the mask, annotation and summary routes with current process
-  authority and sink-wide acknowledgement. `pkg/controller/policy_contract.go`
+  authority and sink-wide acknowledgement. `internal/controller/policy_contract.go`
   still contains panic stubs. W4 exercises the declared transport with fakes.
 - W6 must implement `settings.ResolveConcurrency`, which still contains a panic
   stub. W4 preserves declaration omission and validates explicit values.

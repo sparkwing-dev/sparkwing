@@ -94,12 +94,12 @@ covered here. No full remote uploader integration is claimed.
 
 Shared store files resolved or adapted in this session:
 
-- pkg/store/blob_data_access.go
-- pkg/store/claim_run_test.go
-- pkg/store/console.go
-- pkg/store/console_test.go
-- pkg/store/credit_reversals.go
-- pkg/store/operator_credit_settings.go
+- internal/store/blob_data_access.go
+- internal/store/claim_run_test.go
+- internal/store/console.go
+- internal/store/console_test.go
+- internal/store/credit_reversals.go
+- internal/store/operator_credit_settings.go
 
 Other shared changes are internal/web/reads.go's log-stream cache header,
 docs/observability.md, docs/migrations/_unreleased.md, CHANGELOG.md, generated

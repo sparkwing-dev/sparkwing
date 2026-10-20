@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func PublicEvents(events []store.Event) []store.Event {

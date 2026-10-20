@@ -9,8 +9,8 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 // RuntimeConfig joins the launcher transport, Kubernetes client and enforced Cloud boundary.

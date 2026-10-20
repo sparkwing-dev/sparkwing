@@ -3,8 +3,8 @@
 The seven entries in the supplied store review have implementation and regression
 coverage in this worktree. HEAD remains `8a93238d1`. No Git write occurred.
 
-The native report was read first. It passes `pkg/store` on the previous committed
-state but contains failures in `bin` and `pkg/controller`. It has not judged this
+The native report was read first. It passes `internal/store` on the previous committed
+state but contains failures in `bin` and `internal/controller`. It has not judged this
 worktree. Completion remains with the lead harness.
 
 ## Implemented
@@ -59,7 +59,7 @@ Commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOCACHE=/tmp/sw-gocache`
 | --- | --- |
 | Whole-repository `go build -p 4 ./...` | Pass |
 | `go vet` on store, controller, blob, blob/depcache and acceptance | Pass |
-| Full SQLite `pkg/store` | Pass, 345.898s |
+| Full SQLite `internal/store` | Pass, 345.898s |
 | Blob and blob/depcache package tests | Pass, 4.443s / 0.021s |
 | Final missing-byte/S3 test selection | Pass, 0.185s |
 | Controller `TestFlood*` | Pass, 1.151s |
@@ -114,9 +114,9 @@ a budget waiver. The review-required fixes account for the added production
 code. The inherited area overage still requires a separate reduction pass.
 
 Shared production files outside store are `internal/blob/{s3,remote}.go` and
-`pkg/controller/{flood,engine_routes,engine_lifecycle_routes}.go`. Shared tests
+`internal/controller/{flood,engine_routes,engine_lifecycle_routes}.go`. Shared tests
 are `internal/blob/{missing_bytes,s3_collection,remote,remote_selector}_test.go`,
-`pkg/controller/flood_retry_test.go`, and
+`internal/controller/flood_retry_test.go`, and
 `tests/acceptance/storage_s3_test.go`. Shared prose is `internal/blob/README.md`
 and C1. Lead-owned amendments and handoffs are untouched.
 

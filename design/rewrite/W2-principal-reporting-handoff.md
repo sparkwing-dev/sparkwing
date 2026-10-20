@@ -46,7 +46,7 @@ constants are deleted.
 
 The implemented declarations moved out of five *_contract.go files into
 internal/capability/authentication_types.go and management.go, and
-pkg/controller/policy.go, engine.go and data.go. Long declaration comments were
+internal/controller/policy.go, engine.go and data.go. Long declaration comments were
 cut to one-line GoDoc. W9's client declarations are unchanged.
 
 SyncLauncher now also resolves LauncherSyncReader from Store.AsOperator when
@@ -199,10 +199,10 @@ Go caller migrations outside W2:
 - internal/orchestrator/trigger_host_here_test.go
 - internal/orchestrator/trigger_host_test.go
 - internal/web/browserfixture/main.go
-- pkg/controller/client/client.go
-- pkg/controller/client/coordination.go
-- pkg/controller/client/coordination_test.go
-- pkg/controller/client/metric_routes_test.go
+- internal/controller/client/client.go
+- internal/controller/client/coordination.go
+- internal/controller/client/coordination_test.go
+- internal/controller/client/metric_routes_test.go
 
 The first six files and coordination_test.go only replace removed controller
 scope aliases with the same fixture strings and remove unused imports. The two

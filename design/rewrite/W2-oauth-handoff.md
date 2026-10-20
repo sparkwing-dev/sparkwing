@@ -115,7 +115,7 @@ All Go commands use the absolute worktree with go -C. Tests use -p 4.
 Reproduce the focused controller selection with:
 
 ```sh
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestLoginLimiter_|^TestServerPolicy|^TestSessionRoutePreservesCapabilityScopeProperty$' -count=1
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestLoginLimiter_|^TestServerPolicy|^TestSessionRoutePreservesCapabilityScopeProperty$' -count=1
 go test -p 4 ./tests/acceptance -run '^TestOAuthHTTP' -count=1
 go run ./internal/commentcheck -base main /home/bombuntu/.xwing/envs/1080/sparkwing
 ```

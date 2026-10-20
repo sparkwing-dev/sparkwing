@@ -86,7 +86,7 @@ No signature in another area's contract changed.
 ## Shared files and friction
 
 Shared production changes are internal/backend/store_backend.go and
-pkg/controller/browser_reads.go. Both are caller migrations for the store cut.
+internal/controller/browser_reads.go. Both are caller migrations for the store cut.
 Backend tests, web capacity/log-pretty fixtures and controller reader fixtures
 migrate with them. The exact changed-file list is
 [w1-session62-files.txt](w1-session62-files.txt). C1, the test-port inventory,

@@ -1,0 +1,374 @@
+package store_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math/rand"
+	"os"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+)
+
+func TestConcurrency_GrantClearsOwnStaleWaiterRow(t *testing.T) {
+	s := storetest.Open(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r1/n", RunID: "r1", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r2/n", RunID: "r2", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("r2: want Queued, got %s", r.Kind)
+	}
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "k", "r1/n", "success", "", "", 0, 0); err != nil {
+		t.Fatalf("release r1: %v", err)
+	}
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r2/n", RunID: "r2", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("r2 re-acquire: want Granted, got %s", r.Kind)
+	}
+	st, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "k")
+	if err != nil {
+		t.Fatalf("GetConcurrencyState: %v", err)
+	}
+	if len(st.Waiters) != 0 {
+		t.Fatalf("stale waiter row survived the grant: %+v", st.Waiters)
+	}
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "k", "r2/n", "success", "", "", 0, 0); err != nil {
+		t.Fatalf("release r2 with notify: %v", err)
+	}
+}
+
+func TestConcurrency_ReacquireKeepsQueuedArrivalOrder(t *testing.T) {
+	s := storetest.Open(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/n", RunID: "holder", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "old/n", RunID: "old", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("old: want Queued got %s", r.Kind)
+	}
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "new/n", RunID: "new", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("new: want Queued got %s", r.Kind)
+	}
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "k", "holder/n", "success", "", "", 0, 0); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "old/n", RunID: "old", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("old re-acquire: want Granted before newer waiter, got %s", r.Kind)
+	}
+	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "k")
+	if err != nil {
+		t.Fatalf("GetConcurrencyState: %v", err)
+	}
+	if len(state.Waiters) != 1 || state.Waiters[0].RunID != "new" {
+		t.Fatalf("waiters after old grant = %+v, want only new", state.Waiters)
+	}
+}
+
+// A host whose wall clock steps backwards between two arrivals, as WSL2's
+// time sync does by about 750 ms every 30 s, must not let the later
+// arrival jump the queue.
+func TestConcurrency_QueueKeepsArrivalOrderWhenClockStepsBack(t *testing.T) {
+	s := storetest.Open(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/n", RunID: "holder", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "first/n", RunID: "first", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("first: want Queued got %s", r.Kind)
+	}
+	// hack: the store reads time.Now(), so moving the stored stamp an hour
+	// ahead stands in for the clock stepping back an hour after "first" parked.
+	if _, err := s.DB().ExecContext(ctxT(t), storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = arrived_at + ? WHERE run_id = ?`),
+		int64(time.Hour), "first"); err != nil {
+		t.Fatalf("step the clock back: %v", err)
+	}
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "second/n", RunID: "second", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("second: want Queued got %s", r.Kind)
+	}
+	_, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "k", "holder/n", "success", "", "", 0, 0)
+	if err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	if len(promoted) != 1 || promoted[0].RunID != "first" {
+		t.Fatalf("promoted %+v, want only first", promoted)
+	}
+}
+
+func fuzzSeeds(t *testing.T) []int64 {
+	t.Helper()
+	if env := os.Getenv("SPARKWING_CONC_FUZZ_SEED"); env != "" {
+		seed, err := strconv.ParseInt(env, 10, 64)
+		if err != nil {
+			t.Fatalf("SPARKWING_CONC_FUZZ_SEED=%q: %v", env, err)
+		}
+		return []int64{seed}
+	}
+	if testing.Short() {
+		return []int64{1}
+	}
+	return []int64{1, 2, 3, 4, 5}
+}
+
+func fuzzOps(full int) int {
+	if testing.Short() {
+		return full / 4
+	}
+	return full
+}
+
+func concurrencyFuzzOp(t *testing.T, ctx context.Context, s *store.Store, rng *rand.Rand) error {
+	keys := []string{"ka", "kb", "kc"}
+	runs := []string{"r0", "r1", "r2", "r3", "r4"}
+	nodes := []string{"n0", "n1", ""}
+	policies := []string{
+		store.OnLimitQueue, store.OnLimitQueue, store.OnLimitQueue,
+		store.OnLimitQueue, store.OnLimitSkip, store.OnLimitFail,
+		store.OnLimitCancelOthers,
+	}
+
+	key := keys[rng.Intn(len(keys))]
+	run := runs[rng.Intn(len(runs))]
+	node := nodes[rng.Intn(len(nodes))]
+	holderID := run + "/" + node
+	if node == "" {
+		holderID = run + "/-"
+	}
+
+	switch rng.Intn(12) {
+	case 0, 1, 2, 3:
+		req := store.AcquireSlotRequest{
+			Key:      key,
+			HolderID: holderID,
+			RunID:    run,
+			NodeID:   node,
+			Capacity: 1 + rng.Intn(5),
+			Cost:     1 + rng.Intn(4),
+			Policy:   policies[rng.Intn(len(policies))],
+		}
+		if req.Policy == store.OnLimitCancelOthers && rng.Intn(2) == 0 {
+			req.CancelTimeout = time.Minute
+		}
+		if rng.Intn(5) == 0 {
+			req.Lease = time.Nanosecond
+		}
+		if _, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, req); err != nil {
+			return fmt.Errorf("acquire %+v: %w", req, err)
+		}
+	case 4:
+		if _, _, err := tenantFor(t, s, store.DefaultTeam).HeartbeatConcurrencySlot(ctx, key, holderID, 0); err != nil && !errors.Is(err, store.ErrLockHeld) {
+			return fmt.Errorf("heartbeat %s/%s: %w", key, holderID, err)
+		}
+	case 5:
+		hash := ""
+		ttl := time.Duration(0)
+
+		outcomes := []string{"success", "failed", "skipped", "superseded"}
+		if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, key, holderID, outcomes[rng.Intn(len(outcomes))], holderID, hash, ttl, 0); err != nil {
+			return fmt.Errorf("release %s/%s: %w", key, holderID, err)
+		}
+	case 6:
+		hash := ""
+
+		if _, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, key, run, node, hash, "", "", rng.Intn(4) == 0); err != nil {
+			return fmt.Errorf("resolve %s %s/%s: %w", key, run, node, err)
+		}
+	case 7:
+		if _, err := tenantFor(t, s, store.DefaultTeam).CancelWaiter(ctx, key, run, node); err != nil {
+			return fmt.Errorf("cancel %s %s/%s: %w", key, run, node, err)
+		}
+	case 8:
+		if rng.Intn(2) == 0 {
+			if _, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, key, 0); err != nil {
+				return fmt.Errorf("promote %s: %w", key, err)
+			}
+		} else {
+			if _, err := tenantFor(t, s, store.DefaultTeam).ForceReleaseSupersededHolders(ctx, key); err != nil {
+				return fmt.Errorf("force-release %s: %w", key, err)
+			}
+		}
+	case 9, 10, 11:
+		maxAge := time.Hour
+		if rng.Intn(3) == 0 {
+			maxAge = time.Nanosecond
+		}
+		if _, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: maxAge}); err != nil {
+			return fmt.Errorf("maintain concurrency: %w", err)
+		}
+	}
+
+	st, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, key)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("state %s: %w", key, err)
+	}
+	if st.UsedCost > st.EffectiveCapacity {
+		return fmt.Errorf("state %s: used cost %d exceeds effective capacity %d", key, st.UsedCost, st.EffectiveCapacity)
+	}
+	return nil
+}
+
+func runSequentialPropertySuite(t *testing.T, newStore func(*testing.T) *store.Store) {
+	for _, seed := range fuzzSeeds(t) {
+		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			s := newStore(t)
+			for _, id := range []string{"r0", "r1", "r2", "r3", "r4"} {
+				createLiveRunT(t, s, id)
+			}
+			rng := rand.New(rand.NewSource(seed))
+			for i := 0; i < fuzzOps(600); i++ {
+				if err := concurrencyFuzzOp(t, ctxT(t), s, rng); err != nil {
+					t.Fatalf("seed %d op %d: %v", seed, i, err)
+				}
+			}
+		})
+	}
+}
+
+func runConcurrentPropertySuite(t *testing.T, newStore func(*testing.T) *store.Store) {
+	s := newStore(t)
+	for _, id := range []string{"r0", "r1", "r2", "r3", "r4"} {
+		createLiveRunT(t, s, id)
+	}
+	ctx := ctxT(t)
+	const goroutines = 8
+	errCh := make(chan error, goroutines)
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		seed := int64(100 + g)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rng := rand.New(rand.NewSource(seed))
+			for i := 0; i < fuzzOps(150); i++ {
+				if err := concurrencyFuzzOp(t, ctx, s, rng); err != nil {
+					errCh <- fmt.Errorf("goroutine seed %d op %d: %w", seed, i, err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+}
+
+func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
+	}
+	runSequentialPropertySuite(t, storetest.OpenSQLite)
+}
+
+func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s of real work; the fast class runs under -short")
+	}
+	runConcurrentPropertySuite(t, storetest.OpenSQLite)
+}
+
+func TestConcurrency_PropertyRandomOpsHoldInvariants_Postgres(t *testing.T) {
+	runSequentialPropertySuite(t, storetest.OpenPostgres)
+}
+
+func TestConcurrency_PropertyConcurrentOpsHoldInvariants_Postgres(t *testing.T) {
+	runConcurrentPropertySuite(t, storetest.OpenPostgres)
+}
+
+func TestConcurrency_PropertyFIFOPromotionOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s of real work; the fast class runs under -short")
+	}
+	runFIFOPropertySuite(t, storetest.OpenSQLite)
+}
+
+func TestConcurrency_PropertyFIFOPromotionOrder_Postgres(t *testing.T) {
+	runFIFOPropertySuite(t, storetest.OpenPostgres)
+}
+
+func runFIFOPropertySuite(t *testing.T, newStore func(*testing.T) *store.Store) {
+	for _, seed := range fuzzSeeds(t) {
+		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			s := newStore(t)
+			for _, id := range []string{"r0", "r1", "r2", "r3", "r4"} {
+				createLiveRunT(t, s, id)
+			}
+			rng := rand.New(rand.NewSource(seed))
+			const key = "fifo"
+			var queue []string
+			holders := map[string]bool{}
+			next := 0
+			for i := 0; i < 200; i++ {
+				if rng.Intn(2) == 0 || len(holders) == 0 {
+					run := fmt.Sprintf("r%03d", next)
+					next++
+					resp := acquireT(t, s, store.AcquireSlotRequest{
+						Key: key, HolderID: run + "/n", RunID: run, NodeID: "n",
+						Capacity: 2, Cost: 1, Policy: store.OnLimitQueue,
+					})
+					switch resp.Kind {
+					case store.AcquireGranted:
+						holders[run] = true
+					case store.AcquireQueued:
+						queue = append(queue, run)
+					default:
+						t.Fatalf("seed %d op %d: unexpected kind %s", seed, i, resp.Kind)
+					}
+				} else {
+					var victim string
+					pick := rng.Intn(len(holders))
+					for run := range holders {
+						if pick == 0 {
+							victim = run
+							break
+						}
+						pick--
+					}
+					delete(holders, victim)
+					_, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), key, victim+"/n", "success", "", "", 0, 0)
+					if err != nil {
+						t.Fatalf("seed %d op %d: release %s: %v", seed, i, victim, err)
+					}
+					for _, w := range promoted {
+						if len(queue) == 0 || queue[0] != w.RunID {
+							t.Fatalf("seed %d op %d: promoted %s out of FIFO order (queue head %v)", seed, i, w.RunID, queue)
+						}
+						queue = queue[1:]
+						holders[w.RunID] = true
+					}
+				}
+			}
+		})
+	}
+}

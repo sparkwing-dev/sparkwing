@@ -64,8 +64,8 @@ Passed:
 - go build ./... after the legacy API deletion.
 - go vet for cmd/sparkwing, cmd/sparkwing-controller, internal/source,
   internal/procenv, internal/gotoolchain, internal/doccheck, internal/agentconfig,
-  internal/objectguard, internal/crons, internal/orchestrator, pkg/controller
-  and pkg/store.
+  internal/objectguard, internal/crons, internal/orchestrator, internal/controller
+  and internal/store.
 - Full internal/source, internal/procenv, internal/doccheck,
   internal/agentconfig, internal/gotoolchain and internal/crons tests.
 - CLI tests TestLocalEntryPointsWithholdSigningMaterial,
@@ -127,8 +127,8 @@ internal/gotoolchain/toolchain.go, internal/sparks/{resolve,sparks}.go,
 cmd/sparkwing/spark.go,
 internal/agentconfig/agentconfig.go, internal/crons/{crons,health,pushed,tick}.go,
 internal/doccheck/sourcehints.go, internal/objectguard/{ceiling,objectguard}.go,
-pkg/controller/{engine_intake,engine_routes,services}.go and
-pkg/store/{intake_runtime,local_secrets,run_spec}.go. Related tests and the named
+internal/controller/{engine_intake,engine_routes,services}.go and
+internal/store/{intake_runtime,local_secrets,run_spec}.go. Related tests and the named
 contract/inventory documents changed too. Store edits affect intake replay only;
 no lock-order machinery changed.
 

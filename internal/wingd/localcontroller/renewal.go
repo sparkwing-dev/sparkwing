@@ -5,7 +5,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func localOwnerRenew(current func(context.Context) (capability.Principal, error), renew func(context.Context, string, bool) (store.LeaseBeat, error)) func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {

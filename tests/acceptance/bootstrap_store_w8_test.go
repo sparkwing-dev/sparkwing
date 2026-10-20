@@ -14,13 +14,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func storedCloudClaimantW8(t *testing.T) (*controller.EngineController, capability.Issued) {
@@ -173,7 +173,7 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: held.RunID, NodeID: held.JobID})
+	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: held.RunID, NodeID: held.JobID})
 	if err != nil || row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.Generation != award.Binding.Generation || row.ClaimedBy != "" {
 		t.Fatalf("Cloud persisted completion: outcome=%s attempt=%d generation=%d error=%v", row.Outcome, row.Attempt, row.Generation, err)
 	}

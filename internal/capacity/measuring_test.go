@@ -3,7 +3,7 @@ package capacity
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestResolve_PlanHashChangeReMeasuresAtPriorPeak(t *testing.T) {

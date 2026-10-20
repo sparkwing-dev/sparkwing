@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -36,7 +37,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 					if request.SemaphoresOnly {
 						return daemon.Acquire(ctx, request, queued)
 					}
-					row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+					row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
 					if err != nil || row.ReadyAt == nil || row.ClaimedBy != "" || row.Attempt != 0 {
 						t.Errorf("machine admission consumed the claim before capacity: %+v %v", row, err)
 					}
@@ -61,7 +62,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 				if err == nil || completion.Outcome != "" || executed {
 					t.Fatalf("machine observation failure did not stop safely: %+v %v", completion, err)
 				}
-				row, readErr := fixture.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+				row, readErr := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
 				if readErr != nil || row.ClaimedBy != "" || row.Attempt != 0 || row.Outcome != "" {
 					t.Fatalf("preclaim failure changed the job: %+v %v", row, readErr)
 				}
@@ -73,7 +74,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 			if err != nil || completion.Outcome != want || executed == refuse {
 				t.Fatalf("shared burst owner completion=%+v executed=%v error=%v", completion, executed, err)
 			}
-			row, err := fixture.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+			row, err := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
 			if err != nil || row.Outcome != store.NodeState(want) || row.Attempt != attempts || row.ClaimedBy != "" {
 				t.Fatalf("shared burst owner persisted the wrong result: %+v %v", row, err)
 			}
@@ -181,7 +182,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	case <-ctx.Done():
 		t.Fatal("saturated machine blocked overflow readiness")
 	}
-	rowBefore, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+	rowBefore, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
 	if err != nil || rowBefore.ClaimedBy != "" || rowBefore.Attempt != 0 {
 		t.Fatalf("waiting for machine capacity consumed the overflow claim: %+v %v", rowBefore, err)
 	}
@@ -192,7 +193,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if err != nil || claim.Kind != capability.UnitNode {
 		t.Fatalf("saturated owner's work was not claimable: %+v %v", claim, err)
 	}
-	row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+	row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}

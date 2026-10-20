@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestSurfaceRunnerEnrollmentCredentialTransport(t *testing.T) {
@@ -19,7 +20,7 @@ func TestSurfaceRunnerEnrollmentCredentialTransport(t *testing.T) {
 		t.Run(endpoint, func(t *testing.T) {
 			grants := []string{string(capability.NodesClaim), string(capability.TriggersClaim), string(capability.RunsState)}
 			metadata := capability.Metadata{Prefix: "swk_00000001", Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsState}, IssuedAt: time.Unix(100, 0).UTC()}
-			enrollment := client.EnrollRunnerRequest{Name: "desktop", Repos: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}}
+			enrollment := controllerwire.EnrollRunnerRequest{Name: "desktop", Repos: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}}
 			calls := 0
 			transport := &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 				calls++
@@ -33,14 +34,14 @@ func TestSurfaceRunnerEnrollmentCredentialTransport(t *testing.T) {
 					if req.Method != "POST" || req.URL.Path != "/api/v1/runners" {
 						t.Fatalf("enrollment: %s %s", req.Method, req.URL)
 					}
-					var body client.EnrollRunnerRequest
+					var body controllerwire.EnrollRunnerRequest
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 						t.Fatal(err)
 					}
 					if !reflect.DeepEqual(body, enrollment) {
 						t.Fatalf("enrollment proposal: %+v", body)
 					}
-					response = client.CreatedToken{Capability: "swk_00000001_secret", Prefix: metadata.Prefix, Team: metadata.Team, Grants: grants}
+					response = controllerwire.CreatedToken{Capability: "swk_00000001_secret", Prefix: metadata.Prefix, Team: metadata.Team, Grants: grants}
 					status = http.StatusCreated
 				case 2:
 					if req.Method != "GET" || req.URL.Path != "/api/v1/tokens/"+metadata.Prefix {

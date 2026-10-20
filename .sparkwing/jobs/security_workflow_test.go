@@ -368,11 +368,11 @@ regexes = ['''^artifacts/blobs/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca
 	ignore := strings.TrimSpace(readHostedCIFile(t, ".gitleaksignore"))
 	want := strings.Join([]string{
 		"49be43e4b2e9c0dc24ee7d50eaf4a0dd0291e147:internal/web/next-out/_next/static/chunks/17mq5rf2.ibbt.js:generic-api-key:55",
-		"c4f254125ffc14690be63b70e25c21c90e95932c:pkg/storage/segment_artifact_test.go:generic-api-key:6",
-		"cef3d45478670f750782eb8f4df38ae30cdaf360:pkg/store/argon2.go:generic-api-key:17",
+		"c4f254125ffc14690be63b70e25c21c90e95932c:internal/storage/segment_artifact_test.go:generic-api-key:6",
+		"cef3d45478670f750782eb8f4df38ae30cdaf360:internal/store/argon2.go:generic-api-key:17",
 		"bbd6e83949b551d822df445e15ddc2ae649f3b0d:cmd/sparkwing/agents_test.go:generic-api-key:15",
 		"01fe110594cc9d898a26d12f510397f4b2cd53dc:install/install.sh:generic-api-key:27",
-		"26f34bc5c311eba8dad006f49f84c82ef8c115cc:pkg/controller/webhook_github_bindings_test.go:generic-api-key:21",
+		"26f34bc5c311eba8dad006f49f84c82ef8c115cc:internal/controller/webhook_github_bindings_test.go:generic-api-key:21",
 		"307a77eba29cf80aeb16b78190aed22bbf2787d0:internal/envredact/envredact_test.go:generic-api-key:280",
 		"31bd09fb7a6bcb79dd4533c3a44a702e775c5ba9:internal/envredact/envredact_test.go:generic-api-key:302",
 		"31bd09fb7a6bcb79dd4533c3a44a702e775c5ba9:internal/envredact/envredact_test.go:generic-api-key:306",

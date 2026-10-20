@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (h *nodeExecutor) diagnostic(ctx context.Context, input NodeInput, level, event, step, message string, attrs map[string]any) error {

@@ -2,7 +2,7 @@
 
 <!-- design:begin -->
 
-This design appendix enumerates all 229 distinct routes in `pkg/controller/testdata/credential_matrix.golden` at `1e16668363ecbd99ba922436ab1a6f9cae63335b`. Those routes generated 8,466 old cells. Every old route has one row below. This is a complete source-route inventory, not a complete final permission specification.
+This design appendix enumerates all 229 distinct routes in `internal/controller/testdata/credential_matrix.golden` at `1e16668363ecbd99ba922436ab1a6f9cae63335b`. Those routes generated 8,466 old cells. Every old route has one row below. This is a complete source-route inventory, not a complete final permission specification.
 
 The frozen architecture determines some removals, resource names and permission boundaries. It does not determine every existing route's role grants. Unresolved rights below are launch blockers for their matrix cells. An unavailable or undecided expected answer cannot be reported as a passing or skipped launch check.
 
@@ -10,7 +10,7 @@ C2 owns the production route policy. T1 owns independent expected results and cr
 
 ## Final route permission coverage
 
-`pkg/controller/credential_route_expectations_test.go` contains committed literal expectations
+`internal/controller/credential_route_expectations_test.go` contains committed literal expectations
 for all declared final C2 method/path pairs, including the eleven node-host
 routes and every public, browser and external-proof route. Each alternative pins
 its credential class, complete grant conjunction, binding and liveness together.

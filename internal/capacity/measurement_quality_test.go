@@ -3,7 +3,7 @@ package capacity
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestResolveRequiresMeasuredResourceHistory(t *testing.T) {

@@ -56,7 +56,7 @@ type LocalStartOptions struct {
 	DashboardAddress          string
 }
 
-// LocalRuntime uses the same pkg/controller implementation, route policy and state owner.
+// LocalRuntime uses the same internal/controller implementation, route policy and state owner.
 type LocalRuntime interface {
 	Run(context.Context, LocalStartOptions) error
 	// AwaitReady waits for the next active Run's API, store and startup reconciliation.

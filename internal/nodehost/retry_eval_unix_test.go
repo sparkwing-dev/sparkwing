@@ -14,11 +14,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func retryGeneratedJobs() []nodeproto.JobSpec {
@@ -87,7 +88,7 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 	f.Host.Store = retryMissingOutput{f.State}
 	f.Host.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		if layer.Name == "memo" && row.Ref.NodeID == "targets" {
-			return OwnerLayerResult{Source: &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: store.NodeRef{RunID: "previous", NodeID: "targets"}, StateSeq: 8}}}, nil
+			return OwnerLayerResult{Source: &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: "previous", NodeID: "targets"}, StateSeq: 8}}}, nil
 		}
 		return OwnerLayerResult{}, nil
 	}
@@ -170,7 +171,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 		},
 		Mask:       func(text string) string { return text },
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
-		ReadOutput: func(_ context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
+		ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 			if ref.RunID != f.Accepted.RunID || ref.NodeID != "targets" || generation != sourceInput.Generation {
 				t.Fatal("reconstruction read outside its accepted source")
 			}

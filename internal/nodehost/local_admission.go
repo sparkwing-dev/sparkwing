@@ -10,10 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -38,7 +39,7 @@ type LocalAdmission struct {
 	Daemon      Admitter
 	BoxID       string
 	Controller  string
-	Queued      func(context.Context, store.NodeRef, wingwire.Queued)
+	Queued      func(context.Context, controllerwire.NodeRef, wingwire.Queued)
 }
 
 type localRunLease struct {
@@ -68,7 +69,7 @@ func (a *LocalAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 		Semaphores:   claims, SemaphoresOnly: !parent.resources, Resources: resources,
 		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
-	err = a.hold(ctx, store.NodeRef{RunID: accepted.RunID}, request, func(ctx context.Context, held Lease) error {
+	err = a.hold(ctx, controllerwire.NodeRef{RunID: accepted.RunID}, request, func(ctx context.Context, held Lease) error {
 		parent.token = held.Token()
 		completion, err = body(context.WithValue(ctx, localRunLease{}, parent))
 		return err
@@ -186,7 +187,7 @@ func (a *LocalAdmission) holderRunID(run string) string {
 	return string(wingwire.RemoteRunID(a.Controller, run))
 }
 
-func (a *LocalAdmission) hold(parent context.Context, ref store.NodeRef, request wingwire.AdmissionRequest, body func(context.Context, Lease) error) (err error) {
+func (a *LocalAdmission) hold(parent context.Context, ref controllerwire.NodeRef, request wingwire.AdmissionRequest, body func(context.Context, Lease) error) (err error) {
 	if err := context.Cause(parent); err != nil {
 		return err
 	}
@@ -245,7 +246,7 @@ func localAdmissionFailure(err error) error {
 	return err
 }
 
-func (a *LocalAdmission) acquire(ctx context.Context, cancel context.CancelCauseFunc, ref store.NodeRef, request wingwire.AdmissionRequest) (Lease, error) {
+func (a *LocalAdmission) acquire(ctx context.Context, cancel context.CancelCauseFunc, ref controllerwire.NodeRef, request wingwire.AdmissionRequest) (Lease, error) {
 	var mu sync.Mutex
 	var timer *time.Timer
 	waiting := ""

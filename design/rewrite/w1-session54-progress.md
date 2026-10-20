@@ -125,12 +125,12 @@ Fixture migrations outside store:
 
 - internal/web/server_test.go
 - internal/wingd/localcontroller/state_test.go
-- pkg/controller/compute_limits_test.go
-- pkg/controller/github_checks_test.go
-- pkg/controller/reaped_run_conflict_test.go
-- pkg/controller/retry_test.go
-- pkg/controller/secret_args_display_test.go
-- pkg/controller/trends_test.go
+- internal/controller/compute_limits_test.go
+- internal/controller/github_checks_test.go
+- internal/controller/reaped_run_conflict_test.go
+- internal/controller/retry_test.go
+- internal/controller/secret_args_display_test.go
+- internal/controller/trends_test.go
 
 The two Cloud fixture and metering assertions are in controller's
 engine_amendment_test.go and engine_claim_http_test.go. Store's shared acceptance

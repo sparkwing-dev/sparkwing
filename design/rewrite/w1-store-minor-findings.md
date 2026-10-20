@@ -57,7 +57,7 @@ and the explicit secret skip flag. The HTTP response fields remain rotated,
 skipped and git_credentials. No additional contract request remains.
 
 Shared implementation edits are limited to
-`pkg/controller/credential_maintenance.go` and `pkg/controller/secrets.go`.
+`internal/controller/credential_maintenance.go` and `internal/controller/secrets.go`.
 The HTTP fake and property live in
 `tests/acceptance/credential_maintenance_http_test.go`. Shared documentation and
 generated edits are C1, C2, CHANGELOG, the unreleased migration guide, their

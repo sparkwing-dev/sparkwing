@@ -106,7 +106,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   TMPDIR=/var/tmp/sw-lead-tmp GOTMPDIR=/var/tmp/sw-lead-tmp \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' \
   -count=1 -v -timeout=5m
 ```
@@ -130,7 +130,7 @@ within its -2,900 budget. Tests, testdata and contract declarations are excluded
 No API was removed, so no cross-package caller migration is needed.
 
 Shared files touched: internal/blob/keys.go and authority_test.go;
-pkg/store/blob_lookup.go, blob_persistence.go, blob_record_runtime.go and
+internal/store/blob_lookup.go, blob_persistence.go, blob_record_runtime.go and
 blob_local_cache_test.go; C1/C3/C4 contracts; CHANGELOG.md and its generated
 pkg/docs/changelog.md; docs/caching.md and its generated mirror. All other code
 changes are W9-owned CLI/client files.

@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestNativeOwnerFailures(t *testing.T) {
@@ -54,7 +55,7 @@ func TestNativeOwnerFailures(t *testing.T) {
 			}
 			spec.Resolved.Settings.Options.NoMemo.Value = id == "memo_no_read"
 			accepted := AcceptedRun{RunID: "run", Spec: marshalEventFixture(t, spec), SpecHash: string(spec.Hash), Plan: plan, PlanHash: string(planHash)}
-			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec}, store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: jobID}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: store.StatusPending})
+			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: jobID}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: store.StatusPending})
 			if id == "source" {
 				st.node.Status, st.node.Outcome, st.node.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
 			}
@@ -84,7 +85,7 @@ func TestNativeOwnerFailures(t *testing.T) {
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return selected, nil
 				},
-				ReadOutput: func(context.Context, store.NodeRef, int64) (json.RawMessage, error) {
+				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 					return json.RawMessage("null"), nil
 				},
 				Bind: func(_ context.Context, input EvaluationInput) (ProcessGrant, error) {

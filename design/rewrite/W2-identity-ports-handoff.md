@@ -59,7 +59,7 @@ persistence assertions are in contracts/t1-port-inventory.md.
 | 07:40 item 5 | Server.HTTP returns wingd.LocalHTTP with shared policy API/dashboard handlers and verified peer context. LocalControllerHTTP tests pass. | W8 serving/drain and W1 local authority transactions. |
 | 07:40 item 7 | Legacy runner-permission, token-table metering and credits.grant routes remain deleted. Final root, console, payment and retired-route checks pass. | Native composition and lead ratification remain with the lead. |
 | 07:40 item 10 | SyncLauncher forwards authenticated authority and immutable observation fences, then removes bearer material. Engine sync tests pass. | W1 Operator.ReadLauncherSync and W8 native A1-38 evidence. |
-| 09:40 item 1 | The independent expected table is in pkg/controller/credential_route_expectations_test.go beside the route tests. internal/acceptance/credential_routes.go is absent. All three drift/order/declaration tests pass. | None in W2. |
+| 09:40 item 1 | The independent expected table is in internal/controller/credential_route_expectations_test.go beside the route tests. internal/acceptance/credential_routes.go is absent. All three drift/order/declaration tests pass. | None in W2. |
 
 The existing C2 portions of A1-01/03/05/08/09/11/14/15/16/19/20/21/22/23,
 A1-24 through A1-35, A1-38/39/40/49/55 remain implemented against their

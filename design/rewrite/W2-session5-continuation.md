@@ -70,15 +70,15 @@ It does not claim serving-route completeness or launch acceptance.
 
 ## Files
 
-This continuation changes pkg/controller/data_record_routes.go,
+This continuation changes internal/controller/data_record_routes.go,
 tests/acceptance/data_writes_http_test.go, docs/data-uploads.md, C2's local
 contract explanation, CHANGELOG.md and their generated documentation mirrors.
-This report is the only new file. No pkg/store file changes in this continuation.
+This report is the only new file. No internal/store file changes in this continuation.
 
 The earlier end-to-end (a)-(e) store changes are listed in
 [W2-vertical-handoff.md](W2-vertical-handoff.md) and
 [W2-console-continuation.md](W2-console-continuation.md). Their production files
-under pkg/store are authentication_binding.go, authentication_contract.go,
+under internal/store are authentication_binding.go, authentication_contract.go,
 authority_binding.go, authority_bootstrap.go, authority_issue.go,
 authority_provision.go, binding_execution.go, blob_authority_projection.go,
 blob_data_access.go, blob_persistence.go, capabilities_contract.go,

@@ -71,7 +71,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Test parallelism was at most -p 4.
 
 - Whole-repository go build -p 4 ./... passes.
-- go vet -p 4 ./pkg/store ./pkg/controller ./pkg/match ./internal/api passes.
+- go vet -p 4 ./internal/store ./internal/controller ./pkg/match ./internal/api passes.
 - The W1 selection passes 187 top-level tests and 558 cases, with no skips or
   failures, in 19.573 seconds.
 - All TestEngine controller adapters and the new advisory-profile test pass.
@@ -82,8 +82,8 @@ TMPDIR=/tmp/sw-astra-W1/tmp. Test parallelism was at most -p 4.
 - bin/check-api-spec.sh and git diff --check pass. New Go files are formatted.
 
 To reproduce the W1 selection, extract top-level Test names from these files
-under pkg/store, join them into an anchored -run expression, then run
-`go test -p 4 ./pkg/store -count=1 -run "$expression"`:
+under internal/store, join them into an anchored -run expression, then run
+`go test -p 4 ./internal/store -count=1 -run "$expression"`:
 
     authority_runtime_test.go authority_adapters_test.go rewrite_authority_test.go
     rewrite_schema_test.go state_runtime_test.go scheduling_contract_test.go
@@ -103,7 +103,7 @@ The full legacy suite, PostgreSQL, races, lint, pipelines and independent review
 remain lead checks. The legacy suite still has callers of removed schema.
 API snapshot generation into scratch succeeds, but the checked-in baseline
 predates the rewrite in eight packages, including 840 additions and 51 deletions
-for pkg/store. The lead must regenerate aggregate snapshots with the merged
+for internal/store. The lead must regenerate aggregate snapshots with the merged
 rewrite. No generated baseline was hand-edited. The OpenAPI source and its owning
 drift check are updated. The aggregate rewrite changelog remains lead work.
 
@@ -141,12 +141,12 @@ these APIs and migrating their callers is still W1 work.
 
 ## Shared files and friction
 
-Outside pkg/store, these files changed:
+Outside internal/store, these files changed:
 
 - internal/api/node.go and node_test.go remove deleted node fields.
-- pkg/controller/node_projection_test.go and node_claim_ownership_test.go remove
+- internal/controller/node_projection_test.go and node_claim_ownership_test.go remove
   deleted node fields and SQL fixture columns.
-- pkg/controller/claim_attention.go migrates CapabilityPrefix, passes allowed
+- internal/controller/claim_attention.go migrates CapabilityPrefix, passes allowed
   pools and preserves enrollment. claim_attention_profiles_test.go tests it.
 - pkg/match/match.go, contract.go and match_test.go share granted-key filtering.
 - api/openapi.yaml removes required_executor_location.

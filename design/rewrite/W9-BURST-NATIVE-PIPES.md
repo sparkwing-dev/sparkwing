@@ -55,7 +55,7 @@ TMPDIR=/tmp/sw-astra-W9, with at most four package workers.
 
 Passed:
 
-- Whole-repository build; vet on cmd/sparkwing and pkg/controller.
+- Whole-repository build; vet on cmd/sparkwing and internal/controller.
 - Complete clisurface, controllerwire, controller/client and doccheck suites.
 - Focused CLI burst, route, here, overflow, source, registry, reference and
   Markdown tests; controller burst, personal enrollment and requester-secret
@@ -69,7 +69,7 @@ Passed:
   changelog drift, diff whitespace and commentcheck against HEAD (15 Go files).
 
 Commentcheck against main still fails on the inherited pinnedClock comment at
-pkg/store/store.go:108. The original TCP subprocess probe reached its listener
+internal/store/store.go:108. The original TCP subprocess probe reached its listener
 and was refused by the sandbox. The final TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards
 variant compiles but still needs a native run. An overbroad CLI docs selection
 also reached an unrelated httptest listener refusal; its socket-free focused
@@ -83,7 +83,7 @@ mistakes were corrected before its ordinary and race passes.
   because Git writes are prohibited and the worktree Git metadata is read-only.
   The lead must stage the resolved files and finish the existing merge.
 - Run the TCP subprocess variant with `go test -tags rewrite_integration
-  ./pkg/controller -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$'`.
+  ./internal/controller -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$'`.
 - Full native integration still needs configured public run, SDK build from the
   edited uploaded source, selected engine installation, here scheduler/log
   streaming, registered runner and Cloud Job execution, Ctrl-C, artifact
@@ -100,7 +100,7 @@ earlier cuts stand. W9 versus main: +18,344/-23,824, net -5,480, within -2,900.
 Counts exclude tests, testdata, acceptance and contract declarations. No removed
 API leaves callers behind.
 
-Shared files touched: pkg/controller/burst_sdk_execution_test.go and the three
+Shared files touched: internal/controller/burst_sdk_execution_test.go and the three
 new burst_sdk_{native,pipe,http_integration}_test.go files; C1, C3 controller
 wire and C4 contract docs; CHANGELOG.md and generated pkg/docs mirrors. The
 incoming W8 chart and launcher changes were retained without further edits.

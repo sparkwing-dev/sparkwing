@@ -64,7 +64,7 @@ the test executable did not dispatch `__sdk-install`. Its test-only dispatch now
 uses the production installer. No production engine policy was weakened.
 
 Commentcheck against main still reports the inherited untagged comment at
-`pkg/store/store.go:108`. No archived test was newly ported. The existing W9
+`internal/store/store.go:108`. No archived test was newly ported. The existing W9
 legacy cuts and port reports remain in force.
 
 ## Contract changes made
@@ -97,7 +97,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' -count=1 -v
 ```
 
@@ -125,7 +125,7 @@ Shared files touched:
 
 - `internal/wingd/localcontroller/native.go`, `native_artifacts_test.go` and
   new `native_caches_test.go`.
-- `pkg/controller/burst_sdk_source_test.go`, `burst_sdk_execution_test.go` and
+- `internal/controller/burst_sdk_source_test.go`, `burst_sdk_execution_test.go` and
   `leak_test.go`.
 - `design/rewrite/contracts/c3-protocol-sdk.md`, `CHANGELOG.md` and generated
   `pkg/docs` mirrors.

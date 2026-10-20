@@ -96,8 +96,8 @@ documentation. Lead-owned handoffs and amendments remain unchanged.
 Production Go delta this session: **+32/-74, net -42**. W9-owned production
 versus main: **+16,904/-23,797, net -6,893**, within the -2,900 budget.
 
-Shared files touched: pkg/controller/data_record_routes.go,
-pkg/controller/data_cache_routes.go, pkg/controller/data_request_binding.go,
+Shared files touched: internal/controller/data_record_routes.go,
+internal/controller/data_cache_routes.go, internal/controller/data_request_binding.go,
 tests/acceptance/data_cache_http_test.go, tests/acceptance/data_writes_http_test.go,
 api/openapi.yaml and the generated pkg/docs copies. No caller outside those
 files needed migration. C3 changed only its own prose clarification, not a foreign

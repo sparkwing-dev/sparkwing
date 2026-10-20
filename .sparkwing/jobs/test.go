@@ -29,7 +29,7 @@ func (Test) Help() string {
 func (Test) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Run the full test suite", Command: "sparkwing run test"},
-		{Comment: "Run only some packages", Command: "sparkwing run test --packages './internal/nodehost/ ./pkg/store/'"},
+		{Comment: "Run only some packages", Command: "sparkwing run test --packages './internal/nodehost/ ./internal/store/'"},
 	}
 }
 

@@ -131,11 +131,11 @@ Reproduce the focused checks with the environment above:
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./internal/acceptance ./tests/acceptance ./internal/apiroutes
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./internal/acceptance ./tests/acceptance ./internal/apiroutes
 go test -p 4 ./internal/capability ./internal/apierr ./internal/apiroutes ./internal/apispec ./internal/apiref
 go test -p 4 ./tests/acceptance -run '^TestCredential(Maintenance|Rotation|Audit)HTTP' -count=1
 go test -p 4 ./tests/acceptance -run '^Test(Credential|Authority|Data|Engine|Operator|Deployment|Source|Payment|Credit|Sizing|Discovery|Identity|Queue|FinalCredential|Reporting)' -count=1
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestRouteGuard_|^TestTenantRoutes_|^TestCredential(Issuance|SSHWrite)|^TestSourceController|^TestPlanSecretOpener' -count=1
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestRouteGuard_|^TestTenantRoutes_|^TestCredential(Issuance|SSHWrite)|^TestSourceController|^TestPlanSecretOpener' -count=1
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$' -count=1
 go run ./internal/commentcheck -base main .
 bash bin/check-api-spec.sh

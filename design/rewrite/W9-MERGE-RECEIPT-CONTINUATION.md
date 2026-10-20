@@ -11,7 +11,7 @@ Both conflict files have resolved contents and no conflict markers:
 - `internal/nodehost/process_authority_store_test.go` retains the integration
   branch's repository-scope property, including explicit empty scope and refusal
   of a widened or foreign scope. The full short nodehost suite passes.
-- `pkg/controller/browser_reads.go` uses the amended tenant-only backend
+- `internal/controller/browser_reads.go` uses the amended tenant-only backend
   constructor and retains W9's canonical run/job path values. Numeric debug,
   public reads and private storage/log tests pass.
 
@@ -134,9 +134,9 @@ path values. W9-owned production versus main remains **+16,911/-23,797,
 net -6,886**, within the -2,900 budget. Shared receipt code is counted separately.
 
 Shared files touched: internal/nodehost/process_authority_store_test.go,
-internal/orchestrator/receipt/receipt.go, pkg/controller/browser_reads.go,
-pkg/controller/public_selectors_native_test.go,
-pkg/controller/receipts_snapshot_test.go and the generated pkg/docs copies.
+internal/orchestrator/receipt/receipt.go, internal/controller/browser_reads.go,
+internal/controller/public_selectors_native_test.go,
+internal/controller/receipts_snapshot_test.go and the generated pkg/docs copies.
 Other edits are docs/api.md, CHANGELOG.md and this report. No API caller outside
 these files required migration.
 

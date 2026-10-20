@@ -4,7 +4,7 @@
 
 The merge's three conflicted file contents are resolved. Amended shapes are
 retained in `c2-credentials.md`, `internal/apierr/codes.go` and
-`pkg/controller/engine_contract.go`. The lead must stage them because the swarm
+`internal/controller/engine_contract.go`. The lead must stage them because the swarm
 brief prohibits git writes. No git command changed the index or history.
 
 ## Implemented in this continuation
@@ -96,9 +96,9 @@ GOCACHE=/tmp/sw-astra-W2/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp:
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/apiroutes ./internal/apispec
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./tests/acceptance ./internal/apiroutes ./internal/apispec
 go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$'
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$'
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$'
 go test -p 4 ./internal/apiroutes ./internal/apispec ./internal/apiref
 go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
@@ -248,8 +248,8 @@ The claim-delivery, sync, exchange, plan/eval renewal and upload-idempotency
 contract questions above remain open. No cross-area contract was changed.
 
 Shared implementation edits in this continuation are
-`pkg/controller/client/client.go` and `internal/orchestrator/wingd_api.go`.
-The new client test is `pkg/controller/client/jobs_read_test.go`.
+`internal/controller/client/client.go` and `internal/orchestrator/wingd_api.go`.
+The new client test is `internal/controller/client/jobs_read_test.go`.
 Source docs, migration/changelog, OpenAPI and generated mirrors are aligned.
 `perf/budgets.json` records the missing authorized performance corpus without
 claiming a measurement. W1's read methods remain stubs and real HTTP/api.sock,
@@ -271,7 +271,7 @@ passed:
 - Changed-line commentcheck and `git diff --check`.
 
 Reproduce the new boundary cases with `go test -p 4 ./tests/acceptance -run
-'^TestEngineJobs'` and `go test -p 4 ./pkg/controller/client -run
+'^TestEngineJobs'` and `go test -p 4 ./internal/controller/client -run
 '^TestJobStatus|^TestSizing|^TestParseRetryAfter'`, using the Go environment
 and scratch paths above. Native T1 cells and complete legacy ports remain
 pending. No performance measurement was taken.
@@ -343,9 +343,9 @@ Commands use the brief's GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/apiroutes ./internal/apispec
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./tests/acceptance ./internal/apiroutes ./internal/apispec
 go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestTenantRoutes_'
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestTenantRoutes_'
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$'
 go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
 go run ./internal/commentcheck -base HEAD .
@@ -416,10 +416,10 @@ and git diff --check pass. Use the isolation variables already listed above:
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/apiroutes ./cmd/sparkwing
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./tests/acceptance ./internal/apiroutes ./cmd/sparkwing
 go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance ./internal/apiroutes
 go test -p 4 ./tests/acceptance -run '^TestQueueRead' -count=1
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestQueueStateShowsOnlyTheCallersTeamsRunners$|^TestEveryFrontendAPICallIsAControllerRoute$'
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestQueueStateShowsOnlyTheCallersTeamsRunners$|^TestEveryFrontendAPICallIsAControllerRoute$'
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$'
 go test -p 4 ./internal/apispec ./internal/apiref ./pkg/docs -run '^TestGenerator|^TestEveryRegistered|^TestCommittedSpec|^TestSchema|^TestRewrite|^TestWriteRoutes|^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
 go test -p 4 ./cmd/sparkwing -run '^TestRenderQueue_'
@@ -533,12 +533,12 @@ GOCACHE=/tmp/sw-astra-W2/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp:
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/apispec ./internal/apiroutes
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./tests/acceptance ./internal/apispec ./internal/apiroutes
 go test -p 4 ./tests/acceptance ./internal/capability ./internal/apierr ./internal/apispec ./internal/apiroutes ./internal/apiref
 go test -p 4 ./tests/acceptance -run '^TestEngineRunDetail|^FuzzEngineRunDetail' -count=1
 go test -p 4 ./tests/acceptance -run '^$' -fuzz '^FuzzEngineRunDetailPrivateProjection$' -fuzztime=5s -parallel=2
 go test -p 4 ./tests/acceptance -run '^$' -fuzz '^FuzzEngineRunDetailScope$' -fuzztime=5s -parallel=2
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestTenantRoutes|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestEveryFrontendAPICallIsAControllerRoute$'
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestTenantRoutes|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestEveryFrontendAPICallIsAControllerRoute$'
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$'
 go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
 go run ./internal/commentcheck -base HEAD /home/bombuntu/.xwing/envs/1080/sparkwing
@@ -636,7 +636,7 @@ registration test, plus internal/orchestrator/wingd_api.go's read classification
 for HasMany. Download remains a write because it charges bytes. No removed Go
 API had a caller in another package. W2 caller/test changes are
 cache_grant_scope_internal_test.go, direct_source_test.go,
-direct_upload_test.go and direct_upload_s3_integration_test.go in pkg/controller.
+direct_upload_test.go and direct_upload_s3_integration_test.go in internal/controller.
 
 Other shared files are api/openapi.yaml, docs/api-reference.md, docs/api.md,
 docs/auth.md, docs/data-uploads.md, docs/migrations/_unreleased.md, CHANGELOG.md,
@@ -658,13 +658,13 @@ GOCACHE=/tmp/sw-astra-W2/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp:
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/apiroutes ./internal/orchestrator
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./tests/acceptance ./internal/apiroutes ./internal/orchestrator
 go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance ./internal/acceptance ./internal/apiroutes
 go test -p 4 ./tests/acceptance -run '^TestDataReadHTTP|^FuzzDataReadHTTP' -count=1
 go test -p 4 ./tests/acceptance -run '^$' -fuzz '^FuzzDataReadHTTPReadSet$' -fuzztime=5s -parallel=2
 go test -p 4 ./internal/apispec ./internal/apiref ./internal/apiroutes
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$'
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestTenantRoutes|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestEveryFrontendAPICallIsAControllerRoute$'
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestTenantRoutes|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestEveryFrontendAPICallIsAControllerRoute$'
 go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
 go run ./internal/commentcheck -base main .
 ```
@@ -754,7 +754,7 @@ result metadata, so that alternative is refused. Add a separate intent field
 and consume it in the state event without touching result columns.
 
 The required commentcheck against main fails on two incoming W1 comments:
-pkg/store/state_materialize.go:15 and pkg/store/state_result_records.go:9.
+internal/store/state_materialize.go:15 and internal/store/state_result_records.go:9.
 No W2 comment is reported. No store file was edited here.
 
 The full API snapshot comparison retains seven pre-existing baseline differences:
@@ -779,9 +779,9 @@ GOTMPDIR=/tmp/sw-astra-W2/tmp, TMPDIR=/tmp/sw-astra-W2/tmp and at most -p 4.
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./pkg/controller/client ./tests/acceptance ./internal/acceptance ./internal/apiroutes
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./internal/controller/client ./tests/acceptance ./internal/acceptance ./internal/apiroutes
 go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance ./internal/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
-go test -p 4 ./pkg/controller -run '^TestServerPolicy|^TestEngine|^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$' -skip '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
+go test -p 4 ./internal/controller -run '^TestServerPolicy|^TestEngine|^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$' -skip '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$|^TestHostedRetryPolicy_'
 go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
 go run ./internal/commentcheck -base main .
@@ -790,7 +790,7 @@ go run ./internal/commentcheck -base main .
 Shared edits outside the W2 implementation are
 internal/orchestrator/hosted_retry.go,
 internal/orchestrator/wingd_api_routes_test.go,
-pkg/controller/client/coordination.go,
+internal/controller/client/coordination.go,
 internal/acceptance/credential_routes.go,
 tests/acceptance/engine_transactions_test.go,
 tests/acceptance/engine_lifecycle_http_test.go,
@@ -913,7 +913,7 @@ and mirror checks and diff whitespace checks pass. The regenerated controller,
 client and storage API snapshots cover this continuation's surface cuts.
 
 The required commentcheck still fails only on incoming W1 comments at
-pkg/store/state_materialize.go:15 and pkg/store/state_result_records.go:9.
+internal/store/state_materialize.go:15 and internal/store/state_result_records.go:9.
 Those files are outside W2 and were not edited. Broad legacy credential tests
 still fail while creating the deleted tokens table. The targeted cancellation
 reason test remains red as described above. No complete T1 parked test port or
@@ -924,19 +924,19 @@ GOCACHE=/tmp/sw-astra-W2/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp.
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./pkg/controller/client ./internal/acceptance ./tests/acceptance ./internal/apiroutes
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./internal/controller/client ./internal/acceptance ./tests/acceptance ./internal/apiroutes
 go test -p 4 ./internal/capability ./internal/apierr ./internal/acceptance ./tests/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
-go test -p 4 ./pkg/controller -run '^TestEngine|^TestServerPolicy|^TestPolicyRouter|^TestOperatorSettings|^TestStoreDataStorage|^TestLegacy(CreditGrant|Manifest|Egress)|^FuzzEngine|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$' -skip '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
-go test -p 4 ./pkg/controller -run '^$' -fuzz '^FuzzEngineClaimHTTPKindsNeverWidenGrants$' -fuzztime=3s -parallel=2
-go test -p 4 ./pkg/controller -run '^$' -fuzz '^FuzzEngineLauncherSyncOmitsBearer$' -fuzztime=3s -parallel=2
-go test -p 4 ./pkg/controller -run '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
+go test -p 4 ./internal/controller -run '^TestEngine|^TestServerPolicy|^TestPolicyRouter|^TestOperatorSettings|^TestStoreDataStorage|^TestLegacy(CreditGrant|Manifest|Egress)|^FuzzEngine|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$' -skip '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
+go test -p 4 ./internal/controller -run '^$' -fuzz '^FuzzEngineClaimHTTPKindsNeverWidenGrants$' -fuzztime=3s -parallel=2
+go test -p 4 ./internal/controller -run '^$' -fuzz '^FuzzEngineLauncherSyncOmitsBearer$' -fuzztime=3s -parallel=2
+go test -p 4 ./internal/controller -run '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
 go run ./internal/commentcheck -base main .
 ```
 
 Shared edits outside W2 are internal/apiroutes/apiroutes.go,
 internal/orchestrator/wingd_api_routes_test.go, internal/nodehost/artifacts.go,
-internal/nodehost/memo.go, internal/nodehost/rehydrate.go, pkg/storage/state.go,
-pkg/controller/client/client.go, api/openapi.yaml, docs/api-reference.md,
+internal/nodehost/memo.go, internal/nodehost/rehydrate.go, internal/storage/state.go,
+internal/controller/client/client.go, api/openapi.yaml, docs/api-reference.md,
 docs/auth.md, docs/self-hosting.md, docs/migrations/_unreleased.md, CHANGELOG.md,
 their generated mirrors and .apidiff/pkg_controller{,_client}.txt and
 .apidiff/pkg_storage.txt. Other staged integration changes are not claimed as

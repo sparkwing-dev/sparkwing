@@ -1,0 +1,266 @@
+package controller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"path"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+)
+
+type githubAppAutomationPipeline struct {
+	Pipeline       string   `json:"pipeline"`
+	Push           bool     `json:"push"`
+	Branches       []string `json:"branches"`
+	PullRequest    bool     `json:"pull_request"`
+	Actions        []string `json:"actions"`
+	BaseBranches   []string `json:"base_branches"`
+	ManualOverride bool     `json:"manual_override"`
+}
+
+type githubAppAutomationPreview struct {
+	Repository     string                        `json:"repository"`
+	RepositoryID   int64                         `json:"repository_id"`
+	InstallationID int64                         `json:"installation_id"`
+	Enabled        bool                          `json:"enabled"`
+	Runner         store.GitHubAppRunner         `json:"runner"`
+	DefaultBranch  string                        `json:"default_branch"`
+	SourceSHA      string                        `json:"source_sha"`
+	Status         string                        `json:"status"`
+	Error          string                        `json:"error,omitempty"`
+	Pipelines      []githubAppAutomationPipeline `json:"pipelines"`
+}
+
+func validateAutomationPatterns(patterns []string) error {
+	if len(patterns) > 10 {
+		return errors.New("at most 10 branch patterns are supported")
+	}
+	for _, pattern := range patterns {
+		if pattern == "" || len(pattern) > 128 {
+			return errors.New("branch patterns must be 1 to 128 bytes")
+		}
+		if strings.Contains(pattern, "**") {
+			return errors.New("recursive ** branch patterns are unsupported; use explicit branches or a single *")
+		}
+		if strings.HasPrefix(pattern, "!") {
+			return errors.New("negative branch patterns are unsupported; list the branches to include")
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return fmt.Errorf("invalid branch pattern %q: %w", pattern, err)
+		}
+	}
+	return nil
+}
+
+func automationDeclarations(content []byte) ([]githubAppAutomationPipeline, string, error) {
+	cfg, err := projectconfig.Parse(content)
+	if err != nil {
+		return nil, "invalid", err
+	}
+	out := []githubAppAutomationPipeline{}
+	for _, pipeline := range cfg.Pipelines {
+		if pipeline.On == nil {
+			continue
+		}
+		decl := githubAppAutomationPipeline{Pipeline: pipeline.Name, Branches: []string{}, Actions: []string{}, BaseBranches: []string{}}
+		if push := pipeline.On.Push; push != nil {
+			if len(push.Paths) != 0 {
+				return nil, "unsupported", fmt.Errorf("pipeline %s: on.push.paths is unsupported by repository automation", pipeline.Name)
+			}
+			if err := validateAutomationPatterns(push.Branches); err != nil {
+				return nil, "unsupported", fmt.Errorf("pipeline %s: on.push.branches: %w", pipeline.Name, err)
+			}
+			decl.Push = true
+			decl.Branches = append(decl.Branches, push.Branches...)
+		}
+		if pr := pipeline.On.PullRequest; pr != nil {
+			if err := validateAutomationPatterns(pr.Branches); err != nil {
+				return nil, "unsupported", fmt.Errorf("pipeline %s: on.pull_request.branches: %w", pipeline.Name, err)
+			}
+			decl.PullRequest = true
+			decl.BaseBranches = append(decl.BaseBranches, pr.Branches...)
+			decl.Actions = append(decl.Actions, pr.Actions...)
+			if len(decl.Actions) == 0 {
+				decl.Actions = []string{"opened", "synchronize", "reopened"}
+			}
+			for _, action := range decl.Actions {
+				if !slices.Contains([]string{"opened", "synchronize", "reopened", "closed", "ready_for_review"}, action) {
+					return nil, "unsupported", fmt.Errorf("pipeline %s: on.pull_request.actions %q is unsupported by repository automation", pipeline.Name, action)
+				}
+			}
+		}
+		if decl.Push || decl.PullRequest {
+			out = append(out, decl)
+		}
+	}
+	return out, "ready", nil
+}
+
+func (s *Server) githubAppAutomationPreview(ctx context.Context, tenant *store.Tenant, in store.GitHubAppInstallation, repo store.GitHubRepo) (githubAppAutomationPreview, error) {
+	out := githubAppAutomationPreview{Repository: repo.Slug(), RepositoryID: repo.ID, InstallationID: in.InstallationID, Pipelines: []githubAppAutomationPipeline{}}
+	if grant, err := tenant.GitHubAppAutomation(ctx, in.InstallationID, repo.ID); err == nil {
+		out.Enabled, out.Runner = true, grant.Runner
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return out, err
+	}
+	snapshot, err := s.githubApp.client.FileAtDefaultHead(ctx, in.InstallationID, repo.Owner, repo.Name, ".sparkwing/"+projectconfig.Filename)
+	if err != nil {
+		out.Status = "unavailable"
+		out.Error = "GitHub could not read the repository configuration; retry discovery"
+		return out, nil //nolint:nilerr // Discovery failure is a valid preview status, not a failed preview request.
+	}
+	if snapshot.RepositoryID != repo.ID {
+		return out, errors.New("GitHub repository identity changed while reading configuration")
+	}
+	out.DefaultBranch, out.SourceSHA = snapshot.DefaultBranch, snapshot.HeadSHA
+	if !snapshot.Found {
+		out.Status = "missing"
+		out.Error = "Add .sparkwing/sparkwing.yaml to the default branch with on.push or on.pull_request declarations"
+		return out, nil
+	}
+	decls, status, err := automationDeclarations(snapshot.Content)
+	out.Status = status
+	if err != nil {
+		out.Error = err.Error()
+		return out, nil //nolint:nilerr // Invalid or unsupported declarations are valid preview results.
+	}
+	manual, err := tenant.GitHubAppTriggersFor(ctx, in.InstallationID, repo.ID)
+	if err != nil {
+		return out, err
+	}
+	for i := range decls {
+		for _, sub := range manual {
+			if sub.Pipeline == decls[i].Pipeline {
+				decls[i].ManualOverride = true
+				break
+			}
+		}
+	}
+	out.Pipelines = decls
+	return out, nil
+}
+
+func (s *Server) resolveAutomationRepository(ctx context.Context, tenant *store.Tenant, slug string) (store.GitHubAppInstallation, store.GitHubRepo, error) {
+	in, current, err := s.resolveGitHubAppRepository(ctx, tenant, slug)
+	if err != nil {
+		return in, store.GitHubRepo{}, err
+	}
+	repo, _ := store.ParseGitHubRepo(current.FullName)
+	repo.ID = current.ID
+	return in, repo, nil
+}
+
+func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+	}
+	tenant, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return githubAppRequestError(http.StatusBadRequest, errors.New("invalid automation query"))
+	}
+	queryKey := "repository"
+	if r.Method == http.MethodDelete {
+		queryKey = "repository_id"
+	}
+	for key, values := range query {
+		if key != queryKey || len(values) != 1 || (r.Method == http.MethodPut) {
+			return githubAppRequestError(http.StatusBadRequest, errors.New("invalid automation query"))
+		}
+	}
+	if r.Method == http.MethodDelete {
+		id, err := strconv.ParseInt(r.URL.Query().Get("repository_id"), 10, 64)
+		if err != nil || id <= 0 {
+			return githubAppRequestError(http.StatusBadRequest, errors.New("repository_id must be a positive integer"))
+		}
+		writer, err := s.githubAppWriter(r, a)
+		if err != nil {
+			return err
+		}
+		if err := writer.DeleteAuthorizedGitHubAutomation(r.Context(), a, id); err != nil {
+			return engineLookupError(err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	slug := r.URL.Query().Get("repository")
+	runner := store.GitHubAppRunnerAnywhere
+	if r.Method == http.MethodPut {
+		var req struct {
+			Repository string `json:"repository"`
+			Runner     string `json:"runner"`
+		}
+		if err := decodeEngineRequest(r, &req); err != nil {
+			return githubAppRequestError(http.StatusBadRequest, err)
+		}
+		if runner, err = store.ParseGitHubAppRunner(req.Runner); err != nil {
+			return githubAppRequestError(http.StatusBadRequest, err)
+		}
+		slug = req.Repository
+	} else if slug == "" {
+		if r.URL.RawQuery != "" {
+			return githubAppRequestError(http.StatusBadRequest, errors.New("repository must be owner/name"))
+		}
+		list, err := tenant.GitHubAppAutomations(r.Context())
+		if err != nil {
+			return engineLookupError(err)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"automation": list})
+		return nil
+	}
+	in, repo, err := s.resolveAutomationRepository(r.Context(), tenant, slug)
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, store.ErrInvalidInput) {
+			status = http.StatusBadRequest
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+			err = errors.New("no installation this team holds covers " + slug)
+		}
+		return githubAppRequestError(status, err)
+	}
+	out, err := s.githubAppAutomationPreview(r.Context(), tenant, in, repo)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	if r.Method == http.MethodPut {
+		if out.Status != "ready" {
+			writeJSON(w, http.StatusUnprocessableEntity, out)
+			return nil
+		}
+		writer, err := s.githubAppWriter(r, a)
+		if err != nil {
+			return err
+		}
+		if err := writer.PutAuthorizedGitHubAutomation(r.Context(), a, store.GitHubAppAutomation{RepositoryID: repo.ID, Repository: repo.Slug(), InstallationID: in.InstallationID, Runner: runner}); err != nil {
+			return engineLookupError(err)
+		}
+		out.Enabled, out.Runner = true, runner
+	}
+	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+func automationSubscribes(decl githubAppAutomationPipeline, event, action string, intake githubAppIntake) bool {
+	switch event {
+	case "push":
+		return decl.Push && intake.env["GITHUB_REF_TYPE"] == "branch" && runspec.BranchSelector(decl.Branches).Matches(intake.branch)
+	case "pull_request":
+		return decl.PullRequest && slices.Contains(decl.Actions, action) && runspec.BranchSelector(decl.BaseBranches).Matches(intake.env["GITHUB_BASE_REF"])
+	}
+	return false
+}

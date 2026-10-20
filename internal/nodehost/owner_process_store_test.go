@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
@@ -73,7 +74,7 @@ func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 	if status := call("owner-mask"); status != http.StatusOK || masker.Mask("owner-mask") != "***" {
 		t.Fatal("owner process service unavailable")
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Input.RunID, NodeID: "build"})
+	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "build"})
 	if err != nil || row.Attempt != 0 || row.CapabilityPrefix != "" || row.ClaimedBy != "" {
 		t.Fatalf("evaluation created work: %+v %v", row, err)
 	}

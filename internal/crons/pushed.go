@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // ArmPush is one repository's controller schedules as an operator pushed them.

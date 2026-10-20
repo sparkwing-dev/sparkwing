@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -44,7 +45,7 @@ func (h *OwnerHost) executeBurst(ctx context.Context, run RunInput, accepted Acc
 		err = h.reserveBurst(ctx, accepted, row, func(ctx context.Context, resources wingwire.HostResources) error {
 			claimRequest := request
 			claimRequest.Reserved = &match.Resources{Cores: resources.Cores, MemoryBytes: resources.MemoryBytes}
-			result, err := FollowReconciliation(ctx, h.Store, claimRequest, func(context.Context, store.NodeRef, int64) error { return errBurstProgress })
+			result, err := FollowReconciliation(ctx, h.Store, claimRequest, func(context.Context, controllerwire.NodeRef, int64) error { return errBurstProgress })
 			if err != nil {
 				return err
 			}

@@ -8,12 +8,12 @@ HEAD is a80c408b1. No Git write ran.
 
 Resolved all three conflicted file bodies first. docs/auth.md takes the incoming
 rewrite's scope descriptions. Its mirror is regenerated from that source.
-pkg/controller/server.go retains W1's GET node route and excludes the incoming
+internal/controller/server.go retains W1's GET node route and excludes the incoming
 POST node-dependencies route because W1 already removed that API and handler.
 The whole-repository build confirms the join.
 
 The index still lists docs/auth.md, pkg/docs/mirror/auth.md and
-pkg/controller/server.go as unmerged. The brief prohibits Git writes, and the
+internal/controller/server.go as unmerged. The brief prohibits Git writes, and the
 Git metadata is read-only. The lead must stage these resolved paths and finish
 the merge. No conflict markers remain in them. Amendments and handoffs received
 no edits.
@@ -92,11 +92,11 @@ Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and -p 4.
 GOCACHE, GOTMPDIR and TMPDIR are under /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - W1's selection passes **418 top-level tests / 1,267 cases**, without skips.
   Extract Test names from the files in w1-session25-tests.txt, exclude Postgres
-  names, and use the anchored alternation with ./pkg/store -count=1 -timeout=180s.
+  names, and use the anchored alternation with ./internal/store -count=1 -timeout=180s.
   The final nonce/key extension also passes separately after this selection.
 - **Seventeen SQLite cells** pass with ./internal/acceptance ./tests/acceptance
   -run '^(TestLifecycle|TestRecovery|TestPlacement|TestCredentials|TestBilling|TestSurface)$/[^/]+/store-sqlite$'
@@ -187,11 +187,11 @@ setting, environment variable, service, customer restriction or billing policy.
 
 ## Shared files and cleanup
 
-Outside pkg/store, implementation work touches only acceptance support/tests:
+Outside internal/store, implementation work touches only acceptance support/tests:
 internal/acceptance/store_sessions.go,
 tests/acceptance/credential_maintenance_http_test.go and
 tests/acceptance/session_flow_http_test.go. No production foreign caller needed
-migration for the two removed global rotation APIs. pkg/controller/server.go
+migration for the two removed global rotation APIs. internal/controller/server.go
 has only the merge resolution described above.
 
 Shared prose is c1-data.md, docs/auth.md, docs/migrations/_unreleased.md and

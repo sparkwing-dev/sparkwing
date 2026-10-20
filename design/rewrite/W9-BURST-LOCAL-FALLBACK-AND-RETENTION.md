@@ -104,7 +104,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' -count=1 -v
 ```
 
@@ -141,7 +141,7 @@ API's precomputed-seal argument. Its runtime caller and
 `local_describe_unix_test.go` migrate together. No other package called that API.
 Earlier legacy subsystem cuts remain; no new legacy subsystem is replaced.
 
-Shared files touched: `pkg/store/burst_overflow.go`, `metered_accounting.go`,
+Shared files touched: `internal/store/burst_overflow.go`, `metered_accounting.go`,
 `schema.sql`, `store.go`, `burst_placement_test.go` and new
 `burst_overflow_retention_test.go`, plus `tenant_sql_scope_guard_test.go`;
 C1/C4 contracts, CHANGELOG and embedded-doc

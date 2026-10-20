@@ -8,7 +8,7 @@ committing, pipelines and landing.
 Nine store harness files move from `internal/acceptance` into package tests.
 Eight plain tests retain seven former SQLite cells and the owner portion of
 `recovery-unstarted-lapse`. Their mapping is in t1-port-inventory.md. They open
-through `pkg/store/internal/storetest`, create accounts and membership through
+through `internal/store/internal/storetest`, create accounts and membership through
 sign-in and invitations, enroll the planner, admit and claim the owner, and
 issue expansion authority through `DelegateCapability`. There are no handwritten
 row insertions in the moved files. Fault-injection triggers and lease/session
@@ -54,12 +54,12 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 
 - Whole-repository `go build -p 4 ./...` passes on the final production source.
-- Scoped vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/.... Store vet also passes after the final outbox edit.
 - The W1 selection passes 477 top-level tests and 1,470 cases without skips.
   Reproduce from w1-session32-tests.txt by extracting top-level Test names from
-  those pkg/store files, excluding names containing Postgres or Pg, and passing
-  their anchored alternation to `go test -p 4 ./pkg/store -run ... -count=1`.
+  those internal/store files, excluding names containing Postgres or Pg, and passing
+  their anchored alternation to `go test -p 4 ./internal/store -run ... -count=1`.
 - All eight moved checks and the new account-audit property pass in that selection.
   The singleton fence and stale completion-acknowledgment regressions also pass
   after the final outbox edit.
@@ -74,7 +74,7 @@ GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 A broader prefix selection included the existing
 TestStoreFinishRefusesAnotherTeamsNode fixture. It fails because CreateRun
 writes the removed runs.args_json column. An overlay restoring every changed
-non-test pkg/store Go file to HEAD reproduces the same failure. This test is
+non-test internal/store Go file to HEAD reproduces the same failure. This test is
 not in the passing W1 selection. Full-package and whole-repository tests were
 not run. Early compile checks caught two unused imports. Initial fixture attempts
 correctly refused an invalid machine repository pattern, then exposed the signup

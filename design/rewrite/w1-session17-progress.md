@@ -86,11 +86,11 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is at most four.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet -p 4 passes for pkg/store/..., internal/crons/..., internal/acceptance/...,
-  tests/acceptance/..., pkg/controller/..., pkg/localws/... and cmd/sparkwing/....
+- Scoped go vet -p 4 passes for internal/store/..., internal/crons/..., internal/acceptance/...,
+  tests/acceptance/..., internal/controller/..., pkg/localws/... and cmd/sparkwing/....
 - The W1 selection passes **369 top-level tests / 1,041 cases**, without skips.
   Extract Test names from the files in w1-session17-tests.txt, omit TestPostgres
-  names, and pass their anchored alternation to go test -json -p 4 ./pkg/store.
+  names, and pass their anchored alternation to go test -json -p 4 ./internal/store.
 - TestTickRefreshesAndEvaluatesThroughEachTenant and the three setting tests
   TestSetComputeLimitRejectsUnknownAndNegative,
   TestSetComputeLimitsWritesEveryNamedGuardOrNone and
@@ -109,7 +109,7 @@ Bootstrap ran installed sparkwing info before the swarm brief was read.
 
 ## Shared caller migrations
 
-Production callers outside pkg/store:
+Production callers outside internal/store:
 
 - cmd/sparkwing/crons.go and crons_run.go
 - internal/crons/arm.go, crons.go, health.go, override.go, pushed.go and tick.go
@@ -119,7 +119,7 @@ Retained foreign fixtures:
 
 - cmd/sparkwing/crons_profile_test.go
 - internal/crons/arm_test.go, crons_test.go and pushed_test.go
-- pkg/controller/compute_limits_test.go, crons_team_test.go, crons_test.go and crons_tick_test.go
+- internal/controller/compute_limits_test.go, crons_team_test.go, crons_test.go and crons_tick_test.go
 - pkg/localws/crons_test.go
 
 New shared proof files are internal/crons/tenant_store_test.go,

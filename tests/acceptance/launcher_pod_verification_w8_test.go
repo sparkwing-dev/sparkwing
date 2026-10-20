@@ -13,8 +13,9 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -104,7 +105,7 @@ func TestLauncherPodRejectionCommitsFailedAwardW8(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			node, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "job"})
+			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil || node.Outcome != store.NodeFailed || node.ClaimedBy != "" {
 				t.Fatalf("award survived rejection: %+v %v", node, err)
 			}

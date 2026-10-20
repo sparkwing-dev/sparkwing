@@ -57,12 +57,12 @@ archived test was ported.
 
 ## Scope and handoff
 
-Shared production files touched: `pkg/controller/child_routes.go`,
-`pkg/controller/audit.go`, `pkg/controller/server.go`, `pkg/store/child_output.go`,
+Shared production files touched: `internal/controller/child_routes.go`,
+`internal/controller/audit.go`, `internal/controller/server.go`, `internal/store/child_output.go`,
 `internal/blob/object_output.go` and
 `internal/wingd/localcontroller/native_client.go`. W9's client change is in
-`pkg/controller/client/native_services.go`. New tests are
-`pkg/controller/child_output_sdk_test.go` and `internal/blob/object_output_test.go`;
+`internal/controller/client/native_services.go`. New tests are
+`internal/controller/child_output_sdk_test.go` and `internal/blob/object_output_test.go`;
 the existing audit property file is extended.
 
 Additional generated cleanup: OpenAPI was already missing the current

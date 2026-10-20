@@ -149,7 +149,7 @@ properties retain transport status, private errors and no-persistence checks.
 Store recovery continuation moves `store_started.go`, `store_unstarted.go`,
 `store_retry.go`, `store_capacity.go`, `store_capacity_maintenance.go`,
 `store_orphans.go` and the cancellation/reconciliation checks in
-`store_recovery.go` into ordinary `pkg/store` tests. Their final test names are
+`store_recovery.go` into ordinary `internal/store` tests. Their final test names are
 `TestStoreRecoveryStartedLapseCap`, `TestStoreRecoveryUnstartedLapse`,
 `TestStoreRecoveryApplicationRetry`, `TestStoreRecoveryCapacityAdoption`,
 `TestStoreRecoveryCapacityMaintenance`, `TestStoreRecoveryLocalOrphans`,
@@ -176,13 +176,13 @@ and source liveness remain in the final generated store tests. This does not
 establish GitHub App token-provider integration.
 
 
-Store continuation moves three more harness files into `pkg/store` tests.
+Store continuation moves three more harness files into `internal/store` tests.
 `store_actions_enrollment.go` becomes
-`pkg/store/acceptance_actions_enrollment_test.go:TestStoreActionsEnrollment`.
+`internal/store/acceptance_actions_enrollment_test.go:TestStoreActionsEnrollment`.
 `store_enrollment.go` becomes
-`pkg/store/acceptance_enrollment_test.go:TestStoreEnrolledClaims`.
+`internal/store/acceptance_enrollment_test.go:TestStoreEnrolledClaims`.
 `store_launcher_sync.go` becomes
-`pkg/store/acceptance_launcher_sync_test.go:TestStoreLauncherSync`.
+`internal/store/acceptance_launcher_sync_test.go:TestStoreLauncherSync`.
 They open through storetest and use sign-in, issuance, admission, acceptance and
 release transactions to seed their rows. They retain reopening, enrollment
 revocation, granted identity, award exchange and replacement-generation cleanup.
@@ -209,9 +209,9 @@ after event removal. Foreign tenants cannot read them. Attachment/copy failure
 and event-write failure leave no selectors. Record authorization and byte
 verification remain the record implementation's separate tests.
 
-The final unit-billing suite in `pkg/store/unit_billing_test.go` ports the
+The final unit-billing suite in `internal/store/unit_billing_test.go` ports the
 unfunded-claim, last-reservation race, unstarted-refund and consumed-minimum
-assertions from the retained `pkg/store/credits_test.go` tests. It uses final
+assertions from the retained `internal/store/credits_test.go` tests. It uses final
 ClaimUnit, TransitionNode, RenewUnit, ReleaseUnit, FinishRunAndUnit and ReapUnits
 with W1b's real ledger helpers and a C2 calculator fake. Two properties cover
 stale reports against replacement awards and expiry during issuance. The new
@@ -220,7 +220,7 @@ exchange, price and compute-start persistence through reopening. Native billing
 and provider cells remain pending. No additional archived source identity below
 is claimed closed by these retained-suite ports.
 
-The retained `pkg/store/crons_test.go` suite now uses Tenant for schedule
+The retained `internal/store/crons_test.go` suite now uses Tenant for schedule
 operations and Operator for tick metadata. Fired history fixtures seed the final
 same-team run reference. Non-run entries store NULL. Existing cursor, override,
 pause, retention, deduplication and tenant assertions remain active. The SQLite
@@ -514,7 +514,7 @@ is completed by these component ports.
 
 
 W2 browser-login ports: the ten tests in the deleted 271-line
-pkg/controller/browser_login_test.go move to TestLoginHTTPAccountCapabilitySession,
+internal/controller/browser_login_test.go move to TestLoginHTTPAccountCapabilitySession,
 TestLoginHTTPProofProperty, TestLoginHTTPPageAndMethods,
 TestLoginHTTPRefusesInvalidCredentialAndForm, TestLoginHTTPSafeReturnPath and
 TestLoginHTTPNonlocalRequiresSession in tests/acceptance/login_http_test.go. These cover
@@ -545,7 +545,7 @@ of the entire credential path. TestPaymentHTTPAuthenticationBoundary and
 TestPaymentHTTPRefusals retain signed checkout and private-error checks.
 The deleted credit_reversals_test.go and six removed card_billing_test.go
 transport tests still require their final provider-event ports. Existing
-pkg/store tests retain partial reversal, dispute/payment identity, saved-card
+internal/store tests retain partial reversal, dispute/payment identity, saved-card
 ordering, warned-card repayment, duplicate-payment refund and failed-refund
 retry requirements. None is counted as a completed provider-HTTP port here.
 The surviving owner-budget regression stays in card_billing_test.go. Source
@@ -610,7 +610,7 @@ finalization tests are deleted with the warm dispatcher. Their matching,
 tenant-scope and no-fallback concerns move to the final claim proofs. Enrollment
 remains a fake and native Actions/launcher transport is still required.
 
-`pkg/store/concurrency_maintenance_fence_test.go` ports expired-holder promotion,
+`internal/store/concurrency_maintenance_fence_test.go` ports expired-holder promotion,
 aged-waiter liveness, abandoned-work cleanup and repeated-pass assertions from the
 old maintenance suite. The fence property generates forged names, holders and
 generations. Rollback tests cover statement failure and lease expiry during the
@@ -645,7 +645,7 @@ Branch labels below retain the descriptive suffix of each source branch. Tracker
 The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-machine, 4 placement, 1 credential matrix, 23 run-input, 24 storage, and 10 state/security. Placement also contributes 10 existing functions. Six removed predecessors bring the total to 90 unique revision/file/function identities. Subcases do not increase that count. Source objects were inspected statically; this is not evidence that old or target product tests pass.
 
 Capability management ports the legacy TestRotateToken, its concurrent-revocation
-regression and both revocation tests to pkg/store/capability_inventory_test.go.
+regression and both revocation tests to internal/store/capability_inventory_test.go.
 The ports retain grace validity, explicit-revocation precedence, terminal
 revocation refusal and distinct replacements. Generated deadlines now exercise
 nanosecond boundaries and descendants. Independent SQLite connections race
@@ -670,7 +670,7 @@ rotation fixture are deleted. These are fake-backed HTTP proofs. They do not
 prove the committing rotation, grace, source-consent transfer (superseded by decision 6c) or native route
 matrix and add no archived source-function identity to the inventory.
 
-`pkg/store/download_accounting_runtime_test.go` ports
+`internal/store/download_accounting_runtime_test.go` ports
 `TestChargeDownloadHoldsATeamToItsDailyCap` and
 `TestChargeDownloadRaceForTheLastBytesAdmitsExactlyOne` from the retired raw
 Store method. Final-schema tests preserve cap crossing, delivered-byte counting,
@@ -681,7 +681,7 @@ isolation and conservation. Expired generic download holds release without
 double subtraction. Failed counter writes and overflow roll back admission.
 
 Event accounting ports the five charged-storage tests and seven event-cap tests
-from `pkg/store/storage_test.go` and `event_limits_test.go` to
+from `internal/store/storage_test.go` and `event_limits_test.go` to
 `event_accounting_runtime_test.go` and `event_policy_runtime_test.go`.
 The no-quota assertion now requires additive usage because final counters record
 all tenant writes. The ports retain byte/month/run/count caps, kind validation,
@@ -697,7 +697,7 @@ reopening. The controller proof exercises delivered-byte accounting, trusted
 replica identity, tenant isolation and log/live-log exemptions without a socket.
 No new native acceptance cell or archived source row is marked complete.
 
-`pkg/store/storage_standing_runtime_test.go` ports retained event-byte release
+`internal/store/storage_standing_runtime_test.go` ports retained event-byte release
 after deletion and the funded/free/held storage-standing matrix to final rows.
 It checks unique blob/log inventory, commit/abort/expiry holds, corrupt totals
 and reopening. `FuzzStorageStandingTenantInventory` generates own and foreign
@@ -715,7 +715,7 @@ capacity, expired tickets refuse late commits, and aborting an expired ticket
 cannot release its successor's hold. Committed replay remains covered separately.
 
 The raw paid-credit route and its handler tests are retired.
-`pkg/store/credit_grant_runtime_test.go` ports free-grant idempotency, team
+`internal/store/credit_grant_runtime_test.go` ports free-grant idempotency, team
 scoping, validation, balance/history accounting and payment-linked reversals
 to the final schema. Paid fixtures use committed checkout settlement facts.
 `payment_refunds_test.go` retains refund replay and ports pre-settlement fraud
@@ -725,18 +725,18 @@ cell also refuses raw paid grants. Native provider and controller adapters
 remain open. No archived source row or native acceptance cell is newly closed.
 
 The service-token storage and download counter handlers and their rolling-block
-tests are retired. `pkg/controller/store_data_retirement_internal_test.go` adds
+tests are retired. `internal/controller/store_data_retirement_internal_test.go` adds
 `FuzzLegacyStorageCountersAreGone` over generated credentials, tenant strings and
 byte counts. Every retired route returns 404. Final ticket tests retain scoped
 quota admission, immutable replay, concurrent-client and abort coverage.
 The two signup source tests use the final SQLite schema without a listener.
 They preserve full-tier and unreadable-source refusal and the server's own gate
 projection. Slot policy persistence and sealed-write refusal are covered in
-`pkg/store/credit_settings_runtime_test.go`. Native signup and data adapters
+`internal/store/credit_settings_runtime_test.go`. Native signup and data adapters
 remain open. No archived source row or native acceptance cell is newly closed.
 
 The independent bucket-listing storage pass and its tests are retired.
-`pkg/controller/storage_inventory_internal_test.go:TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage`
+`internal/controller/storage_inventory_internal_test.go:TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage`
 checks the replacement maintenance path against the final SQLite schema. It
 requires a clean maintenance pass, billing from committed blob inventory despite
 stale raw counters, and unchanged replica usage. Existing retained-storage and
@@ -755,10 +755,10 @@ legacy scheduler/store fixtures still fail against the removed schema.
 
 
 The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
-`pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
+`internal/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
 replaces its private ticker-based reaper with the real elected controller pass.
 It reverses the old assertion that a remote owner loss fails the run.
-`pkg/store/reaper_fence_property_test.go:TestReaperFenceProperty` generates forged
+`internal/store/reaper_fence_property_test.go:TestReaperFenceProperty` generates forged
 holders and generations, exact expiry and takeover. Refusals change no snapshot.
 `recovery_test.go:TestRecovery/recovery-local-orphans/store-sqlite` ports local
 orphan persistence through repeat passes and reopening. Existing same-run owner,
@@ -815,7 +815,7 @@ same store boundary. Native process continuity remains required. The old local
 the active unstarted-lapse and reconciler cells already check exact generation
 preservation on reaping and advancement on each next award.
 
-`pkg/store/maintenance_identity_test.go` ports the preservation assertions from
+`internal/store/maintenance_identity_test.go` ports the preservation assertions from
 `TestPruneSpentIdentityKeepsWhatStillAdmits` to the final leased API. It covers
 bounded invitation cleanup, expiry and repeated passes. The generated session
 property preserves live sessions and capability-parent rows. Rollback and expired
@@ -824,7 +824,7 @@ removed with that table. Capability expiry remains covered by the final retentio
 and ancestry tests. The invitation API proof checks nanosecond persistence for
 creation, listing, email delivery, acceptance and withdrawal.
 
-`pkg/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock`
+`internal/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock`
 replaces `TestConcurrencyGuard_CanonicalSQLSitesOnly` from design-found-hotfixes.
 Acquisition uses the injected clock. Expired capacity stops counting, heartbeat
 and adoption cannot revive it, and reacquisition creates a new lease. The
@@ -881,25 +881,25 @@ The final three comparisons include all changes since the recorded merge base. E
 | `node-lifecycle` | `136fbf58144d9bd6c300b0ecc08a9925b468c95e` | `internal/nodehost/lifecycle_test.go` | `TestLifecycleRunLeaseRejectedAfterRestart` | `TestLifecycleRunLeaseRejectedAfterRestart` | Reverse | `recovery_test.go:TestRecovery/recovery-keeper-causes-and-backoff/rejected_owner`. Rejected reattach cancels the unit with the same cause as rejected node reattach. The old expected successful continuation is forbidden. Proves §3.3/A9. |
 | `node-lifecycle` | `136fbf58144d9bd6c300b0ecc08a9925b468c95e` | `internal/nodehost/memo_unix_test.go` | `TestMemo` | `TestMemo/ALeaderEndsOnceAndAHitWithItsCacheHit` | Replace | `storage_test.go:TestStorage/storage-memo-materialization-failures`. Keep one terminal event for the leader. Replace the hit's old `cache_hit`-only lifecycle assertion with one store-owned `job_memoized` transition. Proves §3.3/A25. |
 | `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `internal/nodehost/node_end_event_pin_test.go` | `TestDispatchedNodeEndsWithOneEndEvent` | `TestDispatchedNodeEndsWithOneEndEvent` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-transition-replay-and-fencing/adopt_finished`. One store event, with a failing assertion instead of a defect-dependent skip. Proves §3.3. |
-| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `pkg/store/node_state_pins_test.go` | `TestNodeRules_ATriggerFenceCannotEndALiveHoldersRow` | `TestNodeRules_ATriggerFenceCannotEndALiveHoldersRow` | Keep | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/owner_cannot_finish_executor` and `pkg/store/node_state_test.go:TestTransitionHolderRights`. A trigger capability cannot overwrite a live competing node holder. The refused transaction changes no row or event. Proves §3.3, §5.1. |
-| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `pkg/store/node_state_pins_test.go` | `TestNodeRules_TheReaperEndsACancelledRunsLostNodeAsCancelled` | `TestNodeRules_TheReaperEndsACancelledRunsLostNodeAsCancelled` | Keep | `recovery_test.go:TestRecovery/recovery-cancel-beats-loss/cancel_requested`. A cancel-requested unit ends cancelled. No retry run is created. Proves §3.4. |
-| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `pkg/store/node_state_pins_test.go` | `TestNodeRules_AnAdoptedRowIsNotFinishedTwice` | `TestNodeRules_AnAdoptedRowIsNotFinishedTwice/reaper_first=false` and `/reaper_first=true` | Replace | `recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims/host_first` and `/reaper_first`. The stale host report is refused in either order. The reaper requeues within the same run, and the reconciler follows the persisted state. Proves §3.3-3.4. |
-| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `pkg/store/node_state_pins_test.go` | `TestNodeRules_SettleRunsARecoveryNodeThatListsItsParentAsADep` | `TestNodeRules_SettleRunsARecoveryNodeThatListsItsParentAsADep` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/parent_failure`. A failed recovery parent releases recovery once its other dependencies permit it. The parent's failure does not count as an ordinary failed prerequisite. Proves §3.3, §3.6. |
-| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `pkg/store/lifecycle_guard_test.go` | `TestLifecycleGuard_StatusWritersAreCounted` | `TestLifecycleGuard_StatusWritersAreCounted` | Replace | `pkg/store/lifecycle_guard_test.go:TestStateWriterOwnership`. Restrict state writers to the final owner files instead of pinning today's counts. Creation goes through `AcceptPlan` or `AcceptExpansion`. Keep this as a package architectural check, not a runtime acceptance case. Proves §4.1. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/placement_characterization_test.go` | `TestPlacementToday_HereTriggerIsStrandedAfterItsLeaseLapses` | `TestPlacementToday_HereTriggerIsStrandedAfterItsLeaseLapses` | Reverse | `recovery_test.go:TestRecovery/recovery-here-resume-window/lease_lapse`. The here capability reclaims the same run before expiry through `pipeline trigger --resume`. Other runners cannot claim it. Expiry fails with the documented reason. Proves §3.4, §5.1, §9.3. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/placement_characterization_test.go` | `TestPlacementToday_TriggerClaimMatchesNoLabels` | `TestPlacementToday_TriggerClaimMatchesNoLabels` | Reverse | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/trigger_requirements`. A claimant missing the trigger's requirements cannot host it. Replace the old fixture, which puts `gpu` only on a node, with explicit run/trigger demand. Proves §3.5. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/placement_characterization_test.go` | `TestPlacementToday_SelfAssertedLabelsSatisfyRequires` | `TestPlacementToday_SelfAssertedLabelsSatisfyRequires` | Replace | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity` and `pkg/match/evaluate_test.go:TestGrantedKeys`. Ordinary labels such as `prod` remain self-asserted. `pool=`, `name=`, and `class=` come from authority, not supplied labels. Replace `Requires("local")` and `location=coordinator` with `Inline`. Proves §3.5, §6.6. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/placement_characterization_test.go` | `TestPlacementToday_CoordinatorPinnedNodeIsInvisibleToClaims` | `TestPlacementToday_CoordinatorPinnedNodeIsInvisibleToClaims` | Drop | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/eligible_recovery_work`. Delete coordinator-pin SQL and the pin mechanism. Matching pending work remains visible to claims and attention. Proves §3.4-3.5. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/here_runner_test.go` | `TestCreateHereTriggerWithRun_PinsTheTriggerToItsCredentialOnce` | `TestCreateHereTriggerWithRun_PinsTheTriggerToItsCredentialOnce` | Replace | `recovery_test.go:TestRecovery/recovery-here-resume-window/run_binding`. Keep confinement to one run and the recorded reason. Reverse the second-claim refusal and remove `runner_pin`. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/here_runner_test.go` | `TestCreateHereTriggerWithRun_RefusesAClaimAfterTheWindow` | `TestCreateHereTriggerWithRun_RefusesAClaimAfterTheWindow` | Keep | `credentials_test.go:TestCredentials/credentials-here-award-parent/initial_claim_window`. Keep the initial ten-minute claim window. Subsequent reclaim is governed by the established owner's expiry. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/agent_match_test.go` | `TestQueueClaimNeverTakesANodeLargerThanTheRunnersCapacity` | `TestQueueClaimNeverTakesANodeLargerThanTheRunnersCapacity` | Keep | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/capacity`. A two-core runner cannot claim a four-core job. An eight-core runner can. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/agent_match_test.go` | `TestQueueClaimBindsNameToTheTokenPrincipal` | `TestQueueClaimBindsNameToTheTokenPrincipal` | Keep | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/name`. Supplying another runner's name does not grant that identity. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/agent_match_test.go` | `TestNamedClaimAppliesTheClaimantsProfile` | `TestNamedClaimAppliesTheClaimantsProfile` | Keep | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/named_claim`. Repository acceptance and job demand apply to named claims as they do to queue claims. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/agent_match_test.go` | `TestRunnerTokenRefusesADuplicateAgentName` | `TestRunnerTokenRefusesADuplicateAgentName` | Replace | `pkg/store/capability_test.go:TestRunnerNameUniqueness`. Preserve team-scoped active runner identity and reuse after revocation through the final issuance API. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/agent_match_test.go` | `TestNamedClaimOfAMeteredAgentObeysItsAcceptList` | `TestNamedClaimOfAMeteredAgentObeysItsAcceptList` | Keep | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/metered_runner`. Billing provenance confers no repository or placement authority. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/agent_match_test.go` | `TestCloudPlacementMatchesThePreChangeBehavior` | `TestCloudPlacementMatchesThePreChangeBehavior` | Replace | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/launcher`. Use the granted launcher profile. Delete the special case where metering plus a named claim manufactures cloud placement. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/agent_match_test.go` | `TestNamedClaimFromADispatcherThatSendsNoLabels` | `TestNamedClaimFromADispatcherThatSendsNoLabels` | Replace | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/missing_labels`. An unmet requirement is refused with its cause. Remove old-dispatcher compatibility framing. |
-| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `pkg/store/agent_match_test.go` | `TestAgentNameIsUniqueOnEveryMintPath` | `TestAgentNameIsUniqueOnEveryMintPath` | Replace | `pkg/store/capability_test.go:TestRunnerNameRotation`. Preserve uniqueness during authorized rotation. Replace old token-kind APIs with capability issuance. |
+| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `internal/store/node_state_pins_test.go` | `TestNodeRules_ATriggerFenceCannotEndALiveHoldersRow` | `TestNodeRules_ATriggerFenceCannotEndALiveHoldersRow` | Keep | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/owner_cannot_finish_executor` and `internal/store/node_state_test.go:TestTransitionHolderRights`. A trigger capability cannot overwrite a live competing node holder. The refused transaction changes no row or event. Proves §3.3, §5.1. |
+| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `internal/store/node_state_pins_test.go` | `TestNodeRules_TheReaperEndsACancelledRunsLostNodeAsCancelled` | `TestNodeRules_TheReaperEndsACancelledRunsLostNodeAsCancelled` | Keep | `recovery_test.go:TestRecovery/recovery-cancel-beats-loss/cancel_requested`. A cancel-requested unit ends cancelled. No retry run is created. Proves §3.4. |
+| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `internal/store/node_state_pins_test.go` | `TestNodeRules_AnAdoptedRowIsNotFinishedTwice` | `TestNodeRules_AnAdoptedRowIsNotFinishedTwice/reaper_first=false` and `/reaper_first=true` | Replace | `recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims/host_first` and `/reaper_first`. The stale host report is refused in either order. The reaper requeues within the same run, and the reconciler follows the persisted state. Proves §3.3-3.4. |
+| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `internal/store/node_state_pins_test.go` | `TestNodeRules_SettleRunsARecoveryNodeThatListsItsParentAsADep` | `TestNodeRules_SettleRunsARecoveryNodeThatListsItsParentAsADep` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/parent_failure`. A failed recovery parent releases recovery once its other dependencies permit it. The parent's failure does not count as an ordinary failed prerequisite. Proves §3.3, §3.6. |
+| `node-state-machine` | `7b1fc6d111c272612d4c970d061063a369598e30` | `internal/store/lifecycle_guard_test.go` | `TestLifecycleGuard_StatusWritersAreCounted` | `TestLifecycleGuard_StatusWritersAreCounted` | Replace | `internal/store/lifecycle_guard_test.go:TestStateWriterOwnership`. Restrict state writers to the final owner files instead of pinning today's counts. Creation goes through `AcceptPlan` or `AcceptExpansion`. Keep this as a package architectural check, not a runtime acceptance case. Proves §4.1. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/placement_characterization_test.go` | `TestPlacementToday_HereTriggerIsStrandedAfterItsLeaseLapses` | `TestPlacementToday_HereTriggerIsStrandedAfterItsLeaseLapses` | Reverse | `recovery_test.go:TestRecovery/recovery-here-resume-window/lease_lapse`. The here capability reclaims the same run before expiry through `pipeline trigger --resume`. Other runners cannot claim it. Expiry fails with the documented reason. Proves §3.4, §5.1, §9.3. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/placement_characterization_test.go` | `TestPlacementToday_TriggerClaimMatchesNoLabels` | `TestPlacementToday_TriggerClaimMatchesNoLabels` | Reverse | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/trigger_requirements`. A claimant missing the trigger's requirements cannot host it. Replace the old fixture, which puts `gpu` only on a node, with explicit run/trigger demand. Proves §3.5. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/placement_characterization_test.go` | `TestPlacementToday_SelfAssertedLabelsSatisfyRequires` | `TestPlacementToday_SelfAssertedLabelsSatisfyRequires` | Replace | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity` and `pkg/match/evaluate_test.go:TestGrantedKeys`. Ordinary labels such as `prod` remain self-asserted. `pool=`, `name=`, and `class=` come from authority, not supplied labels. Replace `Requires("local")` and `location=coordinator` with `Inline`. Proves §3.5, §6.6. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/placement_characterization_test.go` | `TestPlacementToday_CoordinatorPinnedNodeIsInvisibleToClaims` | `TestPlacementToday_CoordinatorPinnedNodeIsInvisibleToClaims` | Drop | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/eligible_recovery_work`. Delete coordinator-pin SQL and the pin mechanism. Matching pending work remains visible to claims and attention. Proves §3.4-3.5. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/here_runner_test.go` | `TestCreateHereTriggerWithRun_PinsTheTriggerToItsCredentialOnce` | `TestCreateHereTriggerWithRun_PinsTheTriggerToItsCredentialOnce` | Replace | `recovery_test.go:TestRecovery/recovery-here-resume-window/run_binding`. Keep confinement to one run and the recorded reason. Reverse the second-claim refusal and remove `runner_pin`. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/here_runner_test.go` | `TestCreateHereTriggerWithRun_RefusesAClaimAfterTheWindow` | `TestCreateHereTriggerWithRun_RefusesAClaimAfterTheWindow` | Keep | `credentials_test.go:TestCredentials/credentials-here-award-parent/initial_claim_window`. Keep the initial ten-minute claim window. Subsequent reclaim is governed by the established owner's expiry. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/agent_match_test.go` | `TestQueueClaimNeverTakesANodeLargerThanTheRunnersCapacity` | `TestQueueClaimNeverTakesANodeLargerThanTheRunnersCapacity` | Keep | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/capacity`. A two-core runner cannot claim a four-core job. An eight-core runner can. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/agent_match_test.go` | `TestQueueClaimBindsNameToTheTokenPrincipal` | `TestQueueClaimBindsNameToTheTokenPrincipal` | Keep | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/name`. Supplying another runner's name does not grant that identity. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/agent_match_test.go` | `TestNamedClaimAppliesTheClaimantsProfile` | `TestNamedClaimAppliesTheClaimantsProfile` | Keep | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/named_claim`. Repository acceptance and job demand apply to named claims as they do to queue claims. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/agent_match_test.go` | `TestRunnerTokenRefusesADuplicateAgentName` | `TestRunnerTokenRefusesADuplicateAgentName` | Replace | `internal/store/capability_test.go:TestRunnerNameUniqueness`. Preserve team-scoped active runner identity and reuse after revocation through the final issuance API. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/agent_match_test.go` | `TestNamedClaimOfAMeteredAgentObeysItsAcceptList` | `TestNamedClaimOfAMeteredAgentObeysItsAcceptList` | Keep | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/metered_runner`. Billing provenance confers no repository or placement authority. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/agent_match_test.go` | `TestCloudPlacementMatchesThePreChangeBehavior` | `TestCloudPlacementMatchesThePreChangeBehavior` | Replace | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/launcher`. Use the granted launcher profile. Delete the special case where metering plus a named claim manufactures cloud placement. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/agent_match_test.go` | `TestNamedClaimFromADispatcherThatSendsNoLabels` | `TestNamedClaimFromADispatcherThatSendsNoLabels` | Replace | `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/missing_labels`. An unmet requirement is refused with its cause. Remove old-dispatcher compatibility framing. |
+| `placement` | `8f114747eba050739f6ce8b775e6eb84edb2e1b0` | `internal/store/agent_match_test.go` | `TestAgentNameIsUniqueOnEveryMintPath` | `TestAgentNameIsUniqueOnEveryMintPath` | Replace | `internal/store/capability_test.go:TestRunnerNameRotation`. Preserve uniqueness during authorized rotation. Replace old token-kind APIs with capability issuance. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/api/event_test.go` | `TestPublicEventsRemoveClaimGenerationFromAttemptLifecycle` | `TestPublicEventsRemoveClaimGenerationFromAttemptLifecycle`, subtests `executor_selected`, `execution_attempt_started`, `execution_attempt_finished` | Replace | `internal/api/event_test.go:TestPublicEventsHideFences`. Preserve private fencing-data exclusion under the final event vocabulary. The old branch change only adds the masking argument to the projection call. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/api/event_test.go` | `TestPublicEventsDropMalformedProtectedLifecyclePayload` | `TestPublicEventsDropMalformedProtectedLifecyclePayload` | Keep | `internal/api/event_test.go:TestMalformedProtectedEvent`. A malformed protected payload is not returned. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/receipt/receipt_test.go` | `TestBuildReceipt_AnUnclassifiedRunHasNoInputsHash` | `TestBuildReceipt_AnUnclassifiedRunHasNoInputsHash` | Keep | `internal/orchestrator/receipt/receipt_test.go:TestUnclassifiedInputsHaveNoHash` and `credentials_test.go:TestCredentials/credentials-secret-display-classification/receipt`. An unclassified secret cannot become a guessable inputs hash. |
@@ -910,19 +910,19 @@ The final three comparisons include all changes since the recorded merge base. E
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestHostedRunContext_CarriesThePullRequest` | `TestHostedRunContext_CarriesThePullRequest` | Replace | `lifecycle_test.go:TestLifecycle/lifecycle-request-and-plan-seals/pull_request` and `internal/runspec/spec_test.go:TestPullRequestFields`. Carry number, action, base/head refs and SHAs through the sealed spec. `hermetic-checkout-planning` asserts all six fields in the SDK planning request. The shared projection retains Action and BaseSHA for attempts/evals too. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestLaunchedNode_RefusesASecretDefaultInAGroupName` | `TestLaunchedNode_RefusesASecretDefaultInAGroupName` | Keep | `internal/nodehost/host_planning_test.go:TestPlanningDefaults` checks SDK-default group refusal through the real shared validator, checkout resolver and SQLite owner lifecycle. Rejection finishes intake without a plan or jobs and returns no secret value. `FuzzPlanningDefaultsRefuseSecretIdentifiers` generates escaped, Unicode and control-bearing defaults across job, group, step and concurrency identifiers. SDK processes and source acquisition are test adapters. Native placement refusal remains open. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestHosts_RefuseASecretDefaultInANodeID` | `TestHosts_RefuseASecretDefaultInANodeID`, subtests `trigger host`, `launcher` | Keep | `internal/nodehost/host_planning_test.go:TestPlanningDefaults` supplies the real-validator and SQLite proof for default registration, short secrets and refusal before acceptance. Its safe case verifies persisted SDK defaults and classification. The generated property covers four identifier kinds. Native execution on every supported placement remains open. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/claim_run_test.go` | `TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` | `TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` | Replace | `credentials_test.go:TestCredentials/credentials-matrix-authentication-status/arguments_and_binding`. Planning receives real values for its own run. Replace old trigger routes and 401-on-live-denial answers with final route bindings and 403. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/run_inputs_test.go` | `TestAcceptPlan_NeverDropsAClassifiedSecretArgument` | `TestAcceptPlan_NeverDropsAClassifiedSecretArgument` | Keep | `credentials_test.go:TestCredentials/credentials-secret-display-classification/classification_union` and `pkg/store/run_spec_test.go:TestClassificationNeverShrinks`. A plan cannot remove an intake classification. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/run_inputs_test.go` | `TestTriggerReads_RedactTheRunsSecretArguments` | `TestTriggerReads_RedactTheRunsSecretArguments` | Replace | `credentials_test.go:TestCredentials/credentials-secret-display-classification/run_list_and_detail`. Move deleted `/triggers` list/detail assertions to run views. Preserve classified public arguments and hide every unclassified value. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/run_inputs_test.go` | `TestSecretArgs_AFinishedClaimReadsRedacted` | `TestSecretArgs_AFinishedClaimReadsRedacted`, subtests `node`, `run` | Replace | `credentials_test.go:TestCredentials/credentials-secret-display-classification/finished_job` and `/finished_run`. Authority ends at terminal state before lease expiry. A dead bound credential gets 401. A separate account display read remains redacted. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/run_inputs_test.go` | `TestApprovalReads_MaskSecretArgumentsInTheirText` | `TestApprovalReads_MaskSecretArgumentsInTheirText` | Keep | `credentials_test.go:TestCredentials/credentials-secret-display-classification`. Mask message, approver and comment across decorations, approval detail/list, pending approvals and events. Include SDK defaults at the write boundary. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/run_inputs_test.go` | `TestAcceptPlan_RefusesASecretInANodeID` | `TestAcceptPlan_RefusesASecretInANodeID` | Keep | `credentials_test.go:TestCredentials/credentials-secret-identifiers/controller_accept`. Refuse before insertion with the shared error object and no secret value. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/secret_args_display_test.go` | `TestSecretArgs_ControllerRedactsEveryArgOfAnUnclassifiedRun` | `TestSecretArgs_ControllerRedactsEveryArgOfAnUnclassifiedRun`, loop values `pending`, `success` | Keep | `credentials_test.go:TestCredentials/credentials-secret-display-classification/unclassified`. The display fails closed in both phases. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/plan_secret_names_test.go` | `TestSecretInPlanName_RefusesEveryRenderedName` | `TestSecretInPlanName_RefusesEveryRenderedName` | Replace | `internal/nodeproto/validate_test.go:TestSecretIdentifiers` and `credentials_test.go:TestCredentials/credentials-secret-identifiers`. Use the exact rows below, with the short-value question recorded. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/retry_team_test.go` | `TestManualRetryKeepsActorAndPullRequest` | `TestManualRetryKeepsActorAndPullRequest` | Replace | `lifecycle_test.go:TestLifecycle/lifecycle-retry-sealed-lineage/actor_and_pull_request`. Retain sealed actor, PR, original SHA and verified branch facts. Remove trigger-env copying and agent-loss retry-run framing. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/run_inputs_test.go` | `TestCreateRun_TheIntakesInvocationKeysWin` | `TestCreateRun_TheIntakesInvocationKeysWin` | Replace | `pkg/store/run_spec_test.go:TestRequestSealIsImmutable` and `lifecycle_test.go:TestLifecycle/lifecycle-request-and-plan-seals/intake_precedence`. Fill resolved fields at the second seal without rewriting the request. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/run_inputs_test.go` | `TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs` | `TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs` | Replace | `pkg/store/run_spec_test.go:TestConcurrentClassification`. Interleave final API writes on Postgres and prove classification never shrinks. Replace the pending-upsert hook with the owning transaction boundary. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | Keep | `pkg/store/reporting_seals_test.go:TestReportingDistinguishesUnknownAndEmptyClassification` and `TestReportingReadsSealedFactsWithoutSecretValuesProperty`. Real sealed reports and receipts hide absent, nil, duplicate and invalid classification. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | Keep | `pkg/store/reporting_seals_test.go:TestReportingDistinguishesUnknownAndEmptyClassification`. Explicit empty classification exposes public arguments and permits their receipt input hash. Absent classification hides values and omits the hash. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/claim_run_test.go` | `TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` | `TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` | Replace | `credentials_test.go:TestCredentials/credentials-matrix-authentication-status/arguments_and_binding`. Planning receives real values for its own run. Replace old trigger routes and 401-on-live-denial answers with final route bindings and 403. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/run_inputs_test.go` | `TestAcceptPlan_NeverDropsAClassifiedSecretArgument` | `TestAcceptPlan_NeverDropsAClassifiedSecretArgument` | Keep | `credentials_test.go:TestCredentials/credentials-secret-display-classification/classification_union` and `internal/store/run_spec_test.go:TestClassificationNeverShrinks`. A plan cannot remove an intake classification. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/run_inputs_test.go` | `TestTriggerReads_RedactTheRunsSecretArguments` | `TestTriggerReads_RedactTheRunsSecretArguments` | Replace | `credentials_test.go:TestCredentials/credentials-secret-display-classification/run_list_and_detail`. Move deleted `/triggers` list/detail assertions to run views. Preserve classified public arguments and hide every unclassified value. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/run_inputs_test.go` | `TestSecretArgs_AFinishedClaimReadsRedacted` | `TestSecretArgs_AFinishedClaimReadsRedacted`, subtests `node`, `run` | Replace | `credentials_test.go:TestCredentials/credentials-secret-display-classification/finished_job` and `/finished_run`. Authority ends at terminal state before lease expiry. A dead bound credential gets 401. A separate account display read remains redacted. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/run_inputs_test.go` | `TestApprovalReads_MaskSecretArgumentsInTheirText` | `TestApprovalReads_MaskSecretArgumentsInTheirText` | Keep | `credentials_test.go:TestCredentials/credentials-secret-display-classification`. Mask message, approver and comment across decorations, approval detail/list, pending approvals and events. Include SDK defaults at the write boundary. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/run_inputs_test.go` | `TestAcceptPlan_RefusesASecretInANodeID` | `TestAcceptPlan_RefusesASecretInANodeID` | Keep | `credentials_test.go:TestCredentials/credentials-secret-identifiers/controller_accept`. Refuse before insertion with the shared error object and no secret value. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/secret_args_display_test.go` | `TestSecretArgs_ControllerRedactsEveryArgOfAnUnclassifiedRun` | `TestSecretArgs_ControllerRedactsEveryArgOfAnUnclassifiedRun`, loop values `pending`, `success` | Keep | `credentials_test.go:TestCredentials/credentials-secret-display-classification/unclassified`. The display fails closed in both phases. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/store/plan_secret_names_test.go` | `TestSecretInPlanName_RefusesEveryRenderedName` | `TestSecretInPlanName_RefusesEveryRenderedName` | Replace | `internal/nodeproto/validate_test.go:TestSecretIdentifiers` and `credentials_test.go:TestCredentials/credentials-secret-identifiers`. Use the exact rows below, with the short-value question recorded. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/store/retry_team_test.go` | `TestManualRetryKeepsActorAndPullRequest` | `TestManualRetryKeepsActorAndPullRequest` | Replace | `lifecycle_test.go:TestLifecycle/lifecycle-retry-sealed-lineage/actor_and_pull_request`. Retain sealed actor, PR, original SHA and verified branch facts. Remove trigger-env copying and agent-loss retry-run framing. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/store/run_inputs_test.go` | `TestCreateRun_TheIntakesInvocationKeysWin` | `TestCreateRun_TheIntakesInvocationKeysWin` | Replace | `internal/store/run_spec_test.go:TestRequestSealIsImmutable` and `lifecycle_test.go:TestLifecycle/lifecycle-request-and-plan-seals/intake_precedence`. Fill resolved fields at the second seal without rewriting the request. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/store/run_inputs_test.go` | `TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs` | `TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs` | Replace | `internal/store/run_spec_test.go:TestConcurrentClassification`. Interleave final API writes on Postgres and prove classification never shrinks. Replace the pending-upsert hook with the owning transaction boundary. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/store/secretargs_test.go` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | Keep | `internal/store/reporting_seals_test.go:TestReportingDistinguishesUnknownAndEmptyClassification` and `TestReportingReadsSealedFactsWithoutSecretValuesProperty`. Real sealed reports and receipts hide absent, nil, duplicate and invalid classification. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/store/secretargs_test.go` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | Keep | `internal/store/reporting_seals_test.go:TestReportingDistinguishesUnknownAndEmptyClassification`. Explicit empty classification exposes public arguments and permits their receipt input hash. Absent classification hides values and omits the hash. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/artifacts/retention_test.go` | `TestCaptureRewritesStoredContentSoItsAgeRestarts` | `TestCaptureRewritesStoredContentSoItsAgeRestarts` | Replace | `storage_test.go:TestStorage/storage-reachability-and-retention-tails/reused_content`. Referenced bytes survive GC. Delete the exact two-PUT assertion because reachability and pinned records replace object-age refresh. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/artifacts/retention_test.go` | `TestPresentIsBoundedAndAnswersAMissPastItsBudget` | `TestPresentIsBoundedAndAnswersAMissPastItsBudget` | Replace | `internal/blob/store_test.go:TestHasManyBudget` and `storage_test.go:TestStorage/storage-memo-materialization-failures/budget`. Presence lookup respects its budget. A timed-out memo lookup is a miss. Do not pin the old worker count. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/cache/scope_test.go` | `TestArtifactsAreScopedToTheGrantsRepository` | `TestArtifactsAreScopedToTheGrantsRepository`, subtests `volume`, `bucket` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/filesystem` and `/s3`. Preserve foreign read/existence refusal and own-upload authority. Repository membership alone grants no read. Delete cache-server paths and credentials. |
@@ -930,39 +930,39 @@ The final three comparisons include all changes since the recorded merge base. E
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/nodehost/memo_artifacts_test.go` | `TestMemoUnclaimedFollowerWithoutLeaderOutputRuns` | `TestMemoUnclaimedFollowerWithoutLeaderOutputRuns` | Keep | `storage_test.go:TestStorage/storage-memo-materialization-failures/follower_output`. A follower executes when its leader's output is gone. It cannot return successful empty output. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/nodehost/memo_artifacts_test.go` | `TestMemoCopyWhoseManifestWriteFailsRunsAsAMiss` | `TestMemoCopyWhoseManifestWriteFailsRunsAsAMiss`, subtests `Hit`, `Follow` | Keep | `storage_test.go:TestStorage/storage-memo-materialization-failures/manifest_commit`. A failed manifest-edge transaction becomes a memo miss for hits and followers. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/nodehost/rehydrate_test.go` | `TestARetryRunsAProducerWhoseArtifactsCannotBeCopied` | `TestARetryRunsAProducerWhoseArtifactsCannotBeCopied`, subtests `absent`, `refused` | Keep | `storage_test.go:TestStorage/storage-memo-materialization-failures/missing_bytes` and `/refused_edge`. A retry reruns the producer when bytes or authorized records cannot be copied. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/cache_ref_internal_test.go` | `TestCacheRefs_FollowTheGrantsSignedRefs` | `TestCacheRefs_FollowTheGrantsSignedRefs` | Replace | `internal/capability/data_scope_test.go:TestDataRefScope` and `storage_test.go:TestStorage/storage-memo-and-depcache-scope`. Use server-derived sealed scopes, manual namespaces and original retry trust. Memo reads its own scope with verified-default fallback. Depcache restores own ref, PR base, then verified default. Delete signed cache grants and unscoped/empty-repo fallback. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/claim_run_test.go` | `TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan` | `TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan` | Keep | `storage_test.go:TestStorage/storage-reference-edge-laundering`. Memo, coalesced and declared prior-run references work only through authorized edges. Preserve the full case inventory below. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/claim_run_test.go` | `TestClaimRun_MemoEntriesAreScopedToTheRunsRef` | `TestClaimRun_MemoEntriesAreScopedToTheRunsRef` | Replace | `storage_test.go:TestStorage/storage-memo-and-depcache-scope/poisoning_and_fallback`. Manual runs cannot poison verified default entries. Own scope precedes trusted fallback. Retry preserves trust. A planted false-provenance entry is refused. Seed trust through verified App intake instead of SQL `trigger_source=github`. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/claim_run_test.go` | `TestNodeClaimMemoKeysFollowTheRunsRef` | `TestNodeClaimMemoKeysFollowTheRunsRef` | Replace | `storage_test.go:TestStorage/storage-memo-and-depcache-scope/server_owned_key`. The server computes the scope. Naming main's scope or another job's key grants no authority. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/data_download_claim_provenance_test.go` | `TestDataDownloadClaimUsesCloudProvenance` | `TestDataDownloadClaimUsesCloudProvenance` | Replace | `storage_test.go:TestStorage/storage-binary-provenance` and `placement_test.go:TestPlacement/placement-direct-source`. Preserve trusted binary execution and source binding. Artifact access follows the read set. See the exact seven cases below and the provenance question. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/data_download_output_boundary_test.go` | `TestDataDownloadSharesCommittedArtifactsWithinTheRepository` | `TestDataDownloadSharesCommittedArtifactsWithinTheRepository` | Reverse | `storage_test.go:TestStorage/storage-reference-edge-laundering/same_repo_unrelated_run`. Repository membership alone cannot read another run's artifact. Require a dependency, declared reference, memo edge or own receipt. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/data_download_test.go` | `TestLegacyBinarySignerRefusesArtifactNames` | `TestLegacyBinarySignerRefusesArtifactNames` | Drop | `storage_test.go:TestStorage/storage-reference-edge-laundering/object_kind`. Delete the legacy signer. Retain object-kind and read-set refusal on final `/data` signing routes, with no legacy fallback. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_artifact_scope_test.go` | `TestDirectArtifactReadsStayInsideTheGrantsRepository` | `TestDirectArtifactReadsStayInsideTheGrantsRepository` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/foreign_repository`. Foreign authority is refused. A verified own upload creates a receipt. Add same-team and same-run unrelated-job cases. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_artifact_scope_test.go` | `TestDirectArtifactRedeclarationRenewsItsAge` | `TestDirectArtifactRedeclarationRenewsItsAge` | Replace | `storage_test.go:TestStorage/storage-reachability-and-retention-tails/live_reference`. A live reference prevents collection. Delete assertions about mutable `committed_at` and the object's `renewed` metadata. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_artifact_scope_test.go` | `TestNodeArtifactManifestMustBeStoredByTheRunsRepository` | `TestNodeArtifactManifestMustBeStoredByTheRunsRepository` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/record`. Check existence and authority for the manifest and every member. Repository-scoped names alone are insufficient. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_artifact_scope_test.go` | `TestClaimedAttemptRecordsOnlyAManifestItsRepositoryStored` | `TestClaimedAttemptRecordsOnlyAManifestItsRepositoryStored` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/result_transaction`. Apply existence and edge authorization atomically with the attempt result. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_artifact_scope_test.go` | `TestRunnerNodeManifestMayLiveInItsOwnStore` | `TestRunnerNodeManifestMayLiveInItsOwnStore` | Reverse | `storage_test.go:TestStorage/storage-reference-edge-laundering/unseen_remote_manifest`. Remote result commit refuses a manifest the controller cannot validate. Remove `SPARKWING_CACHE_URL`. Local-run files remain local until an explicit publication. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_artifact_scope_test.go` | `TestClaimedAttemptManifestIsCheckedAgainstTheCacheBucket` | `TestClaimedAttemptManifestIsCheckedAgainstTheCacheBucket` | Drop | `storage_test.go:TestStorage/storage-reference-edge-laundering/filesystem` and `/s3`. Delete cache-bucket HEAD fallback. Authoritative blob rows and authorized members govern both final backends. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_upload_test.go` | `TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires` | `TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires` | Replace | `internal/blob/store_test.go:TestCommitAfterInterruptedUpload` and `storage_test.go:TestStorage/storage-cas-integrity/retry`. Adopt only verified immutable bytes, preserve uploader provenance, and issue receipts only to authorized uploaders. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_upload_test.go` | `TestDirectCommitRefusesExistingObjectWithDifferentChecksum` | `TestDirectCommitRefusesExistingObjectWithDifferentChecksum` | Keep | `storage_test.go:TestStorage/storage-cas-integrity/checksum_mismatch`. Refuse conflicting bytes and publish no successful record. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/direct_upload_test.go` | `TestClaimBinaryUploadIsReservedUnderTheRunsRef` | `TestClaimBinaryUploadIsReservedUnderTheRunsRef` | Replace | `storage_test.go:TestStorage/storage-binary-provenance/ref_scope`. Manual writes use the manual namespace. Retry retains its original awarded scope. Replace the hand-minted cache-grant fixture. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/store/generated_node_test.go` | `TestAGeneratedNodesRecordedSpecIsAdmitted` | `TestAGeneratedNodesRecordedSpecIsAdmitted` | Replace | `pkg/store/expansion_test.go:TestGeneratedSpecAuthority` and `lifecycle_test.go:TestLifecycle/lifecycle-generator-reconstruct-code/declared_references`. Persisted spec/hash controls generated-job references. Forged hash and undeclared references are refused. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/cache_ref_internal_test.go` | `TestCacheRefs_FollowTheGrantsSignedRefs` | `TestCacheRefs_FollowTheGrantsSignedRefs` | Replace | `internal/capability/data_scope_test.go:TestDataRefScope` and `storage_test.go:TestStorage/storage-memo-and-depcache-scope`. Use server-derived sealed scopes, manual namespaces and original retry trust. Memo reads its own scope with verified-default fallback. Depcache restores own ref, PR base, then verified default. Delete signed cache grants and unscoped/empty-repo fallback. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/claim_run_test.go` | `TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan` | `TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan` | Keep | `storage_test.go:TestStorage/storage-reference-edge-laundering`. Memo, coalesced and declared prior-run references work only through authorized edges. Preserve the full case inventory below. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/claim_run_test.go` | `TestClaimRun_MemoEntriesAreScopedToTheRunsRef` | `TestClaimRun_MemoEntriesAreScopedToTheRunsRef` | Replace | `storage_test.go:TestStorage/storage-memo-and-depcache-scope/poisoning_and_fallback`. Manual runs cannot poison verified default entries. Own scope precedes trusted fallback. Retry preserves trust. A planted false-provenance entry is refused. Seed trust through verified App intake instead of SQL `trigger_source=github`. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/claim_run_test.go` | `TestNodeClaimMemoKeysFollowTheRunsRef` | `TestNodeClaimMemoKeysFollowTheRunsRef` | Replace | `storage_test.go:TestStorage/storage-memo-and-depcache-scope/server_owned_key`. The server computes the scope. Naming main's scope or another job's key grants no authority. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/data_download_claim_provenance_test.go` | `TestDataDownloadClaimUsesCloudProvenance` | `TestDataDownloadClaimUsesCloudProvenance` | Replace | `storage_test.go:TestStorage/storage-binary-provenance` and `placement_test.go:TestPlacement/placement-direct-source`. Preserve trusted binary execution and source binding. Artifact access follows the read set. See the exact seven cases below and the provenance question. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/data_download_output_boundary_test.go` | `TestDataDownloadSharesCommittedArtifactsWithinTheRepository` | `TestDataDownloadSharesCommittedArtifactsWithinTheRepository` | Reverse | `storage_test.go:TestStorage/storage-reference-edge-laundering/same_repo_unrelated_run`. Repository membership alone cannot read another run's artifact. Require a dependency, declared reference, memo edge or own receipt. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/data_download_test.go` | `TestLegacyBinarySignerRefusesArtifactNames` | `TestLegacyBinarySignerRefusesArtifactNames` | Drop | `storage_test.go:TestStorage/storage-reference-edge-laundering/object_kind`. Delete the legacy signer. Retain object-kind and read-set refusal on final `/data` signing routes, with no legacy fallback. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_artifact_scope_test.go` | `TestDirectArtifactReadsStayInsideTheGrantsRepository` | `TestDirectArtifactReadsStayInsideTheGrantsRepository` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/foreign_repository`. Foreign authority is refused. A verified own upload creates a receipt. Add same-team and same-run unrelated-job cases. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_artifact_scope_test.go` | `TestDirectArtifactRedeclarationRenewsItsAge` | `TestDirectArtifactRedeclarationRenewsItsAge` | Replace | `storage_test.go:TestStorage/storage-reachability-and-retention-tails/live_reference`. A live reference prevents collection. Delete assertions about mutable `committed_at` and the object's `renewed` metadata. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_artifact_scope_test.go` | `TestNodeArtifactManifestMustBeStoredByTheRunsRepository` | `TestNodeArtifactManifestMustBeStoredByTheRunsRepository` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/record`. Check existence and authority for the manifest and every member. Repository-scoped names alone are insufficient. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_artifact_scope_test.go` | `TestClaimedAttemptRecordsOnlyAManifestItsRepositoryStored` | `TestClaimedAttemptRecordsOnlyAManifestItsRepositoryStored` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/result_transaction`. Apply existence and edge authorization atomically with the attempt result. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_artifact_scope_test.go` | `TestRunnerNodeManifestMayLiveInItsOwnStore` | `TestRunnerNodeManifestMayLiveInItsOwnStore` | Reverse | `storage_test.go:TestStorage/storage-reference-edge-laundering/unseen_remote_manifest`. Remote result commit refuses a manifest the controller cannot validate. Remove `SPARKWING_CACHE_URL`. Local-run files remain local until an explicit publication. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_artifact_scope_test.go` | `TestClaimedAttemptManifestIsCheckedAgainstTheCacheBucket` | `TestClaimedAttemptManifestIsCheckedAgainstTheCacheBucket` | Drop | `storage_test.go:TestStorage/storage-reference-edge-laundering/filesystem` and `/s3`. Delete cache-bucket HEAD fallback. Authoritative blob rows and authorized members govern both final backends. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_upload_test.go` | `TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires` | `TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires` | Replace | `internal/blob/store_test.go:TestCommitAfterInterruptedUpload` and `storage_test.go:TestStorage/storage-cas-integrity/retry`. Adopt only verified immutable bytes, preserve uploader provenance, and issue receipts only to authorized uploaders. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_upload_test.go` | `TestDirectCommitRefusesExistingObjectWithDifferentChecksum` | `TestDirectCommitRefusesExistingObjectWithDifferentChecksum` | Keep | `storage_test.go:TestStorage/storage-cas-integrity/checksum_mismatch`. Refuse conflicting bytes and publish no successful record. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/direct_upload_test.go` | `TestClaimBinaryUploadIsReservedUnderTheRunsRef` | `TestClaimBinaryUploadIsReservedUnderTheRunsRef` | Replace | `storage_test.go:TestStorage/storage-binary-provenance/ref_scope`. Manual writes use the manual namespace. Retry retains its original awarded scope. Replace the hand-minted cache-grant fixture. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/store/generated_node_test.go` | `TestAGeneratedNodesRecordedSpecIsAdmitted` | `TestAGeneratedNodesRecordedSpecIsAdmitted` | Replace | `internal/store/expansion_test.go:TestGeneratedSpecAuthority` and `lifecycle_test.go:TestLifecycle/lifecycle-generator-reconstruct-code/declared_references`. Persisted spec/hash controls generated-job references. Forged hash and undeclared references are refused. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/nodehost/onfailure_test.go` | `TestRecoveryWaitsOnItsOwnDeps` | `TestRecoveryWaitsOnItsOwnDeps` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/own_dependencies`. Recovery waits for its own dependencies and generated groups as well as its parent. Only the failed parent is exempt from ordinary failure propagation. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/nodehost/onfailure_test.go` | `TestRecoveryIsCancelledByAFailedDepOfItsOwn` | `TestRecoveryIsCancelledByAFailedDepOfItsOwn` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/failed_own_dependency`. An ordinary failed prerequisite prevents recovery. Use reason `upstream_failed`. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/runners/k8s/k8s_test.go` | `TestResolveResources_StaysQuietUnderTheCeiling` | `TestResolveResources_StaysQuietUnderTheCeiling` | Replace | `internal/runners/launcher/launcher_test.go:TestSizingBelowCeiling`. Missing measurements are normal and under-ceiling work emits no warning event. Delete the old k8s dispatcher and use the shared error envelope. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/github_runners_test.go` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/github_actions`. No claim and another pipeline are denied. An authorized missing sizing record returns not-found. Use `pipelineOfBoundRun` on the final sizing route. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/log_segments_internal_test.go` | `TestTriggerFencedLogWritesRefuseALiveHolder` | `TestTriggerFencedLogWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/log_mutations`. A competing holder cannot append, sign or seal logs. Delete the unfenced-admin bypass. Recheck after request-body consumption and before mutation. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/runner_scopes_test.go` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/read_and_write`. Exact sealed repo and pipeline bind observations and pins. Delete shared bare-key authority. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/concurrency_guard_test.go` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | Replace | Implemented in `pkg/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock` and `pkg/store/concurrency_scope_property_test.go:TestConcurrencyExpiredCapacityNeverRevivesProperty`. Canonical liveness uses the injected store clock. Expired capacity cannot renew or adopt. The old source-count test is deleted. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/controller_dispatch_test.go` | `TestReportAttempt_ARecoveryNodeWaitsOnItsOwnDeps` | `TestReportAttempt_ARecoveryNodeWaitsOnItsOwnDeps` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/controller` and `pkg/store/decide_test.go:TestRecoveryDependencies`. Success of an own dependency releases recovery. Failure cancels it. A successful recovery does not erase the original run failure. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/node_claim_fence_holder_test.go` | `TestTriggerFencedNodeWritesRefuseALiveHolder` | `TestTriggerFencedNodeWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/node_mutations` and `recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims`. Refuse competing live writes and terminal reversal. Reverse the last old assertion allowing the host to finish after lease lapse. The reaper and reconciler own that recovery. Delete host lifecycle-event append and `ResetNodeForAutoRetry`. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/profile_claim_test.go` | `TestPrincipalHoldsProfileClaimMatchesTheClaimedRunsExactKey` | `TestPrincipalHoldsProfileClaimMatchesTheClaimedRunsExactKey`, subtests `build`, `ci/build`, `3:abcbuild` | Replace | `pkg/store/capability_test.go:TestSizingBinding` and `credentials_test.go:TestCredentials/credentials-holder-mutation-races/pipeline_names`. Preserve full pipeline names and exact repo identity. Delete authorization through bare shared profile keys. |
-| `credential-matrix` | `1e16668363ecbd99ba922436ab1a6f9cae63335b` | `pkg/controller/credential_matrix_test.go` | `TestCredentialMatrix` | `TestCredentialMatrix`; 8,466 route/target/credential cells | Replace | `credentials_test.go:TestCredentials/credentials-matrix-authentication-status` and `pkg/controller/route_policy_test.go:TestEveryRouteHasPolicy`. Independently specify permissions, cover final registrations and binding alternatives, isolate controller/store per cell, and use reference-token lookup. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/secret_args_display_test.go` | `TestSecretArgs_ControllerPendingTriggerRowIsNotYetClassified` | `TestSecretArgs_ControllerPendingTriggerRowIsNotYetClassified`; removed predecessor | Reverse | `credentials_test.go:TestCredentials/credentials-secret-display-classification/unclassified`. Refuse plaintext exposure; unclassified display fails closed. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/secret_args_display_test.go` | `TestSecretArgs_ControllerGrandfathersOldRuns` | `TestSecretArgs_ControllerGrandfathersOldRuns`; removed predecessor | Drop | `credentials_test.go:TestCredentials/credentials-secret-display-classification/unclassified`. Remove grandfathering; unclassified display fails closed. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_GrandfathersRunsWithoutClassification` | `TestRedactedForDisplay_GrandfathersRunsWithoutClassification`; removed predecessor | Reverse | `credentials_test.go:TestCredentials/credentials-secret-display-classification/unclassified`. Refuse plaintext exposure; unclassified display fails closed. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/cache_ref_internal_test.go` | `TestCacheRefs_FollowTheRunsRefAsGitHubActionsDoes` | `TestCacheRefs_FollowTheRunsRefAsGitHubActionsDoes`; removed predecessor | Replace | `storage_test.go:TestStorage/storage-memo-and-depcache-scope`. Use immutable sealed scope instead of mutable trigger-derived scope. |
-| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/controller/data_download_output_boundary_test.go` | `TestDataDownloadSharesCommittedArtifactsWithinTheTeam` | `TestDataDownloadSharesCommittedArtifactsWithinTheTeam`; removed predecessor | Reverse | `storage_test.go:TestStorage/storage-reference-edge-laundering`. Refuse unrestricted team sharing; require authorized read-set edges. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/controller/github_runners_test.go` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/github_actions`. No claim and another pipeline are denied. An authorized missing sizing record returns not-found. Use `pipelineOfBoundRun` on the final sizing route. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/controller/log_segments_internal_test.go` | `TestTriggerFencedLogWritesRefuseALiveHolder` | `TestTriggerFencedLogWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/log_mutations`. A competing holder cannot append, sign or seal logs. Delete the unfenced-admin bypass. Recheck after request-body consumption and before mutation. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/controller/runner_scopes_test.go` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/read_and_write`. Exact sealed repo and pipeline bind observations and pins. Delete shared bare-key authority. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/store/concurrency_guard_test.go` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | Replace | Implemented in `internal/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock` and `internal/store/concurrency_scope_property_test.go:TestConcurrencyExpiredCapacityNeverRevivesProperty`. Canonical liveness uses the injected store clock. Expired capacity cannot renew or adopt. The old source-count test is deleted. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/store/controller_dispatch_test.go` | `TestReportAttempt_ARecoveryNodeWaitsOnItsOwnDeps` | `TestReportAttempt_ARecoveryNodeWaitsOnItsOwnDeps` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/controller` and `internal/store/decide_test.go:TestRecoveryDependencies`. Success of an own dependency releases recovery. Failure cancels it. A successful recovery does not erase the original run failure. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/store/node_claim_fence_holder_test.go` | `TestTriggerFencedNodeWritesRefuseALiveHolder` | `TestTriggerFencedNodeWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/node_mutations` and `recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims`. Refuse competing live writes and terminal reversal. Reverse the last old assertion allowing the host to finish after lease lapse. The reaper and reconciler own that recovery. Delete host lifecycle-event append and `ResetNodeForAutoRetry`. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/store/profile_claim_test.go` | `TestPrincipalHoldsProfileClaimMatchesTheClaimedRunsExactKey` | `TestPrincipalHoldsProfileClaimMatchesTheClaimedRunsExactKey`, subtests `build`, `ci/build`, `3:abcbuild` | Replace | `internal/store/capability_test.go:TestSizingBinding` and `credentials_test.go:TestCredentials/credentials-holder-mutation-races/pipeline_names`. Preserve full pipeline names and exact repo identity. Delete authorization through bare shared profile keys. |
+| `credential-matrix` | `1e16668363ecbd99ba922436ab1a6f9cae63335b` | `internal/controller/credential_matrix_test.go` | `TestCredentialMatrix` | `TestCredentialMatrix`; 8,466 route/target/credential cells | Replace | `credentials_test.go:TestCredentials/credentials-matrix-authentication-status` and `internal/controller/route_policy_test.go:TestEveryRouteHasPolicy`. Independently specify permissions, cover final registrations and binding alternatives, isolate controller/store per cell, and use reference-token lookup. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/secret_args_display_test.go` | `TestSecretArgs_ControllerPendingTriggerRowIsNotYetClassified` | `TestSecretArgs_ControllerPendingTriggerRowIsNotYetClassified`; removed predecessor | Reverse | `credentials_test.go:TestCredentials/credentials-secret-display-classification/unclassified`. Refuse plaintext exposure; unclassified display fails closed. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/controller/secret_args_display_test.go` | `TestSecretArgs_ControllerGrandfathersOldRuns` | `TestSecretArgs_ControllerGrandfathersOldRuns`; removed predecessor | Drop | `credentials_test.go:TestCredentials/credentials-secret-display-classification/unclassified`. Remove grandfathering; unclassified display fails closed. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/store/secretargs_test.go` | `TestRedactedForDisplay_GrandfathersRunsWithoutClassification` | `TestRedactedForDisplay_GrandfathersRunsWithoutClassification`; removed predecessor | Reverse | `credentials_test.go:TestCredentials/credentials-secret-display-classification/unclassified`. Refuse plaintext exposure; unclassified display fails closed. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/cache_ref_internal_test.go` | `TestCacheRefs_FollowTheRunsRefAsGitHubActionsDoes` | `TestCacheRefs_FollowTheRunsRefAsGitHubActionsDoes`; removed predecessor | Replace | `storage_test.go:TestStorage/storage-memo-and-depcache-scope`. Use immutable sealed scope instead of mutable trigger-derived scope. |
+| `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/controller/data_download_output_boundary_test.go` | `TestDataDownloadSharesCommittedArtifactsWithinTheTeam` | `TestDataDownloadSharesCommittedArtifactsWithinTheTeam`; removed predecessor | Reverse | `storage_test.go:TestStorage/storage-reference-edge-laundering`. Refuse unrestricted team sharing; require authorized read-set edges. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/nodehost/onfailure_test.go` | `TestRecoveryWaitsOnItsParentAlone` | `TestRecoveryWaitsOnItsParentAlone`; removed predecessor | Reverse | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/own_dependencies`. Recovery waits on its own dependencies as well as its failed parent. |
 <!-- port-inventory:end -->
 
@@ -1507,7 +1507,7 @@ runtime fixture still needs W3's final admission/lifecycle migration. No archive
 T1 source-function identity or native cell is newly claimed complete.
 ## Egress persistence cutover
 
-The three tests in `pkg/store/egress_test.go` are replaced by final-schema proofs
+The three tests in `internal/store/egress_test.go` are replaced by final-schema proofs
 in `egress_accounting_runtime_test.go`. Round-trip, monotone usage and expiration
 now use additive tenant and replica rows, public day/month reports and the leased
 pruner. Invalid writer identity and negative increments fail through `AddUsage`.
@@ -1553,7 +1553,7 @@ lifecycle cells retain the final store evidence.
 ## W1 acceptance tests move beside the store
 
 The lead's harness cleanup moves these checks from `internal/acceptance` into
-`pkg/store/acceptance_*_test.go`. Each is a plain package test. The old transport
+`internal/store/acceptance_*_test.go`. Each is a plain package test. The old transport
 wrappers are removed, and the native scenario catalog is unchanged.
 
 | Former SQLite check | Package test |
@@ -1567,7 +1567,7 @@ wrappers are removed, and the native scenario catalog is unchanged.
 | credentials-operator-console-split | `TestStoreProvisioningOrigins` |
 | credentials-session-digest-csrf | `TestStoreSessions` |
 
-The moved checks open through `pkg/store/internal/storetest`. Sign-in and
+The moved checks open through `internal/store/internal/storetest`. Sign-in and
 invitation acceptance create accounts and membership. The planner enrolls a
 machine, admits the run with a member session and claims the owner through
 `ClaimUnit`. Expansion authority comes from `DelegateCapability`, including
@@ -1717,7 +1717,7 @@ production fallback or forwarding method is added.
 
 | Retired assertion | Retained evidence |
 | --- | --- |
-| `pkg/controller/claim_test.go:TestClaim_FIFOOrdering` | `TestQueuedTriggerRepositoryScopeProperty` verifies FIFO through real admission and `ClaimUnit`, with generated excluded queues longer than 64 entries. |
+| `internal/controller/claim_test.go:TestClaim_FIFOOrdering` | `TestQueuedTriggerRepositoryScopeProperty` verifies FIFO through real admission and `ClaimUnit`, with generated excluded queues longer than 64 entries. |
 | `TestClaimNextTriggerForTakesOnlyAnAllowedRepositoryPastTheQueueHead` | The same property provisions a registered root, delegates its repository scope, finds eligible work past excluded runs, refuses the remaining queue and compares every excluded run snapshot. |
 | Trigger portion of `TestConcurrentClaimsNeverCrossTeams` | `TestQueuedTriggerClaimsNeverCrossTeamsProperty` races eight workers across two real tenants and checks every award's tenant and uniqueness. The old test retains its node portion as `TestConcurrentNodeClaimsNeverCrossTeams`. |
 | Legacy context-scoped GitHub trigger checks | `TestStoreActionsEnrollment`, `TestGitHubActionsRequiresCurrentEnrollmentProperty`, `TestStoreQueueOrder` and the push-ancestor properties use registered Actions authority and persisted seals. The legacy node assertions remain with that path's retirement. |
@@ -1891,7 +1891,7 @@ cell or production C1 identity projection is claimed complete by this port.
 ## W2 concurrency transport cut
 
 TestObserveSlotMapsMissingHolder and TestHeartbeatSlotMapsLostOwnership move to
-`pkg/controller/client/concurrency_test.go:TestConcurrencyClientDomainErrors`.
+`internal/controller/client/concurrency_test.go:TestConcurrencyClientDomainErrors`.
 The tests now use in-process transport and canonical errors. They preserve
 errors.Is for the store sentinels and errors.As for apierr.Error. Untyped legacy
 error bodies cannot become lost-ownership results. TestConcurrencyClientDistinguishesAdmissionFromRateLimits
@@ -1943,7 +1943,7 @@ refusal property still requires 405 with Allow after registration moves.
 
 The 258-line independent expected route table moved from
 internal/acceptance/credential_routes.go to
-pkg/controller/credential_route_expectations_test.go. Its independent comparison,
+internal/controller/credential_route_expectations_test.go. Its independent comparison,
 mutation sensitivity and alternative-order tests moved beside it. The executable
 policy-alternative tests use the runtime rows, while the moved tests retain the
 hand-written permission oracle. No oracle is regenerated from implementation.
@@ -2082,7 +2082,7 @@ W1 work. No new scenario catalog or harness cell was added.
 
 ## W2 member, claim and GitHub identity fixture ports
 
-The legacy tests in `pkg/controller/team_tokens_test.go` retire with the combined
+The legacy tests in `internal/controller/team_tokens_test.go` retire with the combined
 team-token route. `TestCredentialMemberHTTPRoleCeilingProperty` exercises every
 role ceiling and exact requested grants through real SQLite issuance.
 `TestCredentialMemberHTTPMembershipAndSessionLifecycle` verifies root independence
@@ -2101,7 +2101,7 @@ origin, expiry and refusal are covered by `TestRootProvisioningHTTPOrigin`,
 enrollment tests use explicit transaction fakes. W1 still owns registry limits,
 origin invalidation, personal inventory and rotation persistence.
 
-The five legacy tests in `pkg/controller/runner_claim_test.go` are replaced by
+The five legacy tests in `internal/controller/runner_claim_test.go` are replaced by
 `TestCredentialClaimHTTPAncestryAndFenceProperty`, which obtains real node and
 trigger awards, reads their run, refuses root/claim grant confusion, and refuses
 revoked ancestry, replacement fences and terminal holders despite forged headers.
@@ -2115,7 +2115,7 @@ remains open. Secret selection and refusal are covered by `TestSecretReadHTTPUse
 is fake. Release-audit persistence remains W1 work. The old operator secret
 bypass and 403-for-dead-claim assertions retire.
 
-The five tests in `pkg/controller/identity_github_test.go` move to the final OAuth
+The five tests in `internal/controller/identity_github_test.go` move to the final OAuth
 start/callback and identity-link surfaces. `TestOAuthHTTPGitHubPrimaryEmailProperty`
 generates hostile profile, unverified-primary and verified-secondary addresses.
 None issues a session. `TestOAuthHTTPGitHubUsesNumericIdentityProperty` reads real
@@ -2139,7 +2139,7 @@ No native cell, scenario catalog, Harness or boundary registry changed.
 
 ## W2 identity and team HTTP fixture ports
 
-The 16 tests in `pkg/controller/identity_signin_test.go`, 14 tests in
+The 16 tests in `internal/controller/identity_signin_test.go`, 14 tests in
 `identity_team_test.go` and five tests in `identity_link_test.go` are removed.
 The three files lose 1,019 lines. Their account-response and shared team fixture
 declarations move into `identity_fixture_test.go`, because other retained
@@ -2233,7 +2233,7 @@ fixtures check the canonical route-miss message until their persistence ports
 are supplied. No compatibility symbol is retained.
 
 The final independent route expectation table remains beside the route tests in
-pkg/controller/credential_route_expectations_test.go. The internal/acceptance
+internal/controller/credential_route_expectations_test.go. The internal/acceptance
 copy remains absent. The catalog, port destinations and route declaration,
 ordering and drift checks pass. No scenario catalog, Harness or boundary registry
 entry is added.
@@ -2402,7 +2402,7 @@ matrix cell is inferred from these component and in-process HTTP checks.
 
 ### W2 native log egress continuation
 
-The eight tests in pkg/controller/egress_test.go replace their token-table and
+The eight tests in internal/controller/egress_test.go replace their token-table and
 retired node-route fixtures with native awards, account sessions and committed
 log segments. They retain separate readers, authentication before byte delivery,
 bodyless refusal accounting, download/stream slots, daily alarm privacy, and
@@ -2779,7 +2779,7 @@ leaf and numeric selectors, including a cycle back to the leaf.
 
 ## W9 sealed retry action ports
 
-`pkg/controller/retry_test.go` is deleted. Its raw trigger response, `full`
+`internal/controller/retry_test.go` is deleted. Its raw trigger response, `full`
 query flag and environment provenance transport are removed contracts.
 
 | Archived test | Replacement and status |

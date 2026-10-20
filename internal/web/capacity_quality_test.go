@@ -3,7 +3,7 @@ package web
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestChargeChainRejectsUnknownResourceHistory(t *testing.T) {

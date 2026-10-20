@@ -74,11 +74,11 @@ Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
 and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - W1's selection passes 427 top-level tests / 1,326 cases with no skips.
   Extract Test names from w1-session26-tests.txt, exclude Postgres/Pg names,
-  and pass their anchored alternation to ./pkg/store -count=1 -timeout=180s.
+  and pass their anchored alternation to ./internal/store -count=1 -timeout=180s.
 - The final attempt-specific read extension also passes separately after that
   selection, including current-attempt access, stale-attempt refusal and
   retained claim-wide access.
@@ -140,13 +140,13 @@ gap remains with W2.
 
 ## Shared files and friction
 
-Shared Go files are pkg/controller/claim_run_test.go (superseded test removal),
+Shared Go files are internal/controller/claim_run_test.go (superseded test removal),
 internal/acceptance/store_sessions.go, new store_credential_mutations.go,
 tests/acceptance/credential_mutations_http_test.go, secret_reads_http_test.go,
 and new credential_transactions_http_test.go. The merge-only deletion is
 internal/orchestrator/wingd_api_routes_test.go. No foreign production caller
 needed migration for ReleaseClaimSecret. Its only remaining direct fixture
-caller was removed from pkg/store/generated_node_test.go.
+caller was removed from internal/store/generated_node_test.go.
 
 Shared prose is c1-data.md, docs/auth.md, docs/migrations/_unreleased.md and
 CHANGELOG.md. Their embedded mirrors and .apidiff/pkg_store.txt are regenerated.

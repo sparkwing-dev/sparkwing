@@ -1,7 +1,7 @@
-diff --git a/pkg/controller/intake_review_repro_test.go b/pkg/controller/intake_review_repro_test.go
+diff --git a/internal/controller/intake_review_repro_test.go b/internal/controller/intake_review_repro_test.go
 new file mode 100644
 --- /dev/null
-+++ b/pkg/controller/intake_review_repro_test.go
++++ b/internal/controller/intake_review_repro_test.go
 @@ -0,0 +1,207 @@
 +package controller
 +
@@ -22,8 +22,8 @@ new file mode 100644
 +	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 +	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 +	"github.com/sparkwing-dev/sparkwing/pkg/match"
-+	"github.com/sparkwing-dev/sparkwing/pkg/store"
-+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
++	"github.com/sparkwing-dev/sparkwing/internal/store"
++	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 +)
 +
 +func reviewIntakeStore(t *testing.T) (*Server, *store.Tenant) {

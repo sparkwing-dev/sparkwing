@@ -77,7 +77,7 @@ import json
 from pathlib import Path
 repo = Path('/home/bombuntu/.xwing/envs/1079/sparkwing')
 overlay = {'Replace': {
-    str(repo / 'pkg/store/retry_attempt_fence_probe_test.go'):
+    str(repo / 'internal/store/retry_attempt_fence_probe_test.go'):
         str(repo / 'design/rewrite/w1-retry-attempt-probe.go.txt')
 }}
 Path('/tmp/sw-astra-W1/retry-probe-overlay.json').write_text(json.dumps(overlay))
@@ -86,7 +86,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4 \
 GOCACHE=/tmp/sw-astra-W1/cache GOTMPDIR=/tmp/sw-astra-W1/tmp \
 TMPDIR=/tmp/sw-astra-W1/tmp \
 go -C /home/bombuntu/.xwing/envs/1079/sparkwing test -p 4 \
--overlay=/tmp/sw-astra-W1/retry-probe-overlay.json ./pkg/store \
+-overlay=/tmp/sw-astra-W1/retry-probe-overlay.json ./internal/store \
 -run '^TestRetryAttemptFenceProbe$' -count=1
 ```
 
@@ -137,7 +137,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Test/build package parallelism is -p 4.
 
 - Whole-repository go build ./... passes after the final changes.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The exact store selection passes **317 top-level tests / 917 cases**, no skips.
   Its file list is w1-session12-tests.txt. Extract Test function names, omit
@@ -169,9 +169,9 @@ independent review remain lead checks.
 
 ## Shared files and friction
 
-Production caller migrations outside pkg/store are pkg/controller/storage.go and
+Production caller migrations outside internal/store are internal/controller/storage.go and
 team_storage.go. The minimal fixture migration is
-pkg/controller/credit_reversals_test.go: it directly deletes the legacy token row
+internal/controller/credit_reversals_test.go: it directly deletes the legacy token row
 to exercise its existing missing-row assertion without calling the removed prune
 API. That broader fixture still requires W2's token retirement.
 

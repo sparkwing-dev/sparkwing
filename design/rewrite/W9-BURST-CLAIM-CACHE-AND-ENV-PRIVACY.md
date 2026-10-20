@@ -15,7 +15,7 @@ fixture-only semantics. No integration-deleted file was restored.
 The index still lists the four files as unmerged because the brief forbids Git
 writes. The lead must stage `design/rewrite/contracts/c1-data.md`,
 `internal/nodehost/store_host_fixture_test.go`,
-`pkg/controller/engine_lifecycle.go` and `pkg/store/store.go`, then finish the
+`internal/controller/engine_lifecycle.go` and `internal/store/store.go`, then finish the
 merge. No commit, rebase, reset, stash or Git environment override ran here.
 
 The cache invariant is that every local execution with a sealed cache profile
@@ -102,14 +102,14 @@ deleted: **0**. W9 production versus main is **+19,033/-23,818, net -4,785**,
 within the -2,900 budget. Tests and contract declarations are excluded.
 
 Shared files touched beyond W9 ownership are the four merge-resolution files
-listed above and `pkg/controller/publication_http_test.go`. W9 changes are
+listed above and `internal/controller/publication_http_test.go`. W9 changes are
 `cmd/sparkwing/local_host.go`, the new `local_profile_queue_test.go`,
 `burst_intake_unix_test.go`, `burst_cli_integration_unix_test.go`,
-`pkg/controller/client/publication.go`, C4, local-execution.md and its generated
+`internal/controller/client/publication.go`, C4, local-execution.md and its generated
 mirror, and W9's own report/handoff. No removed API needed caller migration.
 
 The lead must rerun `^TestBurstPublicRun` in cmd/sparkwing and
-`^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$` in pkg/controller,
+`^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$` in internal/controller,
 both with `-tags rewrite_integration`. Native sockets, deployed Cloud/DinD,
 cross-machine transfers and platform/database QA remain lead evidence. No new
 architecture decision or foreign implementation stub blocks this correction.

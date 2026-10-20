@@ -70,7 +70,7 @@ reported complete.
 ## Contract changes needed
 
 W1 must implement the five authority-bearing CredentialWriter methods declared
-in pkg/controller/credential_mutations.go, using Authorized and its own clock.
+in internal/controller/credential_mutations.go, using Authorized and its own clock.
 Existing Tenant methods cannot provide this guarantee. The C2 declaration and
 handoffs.md list the signatures. No C1 contract file or implementation was
 changed. W2 tests with fakes instead of bypassing the transaction boundary.
@@ -116,10 +116,10 @@ Reproduce the focused checks from the worktree with the environment above:
 
 ```sh
 go build -p 4 ./...
-go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./internal/acceptance ./tests/acceptance ./internal/apiroutes
+go vet -p 4 ./internal/capability ./internal/apierr ./internal/controller ./internal/acceptance ./tests/acceptance ./internal/apiroutes
 go test -p 4 ./internal/capability ./internal/apierr ./internal/apiroutes ./internal/apispec ./internal/apiref
 go test -p 4 ./tests/acceptance -run '^Test(Credential|Authority|Data|Engine|Operator|Deployment|Source|Payment|Credit|Sizing|Discovery|Identity|Queue|FinalCredential|Reporting)' -count=1
-go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestRouteGuard_|^TestTenantRoutes_|^TestCredential(Issuance|SSHWrite)|^TestSourceController|^TestPlanSecretOpener' -count=1
+go test -p 4 ./internal/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestRouteGuard_|^TestTenantRoutes_|^TestCredential(Issuance|SSHWrite)|^TestSourceController|^TestPlanSecretOpener' -count=1
 go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$' -count=1
 go run ./internal/commentcheck -base main .
 bash bin/check-api-spec.sh
@@ -158,7 +158,7 @@ tests/acceptance/credential_mutations_http_test.go, api/openapi.yaml,
 docs/api-reference.md, docs/auth.md, docs/git-credentials.md,
 docs/migrations/_unreleased.md and their generated mirrors, CHANGELOG.md and
 its mirror, .apidiff/pkg_controller.txt, perf/budgets.json and C2/handoffs prose.
-All other production changes are in W2-owned pkg/controller. No foreign
+All other production changes are in W2-owned internal/controller. No foreign
 production caller needed migration. No C1 implementation was edited.
 
 Friction: missing authority-bearing store APIs, absent TypeScript compiler,

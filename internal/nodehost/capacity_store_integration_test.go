@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func capacityPlan(policy string, timeout int64, ids ...string) nodeproto.PlanDoc {
@@ -23,7 +24,7 @@ func capacityPlan(policy string, timeout int64, ids ...string) nodeproto.PlanDoc
 
 func capacityRow(t *testing.T, fixture *storeHostFixture, id string) store.NodeRow {
 	t.Helper()
-	row, err := fixture.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: fixture.Accepted.RunID, NodeID: id})
+	row, err := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: id})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestStoreAdmissionSQLiteCancelOthersStopsOwnerSelfClaimedExecution(t *testi
 		return wait(ctx, before)
 	}
 	first.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-		ref := store.NodeRef{RunID: first.Accepted.RunID, NodeID: input.NodeID}
+		ref := controllerwire.NodeRef{RunID: first.Accepted.RunID, NodeID: input.NodeID}
 		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: input.Generation}
 		applied, err := first.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(input.Attempt)})
 		if err != nil {
@@ -246,7 +247,7 @@ func TestStoreAdmissionSQLitePromotesOnlyAfterTerminalRelease(t *testing.T) {
 	if err := admission.Node(t.Context(), fixture.Accepted, first, func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	admission.Queued = func(ctx context.Context, _ store.NodeRef, _ store.AcquireSlotResponse) error {
+	admission.Queued = func(ctx context.Context, _ controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
 		state, err := fixture.Tenant.GetConcurrencyState(ctx, "global:db")
 		if err != nil || len(state.Waiters) != 1 || len(state.Holders) != 1 {
 			t.Errorf("queued state=%+v err=%v", state, err)
@@ -301,7 +302,7 @@ func TestStoreAdmissionSQLiteOwnerLossRetainsWaiterUntilWorkEnds(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	admission.Queued = func(context.Context, store.NodeRef, store.AcquireSlotResponse) error { cancel(); return nil }
+	admission.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error { cancel(); return nil }
 	err := admission.Node(ctx, fixture.Accepted, second, func(context.Context) error { t.Error("ran after owner loss"); return nil })
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
@@ -392,7 +393,7 @@ func TestStoreAdmissionSQLitePlanGroupBoundsTwoRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondAdmission := StoreAdmission{Store: second.Tenant, Owner: second.Actor}
-	secondAdmission.Queued = func(context.Context, store.NodeRef, store.AcquireSlotResponse) error {
+	secondAdmission.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
 		cancelCapacityNode(t, first, capacityRow(t, first, "a"))
 		_, err := first.Tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: first.Actor.Owner, Transition: store.RunTransition{RunID: first.Accepted.RunID, To: store.RunFailed, Actor: first.Actor, Cause: store.RunFinish}})
 		return err

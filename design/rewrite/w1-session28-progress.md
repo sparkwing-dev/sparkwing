@@ -60,12 +60,12 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
 GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The inherited W1 selection plus the new manager tests passes 452 top-level
   tests / 1,435 cases with no skips. w1-session28-tests.txt lists the files.
   Extract Test names, exclude Postgres/Pg names and run their anchored alternation
-  against pkg/store. The focused manager selection also passes with -race.
+  against internal/store. The focused manager selection also passes with -race.
 - All nineteen store-sqlite acceptance cells pass with no skips. Select
   ^(TestLifecycle|TestRecovery|TestPlacement|TestCredentials|TestBilling|TestSurface)$/.*/^store-sqlite$.
   The added cell is credentials-delegation-subset/store-sqlite. It verifies
@@ -138,7 +138,7 @@ internal/acceptance/store_capability_management.go,
 tests/acceptance/capability_management_store_http_test.go,
 tests/acceptance/credentials_test.go and the minimal missing-registry fixture
 change in tests/acceptance/github_runner_admin_http_test.go. There are no
-production caller migrations outside pkg/store.
+production caller migrations outside internal/store.
 
 Shared prose changes are c1-data.md, t1-port-inventory.md,
 t1-credential-routes.md, docs/auth.md and CHANGELOG.md. Generated changes are

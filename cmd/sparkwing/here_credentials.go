@@ -11,9 +11,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type hereCredentials struct{ dir, socket string }

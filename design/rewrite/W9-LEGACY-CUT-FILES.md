@@ -72,7 +72,7 @@ The paths-without-store assertion moves to paths_test.go.
 - `internal/orchestrator/wingd_host.go`
 - `internal/orchestrator/wingd_schema.go`
 - `internal/orchestrator/worker.go`
-- `pkg/controller/client/state_assertion.go`
+- `internal/controller/client/state_assertion.go`
 - `pkg/localws/crons.go`
 - `pkg/localws/doc.go`
 - `pkg/localws/lifecycle.go`

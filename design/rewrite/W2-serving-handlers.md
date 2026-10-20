@@ -40,7 +40,7 @@ Commands used GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache GOTMPDI
 Passed:
 
 - go build -p 4 ./...
-- go vet -p 4 ./pkg/store ./pkg/controller
+- go vet -p 4 ./internal/store ./internal/controller
 - Full go test -p 4 ./internal/apiroutes -count=1
 - go run ./internal/commentcheck -base main . and git diff --check
 - Store tests for exact-writer log signing, activity, pool selectors/replay, foreign installation authority, runner revocation/current roles and native child generation binding. Generated cases cover subject/writer changes, foreign installations and child binding/target substitutions.
@@ -53,15 +53,15 @@ TestFinalCredentialServingRegistrations now reports exactly the four routes abov
 
 New production files:
 
-- pkg/controller/child_routes.go
-- pkg/controller/log_submission_routes.go
-- pkg/controller/missing_operation_routes.go
-- pkg/controller/pool_routes.go
-- pkg/store/controller_pools.go
-- pkg/store/controller_reporting.go
-- pkg/store/controller_runner_admin.go
+- internal/controller/child_routes.go
+- internal/controller/log_submission_routes.go
+- internal/controller/missing_operation_routes.go
+- internal/controller/pool_routes.go
+- internal/store/controller_pools.go
+- internal/store/controller_reporting.go
+- internal/store/controller_runner_admin.go
 
-Shared production edits: pkg/controller/engine_claim_routes.go and the child relation in pkg/store/authority_binding.go. The parent owns the server.go hookup and authentication ordinal projection. Shared test migration: pkg/store/binding_runtime_test.go. New tests: pkg/controller/log_submission_routes_test.go, pkg/store/controller_pools_test.go and pkg/store/controller_reporting_test.go.
+Shared production edits: internal/controller/engine_claim_routes.go and the child relation in internal/store/authority_binding.go. The parent owns the server.go hookup and authentication ordinal projection. Shared test migration: internal/store/binding_runtime_test.go. New tests: internal/controller/log_submission_routes_test.go, internal/store/controller_pools_test.go and internal/store/controller_reporting_test.go.
 
 The new production files add 853 lines. This slice removes two legacy child-invocation reader lines and adds native binding and named-claim decoding. The lead's complete W2 measurement against main, including untracked production Go and the standard exclusions, is +14,110/-16,998, net -2,888. W2 is within its -250 budget. The lead reports its shared-store additions separately. No schema, configuration option or dependency was added by this slice.
 

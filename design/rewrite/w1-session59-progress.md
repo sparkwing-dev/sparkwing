@@ -43,7 +43,7 @@ queries concurrency tables. Waiter resolution now uses checked commits on every
 return after mutation. Pipeline inventory joins queue rows to runs for pipeline
 metadata, and trends use the final memoized outcome.
 
-Production Go delta for pkg/store, using the lead's budget filter and counting
+Production Go delta for internal/store, using the lead's budget filter and counting
 untracked source: **+658 / -252 = +406** against the starting HEAD, including the
 incoming integration work. Combined store delta against main: **-3,548**, still
 **702 lines over** the -4,250 budget. The new imported authority, OIDC and result
@@ -86,12 +86,12 @@ singleton and execution-activity projection.
 
 Shared production callers changed by W1:
 
-- `pkg/controller/objectstore.go`
+- `internal/controller/objectstore.go`
 - `internal/wingd/localcontroller/state.go`
 
-Shared fixture changes include `pkg/controller/review_bootstrap_native_test.go`
-(funded Cloud award), `pkg/store/internal/storetest/storetest.go` (configuration),
-and `pkg/store/teststore/run.go` (current terminal metadata). Other store test
+Shared fixture changes include `internal/controller/review_bootstrap_native_test.go`
+(funded Cloud award), `internal/store/internal/storetest/storetest.go` (configuration),
+and `internal/store/teststore/run.go` (current terminal metadata). Other store test
 edits migrate fixture calls. Merge-only controller, acceptance, auth-document and
 API snapshot conflicts keep the integration changes, adapted to W1's surviving
 implementation. No lead-owned contract file was edited.

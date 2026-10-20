@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // StateReader supplies consistent persisted views for owners and holder followers.
 type StateReader interface {
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
-	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 }
 
 // StateSubscription carries wake-ups for one run. Close must join the subscription
@@ -51,7 +52,7 @@ func (f StateFollower) Wait(ctx context.Context, before store.RunSnapshot) error
 
 // WaitNode follows the node's state sequence rather than the run event cursor.
 // A requeue wakes reconciliation but does not itself authorize execution.
-func (f StateFollower) WaitNode(ctx context.Context, ref store.NodeRef, after int64) error {
+func (f StateFollower) WaitNode(ctx context.Context, ref controllerwire.NodeRef, after int64) error {
 	if ref.RunID == "" || ref.NodeID == "" || after < 0 {
 		return errors.New("state follower requires a node and nonnegative sequence")
 	}
@@ -109,7 +110,7 @@ func (f StateFollower) follow(parent context.Context, run string, changed func(c
 }
 
 type expansionVersion struct {
-	source     store.NodeRef
+	source     controllerwire.NodeRef
 	generation int64
 }
 
@@ -118,7 +119,7 @@ type stateVersion struct {
 	sequence   int64
 	specHash   string
 	planHash   string
-	nodes      map[store.NodeRef]nodeVersion
+	nodes      map[controllerwire.NodeRef]nodeVersion
 	expansions map[expansionVersion]string
 }
 
@@ -129,7 +130,7 @@ type nodeVersion struct {
 }
 
 func snapshotVersion(snapshot store.RunSnapshot) (stateVersion, error) {
-	v := stateVersion{run: snapshot.Run.ID, sequence: snapshot.Run.StateSeq, planHash: snapshot.Run.PlanHash, nodes: map[store.NodeRef]nodeVersion{}, expansions: map[expansionVersion]string{}}
+	v := stateVersion{run: snapshot.Run.ID, sequence: snapshot.Run.StateSeq, planHash: snapshot.Run.PlanHash, nodes: map[controllerwire.NodeRef]nodeVersion{}, expansions: map[expansionVersion]string{}}
 	if snapshot.Run.Spec != nil {
 		v.specHash = string(snapshot.Run.Spec.Hash)
 	}

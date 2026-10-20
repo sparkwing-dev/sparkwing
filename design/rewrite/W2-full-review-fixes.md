@@ -88,7 +88,7 @@ or schema was changed to hide that retention gap.
 
 Files outside W2:
 
-- pkg/store: authority_binding.go, authority_bootstrap.go,
+- internal/store: authority_binding.go, authority_bootstrap.go,
   authority_delegate.go, authority_issue.go, authority_provision.go,
   authority_console.go, authority_management.go, authority_oidc.go,
   authority_provision_policy.go, authentication_contract.go,

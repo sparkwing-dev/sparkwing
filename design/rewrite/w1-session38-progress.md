@@ -28,7 +28,7 @@ moves beside its remaining claim-attention consumers.
 
 Net production Go lines, excluding tests, testdata, acceptance and declarations:
 
-- This session deletes 333 and adds 21, net -312. All are in pkg/store.
+- This session deletes 333 and adds 21, net -312. All are in internal/store.
 - W1+W1b is +3,261 against main, versus its -4,250 budget: 7,511 lines over.
   No budget waiver is requested.
 
@@ -36,11 +36,11 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
 GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1.
 Create that scratch directory before reproducing checks. The test manifest
 w1-session38-tests.txt gives anchored selectors for 78 distinct passing current
-top-level tests in pkg/store and pkg/controller. PostgreSQL skips are excluded
+top-level tests in internal/store and internal/controller. PostgreSQL skips are excluded
 from that passing manifest.
 
-- Whole-repository go build -p 4 ./... passes. Scoped vet passes for pkg/store/...
-  and pkg/controller/.... Both changed test packages compile.
+- Whole-repository go build -p 4 ./... passes. Scoped vet passes for internal/store/...
+  and internal/controller/.... Both changed test packages compile.
 - Current authority, enrollment, inventory, rotation, revocation and HTTP member
   issuance tests pass. The SQLite credentials-delegation-subset proof passes.
 - SQLite plan seals, transitions, generated dependencies, ordered matching,
@@ -83,7 +83,7 @@ Remaining work and real integrations:
 - PostgreSQL locking, native placements, api.sock, Kubernetes, provider billing
   and whole-repository pipelines/QA remain lead or owner integration evidence.
 
-The only shared consumer file changed is pkg/controller/team_tokens_test.go;
+The only shared consumer file changed is internal/controller/team_tokens_test.go;
 its retired member-mint test is covered by the current HTTP issuance race and
 new store property. Other shared edits are C1, the test-port inventory,
 .apidiff/pkg_store.txt, CHANGELOG.md, the migration guide and embedded mirrors.

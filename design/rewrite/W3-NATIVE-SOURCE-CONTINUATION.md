@@ -95,14 +95,14 @@ It predates this working diff. Native completion is unconfirmed.
 
 ## Shared files and volume
 
-Production: `pkg/store/github_source_release.go`,
-`pkg/controller/source_controller.go`, `pkg/controller/client/source_access.go`.
+Production: `internal/store/github_source_release.go`,
+`internal/controller/source_controller.go`, `internal/controller/client/source_access.go`.
 Their test callers and the native fixture migrations are the shared test edits:
 `cmd/sparkwing/{here_resume,local_profile,run_build_policy,run_host,run_offline_unix,
 run_request_id,trigger_intake}_test.go`, `internal/settings/resolution_test.go`,
-`pkg/controller/{claim_source,compute_limits,engine_claim_sdk_unix,flood,
-intake_policy}_test.go`, `pkg/controller/client/source_access_test.go` and
-`pkg/store/github_source_release_test.go`.
+`internal/controller/{claim_source,compute_limits,engine_claim_sdk_unix,flood,
+intake_policy}_test.go`, `internal/controller/client/source_access_test.go` and
+`internal/store/github_source_release_test.go`.
 
 This session replaces the bare-token release return with its source credential
 and deletes 21 production lines while adding 29, net +8. W3 production against

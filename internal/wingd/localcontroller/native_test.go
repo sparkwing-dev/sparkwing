@@ -14,7 +14,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )

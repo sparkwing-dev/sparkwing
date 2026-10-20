@@ -828,7 +828,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`LocalPeerIdentity`](../../../internal/wingd/lifecycle.go) | LocalPeerIdentity comes from the transport's kernel credentials, never request input. |
 | [`LocalSubject`](../../../internal/wingd/lifecycle.go) | LocalSubject checks the peer against the controller's OS account before minting local authority. |
 | [`LocalStartOptions`](../../../internal/wingd/lifecycle.go) | LocalStartOptions carries spawn plumbing in arguments rather than environment variables. |
-| [`LocalRuntime`](../../../internal/wingd/lifecycle.go) | LocalRuntime uses the same pkg/controller implementation, route policy and state owner. |
+| [`LocalRuntime`](../../../internal/wingd/lifecycle.go) | LocalRuntime uses the same internal/controller implementation, route policy and state owner. |
 | [`LocalStatus`](../../../internal/wingd/lifecycle.go) | LocalStatus exposes version skew and activity without opening a second writing store handle. |
 | [`ManagedUnitKind`](../../../internal/wingd/lifecycle.go) | ManagedUnitKind gives schedules and the controller one upgrade path. |
 | [`ManagedUnit`](../../../internal/wingd/lifecycle.go) | ManagedUnit records rendered argv for doctor to detect removed verbs as well as stale versions. |
@@ -899,8 +899,8 @@ This document is the new contract report. Existing files changed only for collid
 - `internal/runners/launcher/job.go`
 - `internal/runners/launcher/job_test.go`
 - `internal/runners/launcher/launcher.go`
-- `pkg/controller/github_app_automation.go`
-- `pkg/controller/github_app_webhook.go`
+- `internal/controller/github_app_automation.go`
+- `internal/controller/github_app_webhook.go`
 - `pkg/localws/pipelines.go`
 - `pkg/projectconfig/pin_test.go`
 - `pkg/projectconfig/projectconfig.go`

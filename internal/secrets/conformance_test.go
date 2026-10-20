@@ -3,9 +3,9 @@ package secrets_test
 import (
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/ciphertest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/ciphertest"
 )
 
 func TestConformance_Cipher(t *testing.T) {

@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 const (
@@ -31,7 +32,7 @@ type StoreAdmission struct {
 	Owner  store.Actor
 	BoxID  string
 	local  bool
-	Queued func(context.Context, store.NodeRef, store.AcquireSlotResponse) error
+	Queued func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error
 }
 
 // AdmissionFailure preserves a refusal's terminal outcome before execution starts.
@@ -136,7 +137,7 @@ func (a *StoreAdmission) group(ctx context.Context, key string, binding store.Ca
 		return a.confirm(ctx, key, id, binding, group.Cost)
 	case store.AcquireQueued:
 		if a.Queued != nil {
-			if err := a.Queued(ctx, store.NodeRef{RunID: binding.RunID, NodeID: binding.NodeID}, response); err != nil {
+			if err := a.Queued(ctx, controllerwire.NodeRef{RunID: binding.RunID, NodeID: binding.NodeID}, response); err != nil {
 				return err
 			}
 		}

@@ -50,7 +50,7 @@ GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and at most -p 4. GOTMPDIR and TMPDIR
 are beneath /tmp/sw-astra-W1.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- `go vet -p 4 ./pkg/controller ./internal/wingd
+- `go vet -p 4 ./internal/controller ./internal/wingd
   ./internal/wingd/testdata/testprog` passes.
 - The process-fixture cleanup test passes directly, 0.491s, after its reproduced
   build failure.
@@ -98,7 +98,7 @@ remains open. This session adds no production mechanism, setting, cache, limit,
 environment variable or contract. No contract change is needed or made.
 
 Shared files touched: internal/wingd/testdata/testprog/main.go;
-pkg/controller/billing_trust.go, console_fixture_test.go,
+internal/controller/billing_trust.go, console_fixture_test.go,
 identity_fixture_test.go, intake_source_test.go, operator_test.go,
 team_billing_test.go and trigger_test.go. This report, the reconciliation ledger
 and the test-port inventory record the changes. Lead-owned amendments and
@@ -113,8 +113,8 @@ is retained.
 ## Previous continuation: integration merge reconciliation
 
 Resolved both conflicting working files before further implementation.
-`pkg/store/store.go` keeps the integration branch's pinned-clock safety annotation.
-`pkg/controller/secret_args_display_test.go` keeps W1's private-input retry proof
+`internal/store/store.go` keeps the integration branch's pinned-clock safety annotation.
+`internal/controller/secret_args_display_test.go` keeps W1's private-input retry proof
 against the incoming committed retry selector. No deleted integration file or
 API was restored. Lead-owned amendments and handoffs remain unchanged.
 The index still records both conflicts because the swarm brief forbids worker
@@ -160,8 +160,8 @@ The store cumulative delta is **+23,788/-26,136, net -2,348 versus main**, using
 the lead's exclusions, **1,902 over** the -4,250 combined W1/W1b budget. This
 continuation adds no mechanism, setting, cache, limit or environment variable.
 
-Shared files touched: `pkg/controller/secret_args_display_test.go` for conflict
-resolution and `pkg/controller/browser_github_app_routes_test.go` for fixture
+Shared files touched: `internal/controller/secret_args_display_test.go` for conflict
+resolution and `internal/controller/browser_github_app_routes_test.go` for fixture
 reconciliation and the real-store proof. Store's only source edit resolves the
 clock annotation. This report records the remaining handoff. No new contract
 change or production caller migration is needed.
@@ -239,7 +239,7 @@ the resolver would leave manual GitHub schedules unable to derive identity.
 Undo removes its interface, controller method and arming assertion together.
 
 Shared files touched: internal/capability/policy.go and routes.go;
-pkg/controller/completion.go, github_app.go, github_app_extra_repos.go,
+internal/controller/completion.go, github_app.go, github_app_extra_repos.go,
 intake_source.go and their route/source/completion tests; claim_source_test.go
 and github_claim_fixture_test.go for the Cloud enrollment fixture;
 github_app_crons_identity_test.go for production identity resolution; C1, C2,
@@ -261,13 +261,13 @@ at session end and /tmp/sw-gocache is retained.
 ## Previous continuation (committed in 8e20b3733)
 
 The lead's native report after session 4 has no failures under the assigned
-controller prefixes. Its one failure outside `pkg/controller` is
+controller prefixes. Its one failure outside `internal/controller` is
 `TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField`. The focused command
 reproduced both errors before the correction (0.272s) and passes afterward
 (0.277s).
 
-Removed the stale `pkg/controller/handlers.go` reader entry and reviewed the
-`pkg/store/teststore/trigger.go` reader. The fixture copies display metadata into
+Removed the stale `internal/controller/handlers.go` reader entry and reviewed the
+`internal/store/teststore/trigger.go` reader. The fixture copies display metadata into
 the existing reporting seed without granting authority. The guard still rejects
 unlisted readers, empty reasons and stale entries. No assertion, production code,
 contract or acceptance cell changed. No test was deleted or skipped.
@@ -285,7 +285,7 @@ lead's filter. The inherited production reductions and source/schedule proofs
 below are not repeated. No new mechanisms or external integration points exist.
 
 Shared files touched are this report and the append-only reconciliation ledger.
-The only Go edit is `pkg/store/declared_repo_guard_test.go`. The shared Git config
+The only Go edit is `internal/store/declared_repo_guard_test.go`. The shared Git config
 has no user identity or core.worktree override. No Git write occurred.
 
 The 01:15 retry-selection redesign belongs to W3 (env 1081), as stated in the
@@ -426,13 +426,13 @@ after the lead commits. Its FAIL verdict and the store budget prevent COMPLETE.
 
 - C1 contract, reconciliation ledger and this report.
 - docs/schedules.md, docs/migrations/_unreleased.md and generated mirrors.
-- pkg/controller/crons.go, handlers.go and intake_policy.go.
-- pkg/controller/schedule_intake_test.go and source_credential_test.go.
-- pkg/controller/crons_tick_test.go: required scheduled-intake caller migration.
-- pkg/controller/compute_limits_test.go, concurrency_team_test.go,
+- internal/controller/crons.go, handlers.go and intake_policy.go.
+- internal/controller/schedule_intake_test.go and source_credential_test.go.
+- internal/controller/crons_tick_test.go: required scheduled-intake caller migration.
+- internal/controller/compute_limits_test.go, concurrency_team_test.go,
   deletion_test.go, flood_team_test.go, flood_test.go, retry_team_test.go and
   team_boundary_test.go: minimal removed-writer fixture migrations only.
-- pkg/controller/trigger_rows_internal_test.go: removed retired helper test.
+- internal/controller/trigger_rows_internal_test.go: removed retired helper test.
 
 Store changes: schedule_intake.go and tests, github_source_release.go and its
 property, capabilities_contract.go, dialect.go, store.go, tenant_triggers.go,

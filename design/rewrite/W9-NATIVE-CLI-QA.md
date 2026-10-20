@@ -118,17 +118,17 @@ Shared Go paths outside W9 ownership:
 - `internal/capability/routes.go`
 - `internal/source/bundle.go`, `internal/source/checkout.go`
 - `internal/sourceurl/github.go`
-- `pkg/controller/credential_route_expectations_test.go`
-- `pkg/controller/data_storage.go`, `pkg/controller/engine_routes.go`
-- `pkg/controller/intake_policy.go`, `pkg/controller/intake_source.go` and its test
-- `pkg/controller/server.go`, `pkg/controller/source_upload.go` and its test
-- `pkg/store/blob_accounting.go`, `pkg/store/blob_gc.go`
-- `pkg/store/blob_persistence.go`, `pkg/store/blob_read_authority.go`
-- `pkg/store/direct_upload.go`, `pkg/store/intake_runtime.go`
-- `pkg/store/schema.go`, `pkg/store/source_upload.go` and its test
-- `pkg/store/store.go`
+- `internal/controller/credential_route_expectations_test.go`
+- `internal/controller/data_storage.go`, `internal/controller/engine_routes.go`
+- `internal/controller/intake_policy.go`, `internal/controller/intake_source.go` and its test
+- `internal/controller/server.go`, `internal/controller/source_upload.go` and its test
+- `internal/store/blob_accounting.go`, `internal/store/blob_gc.go`
+- `internal/store/blob_persistence.go`, `internal/store/blob_read_authority.go`
+- `internal/store/direct_upload.go`, `internal/store/intake_runtime.go`
+- `internal/store/schema.go`, `internal/store/source_upload.go` and its test
+- `internal/store/store.go`
 
-Also changed shared `pkg/store/schema.sql`, generated `api/openapi.yaml` and
+Also changed shared `internal/store/schema.sql`, generated `api/openapi.yaml` and
 `pkg/docs/mirror/`. Source docs and the four owning contract files are updated.
 
 ## Integration points and friction

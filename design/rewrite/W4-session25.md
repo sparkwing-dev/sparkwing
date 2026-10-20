@@ -42,7 +42,7 @@ concurrency path was added, so this session did not repeat the earlier race suit
 ## Remaining integration
 
 - W2/W3 must mount and authorize mask, annotation and summary routes and install
-  sink-wide acknowledgement. `pkg/controller/policy_contract.go` still has panic
+  sink-wide acknowledgement. `internal/controller/policy_contract.go` still has panic
   stubs. W4 transport behavior remains exercised with RoundTripper fakes.
 - W6 must implement `settings.ResolveConcurrency`, which still has a panic stub.
   W4 preserves omission and tests structural validation against that interface.

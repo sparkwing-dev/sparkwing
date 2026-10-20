@@ -43,7 +43,7 @@ lifecycle, historical-hosting-release and local runtime tests remain. Updated
 `LOCAL-CONTROLLER.md` to describe the direct process. Historical release notes
 and the test that inspects an old release tag retain their historical paths.
 
-Outside W8, deleted `pkg/controller/client/claim_input.go` (46 production lines).
+Outside W8, deleted `internal/controller/client/claim_input.go` (46 production lines).
 It has no callers and uses the retired client/error API. This is the only foreign
 production repair beyond choosing integration versions during conflict resolution.
 No W3 implementation was changed after resolving its conflicts to integration.
@@ -214,17 +214,17 @@ These are the index paths the lead must stage, including deleted paths:
 - `internal/runners/launcher/controller_test.go`
 - `internal/runners/proxy_mask_test.go`
 - `internal/runners/run_input_test.go`
-- `pkg/controller/client/client.go`
-- `pkg/controller/client/livelogs.go`
-- `pkg/controller/client/logs.go`
-- `pkg/controller/client/pace.go`
-- `pkg/controller/client/pace_test.go`
-- `pkg/controller/client/poll_advice.go`
+- `internal/controller/client/client.go`
+- `internal/controller/client/livelogs.go`
+- `internal/controller/client/logs.go`
+- `internal/controller/client/pace.go`
+- `internal/controller/client/pace_test.go`
+- `internal/controller/client/poll_advice.go`
 - `pkg/docs/mirror/migrations/_unreleased.md`
 - `pkg/localws/localws.go`
 - `pkg/localws/localws_test.go`
 - `pkg/localws/origin_test.go`
-- `pkg/store/default_team_callers_test.go`
+- `internal/store/default_team_callers_test.go`
 - `tests/acceptance/launcher_controller_w8_test.go`
 
 STATUS: CONTINUE

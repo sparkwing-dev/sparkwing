@@ -23,7 +23,7 @@ arguments, plan and spec against each new execution. Lineage identifies the
 current source and retrier independently. Exact replay returns the same run.
 Revocation and membership loss after the first commit also refuse replay.
 
-The obsolete `pkg/controller/retry_test.go` is deleted: **371 test lines**.
+The obsolete `internal/controller/retry_test.go` is deleted: **371 test lines**.
 Its raw trigger responses, query flags and environment provenance are removed
 contracts. The port inventory maps every old test, including the unresolved
 mode test below. The old duplicate-ID fixture is impossible under the final
@@ -105,8 +105,8 @@ write ran. Source runs are seeded, and intake settings/retention use a contract
 fake. Router, client, credentials and committing SQLite operations are real.
 No host or placement execution is claimed by these tests.
 
-Shared files touched: `pkg/controller/engine_lifecycle.go`, deleted
-`pkg/controller/retry_test.go`, `pkg/controller/trigger_test.go`, the new
+Shared files touched: `internal/controller/engine_lifecycle.go`, deleted
+`internal/controller/retry_test.go`, `internal/controller/trigger_test.go`, the new
 `retry_action_native_test.go`, `retry_mode_integration_test.go` and
 `intake_provenance_native_test.go`, deleted `internal/retryprovenance/keys.go`,
 the port inventory and generated `pkg/docs` copies. Remaining changes are

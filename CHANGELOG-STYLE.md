@@ -160,10 +160,10 @@ Two layers, with deliberately separate concerns:
 
 ## Runs-store schema changes
 
-The store has one baseline schema, `pkg/store/schema_sqlite.sql` and
-`pkg/store/schema_postgres.sql`, and no migrations: a build refuses a
+The store has one baseline schema, `internal/store/schema_sqlite.sql` and
+`internal/store/schema_postgres.sql`, and no migrations: a build refuses a
 store at any other schema version. Change both files together and bump
-`expectedSchemaVersion` in `pkg/store/store.go`, which strands every
+`expectedSchemaVersion` in `internal/store/store.go`, which strands every
 existing store, so the change needs a `(Breaking)` entry naming the
 schema. The release refuses a tag whose baseline SQL differs from the
 previous release's while the version stays the same. Compatibility, and migrations with it, start again at paid

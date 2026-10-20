@@ -1,7 +1,0 @@
-# pkg/storage/fs
-
-func NewUsageReporter(root string) (*UsageReporter, error)
-type UsageReporter struct {
-	Root string
-}
-func (s *UsageReporter) Usage(ctx context.Context) (storage.StoreUsage, error)

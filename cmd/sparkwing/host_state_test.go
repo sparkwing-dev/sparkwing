@@ -12,11 +12,11 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type hostStateController struct {
@@ -29,10 +29,10 @@ type hostStateController struct {
 
 type nodeControllerState struct {
 	nodehost.PrivateHostState
-	node func(context.Context, store.NodeRef) (controllerwire.Controller, error)
+	node func(context.Context, controllerwire.NodeRef) (controllerwire.Controller, error)
 }
 
-func (s nodeControllerState) NodeController(ctx context.Context, ref store.NodeRef) (controllerwire.Controller, error) {
+func (s nodeControllerState) NodeController(ctx context.Context, ref controllerwire.NodeRef) (controllerwire.Controller, error) {
 	return s.node(ctx, ref)
 }
 
@@ -44,8 +44,8 @@ func TestCLIHostStepUsesIndependentNodeAuthorityProperty(t *testing.T) {
 		}}
 		called := false
 		failure := errors.New("node authority unavailable")
-		nodes := nodeControllerState{PrivateHostState: &cliOwnerStore{}, node: func(_ context.Context, ref store.NodeRef) (controllerwire.Controller, error) {
-			if ref != (store.NodeRef{RunID: run, NodeID: node}) {
+		nodes := nodeControllerState{PrivateHostState: &cliOwnerStore{}, node: func(_ context.Context, ref controllerwire.NodeRef) (controllerwire.Controller, error) {
+			if ref != (controllerwire.NodeRef{RunID: run, NodeID: node}) {
 				t.Fatal("step selected another node's authority")
 			}
 			if refuse {
@@ -138,7 +138,7 @@ func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 	for _, renew := range []func() (store.LeaseBeat, error){
 		func() (store.LeaseBeat, error) { return state.RenewOwner(t.Context(), request.Actor, false) },
 		func() (store.LeaseBeat, error) {
-			return state.RenewNodeClaim(t.Context(), store.NodeRef{}, request.Actor)
+			return state.RenewNodeClaim(t.Context(), controllerwire.NodeRef{}, request.Actor)
 		},
 	} {
 		got, err := renew()

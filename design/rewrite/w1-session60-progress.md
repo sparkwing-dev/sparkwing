@@ -61,7 +61,7 @@ interface was added. C2's RunControlWriter signature is unchanged.
 Removed OldestWaitingReadyNodeForPrincipal, the token-table metering lookup from
 run-rate admission and duplicated resume authorization. The removed legacy rate tests and helpers
 occupied 316 lines. This session removes 78 production Go
-lines and adds 251, for **+173 net production Go lines** in pkg/store
+lines and adds 251, for **+173 net production Go lines** in internal/store
 under the lead's filter. The controller conformance declaration adds one shared
 production line. No entire production file is deleted.
 
@@ -72,7 +72,7 @@ larger cuts. This is not a budget waiver or a completion claim.
 ## Verification
 
 - Whole-repository go build ./... passes with workspace and VCS stamping disabled.
-- Scoped go vet passes for pkg/store/... and pkg/controller.
+- Scoped go vet passes for internal/store/... and internal/controller.
 - Focused race checks pass for run-control, resume, sealed intake and typed subject isolation and account-private receipt deletion.
 - Real HTTP-to-store run-control checks pass, along with their existing HTTP
   authority/refusal and resume checks.
@@ -117,12 +117,12 @@ legacy backing-helper removal must coordinate with those cuts.
 
 ## Shared files and friction
 
-Shared schema files pkg/store/schema.sql and pkg/store/schema.go add only the
+Shared schema files internal/store/schema.sql and internal/store/schema.go add only the
 private run-control receipt table. Shared production file
-pkg/controller/run_control_routes.go adds one compile-time
+internal/controller/run_control_routes.go adds one compile-time
 RunControlWriter conformance declaration. Shared tests:
-pkg/controller/run_control_routes_test.go (explicitly missing adapter case) and
-pkg/controller/run_control_store_test.go (real transaction proof). No production
+internal/controller/run_control_routes_test.go (explicitly missing adapter case) and
+internal/controller/run_control_store_test.go (real transaction proof). No production
 caller was otherwise migrated. Shared documents are C1, t1-port-inventory,
 CHANGELOG.md, the migration guide, their embedded copies and .apidiff/pkg_store.txt.
 Lead-owned handoffs and amendments files are unchanged.

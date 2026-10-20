@@ -5,7 +5,7 @@ import (
 	"io"
 	"runtime/debug"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 var Version string

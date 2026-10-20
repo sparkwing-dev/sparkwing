@@ -39,8 +39,8 @@ Legacy code remains. No budget waiver is requested.
 
 Verification passes on the final source:
 
-- Whole-repository go build -p 4 ./.... Scoped go vet -p 4 on pkg/store/...
-  and pkg/controller/.... All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false,
+- Whole-repository go build -p 4 ./.... Scoped go vet -p 4 on internal/store/...
+  and internal/controller/.... All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false,
   GOMAXPROCS=4, GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR inside the assigned
   scratch. w1-session40-tests.txt records the exact successful selectors.
 - 149 store tests and 11 controller tests pass with no skips in those selections.
@@ -87,7 +87,7 @@ Contract changes needed and real integrations left open:
   and repository gates remain owner/lead integration evidence. Shared recovery
   fixtures remain while host/billing consumers still reference them.
 
-Caller migrations are confined to pkg/store tests: concurrency_burst_test.go,
+Caller migrations are confined to internal/store tests: concurrency_burst_test.go,
 concurrency_cost_test.go, concurrency_property_test.go,
 concurrency_scope_property_test.go, concurrency_test.go,
 delete_run_cache_test.go, tenant_user_keys_test.go, tokens_test.go,

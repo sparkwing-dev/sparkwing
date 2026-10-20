@@ -75,10 +75,10 @@ Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and caches,
 temporary directories and test scratch beneath /tmp/sw-astra-W1. Tests use -p 4.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet passes for pkg/store/..., internal/acceptance/... and tests/acceptance/....
+- Scoped go vet passes for internal/store/..., internal/acceptance/... and tests/acceptance/....
 - The W1 file selection passes 383 top-level tests / 1,059 cases with no skips.
   Extract Test names from w1-session18-tests.txt, omit TestPostgres names and pass
-  their anchored alternation to go test -json -p 4 ./pkg/store. The added
+  their anchored alternation to go test -json -p 4 ./internal/store. The added
   TestMeteredUnitApplicationRetryKeepsOneReservation passes separately.
 - internal/acceptance and tests/acceptance with -skip '^TestProtocol$' pass
   19 top-level tests / 199 cases. There are 2,422 native/platform skips.

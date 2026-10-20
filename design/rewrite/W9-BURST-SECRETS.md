@@ -92,12 +92,12 @@ measured, was +17,820/-23,829, net -6,009, within the -2,900 area budget. The
 coordinator owns the final combined measurement.
 
 Shared production files touched are `internal/runspec/contracts.go`,
-`internal/controllerwire/engine.go`, `pkg/controller/engine_intake.go`,
-`pkg/controller/secret_reads.go`, and the store's `store.go`, `run_spec.go`,
+`internal/controllerwire/engine.go`, `internal/controller/engine_intake.go`,
+`internal/controller/secret_reads.go`, and the store's `store.go`, `run_spec.go`,
 `secrets.go`, `secret_reads.go`, `binding_secret.go`, `secret_preflight.go`,
 `plan_contracts.go`, `plan_seal.go`, `expansion_accept.go`, `dialect.go`, and
-`run_state.go`. New source files are `pkg/store/local_secrets.go` and
-`pkg/controller/client/local_secrets.go`. Contract additions are in C1 and C2.
+`run_state.go`. New source files are `internal/store/local_secrets.go` and
+`internal/controller/client/local_secrets.go`. Contract additions are in C1 and C2.
 
 Concurrent work caused temporary compile failures in routing validation,
 overflow API tests, claim capacity fields, and overflow-test syntax. Focused

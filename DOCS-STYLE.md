@@ -33,7 +33,7 @@ answers several is hard to keep correct.
   derives from and the script that regenerates it. To change one, change
   that code (the command registry in `cmd/sparkwing/help_registry.go`,
   the schema structs in `pkg/pipelines` / `pkg/projectconfig`, the
-  `sparkwing` package, or the route registrations in `pkg/controller` /
+  `sparkwing` package, or the route registrations in `internal/controller` /
   `pkg/logs`) and run the `bin/gen-*-docs.sh` the banner names. `pre-release`
   regenerates each one and fails if the committed file is stale.
 
@@ -63,7 +63,7 @@ CLI help registry, and is the durable guard:
 - `sparkwing.yaml` blocks parse through the real strict config parser;
 - a denylist of dead tokens (renamed flags, old file/path names);
 - history / deprecation narrative;
-- failure-reason completeness (every `pkg/store` `Failure*` constant is
+- failure-reason completeness (every `internal/store` `Failure*` constant is
   documented in `observability.md`);
 - frozen counts over open sets;
 - sidebar completeness (`docs/_sidebar.json` and the docs tree agree in

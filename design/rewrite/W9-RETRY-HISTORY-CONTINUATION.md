@@ -104,8 +104,8 @@ W8 findings 6-9 and peer intake retain their completed local implementation.
 The private JSONL writer remains deleted. Complete owner/eval closure execution
 and native local execution still require the contracts and SDK policy above.
 
-Shared files touched: `pkg/controller/retry.go`, `retry_test.go`, the new
-`retry_history_native_test.go`, `pkg/store/tenant_runs.go`,
+Shared files touched: `internal/controller/retry.go`, `retry_test.go`, the new
+`retry_history_native_test.go`, `internal/store/tenant_runs.go`,
 `internal/apispec/wire.go`, `web/src/components/AttemptsDropdown.tsx`,
 `web/src/lib/api.ts`, `api/openapi.yaml`, the port inventory and generated
 `pkg/docs` copies. The frontend files are the only production caller migrations.

@@ -142,21 +142,21 @@ unreferenced. That W1b/W7-owned file still needs its owner's hard cut.
 
 W1 caller migrations outside store only change fixtures:
 
-- pkg/controller/concurrency_team_test.go
-- pkg/controller/github_checks_test.go
-- pkg/controller/profiles_test.go
-- pkg/controller/profiles_coverage_test.go
-- pkg/controller/profiles_aggregation_test.go
-- pkg/controller/claim_dispatch_internal_test.go (deleted unused fixture)
+- internal/controller/concurrency_team_test.go
+- internal/controller/github_checks_test.go
+- internal/controller/profiles_test.go
+- internal/controller/profiles_coverage_test.go
+- internal/controller/profiles_aggregation_test.go
+- internal/controller/claim_dispatch_internal_test.go (deleted unused fixture)
 
 Merge conflict choices also touch internal/web/server_test.go and
-pkg/controller/log_submission_routes_test.go, and keep the integration-deleted
+internal/controller/log_submission_routes_test.go, and keep the integration-deleted
 controller log/output test files deleted. Other staged shared paths came from
 the integration merge. No W1 production edit outside store was needed.
 
 C1, the port inventory, migration source, changelog, embedded copies and both
 store API snapshots are updated. Reporting tests are in the new
-pkg/store/reporting_seals_test.go. Git config has no injected core.worktree or
+internal/store/reporting_seals_test.go. Git config has no injected core.worktree or
 fixture user.name. Scratch is removed at the end; the shared build cache stays.
 
 Friction: Git staging is prohibited, so conflict contents and index status must

@@ -11,8 +11,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
@@ -70,7 +71,7 @@ func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
 			if err := host.Execute(t.Context(), input); err != nil {
 				t.Fatalf("job failed: %v", err)
 			}
-			row, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+			row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
 			if err != nil {
 				t.Fatal(err)
 			}

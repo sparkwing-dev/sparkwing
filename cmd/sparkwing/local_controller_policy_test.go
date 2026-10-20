@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	enginepolicy "github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -30,10 +31,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type policyListener struct {
@@ -314,7 +314,7 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 			t.Error(err)
 		}
 	})
-	ref := store.NodeRef{RunID: admitted.RunID, NodeID: "build"}
+	ref := controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "build"}
 	started, err := node.TransitionNode(ctx, store.NodeTransition{Ref: ref, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(int64)})
 	if err != nil {
 		t.Fatal("node start:", err)

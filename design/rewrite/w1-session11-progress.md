@@ -99,7 +99,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Test/build parallelism is -p 4.
 
 - Whole-repository go build ./... passes.
-- go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The store selection passes **313 top-level tests / 913 cases**, with no skips.
   Extract Test names from w1-session11-tests.txt, omit TestPostgres-prefixed names
@@ -123,12 +123,12 @@ lead checks.
 
 ## Shared files and friction
 
-Shared production caller changes are pkg/controller/auth_handlers.go,
+Shared production caller changes are internal/controller/auth_handlers.go,
 browser_login.go, identity.go and server.go. Minimal clock/capability fixture
-migrations are pkg/controller/browser_session_test.go,
+migrations are internal/controller/browser_session_test.go,
 github_onboarding_browser_test.go, identity_signin_test.go, revocation_test.go and
 team_boundary_test.go. The new controller component property is
-pkg/controller/session_store_runtime_test.go.
+internal/controller/session_store_runtime_test.go.
 
 Shared acceptance files are internal/acceptance/store_credentials.go,
 store_recovery.go and the new store_sessions.go. Shared documentation is

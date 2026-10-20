@@ -34,8 +34,8 @@ no further retry-selection contract decision is needed. Lead-owned handoffs and
 amendments were not edited. The accepted cross-host masking residual remains
 closed by the lead's decision.
 
-Shared files touched are `pkg/store/compute_limits.go`, `intake_rate_test.go`,
-`pkg/controller/retry_action_native_test.go`, `compute_limits_test.go`,
+Shared files touched are `internal/store/compute_limits.go`, `intake_rate_test.go`,
+`internal/controller/retry_action_native_test.go`, `compute_limits_test.go`,
 `secret_args_display_test.go`, `retry_team_test.go`, and the C1 contract and port
 inventory. No W3 production file changed.
 

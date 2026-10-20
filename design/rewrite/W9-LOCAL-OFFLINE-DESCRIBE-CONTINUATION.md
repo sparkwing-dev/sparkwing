@@ -93,7 +93,7 @@ Shared production files touched: internal/engine/{engine,index,policy}.go,
 internal/nodehost/{sdk_description,sdk_planning}.go,
 internal/nodeproto/describe_contract.go,
 sparkwing/protocol_describe.go, sdk/typescript/src/describe.ts,
-pkg/controller/{engine,engine_claim,engine_version,identity}.go.
+internal/controller/{engine,engine_claim,engine_version,identity}.go.
 Shared tests cover those packages plus tests/acceptance. Shared generated files
 are internal/nodeproto/conformance/testdata/v2-documents.schema.json and the
 pkg/docs copies. Contract documentation changes are confined to

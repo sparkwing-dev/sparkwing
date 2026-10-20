@@ -71,7 +71,7 @@ The committed implementation's production files belong to W2: authority_routes.g
 child_routes.go, engine_claim_routes.go, engine_job_control.go, engine_routes.go,
 log_submission_routes.go, metrics.go, missing_operation_routes.go,
 policy_router.go, private_host.go, run_selector.go and source_controller.go,
-all under pkg/controller. No caller outside W2 required migration. The only
+all under internal/controller. No caller outside W2 required migration. The only
 contract edit is design/rewrite/contracts/c2-credentials.md.
 
 ## Fixture and guard continuation
@@ -82,11 +82,11 @@ shadowing appFixture.srv held the server. Removed the shadow field and populated
 the embedded fixture. newGHFixture had the same missing initialization and now
 populates it too. Existing security assertions remain unchanged.
 
-Removed pkg/controller/handlers.go from declaredRepoReaders because that file
+Removed internal/controller/handlers.go from declaredRepoReaders because that file
 no longer reads the declared repository. The guard failed before this edit and
 passes afterward. The shared file touched is
-pkg/store/declared_repo_guard_test.go. The other edits are
-pkg/controller/github_app_test.go and pkg/controller/github_runners_test.go.
+internal/store/declared_repo_guard_test.go. The other edits are
+internal/controller/github_app_test.go and internal/controller/github_runners_test.go.
 No production code, API, contract or historical test port changed. This session
 deletes five test lines and adds three, net -2. Production delta is zero, and
 W2 remains net -892 production lines against main.
@@ -94,9 +94,9 @@ W2 remains net -892 production lines against main.
 Both required privacy tests pass unchanged. Additional passing evidence:
 
 - Whole-repository go build -p 4 ./....
-- go vet -p 4 ./pkg/controller ./pkg/store ./internal/capability ./internal/apierr.
+- go vet -p 4 ./internal/controller ./internal/store ./internal/capability ./internal/apierr.
 - Full internal/capability and internal/apierr tests.
-- TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField in pkg/store, both required
+- TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField in internal/store, both required
   controller privacy tests and TestGitHubBrowserConnection* (controller 1.260s,
   store 0.291s).
 - Controller TestFinalCredential*, TestGitHubBrowserConnection*, TestReviewSetup*,
@@ -129,7 +129,7 @@ the lead must rerun it before completion.
 The native connect-start failure was reproduced without sockets by
 TestGitHubBrowserConnectionRealStore: selecting the production adapter returned
 500 policy_missing. Tenant did not implement the existing GitHubConnectWriter
-contract. Implemented its three methods in pkg/store/github_connect.go and
+contract. Implemented its three methods in internal/store/github_connect.go and
 assigned the concrete tenant in default controller composition. The compiler
 now checks conformance at that assignment.
 
@@ -142,7 +142,7 @@ same authorization transaction and derives ConnectedBy from resolved authority.
 No new interface, table, grant, setting or credential mechanism was added.
 
 Deleted the unused Store.ConsumeGitHubAppConnectState API and migrated its
-only caller, pkg/store/flow_nonce_runtime_test.go, to the shared internal nonce
+only caller, internal/store/flow_nonce_runtime_test.go, to the shared internal nonce
 owner. Extracted the nonce and installation helpers so both existing consumers
 and the new adapter use the same implementations. Production changes including
 shared files are +107/-23, net +84. W2 production against main remains
@@ -158,7 +158,7 @@ because nil resolution selects the implemented production adapter.
 Passing checks, using the environment and concurrency limits recorded above:
 
 - Whole-repository go build -p 4 ./....
-- go vet -p 4 ./pkg/controller ./pkg/store ./internal/capability ./internal/apierr.
+- go vet -p 4 ./internal/controller ./internal/store ./internal/capability ./internal/apierr.
 - Controller TestGitHubBrowserConnection* and both unchanged privacy tests,
   1.638s.
 - Store TestGitHubConnect*, TestFlowNonces*, TestGitHubAppMutations*,
@@ -169,9 +169,9 @@ Passing checks, using the environment and concurrency limits recorded above:
   engine-authority and local-node acceptance selection, 2.158s.
 - Commentcheck against main across 2,688 Go files and git diff --check.
 
-Shared files touched: pkg/store/github_app.go, github_connect.go,
+Shared files touched: internal/store/github_app.go, github_connect.go,
 github_connect_test.go, identity_link.go and flow_nonce_runtime_test.go.
-W2 files touched: pkg/controller/browser_github_app_routes.go and its test,
+W2 files touched: internal/controller/browser_github_app_routes.go and its test,
 plus this report and the C2 implementation note. Existing contract signatures
 and lead-owned handoffs/amendments are unchanged. The prior QueuePriorityWriter
 persistence integration remains with C1. Native GitHub/provider-listener tests
@@ -189,7 +189,7 @@ ran. Scratch is deleted at handoff and the shared cache is retained.
 Resolved the contents of all 19 conflicted paths. The index remains unmerged
 because the swarm brief forbids Git writes. The lead must stage these
 resolutions and finish the merge. The integration-deleted
-`pkg/controller/trigger_rows_internal_test.go` stays deleted. Removed the
+`internal/controller/trigger_rows_internal_test.go` stays deleted. Removed the
 14-line `triggerRunInvocation` helper and its 19-line retired test. Also
 deleted the unused `runTrigger` and `triggerInTeam` helpers, 19 lines including
 the separator, from `tenant_scope.go`. They were the last production
@@ -222,7 +222,7 @@ Verification uses `GOWORK=off GOFLAGS=-buildvcs=false`,
 `TMPDIR=/tmp/sw-astra-W2/tmp` and `-p 4`:
 
 - Whole-repository `go build -p 4 ./...` passes.
-- `go vet -p 4 ./pkg/controller ./pkg/store ./internal/capability ./internal/apierr` passes.
+- `go vet -p 4 ./internal/controller ./internal/store ./internal/capability ./internal/apierr` passes.
 - Both unchanged privacy tests pass. The controller race selection also passes.
 - Controller merge selection covering CronTick, CronLauncher, ScheduleIntake,
   ScheduleHTTP, FloodPolicy, ComputeLimits, Trigger and RunIntake passes, 5.167s.
@@ -261,9 +261,9 @@ Contract changes made: C2 records the amended scheduled-intake signature.
 No new store signature, schema or mechanism was added. Lead-owned handoffs
 and amendment files remain untouched. Shared files resolved are
 `design/rewrite/contracts/c1-data.md`, `design/rewrite/test-reconciliation.md`,
-`pkg/store/github_app.go`, `pkg/store/github_connect.go`,
-`pkg/store/github_connect_test.go` and `pkg/store/declared_repo_guard_test.go`.
-The W2 changes are in `pkg/controller/crons.go`, `crons_tick_test.go` and
+`internal/store/github_app.go`, `internal/store/github_connect.go`,
+`internal/store/github_connect_test.go` and `internal/store/declared_repo_guard_test.go`.
+The W2 changes are in `internal/controller/crons.go`, `crons_tick_test.go` and
 `schedule_routes_test.go`, and `tenant_scope.go`, alongside the other controller conflict resolutions
 and C2's implementation note. No caller outside these paths needed a new
 migration.

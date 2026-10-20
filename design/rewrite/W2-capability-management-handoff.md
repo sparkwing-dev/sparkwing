@@ -79,7 +79,7 @@ generation. A repeated rotation of an already scheduled predecessor fails.
 Explicit revocation ends grace at once. Raw never leaves a failed transaction.
 
 Code inspection found a grace integration gap: readAuthorityTx in
-pkg/store/capabilities_contract.go rejects any non-nil RevokedAt. C2's
+internal/store/capabilities_contract.go rejects any non-nil RevokedAt. C2's
 credentialAlive accepts a future deadline until that deadline. W1 must align
 its persistence reader before claiming real grace or descendant integration.
 No W1 code or foreign contract signature changed. No production inventory,
@@ -134,7 +134,7 @@ Other existing handoffs remain open. The full W2 area is incomplete.
 ## Shared files
 
 Outside W2's controller/capability code, production caller migrations are
-pkg/controller/client/admin.go, cmd/sparkwing/cloud.go, runners.go and
+internal/controller/client/admin.go, cmd/sparkwing/cloud.go, runners.go and
 tokens.go, web/src/lib/teams.ts, web/src/app/team/machines/page.tsx, and
 internal/apiroutes/apiroutes.go. They consume the new metadata/rotation shape
 and inventory path. The CLI duration input converts to an absolute expiry.
@@ -190,8 +190,8 @@ Reproduce the boundary evidence with:
 
 ```sh
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing build -p 4 ./...
-go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./tests/acceptance ./pkg/controller/client -run '^TestCapabilityManagement' -count=1
-go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./pkg/controller ./internal/orchestrator ./cmd/sparkwing -run '^(TestPolicyRouter|TestAuthorizedHandlersDoNotAuthorize|TestRouteGuard|TestTenant|TestEveryControllerRouteIsClassified|TestReadRouteListCarriesNoDuplicates|TestFormatScopes|TestRenderTokens)' -count=1
+go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./tests/acceptance ./internal/controller/client -run '^TestCapabilityManagement' -count=1
+go -C /home/bombuntu/.xwing/envs/1080/sparkwing test -p 4 ./internal/controller ./internal/orchestrator ./cmd/sparkwing -run '^(TestPolicyRouter|TestAuthorizedHandlersDoNotAuthorize|TestRouteGuard|TestTenant|TestEveryControllerRouteIsClassified|TestReadRouteListCarriesNoDuplicates|TestFormatScopes|TestRenderTokens)' -count=1
 go -C /home/bombuntu/.xwing/envs/1080/sparkwing run ./internal/commentcheck -base main .
 ```
 

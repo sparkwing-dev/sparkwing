@@ -36,11 +36,11 @@ source acquisition and directory-based SDK/engine selection path found.
 | `internal/wingd/localcontroller/native.go` | Detects the SDK from the live local directory before acquisition | Detection deleted. Accepted engine SDK is retained. Unaccepted SDK is detected after checkout by Acquire. |
 | `internal/nodehost/native_host.go`, `owner.go`, `claimed_node.go` | Host acquisition and binding of the selected entry | Retained shared-source consumers. |
 | `internal/runners/repository.go`, `internal/runners/hosting.go`, `internal/runners/launcher/controller.go`, `internal/runners/launcher/source_init.go`, `internal/cluster/production_runtime.go` | Runner/launcher source preparation and SDK entry installation | Shared-source consumers. Production Go ownership guard covers these packages. |
-| `pkg/controller/github_app_webhook.go` | Builds App intake with a branch in Source.Ref | Resolves the verified execution/code pair before admission without looking up a newer branch. |
-| `pkg/controller/schedule_source.go` | Local rev-parse or remote ls-remote followed by pair selection | Bespoke Git lookup deleted. Uses shared `Select`, including execution-commit configuration and the configured code pin. |
-| `pkg/store/schedule_intake.go` | Builds pinned scheduled requests and replay digests | Pinned identity resolves through the shared pair selector. Replay carries both committed IDs. |
-| `pkg/controller/client/native_services.go` | Fresh-branch child clears parent SHAs and submits unresolved intent | Fresh source flags are cleared here. Controller child intake resolves against the parent's stored location before sealing. |
-| `pkg/controller/child_source.go` | Added authenticated child-ref resolution and server-private credential lookup | Uses shared ref/pair resolution. Credentials never enter a running parent. |
+| `internal/controller/github_app_webhook.go` | Builds App intake with a branch in Source.Ref | Resolves the verified execution/code pair before admission without looking up a newer branch. |
+| `internal/controller/schedule_source.go` | Local rev-parse or remote ls-remote followed by pair selection | Bespoke Git lookup deleted. Uses shared `Select`, including execution-commit configuration and the configured code pin. |
+| `internal/store/schedule_intake.go` | Builds pinned scheduled requests and replay digests | Pinned identity resolves through the shared pair selector. Replay carries both committed IDs. |
+| `internal/controller/client/native_services.go` | Fresh-branch child clears parent SHAs and submits unresolved intent | Fresh source flags are cleared here. Controller child intake resolves against the parent's stored location before sealing. |
+| `internal/controller/child_source.go` | Added authenticated child-ref resolution and server-private credential lookup | Uses shared ref/pair resolution. Credentials never enter a running parent. |
 | `cmd/sparkwing/action_plan.go`, `compile.go`, `run_help.go` | Preview/help materializes pipeline code and chooses its SDK from a directory | Preview, describe and help use shared acquisition with the prepared environment. SDK selection follows the acquired directory. |
 | `cmd/sparkwing/toolchain_select.go`, `describe_cache.go` | Selects local engine or SDK-dependent description identity | W9's preview/describe selection review remains with W9. |
 | `cmd/sparkwing/cache.go`, `cache_warm.go` | Classifies directories and reads pins for explicit cache management | Retained management surface. |
@@ -50,7 +50,7 @@ source acquisition and directory-based SDK/engine selection path found.
 | `internal/engine/pin.go`, `install.go`, `sdkinstall/install.go` | Reads the supplied directory's SDK pin and installs through the selected engine | Retained engine installation responsibility. |
 | `internal/engine/upgrade.go` | Stages source/config and reads pins before/after an explicit SDK upgrade | Retained explicit upgrade responsibility. |
 | `internal/sparks/overlay.go` | Materializes dependency overlays and sums | Retained dependency-management responsibility. |
-| `pkg/controller/burst_sdk_source_test.go` | Test fixture copies tracked working bytes into an owned SDK dependency directory | Test-only source capture. It excludes transient untracked files created by concurrent TypeScript tests. Execution still uses shared acquisition. |
+| `internal/controller/burst_sdk_source_test.go` | Test fixture copies tracked working bytes into an owned SDK dependency directory | Test-only source capture. It excludes transient untracked files created by concurrent TypeScript tests. Execution still uses shared acquisition. |
 | `.github/workflows/*`, `.sparkwing/*` | CI checks out/builds the repository through GitHub actions and pipeline tooling | Build infrastructure, outside production application packages. |
 
 `TestGitAcquisitionHasOneOwner` parses production Go packages and refuses Git

@@ -245,11 +245,11 @@ replacement proofs. Integration authority covers these changes. No service,
 setting, limit, environment variable or compatibility surface was added.
 
 Shared production files: internal/runspec/contracts.go,
-pkg/controller/client/native_services.go, pkg/controller/concurrency.go,
-pkg/store/capacity_owner.go, pkg/store/intake_runtime.go,
-pkg/store/latest_run.go and pkg/store/store.go. The capacity_owner change only
+internal/controller/client/native_services.go, internal/controller/concurrency.go,
+internal/store/capacity_owner.go, internal/store/intake_runtime.go,
+internal/store/latest_run.go and internal/store/store.go. The capacity_owner change only
 migrates the removed request field. Shared fixture files:
-pkg/controller/{server_test,team_boundary_test,publication_http_test,source_upload_test,credits_claim_reconciliation_test}.go.
+internal/controller/{server_test,team_boundary_test,publication_http_test,source_upload_test,credits_claim_reconciliation_test}.go.
 The W2 run-existence privacy mechanism and its tests are unchanged except for the
 dialect-safe fixture insert. Generated files: api/openapi.yaml and
 .apidiff/pkg_store.txt.
@@ -329,8 +329,8 @@ GOTMPDIR=/tmp/sw-astra-W1b/go-tmp TMPDIR=/tmp/sw-astra-W1b GOMAXPROCS=4,
 go -C /home/bombuntu/.xwing/envs/1088/sparkwing and test -p 4.
 
 - Whole-repository build passes after the API removals and wrapper cut.
-- Scoped vet passes for pkg/store, pkg/controller and receipt.
-- Full SQLite pkg/store passes in 318.224s. This run began before the behavior-
+- Scoped vet passes for internal/store, internal/controller and receipt.
+- Full SQLite internal/store passes in 318.224s. This run began before the behavior-
   preserving result wrapper cut. The focused Result/Step/Annotation/Summary/
   OutputReporting selection passes after that cut in 0.686s. The final foreign-
   selector fixture strengthens the property with a real unrelated record and
@@ -364,7 +364,7 @@ The port inventory records the replacement limit fuzz, new reporting property
 and the retained real-claim pricing proof. No lead-owned handoff or amendment
 file changed.
 
-Shared caller changes outside pkg/store: internal/orchestrator/receipt/receipt.go
+Shared caller changes outside internal/store: internal/orchestrator/receipt/receipt.go
 and receipt_test.go. Shared store edits: store.go (report projection),
 unit_billing.go (resource type only), concurrency.go (move a test-only predicate)
 and tenant_sql_scope_guard_test.go (delete only the retired reader's exemption).
@@ -474,7 +474,7 @@ join. The port inventory records each retired test's replacement. The migration
 guide, changelog and generated store API snapshot are updated. Lead-owned
 amendments and handoffs are unchanged. No foreign contract change is requested.
 
-Shared caller migrations stay within pkg/store: the external card-refund test
+Shared caller migrations stay within internal/store: the external card-refund test
 moves to operator_card_billing_test.go and uses the real console/provider flow;
 payment rollback calls applyCardRefundTx directly. The only W1 guard edit removes
 the two exemptions for deleted DropCardAttempt and reportCardRefundTx. Production

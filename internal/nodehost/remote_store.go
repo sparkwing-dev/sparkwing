@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // RemoteOwnerStore projects shared controller responses into the same owner
@@ -44,7 +44,7 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	if wire.Source != nil {
 		result.Source = &store.MaterializeSource{Kind: store.SourcePolicy(wire.Source.Policy), Source: wire.Source.Attempt, Record: wire.Source.Record}
 		if source := wire.Source.Result; source != nil {
-			result.Source.Result = &store.MaterializedResultSource{Ref: store.NodeRef{RunID: source.RunID, NodeID: source.JobID}, StateSeq: source.StateSeq}
+			result.Source.Result = &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: source.RunID, NodeID: source.JobID}, StateSeq: source.StateSeq}
 		}
 	}
 	if result.Kind == store.Execute {
@@ -114,7 +114,7 @@ func executionRow(runID string, job controllerwire.ExecutionJob) (store.NodeRow,
 		return store.NodeRow{}, errors.New("execution response has an invalid persisted job")
 	}
 	return store.NodeRow{
-		Ref: store.NodeRef{RunID: runID, NodeID: job.ID}, Status: store.NodeStatus(job.Status), Outcome: store.NodeState(job.Outcome), StatusDetail: job.StatusDetail,
+		Ref: controllerwire.NodeRef{RunID: runID, NodeID: job.ID}, Status: store.NodeStatus(job.Status), Outcome: store.NodeState(job.Outcome), StatusDetail: job.StatusDetail,
 		ClaimedBy: job.ClaimedBy, CapabilityPrefix: job.CapabilityPrefix, OwnerCapabilityPrefix: job.OwnerCapabilityPrefix, Generation: job.Generation, Attempt: job.Attempt, ApplicationRetries: job.ApplicationRetries, Disruptions: job.Disruptions,
 		ReadyAt: job.ReadyAt, LeaseExpiresAt: job.LeaseExpiresAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, CancelRequestedAt: job.CancelRequestedAt,
 		OutputRecord: job.OutputRecord, ManifestRecord: job.ManifestRecord,

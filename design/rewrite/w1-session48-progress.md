@@ -113,14 +113,14 @@ and W3 host-event harnesses, so it was not deleted out from under those owners.
 
 ## Shared files and caller cuts
 
-Outside pkg/store, the implementation change is `pkg/controller/server.go`.
-`pkg/controller/runner_metering_store_test.go` adds the real route/commit proof.
+Outside internal/store, the implementation change is `internal/controller/server.go`.
+`internal/controller/runner_metering_store_test.go` adds the real route/commit proof.
 The deleted API callers are removed from these shared test files:
 
 - `internal/nodehost/rehydrate_resume_test.go`
-- `pkg/controller/egress_test.go`
-- `pkg/controller/prom_internal_test.go`
-- `pkg/controller/server_test.go`
+- `internal/controller/egress_test.go`
+- `internal/controller/prom_internal_test.go`
+- `internal/controller/server_test.go`
 
 Store legacy caller cuts affect these test files. Each change removes functions
 that call the deleted API or their dependent helper, plus unused imports:

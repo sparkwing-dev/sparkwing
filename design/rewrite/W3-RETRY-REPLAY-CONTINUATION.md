@@ -24,8 +24,8 @@ reproduced the same failure through the real router and SQLite:
 The probe used `newGitHubBrowserFixture`, cleared its injected
 `resolveGitHubConnectWriter`, then posted its valid session and CSRF token to
 `/github/app/connect`. It has been deleted. The default resolver in
-`pkg/controller/browser_github_app_routes.go` requires the tenant to implement
-`GitHubConnectWriter`. `pkg/store` implements none of its three authority-bearing
+`internal/controller/browser_github_app_routes.go` requires the tenant to implement
+`GitHubConnectWriter`. `internal/store` implements none of its three authority-bearing
 methods: `LinkedGitHubSubject`, `ConsumeGitHubConnect`, and
 `BindAuthorizedGitHubInstallation`. C2 already declares their transaction rules
 under its browser GitHub App contract. C1/C2 must implement that contract. This

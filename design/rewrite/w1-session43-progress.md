@@ -82,11 +82,11 @@ legacy suites are not claimed passing. Native catalog cells remain pending.
 
 ## Shared files
 
-Mechanical tenant caller migrations outside pkg/store:
+Mechanical tenant caller migrations outside internal/store:
 
 - internal/nodehost/attempt_test.go, closures_test.go, debug_test.go.
 - internal/opsview/doctor_root_unix_test.go.
-- pkg/controller/chunked_body_test.go, compute_limits_test.go, crons_test.go,
+- internal/controller/chunked_body_test.go, compute_limits_test.go, crons_test.go,
   crons_tick_test.go, cycle_detection_test.go, execution_location_test.go,
   here_runner_test.go, metric_timestamp_test.go, profiles_coverage_test.go,
   prom_internal_test.go, release_pause_test.go, retry_test.go,

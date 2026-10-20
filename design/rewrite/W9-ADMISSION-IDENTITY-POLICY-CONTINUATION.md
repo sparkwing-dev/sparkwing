@@ -72,7 +72,7 @@ Shared production files touched outside W9's CLI ownership are
 `internal/chaos/crashdummy/main.go`,
 `internal/cluster/production_runtime.go`,
 `internal/engine/{engine,index,policy,upgrade}.go` and
-`pkg/controller/{engine_claim,engine_version}.go`. Their tests were migrated to
+`internal/controller/{engine_claim,engine_version}.go`. Their tests were migrated to
 the typed admission field. Source versioning documentation and its embedded
 mirror were updated. The internal Go type changes above implement the requested
 boundary repair. No wire, store-schema or foreign contract amendment is needed.

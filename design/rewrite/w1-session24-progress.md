@@ -94,8 +94,8 @@ GOCACHE is /tmp/sw-astra-W1/cache; GOTMPDIR and TMPDIR are
 /tmp/sw-astra-W1/tmp. Commands use go -C with this worktree's absolute path.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet -p 4 passes for pkg/store/..., pkg/controller/..., internal/orchestrator/..., internal/acceptance/..., tests/acceptance/... and cmd/sparkwing/....
-- The W1 store selection passes **408 top-level tests / 1,227 cases**, with no skips. Extract the Test names from the files in w1-session24-tests.txt, exclude names containing Postgres, and use their anchored alternation with ./pkg/store -count=1 -timeout=180s.
+- Scoped go vet -p 4 passes for internal/store/..., internal/controller/..., internal/orchestrator/..., internal/acceptance/..., tests/acceptance/... and cmd/sparkwing/....
+- The W1 store selection passes **408 top-level tests / 1,227 cases**, with no skips. Extract the Test names from the files in w1-session24-tests.txt, exclude names containing Postgres, and use their anchored alternation with ./internal/store -count=1 -timeout=180s.
 - **Fifteen SQLite cells** pass. Run ./internal/acceptance ./tests/acceptance with -run '^(TestLifecycle|TestRecovery|TestPlacement)$/[^/]+/store-sqlite$' -count=1 for thirteen; run ./tests/acceptance with -run '^(TestBilling|TestSurface)$/[^/]+/store-sqlite$' -count=1 for the other two. These cover three lifecycle, eight recovery, two placement, one billing-start and one schedules cell.
 - Controller -run '^(TestOperationalQueueSampler|TestSetQueueDepthCoversEveryState|TestQueueDepthCache)' -count=1 passes. TestDocumentedMetricsMatchTheRegistry passes separately.
 - commentcheck -base main passes across **1,124 files**. git diff --check, sync-docs.sh --check and check-changelog.sh pass.
@@ -145,19 +145,19 @@ does not mark those cuts or the full W1 area complete.
 
 ## Shared files and cleanup
 
-Production caller migrations outside pkg/store:
+Production caller migrations outside internal/store:
 
-- pkg/controller/server.go
+- internal/controller/server.go
 - internal/orchestrator/trigger_consumer.go
 
 Shared test and acceptance files:
 
 - cmd/sparkwing/run_detached_process_test.go
-- pkg/controller/operator_queue_internal_test.go
+- internal/controller/operator_queue_internal_test.go
 - internal/acceptance/store_queue_order.go
 - internal/acceptance/store_unstarted.go
 
-Within pkg/store the changed files are store.go, unit_billing.go,
+Within internal/store the changed files are store.go, unit_billing.go,
 unit_billing_test.go, operator_queue.go, operator_queue_test.go,
 queue_state_counts_test.go, terminal_parent_claim_test.go,
 tenant_sql_scope_guard_test.go and default_team_callers_test.go.

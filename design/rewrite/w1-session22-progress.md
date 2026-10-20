@@ -63,8 +63,8 @@ Go checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
 GOCACHE/GOTMPDIR/TMPDIR below /tmp/sw-astra-W1.
 
 - Whole-repository `go build -p 4 ./...` passes on the final source tree.
-- Scoped `go vet -p 4` passes for pkg/store/..., pkg/controller/..., pkg/storage/..., internal/nodehost/..., internal/orchestrator/..., internal/runners/k8s/..., internal/acceptance/... and tests/acceptance/....
-- The W1 package selection passes **401 top-level tests / 1,176 cases**, with no skips. Select Test functions from the files in w1-session22-tests.txt, omit TestPostgres names, and run their anchored alternation against ./pkg/store with -count=1.
+- Scoped `go vet -p 4` passes for internal/store/..., internal/controller/..., internal/storage/..., internal/nodehost/..., internal/orchestrator/..., internal/runners/k8s/..., internal/acceptance/... and tests/acceptance/....
+- The W1 package selection passes **401 top-level tests / 1,176 cases**, with no skips. Select Test functions from the files in w1-session22-tests.txt, omit TestPostgres names, and run their anchored alternation against ./internal/store with -count=1.
 - Ten SQLite cells pass with `go test -p 4 ./internal/acceptance ./tests/acceptance -run '^(TestLifecycle|TestRecovery)$/[^/]+/store-sqlite$' -count=1`. These are both lifecycle cells and all eight recovery cells.
 - The three Engine enrollment/trusted-service/bootstrap adapter tests and both TestHostedRetryPolicy_ tests pass.
 - Full internal/apiref and internal/apispec tests pass. Embedded scrub and migration tests pass. check-api-spec and sync-docs --check pass.
@@ -106,15 +106,15 @@ No new foreign contract change or architecture decision is requested.
 
 ## Shared files
 
-The lead's caller-migration exception covers these edits outside pkg/store:
+The lead's caller-migration exception covers these edits outside internal/store:
 
 - internal/acceptance/store_transitions.go
 - internal/nodehost/debug.go and debug_test.go
 - internal/orchestrator/backends.go, hosted_retry.go, hosted_retry_test.go and wingd_api_routes_test.go
 - internal/runners/k8s/k8s_test.go
-- pkg/controller/client/client.go
-- pkg/controller/handlers.go, node_claim_test.go, node_client_contract_test.go, runner_scopes_test.go, server.go and tenant_routes.go
-- pkg/storage/state.go
+- internal/controller/client/client.go
+- internal/controller/handlers.go, node_claim_test.go, node_client_contract_test.go, runner_scopes_test.go, server.go and tenant_routes.go
+- internal/storage/state.go
 - tests/acceptance/lifecycle_test.go
 
 Shared prose is c1-data.md, handoffs.md, t1-credential-routes.md,

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func TestTriggerCommandSubmitsPreparedSealThroughFinalRoute(t *testing.T) {

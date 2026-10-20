@@ -79,12 +79,12 @@ jobs:
           fi
 
       - name: Run the Postgres conformance suites
-        run: go test ./pkg/store ./internal/backend ./internal/orchestrator
+        run: go test ./internal/store ./internal/backend ./internal/orchestrator
 
       - name: Prove the Postgres-gated tests did not skip
         run: |
           set -euo pipefail
-          go test -v -count=1 -run 'Postgres|Pg|BackupRestoreDrill|^TestCLITokenMintUsesCommittedMembershipAuthority$|^TestRunFiltersTreatSQLMetacharactersAsLiteral$|^TestSecretMutationsTreatSQLMetacharactersAsLiteral$' ./pkg/store ./internal/backend ./internal/orchestrator ./pkg/controller \
+          go test -v -count=1 -run 'Postgres|Pg|BackupRestoreDrill|^TestCLITokenMintUsesCommittedMembershipAuthority$|^TestRunFiltersTreatSQLMetacharactersAsLiteral$|^TestSecretMutationsTreatSQLMetacharactersAsLiteral$' ./internal/store ./internal/backend ./internal/orchestrator ./internal/controller \
             | tee "$RUNNER_TEMP/postgres-gated.log"
           if grep -q -- '--- SKIP' "$RUNNER_TEMP/postgres-gated.log"; then
             echo 'a Postgres-gated test skipped on the lane that promises Postgres coverage:' >&2

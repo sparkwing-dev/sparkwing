@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // PublicNode returns the credential-safe shape shared by node read surfaces.

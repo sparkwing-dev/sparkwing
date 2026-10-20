@@ -76,8 +76,8 @@ TMPDIR=/tmp/sw-astra-W9, from this worktree:
 
 ```sh
 go test -p 4 -tags rewrite_integration ./internal/cluster -run 'TestProductionRunnerCommandsClaimAndHost|TestProductionRunnerOwnerReachesNativeHost|TestProductionRunnerNodeReachesNativeHost|TestProductionCloudExchangeReachesAwardRenewal|TestInstalledRunnerRuntimeComposition' -count=1 -v
-go test -p 4 -tags rewrite_integration ./pkg/controller -run '^TestReviewOwnerEvaluationReportsBeforeWorkAward$' -count=1 -v
-go test -p 4 ./pkg/controller -run 'TestPublicNumericSelectors|TestDebugNumericSelectors|FuzzDebugSelectorsStayWithinAuthenticatedTeam|Fuzz.*Numeric' -count=1
+go test -p 4 -tags rewrite_integration ./internal/controller -run '^TestReviewOwnerEvaluationReportsBeforeWorkAward$' -count=1 -v
+go test -p 4 ./internal/controller -run 'TestPublicNumericSelectors|TestDebugNumericSelectors|FuzzDebugSelectorsStayWithinAuthenticatedTeam|Fuzz.*Numeric' -count=1
 ```
 
 No native acceptance cell was newly unskipped. No archived test was ported.

@@ -93,7 +93,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' -count=1 -v
 ```
 
@@ -125,9 +125,9 @@ Shared files changed:
   burst_availability_test.go, burst_store_admission_test.go, burst_execution.go,
   local_admission.go, owner_schedule.go and remote_store.go.
 - internal/wingd/localcontroller: machine_admission.go and node_pipeline_test.go.
-- pkg/store: burst_placement_test.go, owner_placement.go, state_contract.go,
+- internal/store: burst_placement_test.go, owner_placement.go, state_contract.go,
   state_owner_read.go, state_reconcile.go and unit_matching.go.
-- pkg/controller: engine.go, burst_acceptance_test.go,
+- internal/controller: engine.go, burst_acceptance_test.go,
   burst_sdk_execution_test.go, burst_sdk_native_test.go and
   burst_sdk_http_integration_test.go.
 - cmd/apidiff/main.go and main_test.go; CHANGELOG.md; api/openapi.yaml;

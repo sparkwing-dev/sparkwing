@@ -97,7 +97,7 @@ GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
 TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
 
 - Whole-repository go build -p 4 ./... passes.
-- go vet -p 4 passes for pkg/store/..., pkg/controller/..., internal/acceptance,
+- go vet -p 4 passes for internal/store/..., internal/controller/..., internal/acceptance,
   tests/acceptance, cmd/sparkwing, internal/opsview, internal/web,
   internal/orchestrator and internal/runners/k8s.
 - The exact store selection passes **296 top-level tests / 828 cases** without
@@ -124,7 +124,7 @@ snapshot regeneration remains integration work.
 
 ## Shared files and friction
 
-Production callers outside pkg/store changed only in
+Production callers outside internal/store changed only in
 cmd/sparkwing/runs_capacity.go, internal/opsview/doctor.go and
 internal/orchestrator/backends.go.
 
@@ -138,10 +138,10 @@ new store_started.go, plus fixture migrations in:
   nodehost_usage}_test.go
 - internal/runners/k8s/{k8s,profile_cpu_policy}_test.go
 - internal/web/capacity_test.go
-- pkg/controller/{finish_run_followups,finish_run_recovery,finish_run_retry,
+- internal/controller/{finish_run_followups,finish_run_recovery,finish_run_retry,
   profiles_aggregation,profiles_completion,profiles_coverage,profiles,
   runner_scopes}_test.go
-- pkg/controller/client/coordination_test.go
+- internal/controller/client/coordination_test.go
 
 C1, T1, two API snapshots, this handoff and the exact test-file list record
 the change. W1b files are untouched.

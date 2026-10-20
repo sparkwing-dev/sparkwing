@@ -91,9 +91,9 @@ adding an admission implementation.
 
 Shared production files touched: `internal/procenv/{build,submitted}.go`,
 `internal/runspec/environment.go`, `internal/wingd/localcontroller/native.go`,
-`internal/cluster/production_runtime.go`, `pkg/store/{store,run_spec,
-plan_contracts,submitted_environment}.go`, `pkg/store/schema.sql`, and
-`pkg/controller/{server,engine,engine_claim,engine_intake}.go`. Their focused
+`internal/cluster/production_runtime.go`, `internal/store/{store,run_spec,
+plan_contracts,submitted_environment}.go`, `internal/store/schema.sql`, and
+`internal/controller/{server,engine,engine_claim,engine_intake}.go`. Their focused
 callers/tests were migrated. W9 callers changed in `trigger_prepare.go`,
 `trigger_native.go`, `burst_native.go`, `local_run_host.go` and standalone run
 composition. Generated CLI/API references, OpenAPI schema and changelog mirrors were

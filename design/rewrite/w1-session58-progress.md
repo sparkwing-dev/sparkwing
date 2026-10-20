@@ -6,7 +6,7 @@ are unchanged.
 
 ## Merge resolution
 
-Resolved the only conflicted working-copy file, pkg/store/launcher_snapshot.go.
+Resolved the only conflicted working-copy file, internal/store/launcher_snapshot.go.
 W1 retains the store-owned award snapshot and controller adapter. W8's amended
 reservation observation and cleanup response are implemented through that same
 snapshot. No deleted integration file was restored. Removed launcher_contract.go
@@ -131,11 +131,11 @@ amendments stay with W1b.
 ## Shared files, assumptions and friction
 
 Shared production files touched by W1:
-- pkg/controller/engine_launcher_sync.go
-- pkg/controller/github_app_routes.go
+- internal/controller/engine_launcher_sync.go
+- internal/controller/github_app_routes.go
 
 Shared tests touched by W1:
-- pkg/controller/github_app_native_routes_test.go (new)
+- internal/controller/github_app_native_routes_test.go (new)
 - tests/acceptance/bootstrap_store_w8_test.go
 - tests/acceptance/runner_store_w8_test.go
 - tests/acceptance/launcher_reservation_w8_test.go

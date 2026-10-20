@@ -28,7 +28,7 @@ All Go checks used `GOWORK=off GOFLAGS=-buildvcs=false`,
   `PUT /bucket/teams/default/pending/member-a-0` escaped the configured prefix.
   The same command passes after the fix.
 - `build ./...` and `vet ./...`: pass on the final production code.
-- Full `internal/blob`, `pkg/storage/logseg`, `internal/doccheck` and Helm chart
+- Full `internal/blob`, `internal/storage/logseg`, `internal/doccheck` and Helm chart
   package tests: pass.
 - Focused S3/CloudFront controller tests and filesystem/S3 controller startup
   tests: pass. Startup tests cover the actual storage URL parser and constructor.
@@ -47,7 +47,7 @@ All Go checks used `GOWORK=off GOFLAGS=-buildvcs=false`,
   Runtime: 151.319 seconds.
 - `commentcheck -base HEAD .`: clean across all 24 task Go files.
   `commentcheck -base main .` reports the existing untagged comment at
-  `pkg/store/store.go:107`; that line is unchanged from HEAD.
+  `internal/store/store.go:107`; that line is unchanged from HEAD.
 - `git diff --check`: pass.
 
 The first broader storage run exposed an existing stale `record_refused`
@@ -65,7 +65,7 @@ remains for this slice. Lead-owned handoffs and amendments were untouched.
 ## Shared files and size
 
 Shared edits: controller `data.go`, `data_test.go`, `main.go`; CloudFront adapter
-and tests; `pkg/storage/logseg/s3_test.go`; acceptance storage fixtures, the memo
+and tests; `internal/storage/logseg/s3_test.go`; acceptance storage fixtures, the memo
 assertion, source-bundle property and mechanical S3 constructor callers; Cloud
 chart example/README/render test; C1; storage docs and embedded mirror; changelog
 and embedded mirror. Other implementation edits stay in `internal/blob`.

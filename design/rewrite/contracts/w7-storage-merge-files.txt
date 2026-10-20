@@ -53,7 +53,7 @@ Continuation edits outside conflict resolution:
 cmd/sparkwing/run_host.go
 internal/orchestrator/run_handle.go
 internal/orchestrator/run_handle_test.go
-pkg/storage/storage.go
+internal/storage/storage.go
 docs/migrations/_unreleased.md
 pkg/docs/mirror/migrations/_unreleased.md
 design/rewrite/contracts/w7-storage-report.md

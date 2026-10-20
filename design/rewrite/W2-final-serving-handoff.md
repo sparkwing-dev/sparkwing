@@ -104,9 +104,9 @@ contract change is requested for this slice.
 
 ## Shared files
 
-Outside W2: pkg/store/child_output.go, console_refund.go and their tests;
+Outside W2: internal/store/child_output.go, console_refund.go and their tests;
 internal/wingd/localcontroller/claims.go; internal/controllerwire/operator.go
-and output.go; pkg/controller/client/native_services.go; internal/apispec/wire.go;
+and output.go; internal/controller/client/native_services.go; internal/apispec/wire.go;
 credential/local-node acceptance fixtures and their port documents; C1/C3
 contracts, API/OpenAPI/migration docs and embedded mirrors.
 

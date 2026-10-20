@@ -88,7 +88,7 @@ files and exclude tests, testdata, acceptance and contract declarations.
 ## Friction and native follow-up
 
 - Required commentcheck against main reports the pre-existing untagged comment
-  at pkg/store/store.go:107, also present in HEAD. No store file was changed.
+  at internal/store/store.go:107, also present in HEAD. No store file was changed.
 - Full fssecure tests report the existing config-writer inventory misses for
   cmd/sparkwing/configure_init.go and internal/userconfig/legacy_migrate.go.
   The short suite and all focused file-security tests pass.

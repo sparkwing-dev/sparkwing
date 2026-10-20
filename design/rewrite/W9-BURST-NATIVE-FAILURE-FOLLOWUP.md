@@ -51,7 +51,7 @@ GOTMPDIR=/tmp/sw-astra-W9/go and at most four package workers.
 - The rewrite_integration CLI and SDK HTTP probes compile, then skip at the
   forbidden TCP listener. Those skips are not native acceptance evidence.
 
-The cancellation reproduction is `go test -p 4 ./pkg/controller -run
+The cancellation reproduction is `go test -p 4 ./internal/controller -run
 '^TestBurstCancelledOwnerRenewalRetainsReportingAuthority$' -count=1` with the
 same environment above. It passed after the fix. The lead-native rerun needs
 `go test -p 4 -tags rewrite_integration ./cmd/sparkwing -run
@@ -73,11 +73,11 @@ acceptance cell was newly unskipped.
 
 Shared files touched beyond W9 ownership:
 
-- pkg/store/local_secrets.go and local_secrets_test.go.
-- pkg/controller/burst_cancellation_test.go.
+- internal/store/local_secrets.go and local_secrets_test.go.
+- internal/controller/burst_cancellation_test.go.
 - Merge resolutions in internal/capability/policy.go,
-  internal/apiroutes/apiroutes_test.go, pkg/store/dialect.go, pkg/store/store.go,
-  and pkg/controller/engine_amendment_test.go.
+  internal/apiroutes/apiroutes_test.go, internal/store/dialect.go, internal/store/store.go,
+  and internal/controller/engine_amendment_test.go.
 - C1/C2/C3/C4 contract notes and pkg/docs/mirror/local-execution.md.
 
 The remaining merge resolutions are cmd/sparkwing/schedules_repository_environment_test.go

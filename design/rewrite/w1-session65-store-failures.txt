@@ -55,16 +55,16 @@ TestTheDefaultLadderRefusesAClassAboveEight
 No new or resolved store failures.
 
 Focused account ports
-ok  	github.com/sparkwing-dev/sparkwing/pkg/store	3.896s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	3.896s
 
 Focused account race
-ok  	github.com/sparkwing-dev/sparkwing/pkg/store	40.668s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	40.668s
 
 Account HTTP acceptance
 ok  	github.com/sparkwing-dev/sparkwing/tests/acceptance	0.422s
 
 Log tree and pages
-ok  	github.com/sparkwing-dev/sparkwing/pkg/controller	2.477s
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	2.477s
 
 Commentcheck vs main
 commentcheck: clean across 2474 file(s)
@@ -112,5 +112,5 @@ Controller invitation fixture (inherited raw-token failures)
         --- FAIL: TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority/deleted/editor/sqlite (0.03s)
             team_boundary_test.go:259: tokens: insert: SQL logic error: no such table: tokens (1)
 FAIL
-FAIL	github.com/sparkwing-dev/sparkwing/pkg/controller	0.393s
+FAIL	github.com/sparkwing-dev/sparkwing/internal/controller	0.393s
 FAIL

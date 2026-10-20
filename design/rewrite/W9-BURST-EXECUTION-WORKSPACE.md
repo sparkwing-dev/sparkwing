@@ -54,7 +54,7 @@ Passed:
   drift and whitespace. Commentcheck against HEAD is clean across eight Go files.
 
 Commentcheck against main still reports the inherited untagged pinnedClock
-comment at `pkg/store/store.go:108`. No archived test was newly ported. Existing
+comment at `internal/store/store.go:108`. No archived test was newly ported. Existing
 test ports and legacy cuts remain as recorded in earlier W9 reports.
 
 ## Contract changes made
@@ -82,7 +82,7 @@ env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
 
 env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache \
   go -C /home/bombuntu/.xwing/envs/1087/sparkwing test -p 4 \
-  -tags rewrite_integration ./pkg/controller \
+  -tags rewrite_integration ./internal/controller \
   -run '^TestBurstNativeSDKHTTPExecutesHerePersonalAndCloudAwards$' -count=1 -v
 ```
 
@@ -115,7 +115,7 @@ Shared files touched:
 
 - `internal/nodehost/artifact_layer.go`, `depcache_records.go`,
   `cache_directory.go`, `cache_directory_unix_test.go`, `workspace_layers_test.go`.
-- `pkg/controller/burst_acceptance_test.go`, `burst_sdk_source_test.go` and
+- `internal/controller/burst_acceptance_test.go`, `burst_sdk_source_test.go` and
   `testdata/burst-sdk/main.go`.
 - C3 protocol/SDK contract, CHANGELOG and generated embedded-doc mirrors.
 

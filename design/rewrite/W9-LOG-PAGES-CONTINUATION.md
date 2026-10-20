@@ -94,9 +94,9 @@ The lead should rerun `TestReviewProductionExecutionBindings`,
 
 ## Scope, size and assumptions
 
-Shared production edits are `pkg/controller/log_pages.go` and the four-line
-registration change in `pkg/controller/reporting_routes.go`. The new test file
-is `pkg/controller/log_pages_test.go`. Documentation changes are
+Shared production edits are `internal/controller/log_pages.go` and the four-line
+registration change in `internal/controller/reporting_routes.go`. The new test file
+is `internal/controller/log_pages_test.go`. Documentation changes are
 `docs/local-execution.md` and its generated mirror. Lead-owned contracts,
 handoffs and amendments are unchanged. No API was removed or caller migrated.
 

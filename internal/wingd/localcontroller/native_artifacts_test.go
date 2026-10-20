@@ -10,11 +10,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestNativeServicesPublishesAndConsumesArtifacts(t *testing.T) {
@@ -40,7 +41,7 @@ func TestNativeServicesPublishesAndConsumesArtifacts(t *testing.T) {
 			job := nodeproto.JobSpec{ID: "job", Artifacts: []string{"result.txt"}}
 			if consume {
 				key := blob.ResultRecordKey(runspec.AttemptIdentity{Team: "default", RunID: "run", NodeID: "producer", Generation: 4, Attempt: 2}, input.Storage.Authority.Repo, input.Storage.Authority.Ref.Scope, "burst", blob.KindManifest)
-				state.node = store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "producer"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: 4, Attempt: 2, ManifestRecord: &key}
+				state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "producer"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: 4, Attempt: 2, ManifestRecord: &key}
 				job.Artifacts = nil
 				job.Consumes = []nodeproto.ArtifactInput{{Producer: "producer", Into: "received"}}
 				_, err = prepare(t.Context(), nodehost.LayerSpec{Name: "artifacts"}, input, job)

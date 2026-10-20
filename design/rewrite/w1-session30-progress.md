@@ -62,7 +62,7 @@ Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
 GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1.
 
 - Whole-repository go build -p 4 ./... passes.
-- Scoped go vet passes for pkg/store/..., pkg/controller/..., internal/acceptance/...
+- Scoped go vet passes for internal/store/..., internal/controller/..., internal/acceptance/...
   and tests/acceptance/....
 - The W1 selection passes 465 top-level tests / 1,458 cases with no skips.
   Its file inventory is w1-session30-tests.txt. Extract Test names, omit
@@ -113,8 +113,8 @@ Remaining work and real integration points:
   or full acceptance suite ran here. The lead retains independent review and
   landing.
 
-Shared source/test files changed are pkg/controller/identity_team.go,
-pkg/controller/root_provisioning.go, internal/acceptance/store_credentials.go,
+Shared source/test files changed are internal/controller/identity_team.go,
+internal/controller/root_provisioning.go, internal/acceptance/store_credentials.go,
 the new internal/acceptance/store_enrollment.go, tests/acceptance/placement_test.go
 and tests/acceptance/root_provisioning_http_test.go. Other shared edits are
 docs/api.md, docs/migrations/_unreleased.md, CHANGELOG.md, their embedded mirrors,

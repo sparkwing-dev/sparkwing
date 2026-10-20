@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func TestCollectRunIDs_FlagsAndStdinDash(t *testing.T) {

@@ -8,10 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T) {
@@ -142,6 +143,6 @@ func sdkTestEnvironment(st EvaluationStore) SDKEnvironment {
 	}
 }
 
-func (s environmentReadError) ReadNode(context.Context, store.NodeRef) (store.NodeRow, error) {
+func (s environmentReadError) ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
 	return store.NodeRow{}, s.err
 }

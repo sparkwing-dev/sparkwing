@@ -100,7 +100,7 @@ and Kubernetes instance correlation before W1 can implement safe cleanup.
 
 **DESIGN approved (lead): W1b record mutation authorization.** Invariant: no record, manifest or memo copy persists unless the writer, ancestor and holder authority is current at the moment of the write. Record publication has one transaction-local mutation owner used by both CommitRecord and CopyMemo: prepare namespaces and verified members first (any I/O happens here), then take the existing blob locks, recheck current authority against the store clock inside the same transaction, and persist the complete destination batch through that owner. That final recheck is the linearization boundary; nothing writes after it without passing it. Preserve immutable replay, all-or-nothing output and manifest copies, and caller-owned rollback. Remove the scattered per-path checks this replaces. TestBlobRecordsMutationCannotOutliveAuthority must go green with its full generated-case run.
 
-**W1b may make two catalog edits in W1 files (lead).** W1b deletes `output_runs` and `output_tombstones` from `tenantTables` in `pkg/store/tenant.go`, and the `(*Store).ExpiredOutputRuns` entry from `reviewedUnscopedSQL` in `pkg/store/tenant_sql_scope_guard_test.go`. These are exactly the two edits listed in W1b-HANDOFF.md; nothing else in W1's files.
+**W1b may make two catalog edits in W1 files (lead).** W1b deletes `output_runs` and `output_tombstones` from `tenantTables` in `internal/store/tenant.go`, and the `(*Store).ExpiredOutputRuns` entry from `reviewedUnscopedSQL` in `internal/store/tenant_sql_scope_guard_test.go`. These are exactly the two edits listed in W1b-HANDOFF.md; nothing else in W1's files.
 
 **W1b priority (lead).** After the two items above, prioritize legacy cutovers and real integration over more test coverage: retire the legacy claim-credit, raw storage, output, direct-upload and log paths you own, migrating callers with the smallest change (the W1 scope note above applies to you in the other direction for caller migration only), and join W1's real issuance/start/finish transactions to the billing helpers (A1-27).
 
@@ -415,7 +415,7 @@ presentations and HEAD, keeps current membership/parent ceilings and enforces
 the configured absolute lifetime. Real SQLite HTTP properties pass. W1 still
 owns roleless and console session representation. Its LookupSession path must
 also classify every backend fault with ErrSessionBackend: the authority-chain
-error return and RowsAffected error return in pkg/store/auth.go currently
+error return and RowsAffected error return in internal/store/auth.go currently
 propagate infrastructure errors without that tag. A temporary overlay probe
 dropping memberships before GET auth/session returned 401 instead of 503.
 W2 has not added SQL or error-message matching. Wider browser login, OAuth, peer and legacy route
@@ -588,7 +588,7 @@ Workers: act on every decision addressed to your area. Items marked "Korey to ra
 
 `internal/acceptance` is about 14,450 lines of test code in an ordinary package, so it counts against the production budget, and much of it duplicates unit tests. Each area does the following in its own area, and the lead runs one cross-cutting pass afterwards for the scenario catalog, the cell registries and the areas with no running worker (W4, W6, W7).
 
-1. **Move your harness files into `_test.go` files in the package they test.** W3: `host_*` into `internal/nodehost` (and `internal/lease`) tests. W1/W1b: `store_*` into `pkg/store` tests, replacing hand-written SQL `INSERT`s with the store's own seeding (`pkg/store/internal/storetest`). W2: `credential_routes.go` into a `_test.go` file next to the routes; keep the hand-written expected table. Delete the moved file from `internal/acceptance`.
+1. **Move your harness files into `_test.go` files in the package they test.** W3: `host_*` into `internal/nodehost` (and `internal/lease`) tests. W1/W1b: `store_*` into `internal/store` tests, replacing hand-written SQL `INSERT`s with the store's own seeding (`internal/store/internal/storetest`). W2: `credential_routes.go` into a `_test.go` file next to the routes; keep the hand-written expected table. Delete the moved file from `internal/acceptance`.
 2. **W3: one scripted fake per interface.** Collapse the six fake SDK processes, six fake host stores, four fake blob backends and two remote-cache fakes in `host_*` into one scripted fake each.
 3. **Delete checks that repeat existing unit tests.** W3: `host_reconcile.go` cases already covered by `nodehost/reconcile_test.go`; keep one copy of `CheckKeeperCauses` and `CheckKeeperConflictAndStop` (they run three times today).
 4. **Delete dead contract declarations (never referenced, even by tests).** W1: `LockOrder`, `SingletonWork`, `RetentionRules`, `CompletionEffects`, `EffectPhaseRanks`, `CapacityLiveness`. W8: `KeepAliveReasons`, `LocalPlatformPolicies`, `CloudUnitPolicies`, `CloudPodInvariants`.
@@ -608,7 +608,7 @@ The materialization path has stalled across four areas, each waiting on another:
 
 W2's review (`review/areas/W2-review-1792093521-final.md`, fixes in W2's `design/rewrite/W2-review-fixes.md`) left seven DESIGN handoffs, five of them addressed to W1. To avoid another multi-area wait:
 
-- **W2 owns end to end, including the minimal `pkg/store` edits each needs (list those files):** (a) the committing origin gate: store root issuance and owner-consent commits call the same direct-session predicate inside their transactions (the review's security blocker, second layer); (b) production dependency composition for W2's routes: concrete store adapters for the bootstrap seed (`EnsureBootstrapCapability`, `HasDeploymentAdministrator`), non-checkout payment settlement handoff to W1b's `SettlePayment`, local HTTP peers (`CredentialPeer`), `LauncherSyncReader`, `/data` authority and access, with compile-time conformance and route-through-commit tests; (c) the native declared-reference relation for `/pipelines/{name}/latest`; (d) the dashboard's canonical repository resolution and the missing resume handler; (e) the 23 handlers the new serving-registration test reports missing, or their removal from policy if the design deletes them.
+- **W2 owns end to end, including the minimal `internal/store` edits each needs (list those files):** (a) the committing origin gate: store root issuance and owner-consent commits call the same direct-session predicate inside their transactions (the review's security blocker, second layer); (b) production dependency composition for W2's routes: concrete store adapters for the bootstrap seed (`EnsureBootstrapCapability`, `HasDeploymentAdministrator`), non-checkout payment settlement handoff to W1b's `SettlePayment`, local HTTP peers (`CredentialPeer`), `LauncherSyncReader`, `/data` authority and access, with compile-time conformance and route-through-commit tests; (c) the native declared-reference relation for `/pipelines/{name}/latest`; (d) the dashboard's canonical repository resolution and the missing resume handler; (e) the 23 handlers the new serving-registration test reports missing, or their removal from policy if the design deletes them.
 - **W1 owns:** (f) the local-first placement policy input to the shared matcher (W2 review finding 7), so configured local-first hold, liveness and default preference work again; (g) trusted origin admission for schedules and verified GitHub App deliveries through the single sealed intake (finding 3), then deletion of `triggerIntake`, `triggerRows` and the legacy insertion path.
 
 ## Lead decision 14:40: the local controller is W8's first priority
@@ -879,7 +879,7 @@ Assigned to an Opus implementer (env 1087).
 
 ## 2026-10-19 Korey decision 28: structural simplification plan approved
 
-- Korey approved every recommendation in /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/simplicity/PLAN.md §4 (decisions 1-6 and 9-21 as recommended; 7-9 amended by §7 for prepaid), including moving pkg/store and pkg/controller under internal/, Sol's six cuts, GitHub-model provenance and cache trust, withdrawing the pool-runner residual, declared deployment kind, the 5-minute cancel drain deadline, Cloud fair shares, child-run limits (depth 10, 50 per root), CLI token limits, team-owned shared runners, append-only audit, the durable webhook inbox and declared restore.
+- Korey approved every recommendation in /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/simplicity/PLAN.md §4 (decisions 1-6 and 9-21 as recommended; 7-9 amended by §7 for prepaid), including moving internal/store and internal/controller under internal/, Sol's six cuts, GitHub-model provenance and cache trust, withdrawing the pool-runner residual, declared deployment kind, the 5-minute cancel drain deadline, Cloud fair shares, child-run limits (depth 10, 50 per root), CLI token limits, team-owned shared runners, append-only audit, the durable webhook inbox and declared restore.
 - Feature freeze: no new ranking, launcher or billing features beyond the plan until its §5 stop rule is met. Work proceeds in the plan's waves; every workstream deletes the old path and lands with its guard.
 
 ## 2026-10-19 Korey decision 29: one active controller per database for v0.68
@@ -951,4 +951,4 @@ separate operations; no database transaction stays open across a provider call.
 
 - Wave 1 of the simplification plan grew production Go by about 3,100 lines. Korey accepts growth that buys the right abstractions and single owners ("sometimes a codebase has to grow to become simpler").
 - Wave 2 proceeds: deletion-heavy lanes first (WS12 Sol's cuts, WS6 tenant handle, WS7 authority), and each lane reports its net lines and justifies growth in the merge request. The second time a reviewer finds the same mechanism in a lane, the lane stops patching and builds a single owner.
-- Barrier B1 (pkg/store, pkg/controller, client, storage, teststore under internal/) runs before wave 2 starts.
+- Barrier B1 (internal/store, internal/controller, client, storage, teststore under internal/) runs before wave 2 starts.

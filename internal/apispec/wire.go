@@ -8,8 +8,7 @@ import (
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -124,19 +123,19 @@ func wireOperations() map[string]wireOperation {
 		result["GET "+path] = operation("List credential metadata", nil, struct {
 			Tokens []capability.Metadata `json:"tokens"`
 		}{}, query("kind", "string"), query("include_revoked", "string"))
-		var create any = client.CreateTokenRequest{}
+		var create any = wire.CreateTokenRequest{}
 		if path == "/api/v1/operator/tokens" {
-			create = client.CreateServiceTokenRequest{}
+			create = wire.CreateServiceTokenRequest{}
 		}
-		result["POST "+path] = operation("Issue a credential once", create, client.CreatedToken{})
+		result["POST "+path] = operation("Issue a credential once", create, wire.CreatedToken{})
 		result["GET "+path+"/{token}"] = operation("Read credential metadata", nil, capability.Metadata{})
 		result["DELETE "+path+"/{token}"] = operation("Revoke a credential", nil, nil)
 		result["POST "+path+"/{token}/rotate"] = operation("Rotate a credential once", struct {
 			GraceSecs int64      `json:"grace_secs"`
 			ExpiresAt *time.Time `json:"expires_at,omitempty"`
-		}{}, client.RotatedToken{})
+		}{}, wire.RotatedToken{})
 	}
-	result["POST /api/v1/runners"] = operation("Enroll a runner once", client.EnrollRunnerRequest{}, client.CreatedToken{})
+	result["POST /api/v1/runners"] = operation("Enroll a runner once", wire.EnrollRunnerRequest{}, wire.CreatedToken{})
 	result["GET /api/v1/team/settings"] = operation("Read team machine enrollment settings and claim ranking", nil, wire.TeamSettings{})
 	result["PUT /api/v1/team/settings"] = operation("Change and audit team machine enrollment settings and claim ranking", wire.TeamSettingsUpdate{}, wire.TeamSettings{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))

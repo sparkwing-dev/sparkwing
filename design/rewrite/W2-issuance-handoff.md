@@ -146,7 +146,7 @@ env -C /home/bombuntu/.xwing/envs/1080/sparkwing/web TMPDIR=/tmp/sw-astra-W2/tmp
 Reproduce the focused Go evidence with the environment above and:
 
 ```sh
-go test -p 4 ./pkg/controller ./tests/acceptance -run '^TestCredentialIssuance|^FuzzCredentialIssuance|^TestPlanSecretOpener|^FuzzPlanSecret' -count=1
+go test -p 4 ./internal/controller ./tests/acceptance -run '^TestCredentialIssuance|^FuzzCredentialIssuance|^TestPlanSecretOpener|^FuzzPlanSecret' -count=1
 go test -p 4 ./internal/capability ./internal/apierr ./internal/acceptance ./tests/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
 go run ./internal/commentcheck -base main .
 ```

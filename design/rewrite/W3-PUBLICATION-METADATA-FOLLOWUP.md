@@ -49,10 +49,10 @@ host file or archived test port needed removal. The old burst assertion that
 allowed a known secret in a filename is replaced with refusal coverage.
 
 Shared production files: cmd/sparkwing/{burst_native,trigger_native}.go,
-internal/doccheck/sourcehints.go and pkg/controller/client/source_upload.go.
+internal/doccheck/sourcehints.go and internal/controller/client/source_upload.go.
 Shared tests: cmd/sparkwing/burst_source_test.go,
-internal/doccheck/sourcehints_test.go, pkg/controller/client/source_publication_test.go,
-pkg/controller/source_upload_test.go and pkg/controller/burst_acceptance_test.go.
+internal/doccheck/sourcehints_test.go, internal/controller/client/source_publication_test.go,
+internal/controller/source_upload_test.go and internal/controller/burst_acceptance_test.go.
 These contain all migrations for the uploader signature. Source files belong
 to W3. Shared prose: docs/{deployment,local-execution}.md, their generated
 pkg/docs/mirror copies and contracts/w3-source-selection-continuation.md.

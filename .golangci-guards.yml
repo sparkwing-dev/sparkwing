@@ -67,12 +67,13 @@ linters:
         store-allowed-internal:
           list-mode: lax
           files:
-            - "**/pkg/store/**"
+            - "**/internal/store/**"
             - "!$test"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal
-              desc: "pkg/store may import only the data-model packages it owns the authority over. Git resolution, token minting and wire DTOs belong to the controller."
+              desc: "internal/store may import only the data-model packages it owns the authority over. Git resolution, token minting and wire DTOs belong to the controller."
           allow:
+            - github.com/sparkwing-dev/sparkwing/internal/store
             - github.com/sparkwing-dev/sparkwing/internal/capability
             - github.com/sparkwing-dev/sparkwing/internal/blob
             - github.com/sparkwing-dev/sparkwing/internal/runspec
@@ -95,9 +96,11 @@ linters:
             - "**/internal/runspec/**"
             - "!$test"
           deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/store
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/store
               desc: "Wire and value packages are leaves; they must not reach the store."
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/controller
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller$
+              desc: "Server implementation belongs behind the controller wire contract."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller/
               desc: "Wire and value packages are leaves; they must not reach the controller."
             - pkg: github.com/sparkwing-dev/sparkwing/internal/engine
               desc: "Wire and value packages are leaves; move the shared value to a leaf package such as engineid."
@@ -109,7 +112,7 @@ linters:
         controller-not-daemon:
           list-mode: lax
           files:
-            - "**/pkg/controller/**"
+            - "**/internal/controller/**"
             - "!$test"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/wingd
@@ -122,18 +125,20 @@ linters:
             - "**/internal/runners/**"
             - "!$test"
           deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/controller
-              desc: "Run hosts and runners talk to the controller through pkg/controller/client, never the server package."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller$
+              desc: "Server implementation belongs behind the controller wire contract."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller/
+              desc: "Run hosts and runners talk to the controller through internal/controller/client, never the server package."
           allow:
-            - github.com/sparkwing-dev/sparkwing/pkg/controller/client
+            - github.com/sparkwing-dev/sparkwing/internal/controller/client
 
         client-not-store:
           list-mode: lax
           files:
-            - "**/pkg/controller/client/**"
+            - "**/internal/controller/client/**"
             - "!$test"
           deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/store
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/store
               desc: "The controller client must not link the store; use wire types."
 
         internal-not-sdk:
@@ -168,11 +173,13 @@ linters:
             - "**/pkg/backends/**"
             - "!$test"
           deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/storage
-              desc: "pkg/backends is config-type only; pkg/storage consumes the config, not the reverse."
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/store
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/storage
+              desc: "pkg/backends is config-type only; internal/storage consumes the config, not the reverse."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/store
               desc: "pkg/backends is config-type only."
-            - pkg: github.com/sparkwing-dev/sparkwing/pkg/controller
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller$
+              desc: "Server implementation belongs behind the controller wire contract."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller/
               desc: "pkg/backends declares the controller backend type only."
             - pkg: github.com/sparkwing-dev/sparkwing/pkg/logs
               desc: "pkg/backends declares log backend types only."
@@ -207,12 +214,12 @@ linters:
       analyze-types: true
       forbid:
         - pattern: ^store\.Store\.(AsOperator|ForTeam|SetTestClock)$
-          pkg: ^github\.com/sparkwing-dev/sparkwing/pkg/store$
+          pkg: ^github\.com/sparkwing-dev/sparkwing/internal/store$
           msg: "F1: widening the store to a team or operator handle belongs to a composition root (cmd/*, internal/wingd/localcontroller). Take the narrowed port as a dependency instead."
         - pattern: \.TestOnly\w*$
           msg: "F1: TestOnly hooks are for tests; call them only from _test.go files."
         - pattern: ^runspec\.(AppProvenance|ScheduleProvenance|ActionsProvenance|AssertedProvenance|AssertedChildProvenance|Provenance\.ReadingDefault)$
-          msg: "F2: only the intake transaction (pkg/store/intake_provenance.go) seals the identity a run speaks for; a child or retry copies its parent's sealed value."
+          msg: "F2: only the intake transaction (internal/store/intake_provenance.go) seals the identity a run speaks for; a child or retry copies its parent's sealed value."
         - pattern: ^runspec\.(Git\.(Ref|SHA|App)|Request\.Pipeline)$
           msg: "F3: the store decides trust from runspec.SealedRequest.Provenance, never from the submitted ref, commit, pipeline or App facts."
         - pattern: ^license\.\*?License\.Allows$
@@ -233,20 +240,20 @@ linters:
         text: "F1: widening"
         linters:
           - forbidigo
-      - path: ^(internal/runspec/|pkg/store/intake_provenance\.go$|pkg/store/teststore/)
+      - path: ^(internal/runspec/|internal/store/intake_provenance\.go$|internal/store/teststore/)
         text: "F2: only the intake"
         linters:
           - forbidigo
       # F3 guards the store's trust decisions. The controller still reads Git.App to route
       # check reports and source tokens to an installation; that routing is not trust.
-      - path-except: ^pkg/store/
+      - path-except: ^internal/store/
         text: "F3:"
         linters:
           - forbidigo
       # Intake and sealing build provenance from these facts. run_spec, latest_run and
       # binding_execution project or name the run's own pipeline; github_app_runner and
       # github_source_release route to the App installation that delivered the run.
-      - path: ^pkg/store/(intake_runtime|intake_provenance|app_intake|schedule_intake|schedule_transactions|run_spec|plan_seal|source_upload|github_app_runner|github_source_release|latest_run|binding_execution)\.go$
+      - path: ^internal/store/(intake_runtime|intake_provenance|app_intake|schedule_intake|schedule_transactions|run_spec|plan_seal|source_upload|github_app_runner|github_source_release|latest_run|binding_execution)\.go$
         text: "F3:"
         linters:
           - forbidigo
@@ -254,8 +261,8 @@ linters:
         text: "F2: only internal/deployment"
         linters:
           - forbidigo
-      # teststore is test-only fixture code; it moves under internal/ with the store.
-      - path: ^pkg/store/teststore/
+      # teststore contains only internal fixture code.
+      - path: ^internal/store/teststore/
         text: "F1: widening"
         linters:
           - forbidigo

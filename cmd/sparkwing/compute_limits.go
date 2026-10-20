@@ -14,9 +14,9 @@ import (
 	"text/tabwriter"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type operatorConnector func(context.Context, string) (controllerwire.OperatorManager, func(), error)

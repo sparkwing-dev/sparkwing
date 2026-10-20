@@ -59,7 +59,7 @@ All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false,
 GOCACHE=/tmp/sw-gocache and TMPDIR/GOTMPDIR under /tmp/sw-astra-W1. Tests use
 -p 4. The final build and scoped vet pass.
 
-- Whole repository: go build -p 4 ./... . Vet: ./pkg/store ./pkg/controller.
+- Whole repository: go build -p 4 ./... . Vet: ./internal/store ./internal/controller.
 - The 21 established W1 TestStore acceptance functions and insertion-limit
   proof pass in the focused acceptance run (10.795s). No native placement cell
   is newly enabled. Cloud metering, ordered preference and rotation-deadline
@@ -125,10 +125,10 @@ human decision is requested. Billing/blob/log amendments remain W1b's work.
 ## Shared files and friction
 
 Shared Go files:
-- pkg/controller/invitation_lifecycle_team_test.go
-- pkg/controller/team_boundary_test.go
-- pkg/controller/team_write_routes.go
-- pkg/controller/team_native_routes_test.go
+- internal/controller/invitation_lifecycle_team_test.go
+- internal/controller/team_boundary_test.go
+- internal/controller/team_write_routes.go
+- internal/controller/team_native_routes_test.go
 
 The only controller production change is compile-time TeamWriter conformance.
 The two external fixture callers now use native invitation authorization.

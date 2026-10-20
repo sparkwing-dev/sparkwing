@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -24,8 +25,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type nativeState struct {
@@ -34,7 +35,7 @@ type nativeState struct {
 	node     store.NodeRow
 }
 
-func (s *nativeState) ReadNode(ctx context.Context, _ store.NodeRef) (store.NodeRow, error) {
+func (s *nativeState) ReadNode(ctx context.Context, _ controllerwire.NodeRef) (store.NodeRow, error) {
 	return s.node, context.Cause(ctx)
 }
 
@@ -446,7 +447,7 @@ func TestNativeOwnerEvaluationHasProductionBinder(t *testing.T) {
 		data := &nativeStorageFixture{}
 		return nodehost.StorageBinding{Bytes: data, Records: data, Authority: blob.Authority{CapabilityRef: principal.Capability.Prefix}}, nil
 	}
-	state.node = store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Spec: []byte(`{"id":"job"}`), SpecHash: "source-hash"}
+	state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: []byte(`{"id":"job"}`), SpecHash: "source-hash"}
 	listener := &processListener{closed: make(chan struct{})}
 	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
 	if err != nil {

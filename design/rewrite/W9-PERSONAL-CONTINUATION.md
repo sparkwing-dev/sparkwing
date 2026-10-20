@@ -29,8 +29,8 @@ These focused checks passed with `GOWORK=off`, `GOFLAGS=-buildvcs=false`,
 `GOCACHE=/tmp/sw-gocache` and `go test -p 4`:
 
 - `./cmd/sparkwing -run '^TestRunners' -count=1`.
-- `./pkg/controller/client -run '^(TestCredential|TestRunnerSession|TestRunnerEnrollment|FuzzCredential|FuzzRunnerEnrollment)' -count=1`.
-- `./pkg/controller -run '^(TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner|TestPersonalEnrollmentTransportNeverPromotesCapabilityAncestryProperty)$' -count=1`.
+- `./internal/controller/client -run '^(TestCredential|TestRunnerSession|TestRunnerEnrollment|FuzzCredential|FuzzRunnerEnrollment)' -count=1`.
+- `./internal/controller -run '^(TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner|TestPersonalEnrollmentTransportNeverPromotesCapabilityAncestryProperty)$' -count=1`.
 - `./internal/clisurface -count=1`.
 
 `TestRunnersPersonalEnrollmentCLIThroughController` exercises both registration

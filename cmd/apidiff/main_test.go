@@ -39,7 +39,7 @@ func TestDiscoverPackagePathsIncludesEveryPublicPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"sparkwing", "pkg/cachecontrol", "pkg/storage/fs"} {
+	for _, want := range []string{"sparkwing", "pkg/cachecontrol", "pkg/wingwire"} {
 		if !slices.Contains(paths, want) {
 			t.Errorf("public package %q is absent from API snapshots", want)
 		}

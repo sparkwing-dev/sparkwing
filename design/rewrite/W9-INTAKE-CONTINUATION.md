@@ -57,9 +57,9 @@ GOCACHE=/tmp/sw-gocache, GOTMPDIR=/tmp/sw-astra-W9/go and TMPDIR=/tmp/sw-astra-W
 No acceptance cell is newly claimed and no archived test was newly ported. W6's
 intake policy and provenance tests were reused. Source documentation is updated
 in internal/wingd/LOCAL-CONTROLLER.md. Shared files touched: that document,
-internal/settings/intake.go and intake_policy_test.go, pkg/controller/server.go,
+internal/settings/intake.go and intake_policy_test.go, internal/controller/server.go,
 intake_source.go, intake_policy.go and intake_policy_test.go, and
-pkg/store/intake_settings.go, plan_contracts.go, plan_seal.go and expansion_accept.go.
+internal/store/intake_settings.go, plan_contracts.go, plan_seal.go and expansion_accept.go.
 The W9 test is cmd/sparkwing/local_controller_policy_test.go.
 
 No whole legacy file was deleted. Production Go is +210/-23, net +187, largely
