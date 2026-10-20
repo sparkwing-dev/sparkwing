@@ -893,3 +893,7 @@ Assigned to an Opus implementer (env 1087).
 - On Kubernetes, a self-hosted pool whose trust class is verified-default-only (pools holding reserved secrets) runs every claim in a fresh pod through the existing launcher machinery (the Cloud job pod shape, admission policy and per-claim bootstrap exchange), the way GitHub's Actions Runner Controller runs ephemeral runners. No pool root credential is reachable from job code and nothing persists between claims.
 - Runners on plain machines (VMs, bare metal) keep the same-uid residual, documented plainly as GitHub documents it for self-hosted runners; an ephemeral machine mode may come later.
 - The separate-job-uid option is dropped.
+
+## 2026-10-19 Korey decision 31: admin-armed default-branch schedules are verified
+
+- A schedule armed by a team admin, on the repository's default branch, with no argument or timing overrides, whose commit is resolved through the GitHub App at fire time, is sealed with verified trust: it can use verified-default-only pools and reads the default branch's cache. Schedules armed by non-admins, any overridden schedule, and manual runs stay unverified.
