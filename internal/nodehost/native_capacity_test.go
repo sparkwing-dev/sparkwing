@@ -16,7 +16,7 @@ import (
 func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	config, _, _, _ := nativeHostFixture(t)
-	config.Store, config.Owner = fixture.Tenant, fixture.Host
+	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestNativeHostAutomaticallyBindsRealCapacityPerRun(t *testing.T) {
 	first := newStoreHostFixture(t, capacityPlan("queue", 0, "a"))
 	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("queue", 0, "a"), runspec.Options{})
 	config, _, _, _ := nativeHostFixture(t)
-	config.Store, config.Owner = first.Tenant, first.Host
+	config.Store, config.Owner = first.Tenant, ownerOperationsFixture(first.Host)
 	config.Admission = &LocalAdmission{Daemon: newFakeDaemon()}
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {

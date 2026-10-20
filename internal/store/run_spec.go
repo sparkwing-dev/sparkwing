@@ -408,7 +408,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		if err != nil {
 			return err
 		}
-		hash, err := tx.store.planServices().CanonicalHash(job)
+		hash, err := runspec.CanonicalHash(job)
 		if err != nil {
 			return err
 		}

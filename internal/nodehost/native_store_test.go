@@ -92,7 +92,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	var award store.ReconciledNode
 	f.Host.AdoptClaim = func(_ context.Context, claim store.ReconciledNode) error { award = claim; return nil }
-	f.Host.Layer = nil
+	f.Host.DebugPolicy, f.Host.SkipPolicy, f.Host.ApprovalPolicy, f.Host.MemoPolicy, f.Host.AdmissionPolicy = nil, nil, nil, nil, nil
 	bind := func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
 		if award.Node.Ref.NodeID != input.NodeID || len(award.Bearer) == 0 {
 			return ProcessGrant{}, errors.New("native attempt has no adopted award")
@@ -122,7 +122,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		return grant, nil
 	}
 	config := NativeHostConfig{
-		Store: f.State, Lease: f.Host.Lease, Snapshots: snapshots, Owner: f.Host,
+		Store: f.State, Lease: f.Host.Lease, Snapshots: snapshots, Owner: ownerOperationsFixture(f.Host),
 		Masks: NewMaskRegistry(secrets.NewMasker()), Processes: processes, Router: router,
 		Admission:  &LocalAdmission{Daemon: newFakeDaemon()},
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
@@ -136,14 +136,14 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 				return engine.SDKCommand{Directory: root, Command: []string{bin}}, nil
 			},
 		},
-		Planner:  SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return nil }},
-		Executor: ExecutorDependencies{Bind: bind, PublishOutput: outputs.PublishOutput},
-		Evaluation: EvaluationDependencies{
+		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+		Executor:    ExecutionOperations{Bind: bind, PublishOutput: outputs.PublishOutput},
+		ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+			return nil, errors.New("unexpected source output read")
+		},
+		Evaluation: EvaluationOperations{
 			Bind: func(context.Context, EvaluationInput) (ProcessGrant, error) {
 				return ProcessGrant{}, errors.New("unexpected owner evaluation")
-			},
-			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
-				return nil, errors.New("unexpected source output read")
 			},
 		},
 	}

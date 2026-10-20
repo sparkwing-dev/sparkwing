@@ -8,63 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
-
-type fakePlanContracts struct {
-	validate func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	resolve  func(settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error)
-}
-
-func (f fakePlanContracts) ValidatePlan(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-	return f.validate(raw, ctx)
-}
-
-func (f fakePlanContracts) ResolveExpansion(in settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-	return f.resolve(in)
-}
-
-func (fakePlanContracts) CanonicalHash(value any) (runspec.Hash, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	var document any
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return "", err
-	}
-	hash, err := stateHash(document)
-	return runspec.Hash(hash), err
-}
 
 func successfulExpansionFixture(t *testing.T) (*Tenant, ExpansionSubmission) {
 	t.Helper()
 	tenant, _, request := expansionFixture(t)
 	request.Failure = nil
-	request.Body = []byte(`{"jobs":[{"id":"generated","groups":["group"],"deps":["job"]}]}`)
-	tenant.s.plans = fakePlanContracts{
-		validate: func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-			if !ctx.Expansion || ctx.SourceJob != "job" || ctx.Placement != nodeproto.PlacementRunnerHosted || len(ctx.ExistingJobs) != 1 || ctx.ExistingJobs[0].ID != "job" || ctx.Secrets == nil {
-				t.Fatalf("validation context = %+v", ctx)
-			}
-			var plan nodeproto.PlanDoc
-			err := json.Unmarshal(raw, &plan)
-			return plan, err
-		},
-		resolve: func(in settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-			if in.Spec.Request.Request.Pipeline != "p" {
-				t.Fatalf("resolver lost accepted seal: %+v", in.Spec)
-			}
-			out := map[string]runspec.JobExecutionSettings{}
-			for _, job := range in.Plan.Jobs {
-				out[job.ID] = runspec.JobExecutionSettings{Retry: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 2}}}
-			}
-			return out, nil
-		},
-	}
+	request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"step"}],"groups":["group"],"deps":["job"],"retry":{"attempts":2}}]}`)
 	return tenant, request
 }
 
@@ -89,7 +40,7 @@ func TestExpansionSuccessCommitsTopologyAndExecutionSettings(t *testing.T) {
 	if err != nil || len(graph.Expansions) != 1 || !reflect.DeepEqual(graph.Expansions[0].Members, []string{"generated"}) {
 		t.Fatalf("projection = %+v, %v", graph, err)
 	}
-	request.Body = []byte(` { "jobs": [ { "deps": ["job"], "groups": ["group"], "id": "generated" } ] } `)
+	request.Body = []byte(` { "jobs": [ { "deps": ["job"], "groups": ["group"], "id": "generated", "steps": [{"id":"step"}], "retry":{"attempts":2} } ] } `)
 	replay, err := tenant.AcceptExpansion(t.Context(), request)
 	if err != nil || !replay.Replayed || replay.BodyHash != accepted.BodyHash || len(replay.Nodes) != 1 {
 		t.Fatalf("replay = %+v, %v", replay, err)
@@ -118,46 +69,22 @@ func TestExpansionEmptySuccessPreservesEmptyGroup(t *testing.T) {
 }
 
 func TestExpansionRefusalRollsBackAllJobsAndBarrier(t *testing.T) {
-	for _, problem := range []string{"validator", "resolver", "missing_settings", "duplicate_job", "wrong_group", "missing_jobs", "null_jobs", "ancestor_lapse", "secret_identifier"} {
+	for _, problem := range []string{"duplicate_job", "wrong_group", "missing_jobs", "null_jobs", "secret_identifier"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
-			contracts := tenant.s.plans.(fakePlanContracts)
 			switch problem {
-			case "validator":
-				contracts.validate = func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					return nodeproto.PlanDoc{}, errors.New("plan refused")
-				}
-			case "resolver":
-				contracts.resolve = func(settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-					return nil, errors.New("ceiling exceeded")
-				}
-			case "missing_settings":
-				contracts.resolve = func(settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-					return map[string]runspec.JobExecutionSettings{}, nil
-				}
 			case "duplicate_job":
-				request.Body = []byte(`{"jobs":[{"id":"first","groups":["group"]},{"id":"job","groups":["group"]}]}`)
+				request.Body = []byte(`{"jobs":[{"id":"first","steps":[{"id":"step"}],"groups":["group"]},{"id":"job","steps":[{"id":"step"}],"groups":["group"]}]}`)
 			case "wrong_group":
-				request.Body = []byte(`{"jobs":[{"id":"first","groups":["group"]},{"id":"second","groups":["foreign"]}]}`)
+				request.Body = []byte(`{"jobs":[{"id":"first","steps":[{"id":"step"}],"groups":["group"]},{"id":"second","steps":[{"id":"step"}],"groups":["foreign"]}]}`)
 			case "missing_jobs":
 				request.Body = []byte(`{}`)
 			case "null_jobs":
 				request.Body = []byte(`{"jobs":null}`)
-			case "ancestor_lapse":
-				resolve := contracts.resolve
-				contracts.resolve = func(in settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-					expired := tenant.s.now().Add(time.Hour)
-					tenant.s.clock = func() time.Time { return expired }
-					return resolve(in)
-				}
 			case "secret_identifier":
-				contracts.validate = func(_ json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					if !ctx.Secrets.ContainsSecret("job-42") {
-						t.Fatal("short registered secret missing from matcher")
-					}
-					return nodeproto.PlanDoc{}, authorityError(apierr.SecretInIdentifier, "identifier contains a secret")
-				}
+				request.Body = []byte(`{"jobs":[{"id":"job-42","steps":[{"id":"step"}],"groups":["group"]}]}`)
 				var spec runspec.Spec
+				spec.Declarations.Version = 1
 				spec.Request.Request.Pipeline = "p"
 				spec.Resolved.SecretArgs = []string{"token"}
 				spec.Resolved.Args = map[string]string{"token": "42"}
@@ -167,7 +94,6 @@ func TestExpansionRefusalRollsBackAllJobsAndBarrier(t *testing.T) {
 				}
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=? WHERE id='run'`, raw)
 			}
-			tenant.s.plans = contracts
 			if _, err := tenant.AcceptExpansion(t.Context(), request); err == nil {
 				t.Fatal("invalid expansion accepted")
 			}
@@ -194,6 +120,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
 			var spec runspec.Spec
+			spec.Declarations.Version = 1
 			spec.Request.Request.Pipeline = "p"
 			spec.Request.Provenance = assertedProvenance(t, "p", "", "")
 			spec.Request.AllowedPools = []string{"prod"}
@@ -221,25 +148,9 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 					return "42", nil
 				}))
 			}
-			contracts := tenant.s.plans.(fakePlanContracts)
-			validate := contracts.validate
-			contracts.validate = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-				if !ctx.Secrets.ContainsSecret("job-42") {
-					t.Fatal("stored secret not registered")
-				}
-				return validate(raw, ctx)
+			if mode != "missing_requirement" {
+				request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"step"}],"groups":["group"],"requires":["pool=prod"]}]}`)
 			}
-			resolve := contracts.resolve
-			contracts.resolve = func(in settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-				jobs, err := resolve(in)
-				if mode != "missing_requirement" {
-					job := jobs["generated"]
-					job.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"pool=prod"}}}
-					jobs["generated"] = job
-				}
-				return jobs, err
-			}
-			tenant.s.plans = contracts
 			_, err = tenant.AcceptExpansion(t.Context(), request)
 			if mode == "allowed" && err != nil || mode != "allowed" && err == nil {
 				t.Fatalf("acceptance = %v", err)
@@ -254,19 +165,29 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 	}
 }
 
-func TestExpansionReplayRechecksLeaseAfterValidation(t *testing.T) {
+func TestExpansionReplayRechecksLeaseAfterSecretDecryption(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	contracts := tenant.s.plans.(fakePlanContracts)
-	validate := contracts.validate
-	contracts.validate = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
+
+	var run RunRow
+	run, err := tenant.ReadRun(t.Context(), request.Source.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Spec.Resolved.SecretNames = []string{"clock-secret"}
+	raw, err := json.Marshal(run.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=? WHERE id='run'`, raw)
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','clock-secret','ciphertext','account',1,1,1,'p',0,'')`)
+	tenant.s.SetPlanSecretOpener(fakePlanSecretOpener(func(context.Context, Team, Secret) (string, error) {
 		expired := tenant.s.now().Add(time.Hour)
 		tenant.s.clock = func() time.Time { return expired }
-		return validate(raw, ctx)
-	}
-	tenant.s.plans = contracts
+		return "clock-secret-value", nil
+	}))
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err == nil {
 		t.Fatal("replayed through expired owner")
 	}

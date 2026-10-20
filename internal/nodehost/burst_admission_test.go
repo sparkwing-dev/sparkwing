@@ -32,9 +32,9 @@ func burstAdmissionFixture(t *testing.T) (*ownerFixture, OwnerHost, RunInput, *f
 	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
 	f.snapshot.Nodes[0].Execution.Resources.Value.Cores.Value = 4
 	host.Local = func(store.NodeRow) bool { return true }
-	host.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&host, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
-	}
+	})
 	d := newFakeDaemon()
 	configureNativeAdmission(&host, &LocalAdmission{Daemon: d, BoxID: testBox}, nil)
 	return f, host, input, d

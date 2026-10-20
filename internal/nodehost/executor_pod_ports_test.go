@@ -97,9 +97,9 @@ func FuzzNodeExecutorMasksOuterAndPublicationFailures(f *testing.F) {
 		deps.Mask = masker.Mask
 		failure := errors.New(strings.Repeat("h", nodeErrTextHeadBytes-10) + secret + "\n" + strings.Repeat("y", 2*nodeErrTextMaxBytes))
 		if outer {
-			deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+			setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
 				return nil, failure
-			}
+			})
 		} else {
 			job := input.Accepted.Plan.Jobs[0]
 			job.ResultStep = "body"

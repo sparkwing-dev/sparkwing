@@ -403,8 +403,8 @@ pool authority cannot come from machine labels. Max concurrent defaults to one;
 lease, poll and heartbeat explicit zero fail. `accept_working_tree` requires a
 repository allow-list. Spawn policy retains the existing return-to-queue mode.
 
-Admission retains classic/off/auto/jev/custom, budget, custom class weights,
-backfill delay, aging, interactive burst and the existing Jev predictor fields.
+Admission retains classic/off/auto/custom, budget, custom class weights,
+backfill delay, aging and interactive burst.
 The rewrite changes lifecycle ownership, not admission behavior. Repo settings
 retain registered paths, fallback_paths, auto_register and include_worktrees.
 Cache max_bytes/max_entries zero disables the individual local cache bound.
@@ -564,10 +564,8 @@ credential expiry or give eval units a job-attempt grace exception.
 
 ## Authentication and billing bounds
 
-C2 selects a five-second auth-cache bound; C4 owns `limits.AuthCacheTTL`.
-Every reuse also requires a fresh, identical store generation vector for the
-credential, all ancestors and team membership. The TTL cannot authorize reuse
-on its own. Binding liveness and credential expiry remain per-request checks.
+C2 reads fresh authority and membership snapshots on every request. Binding
+liveness and credential expiry are checked for each request.
 
 `limits.WorkBillingMinimum` and `HostBillingMinimum` are the numerical owners
 for the separate job and host minimums. Both are sixty seconds. Plan and eval
@@ -808,7 +806,6 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`AdmissionConfig`](../../../internal/userconfig/contract.go#L43) | AdmissionConfig preserves machine admission independently of placement. |
 | [`AdmissionCustom`](../../../internal/userconfig/contract.go#L51) | AdmissionCustom records explicit zero separately from the policy defaults. |
 | [`AdmissionBurst`](../../../internal/userconfig/contract.go#L59) | AdmissionBurst retains the existing admission policy's measured burst bound. |
-| [`AdmissionJev`](../../../internal/userconfig/contract.go#L66) | AdmissionJev names the existing admission predictor and its failure bounds. |
 | [`RunnerConfig`](../../../internal/userconfig/contract.go#L77) | RunnerConfig supplies machine claim preferences; pools and billing facts come from its root capability. |
 | [`CacheConfig`](../../../internal/userconfig/contract.go#L95) | CacheConfig bounds only the local binary cache; explicit zero disables a bound. |
 | [`MachineConfig`](../../../internal/userconfig/contract.go#L101) | MachineConfig preserves an explicit box identity when the hostname changes. |

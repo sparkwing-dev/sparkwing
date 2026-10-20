@@ -271,7 +271,7 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 }
 
 func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, kind store.DecisionKind, next func(context.Context, store.ReconcileRequest) error) error {
-	if h.Layer == nil {
+	if h.DebugPolicy == nil || h.SkipPolicy == nil || h.ApprovalPolicy == nil || h.MemoPolicy == nil || h.AdmissionPolicy == nil {
 		return errors.New("run host requires owner layer policies before dispatch")
 	}
 	if err := h.debugBoundary(ctx, input, accepted, row, true); err != nil {
@@ -296,19 +296,16 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			}
 		}
 	}
-	for _, layer := range LayerTable() {
-		if layer.Side != OwnerSide {
-			continue
-		}
-		result, err := h.Layer(ctx, layer, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
+	apply := func(policy OwnerPolicy) (bool, error) {
+		result, err := policy(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
 		if err != nil {
-			return err
+			return true, err
 		}
 		if result.Transition != nil {
 			change := *result.Transition
 			change.Ref, change.Actor = row.Ref, input.Owner
 			_, err = h.Store.TransitionNode(ctx, change)
-			return err
+			return true, err
 		}
 		if result.Source != nil {
 			request.Source, request.Policy = result.Source, result.Source.Kind
@@ -316,15 +313,30 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			probe.MaterializeOnly = true
 			reused, err := FollowReconciliation(ctx, h.Store, probe, h.WaitNode)
 			if err != nil {
-				return err
+				return true, err
 			}
 			if reused.Kind != store.Dispatch {
-				return nil
+				return true, nil
 			}
 			request.Source, request.Policy = nil, store.SourceNone
 		}
-		if kind == store.DecisionApproval && layer.Name == "approval" {
-			break
+		return false, nil
+	}
+	if done, err := apply(h.DebugPolicy); done || err != nil {
+		return err
+	}
+	if done, err := apply(h.SkipPolicy); done || err != nil {
+		return err
+	}
+	if done, err := apply(h.ApprovalPolicy); done || err != nil {
+		return err
+	}
+	if kind != store.DecisionApproval {
+		if done, err := apply(h.MemoPolicy); done || err != nil {
+			return err
+		}
+		if done, err := apply(h.AdmissionPolicy); done || err != nil {
+			return err
 		}
 	}
 	local := kind != store.DecisionApproval && h.Local != nil && h.Local(row)

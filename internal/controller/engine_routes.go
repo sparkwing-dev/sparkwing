@@ -171,9 +171,6 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err := validateGitSHA(body.Request.Git.SHA); err != nil {
 			return invalidEngineBody(err.Error())
 		}
-		if err := s.dedupeIntake(a, &body); err != nil {
-			return err
-		}
 		intent, err := IntakeForStore(a, body)
 		if err != nil {
 			return err

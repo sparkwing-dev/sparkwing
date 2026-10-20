@@ -196,21 +196,21 @@ func cliNativeOwner(t *testing.T, state nodehost.NativeHostStore, owner nodehost
 	})
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{})
 	host, _, _, err := nodehost.NewNativeHost(nodehost.NativeHostConfig{
-		Store: state, Lease: owner.Lease, Owner: owner,
+		Store: state, Lease: owner.Lease, Owner: nodehost.OwnerOperations{Renew: owner.Renew, Wait: owner.Wait, WaitNode: owner.WaitNode, Local: owner.Local, Acquire: owner.Acquire, Prepare: owner.Prepare, AdoptClaim: owner.AdoptClaim, Expand: owner.Expand, Delegator: owner.Delegator},
 		Source: source.Options{Engines: boundary}, Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), Router: router,
 		Processes: &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error {
 			return errors.New("unexpected execution log")
 		}},
-		Planner: nodehost.SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return errors.New("unexpected planning log") }},
-		Executor: nodehost.ExecutorDependencies{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
+		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return errors.New("unexpected planning log") },
+		Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 			return nodehost.ProcessGrant{}, errors.New("unexpected execution delegation")
 		}},
-		Evaluation: nodehost.EvaluationDependencies{
+		ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+			return nil, errors.New("unexpected output read")
+		},
+		Evaluation: nodehost.EvaluationOperations{
 			Bind: func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
 				return nodehost.ProcessGrant{}, errors.New("unexpected evaluation delegation")
-			},
-			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
-				return nil, errors.New("unexpected output read")
 			},
 		},
 	})

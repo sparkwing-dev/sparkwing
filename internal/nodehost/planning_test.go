@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -15,253 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func TestPlanInitialRetainsAuthorityLossAtEveryBoundary(t *testing.T) {
-	for _, stage := range []string{"before", "lookup", "validate-hit", "invalidate", "plan", "validate-fresh", "hash", "put"} {
-		t.Run(stage, func(t *testing.T) {
-			f := newPlanningFixture(t)
-			if stage == "validate-hit" || stage == "invalidate" {
-				if _, err := PlanInitial(t.Context(), f.input, f.functions()); err != nil {
-					t.Fatal(err)
-				}
-			}
-			ctx, cancel := context.WithCancelCause(t.Context())
-			defer cancel(nil)
-			functions := f.functions()
-			loseAuthority := func() { cancel(lease.ErrLeaseLost) }
-			switch stage {
-			case "before":
-				loseAuthority()
-			case "lookup":
-				f.cache.onLookup = loseAuthority
-			case "put":
-				f.cache.onPut = loseAuthority
-			case "plan":
-				plan := functions.Plan
-				functions.Plan = func(ctx context.Context) (json.RawMessage, error) {
-					cancel(lease.ErrLeaseLost)
-					return plan(ctx)
-				}
-			case "validate-hit", "validate-fresh":
-				validate := functions.Validate
-				functions.Validate = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					cancel(lease.ErrLeaseLost)
-					return validate(raw, validation)
-				}
-			case "invalidate":
-				f.cache.entry.PlanHash = runspec.Hash(strings.Repeat("f", 64))
-				f.cache.onInvalidate = loseAuthority
-			case "hash":
-				hash := functions.Hash
-				functions.Hash = func(value any) (runspec.Hash, error) {
-					cancel(lease.ErrLeaseLost)
-					return hash(value)
-				}
-			}
-			result, err := PlanInitial(ctx, f.input, functions)
-			if !errors.Is(err, lease.ErrLeaseLost) || len(result.CanonicalPlan) != 0 || result.CacheHit {
-				t.Fatalf("planning lost its authority cause at %s: result=%+v error=%v", stage, result, err)
-			}
-		})
-	}
-}
-
-func TestPlanInitialCacheHitSkipsPlanningAndRevalidates(t *testing.T) {
-	f := newPlanningFixture(t)
-	first, err := PlanInitial(t.Context(), f.input, f.functions())
-	if err != nil || first.CacheHit || first.MissReason == "" || f.plans != 1 || f.validations != 1 || len(f.cache.puts) != 1 {
-		t.Fatalf("cold plan = %+v, %v; fixture = %+v", first, err, f)
-	}
-	f.input.Validation.Placement = nodeproto.PlacementRunnerHosted
-	warm, err := PlanInitial(t.Context(), f.input, f.functions())
-	if err != nil || !warm.CacheHit || warm.MissReason != "" || f.plans != 1 || f.validations != 2 || len(f.cache.puts) != 1 {
-		t.Fatalf("warm plan = %+v, %v; fixture = %+v", warm, err, f)
-	}
-	if !reflect.DeepEqual(warm.Plan, first.Plan) || warm.PlanHash != first.PlanHash || string(warm.CanonicalPlan) != string(first.CanonicalPlan) {
-		t.Fatal("cache hit changed the validated declarations")
-	}
-	if f.seenValidation.Placement != nodeproto.PlacementRunnerHosted || f.seenValidation.Secrets != f.input.Validation.Secrets {
-		t.Fatalf("cached plan ignored current validation: %+v", f.seenValidation)
-	}
-}
-
-func TestPlanInitialFileCacheSurvivesReopen(t *testing.T) {
-	f := newPlanningFixture(t)
-	directory := t.TempDir()
-	cache, err := NewFilePlanCache(directory, f.input.Inputs.Team, f.input.Inputs.Repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.input.Cache = cache
-	first, err := PlanInitial(t.Context(), f.input, f.functions())
-	if err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := NewFilePlanCache(directory, f.input.Inputs.Team, f.input.Inputs.Repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.input.Cache = reopened
-	warm, err := PlanInitial(t.Context(), f.input, f.functions())
-	if err != nil || !warm.CacheHit || f.plans != 1 || warm.PlanHash != first.PlanHash || string(warm.CanonicalPlan) != string(first.CanonicalPlan) {
-		t.Fatalf("reopened cache = %+v, %v; plans = %d", warm, err, f.plans)
-	}
-	key, _, err := PlanCacheIdentity(f.input.Inputs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cache.Put(t.Context(), PlanCacheEntry{Key: key, Inputs: f.input.Inputs, Plan: first.CanonicalPlan, PlanHash: runspec.Hash(strings.Repeat("f", 64))}); err != nil {
-		t.Fatal(err)
-	}
-	replacement, err := PlanInitial(t.Context(), f.input, f.functions())
-	if err != nil || replacement.CacheHit || f.plans != 2 || replacement.PlanHash != first.PlanHash || len(f.warnings) != 1 {
-		t.Fatalf("corrupt hash = %+v, %v; plans = %d, warnings = %v", replacement, err, f.plans, f.warnings)
-	}
-}
-
-func TestPlanInitialInvalidEntryIsRemovedBeforeFreshPlanning(t *testing.T) {
-	for _, kind := range []string{"scope", "inputs", "hash", "malformed", "current validation"} {
-		t.Run(kind, func(t *testing.T) {
-			f := newPlanningFixture(t)
-			if _, err := PlanInitial(t.Context(), f.input, f.functions()); err != nil {
-				t.Fatal(err)
-			}
-			switch kind {
-			case "scope":
-				f.cache.entry.Key.Team = "foreign-team"
-			case "inputs":
-				f.cache.entry.Inputs.SecretVersion = "stale"
-			case "hash":
-				f.cache.entry.PlanHash = runspec.Hash(strings.Repeat("f", 64))
-			case "malformed":
-				f.cache.entry.Plan = json.RawMessage(`{"jobs":`)
-			case "current validation":
-				f.rejectNext = true
-			}
-			result, err := PlanInitial(t.Context(), f.input, f.functions())
-			if err != nil || result.CacheHit || result.MissReason == "" || f.plans != 2 || len(f.cache.invalidated) != 1 || len(f.warnings) != 1 {
-				t.Fatalf("invalid entry = %+v, %v; fixture = %+v", result, err, f)
-			}
-			if !reflect.DeepEqual(f.cache.calls, []string{"lookup", "put", "lookup", "invalidate", "put"}) {
-				t.Fatalf("cache calls = %v", f.cache.calls)
-			}
-		})
-	}
-}
-
-func TestPlanInitialCacheFailuresWarnWithoutFailingRun(t *testing.T) {
-	for _, operation := range []string{"lookup", "put", "invalidate", "damaged miss"} {
-		t.Run(operation, func(t *testing.T) {
-			f := newPlanningFixture(t)
-			private := "private-secret-bearing-cache-key"
-			switch operation {
-			case "lookup":
-				f.cache.lookupErr = errors.New(private)
-			case "put":
-				f.cache.putErr = errors.New(private)
-			case "invalidate":
-				if _, err := PlanInitial(t.Context(), f.input, f.functions()); err != nil {
-					t.Fatal(err)
-				}
-				f.cache.entry.PlanHash = runspec.Hash(strings.Repeat("f", 64))
-				f.cache.invalidateErr = errors.New(private)
-			case "damaged miss":
-				f.cache.missReason = private
-			}
-			result, err := PlanInitial(t.Context(), f.input, f.functions())
-			if err != nil || result.CacheHit || len(f.warnings) == 0 {
-				t.Fatalf("cache failure = %+v, %v; warnings = %v", result, err, f.warnings)
-			}
-			if strings.Contains(strings.Join(f.warnings, " ")+result.MissReason, private) {
-				t.Fatal("cache diagnostics exposed private backend content")
-			}
-		})
-	}
-}
-
-func TestPlanInitialIncompleteInputsBypassCache(t *testing.T) {
-	f := newPlanningFixture(t)
-	f.input.Inputs.EnvironmentDigest = ""
-	result, err := PlanInitial(t.Context(), f.input, f.functions())
-	if err != nil || result.CacheHit || result.MissReason == "" || f.plans != 1 || len(f.cache.calls) != 0 {
-		t.Fatalf("ineligible plan = %+v, %v; fixture = %+v", result, err, f)
-	}
-	f.input.Cache = nil
-	f.input.Disabled = true
-	result, err = PlanInitial(t.Context(), f.input, f.functions())
-	if err != nil || result.CacheHit || result.MissReason == "" || f.plans != 2 || len(f.cache.calls) != 0 {
-		t.Fatalf("disabled cache = %+v, %v; fixture = %+v", result, err, f)
-	}
-}
-
-func TestPlanInitialNeverCachesUnvalidatedPlans(t *testing.T) {
-	for _, kind := range []string{"planner error", "validation error", "hash error", "invalid hash", "expansion", "existing jobs", "existing concurrency", "source job", "missing secrets"} {
-		t.Run(kind, func(t *testing.T) {
-			f := newPlanningFixture(t)
-			functions := f.functions()
-			switch kind {
-			case "planner error":
-				functions.Plan = func(context.Context) (json.RawMessage, error) { return nil, errors.New("planner failed") }
-			case "validation error":
-				f.rejectNext = true
-			case "hash error":
-				functions.Hash = func(any) (runspec.Hash, error) { return "", errors.New("hash failed") }
-			case "invalid hash":
-				functions.Hash = func(any) (runspec.Hash, error) { return "not-a-hash", nil }
-			case "expansion":
-				f.input.Validation.Expansion = true
-			case "existing jobs":
-				f.input.Validation.ExistingJobs = []nodeproto.JobSpec{{ID: "existing"}}
-			case "existing concurrency":
-				f.input.Validation.ExistingConcurrency = []nodeproto.ConcurrencySpec{{Group: "existing"}}
-			case "source job":
-				f.input.Validation.SourceJob = "generator"
-			case "missing secrets":
-				f.input.Validation.Secrets = nil
-			}
-			if _, err := PlanInitial(t.Context(), f.input, functions); err == nil || len(f.cache.puts) != 0 {
-				t.Fatalf("rejected plan err = %v, writes = %d", err, len(f.cache.puts))
-			}
-		})
-	}
-}
-
-func TestPlanInitialCancellationStopsCacheAndPlanning(t *testing.T) {
-	for _, phase := range []string{"before lookup", "lookup", "planning", "validation", "hash", "put"} {
-		t.Run(phase, func(t *testing.T) {
-			f := newPlanningFixture(t)
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			functions := f.functions()
-			switch phase {
-			case "before lookup":
-				cancel()
-			case "lookup":
-				f.cache.onLookup = cancel
-			case "planning":
-				functions.Plan = func(context.Context) (json.RawMessage, error) { cancel(); return f.raw, nil }
-			case "validation":
-				functions.Validate = func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					cancel()
-					return nodeproto.PlanDoc{}, nil
-				}
-			case "hash":
-				functions.Hash = func(value any) (runspec.Hash, error) { cancel(); return planningTestHash(value) }
-			case "put":
-				f.cache.onPut = cancel
-			}
-			if _, err := PlanInitial(ctx, f.input, functions); !errors.Is(err, context.Canceled) {
-				t.Fatalf("cancelled plan = %v", err)
-			}
-			if phase != "put" && len(f.cache.puts) != 0 {
-				t.Fatal("cancelled planning published a cache entry")
-			}
-		})
-	}
-}
-
 type planningFixture struct {
 	input          PlanningInput
-	cache          *planningCacheFake
 	raw            json.RawMessage
 	plans          int
 	validations    int
@@ -272,11 +25,10 @@ type planningFixture struct {
 
 func newPlanningFixture(t *testing.T) *planningFixture {
 	t.Helper()
-	cache := &planningCacheFake{}
 	return &planningFixture{
-		cache: cache, raw: json.RawMessage(`{ "jobs": [{"id": "test"}] }`),
-		input: PlanningInput{Cache: cache, Inputs: planCacheInputs(), Validation: nodeproto.ValidationContext{
-			Placement: nodeproto.PlacementLocal, Secrets: planCacheSecretMatcher{},
+		raw: json.RawMessage(`{ "jobs": [{"id": "test"}] }`),
+		input: PlanningInput{Validation: nodeproto.ValidationContext{
+			Placement: nodeproto.PlacementLocal, Secrets: planningSecretMatcher{},
 		}},
 	}
 }
@@ -296,7 +48,6 @@ func (f *planningFixture) functions() PlanningFunctions {
 			return plan, err
 		},
 		Hash: planningTestHash,
-		Warn: func(message string) { f.warnings = append(f.warnings, message) },
 	}
 }
 
@@ -317,49 +68,56 @@ func planningTestHash(value any) (runspec.Hash, error) {
 	return runspec.Hash(hex.EncodeToString(digest[:])), nil
 }
 
-type planningCacheFake struct {
-	entry                            *PlanCacheEntry
-	puts                             []PlanCacheEntry
-	invalidated                      []PlanCacheKey
-	calls                            []string
-	missReason                       string
-	lookupErr, putErr, invalidateErr error
-	onLookup, onPut, onInvalidate    func()
+type planningSecretMatcher struct{}
+
+func (planningSecretMatcher) ContainsSecret(value string) bool { return false }
+
+func TestPlanInitialAlwaysRunsCurrentSDKPlanning(t *testing.T) {
+	calls := 0
+	for range 2 {
+		result, err := PlanInitial(t.Context(), PlanningInput{Validation: nodeproto.ValidationContext{Secrets: planningSecretMatcher{}, Placement: nodeproto.PlacementLocal}}, PlanningFunctions{Plan: func(context.Context) (json.RawMessage, error) { calls++; return json.RawMessage(`{"jobs":[]}`), nil }})
+		if err != nil || len(result.Plan.Jobs) != 0 || result.PlanHash == "" {
+			t.Fatalf("planning = %+v, %v", result, err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("SDK calls = %d, want 2", calls)
+	}
 }
 
-func (c *planningCacheFake) Lookup(context.Context, PlanCacheKey) (PlanCacheLookup, error) {
-	c.calls = append(c.calls, "lookup")
-	if c.onLookup != nil {
-		c.onLookup()
+func TestPlanInitialRetainsAuthorityLossAtEveryBoundary(t *testing.T) {
+	for _, stage := range []string{"before", "plan", "validate", "hash"} {
+		t.Run(stage, func(t *testing.T) {
+			fixture := newPlanningFixture(t)
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			functions := fixture.functions()
+			switch stage {
+			case "before":
+				cancel(lease.ErrLeaseLost)
+			case "plan":
+				plan := functions.Plan
+				functions.Plan = func(ctx context.Context) (json.RawMessage, error) {
+					cancel(lease.ErrLeaseLost)
+					return plan(ctx)
+				}
+			case "validate":
+				validate := functions.Validate
+				functions.Validate = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
+					cancel(lease.ErrLeaseLost)
+					return validate(raw, validation)
+				}
+			case "hash":
+				hash := functions.Hash
+				functions.Hash = func(value any) (runspec.Hash, error) {
+					cancel(lease.ErrLeaseLost)
+					return hash(value)
+				}
+			}
+			result, err := PlanInitial(ctx, fixture.input, functions)
+			if !errors.Is(err, lease.ErrLeaseLost) || len(result.CanonicalPlan) != 0 {
+				t.Fatalf("%s lost authority: result=%+v error=%v", stage, result, err)
+			}
+		})
 	}
-	if c.entry == nil && c.missReason == "" {
-		return PlanCacheLookup{MissReason: "entry is absent"}, c.lookupErr
-	}
-	return PlanCacheLookup{Entry: c.entry, MissReason: c.missReason}, c.lookupErr
-}
-
-func (c *planningCacheFake) Put(_ context.Context, entry PlanCacheEntry) error {
-	c.calls = append(c.calls, "put")
-	if c.onPut != nil {
-		c.onPut()
-	}
-	if c.putErr != nil {
-		return c.putErr
-	}
-	c.puts = append(c.puts, entry)
-	c.entry = &entry
-	return nil
-}
-
-func (c *planningCacheFake) Invalidate(_ context.Context, key PlanCacheKey, _ string) error {
-	c.calls = append(c.calls, "invalidate")
-	if c.onInvalidate != nil {
-		c.onInvalidate()
-	}
-	c.invalidated = append(c.invalidated, key)
-	if c.invalidateErr != nil {
-		return c.invalidateErr
-	}
-	c.entry = nil
-	return nil
 }

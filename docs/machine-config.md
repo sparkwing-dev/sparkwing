@@ -14,7 +14,7 @@ See [Config reference](config-reference.md).
 | --- | --- |
 | `profiles` | Named controller connections containing `controller.url` and an optional `controller.token`. |
 | `repos` | Registered checkout paths, `fallback_paths`, `auto_register` and `include_worktrees`. |
-| `admission` | Machine admission `mode`, `budget`, `custom` and `jev` policy. |
+| `admission` | Machine admission `mode`, `budget` and `custom` policy. |
 | `runner` | Controller URL, `credentials_dir`, permitted `repos`, labels and local capacity preferences. |
 | `cache` | Local binary-cache `max_bytes` and `max_entries`. Explicit zero disables a bound. |
 | `machine` | An optional `box_id` for box-scoped concurrency. |

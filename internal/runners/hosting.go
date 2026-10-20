@@ -19,7 +19,7 @@ type Hosting struct {
 	ControllerURL string
 	HTTP          *http.Client
 	NewController func(client.EngineOptions) (controllerwire.Controller, error)
-	Bind          func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error)
+	Bind          func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error)
 }
 
 // Host confirms live authority before binding services; native hosts own acquisition and renewal.
@@ -30,7 +30,7 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) erro
 	return hostAward(ctx, unit, h.bind)
 }
 
-func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(context.Context, controllerwire.ClaimedUnit, controllerwire.ClaimedUnit, nodehost.RunInput) (NativeServices, storeInputs, error)) (result error) {
+func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(context.Context, controllerwire.ClaimedUnit, controllerwire.ClaimedUnit, nodehost.RunInput) (nodehost.NativeServices, storeInputs, error)) (result error) {
 	if err := validateHostedAward(unit); err != nil {
 		return err
 	}
@@ -89,20 +89,20 @@ func captureUnit(unit controllerwire.ClaimedUnit) (controllerwire.ClaimedUnit, e
 	return captured, err
 }
 
-func (h Hosting) bind(ctx context.Context, unit, original controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {
+func (h Hosting) bind(ctx context.Context, unit, original controllerwire.ClaimedUnit, input nodehost.RunInput) (nodehost.NativeServices, storeInputs, error) {
 	controller, err := h.controller(unit.Capability)
 	if err != nil {
-		return NativeServices{}, storeInputs{}, err
+		return nodehost.NativeServices{}, storeInputs{}, err
 	}
 	beat, err := controller.Renew(ctx, unit.UnitID, controllerwire.RenewalRequest{})
 	if err != nil {
-		return NativeServices{}, storeInputs{}, err
+		return nodehost.NativeServices{}, storeInputs{}, err
 	}
 	if beat.CancelRequested {
-		return NativeServices{}, storeInputs{}, &lease.CancelError{Reason: beat.CancelReason}
+		return nodehost.NativeServices{}, storeInputs{}, &lease.CancelError{Reason: beat.CancelReason}
 	}
 	if err := context.Cause(ctx); err != nil {
-		return NativeServices{}, storeInputs{}, err
+		return nodehost.NativeServices{}, storeInputs{}, err
 	}
 	services, principal, err := h.Bind(ctx, original, controller)
 	if err == nil {

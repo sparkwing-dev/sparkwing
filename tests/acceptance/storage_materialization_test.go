@@ -3,7 +3,6 @@ package acceptance_test
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type storageMaterializationSigner struct {
@@ -53,8 +51,6 @@ func (s *storageMaterializationSigner) Commit(ctx context.Context, q blob.Commit
 type storageMaterializationRecords struct {
 	blob.RecordStore
 	results   map[blob.RecordKey]blob.RecordLookupResult
-	hit       blob.MemoHit
-	copyErr   error
 	commitErr error
 }
 
@@ -69,10 +65,6 @@ func (r *storageMaterializationRecords) CommitRecord(_ context.Context, q blob.C
 
 func (r *storageMaterializationRecords) LookupRecord(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
 	return r.results[q.Key], nil
-}
-
-func (r *storageMaterializationRecords) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error) {
-	return r.hit, r.copyErr
 }
 
 func checkStorageFilesystemMaterialization(t *testing.T) {
@@ -120,12 +112,6 @@ func checkStorageMaterialization(t *testing.T, objects blob.ObjectBackend, trans
 			return false
 		}
 		members := records.results[manifest.Key].Members
-		records.hit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: result.Digest}, Manifest: runspec.Optional[blob.Digest]{Set: true, Value: manifest.Digest}, Members: members}
-		request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: authority, Budget: budget}, Destination: identity.Attempt.Value}
-		materialized, err := blob.MaterializeMemo(t.Context(), store, records, request)
-		if err != nil || !materialized.Hit.Found || !bytes.Equal(materialized.Output, output) {
-			t.Fatalf("materialize: %+v, %v", materialized, err)
-		}
 		consumer := t.TempDir()
 		if n, err := artifacts.Stage(t.Context(), data, consumer, []artifacts.Edge{{Record: manifest.Key}}); n != 1 || err != nil {
 			t.Fatalf("stage: %d, %v", n, err)
@@ -133,44 +119,22 @@ func checkStorageMaterialization(t *testing.T, objects blob.ObjectBackend, trans
 		if body, err := os.ReadFile(filepath.Join(consumer, file)); err != nil || !bytes.Equal(body, payload) {
 			return false
 		}
-		faults := []string{"follower_output", "manifest_commit", "refused_edge", "missing_bytes", "corrupt_output", "corrupt_manifest", "corrupt_member", "missing_output_record"}
+		faults := []string{"missing_bytes", "corrupt_member", "corrupt_manifest"}
 		fault := faults[int(ordinal)%len(faults)]
-		damaged := result.Digest
-		switch fault {
-		case "manifest_commit":
-			records.copyErr = errors.New("manifest transaction refused")
-		case "refused_edge":
-			records.copyErr = blob.ErrDigestNotReadable
-		case "missing_output_record":
-			records.hit.Output = runspec.Optional[blob.Digest]{}
-		case "missing_bytes", "corrupt_member":
-			damaged = members[0].Digest
-		case "corrupt_manifest":
+		damaged := members[0].Digest
+		if fault == "corrupt_manifest" {
 			damaged = manifest.Digest
 		}
-		if records.copyErr == nil && fault != "missing_output_record" {
-			key, err := blob.ObjectKey(identity.Team, damaged)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if fault == "follower_output" || fault == "missing_bytes" {
-				if err := objects.DeleteObject(t.Context(), key); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				overwrite(key, []byte("corrupt"))
-			}
-		}
-		materialized, err = blob.MaterializeMemo(t.Context(), store, records, request)
-		if fault == "refused_edge" {
-			if !errors.Is(err, blob.ErrDigestNotReadable) {
-				t.Fatalf("authority refusal became a miss: %v", err)
-			}
-		} else if err != nil {
+		key, err := blob.ObjectKey(identity.Team, damaged)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if materialized.Hit.Found || len(materialized.Output) != 0 {
-			t.Fatalf("%s became a memo hit: %+v, %v", fault, materialized, err)
+		if fault == "missing_bytes" {
+			if err := objects.DeleteObject(t.Context(), key); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			overwrite(key, []byte("corrupt"))
 		}
 		if fault == "missing_bytes" || fault == "corrupt_member" || fault == "corrupt_manifest" {
 			if err := os.WriteFile(filepath.Join(consumer, file), []byte("preserved"), 0o640); err != nil {

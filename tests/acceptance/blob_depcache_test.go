@@ -147,8 +147,8 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err != nil || !hitMemo.Found || !hitMemo.Output.Set || hitMemo.Output.Value != result.Digest {
 		return fmt.Errorf("reopened physical memo differs: %+v: %v", hitMemo, err)
 	}
-	copied, err := blob.MaterializeMemo(ctx, data.Bytes, data.Records, blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: identity.Attempt.Value.NodeID, Hash: runspec.Hash(memoKey.Scope.Key)}, Budget: data.Budget}, Destination: identity.Attempt.Value})
-	if err != nil || !copied.Hit.Found || !bytes.Equal(copied.Output, body) || !copied.Hit.Manifest.Set || copied.Hit.Manifest.Value != manifest.Digest {
+	copied, err := data.Records.CopyMemo(ctx, blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: identity.Attempt.Value.NodeID, Hash: runspec.Hash(memoKey.Scope.Key)}, Budget: data.Budget}, Destination: identity.Attempt.Value})
+	if err != nil || !copied.Found || !copied.Manifest.Set || copied.Manifest.Value != manifest.Digest {
 		return fmt.Errorf("materialize physical memo: %+v: %v", copied, err)
 	}
 	artifactData.Bytes, artifactData.Records = data.Bytes, data.Records

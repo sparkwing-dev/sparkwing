@@ -3,8 +3,6 @@ package limits
 import "time"
 
 const (
-	// ScheduleCatchUpDefault bounds default schedule catch-up.
-	ScheduleCatchUpDefault time.Duration = time.Hour
 	// ScheduleCatchUpMin bounds minimum enabled catch-up.
 	ScheduleCatchUpMin time.Duration = 2 * time.Minute
 	// ScheduleCatchUpMax bounds maximum catch-up.

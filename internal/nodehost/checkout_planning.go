@@ -96,22 +96,6 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	if err := p.Masks.initialize(input.Request, nil, nil, nil); err != nil {
 		return out, err
 	}
-	p.assemblePlanCache(&input.Planning, request)
-	input.Planning.Inputs.Team = request.Team
-	input.Planning.Inputs.Repository = request.Git.Repository.Key
-	input.Planning.Inputs.Entrypoint = request.Source.Entrypoint
-	hash := (PlanningFunctions{Hash: p.CanonicalHash}).defaults().Hash
-	input.Planning.Inputs.CheckoutDigest, err = hash(request.Options.Checkout)
-	if err != nil {
-		return out, err
-	}
-	input.Planning.Inputs.ProjectDigest, err = hash(struct {
-		File string
-		Body []byte
-	}{input.ProjectFile, input.Project})
-	if err != nil {
-		return out, err
-	}
 	declarations, err := settings.ProjectCheckoutDeclarations(input.Project, input.ProjectFile, request.Pipeline)
 	if err != nil {
 		return out, err

@@ -151,8 +151,7 @@ func TestCredentialRotationEmptyAndMissingTransforms(t *testing.T) {
 }
 
 func TestSourceReleaseAuditsReadCommittedNanosecondsAndTenant(t *testing.T) {
-	tenant, a, _ := sourceReleaseFixture(t)
-	tenant.s.sourcePolicy = nil
+	tenant, a := sourceReleaseFixture(t)
 	_, first, err := tenant.ReleaseSourceCredential(t.Context(), a)
 	if err != nil {
 		t.Fatal(err)

@@ -10,12 +10,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// Prepare implements the artifact portion of ExecutorDependencies.PrepareLayer.
+// Prepare implements the artifact portion of ExecutorDependencies.PrepareArtifacts.
 // It stages consumes in declaration order and publishes once after successful
 // execution. The finalizer uses the last committed attempt's storage authority.
-// Other layer names are left to the caller's layer composition.
-func (a ArtifactRecords) Prepare(ctx context.Context, layer LayerSpec, input NodeInput, job nodeproto.JobSpec) (ExecutorFinalizer, error) {
-	if layer.Name != "artifacts" || len(job.Artifacts) == 0 && len(job.Consumes) == 0 {
+func (a ArtifactRecords) Prepare(ctx context.Context, input NodeInput, job nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	if len(job.Artifacts) == 0 && len(job.Consumes) == 0 {
 		return nil, nil
 	}
 	if input.Entry == nil || input.Entry.Directory == "" {

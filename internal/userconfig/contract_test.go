@@ -15,7 +15,7 @@ func TestFinalMachineSchema(t *testing.T) {
 	cfg, err := Decode("machine.yaml", []byte(`profiles: {prod: {controller: {url: https://example.com, token: secret}}}
 runner: {repos: [github.com/acme/repo], accept_working_tree: true, max_concurrent: 1, lease: 1m, heartbeat: 10s, spawn_policy: return-to-queue}
 cache: {max_bytes: "0", max_entries: 0}
-admission: {mode: custom, custom: {aging_every: 0, class_weight: {batch: 0}}, jev: {min_probability: 0}}
+admission: {mode: custom, custom: {aging_every: 0, class_weight: {batch: 0}}}
 machine: {box_id: machine-one}
 run: {submit_env_allow: []}
 `))
@@ -28,7 +28,7 @@ run: {submit_env_allow: []}
 }
 
 func TestRejectMalformedMachine(t *testing.T) {
-	for _, raw := range []string{"machine: {box_id: ''}", "agent: {}", "logs: {}", "runner: {gitcache: x}", "runner: {allow_repos: []}", "run: {dispatch_wait: 1m}", "profiles: {p: {backend: x}}", "cache: null", "cache: {max_entries: 1, max_entries: 2}", "{}\n---\n{}", "runner: {max_concurrent: 0}", "runner: {lease: 0s}", "runner: {heartbeat: 0s}", "runner: {accept_working_tree: true}", "debug: {pause_timeout: 0s}", "admission: {mode: wrong}", "admission: {jev: {min_probability: .nan}}"} {
+	for _, raw := range []string{"machine: {box_id: ''}", "agent: {}", "logs: {}", "runner: {gitcache: x}", "runner: {allow_repos: []}", "run: {dispatch_wait: 1m}", "profiles: {p: {backend: x}}", "cache: null", "cache: {max_entries: 1, max_entries: 2}", "{}\n---\n{}", "runner: {max_concurrent: 0}", "runner: {lease: 0s}", "runner: {heartbeat: 0s}", "runner: {accept_working_tree: true}", "debug: {pause_timeout: 0s}", "admission: {mode: wrong}"} {
 		t.Run(raw, func(t *testing.T) {
 			_, err := Decode("machine.yaml", []byte(raw))
 			if err == nil {
@@ -142,4 +142,12 @@ func FuzzRetiredProfileFieldsKeepValuesPrivate(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestRejectRemovedAdmissionAdvisor(t *testing.T) {
+	for _, raw := range []string{"admission: {mode: jev}", "admission: {jev: {}}"} {
+		if _, err := Decode("machine.yaml", []byte(raw)); err == nil {
+			t.Fatalf("accepted removed admission policy: %s", raw)
+		}
+	}
 }

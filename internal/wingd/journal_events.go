@@ -1,8 +1,6 @@
 package wingd
 
 import (
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -42,7 +40,6 @@ func journalBudget(b userconfig.Budget) map[string]any {
 
 func journalPolicy(p AdmissionPolicy) map[string]any {
 	s := p.Scheduling
-	j := p.Jev
 	scheduling := map[string]any{"aging_every": s.AgingEvery, "burst": map[string]any{"max_cores": s.Burst.MaxCores, "max_p99": s.Burst.MaxP99, "min_samples": s.Burst.MinSamples}}
 	if len(s.BackfillDelay) > 0 {
 		scheduling["backfill_delay"] = s.BackfillDelay
@@ -53,22 +50,7 @@ func journalPolicy(p AdmissionPolicy) map[string]any {
 	return map[string]any{
 		"mode":       p.Mode,
 		"scheduling": scheduling,
-		"jev":        map[string]any{"model": j.Model, "endpoint": journalEndpoint(j.Endpoint), "timeout": j.Timeout, "min_confidence": j.MinConfidence, "min_probability": j.MinProbability, "max_backfill": j.MaxBackfill},
 	}
-}
-
-func journalEndpoint(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Opaque != "" {
-		return ""
-	}
-	if u.Scheme == "" && !strings.HasPrefix(raw, "/") && strings.Contains(strings.SplitN(raw, "/", 2)[0], "@") {
-		u, err = url.Parse("//" + raw)
-		if err != nil {
-			return ""
-		}
-	}
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
 }
 
 func (d *Daemon) recordWindow(now time.Time, ev admissionEvent, c *conn, data map[string]any) {

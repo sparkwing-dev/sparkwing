@@ -114,7 +114,6 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 	ctx := t.Context()
 	tenant, input, now := intakeFixture(t)
 	s := tenant.s
-	s.intake = fakeIntakeContracts{resolve: settings.ResolvePlan}
 	input.Request.Dispatch = ""
 	input.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"pool=deploy"}}}
 	input.Request.Git.Repository.Display = "https://github.com/acme/repo"
@@ -163,7 +162,7 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
-	raw, err := json.Marshal(plan)
+	raw, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}

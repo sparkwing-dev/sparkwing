@@ -10,8 +10,7 @@ import (
 
 func sourceGitCredentialFixture(t *testing.T) (*Tenant, capability.Authorized, capability.Authorized) {
 	t.Helper()
-	tenant, source, _ := sourceReleaseFixture(t)
-	tenant.s.sourcePolicy = nil
+	tenant, source := sourceReleaseFixture(t)
 	owner := authorityMember(t, tenant.s, "owner", RoleOwner)
 	admin := capability.Authorized{Principal: capability.Principal{Authority: owner.Authority}, Target: capability.Target{Team: string(tenant.team)}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
 	return tenant, admin, source

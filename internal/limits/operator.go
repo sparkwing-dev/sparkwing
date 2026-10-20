@@ -13,8 +13,6 @@ const (
 	LiveLogIdleTimeout time.Duration = 10 * time.Minute
 	// IdleClaimPoll supplies default maximum suggested idle poll.
 	IdleClaimPoll time.Duration = 5 * time.Second
-	// TriggerDedupeWindow disables API payload deduplication by default; verified webhook replay deduplication still applies.
-	TriggerDedupeWindow time.Duration = 0
 	// BucketReconcileInterval supplies object bucket measurement interval.
 	BucketReconcileInterval time.Duration = time.Hour
 	// RunnerIdleExit disables runner idle exit by default.

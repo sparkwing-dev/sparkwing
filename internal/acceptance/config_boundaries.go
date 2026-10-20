@@ -131,7 +131,7 @@ sparks: [{name: core, source: github.com/acme/core, version: v1.0.0}]
 	}
 	machineRaw := []byte(`profiles: {prod: {controller: {url: https://controller.example, token: boundary-secret-token}}}
 repos: {repos: [{path: /work/repo}], fallback_paths: [/work], auto_register: true, include_worktrees: false}
-admission: {mode: custom, budget: "50%,8gb", custom: {class_weight: {batch: 0}, aging_every: 0}, jev: {min_confidence: 0}}
+admission: {mode: custom, budget: "50%,8gb", custom: {class_weight: {batch: 0}, aging_every: 0}}
 runner: {controller: https://controller.example, credentials_dir: /private/runner, repos: [github.com/acme/repo], accept_working_tree: true, max_concurrent: 2, keep_free: "1,2gb", contribution: "50%,8gb", spawn_policy: return-to-queue, poll: 1s, lease: 1m, heartbeat: 10s}
 cache: {max_bytes: 1GiB, max_entries: 0}
 machine: {box_id: machine-one}

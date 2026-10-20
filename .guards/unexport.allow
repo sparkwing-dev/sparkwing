@@ -7,7 +7,7 @@
 internal/acceptance	13
 internal/admission	10
 internal/agentconfig	1
-internal/api	11
+internal/api	1
 internal/apierr	4
 internal/apiroutes	7
 internal/artifacts	2
@@ -15,7 +15,7 @@ internal/authwire	2
 internal/backend	1
 internal/bincache	17
 internal/blob	20
-internal/capability	30
+internal/capability	28
 internal/capacity	9
 internal/chaos	11
 internal/clisurface	11
@@ -23,7 +23,7 @@ internal/cluster	3
 internal/configguard	2
 internal/controller	67
 internal/controller/client	2
-internal/crons	39
+internal/crons	35
 internal/discovery	4
 internal/diskspace	1
 internal/egress	22
@@ -47,7 +47,7 @@ internal/limits	116
 internal/localsecrets	8
 internal/logpretty	6
 internal/logutil	2
-internal/nodehost	61
+internal/nodehost	55
 internal/nodeproto	43
 internal/objectguard	50
 internal/oidcissuer	8
@@ -70,11 +70,11 @@ internal/runners	3
 internal/runners/launcher	4
 internal/runners/service	4
 internal/runners/service/unitfile	1
-internal/runspec	5
+internal/runspec	4
 internal/secrets	7
 internal/secretsource	2
 internal/sessionledger	8
-internal/settings	55
+internal/settings	42
 internal/sourceurl	7
 internal/sparks	5
 internal/sparkwingruntime	5

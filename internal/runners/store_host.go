@@ -22,17 +22,10 @@ type StoreBinding struct {
 	Bearer    func(context.Context) (string, error)
 }
 
-// NativeServices supplies the per-award host services and their joined cleanup.
-type NativeServices struct {
-	Config  nodehost.NativeHostConfig
-	Storage nodehost.StorageBinding
-	Close   func() error
-}
-
 // StoreHosting constructs the shared hosts over the controller's existing store handle.
 type StoreHosting struct {
 	Store *store.Store
-	Bind  func(context.Context, StoreBinding) (NativeServices, error)
+	Bind  func(context.Context, StoreBinding) (nodehost.NativeServices, error)
 }
 
 // Host authenticates before binding services; shared hosts own acquisition, renewal and joining.
@@ -48,18 +41,18 @@ type storeInputs struct {
 	node nodehost.NodeInput
 }
 
-func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {
+func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUnit, input nodehost.RunInput) (nodehost.NativeServices, storeInputs, error) {
 	principal, err := h.authenticate(ctx, unit)
 	if err != nil {
-		return NativeServices{}, storeInputs{}, err
+		return nodehost.NativeServices{}, storeInputs{}, err
 	}
 	tenant, err := h.Store.ForTeam(ctx, store.Team(principal.Capability.Team))
 	if err != nil {
-		return NativeServices{}, storeInputs{}, err
+		return nodehost.NativeServices{}, storeInputs{}, err
 	}
 	inputs, err := nativeInputs(ctx, tenant, unit, principal, input)
 	if err != nil {
-		return NativeServices{}, inputs, err
+		return nodehost.NativeServices{}, inputs, err
 	}
 	lifetime, retire := context.WithCancel(context.WithoutCancel(ctx))
 	binding := StoreBinding{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {

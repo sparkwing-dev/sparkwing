@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
@@ -55,7 +57,7 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 	s, unit := nativeStoreAwardW8(t, capability.UnitNode)
 	finished := errors.New("binding finished")
 	refreshed, closed := false, false
-	host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+	host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
 		p := binding.Principal
 		attempt := int64(0)
 		applied, err := binding.Tenant.TransitionNode(ctx, store.NodeTransition{
@@ -63,14 +65,14 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 			Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation},
 		})
 		if err != nil {
-			return runners.NativeServices{}, err
+			return nodehost.NativeServices{}, err
 		}
 		current, err := binding.Refresh(ctx)
 		if err != nil || current.Authority != p.Authority || current.Capability.Binding.Attempt != applied.Attempt || unit.Binding.Attempt != 0 {
 			t.Fatalf("started host lost its authenticated award: %+v: %v", current.Capability.Binding, err)
 		}
 		refreshed = true
-		return runners.NativeServices{Close: func() error { closed = true; return nil }}, finished
+		return nodehost.NativeServices{Close: func() error { closed = true; return nil }}, finished
 	}}
 	if err := host.Host(t.Context(), unit); !errors.Is(err, finished) || !refreshed || !closed {
 		t.Fatalf("refreshed=%v closed=%v: %v", refreshed, closed, err)
@@ -92,7 +94,7 @@ func FuzzEmbeddedServiceBearerW9KeepsAwardAndLifetime(f *testing.F) {
 		defer cancelHost()
 		var retained func(context.Context) (string, error)
 		finalized := false
-		host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+		host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
 			retained = binding.Bearer
 			if retained == nil {
 				t.Fatal("embedded services have no awarded credential transport")
@@ -108,7 +110,7 @@ func FuzzEmbeddedServiceBearerW9KeepsAwardAndLifetime(f *testing.F) {
 				t.Fatal("cancelled service operation retained usable authority")
 			}
 			cancelHost()
-			return runners.NativeServices{Close: func() error {
+			return nodehost.NativeServices{Close: func() error {
 				actual, err := retained(context.WithoutCancel(ctx))
 				if actual != raw || err != nil {
 					t.Fatal("cancelled hosting scope lost authority before joined log cleanup")

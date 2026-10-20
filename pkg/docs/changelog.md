@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** Remove `--trigger-dedupe-window` and chart `controller.triggerDedupeWindow`. Identical API submissions create separate runs unless the caller supplies an idempotency key. Explicit keys and GitHub delivery IDs keep their persistent replay behavior.
+- **admission (Breaking):** Remove the `jev` admission mode and its adviser configuration. Use `classic`, `off`, `auto` or `custom` for deterministic machine admission. Queue status drops the adviser counters.
+- **runner:** Remove the persistent plan cache. Each new planning attempt invokes the SDK. An accepted plan remains stored for resume.
+
 - **go api (Breaking):** Move the store, controller, controller client, cipher tests and storage backends under `internal/`. External Go imports of their former `pkg/` paths are removed. HTTP credential DTOs and `NodeRef` live in `internal/controllerwire`; JSON contracts are unchanged. Use the author SDK, public wire packages or the documented HTTP API. See [migration](docs/migrations/_unreleased.md#controller-and-store-packages-are-internal).
 
 - **billing:** Payment events and refund responses share one state owner, including operator refunds and outcomes delivered before the payer is known. Terminal refunds cannot regress to pending. Refunds, disputes and warning consequences commit with the paid grant, and only actual refunds count as provider money returned.

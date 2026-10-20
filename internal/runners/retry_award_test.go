@@ -7,6 +7,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -17,9 +19,9 @@ func TestReviewRetryJobPassesHostingAwardValidation(t *testing.T) {
 	host := Hosting{
 		ControllerURL: "https://controller.example",
 		NewController: func(client.EngineOptions) (controllerwire.Controller, error) { return nil, boundary },
-		Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+		Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 			t.Fatal("crossed failed controller boundary")
-			return NativeServices{}, capability.Principal{}, nil
+			return nodehost.NativeServices{}, capability.Principal{}, nil
 		},
 	}
 	if err := host.Host(t.Context(), hostingAward(capability.UnitNode)); !errors.Is(err, boundary) {

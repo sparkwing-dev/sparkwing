@@ -60,13 +60,9 @@ const (
 
 // Rule is the precedence-document and conformance-test source for one setting.
 type Rule struct {
-	Key        string
-	Resolver   string
-	Sources    []Source
-	Phase      Phase
-	Merge      string
-	Zero       string
-	Validation string
+	Key     string
+	Sources []Source
+	Phase   Phase
 }
 
 // Values combines native run preferences with parent-only startup inputs.

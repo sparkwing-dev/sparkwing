@@ -45,14 +45,14 @@ func TestResolveAdmissionPolicyAutoEnablesAdaptiveScheduling(t *testing.T) {
 	}
 }
 
-func TestResolveAdmissionPolicyCustomAndJevBounds(t *testing.T) {
-	content := ("mode: jev\ncustom:\n  backfill_delay:\n    interactive: 750ms\n  class_weight:\n    interactive: 20\n  aging_every: 3\n  interactive_burst:\n    cores: 0.5\n    max_p99: 1500ms\n    min_samples: 5\njev:\n  timeout: 125ms\n  min_confidence: 0.8\n  min_probability: 0.75\n  max_backfill: 3s\n")
+func TestResolveAdmissionPolicyCustomBounds(t *testing.T) {
+	content := ("mode: custom\ncustom:\n  backfill_delay:\n    interactive: 750ms\n  class_weight:\n    interactive: 20\n  aging_every: 3\n  interactive_burst:\n    cores: 0.5\n    max_p99: 1500ms\n    min_samples: 5\n")
 	writeAdmissionConfig(t, content)
 	policy, _, err := ResolveAdmissionPolicy()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.Mode != admission.ModeJev || policy.Jev.Timeout != 125*time.Millisecond || policy.Jev.MinConfidence != 0.8 || policy.Jev.MinProbability != 0.75 || policy.Jev.MaxBackfill != 3*time.Second {
+	if policy.Mode != admission.ModeCustom {
 		t.Fatalf("policy = %+v", policy)
 	}
 	if got := policy.Scheduling.BackfillDelay[admission.ClassInteractive]; got != 750*time.Millisecond {

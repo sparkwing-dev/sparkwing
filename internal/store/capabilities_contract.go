@@ -284,8 +284,7 @@ func equalProjection(a, b any) bool {
 }
 
 type authorityNode struct {
-	principal  capability.Principal
-	generation int64
+	principal capability.Principal
 }
 
 func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool) (authorityNode, error) {
@@ -298,7 +297,7 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 	}
 	node := authorityNode{principal: capability.Principal{Authority: ref}}
 	if ref.Kind == capability.AuthorityCapability {
-		if err := tx.QueryRowContext(ctx, "SELECT revocation_generation FROM capabilities WHERE prefix = ?"+suffix, ref.ID).Scan(&node.generation); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT prefix FROM capabilities WHERE prefix = ?"+suffix, ref.ID).Scan(&ref.ID); err != nil {
 			return node, err
 		}
 		c, err := loadCapabilityTx(ctx, tx, ref.ID)
@@ -312,7 +311,7 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		var created, expires int64
 		var revoked sql.NullInt64
 		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
-		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,auth_generation FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &node.generation)
+		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,revoked_at FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked)
 		if err != nil {
 			return node, err
 		}
@@ -517,32 +516,6 @@ func (tx *storeTx) ResolveAuthority(ctx context.Context, ref capability.Authorit
 		return capability.Principal{}, err
 	}
 	return chain[0].principal, nil
-}
-
-// AuthGenerations returns one snapshot of the leaf's full ancestry and membership fence.
-func (s *Store) AuthGenerations(ctx context.Context, authority capability.AuthorityRef, team string) (capability.AuthGenerations, error) {
-	tx, err := s.beginSnapshotReadTx(ctx)
-	if err != nil {
-		return capability.AuthGenerations{}, err
-	}
-	defer rollbackOrLog(tx)
-	chain, err := authorityChainTx(ctx, tx, authority, false)
-	if err != nil {
-		return capability.AuthGenerations{}, err
-	}
-	if chain[0].principal.Capability.Team != team {
-		return capability.AuthGenerations{}, authorityError(apierr.Forbidden, "authority team mismatch")
-	}
-	result := capability.AuthGenerations{Team: team}
-	for _, node := range chain {
-		result.Authorities = append(result.Authorities, capability.AuthorityGeneration{Authority: node.principal.Authority, Generation: node.generation})
-	}
-	if team != "" {
-		if err := tx.QueryRowContext(ctx, "SELECT auth_generation FROM team_counters WHERE team = ?", team).Scan(&result.MembershipGeneration); err != nil {
-			return capability.AuthGenerations{}, err
-		}
-	}
-	return result, tx.Commit()
 }
 
 func resolveActorTx(ctx context.Context, tx *storeTx, actor Actor) (capability.Principal, error) {

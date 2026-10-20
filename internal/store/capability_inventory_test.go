@@ -426,10 +426,7 @@ func TestCapabilityRotationDeadlinesAndAncestryProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		generations, err := s.AuthGenerations(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}, "a")
-		if err != nil || len(generations.Authorities) != 1 || generations.Authorities[0].Generation != 1 {
-			t.Fatalf("rotation generation: %+v %v", generations, err)
-		}
+
 		end := start.Add(grace)
 		for _, at := range []time.Time{start, end.Add(-time.Nanosecond), end, end.Add(time.Nanosecond)} {
 			now = at

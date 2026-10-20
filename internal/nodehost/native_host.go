@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"slices"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -20,7 +22,7 @@ type NativeHostStore interface {
 	ClaimStore
 }
 
-// NativeHostConfig supplies policy adapters in nested configs; shared fields come from its top level.
+// NativeHostConfig supplies external dependencies once for the shared host.
 type NativeHostConfig struct {
 	Store          NativeHostStore
 	Lease          lease.Keeper
@@ -30,12 +32,11 @@ type NativeHostConfig struct {
 	Processes      *NativeProcesses
 	Router         ProcessEndpointRegistrar
 	Validation     nodeproto.ValidationContext
-	ValidatePlan   func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	CanonicalHash  func(any) (runspec.Hash, error)
-	Owner          OwnerHost
-	Executor       ExecutorDependencies
-	Evaluation     EvaluationDependencies
-	Planner        SDKPlanner
+	Owner          OwnerOperations
+	Executor       ExecutionOperations
+	Evaluation     EvaluationOperations
+	ReadOutput     func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	PlanningLog    func(context.Context, nodeproto.FrameLog) error
 	Admission      *LocalAdmission
 	ClaimAdmission *LocalAdmission
 	Capacity       *StoreAdmission
@@ -49,7 +50,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	if config.Lease.Interval <= 0 || config.Lease.Lease <= config.Lease.Interval {
 		return nil, nil, nil, errors.New("native host requires a positive renewal interval below its lease")
 	}
-	if config.Owner.Wait == nil || config.Owner.Renew == nil || config.Planner.Log == nil {
+	if config.Owner.Wait == nil || config.Owner.Renew == nil || config.PlanningLog == nil {
 		return nil, nil, nil, errors.New("native host requires unit renewal, state following and planning logs")
 	}
 	if config.Executor.Bind == nil || config.Evaluation.Bind == nil {
@@ -65,11 +66,8 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	processes.Session.Environments.Snapshots = config.Snapshots
 	validation := config.Validation
 	validation.Secrets = config.Masks
-	functions := (PlanningFunctions{Validate: config.ValidatePlan, Hash: config.CanonicalHash}).defaults()
-	execution := config.Executor
-	if execution.ReadOutput == nil {
-		execution.ReadOutput = config.Evaluation.ReadOutput
-	}
+	functions := (PlanningFunctions{}).defaults()
+	execution := ExecutorDependencies{Log: config.Executor.Log, BindStorage: config.Executor.BindStorage, Bind: config.Executor.Bind, ChildContext: config.Executor.ChildContext, PrepareArtifacts: config.Executor.PrepareArtifacts, PrepareCaches: config.Executor.PrepareCaches, PublishOutput: config.Executor.PublishOutput, Annotate: config.Executor.Annotate, ReadFailure: config.Executor.ReadFailure, ReadOutput: config.ReadOutput}
 	if execution.Log == nil {
 		execution.Log = func(ctx context.Context, input NodeInput, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, input.Accepted.RunID, input.NodeID, frame)
@@ -83,7 +81,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	evaluation := config.Evaluation
+	evaluation := EvaluationDependencies{Bind: config.Evaluation.Bind, ChildContext: config.Evaluation.ChildContext, ReadOutput: config.ReadOutput}
 	evaluation.Masks = config.Masks
 	evaluation.Store, evaluation.Mask = config.Store, config.Masks.masker.Mask
 	evaluation.Start, evaluation.EnsureEngine = processes.StartEvaluation, config.Source.Engines.Ensure
@@ -92,15 +90,8 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	planner := config.Planner
-	planner.Masks = config.Masks
-	planner.Environment = processes.Session.Environments.planning
-	if planner.CacheDirectory == "" && config.Source.Workspace != "" {
-		planner.CacheDirectory = filepath.Join(config.Source.Workspace, "plan-cache")
-	}
-	planner.Start, planner.EnsureEngine = processes.StartPlanning, config.Source.Engines.Ensure
-	planner.Masker, planner.ValidatePlan, planner.CanonicalHash = config.Masks.masker, functions.Validate, functions.Hash
-	owner := config.Owner
+	planner := SDKPlanner{Log: config.PlanningLog, Masks: config.Masks, Start: processes.StartPlanning, EnsureEngine: config.Source.Engines.Ensure, Masker: config.Masks.masker, ValidatePlan: functions.Validate, CanonicalHash: functions.Hash}
+	owner := OwnerHost{Renew: config.Owner.Renew, Acquire: config.Owner.Acquire, Prepare: config.Owner.Prepare, Project: config.Owner.Project, Decide: config.Owner.Decide, Wait: config.Owner.Wait, WaitNode: config.Owner.WaitNode, Debug: config.Owner.Debug, MemoPolicy: config.Owner.MemoPolicy, AdmissionPolicy: config.Owner.AdmissionPolicy, Local: config.Owner.Local, AdoptClaim: config.Owner.AdoptClaim, Delegator: config.Owner.Delegator, ExpansionActor: config.Owner.ExpansionActor, Expand: config.Owner.Expand}
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
 	owner.Computing = processes.Computing
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
@@ -112,38 +103,55 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	configureNativeAdmission(&owner, config.Admission, config.Capacity)
 	owner.Planning.Validation = validation
-	layers := owner.Layer
-	owner.Layer = func(ctx context.Context, layer LayerSpec, input EvaluationInput, row store.NodeRow, storage StorageBinding) (OwnerLayerResult, error) {
-		if layer.Name == "debug" {
-			unused, err := unusedOwnerPolicy(layer.Name, input, row, owner.Local)
-			if err != nil || unused || owner.Debug != nil {
-				return OwnerLayerResult{}, err
-			}
-			return OwnerLayerResult{}, errors.New("debug pause requires an authority-bearing boundary adapter")
+	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+		var spec runspec.Spec
+		var job nodeproto.JobSpec
+		if json.Unmarshal(input.Accepted.Spec, &spec) != nil || json.Unmarshal(row.Spec, &job) != nil {
+			return OwnerLayerResult{}, errors.New("debug policy requires accepted run and job declarations")
 		}
-		if layer.Name == "skip_if" {
-			return evaluator.skipLayer(ctx, input, row, processes.Log)
-		}
-		if layer.Name == "approval" {
+		pause := spec.Resolved.Settings.Options.Pause.Value
+		unused := job.OnFailureOf != "" || !slices.Contains(pause.Before.Value, job.ID) && (job.Approval != nil || !slices.Contains(pause.After.Value, job.ID) && !pause.OnFailure.Value)
+		if unused || owner.Debug != nil {
 			return OwnerLayerResult{}, nil
 		}
-		if layer.Name == "admission" {
-			isLocal := owner.Local != nil && owner.Local(row)
-			if err := requireMachineAdmission(config.Admission, isLocal); err != nil {
+		return OwnerLayerResult{}, errors.New("debug pause requires an authority-bearing boundary adapter")
+	}
+	owner.SkipPolicy = func(ctx context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+		return evaluator.skipLayer(ctx, input, row, processes.Log)
+	}
+	owner.ApprovalPolicy = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+		return OwnerLayerResult{}, nil
+	}
+	if owner.MemoPolicy == nil {
+		owner.MemoPolicy = func(_ context.Context, _ EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+			var job nodeproto.JobSpec
+			if err := json.Unmarshal(row.Spec, &job); err != nil {
 				return OwnerLayerResult{}, err
 			}
-			if config.Capacity != nil || isLocal {
+			if job.Memo != nil || job.Closures.MemoKey != "" {
+				return OwnerLayerResult{}, errors.New("native host requires the memo owner policy adapter")
+			}
+			return OwnerLayerResult{}, nil
+		}
+	}
+	if owner.AdmissionPolicy == nil {
+		owner.AdmissionPolicy = func(_ context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+			local := owner.Local != nil && owner.Local(row)
+			if err := requireMachineAdmission(config.Admission, local); err != nil {
+				return OwnerLayerResult{}, err
+			}
+			if config.Capacity != nil || local {
 				return OwnerLayerResult{}, nil
 			}
-		}
-		if layers == nil {
-			unused, err := unusedOwnerPolicy(layer.Name, input, row, owner.Local)
-			if err != nil || unused {
+			var spec runspec.Spec
+			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 				return OwnerLayerResult{}, err
 			}
-			return OwnerLayerResult{}, errors.New("native host requires the " + layer.Name + " owner policy adapter")
+			if len(spec.Resolved.Settings.Concurrency) != 0 || len(row.Execution.Concurrency) != 0 {
+				return OwnerLayerResult{}, errors.New("native host requires the admission owner policy adapter")
+			}
+			return OwnerLayerResult{}, nil
 		}
-		return layers(ctx, layer, input, row, storage)
 	}
 	if owner.Expand == nil {
 		owner.Expand = func(ctx context.Context, input EvaluationInput, _ store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
@@ -160,21 +168,40 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	return &owner, claimed, evaluator, nil
 }
 
-func unusedOwnerPolicy(name string, input EvaluationInput, row store.NodeRow, local func(store.NodeRow) bool) (bool, error) {
-	var spec runspec.Spec
-	var job nodeproto.JobSpec
-	if json.Unmarshal(input.Accepted.Spec, &spec) != nil || json.Unmarshal(row.Spec, &job) != nil {
-		return false, errors.New("owner policy requires accepted run and job declarations")
-	}
-	switch name {
-	case "debug":
-		pause := spec.Resolved.Settings.Options.Pause.Value
-		return job.OnFailureOf != "" || !slices.Contains(pause.Before.Value, job.ID) && (job.Approval != nil || !slices.Contains(pause.After.Value, job.ID) && !pause.OnFailure.Value), nil
-	case "memo":
-		return job.Memo == nil && job.Closures.MemoKey == "", nil
-	case "admission":
-		return len(spec.Resolved.Settings.Concurrency) == 0 && len(row.Execution.Concurrency) == 0 && (local == nil || !local(row)), nil
-	default:
-		return false, nil
-	}
+// OwnerOperations supplies placement callbacks without shared host state.
+type OwnerOperations struct {
+	Renew           func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Acquire         func(context.Context, RunInput) (*source.Entry, error)
+	Prepare         func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
+	Project         func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	Decide          func(store.ScheduleSnapshot) store.ScheduleDecision
+	Wait            func(context.Context, store.RunSnapshot) error
+	WaitNode        WaitNodeChange
+	Debug           DebugBoundaryWaiter
+	MemoPolicy      OwnerPolicy
+	AdmissionPolicy OwnerPolicy
+	Local           func(store.NodeRow) bool
+	AdoptClaim      func(context.Context, store.ReconciledNode) error
+	Delegator       OwnerDelegator
+	ExpansionActor  func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
+	Expand          func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
+}
+
+// ExecutionOperations supplies placement callbacks without shared host state.
+type ExecutionOperations struct {
+	Log              func(context.Context, NodeInput, nodeproto.FrameLog) error
+	BindStorage      func(context.Context, NodeInput) (StorageBinding, error)
+	Bind             func(context.Context, NodeInput) (ProcessGrant, error)
+	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
+	PrepareArtifacts func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
+	PrepareCaches    func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
+	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
+	Annotate         func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
+	ReadFailure      func(context.Context, controllerwire.NodeRef, int64) (*nodeproto.JobFailure, error)
+}
+
+// EvaluationOperations supplies placement callbacks without shared host state.
+type EvaluationOperations struct {
+	Bind         func(context.Context, EvaluationInput) (ProcessGrant, error)
+	ChildContext func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 }

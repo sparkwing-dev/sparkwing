@@ -135,6 +135,11 @@ func TestProductionCloudPlanAndEvalReachNativeHost(t *testing.T) {
 func testProductionNativeBinding(t *testing.T, kind capability.UnitKind) {
 	t.Helper()
 	hosting, unit := productionNativeAward(t, kind)
+	machineConfig := filepath.Join(t.TempDir(), "invalid-machine.yaml")
+	if err := os.WriteFile(machineConfig, []byte("machine: [invalid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", machineConfig)
 	controller, err := client.NewEngineClient(client.EngineOptions{URL: hosting.ControllerURL, HTTP: hosting.HTTP, Bearer: fixedBearer(unit.Capability)})
 	if err != nil {
 		t.Fatal(err)

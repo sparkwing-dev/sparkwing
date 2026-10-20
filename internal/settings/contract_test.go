@@ -1,11 +1,14 @@
 package settings
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestSettingsHaveOneResolverAndOrderedSources(t *testing.T) {
+func TestSettingsHaveUniqueKeysAndOrderedSources(t *testing.T) {
 	seen := map[string]bool{}
 	for _, row := range Table() {
-		if row.Key == "" || seen[row.Key] || row.Resolver == "" || row.Merge == "" || row.Zero == "" || row.Validation == "" {
+		if row.Key == "" || seen[row.Key] {
 			t.Errorf("incomplete or duplicate setting: %+v", row)
 		}
 		seen[row.Key] = true
@@ -15,7 +18,7 @@ func TestSettingsHaveOneResolverAndOrderedSources(t *testing.T) {
 			t.Errorf("%s: unknown phase %q", row.Key, row.Phase)
 		}
 		order := Precedence()
-		if row.Resolver == "ControllerCeilings" || row.Resolver == "Retention" {
+		if strings.HasPrefix(row.Key, "operator.") || row.Key == "retention" {
 			order = OperatorPrecedence()
 		}
 		last := -1

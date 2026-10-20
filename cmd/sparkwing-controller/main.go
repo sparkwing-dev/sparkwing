@@ -130,11 +130,6 @@ func run(args []string) error {
 		"pending-trigger depth of one team past which that team's new webhook "+
 			"deliveries and API submissions are shed with 503 and a Retry-After rather than queued. "+
 			"Zero never sheds.")
-	triggerDedupeWindow := fs.Duration("trigger-dedupe-window", 0,
-		"how long a content-identical API submission answers with the run the "+
-			"first one started instead of starting a second. GitHub deliveries "+
-			"are deduped by delivery id and body digest regardless. Zero dedupes "+
-			"no API submission.")
 	runnersPerToken := fs.Int("runners-per-token", controller.DefaultRunnersPerToken,
 		"most self-named runners one caller may hold at once on the claim routes, "+
 			"where the runner name is the caller's own word and each name gets its "+
@@ -335,9 +330,7 @@ func run(args []string) error {
 	if *shedQueueDepth < 0 {
 		return fmt.Errorf("--shed-queue-depth cannot be negative")
 	}
-	if *triggerDedupeWindow < 0 {
-		return fmt.Errorf("--trigger-dedupe-window cannot be negative")
-	}
+
 	if *runnersPerToken < 1 {
 		return fmt.Errorf("--runners-per-token must be at least 1")
 	}
@@ -491,7 +484,6 @@ func run(args []string) error {
 		WithFloodPolicy(controller.FloodPolicy{
 			RunsPerPrincipalHour: guards.RunsPerPrincipalHour,
 			ShedQueueDepth:       guards.ShedQueueDepth,
-			DedupeWindow:         *triggerDedupeWindow,
 		}).
 		WithRequestBudget(controller.RequestBudget{
 			ClaimsPerMinute:     guards.ClaimsPerRunnerMinute,

@@ -33,7 +33,7 @@ type PlanningProcessInput struct {
 	SecretArgs []string
 }
 
-// PreparedPlanning supplies OwnerPlanning's cache inputs and lazy SDK planner.
+// PreparedPlanning supplies OwnerPlanning's validation and SDK planner.
 // Args and SecretArgs belong in the resolved half submitted to AcceptPlan.
 // Prepare owns and closes describe; Functions.Plan owns and closes a fresh process.
 type PreparedPlanning struct {
@@ -44,25 +44,22 @@ type PreparedPlanning struct {
 	Functions   PlanningFunctions
 }
 
-// SDKPlanner reconstructs planning inputs before PlanInitial checks the cache.
+// SDKPlanner prepares SDK planning with the current host inputs.
 // Start must use the supplied log callback for every output stream and return
 // any acquired process even when setup fails. Log must honor its context. The
 // owner evaluates guards from the returned arguments before starting planning.
 type SDKPlanner struct {
-	CacheDirectory string
-	Environment    func(context.Context, PlanningProcessInput) ([]string, error)
-	Start          func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error)
-	EnsureEngine   func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
-	Masker         *secrets.Masker
-	Masks          *MaskRegistry
-	Log            func(context.Context, nodeproto.FrameLog) error
-	ValidatePlan   func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	CanonicalHash  func(any) (runspec.Hash, error)
-	Warn           func(string)
+	Start         func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error)
+	EnsureEngine  func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	Masker        *secrets.Masker
+	Masks         *MaskRegistry
+	Log           func(context.Context, nodeproto.FrameLog) error
+	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
+	CanonicalHash func(any) (runspec.Hash, error)
 }
 
 // Prepare describes the selected entry, registers defaults from every pipeline
-// and resolves requested arguments. It starts no plan process on a cache hit.
+// and resolves requested arguments.
 func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, planning PlanningInput) (PreparedPlanning, error) {
 	if p.Start == nil || p.EnsureEngine == nil || p.Masker == nil || p.Log == nil {
 		return PreparedPlanning{}, errors.New("SDK planning requires process, engine, masking and run-log adapters")
@@ -80,7 +77,7 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, nil, nil, nil); err != nil {
 		return PreparedPlanning{}, err
 	}
-	functions := (PlanningFunctions{Validate: p.ValidatePlan, Hash: p.CanonicalHash, Warn: p.Warn}).defaults()
+	functions := (PlanningFunctions{Validate: p.ValidatePlan, Hash: p.CanonicalHash}).defaults()
 	validate, hash := functions.Validate, functions.Hash
 	functions.Validate = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
 		plan, err := validate(raw, validation)
@@ -95,17 +92,6 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 			return "", p.planningError(context.Background(), err, true)
 		}
 		return digest, nil
-	}
-	if input.Environment.Digest != "" && planCacheDigestValid(planning.Inputs.EnvironmentDigest) {
-		if !planCacheDigestValid(input.Environment.Digest) {
-			planning.Inputs.EnvironmentDigest = ""
-		} else {
-			digest, err := functions.Hash(struct{ Host, Captured runspec.Hash }{planning.Inputs.EnvironmentDigest, input.Environment.Digest})
-			if err != nil {
-				return PreparedPlanning{}, err
-			}
-			planning.Inputs.EnvironmentDigest = digest
-		}
 	}
 	logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log}
 	var raw json.RawMessage
@@ -132,27 +118,6 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, true)
 	}
 	input.Args = maps.Clone(prepared.Args)
-	if p.Environment != nil && !planning.Disabled {
-		if err := p.fingerprintPlanning(ctx, input, prepared, &planning); err != nil {
-			return PreparedPlanning{}, p.planningError(ctx, err, true)
-		}
-	}
-	planning.Inputs.Engine, planning.Inputs.Pipeline, planning.Inputs.Entrypoint = input.Entry.Engine.Identity, input.Run.Pipeline, input.Entrypoint
-	runner := struct {
-		Granted nodeproto.RunnerIdentity
-		Target  releaseasset.Target
-		Host    runspec.Hash
-	}{input.Runner, input.Entry.Engine.Target, planning.Inputs.RunnerDigest}
-	for _, field := range []struct {
-		value any
-		dst   *runspec.Hash
-	}{{raw, &planning.Inputs.DescribeDigest}, {input.Args, &planning.Inputs.ArgsDigest}, {input.Run, &planning.Inputs.RunContextDigest}, {runner, &planning.Inputs.RunnerDigest}} {
-		hash, err := functions.Hash(field.value)
-		if err != nil {
-			return PreparedPlanning{}, p.planningError(ctx, err, true)
-		}
-		*field.dst = hash
-	}
 	planning.Validation.Secrets = planningSecrets{prior: planning.Validation.Secrets, masker: p.Masker}
 	functions.Plan = func(ctx context.Context) (json.RawMessage, error) {
 		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: true}

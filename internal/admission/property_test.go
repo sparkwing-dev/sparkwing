@@ -41,10 +41,10 @@ func TestLedger_AdaptivePoliciesPreserveInvariantsAcrossRandomSequences(t *testi
 		"custom": {
 			BackfillDelay: map[WorkloadClass]time.Duration{
 				ClassCritical: 500 * time.Millisecond, ClassInteractive: 3 * time.Second,
-				ClassNormal: 7 * time.Second, ClassBatch: 15 * time.Second,
+				classNormal: 7 * time.Second, classBatch: 15 * time.Second,
 			},
 			ClassWeight: map[WorkloadClass]int{
-				ClassCritical: 20, ClassInteractive: 10, ClassNormal: 3, ClassBatch: 0,
+				ClassCritical: 20, ClassInteractive: 10, classNormal: 3, classBatch: 0,
 			},
 			AgingEvery: 2,
 			Burst:      BurstPolicy{MaxCores: 1.5, MaxP99: 3 * time.Second, MinSamples: 2},
@@ -144,7 +144,7 @@ func randomSubmit(t *testing.T, l *Ledger, rng *rand.Rand, n int, totalCores flo
 		ID:            fmt.Sprintf("req-%d", n),
 		Cores:         float64(rng.Intn(int(totalCores*2)+2)) * 0.5,
 		MemoryBytes:   uint64(rng.Intn(int(totalMemory) + 1)),
-		Class:         []WorkloadClass{ClassCritical, ClassInteractive, ClassNormal, ClassBatch}[rng.Intn(4)],
+		Class:         []WorkloadClass{ClassCritical, ClassInteractive, classNormal, classBatch}[rng.Intn(4)],
 		ExpectedP99MS: int64(rng.Intn(5001)),
 		BurstCores:    rng.Intn(5) == 0,
 	}

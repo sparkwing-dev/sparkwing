@@ -209,9 +209,10 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	f.State = &hostState{Tenant: tenant}
 	f.Host = OwnerHost{Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(s string) string { return s }, Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
 		return database.RenewUnit(ctx, actor.CapabilityPrefix, executing)
-	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }, Layer: func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }}
+	setTestPolicies(&f.Host, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
-	}}
+	})
 	follower := StateFollower{Store: f.State, Subscribe: f.State.subscribe}
 	f.Host.Wait, f.Host.WaitNode = follower.Wait, follower.WaitNode
 	f.Host.Delegator = database

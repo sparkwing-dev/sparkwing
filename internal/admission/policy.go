@@ -10,7 +10,6 @@ const (
 	ModeClassic Mode = "classic"
 	ModeOff     Mode = "off"
 	ModeAuto    Mode = "auto"
-	ModeJev     Mode = "jev"
 	ModeCustom  Mode = "custom"
 )
 
@@ -22,8 +21,8 @@ type WorkloadClass string
 const (
 	ClassCritical    WorkloadClass = "critical"
 	ClassInteractive WorkloadClass = "interactive"
-	ClassNormal      WorkloadClass = "normal"
-	ClassBatch       WorkloadClass = "batch"
+	classNormal      WorkloadClass = "normal"
+	classBatch       WorkloadClass = "batch"
 )
 
 // Policy controls duration-aware backfill. A zero-value policy preserves the
@@ -51,22 +50,22 @@ func AutoPolicy() SchedulingPolicy {
 	return SchedulingPolicy{BackfillDelay: map[WorkloadClass]time.Duration{
 		ClassCritical:    0,
 		ClassInteractive: 2 * time.Second,
-		ClassNormal:      10 * time.Second,
-		ClassBatch:       30 * time.Second,
+		classNormal:      10 * time.Second,
+		classBatch:       30 * time.Second,
 	}, ClassWeight: map[WorkloadClass]int{
 		ClassCritical:    12,
 		ClassInteractive: 8,
-		ClassNormal:      4,
-		ClassBatch:       0,
+		classNormal:      4,
+		classBatch:       0,
 	}, AgingEvery: 4, Burst: BurstPolicy{MaxCores: 1, MaxP99: 2 * time.Second, MinSamples: 3}}
 }
 
 func normalizeClass(class WorkloadClass) WorkloadClass {
 	switch class {
-	case ClassCritical, ClassInteractive, ClassNormal, ClassBatch:
+	case ClassCritical, ClassInteractive, classNormal, classBatch:
 		return class
 	default:
-		return ClassNormal
+		return classNormal
 	}
 }
 

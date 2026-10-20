@@ -120,17 +120,17 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 			child, cancel := context.WithCancel(ctx)
 			return child, cancel, nil
 		},
-		PrepareLayer: func(_ context.Context, layer LayerSpec, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
-			*trace = append(*trace, layer.Name+":in")
-			return func(context.Context, NodeInput, *store.NodeResult) error {
-				*trace = append(*trace, layer.Name+":out")
-				return nil
-			}, nil
-		},
 		PublishOutput: func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) {
 			return nil, errors.New("private output refused")
 		},
 	}
+	setTestExecutor(&dependencies, func(_ context.Context, layer testPolicyName, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
+		*trace = append(*trace, layer.Name+":in")
+		return func(context.Context, NodeInput, *store.NodeResult) error {
+			*trace = append(*trace, layer.Name+":out")
+			return nil
+		}, nil
+	})
 	for _, apply := range configure {
 		apply(&dependencies)
 	}

@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 )
 
 type localOwnerState struct {
@@ -26,11 +25,11 @@ func (s localOwnerState) ReadSnapshot(ctx context.Context, run string) (store.Ru
 	return s.Tenant.ReadOwnerSnapshot(ctx, s.owner, run)
 }
 
-func newLocalNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions) (runners.NativeServices, error) {
-	return localNativeServices(ctx, home, owned, binding, options, localcontroller.NativeServices)
+func newLocalNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions) (nodehost.NativeServices, error) {
+	return localNativeServices(ctx, home, owned, binding, options, nodehost.NewNativeServices)
 }
 
-func localNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions, build func(context.Context, localcontroller.NativeConfig) (runners.NativeServices, error)) (_ runners.NativeServices, err error) {
+func localNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions, build func(context.Context, nodehost.NativeConfig) (nodehost.NativeServices, error)) (_ nodehost.NativeServices, err error) {
 	options.Bearer = binding.Bearer
 	var private *client.LocalHostClient
 	fence := binding.Principal.Capability.Binding
@@ -40,7 +39,7 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 		private, err = client.NewLocalHostClient(options, fence.RunID)
 	}
 	if err != nil {
-		return runners.NativeServices{}, err
+		return nodehost.NativeServices{}, err
 	}
 	defer func() {
 		if err != nil {
@@ -49,38 +48,43 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 	}()
 	source, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), true)
 	if err != nil {
-		return runners.NativeServices{}, err
+		return nodehost.NativeServices{}, err
 	}
 	var state nodehost.NativeHostStore = binding.Tenant
 	if binding.Principal.Capability.Unit == capability.UnitTrigger {
 		state = localOwnerState{Tenant: binding.Tenant, owner: binding.Principal.Authority}
 	}
-	services, err := build(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
-		Home: home, Version: installedVersion(), Store: state, Parent: owned, Bindings: owned,
+	admission, err := nodehost.MachineAdmission(home, installedVersion())
+	if err != nil {
+		return nodehost.NativeServices{}, err
+	}
+	services, err := build(ctx, nodehost.WithClient(nodehost.NativeConfig{
+		Admission: admission,
+		Home:      home, Store: state, Parent: owned, Bindings: owned,
 		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: source, Local: store.OwnerCanExecute(binding.Principal),
 	}, private))
 	if err != nil {
-		return runners.NativeServices{}, err
+		return nodehost.NativeServices{}, err
 	}
 	services.Config.Owner.Delegator = owned
 	closeServices := services.Close
 	services.Close = func() error { return errors.Join(closeServices(), private.Close()) }
 	run, err := binding.Tenant.ReadRun(ctx, fence.RunID)
 	if err != nil {
-		return runners.NativeServices{}, errors.Join(err, services.Close())
+		return nodehost.NativeServices{}, errors.Join(err, services.Close())
 	}
 	if profile := run.Request.Request.Options.CacheFrom.Value; profile != "" && run.Request.Request.Origin == runspec.OriginLocal {
 		snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
 		if err != nil {
-			return runners.NativeServices{}, errors.Join(err, services.Close())
+			return nodehost.NativeServices{}, errors.Join(err, services.Close())
 		}
 		environment, err := snapshots.Load(ctx, run.Request.Request.Env)
 		if err != nil {
-			return runners.NativeServices{}, errors.Join(err, services.Close())
+			return nodehost.NativeServices{}, errors.Join(err, services.Close())
 		}
 		cache, closeCache, err := openProfileCache(ctx, environment, profile, run.Request.Request.Git, run.Request.Request.Source.Location.LocalCheckout)
 		if err != nil {
-			return runners.NativeServices{}, errors.Join(err, services.Close())
+			return nodehost.NativeServices{}, errors.Join(err, services.Close())
 		}
 		services.Storage.RemoteCache = cache
 		closeHost := services.Close

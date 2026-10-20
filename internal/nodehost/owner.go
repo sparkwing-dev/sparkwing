@@ -52,7 +52,7 @@ type OwnerLayerResult struct {
 // OwnerHost coordinates the frozen lifecycle with source, SDK and placement adapters.
 // Project and Decide default to the shared store functions. Wait must catch up
 // against the snapshot's persisted state sequences before waiting for notification.
-// Layer implements each owner-side policy named by LayerTable; it is required before
+// OwnerPolicy implements one owner decision; it is required before
 // dispatch so an unwired policy cannot silently permit execution.
 // Source supplies the shared acquisition path. Acquire may replace it with a
 // trusted adapter that uses RunInput's sealed request and persisted acceptance.
@@ -64,22 +64,26 @@ type OwnerHost struct {
 	Store          OwnerStore
 	Lease          lease.Keeper
 	// Renew reports current compute through the authenticated unit renewal transaction.
-	Renew     func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
-	Computing func(string) bool
-	Source    source.Options
-	Acquire   func(context.Context, RunInput) (*source.Entry, error)
-	Prepare   func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
-	Planner   *SDKPlanner
-	Planning  PlanningInput
-	Project   func(store.RunSnapshot) (store.ScheduleSnapshot, error)
-	Decide    func(store.ScheduleSnapshot) store.ScheduleDecision
-	Wait      func(context.Context, store.RunSnapshot) error
-	WaitNode  WaitNodeChange
-	Debug     DebugBoundaryWaiter
-	Layer     func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)
-	Local     func(store.NodeRow) bool
-	Admit     func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error
-	Around    func(context.Context, AcceptedRun, func(context.Context) (RunCompletion, error)) (RunCompletion, error)
+	Renew           func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Computing       func(string) bool
+	Source          source.Options
+	Acquire         func(context.Context, RunInput) (*source.Entry, error)
+	Prepare         func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
+	Planner         *SDKPlanner
+	Planning        PlanningInput
+	Project         func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	Decide          func(store.ScheduleSnapshot) store.ScheduleDecision
+	Wait            func(context.Context, store.RunSnapshot) error
+	WaitNode        WaitNodeChange
+	Debug           DebugBoundaryWaiter
+	DebugPolicy     OwnerPolicy
+	SkipPolicy      OwnerPolicy
+	ApprovalPolicy  OwnerPolicy
+	MemoPolicy      OwnerPolicy
+	AdmissionPolicy OwnerPolicy
+	Local           func(store.NodeRow) bool
+	Admit           func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error
+	Around          func(context.Context, AcceptedRun, func(context.Context) (RunCompletion, error)) (RunCompletion, error)
 	// AdoptClaim retains the private award for per-attempt process delegation.
 	AdoptClaim     func(context.Context, store.ReconciledNode) error
 	Delegator      OwnerDelegator
@@ -297,13 +301,8 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
-	if input.PlanCache != nil {
-		prepared.Planning.Cache = input.PlanCache
-	}
 	guards := prepared.Resolved.Guards
 	if !guards.Passed && (len(guards.When)+len(guards.Unless) != 0 || guards.Reason != "") {
-		prepared.Planning.Cache = nil
-		prepared.Planning.Disabled = true
 		prepared.Functions.Plan = func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil }
 	}
 	if err := h.Masks.initialize(row.Request, &prepared.Resolved, nil, nil); err != nil {
@@ -397,3 +396,6 @@ func ownerAccepted(row store.RunRow) (AcceptedRun, error) {
 	}
 	return result, nil
 }
+
+// OwnerPolicy evaluates one owner decision before dispatch.
+type OwnerPolicy func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)

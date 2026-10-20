@@ -21,11 +21,11 @@ func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanA
 	t.Helper()
 	tenant, request, now := planFixture(t, runspec.DispatchController)
 	var err error
-	request.Seal.Plan, err = json.Marshal(plan)
+	request.Seal.Plan, err = json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Seal.Resolved.Settings, err = (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Plan: plan})
+	request.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: request.Seal.Request, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,11 +282,6 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 		{ID: "gate", Approval: &nodeproto.ApprovalSpec{}},
 	}}
 	tenant, request, now := controllerPlanFixture(t, plan)
-	plans := tenant.s.plans.(fakePlanContracts)
-	plans.resolve = func(settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-		return map[string]runspec.JobExecutionSettings{}, nil
-	}
-	tenant.s.plans = plans
 	actor := controllerJobActor(t, tenant, request.RunID)
 	before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "gate"})
 	if err != nil || before.Status != StatusApprovalPending {

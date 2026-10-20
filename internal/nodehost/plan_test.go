@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func TestSDKPlanningUnknownPipelineNeverPlansOrCaches(t *testing.T) {
+func TestSDKPlanningUnknownPipelineNeverPlans(t *testing.T) {
 	planner, input, fixture, processes := sdkPlanningFixture(t)
 	input.Run.Pipeline = "ghost"
 	_, err := planner.Prepare(t.Context(), input, fixture.input)
@@ -18,7 +18,7 @@ func TestSDKPlanningUnknownPipelineNeverPlansOrCaches(t *testing.T) {
 	if !errors.As(err, &failure) || failure.Code != apierr.UnknownPipeline {
 		t.Fatalf("error=%v", err)
 	}
-	if len(*processes) != 1 || len(fixture.cache.puts) != 0 {
+	if len(*processes) != 1 {
 		t.Fatal("unknown pipeline started planning or populated the cache")
 	}
 	process := (*processes)[0]

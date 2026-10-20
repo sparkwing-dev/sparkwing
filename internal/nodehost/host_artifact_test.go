@@ -222,7 +222,7 @@ func TestExecutorArtifactStaging(t *testing.T) {
 					}
 					return request.Key, nil
 				}}
-				deps.PrepareLayer = stager.Prepare
+				deps.PrepareArtifacts = stager.Prepare
 				start := deps.Start
 				deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 					got, err := os.ReadFile(filepath.Join(workspace, "bin/program"))

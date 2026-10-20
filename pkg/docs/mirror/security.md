@@ -175,14 +175,11 @@ Queue shedding measures that team's pending work.
 Exhaustion returns `429`; queue shedding returns `503`. Both carry
 `Retry-After`. These process budgets complement the store's persistent limits.
 
-When content deduplication is configured, identical API submissions by the
-same team and submitting identity share an intake key within that window. The store owns
-the commit and replay: the first response is `201`, and replay returns `200`
-with `replayed: true` and the same run ID. Replay never returns another here
-bearer. An explicit idempotency key takes precedence over content deduplication.
-Persisted replay runs before flood charging, so a replay does not spend the
-flood budget. A refused store transaction leaves no replay result. Retrying
-the same content inside the dedupe window can still create its first run.
+Explicit idempotency keys and GitHub delivery IDs identify replays. The store
+owns the commit: the first response is `201`, and replay returns `200` with
+`replayed: true` and the same run ID. Replay never returns another here bearer
+or spends the flood budget. A refused store transaction leaves no replay result.
+Identical submissions without an idempotency key create separate runs.
 
 ### Limits profiles
 

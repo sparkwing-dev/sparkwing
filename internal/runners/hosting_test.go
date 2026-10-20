@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -65,9 +67,9 @@ func TestHostingFailuresPreventBinding(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := Hosting{
 				ControllerURL: "https://controller.example", NewController: tc.open,
-				Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+				Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 					t.Fatal("unauthorized award reached native binding")
-					return NativeServices{}, capability.Principal{}, nil
+					return nodehost.NativeServices{}, capability.Principal{}, nil
 				},
 			}
 			err := h.Host(t.Context(), hostingAward(capability.UnitNode))
@@ -93,12 +95,12 @@ func TestHostingPartialBindingClosesServices(t *testing.T) {
 			closed := 0
 			h := Hosting{
 				ControllerURL: "https://controller.example", NewController: hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }),
-				Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+				Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 					err := bindErr
 					if cancelled {
 						cancel(lease.ErrLeaseLost)
 					}
-					return NativeServices{Close: func() error { closed++; return closeErr }}, capability.Principal{}, err
+					return nodehost.NativeServices{Close: func() error { closed++; return closeErr }}, capability.Principal{}, err
 				},
 			}
 			err := h.Host(ctx, hostingAward(capability.UnitNode))
@@ -117,9 +119,9 @@ func TestHostingInterruptedConfirmationCannotBind(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	stop := errors.New("caller stopped")
-	host := Hosting{ControllerURL: "https://controller.example", NewController: hostingClient(func(context.Context) (lease.Beat, error) { cancel(stop); return lease.Beat{}, nil }), Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+	host := Hosting{ControllerURL: "https://controller.example", NewController: hostingClient(func(context.Context) (lease.Beat, error) { cancel(stop); return lease.Beat{}, nil }), Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 		t.Fatal("interrupted confirmation reached native binding")
-		return NativeServices{}, capability.Principal{}, nil
+		return nodehost.NativeServices{}, capability.Principal{}, nil
 	}}
 	if err := host.Host(ctx, hostingAward(capability.UnitTrigger)); !errors.Is(err, stop) {
 		t.Fatal(err)
@@ -150,9 +152,9 @@ func FuzzHostingRejectsIncompleteNodeAwards(f *testing.F) {
 				confirmed = true
 				return lease.Beat{}, confirmation
 			}),
-			Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+			Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 				t.Fatal("award reached native binding")
-				return NativeServices{}, capability.Principal{}, nil
+				return nodehost.NativeServices{}, capability.Principal{}, nil
 			},
 		}
 		err := host.Host(t.Context(), unit)

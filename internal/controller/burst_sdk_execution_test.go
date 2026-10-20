@@ -203,11 +203,8 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			storage, err := private.BindStorage(ctx, principal)
 			return nodehost.StorageBinding{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority}, err
 		},
-		PrepareLayer: func(ctx context.Context, layer nodehost.LayerSpec, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
-			if layer.Name == "caches" {
-				return caches.Prepare(ctx, layer, input, job)
-			}
-			finish, err := artifacts.Prepare(ctx, layer, input, job)
+		PrepareCaches: caches.Prepare, PrepareArtifacts: func(ctx context.Context, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
+			finish, err := artifacts.Prepare(ctx, input, job)
 			if err != nil || finish == nil {
 				return finish, err
 			}
@@ -238,7 +235,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 				if err := os.RemoveAll(directory); err != nil {
 					return err
 				}
-				if _, err := caches.Prepare(ctx, nodehost.LayerSpec{Name: "caches"}, current, job); err != nil {
+				if _, err := caches.Prepare(ctx, current, job); err != nil {
 					return err
 				}
 				body, err = os.ReadFile(filepath.Join(directory, "dependency"))

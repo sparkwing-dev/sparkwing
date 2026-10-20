@@ -79,7 +79,7 @@ func TestOwnerSeals(t *testing.T) {
 				},
 				Prepare: func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
 					s.trace = append(s.trace, "prepare")
-					return OwnerPlanning{Planning: PlanningInput{Disabled: true, Validation: nodeproto.ValidationContext{Secrets: ownerSealSecrets{}}}, Functions: PlanningFunctions{
+					return OwnerPlanning{Planning: PlanningInput{Validation: nodeproto.ValidationContext{Secrets: ownerSealSecrets{}}}, Functions: PlanningFunctions{
 						Plan: func(context.Context) (json.RawMessage, error) {
 							s.trace = append(s.trace, "plan")
 							return json.RawMessage(`{"jobs":[]}`), nil

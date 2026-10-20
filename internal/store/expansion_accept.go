@@ -70,7 +70,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		}
 		validation.ExistingJobs = append(validation.ExistingJobs, job)
 	}
-	result.plan, err = tx.store.planServices().ValidatePlan(request.Body, validation)
+	result.plan, err = validatePlan(request.Body, validation)
 	if err != nil {
 		return result, err
 	}
@@ -83,7 +83,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	if err != nil {
 		return result, err
 	}
-	hash, err := tx.store.planServices().CanonicalHash(json.RawMessage(result.body))
+	hash, err := runspec.CanonicalHash(json.RawMessage(result.body))
 	result.hash, result.state = string(hash), ExpansionAccepted
 	return result, err
 }
@@ -101,7 +101,7 @@ func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]Nod
 }
 
 func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, snapshot RunSnapshot, accepted expansionAcceptance) ([]NodeRow, error) {
-	executionSettings, err := tx.store.planServices().ResolveExpansion(settings.ExpansionInputs{Spec: *snapshot.Run.Spec, Plan: accepted.plan, Context: settings.Context{Local: RequestPlacement(snapshot.Run.Request.Request) == nodeproto.PlacementLocal}})
+	executionSettings, err := settings.ResolveExpansion(settings.ExpansionInputs{Spec: *snapshot.Run.Spec, Plan: accepted.plan, Context: settings.Context{Local: RequestPlacement(snapshot.Run.Request.Request) == nodeproto.PlacementLocal}})
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 		if err != nil {
 			return nil, err
 		}
-		hash, err := tx.store.planServices().CanonicalHash(job)
+		hash, err := runspec.CanonicalHash(job)
 		if err != nil {
 			return nil, err
 		}

@@ -247,34 +247,6 @@ func TestClaimUnavailableCountsOnlyTheClaimRoutes503s(t *testing.T) {
 	}
 }
 
-func TestClaimWaitSkipsAReclaimAfterRequeue(t *testing.T) {
-	const series = "sparkwing_node_claim_wait_seconds_count"
-	claimable := time.Now().Add(-2 * time.Second)
-
-	before := mustSample(t, scrapeRegistry(t), series)
-	observeClaimWait(&store.Node{PlacementHoldFrom: &claimable, ClaimGeneration: 2})
-	if got := mustSample(t, scrapeRegistry(t), series); got != before {
-		t.Errorf("observations = %v, want %v: a re-claim reports the previous attempt's wait", got, before)
-	}
-
-	observeClaimWait(&store.Node{PlacementHoldFrom: &claimable, ClaimGeneration: 1})
-	if got := mustSample(t, scrapeRegistry(t), series); got != before+1 {
-		t.Errorf("observations = %v, want %v after a first claim", got, before+1)
-	}
-}
-
-func TestClaimWaitPrefersTheHoldInstantOverReadyAt(t *testing.T) {
-	const sum = "sparkwing_node_claim_wait_seconds_sum"
-	held := time.Now().Add(-30 * time.Second)
-	bumped := time.Now().Add(-time.Second)
-
-	before := mustSample(t, scrapeRegistry(t), sum)
-	observeClaimWait(&store.Node{PlacementHoldFrom: &held, ReadyAt: &bumped, ClaimGeneration: 1})
-	if got := mustSample(t, scrapeRegistry(t), sum) - before; got < 20 {
-		t.Errorf("observed wait = %vs, want the hold instant rather than the bumped ready_at", got)
-	}
-}
-
 func TestNodeSecondsReportsLedgerSecondsAsCloud(t *testing.T) {
 	restoreGlobals(t)
 

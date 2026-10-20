@@ -89,9 +89,9 @@ func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, Executo
 
 func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
 	f, input, deps := maskingExecutorFixture(t)
-	deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		return nil, outerLayerFailure()
-	}
+	})
 	host, err := NewNodeExecutor(deps)
 	if err != nil {
 		t.Fatal(err)

@@ -40,44 +40,6 @@ func (f fakeIntakePolicy) ResolveIntake(ctx context.Context, r capability.Author
 	return facts, err
 }
 
-type fakeIntakeContracts struct {
-	resolve func(settings.PlanInputs) (runspec.ExecutionSettings, error)
-}
-
-func (fakeIntakeContracts) SealRequest(in runspec.Request, facts runspec.IntakeFacts) (runspec.SealedRequest, error) {
-	out := runspec.SealedRequest{Version: 1, Request: in, RunID: facts.RunID, AdmittedAt: facts.AdmittedAt, AllowedPools: facts.AllowedPools, AuthorityRef: facts.AuthorityRef, Ceilings: facts.Ceilings, Provenance: facts.Provenance}
-	hash, err := stateHash(out)
-	out.Hash = runspec.Hash(hash)
-	return out, err
-}
-
-func (fakeIntakeContracts) SealSpec(in runspec.SealInput) (runspec.Spec, error) {
-	hash, err := (fakePlanContracts{}).CanonicalHash(in.Plan)
-	if err != nil {
-		return runspec.Spec{}, err
-	}
-	out := runspec.Spec{Version: 1, Declarations: in.Declarations, Request: in.Request, Resolved: in.Resolved, PlanHash: hash}
-	digest, err := stateHash(out)
-	out.Hash = runspec.Hash(digest)
-	out.SealedAt = in.Now
-	return out, err
-}
-
-func (fakeIntakeContracts) CarryRetry(in runspec.RetryInput) (runspec.RetrySnapshot, error) {
-	return runspec.RetrySnapshot{Request: in.Request, Spec: in.Spec, Plan: in.Plan, Lineage: runspec.Lineage{RetryOf: in.SourceRunID, Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: in.Retrier}}}, nil
-}
-
-func (f fakeIntakeContracts) ResolvePlan(in settings.PlanInputs) (runspec.ExecutionSettings, error) {
-	if f.resolve != nil {
-		return f.resolve(in)
-	}
-	out := runspec.ExecutionSettings{Options: in.Request.Request.Options, Jobs: map[string]runspec.JobExecutionSettings{}}
-	for _, job := range in.Plan.Jobs {
-		out.Jobs[job.ID] = runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: job.Requires}}}
-	}
-	return out, nil
-}
-
 func intakeFixture(t *testing.T) (*Tenant, IntakeRequest, *time.Time) {
 	t.Helper()
 	s := authorityStore(t)
@@ -86,12 +48,6 @@ func intakeFixture(t *testing.T) (*Tenant, IntakeRequest, *time.Time) {
 	root := authorityRoot("member", "a")
 	root.Grants = []capability.Grant{capability.RunsWrite, capability.RunsControl}
 	authorityPersist(t, s, root)
-	s.intake = fakeIntakeContracts{}
-	s.plans = fakePlanContracts{validate: func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-		var p nodeproto.PlanDoc
-		err := json.Unmarshal(raw, &p)
-		return p, err
-	}}
 	s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		if _, err := r.ResolveAuthority(ctx, in.Authority); err != nil {
 			return IntakePolicyFacts{}, err
@@ -131,15 +87,15 @@ func planFixtureWithInput(t *testing.T, dispatch runspec.Dispatch, change func(*
 	persistPlanOwner(t, tenant.s, owner)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',capability_prefix='planner',generation=1,lease_expires_at=? WHERE id=?`, now.Add(time.Hour).UnixNano(), admitted.RunID)
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
-	raw, err := json.Marshal(plan)
+	raw, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: admitted.Request, Plan: plan})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: runspec.CheckoutDeclarations{Version: 1}, Plan: raw, Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
+	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: raw, Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
 	return tenant, request, now
 }
 
@@ -297,7 +253,7 @@ func TestPlanSealPersistsReplayAndExecutionSettings(t *testing.T) {
 	if err != nil || node.SpecHash == "" || node.StateSeq != 0 || node.Status != StatusPending || !reflect.DeepEqual(node.Execution, first.Spec.Resolved.Settings.Jobs["job"]) {
 		t.Fatalf("node=%+v %v", node, err)
 	}
-	request.Seal.Plan = []byte(` { "jobs": [ { "id": "job" } ] } `)
+	request.Seal.Plan = []byte(` { "jobs": [ { "id": "job", "steps": [{"id":"step"}] } ] } `)
 	replay, err := tenant.AcceptPlan(t.Context(), request)
 	if err != nil || !replay.Replayed || replay.Spec.Hash != first.Spec.Hash {
 		t.Fatalf("replay=%+v %v", replay, err)
@@ -311,8 +267,12 @@ func TestPlanSealPersistsReplayAndExecutionSettings(t *testing.T) {
 
 func TestAcceptedPlanAndSnapshotReturnIndependentValues(t *testing.T) {
 	tenant, request, _ := planFixture(t, runspec.DispatchHost)
-	request.Seal.Plan = []byte(`{"jobs":[{"id":"job","requires":["linux"]}]}`)
-	request.Seal.Resolved.Settings.Jobs["job"] = runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"linux"}}}}
+	request.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"step"}],"requires":["linux"]}]}`)
+	var proposed nodeproto.PlanDoc
+	if err := json.Unmarshal(request.Seal.Plan, &proposed); err != nil {
+		t.Fatal(err)
+	}
+	request.Seal.Resolved.Settings, _ = settings.ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Declarations: request.Seal.Declarations, Plan: proposed})
 	accepted, err := tenant.AcceptPlan(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -352,7 +312,7 @@ func TestAcceptedPlanAndSnapshotReturnIndependentValues(t *testing.T) {
 }
 
 func TestPlanSealRefusalRollsBackBothSealAndJobs(t *testing.T) {
-	for _, problem := range []string{"request", "argument", "environment", "unclassified", "resolver", "settings_drift", "missing_job_settings", "duplicate_job", "invalid_graph", "missing_secret", "secret_identifier", "expired", "revoked_parent", "cancelled", "validator_lapses_owner"} {
+	for _, problem := range []string{"request", "argument", "environment", "unclassified", "settings_drift", "missing_job_settings", "duplicate_job", "invalid_graph", "missing_secret", "secret_identifier", "expired", "revoked_parent", "cancelled"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, request, now := planFixture(t, runspec.DispatchHost)
 			switch problem {
@@ -364,47 +324,25 @@ func TestPlanSealRefusalRollsBackBothSealAndJobs(t *testing.T) {
 				request.Seal.Resolved.Env.Names = []string{"LEAK"}
 			case "unclassified":
 				request.Seal.Resolved.SecretArgs = nil
-			case "resolver":
-				tenant.s.intake = fakeIntakeContracts{resolve: func(settings.PlanInputs) (runspec.ExecutionSettings, error) {
-					return runspec.ExecutionSettings{}, errors.New("ceiling refused")
-				}}
 			case "settings_drift":
 				request.Seal.Resolved.Settings.Options.Priority = runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 99}}
 			case "missing_job_settings":
 				request.Seal.Resolved.Settings.Jobs = nil
-				tenant.s.intake = fakeIntakeContracts{resolve: func(in settings.PlanInputs) (runspec.ExecutionSettings, error) {
-					return request.Seal.Resolved.Settings, nil
-				}}
 			case "duplicate_job":
-				request.Seal.Plan = []byte(`{"jobs":[{"id":"job"},{"id":"job"}]}`)
+				request.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"step"}]},{"id":"job","steps":[{"id":"step"}]}]}`)
 			case "invalid_graph":
-				request.Seal.Plan = []byte(`{"jobs":[{"id":"job","deps":["absent"]}]}`)
+				request.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"step"}],"deps":["absent"]}]}`)
 			case "missing_secret":
 				request.Seal.Resolved.SecretNames = []string{"absent"}
 			case "secret_identifier":
 				request.Seal.Resolved.SecretArgs = []string{"message"}
-				contracts := tenant.s.plans.(fakePlanContracts)
-				contracts.validate = func(_ json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					if !ctx.Secrets.ContainsSecret("id-hello") {
-						t.Fatal("secret absent from matcher")
-					}
-					return nodeproto.PlanDoc{}, authorityError(apierr.SecretInIdentifier, "secret identifier")
-				}
-				tenant.s.plans = contracts
+				request.Seal.Plan = []byte(`{"jobs":[{"id":"hello","steps":[{"id":"step"}]}]}`)
 			case "expired":
 				*now = now.Add(time.Hour)
 			case "revoked_parent":
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='member'`)
 			case "cancelled":
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=1 WHERE id=?`, request.RunID)
-			case "validator_lapses_owner":
-				contracts := tenant.s.plans.(fakePlanContracts)
-				validate := contracts.validate
-				contracts.validate = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					*now = now.Add(time.Hour)
-					return validate(raw, ctx)
-				}
-				tenant.s.plans = contracts
 			}
 			if _, err := tenant.AcceptPlan(t.Context(), request); err == nil {
 				t.Fatal("invalid plan succeeded")
@@ -432,8 +370,8 @@ func TestPlanClassificationNeverShrinks(t *testing.T) {
 	persistPlanOwner(t, tenant.s, root)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',capability_prefix='planner',generation=1,lease_expires_at=? WHERE id=?`, tenant.s.now().Add(time.Hour).UnixNano(), admitted.RunID)
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
-	resolved, _ := (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: admitted.Request, Plan: plan})
-	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}}, Seal: runspec.SealInput{Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
+	resolved, _ := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
+	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
 	accepted, err := tenant.AcceptPlan(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -576,11 +514,11 @@ func TestPlanPublishRequiresRunBoundPublisher(t *testing.T) {
 			}
 			jobs := []nodeproto.JobSpec{{ID: "imported"}}
 			plan := nodeproto.PlanDoc{Jobs: jobs}
-			resolved, err := (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: admitted.Request, Plan: plan})
+			resolved, err := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "publisher"}, CapabilityPrefix: "publisher"}, Seal: runspec.SealInput{Request: admitted.Request, Plan: []byte(`{"jobs":[{"id":"imported"}]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
+			request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "publisher"}, CapabilityPrefix: "publisher"}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: []byte(`{"jobs":[{"id":"imported","steps":[{"id":"step"}]}]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
 			accepted, err := tenant.AcceptPlan(t.Context(), request)
 			if mode != "valid" {
 				if err == nil {
@@ -601,7 +539,7 @@ func TestPlanPublishRequiresRunBoundPublisher(t *testing.T) {
 	}
 }
 
-func TestPlanSealRechecksAncestorAfterValidation(t *testing.T) {
+func TestPlanSealRechecksAncestorAfterSecretDecryption(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchHost)
 	root := authorityRoot("short", "a")
 	root.Grants = []capability.Grant{capability.NodeResult}
@@ -617,13 +555,7 @@ func TestPlanSealRechecksAncestorAfterValidation(t *testing.T) {
 	persistPlanOwner(t, tenant.s, owner)
 	request.Actor.Authority.ID, request.Actor.CapabilityPrefix = "short-planner", "short-planner"
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET capability_prefix='short-planner' WHERE id=?`, request.RunID)
-	contracts := tenant.s.plans.(fakePlanContracts)
-	validate := contracts.validate
-	contracts.validate = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-		*now = now.Add(2 * time.Second)
-		return validate(raw, ctx)
-	}
-	tenant.s.plans = contracts
+	expirePlanSecret(t, tenant, &request, func() { *now = now.Add(2 * time.Second) })
 	if _, err := tenant.AcceptPlan(t.Context(), request); err == nil {
 		t.Fatal("expired ancestor authorized acceptance")
 	}
@@ -877,52 +809,29 @@ func TestAdmissionSealsServerResolvedOptionsAndCeilings(t *testing.T) {
 	}
 }
 
-type expiringPlanHash struct {
-	planContracts
-	expire func()
-}
-
-type intakeHashClock struct {
-	planContracts
-	now *time.Time
-}
-
-func (f intakeHashClock) CanonicalHash(v any) (runspec.Hash, error) {
-	*f.now = f.now.Add(time.Second)
-	return f.planContracts.CanonicalHash(v)
-}
-
-func TestAdmissionIdempotentReplayRechecksAuthorityAfterHashing(t *testing.T) {
-	tenant, request, now := intakeFixture(t)
-	request.IdempotencyKey = "invocation"
-	if _, err := tenant.AdmitRun(t.Context(), request); err != nil {
-		t.Fatal(err)
+func testBodyPlan(plan nodeproto.PlanDoc) nodeproto.PlanDoc {
+	for i := range plan.Jobs {
+		job := &plan.Jobs[i]
+		if job.Approval == nil && len(job.Children) == 0 && len(job.Steps) == 0 {
+			job.Steps = []nodeproto.StepSpec{{ID: "step"}}
+		}
 	}
-	root := authorityRoot("short-member", "a")
-	root.Subject.ID = "member"
-	root.Grants = []capability.Grant{capability.RunsWrite}
-	expires := now.Add(time.Second)
-	root.ExpiresAt = &expires
-	authorityPersist(t, tenant.s, root)
-	request.Authority.ID = root.Prefix
-	tenant.s.plans = intakeHashClock{planContracts: tenant.s.plans, now: now}
-	_, err := tenant.AdmitRun(t.Context(), request)
-	var denied *apierr.Error
-	if !errors.As(err, &denied) || denied.Code != apierr.Unauthenticated {
-		t.Fatalf("expired replay authority = %v", err)
-	}
+	return plan
 }
 
-func (f expiringPlanHash) CanonicalHash(v any) (runspec.Hash, error) {
-	if _, ok := v.(nodeproto.JobSpec); ok {
-		f.expire()
-	}
-	return f.planContracts.CanonicalHash(v)
+func expirePlanSecret(t *testing.T, tenant *Tenant, request *PlanAcceptance, expire func()) {
+	t.Helper()
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','clock-secret','ciphertext','account',1,1,1,'p',0,'')`)
+	request.Seal.Resolved.SecretNames = []string{"clock-secret"}
+	tenant.s.SetPlanSecretOpener(fakePlanSecretOpener(func(context.Context, Team, Secret) (string, error) {
+		expire()
+		return "clock-secret-value", nil
+	}))
 }
 
-func TestPlanSealRechecksOwnerAfterJobInsertion(t *testing.T) {
+func TestPlanSealRechecksOwnerAfterSecretDecryption(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchHost)
-	tenant.s.plans = expiringPlanHash{planContracts: tenant.s.plans, expire: func() { *now = now.Add(time.Hour) }}
+	expirePlanSecret(t, tenant, &request, func() { *now = now.Add(time.Hour) })
 	if _, err := tenant.AcceptPlan(t.Context(), request); err == nil {
 		t.Fatal("expired owner committed plan jobs")
 	}
@@ -931,4 +840,26 @@ func TestPlanSealRechecksOwnerAfterJobInsertion(t *testing.T) {
 		t.Fatalf("expired acceptance changed spec: %+v %v", run.Spec, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "nodes", 0)
+}
+
+func TestAdmissionRechecksAuthorityAfterPolicyWork(t *testing.T) {
+	tenant, request, now := intakeFixture(t)
+	root := authorityRoot("short-member", "a")
+	root.Grants = []capability.Grant{capability.RunsWrite}
+	expires := now.Add(time.Second)
+	root.ExpiresAt = &expires
+	authorityPersist(t, tenant.s, root)
+	request.Authority.ID = root.Prefix
+	policy := tenant.s.intakePolicy
+	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
+		facts, err := policy.ResolveIntake(ctx, resolver, in)
+		*now = expires
+		return facts, err
+	}))
+	_, err := tenant.AdmitRun(t.Context(), request)
+	var denied *apierr.Error
+	if !errors.As(err, &denied) || denied.Code != apierr.Unauthenticated {
+		t.Fatalf("expired intake authority = %v", err)
+	}
+	rewriteSchemaCount(t, tenant.s.db, "runs", 0)
 }

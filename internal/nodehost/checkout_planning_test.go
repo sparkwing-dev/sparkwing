@@ -18,9 +18,6 @@ import (
 func TestOwnerHostGuardRefusalBypassesPlanAndCache(t *testing.T) {
 	f, host, input := newOwnerFixture(t, false)
 	planning := newPlanningFixture(t)
-	input.PlanCache = planning.cache
-	planning.cache.onLookup = func() { t.Error("refused guard read plan cache") }
-	planning.cache.onPut = func() { t.Error("refused guard wrote plan cache") }
 	host.Prepare = func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
 		return OwnerPlanning{Resolved: runspec.Resolved{Guards: runspec.Guards{Unless: []string{"where:local"}, Reason: "refused"}}, Planning: planning.input, Functions: PlanningFunctions{
 			Plan: func(context.Context) (json.RawMessage, error) {
@@ -43,24 +40,6 @@ func TestOwnerHostGuardRefusalBypassesPlanAndCache(t *testing.T) {
 	}
 	if f.accepted.Seal.Resolved.Guards.Reason != "refused" || f.accepted.RunID != "run" {
 		t.Fatal("guard refusal did not pass through acceptance")
-	}
-}
-
-func TestSDKCheckoutPlanningCacheIncludesProject(t *testing.T) {
-	var prior runspec.Hash
-	for _, requires := range []string{"pool=build", "pool=test"} {
-		planner, process, fixture, _ := sdkPlanningFixture(t)
-		planner.CanonicalHash = planningTestHash
-		input := CheckoutPlanningInput{Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build", Team: "team", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:123"}}, Source: runspec.Source{Entrypoint: "build"}}}, Entry: process.Entry, Planning: fixture.input, ProjectFile: "sparkwing.yaml", Project: []byte("defaults:\n  requires: [" + requires + "]\n")}
-		prepared, err := planner.PrepareCheckout(t.Context(), input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		digest := prepared.Planning.Inputs.ProjectDigest
-		if !planCacheDigestValid(digest) || digest == prior || prepared.Planning.Inputs.Team != "team" || prepared.Planning.Inputs.Repository != "gh:123" || prepared.Planning.Inputs.Entrypoint != "build" {
-			t.Fatal("checkout planning reused unrelated project identity or scope")
-		}
-		prior = digest
 	}
 }
 
@@ -108,7 +87,6 @@ func TestOwnerHostResolvesValidatedPlansBeforeAcceptance(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			input.PlanCache = planning.cache
 			request := &f.snapshot.Run.Request.Request
 			request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}
 			request.RequestedArgs = map[string]string{"token": "private"}

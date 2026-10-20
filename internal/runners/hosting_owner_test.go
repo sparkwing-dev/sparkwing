@@ -64,20 +64,20 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 		host := Hosting{
 			ControllerURL: "https://controller.example",
 			NewController: hostingClient(func(context.Context) (lease.Beat, error) { confirmations++; return lease.Beat{}, nil }),
-			Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
-				return NativeServices{Config: nodehost.NativeHostConfig{
+			Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
+				return nodehost.NativeServices{Config: nodehost.NativeHostConfig{
 					Store: state, Lease: lease.Keeper{Lease: time.Minute, Interval: time.Second}, Source: source.Options{Engines: hostingOwnerEngines{}},
-					Masks:     nodehost.NewMaskRegistry(secrets.NewMasker()),
-					Router:    controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities}),
-					Processes: &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
-					Planner:   nodehost.SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return nil }},
-					Executor: nodehost.ExecutorDependencies{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
+					Masks:       nodehost.NewMaskRegistry(secrets.NewMasker()),
+					Router:      controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities}),
+					Processes:   &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
+					PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+					Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 						return nodehost.ProcessGrant{}, errors.New("unexpected execution")
 					}},
-					Evaluation: nodehost.EvaluationDependencies{Bind: func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
+					Evaluation: nodehost.EvaluationOperations{Bind: func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
 						return nodehost.ProcessGrant{}, errors.New("unexpected evaluation")
 					}},
-					Owner: nodehost.OwnerHost{
+					Owner: nodehost.OwnerOperations{
 						Renew: func(_ context.Context, actor store.Actor, computing bool) (store.LeaseBeat, error) {
 							renewals++
 							if actor.Authority != principal.Authority || computing != (renewals == 1) {

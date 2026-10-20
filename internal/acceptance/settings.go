@@ -136,27 +136,20 @@ func independentRunBounds() error {
 }
 
 func authorBounds() error {
-	in := settings.Inputs{Context: settings.Context{Submitter: true}, Code: settings.Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{Retry: boundarySetting(10), MemoTTL: boundarySetting(30 * 24 * time.Hour)}}}, Flags: settings.Values{CatchUp: boundaryPointer(24 * time.Hour)}}
+	in := settings.Inputs{Context: settings.Context{Submitter: true}, Code: settings.Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{Retry: boundarySetting(10), MemoTTL: boundarySetting(30 * 24 * time.Hour)}}}}
 	if value, _, err := settings.Retry(in); err != nil || value != 10 {
 		return errors.New("retry boundary refused or clamped")
 	}
 	if value, _, err := settings.MemoTTL(in); err != nil || value != 30*24*time.Hour {
 		return errors.New("memo boundary refused or clamped")
 	}
-	if value, _, err := settings.CatchUp(in); err != nil || value != 24*time.Hour {
-		return errors.New("catch-up boundary refused or clamped")
-	}
 	in.Code.JobDefaults.Retry = boundarySetting(11)
 	in.Code.JobDefaults.MemoTTL = boundarySetting(30*24*time.Hour + time.Nanosecond)
-	in.Flags.CatchUp = boundaryPointer(24*time.Hour + time.Nanosecond)
 	if _, _, err := settings.Retry(in); err == nil {
 		return errors.New("excess retry accepted")
 	}
 	if _, _, err := settings.MemoTTL(in); err == nil {
 		return errors.New("excess memo TTL accepted")
-	}
-	if _, _, err := settings.CatchUp(in); err == nil {
-		return errors.New("excess catch-up accepted")
 	}
 	return nil
 }

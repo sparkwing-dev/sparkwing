@@ -26,7 +26,7 @@ policy, set it in the `admission` section of `~/.config/sparkwing/config.yaml`
 
 ```yaml
 admission:
-  mode: classic # classic, off, auto, jev, or custom
+  mode: classic # classic, off, auto, or custom
 ```
 
 The modes are:
@@ -38,10 +38,6 @@ The modes are:
   measurement, queue visibility, and deterministic concurrency groups.
 - `auto` uses measured duration and resource profiles, weighted workload
   classes, bounded short-job backfill, and aging.
-- `jev` starts from `auto` and asks TypeSafe Jev whether a well-measured short
-  candidate should spend additional bounded backfill time. Every hard resource
-  and semaphore check remains in code. Missing credentials, timeouts, malformed
-  responses, and low-confidence answers fall back to `auto`.
 - `custom` runs the deterministic scheduler with operator-selected weights,
   aging, and backfill-delay budgets.
 
@@ -72,7 +68,7 @@ capacity until the older waiter's delay budget is spent.
 
 ## Custom policy
 
-Custom fields also tune the deterministic baseline and fallback used by `jev`:
+Custom fields tune the deterministic scheduler:
 
 ```yaml
 mode: custom
@@ -100,30 +96,6 @@ the `auto` defaults. The interactive burst is a single CPU-only lane: eligible
 work must have at least `min_samples`, fit within both `cores` and `max_p99`, and
 be interactive or explicitly critical. It may exceed CPU reservations by at
 most `cores`; memory and semaphores remain hard limits, and a second burst waits.
-
-## Jev policy
-
-Store the TypeSafe key as the local secret `TYPESAFE_API_KEY`
-(`sparkwing secrets set --secret TYPESAFE_API_KEY --file <path>`); the daemon
-reads it when it starts in `jev` mode and admits without the advisor when the
-secret is missing. Then select `jev`:
-
-```yaml
-mode: jev
-jev:
-  model: jev-latest
-  timeout: 300ms
-  min_confidence: 0.5
-  min_probability: 0.7
-  max_backfill: 5s
-```
-
-Jev receives queue resource and duration summaries, pipeline/repository labels,
-and the candidate's workload class. It does not receive pipeline arguments,
-logs, source, or secrets. Its answer is a typed choice between waiting and a
-short backfill. Sparkwing validates confidence and duration bounds, then
-rechecks the live deterministic ledger before any grant. Queue JSON reports Jev
-attempt, admit, and fallback counters for comparison with `auto`.
 
 ## Stress-testing admission
 

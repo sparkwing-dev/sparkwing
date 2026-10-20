@@ -116,11 +116,6 @@ type Daemon struct {
 	container *containerSensor
 
 	cgroup *cgroupLimiter
-
-	jevAdvisor   JevAdvisor
-	jevAttempts  uint64
-	jevAdmits    uint64
-	jevFallbacks uint64
 }
 
 type delivery struct {
@@ -153,10 +148,6 @@ func New(cfg Config) (*Daemon, error) {
 	if ownedSampler == nil {
 		ownedSampler = newOwnedCPUSampler()
 	}
-	advisor := cfg.JevAdvisor
-	if advisor == nil && cfg.admissionPolicy().Mode == admission.ModeJev {
-		advisor = newTypeSafeJevAdvisor(cfg.TypeSafeAPIKey, cfg.admissionPolicy().Jev)
-	}
 	return &Daemon{
 		cfg:                 cfg,
 		stay:                cfg.Stay,
@@ -178,7 +169,6 @@ func New(cfg Config) (*Daemon, error) {
 		cancelPending:       map[string]struct{}{},
 		cancelledRuns:       map[string]struct{}{},
 		disconnectedPending: map[string]struct{}{},
-		jevAdvisor:          advisor,
 	}, nil
 }
 
@@ -831,7 +821,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	requested := chargedResources(req.Resources)
 	charged := requested
-	jevBypass := d.jevReservationBypass(req, requested)
 
 	d.mu.Lock()
 	if d.runCancelledLocked(string(req.RunID)) {
@@ -862,9 +851,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	ar := requestFromWireWithMetadata(string(req.RunID), req.OwnerRunID, ledgerCharge, req.Semaphores, req.CostSource, req.Priority, req.Class, req.ExpectedP99MS)
 	ar.BurstCores = d.cfg.admissionPolicy().interactiveBurstEligible(req, ledgerCharge)
-	if jevBypass {
-		ar.ReservationBypassBudgetMS = d.cfg.admissionPolicy().Jev.maxBackfill().Milliseconds()
-	}
 	c.runID = string(req.RunID)
 	c.journalRunID = string(req.RunID)
 	c.ownerRunID = req.OwnerRunID

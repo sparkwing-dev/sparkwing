@@ -26,7 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -140,7 +139,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := localcontroller.WithClient(localcontroller.NativeConfig{Store: state}, host)
+	cfg := nodehost.WithClient(nodehost.NativeConfig{Store: state}, host)
 	services, err := cfg.Services(ctx, principal, nodeproto.JobSpec{ID: "job"})
 	if err != nil {
 		t.Fatal(err)

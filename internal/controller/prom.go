@@ -46,31 +46,6 @@ var (
 		},
 	)
 
-	runsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "sparkwing_runs_total",
-			Help: "Runs that reached a terminal state, partitioned by pipeline and terminal status.",
-		},
-		[]string{"pipeline", "status"},
-	)
-
-	runDurationSeconds = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "sparkwing_run_duration_seconds",
-			Help:    "End-to-end wall time from CreateRun to FinishRun.",
-			Buckets: []float64{1, 5, 10, 30, 60, 300, 900, 1800},
-		},
-		[]string{"pipeline", "outcome"},
-	)
-
-	nodesClaimedTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "sparkwing_nodes_claimed_total",
-			Help: "Successful node claims from the warm-pool / agent claim endpoint.",
-		},
-		[]string{"pipeline"},
-	)
-
 	pendingNodesGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "sparkwing_pending_nodes",
@@ -123,14 +98,6 @@ var (
 			Help: "Nodes short of a terminal outcome, by queue state. Sampled from the reaper loop.",
 		},
 		[]string{"state"},
-	)
-
-	claimWaitSeconds = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Name:    "sparkwing_node_claim_wait_seconds",
-			Help:    "Seconds a node waited between becoming claimable and its first runner taking it. A re-claim after a requeue is not observed, because the wait it would report is the previous attempt's.",
-			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300},
-		},
 	)
 
 	claimUnavailableTotal = prometheus.NewCounter(
@@ -202,12 +169,9 @@ func observeRequestRateAlarm() {
 // safety: named rather than passed inline so the drift check can ask the same
 // collectors the registry serves what they export.
 var sparkwingCollectors = []prometheus.Collector{
-	runsTotal,
-	runDurationSeconds,
 	signUpsTotal,
 	signUpGateClosedTotal,
 	signUpVelocityWarningsTotal,
-	nodesClaimedTotal,
 	pendingNodesGauge,
 	activeRunnersGauge,
 	httpRequestsTotal,
@@ -215,7 +179,6 @@ var sparkwingCollectors = []prometheus.Collector{
 	principalThrottledTotal,
 	requestRateAlarmTotal,
 	queueDepthGauge,
-	claimWaitSeconds,
 	claimUnavailableTotal,
 	claimEmptyTotal,
 	runnersLiveGauge,
@@ -304,23 +267,6 @@ func (s *Server) metricsServer() *http.Server {
 	}
 }
 
-func observeRunFinish(pipeline, status string, duration time.Duration) {
-	if pipeline == "" {
-		pipeline = "unknown"
-	}
-	runsTotal.WithLabelValues(pipeline, status).Inc()
-	if duration > 0 {
-		runDurationSeconds.WithLabelValues(pipeline, status).Observe(duration.Seconds())
-	}
-}
-
-func observeNodeClaim(pipeline string) {
-	if pipeline == "" {
-		pipeline = "unknown"
-	}
-	nodesClaimedTotal.WithLabelValues(pipeline).Inc()
-}
-
 func setPendingNodes(n int)  { pendingNodesGauge.Set(float64(n)) }
 func setActiveRunners(n int) { activeRunnersGauge.Set(float64(n)) }
 
@@ -361,22 +307,6 @@ func observeEmptyClaim(c capability.Capability) {
 func setQueueDepth(counts map[string]int) {
 	for _, state := range store.QueueStates() {
 		queueDepthGauge.WithLabelValues(state).Set(float64(counts[state]))
-	}
-}
-
-func observeClaimWait(n *store.Node) {
-	if n == nil || n.ClaimGeneration > 1 {
-		return
-	}
-	from := n.PlacementHoldFrom
-	if from == nil {
-		from = n.ReadyAt
-	}
-	if from == nil {
-		return
-	}
-	if wait := time.Since(*from); wait > 0 {
-		claimWaitSeconds.Observe(wait.Seconds())
 	}
 }
 

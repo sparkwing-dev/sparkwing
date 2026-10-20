@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"fmt"
-
 	"math/rand/v2"
 	"slices"
 	"strings"
@@ -57,13 +56,7 @@ func TestMembershipRevokesOnlyTheAffectedMintersCredentialsProperty(t *testing.T
 			}
 			for _, prefix := range []string{"mine", "owners", "foreign", "deployment", "child"} {
 				ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
-				team := Team("a")
-				if prefix == "foreign" {
-					team = "b"
-				} else if prefix == "deployment" {
-					team = ""
-				}
-				_, err := s.AuthGenerations(t.Context(), ref, string(team))
+				_, err := s.ResolveAuthority(t.Context(), ref)
 				ended := (role == nil || keep == RoleReader) && (prefix == "mine" || prefix == "child")
 				if (err != nil) != ended {
 					t.Fatalf("prefix=%s ended=%v error=%v", prefix, ended, err)

@@ -48,23 +48,23 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 	authorities, _, _, _, _ := processAuthorityFixture(t)
 	t.Cleanup(func() { _ = authorities.Close() })
 	config := NativeHostConfig{
-		Store: nativeHostState{ClaimStore: state}, Lease: claimed.Lease,
-		Source:       source.Options{Engines: claimEngine{resolved: input.Engine}},
-		Masks:        NewMaskRegistry(secrets.NewMasker()),
-		Router:       &serviceRegistrar{},
-		Processes:    &NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
-		ValidatePlan: execution.ValidatePlan, CanonicalHash: execution.CanonicalHash,
-		Executor: execution,
-		Evaluation: EvaluationDependencies{
+		Store: nativeHostState{ClaimStore: state}, Lease: claimed.Lease, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
+		Source:    source.Options{Engines: claimEngine{resolved: input.Engine}},
+		Masks:     NewMaskRegistry(secrets.NewMasker()),
+		Router:    &serviceRegistrar{},
+		Processes: &NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
+
+		Executor: executionOperationsFixture(execution),
+		ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+			return json.RawMessage("null"), nil
+		},
+		Evaluation: EvaluationOperations{
 			Bind: func(context.Context, EvaluationInput) (ProcessGrant, error) {
 				return ProcessGrant{}, errors.New("fixture delegation unavailable")
 			},
-			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
-				return json.RawMessage("null"), nil
-			},
 		},
-		Planner: SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return nil }},
-		Owner:   OwnerHost{Renew: func(context.Context, store.Actor, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil }, Wait: func(context.Context, store.RunSnapshot) error { return nil }},
+		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+		Owner:       OwnerOperations{Renew: func(context.Context, store.Actor, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil }, Wait: func(context.Context, store.RunSnapshot) error { return nil }},
 	}
 	return config, input, state, claimed
 }
@@ -185,10 +185,10 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 		return ProcessGrant{}, refused
 	}
 	var layers []string
-	config.Owner.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	setTestNativePolicies(&config.Owner, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		layers = append(layers, layer.Name)
 		return OwnerLayerResult{}, nil
-	}
+	})
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -242,10 +242,10 @@ func TestNativeHostSkipPolicyJoinsEvaluationBeforeTransition(t *testing.T) {
 		return config.Processes.Delegate(ctx, lookup, delegation, *services)
 	}
 	var layers []string
-	config.Owner.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	setTestNativePolicies(&config.Owner, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		layers = append(layers, layer.Name)
 		return OwnerLayerResult{}, nil
-	}
+	})
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)

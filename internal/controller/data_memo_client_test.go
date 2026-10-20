@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -46,7 +45,7 @@ func TestDataMemoClientUsesRealRecordsAndCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := localHostRoundTripper{handler: h}
-	signer, records, err := client.NewDataClient(client.EngineOptions{URL: "https://controller.test", Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: &http.Client{Transport: transport}})
+	_, records, err := client.NewDataClient(client.EngineOptions{URL: "https://controller.test", Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: &http.Client{Transport: transport}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,11 +60,5 @@ func TestDataMemoClientUsesRealRecordsAndCopy(t *testing.T) {
 		if err != nil || !hit.Found || hit.Output.Value != output.Digest || hit.Manifest.Value != manifest.Digest || len(hit.Members) != 1 || hit.Members[0] != members[0] || hit.ReadSet.Reader != authority.Attempt.Value || len(hit.ReadSet.Edges) != 0 {
 			t.Fatalf("%s: %+v %v", operation, hit, err)
 		}
-	}
-	lookup.Budget.Deadline = time.Now().Add(time.Minute)
-	bytes := blob.NewSignedStore(blob.SignedStoreOptions{Signer: signer, HTTPClient: blob.TransferClient{Transport: transport}})
-	materialized, err := blob.MaterializeMemo(t.Context(), bytes, records, blob.CopyMemoRequest{Lookup: lookup, Destination: authority.Attempt.Value})
-	if err != nil || !materialized.Hit.Found || string(materialized.Output) != `{"value":42}` {
-		t.Fatalf("materialized bytes: %+v %v", materialized, err)
 	}
 }

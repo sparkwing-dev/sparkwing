@@ -14,35 +14,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-type sourcePolicyFake struct {
-	request capability.SourceReleaseRequest
-	err     error
-	before  func()
-}
-
-func (f *sourcePolicyFake) AuthorizeSourceRelease(request capability.SourceReleaseRequest, now time.Time) (capability.SourceReleaseAudit, error) {
-	f.request = request
-	if f.before != nil {
-		f.before()
-	}
-	if f.err != nil {
-		return capability.SourceReleaseAudit{}, f.err
-	}
-	c := request.Authorization.Principal.Capability
-	return capability.SourceReleaseAudit{
-		Team: c.Team, CredentialID: request.CredentialID, Host: request.Host,
-		RepositoryKey: request.RepositoryKey, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID,
-		Generation: c.Binding.Generation, MachineID: request.Executor.MachineID,
-		OwnerAccountID: request.Executor.OwnerAccountID, CapabilityPrefix: c.Prefix, ReleasedAt: now,
-	}, nil
-}
-
-func sourceReleaseFixture(t *testing.T) (*Tenant, capability.Authorized, *sourcePolicyFake) {
+func sourceReleaseFixture(t *testing.T) (*Tenant, capability.Authorized) {
 	t.Helper()
 	return sourceReleaseUnitFixture(t, capability.UnitNode)
 }
 
-func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, capability.Authorized, *sourcePolicyFake) {
+func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, capability.Authorized) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
 	fundUnitClaim(t, s)
@@ -81,13 +58,12 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 	if kind == capability.UnitPlan {
 		s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "cloud"}})
 	}
-	policy := &sourcePolicyFake{}
-	s.sourcePolicy = policy
+
 	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tenant, capability.Authorized{Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}, Access: capability.AccessRule{Liveness: capability.LiveSensitive}}, policy
+	return tenant, capability.Authorized{Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}, Access: capability.AccessRule{Liveness: capability.LiveSensitive}}
 }
 
 func setMachineOrigin(t *testing.T, s *Store, prefix string, origin *CapabilityOrigin) {
@@ -112,9 +88,9 @@ func setMachineOrigin(t *testing.T, s *Store, prefix string, origin *CapabilityO
 func TestSourceReleaseSupportsOwnerUnitsAndGrantedCloudPlacement(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan} {
 		t.Run(string(kind), func(t *testing.T) {
-			tenant, auth, policy := sourceReleaseUnitFixture(t, kind)
+			tenant, auth := sourceReleaseUnitFixture(t, kind)
 			credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
-			if err != nil || credential.ID != "credential" || audit.RunID != "run" || audit.NodeID != "" || audit.Generation != 1 || policy.request.Executor.Cloud != (kind == capability.UnitPlan) {
+			if err != nil || credential.ID != "credential" || audit.RunID != "run" || audit.NodeID != "" || audit.Generation != 1 {
 				t.Fatalf("owner source: credential=%s audit=%+v err=%v", credential.ID, audit, err)
 			}
 		})
@@ -122,17 +98,13 @@ func TestSourceReleaseSupportsOwnerUnitsAndGrantedCloudPlacement(t *testing.T) {
 }
 
 func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
-	tenant, auth, policy := sourceReleaseFixture(t)
+	tenant, auth := sourceReleaseFixture(t)
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if credential.ID != "credential" || credential.Secret != "encrypted-secret" || audit.ID == "" || audit.Team != "a" || audit.RepositoryKey != "gh:1" || audit.NodeID != "job" || audit.Generation != 1 || audit.MachineID != "runner" || audit.OwnerAccountID != "owner" || !audit.ReleasedAt.Equal(tenant.s.now()) {
 		t.Fatalf("release: credential=%s audit=%+v", credential.ID, audit)
-	}
-	executor := policy.request.Executor
-	if executor.Cloud || !executor.Shared || executor.Team != "a" || !reflect.DeepEqual(executor.AuthorizedRepositories, []string{"gh:1"}) || policy.request.Authorization.Principal.Authority != auth.Principal.Authority {
-		t.Fatalf("derived request: %+v", policy.request)
 	}
 	var stored capability.SourceReleaseAudit
 	var released int64
@@ -144,9 +116,9 @@ func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 }
 
 func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
-	for _, problem := range []string{"team", "revoked", "parent_revoked", "lease", "generation", "holder", "started", "cancelled", "finished", "deadline", "personal", "unregistered", "unconfirmed_ssh", "credential_host", "repository", "enrollment", "policy", "audit", "commit"} {
+	for _, problem := range []string{"team", "revoked", "parent_revoked", "lease", "generation", "holder", "started", "cancelled", "finished", "deadline", "personal", "unregistered", "unconfirmed_ssh", "credential_host", "repository", "enrollment", "audit", "commit"} {
 		t.Run(problem, func(t *testing.T) {
-			tenant, auth, policy := sourceReleaseFixture(t)
+			tenant, auth := sourceReleaseFixture(t)
 			s := tenant.s
 			switch problem {
 			case "team":
@@ -185,8 +157,6 @@ func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
 				s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Accept: accept}})
 			case "enrollment":
 				s.SetClaimProfileResolver(nil)
-			case "policy":
-				policy.err = errors.New("policy refused")
 			case "audit":
 				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_source_audit BEFORE INSERT ON git_credential_releases BEGIN SELECT RAISE(ABORT,'audit refused'); END`)
 			case "commit":
@@ -203,7 +173,7 @@ func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
 }
 
 func TestSourceReleaseCannotWidenPersistedFacts(t *testing.T) {
-	tenant, auth, _ := sourceReleaseFixture(t)
+	tenant, auth := sourceReleaseFixture(t)
 	property := func(value string, foreign bool) bool {
 		forged := auth
 		forged.Principal.Capability.Team = "forged-" + value
@@ -225,15 +195,15 @@ func TestSourceReleaseCannotWidenPersistedFacts(t *testing.T) {
 	}
 }
 
-func TestSourceReleaseRechecksLeaseAfterPolicyWork(t *testing.T) {
-	tenant, auth, policy := sourceReleaseFixture(t)
+func TestSourceReleaseRechecksLeaseAfterEnrollment(t *testing.T) {
+	tenant, auth := sourceReleaseFixture(t)
 	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy.before = func() {
+	tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "remote"}, before: func() {
 		tenant.s.clock = func() time.Time { return *row.LeaseExpiresAt }
-	}
+	}})
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 	if err == nil || credential.Secret != "" || audit.ID != "" {
 		t.Fatal("release outlived the locked lease")
@@ -242,7 +212,7 @@ func TestSourceReleaseRechecksLeaseAfterPolicyWork(t *testing.T) {
 }
 
 func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
-	tenant, auth, _ := sourceReleaseFixture(t)
+	tenant, auth := sourceReleaseFixture(t)
 	setMachineOrigin(t, tenant.s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 	auth.Principal.Capability.Billing = &capability.BillingProvenance{ExecutorClass: "cloud"}
 	tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Name: "cloud", Class: match.ClassCloud, Location: "cloud", Labels: []string{"class=cloud", "location=cloud"}}})
@@ -255,9 +225,8 @@ func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
 
 func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
 	property := func(personal, registered, ssh bool) bool {
-		tenant, auth, _ := sourceReleaseFixture(t)
+		tenant, auth := sourceReleaseFixture(t)
 		s := tenant.s
-		s.sourcePolicy = nil
 		var origin *CapabilityOrigin
 		if registered {
 			origin = &CapabilityOrigin{Personal: personal, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"}

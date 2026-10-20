@@ -594,7 +594,7 @@ func TestProtocolSessionChild(t *testing.T) {
 	}
 }
 
-func TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache(t *testing.T) {
+func TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime(t *testing.T) {
 	p, input, f, _ := sdkPlanningFixture(t)
 	exe, err := os.Executable()
 	if err != nil {
@@ -629,11 +629,11 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		result, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions)
-		if err != nil || result.CacheHit != (i == 1) {
+		if err != nil {
 			t.Fatalf("plan %d = %+v, %v", i, result, err)
 		}
 	}
-	if len(sessions) != 3 || cleaned != 3 {
+	if len(sessions) != 4 || cleaned != 4 {
 		t.Fatalf("processes = %d, cleanups = %d", len(sessions), cleaned)
 	}
 	for _, session := range sessions {

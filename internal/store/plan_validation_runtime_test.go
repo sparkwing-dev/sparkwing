@@ -80,7 +80,6 @@ func TestAcceptedPlanUsesSharedStrictValidator(t *testing.T) {
 	} {
 		t.Run(body, func(t *testing.T) {
 			tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
-			tenant.s.plans = nil
 			request.Seal.Plan = []byte(body)
 			if _, err := tenant.AcceptPlan(t.Context(), request); err == nil {
 				t.Fatal("invalid plan accepted")
@@ -102,7 +101,6 @@ func TestAcceptedPlanIdentifierSecretsProperty(t *testing.T) {
 			secret = "x"
 		}
 		tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
-		tenant.s.plans = nil
 		request.Seal.Resolved.Args["secret"] = secret
 		request.Seal.Resolved.SecretArgs = []string{"message", "secret"}
 		for _, job := range []nodeproto.JobSpec{

@@ -11,22 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
-type planContracts interface {
-	ValidatePlan(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	ResolveExpansion(settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error)
-	CanonicalHash(any) (runspec.Hash, error)
-}
-
-type sharedPlanContracts struct{}
-
-func (sharedPlanContracts) CanonicalHash(value any) (runspec.Hash, error) {
-	return runspec.CanonicalHash(value)
-}
-
-func (sharedPlanContracts) ValidatePlan(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
+func validatePlan(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
 	plan, err := nodeproto.ValidatePlan(raw, ctx)
 	if err != nil {
 		return nodeproto.PlanDoc{}, err
@@ -41,17 +28,6 @@ func (sharedPlanContracts) ValidatePlan(raw json.RawMessage, ctx nodeproto.Valid
 		}
 	}
 	return plan, nil
-}
-
-func (sharedPlanContracts) ResolveExpansion(in settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-	return settings.ResolveExpansion(in)
-}
-
-func (s *Store) planServices() planContracts {
-	if s.plans != nil {
-		return s.plans
-	}
-	return sharedPlanContracts{}
 }
 
 // PlanSecretOpener decrypts a stored envelope without releasing its plaintext to a host.

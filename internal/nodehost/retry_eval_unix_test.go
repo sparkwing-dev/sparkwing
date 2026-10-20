@@ -86,12 +86,12 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 	plan.Jobs, plan.Jobs[1].Needs = plan.Jobs[:2], nil
 	f := newStoreHostFixture(t, plan)
 	f.Host.Store = retryMissingOutput{f.State}
-	f.Host.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&f.Host, func(_ context.Context, layer testPolicyName, _ EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		if layer.Name == "memo" && row.Ref.NodeID == "targets" {
 			return OwnerLayerResult{Source: &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: "previous", NodeID: "targets"}, StateSeq: 8}}}, nil
 		}
 		return OwnerLayerResult{}, nil
-	}
+	})
 	var bodies []string
 	var mu sync.Mutex
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {

@@ -171,7 +171,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	c := openFixture(t, func(_ context.Context, binding Binding) (Services, error) {
 		b = binding
 		services := serviceFixture(binding)
-		state, err := NewState(binding, stateCipher(t))
+		state, err := NewState(binding)
 		services.State = state
 		return services, err
 	})
@@ -271,7 +271,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := nativeServices(ctx, WithClient(NativeConfig{Home: b.Home, Version: "v1.2.3", Local: func(store.NodeRow) bool { return true }, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: private.Principal, Renew: b.Store.RenewUnit, Source: source.Options{Engines: pipelineEngine{selected}, Base: procenv.Base{Local: true}}}, private), func(string, string) (net.Listener, error) { return &processListener{closed: make(chan struct{})}, nil })
+	services, err := nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{Home: b.Home, Local: func(store.NodeRow) bool { return true }, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: private.Principal, Renew: b.Store.RenewUnit, Source: source.Options{Engines: pipelineEngine{selected}, Base: procenv.Base{Local: true}}}, private))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 			return grant, errors.New("process substituted owner or foreign node authority")
 		}
 		bound, err := services.Config.Processes.Authorities.Resolve(ctx, capability.Authorized{Principal: snapshot.Authorities[0].Principal, Binding: process.Binding})
-		if err != nil || bound == nil || !completeServices(*bound) || bound.Job.ID != input.NodeID {
+		if err != nil || bound == nil || (bound.Secret == nil || bound.Output == nil || bound.Latest == nil || bound.OIDC == nil || bound.Annotation == nil || bound.Summary == nil || bound.StartChild == nil || bound.AwaitChild == nil) || bound.Job.ID != input.NodeID {
 			return grant, fmt.Errorf("process services were incomplete at construction: %w", err)
 		}
 		mu.Lock()

@@ -27,7 +27,6 @@ func (p scheduleFixturePolicy) ResolveScheduleSource(_ context.Context, row Cron
 
 func consentedScheduleFixture(t *testing.T) (*Tenant, capability.Authorized, controllerwire.ScheduleRepoRequest, *time.Time) {
 	tenant, _, now := intakeFixture(t)
-	tenant.s.intake = nil
 	tenant.s.SetIntakePolicy(scheduleFixturePolicy{fakeIntakePolicy(func(_ context.Context, _ capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{Options: &in.Request.Options, SourceLocation: &in.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 	})})

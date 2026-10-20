@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
@@ -65,14 +66,12 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 
 func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchController)
-	request.Seal.Plan = []byte(`{"claim_wait_ms":60000,"jobs":[{"id":"job"}]}`)
-	request.Seal.Resolved.Settings.Options.ClaimWait = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Minute}, Origin: runspec.SettingOrigin{Layer: runspec.LayerCode, Key: "claim_wait"}}
-	tenant.s.intake = fakeIntakeContracts{resolve: func(input settings.PlanInputs) (runspec.ExecutionSettings, error) {
-		resolved, err := (fakeIntakeContracts{}).ResolvePlan(input)
-		resolved.Options.ClaimWait = request.Seal.Resolved.Settings.Options.ClaimWait
-		resolved.Options.ClaimWait.Value = time.Duration(*input.Plan.ClaimWaitMS) * time.Millisecond
-		return resolved, err
-	}}
+	request.Seal.Plan = []byte(`{"claim_wait_ms":60000,"jobs":[{"id":"job","steps":[{"id":"step"}]}]}`)
+	var plan nodeproto.PlanDoc
+	if err := json.Unmarshal(request.Seal.Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	request.Seal.Resolved.Settings, _ = settings.ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Declarations: request.Seal.Declarations, Plan: plan})
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}

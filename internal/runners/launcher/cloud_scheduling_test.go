@@ -62,7 +62,7 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		case 1:
 			admitted.Spec.Template.Spec.Tolerations = nil
 		case 2:
-			admitted.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("cloud", team + "foreign")
+			admitted.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("cloud", team+"foreign")
 		}
 		if err := validateAdmittedJob(r.Job, admitted); err == nil {
 			t.Fatal("admission weakened Cloud protection")

@@ -108,7 +108,7 @@ func TestAutoBackfillAdmitsMeasuredShortWorkWithinDelayBudget(t *testing.T) {
 	l, err := New(Config{
 		TotalMemoryBytes: 8 << 30,
 		Scheduling: SchedulingPolicy{BackfillDelay: map[WorkloadClass]time.Duration{
-			ClassNormal: 2500 * time.Millisecond,
+			classNormal: 2500 * time.Millisecond,
 		}},
 	})
 	if err != nil {
@@ -118,7 +118,7 @@ func TestAutoBackfillAdmitsMeasuredShortWorkWithinDelayBudget(t *testing.T) {
 	if _, err := l.SetHeadroom(0, 5<<30); err != nil {
 		t.Fatalf("set headroom: %v", err)
 	}
-	mustQueue(t, l, Request{ID: "four-minute", MemoryBytes: 6 << 30, Class: ClassNormal})
+	mustQueue(t, l, Request{ID: "four-minute", MemoryBytes: 6 << 30, Class: classNormal})
 
 	for _, id := range []string{"one-second-1", "one-second-2"} {
 		lease := mustGrant(t, l, Request{ID: id, MemoryBytes: 4 << 30, ExpectedP99MS: 1000})
@@ -146,34 +146,6 @@ func TestAutoBackfillUnknownDurationCannotSpendProtectedDelayBudget(t *testing.T
 	mustRelease(t, l, first.ID, "first")
 	if pos := mustQueue(t, l, Request{ID: "unknown", MemoryBytes: 4 << 30}); pos != 1 {
 		t.Fatalf("unknown-duration request position = %d, want it behind the protected waiter", pos)
-	}
-}
-
-func TestAdvisorCanEnlargeButNotRemoveBackfillDelayBound(t *testing.T) {
-	l, err := New(Config{
-		TotalMemoryBytes: 8 << 30,
-		Scheduling: SchedulingPolicy{BackfillDelay: map[WorkloadClass]time.Duration{
-			ClassNormal: time.Second,
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
-	if _, err := l.SetHeadroom(0, 5<<30); err != nil {
-		t.Fatalf("set headroom: %v", err)
-	}
-	mustQueue(t, l, Request{ID: "older", MemoryBytes: 6 << 30})
-	first := mustGrant(t, l, Request{ID: "first", MemoryBytes: 4 << 30, ExpectedP99MS: 1000})
-	mustRelease(t, l, first.ID, "first")
-	second := mustGrant(t, l, Request{
-		ID: "advised", MemoryBytes: 4 << 30, ExpectedP99MS: 1000, ReservationBypassBudgetMS: 2500,
-	})
-	mustRelease(t, l, second.ID, "advised")
-	if pos := mustQueue(t, l, Request{
-		ID: "past-bound", MemoryBytes: 4 << 30, ExpectedP99MS: 1000, ReservationBypassBudgetMS: 2500,
-	}); pos != 1 {
-		t.Fatalf("request beyond advisor bound position = %d, want queued behind older", pos)
 	}
 }
 

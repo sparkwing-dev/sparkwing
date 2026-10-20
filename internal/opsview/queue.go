@@ -110,9 +110,6 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 	if qs.AdmissionMode != "" {
 		fmt.Fprintf(w, "admission\t%s\n", qs.AdmissionMode)
 	}
-	if qs.Jev != nil {
-		fmt.Fprintf(w, "jev\t%d\t%d\t%d\n", qs.Jev.Attempts, qs.Jev.Admits, qs.Jev.Fallbacks)
-	}
 	for _, r := range qs.Resources {
 		fmt.Fprintf(w, "resource\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
@@ -663,9 +660,6 @@ func FmtDaemonHeader(qs wingwire.QueueState) string {
 	header := fmt.Sprintf("daemon %s, %s", version, up)
 	if qs.AdmissionMode != "" {
 		header += ", admission " + qs.AdmissionMode
-	}
-	if qs.Jev != nil {
-		header += fmt.Sprintf(" (%d Jev attempts, %d admits, %d fallbacks)", qs.Jev.Attempts, qs.Jev.Admits, qs.Jev.Fallbacks)
 	}
 	return header
 }

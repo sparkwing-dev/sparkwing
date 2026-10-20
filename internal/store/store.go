@@ -93,14 +93,11 @@ type Store struct {
 	resultRecords    nodeResultRecords
 	materializations materializationRecords
 	claimProfiles    ClaimProfileResolver
-	intake           intakeContracts
 	intakePolicy     IntakePolicy
-	plans            planContracts
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
 	provisions       ProvisionPolicy
 	consolePolicy    consolePolicy
-	sourcePolicy     sourceReleaseContracts
 	clock            func() time.Time
 	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
 	db               *sql.DB

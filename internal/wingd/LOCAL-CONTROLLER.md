@@ -55,8 +55,7 @@ The CLI factory now binds `NewState`, the shared `Server.HTTP()` handlers,
 signed engine and runner policies, and the native service constructor.
 `NewState` reads activity in one tenant-scoped snapshot and reports changed
 counts. Published history and terminal nodes do not hold the controller open.
-It opens the optional Jev secret through the same store-bound cipher used by
-the HTTP server. The production factory test reconciles a fresh home, checks
+The production factory test reconciles a fresh home, checks
 both HTTP handlers and verifies closure without a socket.
 
 Both controllers construct their server with `controller.New`, which installs
@@ -179,11 +178,6 @@ Transient startup failures can be retried. An incompatible store remains a
 doctor finding. A dashboard startup failure reaches its caller after that
 cleanup, with the original service error preserved.
 
-Jev admission reads its optional `TYPESAFE_API_KEY` through the elected
-controller's secrets store. An explicit advisor takes precedence. A missing or
-unreadable key is logged and retains the existing admission fallback. Startup
-does not open a second secrets store.
-
 The daemon accepts live controller counts through `SetLocalActivity`. Runs,
 queued triggers, held leases and dashboard connections prevent idle exit.
 The runtime counts its dashboard HTTP connections until they close, including
@@ -215,8 +209,8 @@ the current schema.
 
 `ResolveAdmissionPolicy` reads the complete machine configuration through
 `userconfig.ReadConfig`. The shared configuration package owns decoding and
-validation. The runtime converts its typed admission settings to scheduling and
-Jev policy, preserving explicit zero values and the defaults for omitted fields.
+validation. The runtime converts its typed admission settings to scheduling
+policy, preserving explicit zero values and the defaults for omitted fields.
 
 <!-- design:begin -->
 

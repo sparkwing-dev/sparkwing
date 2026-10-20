@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -18,11 +20,11 @@ func TestInitialAttemptW8Components(t *testing.T) {
 		reached := errors.New("native binding reached")
 		host := runners.Hosting{
 			ControllerURL: "https://controller.example", NewController: runnerControllerFactoryW8(func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }),
-			Bind: func(_ context.Context, unit controllerwire.ClaimedUnit, _ controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+			Bind: func(_ context.Context, unit controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 				if unit.Binding.Attempt != 0 {
 					t.Fatal("runner manufactured an ordinal before Start")
 				}
-				return runners.NativeServices{}, capability.Principal{}, reached
+				return nodehost.NativeServices{}, capability.Principal{}, reached
 			},
 		}
 		if err := host.Host(t.Context(), runnerAuthorityAwardW8(capability.UnitNode)); !errors.Is(err, reached) {

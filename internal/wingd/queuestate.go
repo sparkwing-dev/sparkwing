@@ -41,9 +41,6 @@ func (d *Daemon) buildQueueStateLocked() (wingwire.QueueState, admission.Snapsho
 	var qs wingwire.QueueState
 	qs.DaemonVersion = d.cfg.Version
 	qs.AdmissionMode = string(d.cfg.admissionPolicy().Mode)
-	if qs.AdmissionMode == "jev" {
-		qs.Jev = &wingwire.JevAdmissionStats{Attempts: d.jevAttempts, Admits: d.jevAdmits, Fallbacks: d.jevFallbacks}
-	}
 	if !d.startedAt.IsZero() {
 		qs.DaemonUptimeMS = d.now().Sub(d.startedAt).Milliseconds()
 	}

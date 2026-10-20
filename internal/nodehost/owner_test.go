@@ -332,7 +332,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 		},
 		Prepare: func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
 			f.record("prepare")
-			return OwnerPlanning{Planning: PlanningInput{Disabled: true, Validation: nodeproto.ValidationContext{Secrets: planCacheSecretMatcher{}}}, Functions: PlanningFunctions{
+			return OwnerPlanning{Planning: PlanningInput{Validation: nodeproto.ValidationContext{Secrets: planningSecretMatcher{}}}, Functions: PlanningFunctions{
 				Plan: func(context.Context) (json.RawMessage, error) {
 					f.record("plan")
 					return json.RawMessage(`{"jobs":[]}`), nil
@@ -445,10 +445,10 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
 	h.Local = func(store.NodeRow) bool { return true }
-	h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		f.record(layer.Name)
 		return OwnerLayerResult{}, nil
-	}
+	})
 	h.Executor = ownerNodeFunc(func(ctx context.Context, n NodeInput) error {
 		f.record("execute")
 		_, err := f.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: n.Accepted.RunID, NodeID: n.NodeID}, To: store.NodeSuccess})
@@ -507,9 +507,9 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 					return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 				}
 				h.Local = func(store.NodeRow) bool { return true }
-				h.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+				setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 					return OwnerLayerResult{}, nil
-				}
+				})
 				deadline := time.Now().Add(time.Minute)
 				started := make(chan struct{})
 				stopped := make(chan time.Duration, 1)

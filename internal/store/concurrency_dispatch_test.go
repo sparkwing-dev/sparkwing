@@ -1,20 +1,23 @@
 package store
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
 func TestConcurrencyControllerDispatchedRunUsesBoundUnitKind(t *testing.T) {
 	tenant, plan, now := planFixture(t, runspec.DispatchController)
-	plan.Seal.Plan = []byte(`{"jobs":[{"id":"job","concurrency":[{"group":"deploy"}]}]}`)
-	job := plan.Seal.Resolved.Settings.Jobs["job"]
-	job.Concurrency = []runspec.Concurrency{{Group: "deploy", Scope: "global", Capacity: 1, Cost: 1, OnLimit: "queue"}}
-	plan.Seal.Resolved.Settings.Jobs["job"] = job
-	tenant.s.intake = fakeIntakeContracts{resolve: func(settings.PlanInputs) (runspec.ExecutionSettings, error) { return plan.Seal.Resolved.Settings, nil }}
+	plan.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"step"}],"concurrency":[{"group":"deploy"}]}]}`)
+	var document nodeproto.PlanDoc
+	if err := json.Unmarshal(plan.Seal.Plan, &document); err != nil {
+		t.Fatal(err)
+	}
+	plan.Seal.Resolved.Settings, _ = settings.ResolvePlan(settings.PlanInputs{Request: plan.Seal.Request, Declarations: plan.Seal.Declarations, Plan: document})
 	if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
 		t.Fatal(err)
 	}

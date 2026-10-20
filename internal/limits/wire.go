@@ -19,8 +19,6 @@ const (
 	SecretJSONRequestBytes int64 = 8 << 20
 	// CloudEventRetention bounds default cloud event retention.
 	CloudEventRetention time.Duration = 30 * 24 * time.Hour
-	// CloudMetricRetention bounds default cloud metric retention; separately configurable.
-	CloudMetricRetention time.Duration = 30 * 24 * time.Hour
 	// DataUploadURLTTL bounds signed data upload URL lifetime.
 	DataUploadURLTTL time.Duration = 15 * time.Minute
 )

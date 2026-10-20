@@ -14,19 +14,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
-type settingsPlanValidator struct{ sharedPlanContracts }
-
-func (settingsPlanValidator) ValidatePlan(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-	var plan nodeproto.PlanDoc
-	err := json.Unmarshal(raw, &plan)
-	return plan, err
-}
-
 func sharedSettingsPlan(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcceptance) {
 	t.Helper()
 	tenant, in, now := intakeFixture(t)
-	tenant.s.intake = nil
-	tenant.s.plans = settingsPlanValidator{}
 	in.Request.Options.OwnerExecutionTimeout.Origin = runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "owner_execution_timeout"}
 	in.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"message"}}
 	admitted, err := tenant.AdmitRun(t.Context(), in)
@@ -40,7 +30,7 @@ func sharedSettingsPlan(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcce
 	owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}
 	persistPlanOwner(t, tenant.s, owner)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',capability_prefix='planner',generation=1,lease_expires_at=? WHERE id=?`, now.Add(time.Hour).UnixNano(), admitted.RunID)
-	body, err := json.Marshal(plan)
+	body, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +72,7 @@ func TestAcceptanceRerunsSharedSettingsBeforePersistence(t *testing.T) {
 	tenant, request := sharedSettingsPlan(t, plan)
 	zero := float64(0)
 	plan.Jobs[0].Resources.Cores = &zero
-	body, err := json.Marshal(plan)
+	body, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,12 +90,12 @@ func TestAcceptanceRerunsSharedSettingsBeforePersistence(t *testing.T) {
 func TestAcceptancePersistsConcurrencyWinnersFromResolutionContract(t *testing.T) {
 	tenant, request, _ := planFixture(t, runspec.DispatchHost)
 	want := []runspec.Concurrency{{Group: "deploy", Scope: "global", Capacity: 1, Cost: 1, OnLimit: "queue"}}
-	resolved := request.Seal.Resolved.Settings
-	job := resolved.Jobs["job"]
-	job.Concurrency = want
-	resolved.Jobs["job"] = job
-	request.Seal.Resolved.Settings = resolved
-	tenant.s.intake = fakeIntakeContracts{resolve: func(settings.PlanInputs) (runspec.ExecutionSettings, error) { return resolved, nil }}
+	request.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"step"}],"concurrency":[{"group":"deploy","capacity":1,"cost":1,"scope":"global","on_limit":"queue"}]}]}`)
+	var plan nodeproto.PlanDoc
+	if err := json.Unmarshal(request.Seal.Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	request.Seal.Resolved.Settings, _ = settings.ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Declarations: request.Seal.Declarations, Plan: plan})
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}

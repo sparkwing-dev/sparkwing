@@ -478,13 +478,13 @@ func TestNodeExecutorStorageLayersWrapRetriesOnce(t *testing.T) {
 	input, s, deps, _ := executorFixture(t)
 	executorRetryBudget(t, &input, s, 1)
 	var events []string
-	deps.PrepareLayer = func(_ context.Context, layer LayerSpec, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(_ context.Context, layer testPolicyName, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		events = append(events, layer.Name+" in")
 		return func(context.Context, NodeInput, *store.NodeResult) error {
 			events = append(events, layer.Name+" out")
 			return nil
 		}, nil
-	}
+	})
 	start := deps.Start
 	attempts := 0
 	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
@@ -963,7 +963,7 @@ func TestNodeExecutorRefreshesStorageAndFinalizesLastAttempt(t *testing.T) {
 		binds = append(binds, in.Attempt)
 		return StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}, Authority: blob.Authority{CapabilityRef: "storage-claim", Principal: "executor", Repo: "repo", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{RunID: in.Accepted.RunID, NodeID: in.NodeID, Attempt: in.Attempt, Generation: in.Generation}}}}, nil
 	}
-	deps.PrepareLayer = func(_ context.Context, _ LayerSpec, in NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(_ context.Context, _ testPolicyName, in NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		if in.Storage.Authority.Attempt.Value.Attempt != 1 {
 			t.Fatal("layer preparation did not receive first bound attempt")
 		}
@@ -971,7 +971,7 @@ func TestNodeExecutorRefreshesStorageAndFinalizesLastAttempt(t *testing.T) {
 			finalized = append(finalized, latest.Storage.Authority.Attempt.Value.Attempt)
 			return nil
 		}, nil
-	}
+	})
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		starts = append(starts, in.Storage.Authority.Attempt.Value.Attempt)
@@ -1005,9 +1005,9 @@ func TestNodeExecutorStorageRefreshFailureSuppressesStaleFinalizers(t *testing.T
 		}
 		return StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}, Authority: blob.Authority{CapabilityRef: "claim", Principal: "executor", Repo: "repo", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{RunID: in.Accepted.RunID, NodeID: in.NodeID, Attempt: in.Attempt, Generation: in.Generation}}}}, nil
 	}
-	deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		return func(context.Context, NodeInput, *store.NodeResult) error { finalized++; return nil }, nil
-	}
+	})
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, in, activity)

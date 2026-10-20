@@ -20,13 +20,13 @@ func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
 	f.snapshot.Run.State = store.RunRunning
 	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending}}
 	var layers []string
-	host.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&host, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		layers = append(layers, layer.Name)
 		if layer.Name == "memo" || layer.Name == "admission" {
 			return OwnerLayerResult{}, errors.New("approval entered compute policy")
 		}
 		return OwnerLayerResult{}, nil
-	}
+	})
 	host.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Status == string(store.StatusPending) {
 			return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "gate", Kind: store.DecisionApproval}}}
@@ -95,7 +95,7 @@ func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 		}
 		return d
 	}
-	h.Layer = func(ctx context.Context, layer LayerSpec, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(ctx context.Context, layer testPolicyName, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		if layer.Name != "debug" {
 			t.Fatalf("unexpected layer after terminal transition: %s", layer.Name)
 		}
@@ -111,7 +111,7 @@ func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 			close(released)
 		}
 		return OwnerLayerResult{Transition: &store.NodeTransition{To: store.NodeSkipped, Cause: store.CauseDependency}}, nil
-	}
+	})
 	if _, err := h.Run(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
@@ -139,9 +139,9 @@ func TestOwnerHostRemoteDispatchNeverSelfClaims(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
 	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}
 	f.snapshot.Nodes = []store.NodeRow{row}
-	h.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
-	}
+	})
 	request, err := releasedRequest(&h, t.Context(), in, *in.Accepted, &source.Entry{}, row, store.DecisionReady)
 	if err != nil || request != nil {
 		t.Fatalf("request=%+v error=%v", request, err)
@@ -257,7 +257,7 @@ func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
 			}
 			probe := &ownerReconcileProbe{OwnerStore: f, result: store.ReconciledNode{Kind: kind, Node: returned}}
 			h.Store = probe
-			h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+			setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 				if layer.Name == "admission" && kind != store.Dispatch {
 					t.Fatal("materialized hit took compute admission")
 				}
@@ -265,7 +265,7 @@ func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
 					return OwnerLayerResult{Source: &store.MaterializeSource{Kind: store.SourceMemo}}, nil
 				}
 				return OwnerLayerResult{}, nil
-			}
+			})
 			request, err := releasedRequest(&h, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
 			if err != nil || request != nil || !probe.request.MaterializeOnly || probe.request.Policy != store.SourceMemo {
 				t.Fatalf("probe=%+v returned=%+v error=%v", probe.request, request, err)
@@ -299,7 +299,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 	entry := &source.Entry{Engine: engine.Resolved{Identity: engine.Identity{Version: "selected"}}}
 	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, Generation: 7, SpecHash: "job-seal"}
 	policies := 0
-	host.Layer = func(_ context.Context, _ LayerSpec, evaluation EvaluationInput, persisted store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&host, func(_ context.Context, _ testPolicyName, evaluation EvaluationInput, persisted store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		if !reflect.DeepEqual(binding, input.Storage) {
 			t.Fatal("owner policy lost its bound storage clients")
 		}
@@ -308,7 +308,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 		}
 		policies++
 		return OwnerLayerResult{}, nil
-	}
+	})
 	if _, err := releasedRequest(&host, t.Context(), input, *input.Accepted, entry, row, store.DecisionReady); err != nil {
 		t.Fatal(err)
 	}
@@ -332,9 +332,9 @@ func TestOwnerHostAdmissionSkipDoesNotHideIndependentFailure(t *testing.T) {
 			fixture, host, input := newOwnerFixture(t, true)
 			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "job"}, Status: store.StatusPending}
 			fixture.snapshot.Nodes = []store.NodeRow{row}
-			host.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+			setTestPolicies(&host, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 				return OwnerLayerResult{}, nil
-			}
+			})
 			independent := errors.New("admission cleanup refused")
 			host.Admit = func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error {
 				failure := &AdmissionFailure{Outcome: store.NodeSkipped, Err: errors.New("full group")}

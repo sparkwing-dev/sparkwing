@@ -48,16 +48,16 @@ func TestAuthorityEnvelopeRefusesProjectionDrift(t *testing.T) {
 	s := authorityStore(t)
 	authorityPersist(t, s, authorityRoot("root", "a"))
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
-	if _, err := s.AuthGenerations(t.Context(), ref, "a"); err != nil {
+	if _, err := s.ResolveAuthority(t.Context(), ref); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET grants = ? WHERE prefix = 'root'", []byte(`["team.admin"]`))
-	if _, err := s.AuthGenerations(t.Context(), ref, "a"); err == nil {
+	if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
 		t.Fatal("accepted index authority wider than envelope")
 	}
 }
 
-func TestAuthorityGenerationIncludesCrossTeamAncestor(t *testing.T) {
+func TestAuthorityResolutionRechecksCrossTeamAncestor(t *testing.T) {
 	s := authorityStore(t)
 	root := authorityRoot("launcher", "")
 	root.Subject.Kind = capability.SubjectService
@@ -67,21 +67,19 @@ func TestAuthorityGenerationIncludesCrossTeamAncestor(t *testing.T) {
 	child.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
 	authorityPersist(t, s, child)
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}
-	got, err := s.AuthGenerations(t.Context(), ref, "a")
+	got, err := s.ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Authorities) != 2 || got.Authorities[1].Authority.ID != root.Prefix {
+	if got.Capability.Team != "a" || got.Capability.Parent == nil || *got.Capability.Parent != *child.Parent {
 		t.Fatalf("ancestry = %#v", got)
 	}
-	if _, err := s.AuthGenerations(t.Context(), ref, "b"); err == nil {
-		t.Fatal("accepted foreign membership fence")
-	}
+
 	actor := Actor{Authority: *child.Parent, CapabilityPrefix: root.Prefix}
 	if err := s.AsOperator().RevokeAuthority(t.Context(), actor, *child.Parent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AuthGenerations(t.Context(), ref, "a"); err == nil {
+	if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
 		t.Fatal("revoked ancestor stayed live")
 	}
 	var generation int64
@@ -109,7 +107,7 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	child.Parent = &member.Authority
 	authorityPersist(t, s, child)
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}
-	before, err := s.AuthGenerations(t.Context(), ref, "a")
+	_, err := s.ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,20 +116,18 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member", Role: &role}); err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.AuthGenerations(t.Context(), ref, "a")
+	_, err = s.ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.MembershipGeneration != before.MembershipGeneration+1 {
-		t.Fatalf("membership fence did not advance: %#v -> %#v", before, after)
-	}
+
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "owner", Role: &role}); !errors.Is(err, ErrLastOwner) {
 		t.Fatalf("last owner demotion: %v", err)
 	}
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AuthGenerations(t.Context(), ref, "a"); err == nil {
+	if _, err := s.ResolveAuthority(t.Context(), ref); err == nil {
 		t.Fatal("removed member descendant stayed live")
 	}
 }
@@ -152,7 +148,7 @@ func TestAuthorityMissingCycleExpiryAndForgedFenceFailClosed(t *testing.T) {
 				c.ExpiresAt = &expiry
 			}
 			authorityPersist(t, s, c)
-			if _, err := s.AuthGenerations(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}, "a"); err == nil {
+			if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}); err == nil {
 				t.Fatal("accepted invalid authority")
 			}
 		})
@@ -206,7 +202,7 @@ func TestAuthorityAwardDerivesBindingAndBilling(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 1)
-	if _, err := s.AuthGenerations(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, "a"); err != nil {
+	if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -240,7 +236,7 @@ func TestAuthorityBootstrapExchangeIsAtomicAndSingleUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 1)
-	if _, err := s.AuthGenerations(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}, "a"); err != nil {
+	if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -33,8 +33,6 @@ const (
 	FreeLogRetention time.Duration = 30 * 24 * time.Hour
 	// FundedLogRetention bounds funded log retention class.
 	FundedLogRetention time.Duration = 90 * 24 * time.Hour
-	// CloudRunRetention bounds cloud run retention; self-hosted default is disabled.
-	CloudRunRetention time.Duration = 90 * 24 * time.Hour
 	// BlobGCGrace bounds tombstone grace before unreachable blob collection.
 	BlobGCGrace time.Duration = 24 * time.Hour
 	// CapabilityRetention bounds retention after capability expiry or revocation.
