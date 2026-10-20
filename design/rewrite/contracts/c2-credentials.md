@@ -957,10 +957,10 @@ The heartbeat's claim ID stays caller-selected and must match the unit ID.
 
 LauncherSyncReader is a local C2 adapter contract for a transactional launcher
 snapshot. It receives the authenticated authority reference and observations.
-The adapter must recheck ancestry and current award ownership. Sync copies the
-response and clears every Capability before returning it. Missing wiring returns
-policy_missing. C1 still needs the final snapshot operation. Its old
-SyncLaunchJobs accepts retired claim identities and cannot serve this adapter.
+The adapter rechecks ancestry and current award ownership through
+`Operator.ReconcileLauncherAwards`. Authenticated observations seal the reserved
+node identity on the award before pod activation. Sync copies the response and
+clears every Capability before returning it. Missing wiring returns policy_missing.
 
 Storage settings and reports use Operator. Quota and allowance writes resolve a
 Tenant for the policy-authorized team. They retain the operator.object_store
@@ -1219,6 +1219,11 @@ clients, SDKs or documentation generators.
   never skips the here Award to reach the requester's token or session.
   A session parent is checked in the sessions table, including membership
   and current `runs.write`; it is not converted to a new bearer root.
+- `Capability.ExecutionHost` seals execution placement separately from the
+  accountable subject. The award owner derives it from the machine or local peer,
+  the authenticated here origin, or the launcher's reserved node. Delegation and
+  exchange preserve it. Box concurrency reads only this persisted value and
+  refuses an award without one. Capacity requests cannot select the identity.
 - Here is an Award during intake. It reserves `here:<run>`, allows the
   first claim within ten minutes, and expires at the owner deadline plus
   the claim window, capped by the parent. Reclaim after a first claim uses

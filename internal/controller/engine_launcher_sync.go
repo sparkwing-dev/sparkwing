@@ -39,7 +39,7 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 
 type storeLauncherSync struct {
 	store interface {
-		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef) ([]store.LauncherAward, []store.LauncherPreparation, error)
+		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef) ([]store.LauncherAward, []store.LauncherPreparation, error)
 	}
 }
 
@@ -47,10 +47,8 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	if err := validateLauncherObservations(observed); err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
-	observations := make([]capability.LeaseRef, 0, len(observed))
 	var reservations []capability.LeaseRef
 	for _, observation := range observed {
-		observations = append(observations, observation.Award)
 		if observation.ReservationID != "" {
 			reservations = append(reservations, observation.Award)
 		}
@@ -61,7 +59,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 			rejected = append(rejected, observation.Award)
 		}
 	}
-	awards, prepared, err := s.store.ReconcileLauncherAwards(ctx, ref, observations, reservations, preparing, rejected)
+	awards, prepared, err := s.store.ReconcileLauncherAwards(ctx, ref, observed, reservations, preparing, rejected)
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}

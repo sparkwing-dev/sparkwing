@@ -172,19 +172,19 @@ func TestPrivateCapacityRefusesMissingPersistedHostIdentity(t *testing.T) {
 	server, _, tenant, owner, bearer := localHostAwardFixture(t)
 	acceptCapacityPlan(t, server, tenant, owner, "box", "queue", 1, 1, "build")
 	var raw []byte
-	if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT authority_json FROM capabilities WHERE prefix='runner'`).Scan(&raw); err != nil {
+	if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT authority_json FROM capabilities WHERE prefix=?`, owner.Capability.Prefix).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var record store.CapabilityRecord
 	if err := json.Unmarshal(raw, &record); err != nil {
 		t.Fatal(err)
 	}
-	record.Value.Subject.Kind = capability.SubjectService
+	record.Value.ExecutionHost = ""
 	raw, err := json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, server.store, `UPDATE capabilities SET subject_kind='service',authority_json=? WHERE prefix='runner'`, raw)
+	engineSQL(t, server.store, `UPDATE capabilities SET authority_json=? WHERE prefix=?`, raw, owner.Capability.Prefix)
 	code := privateCapacityRequest(t, server, bearer, localhostwire.LocalCapacityRequest{Binding: store.CapacityBinding{RunID: "run", NodeID: "build"}})
 	if code != http.StatusForbidden {
 		t.Fatalf("missing host admitted: HTTP %d", code)

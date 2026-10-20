@@ -114,7 +114,7 @@ func (t *Tenant) AdmitCapacity(ctx context.Context, binding CapacityBinding, act
 	return result, err
 }
 
-// capacityKeyTx uses persisted machine ancestry rather than a host's submitted key.
+// capacityKeyTx reads only the execution identity sealed on the authenticated award.
 func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, runID, scope, group string) (string, error) {
 	switch scope {
 	case "global":
@@ -126,14 +126,9 @@ func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.Author
 		if err != nil {
 			return "", err
 		}
-		for i := len(chain) - 1; i >= 0; i-- {
-			c := chain[i].principal.Capability
-			if c.Subject.Kind == capability.SubjectMachine && c.Binding.Kind == capability.BindingNone || c.Subject.Kind == capability.SubjectLocal {
-				if c.Subject.ID == "" {
-					return "", bindingRefusal()
-				}
-				return runspec.ConcurrencyKey(scope, c.Subject.ID, group), nil
-			}
+		c := chain[0].principal.Capability
+		if c.Unit != "" && c.ExecutionHost != "" {
+			return runspec.ConcurrencyKey(scope, c.ExecutionHost, group), nil
 		}
 	}
 	return "", bindingRefusal()

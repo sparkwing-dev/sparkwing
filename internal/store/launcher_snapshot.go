@@ -31,7 +31,17 @@ type LauncherAward struct {
 }
 
 // ReconcileLauncherAwards isolates each persisted award through renewal, rejection and snapshot validation.
-func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, observed, reservations, preparing, rejected []capability.LeaseRef) ([]LauncherAward, []LauncherPreparation, error) {
+func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, hosts []controllerwire.LauncherObservation, reservations, preparing, rejected []capability.LeaseRef) ([]LauncherAward, []LauncherPreparation, error) {
+	var observed []capability.LeaseRef
+	if hosts != nil {
+		observed = make([]capability.LeaseRef, 0, len(hosts))
+	}
+	for _, host := range hosts {
+		if err := host.Validate(); err != nil {
+			return nil, nil, err
+		}
+		observed = append(observed, host.Award)
+	}
 	if err := validateLauncherPreparationFences(preparing); err != nil {
 		return nil, nil, err
 	}
@@ -39,6 +49,11 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 	owner, err := o.s.launcherAwardOwnership(ctx, authority, observed, selected)
 	if err != nil {
 		return nil, nil, err
+	}
+	for _, host := range hosts {
+		if err := owner.apply(ctx, host.Award, func() error { return o.s.sealLauncherHost(ctx, authority, host) }); err != nil {
+			return nil, nil, err
+		}
 	}
 	var prepared []LauncherPreparation
 	for _, fence := range preparing {

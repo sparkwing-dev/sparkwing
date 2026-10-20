@@ -803,8 +803,15 @@ only with `runner.local_admission`; placement eligibility does not decide this
 requirement. `ComposeNativeAdmission` always supplies controller-backed logical
 concurrency to remote owners through `RemoteHostStore`. Its capacity store uses
 the private owner transport, including before a job has an execution award.
-The capacity store derives box scope from the persisted machine identity bound
-to the award. Compute admission settings do not select a concurrency namespace.
+The capacity store derives box scope only from `Capability.ExecutionHost`, sealed
+on the award independently of its accountable subject. Machine roots and Actions
+push credentials use their machine subject. Account-backed here awards use the
+origin machine authenticated by the intake proof. Local peers use their peer
+identity. Launcher awards seal the reserved node UID during authenticated launcher
+sync, before pod activation. The identity survives child awards, delegation and
+bootstrap exchange. A later observation cannot replace it. An award without an
+execution host is refused for box scope. Compute admission settings do not select
+a concurrency namespace.
 The private client sends only the unit binding; the store admits all its groups.
 Selection uses the scheduler's dependency closure, including present
 optional dependencies and generator sources. The
