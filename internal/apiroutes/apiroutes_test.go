@@ -450,8 +450,7 @@ func TestParseControllerBusinessRegistrations(t *testing.T) {
 		"PUT /api/v1/team/github-app/extra-repos":                     false,
 		"POST /api/v1/team/billing/checkout":                          false,
 		"POST /api/v1/team/billing/card":                              false,
-		"POST /api/v1/team/billing/pay":                               false,
-		"PUT /api/v1/team/billing/budget":                             false,
+		"PUT /api/v1/team/billing/refill":                             false,
 
 		"GET /api/v1/schedules":                      false,
 		"DELETE /api/v1/schedules/{schedule}":        false,

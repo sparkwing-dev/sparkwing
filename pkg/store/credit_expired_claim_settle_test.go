@@ -24,9 +24,9 @@ func usageSeconds(t *testing.T, s *store.Store, runID, nodeID string) int64 {
 	return seconds
 }
 
-// A hold takes the ledger lock a metered claim takes, so a claim that read
-// the team as not frozen commits before the hold does and none can commit
-// after it. The test holds the ledger lock and shows the hold waits for it.
+// A hold takes the team's ledger lock a metered claim takes, so a claim that
+// read the team as not held commits before the hold does and none can commit
+// after it. The test holds the team's lock and shows the hold waits for it.
 func TestAHoldWaitsForTheLedgerLock(t *testing.T) {
 	s := storetest.OpenPostgres(t)
 	ctx := context.Background()
@@ -36,7 +36,7 @@ func TestAHoldWaitsForTheLedgerLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := holder.ExecContext(ctx,
-		`SELECT pg_advisory_xact_lock(hashtext('sparkwing/credit-ledger'))`); err != nil {
+		`SELECT pg_advisory_xact_lock(hashtext($1))`, "sparkwing/ledger/"+string(store.DefaultTeam)); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)

@@ -168,7 +168,6 @@ func TestStoreDataLedgerTotalsObserveOnlyConfirmedCompute(t *testing.T) {
 	s, c := meteringFixture(t, capability.UnitPlan, capability.BillingAtAward)
 	reserveMetering(t, s, c)
 	at := s.now()
-	confirmed := int64(0)
 	for _, step := range []struct {
 		now   int64
 		renew bool
@@ -176,7 +175,6 @@ func TestStoreDataLedgerTotalsObserveOnlyConfirmedCompute(t *testing.T) {
 	}{{3, false, 0}, {3, true, 3}, {70, false, 3}, {70, true, 70}, {3600, false, 70}} {
 		s.clock = func() time.Time { return at.Add(time.Duration(step.now) * time.Second) }
 		if step.renew {
-			confirmed = step.now
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
 				_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), false)
 				return err
@@ -193,7 +191,7 @@ func TestStoreDataLedgerTotalsObserveOnlyConfirmedCompute(t *testing.T) {
 			t.Fatal("report charged or closed open compute")
 		}
 	}
-	confirmed = 75
+	confirmed := int64(75)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", at.Add(75*time.Second), true)
 		return err

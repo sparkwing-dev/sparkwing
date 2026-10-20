@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -171,20 +172,15 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 		return err
 	}
 	if n, err := res.RowsAffected(); err != nil || n == 0 {
-		return cmpErr(err, ErrNoCard)
+		return cmp.Or(err, ErrNoCard)
 	}
 	return RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventRefillSettings, SubjectID: string(team), Actor: actor, At: tx.now(),
-		Attrs: map[string]any{"enabled": s.Enabled, "threshold_cents": s.ThresholdCents, "amount_cents": s.AmountCents,
-			"week_limit_cents": s.WeekLimitCents, "month_limit_cents": s.MonthLimitCents},
+		Attrs: map[string]any{
+			"enabled": s.Enabled, "threshold_cents": s.ThresholdCents, "amount_cents": s.AmountCents,
+			"week_limit_cents": s.WeekLimitCents, "month_limit_cents": s.MonthLimitCents,
+		},
 	})
-}
-
-func cmpErr(err, fallback error) error {
-	if err != nil {
-		return err
-	}
-	return fallback
 }
 
 // DueRefills opens a refill for every opted-in team whose balance fell below its threshold, within its limits, and
@@ -291,7 +287,7 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 			return err
 		}
 		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			return cmpErr(err, authorityError(apierr.Conflict, "refill is closed or bound to another payment"))
+			return cmp.Or(err, authorityError(apierr.Conflict, "refill is closed or bound to another payment"))
 		}
 		return nil
 	})
