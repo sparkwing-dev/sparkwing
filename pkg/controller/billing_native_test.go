@@ -152,6 +152,8 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 			body = `{"id":"pm_native","object":"payment_method","livemode":false,"customer":"cus_native","type":"card","card":{"fingerprint":"fp_native","brand":"visa","last4":"4242"}}`
 		case "/v1/charges/ch_auto":
 			body = `{"id":"ch_auto","object":"charge","livemode":false,"payment_intent":"pi_auto","payment_method_details":{"card":{"fingerprint":"fp_native"}}}`
+		case "/v1/charges/ch_other":
+			body = `{"id":"ch_other","object":"charge","livemode":false,"payment_intent":"pi_other","payment_method_details":{"card":{"fingerprint":"fp_native"}}}`
 		case "/v1/payment_intents/pi_prepay":
 			body = `{"id":"pi_prepay","object":"payment_intent","livemode":false,"latest_charge":"ch_prepay"}`
 		case "/v1/charges/ch_prepay":
@@ -248,16 +250,17 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	for range 2 {
 		call("card", "", 200)
 	}
-	if w := deliver("evt_setup", "setup_intent.succeeded", setupIntent); w.Code == 204 {
-		t.Fatal("a setup intent of this deployment was acknowledged before its page bound it")
+	webhook("evt_setup", "setup_intent.succeeded", setupIntent)
+	tenant, err := s.store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spend, err := tenant.SpendStanding(t.Context(), time.Now()); err != nil || spend.Card.PaymentMethod != "" {
+		t.Fatalf("setup attached a card before its page bound it: %+v: %v", spend.Card, err)
 	}
 	for range 2 {
 		webhook("evt_setup_page", "checkout.session.completed", `{"id":"cs_setup","object":"checkout.session","mode":"setup","status":"complete","livemode":false,"customer":"cus_native","setup_intent":"seti_native","metadata":{"purpose":"card_setup",`+stamp+`}}`)
 		webhook("evt_setup", "setup_intent.succeeded", setupIntent)
-	}
-	tenant, err := s.store.ForTeam(t.Context(), "a")
-	if err != nil {
-		t.Fatal(err)
 	}
 	spend, err := tenant.SpendStanding(t.Context(), time.Now())
 	if err != nil || spend.Card.PaymentMethod != "pm_native" || spend.Billing.Tier != "New" {
@@ -278,8 +281,9 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	for range 2 {
 		s.refillPass(t.Context())
 	}
-	if w := deliver("evt_refill", "payment_intent.succeeded", strings.Replace(refilled, "pi_auto", "pi_other", 1)); w.Code == 204 {
-		t.Fatal("a refill payment this deployment never recorded was acknowledged")
+	webhook("evt_unbound_refill", "payment_intent.succeeded", strings.NewReplacer("pi_auto", "pi_other", "ch_auto", "ch_other").Replace(refilled))
+	if spend, err := tenant.SpendStanding(t.Context(), time.Now()); err != nil || spend.BalanceMicro != 0 || !spend.Refill.Open {
+		t.Fatalf("unbound refill changed credit or closed the bound refill: %+v: %v", spend, err)
 	}
 	for range 2 {
 		webhook("evt_refill", "payment_intent.succeeded", refilled)

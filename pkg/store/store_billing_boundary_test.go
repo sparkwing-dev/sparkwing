@@ -136,6 +136,14 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 			t.Fatalf("raw paid grant: %v", err)
 		}
 	}
+	for _, event := range []capability.PaymentEvent{
+		{Mode: capability.PaymentTest, EventID: "pending-setup", Kind: capability.PaymentCardSetup, ObjectID: "setup", CustomerID: "customer", MethodID: "method", Fingerprint: "card", Created: now.Unix()},
+		{Mode: capability.PaymentTest, EventID: "pending-payment", Kind: capability.PaymentCardFailed, ObjectID: "pending-payment", PaymentID: "pending-payment", CustomerID: "customer", Currency: "usd", AmountMinor: 1000, Status: "requires_payment_method", Created: now.Unix()},
+	} {
+		if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "customer", PaymentMethod: "method", Fingerprint: "card"}, "provider", *now); err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,9 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 	for _, cause := range []string{HoldCauseOperator, HoldCauseDispute, HoldCauseWarning, HoldCauseRevoked} {
 		t.Run(cause, func(t *testing.T) {
 			s, demand, now := billingModelFixture(t)
+			if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+				t.Fatal(err)
+			}
 			claim, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
 			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {

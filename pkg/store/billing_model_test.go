@@ -133,7 +133,7 @@ func TestBillingModelDisputeOutcomePreservesStandingProperty(t *testing.T) {
 		wantBalance := int64(100 * MicroCreditsPerCent)
 		if status == "lost" {
 			wantBalance = 0
-			if released, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute", "operator", "reviewed", now); err != nil || released != 1 {
+			if released, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute:test:dispute", "operator", "reviewed", now); err != nil || released != 1 {
 				t.Fatalf("operator release=%d: %v", released, err)
 			}
 		}
