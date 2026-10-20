@@ -36,11 +36,17 @@ func Submit(environment, allowed []string, masker *secrets.Masker) (map[string][
 }
 
 // safety: a submitted value comes from the requester, so it may not reconfigure the executing
-// host's Go toolchain or network base, nor carry an engine-owned or credential-shaped name.
+// host's Go toolchain, caches, network base or Sparkwing home, nor carry an engine-owned or
+// credential-shaped name.
 func submittable(name string) bool {
 	row, _ := Lookup(name)
-	return submitEnvName.MatchString(name) && row.Owner != "engine" && !row.GoTool && !row.RemoteBase && !credentialName(row, name)
+	key := envKey(name)
+	return submitEnvName.MatchString(name) && row.Owner != "engine" && !row.GoTool && !row.RemoteBase && !credentialName(row, name) &&
+		!strings.HasPrefix(key, envKey("SPARKWING_")) && !slices.ContainsFunc(hostOwned, func(owned string) bool { return envKey(owned) == key })
 }
+
+// safety: the runner reads these for its own caches and tools.
+var hostOwned = []string{"GOCACHE", "GOMODCACHE", "GOWORK", "GOBIN", "GOENV", "GOROOT", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "npm_config_cache", "DOCKER_HOST"}
 
 func submitAllowed(name string, allowed []string) bool {
 	for _, pattern := range allowed {
@@ -88,7 +94,8 @@ func CheckSubmitted(values map[string][]byte, masker *secrets.Masker) error {
 }
 
 // WithSubmitted binds private submitted values to a remote base before any process starts.
-// Only names the host operator accepts reach the base; the rest are dropped.
+// Only names the host operator accepts reach the base; the rest are dropped. A name the
+// host already sets keeps the host's value, and installs never receive submitted values.
 func WithSubmitted(base Base, values map[string][]byte, accept SubmitAccept) (Base, error) {
 	if base.Local {
 		return Base{}, errors.New("submitted values require a remote environment")
@@ -96,13 +103,18 @@ func WithSubmitted(base Base, values map[string][]byte, accept SubmitAccept) (Ba
 	if err := CheckSubmitted(values, base.Masker); err != nil {
 		return Base{}, err
 	}
-	base.Ambient, base.SubmitEnvAllow = slices.Clone(base.Ambient), slices.Clone(base.SubmitEnvAllow)
+	hostSet := map[string]bool{}
+	for _, entry := range base.Ambient {
+		name, _, _ := strings.Cut(entry, "=")
+		hostSet[envKey(name)] = true
+	}
+	base.Ambient, base.Submitted = slices.Clone(base.Ambient), slices.Clone(base.Submitted)
 	for name, value := range values {
-		if !accept.accepts(name) {
+		if !accept.accepts(name) || hostSet[envKey(name)] {
 			continue
 		}
 		base.Ambient = append(base.Ambient, name+"="+string(value))
-		base.SubmitEnvAllow = append(base.SubmitEnvAllow, name)
+		base.Submitted = append(base.Submitted, name)
 	}
 	return base, nil
 }

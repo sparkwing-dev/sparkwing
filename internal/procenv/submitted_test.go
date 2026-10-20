@@ -99,7 +99,7 @@ func TestSubmittedNamesSurviveOnlyInsideTheOperatorAllowList(t *testing.T) {
 					continue
 				}
 				row, _ := Lookup(name)
-				if !submitAllowed(name, operator) || row.GoTool || row.RemoteBase {
+				if kind == Install || !submitAllowed(name, operator) || row.GoTool || row.RemoteBase || !submittable(name) {
 					t.Fatalf("operator %v: submitted %s reached a %d process", operator, name, kind)
 				}
 			}
@@ -136,6 +136,34 @@ func TestRemoteInstallsIgnoreTheHostGoEnvFile(t *testing.T) {
 		owned, err := Build(Install, base, Runtime{})
 		if err != nil || slices.Contains(owned, "GOENV=off") {
 			t.Fatalf("an owner's install lost its go env file: %v %v", owned, err)
+		}
+	}
+}
+
+func TestSubmittedValuesNeverRedirectTheRunnersOwnState(t *testing.T) {
+	for _, name := range []string{"SPARKWING_HOME", "SPARKWING_CONFIG", "GOMODCACHE", "GOCACHE", "GOWORK", "GOENV", "npm_config_cache", "DOCKER_HOST"} {
+		if err := CheckSubmitted(map[string][]byte{name: []byte("/attacker")}, secrets.NewMasker()); err == nil {
+			t.Errorf("submitted %s accepted", name)
+		}
+	}
+	accept, err := OperatorSubmitAccept([]string{"BUILD_*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := WithSubmitted(Base{Ambient: []string{"BUILD_REGION=host"}, SubmitEnvAllow: []string{"BUILD_REGION"}, Masker: secrets.NewMasker()}, map[string][]byte{"BUILD_REGION": []byte("requester"), "BUILD_NOTE": []byte("requester-note")}, accept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []Kind{Install, Plan, Attempt, Eval} {
+		env, err := Build(kind, base, Runtime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(env, "BUILD_REGION=host") {
+			t.Errorf("%d: a submitted value replaced the host's own: %v", kind, env)
+		}
+		if slices.Contains(env, "BUILD_NOTE=requester-note") == (kind == Install) {
+			t.Errorf("%d: submitted delivery %v", kind, env)
 		}
 	}
 }

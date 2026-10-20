@@ -136,8 +136,12 @@ these settings unless the operator's allow list names them.
 A run cannot submit a Go toolchain or network base name (`PATH`, `HOME`,
 `TMPDIR`, the proxy and CA settings, and similar) through
 `run.submit_env_allow`: intake refuses it and the CLI does not capture it,
-because it would reconfigure the executing host. Submitted names reach a shared
-runner only when its operator also lists them. Remote builds on a host the
+because it would reconfigure the executing host. The same holds for `SPARKWING_*`
+names and the host's cache and tool settings (`GOCACHE`, `GOMODCACHE`, `GOWORK`,
+`GOBIN`, `GOENV`, `GOROOT`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`,
+`npm_config_cache`, `DOCKER_HOST`). Submitted names reach a shared runner only
+when its operator also lists them, never replace a value the host sets itself,
+and never reach the pipeline compile. Remote builds on a host the
 run's owner does not own set `GOENV=off`, so a `go env -w` file on that host
 does not change the build.
 

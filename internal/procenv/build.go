@@ -195,6 +195,9 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 		if row.RemoteBase {
 			return true
 		}
+		if slices.ContainsFunc(b.Submitted, func(submitted string) bool { return envKey(submitted) == envKey(name) }) {
+			return k != Install
+		}
 		return submitAllowed(name, b.SubmitEnvAllow)
 	}
 	return false
