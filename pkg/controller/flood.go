@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -313,10 +314,23 @@ func (s *Server) admitWithFlood(ctx context.Context, admit func(context.Context)
 }
 
 func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest, p capability.Principal) error {
-	if s.flood == nil || request.Authority.Kind == "schedule" || request.VerifiedDeliveryID != "" || request.Request.Lineage.ParentRunID != "" {
+	if s.flood == nil {
 		return nil
 	}
-	key := string(p.Authority.Kind) + ":" + p.Authority.ID
+	authority, delivered := p.Authority, request.VerifiedDeliveryID != ""
+	// safety: a child spends the budget its root was admitted under, not the
+	// runner holding the parent's claim, so a run cannot fan out past its creator's budget.
+	if parent := request.Request.Lineage.ParentRunID; parent != "" {
+		root, err := store.ChildRootRequest(ctx, resolver, store.Team(p.Capability.Team), parent)
+		if err != nil {
+			return err
+		}
+		authority, delivered = root.AuthorityRef, root.Request.Origin == runspec.OriginApp
+	}
+	if authority.Kind == "schedule" || delivered {
+		return nil
+	}
+	key := string(authority.Kind) + ":" + authority.ID
 	if s.flood.depth != nil {
 		team := store.Team(p.Capability.Team)
 		if err := floodRefusalError(s.depthRefusal(team, key, "api", func() (int, error) { return store.IntakeQueueDepth(ctx, resolver, team) })); err != nil {

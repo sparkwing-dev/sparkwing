@@ -19,7 +19,8 @@ const (
 	TrustVerified TrustClass = "verified"
 	// TrustActions is a run bound to a GitHub Actions push that GitHub's own ID token proved.
 	TrustActions TrustClass = "actions"
-	// TrustSchedule is an unmodified fire of a schedule on this controller.
+	// TrustSchedule is an unmodified fire of a schedule a team admin armed on the
+	// repository's default branch, whose commit GitHub resolved at fire time.
 	TrustSchedule TrustClass = "schedule"
 	// TrustAsserted is every run whose ref, commit and inputs a principal chose.
 	TrustAsserted TrustClass = "asserted"
@@ -44,6 +45,7 @@ type Provenance struct {
 	base          string
 	delivery      string
 	writer        string
+	sharedOnly    bool
 }
 
 // AppProvenance seals the identity of a signed, replay-checked GitHub App delivery.
@@ -54,7 +56,7 @@ func AppProvenance(app AppFacts, pr Optional[PullRequest], pipeline string) (Pro
 		return Provenance{}, errors.New("provenance requires a verified App delivery")
 	}
 	if app.Event == "pull_request" && pr.Set && pr.Value.BaseRef != "" {
-		p.base = normalizeBranch(pr.Value.BaseRef)
+		p.base = NormalizedBranch(pr.Value.BaseRef)
 	}
 	if app.DefaultBranchPush && app.Event == "push" && app.DefaultBranch != "" && app.Ref == "refs/heads/"+app.DefaultBranch {
 		p.trust = TrustVerifiedDefault
@@ -62,19 +64,23 @@ func AppProvenance(app AppFacts, pr Optional[PullRequest], pipeline string) (Pro
 	return p, p.validate()
 }
 
-// ScheduleProvenance seals an unmodified schedule fire. Each schedule and the
-// principal that armed it write their own data scope.
-func ScheduleProvenance(schedule, armedBy, ref, sha, pipeline string) (Provenance, error) {
-	p := Provenance{trust: TrustSchedule, ref: ref, sha: strings.ToLower(sha), pipeline: pipeline, writer: "schedule/" + escapeWriter(schedule) + "/" + escapeWriter(armedBy)}
-	if schedule == "" || armedBy == "" {
-		return Provenance{}, errors.New("schedule provenance requires the schedule and its armer")
+// ScheduleProvenance seals an unmodified fire of a schedule a team admin armed on
+// the repository's default branch. The commit is that branch's head, which GitHub
+// resolved at fire time, so the run is as trusted as a push to the default branch
+// for pools and cache reads, while it still writes only its own scope.
+func ScheduleProvenance(schedule string, repositoryID int64, defaultBranch, sha, pipeline string) (Provenance, error) {
+	branch := NormalizedBranch(defaultBranch)
+	p := Provenance{trust: TrustSchedule, repositoryID: repositoryID, ref: "refs/heads/" + branch, sha: strings.ToLower(sha), pipeline: pipeline, defaultBranch: branch, writer: "schedule/" + escapeWriter(schedule)}
+	if schedule == "" || NormalizedBranch(branch) == "" {
+		return Provenance{}, errors.New("schedule provenance requires the schedule and the branch it follows")
 	}
 	return p, p.validate()
 }
 
-// ActionsProvenance seals a run whose credential is bound to one GitHub Actions push.
-func ActionsProvenance(ref, sha, pipeline string) (Provenance, error) {
-	p := Provenance{trust: TrustActions, ref: ref, sha: strings.ToLower(sha), pipeline: pipeline, writer: "actions"}
+// ActionsProvenance seals a run whose credential is bound to one GitHub Actions push
+// of one repository.
+func ActionsProvenance(repositoryID int64, ref, sha, pipeline string) (Provenance, error) {
+	p := Provenance{trust: TrustActions, repositoryID: repositoryID, ref: ref, sha: strings.ToLower(sha), pipeline: pipeline, writer: "actions"}
 	return p, p.validate()
 }
 
@@ -82,6 +88,27 @@ func ActionsProvenance(ref, sha, pipeline string) (Provenance, error) {
 // data scope, so one writer's records never reach another writer's runs.
 func AssertedProvenance(writer Writer, ref, sha, pipeline string) (Provenance, error) {
 	p := Provenance{trust: TrustAsserted, ref: ref, sha: strings.ToLower(sha), pipeline: pipeline, writer: string(writer)}
+	return p, p.validate()
+}
+
+// AssertedChildProvenance seals a child that left its parent's revision. No
+// pipeline vouched for its code, so it reads only team-wide shared secrets.
+func AssertedChildProvenance(writer Writer, ref, sha, pipeline string) (Provenance, error) {
+	p := Provenance{trust: TrustAsserted, ref: ref, sha: strings.ToLower(sha), pipeline: pipeline, writer: string(writer), sharedOnly: true}
+	return p, p.validate()
+}
+
+// SharedSecretsOnly reports a run that may read only team-wide shared secrets.
+func (p Provenance) SharedSecretsOnly() bool { return p.sharedOnly }
+
+// ReadingDefault adds the repository's verified default branch, which intake learned
+// from verified records, as a cache read fallback for an unverified run. It never
+// changes the scope the run writes or the identity it claims.
+func (p Provenance) ReadingDefault(branch string) (Provenance, error) {
+	if p.Verified() {
+		return Provenance{}, errors.New("a verified run carries its own default branch")
+	}
+	p.defaultBranch = NormalizedBranch(branch)
 	return p, p.validate()
 }
 
@@ -112,12 +139,27 @@ func (p Provenance) validate() error {
 		if p.repositoryID <= 0 || p.delivery == "" || p.ref == "" || p.sha == "" || p.writer != "" || !slices.Contains(appEvents, p.event) {
 			return errors.New("verified provenance requires a repository, delivery, event, ref and commit")
 		}
+		if p.sharedOnly {
+			return errors.New("only an asserted child is limited to shared secrets")
+		}
+		if p.base != "" && p.event != "pull_request" {
+			return errors.New("only a pull request seals a base branch")
+		}
+		if p.trust == TrustVerifiedDefault && (p.event != "push" || p.defaultBranch == "" || p.ref != "refs/heads/"+p.defaultBranch) {
+			return errors.New("verified-default provenance is a push to the default branch")
+		}
 	case TrustActions, TrustSchedule, TrustAsserted:
-		if p.repositoryID != 0 || p.delivery != "" || p.event != "" || p.defaultBranch != "" || p.base != "" || p.writer == "" || strings.Contains(p.writer, ":") {
+		if p.delivery != "" || p.event != "" || p.base != "" || p.writer == "" || strings.Contains(p.writer, ":") {
 			return errors.New("unverified provenance carries only a writer, ref and commit")
 		}
-		if p.trust == TrustActions && (p.ref == "" || p.sha == "") {
-			return errors.New("actions provenance requires the bound ref and commit")
+		if (p.trust == TrustAsserted) != (p.repositoryID == 0) || p.repositoryID < 0 || p.sharedOnly && p.trust != TrustAsserted {
+			return errors.New("only a run bound to a GitHub repository names its repository")
+		}
+		if p.trust != TrustAsserted && (p.ref == "" || p.sha == "") {
+			return errors.New("actions and schedule provenance require the proven ref and commit")
+		}
+		if p.trust == TrustSchedule && (p.defaultBranch == "" || p.ref != "refs/heads/"+p.defaultBranch) {
+			return errors.New("schedule provenance follows the default branch")
 		}
 	default:
 		return fmt.Errorf("unknown trust class %q", p.trust)
@@ -125,7 +167,8 @@ func (p Provenance) validate() error {
 	return nil
 }
 
-// Valid reports whether intake sealed this value; the zero value speaks for nothing.
+// Valid reports whether the value has a shape intake can seal; the zero value
+// speaks for nothing.
 func (p Provenance) Valid() bool { return p.validate() == nil }
 
 // Trust returns the class that established this identity.
@@ -136,17 +179,23 @@ func (p Provenance) Verified() bool {
 	return p.trust == TrustVerified || p.trust == TrustVerifiedDefault
 }
 
-// Ref is the ref the run speaks for. Only verified, actions and schedule refs are
-// established by the controller; an asserted ref is the submitter's text.
+// RepositoryID is the GitHub repository a signed delivery, an Actions push binding
+// or App automation consent established, and zero for a run a principal chose.
+func (p Provenance) RepositoryID() int64 { return p.repositoryID }
+
+// Ref is the ref the run speaks for. GitHub establishes it for verified, actions and
+// schedule runs; an asserted ref is the submitter's text.
 func (p Provenance) Ref() string { return p.ref }
 
 // SHA is the execution commit the run speaks for.
 func (p Provenance) SHA() string { return p.sha }
 
-// Pipeline is the pipeline the run speaks for. A child speaks for its parent's pipeline.
+// Pipeline is the pipeline the run speaks for. A child at its parent's exact revision
+// speaks for its parent's pipeline; every other run speaks for its own.
 func (p Provenance) Pipeline() string { return p.pipeline }
 
-// DefaultBranch is the repository's default branch name from a verified delivery.
+// DefaultBranch is the repository's default branch: from the delivery for a verified
+// run, and from verified records for any other run, which reads its cache from there.
 func (p Provenance) DefaultBranch() string { return p.defaultBranch }
 
 // PullRequestBase is the base branch name of a verified pull request delivery.
@@ -165,9 +214,9 @@ func (p Provenance) OIDC() (trigger string, repositoryID int64, ref, sha string)
 	case TrustVerified, TrustVerifiedDefault:
 		return p.event, p.repositoryID, p.ref, p.sha
 	case TrustSchedule:
-		return "cron", 0, p.ref, p.sha
+		return "cron", p.repositoryID, p.ref, p.sha
 	case TrustActions:
-		return "manual", 0, p.ref, p.sha
+		return "manual", p.repositoryID, p.ref, p.sha
 	}
 	return "manual", 0, "", ""
 }
@@ -183,20 +232,21 @@ type provenanceJSON struct {
 	Base          string     `json:"pull_request_base,omitempty"`
 	Delivery      string     `json:"delivery,omitempty"`
 	Writer        string     `json:"writer,omitempty"`
+	SharedOnly    bool       `json:"shared_secrets_only,omitempty"`
 }
 
 // MarshalJSON persists the sealed fields inside the request seal.
 func (p Provenance) MarshalJSON() ([]byte, error) {
-	return json.Marshal(provenanceJSON{p.trust, p.repositoryID, p.ref, p.sha, p.event, p.pipeline, p.defaultBranch, p.base, p.delivery, p.writer})
+	return json.Marshal(provenanceJSON{p.trust, p.repositoryID, p.ref, p.sha, p.event, p.pipeline, p.defaultBranch, p.base, p.delivery, p.writer, p.sharedOnly})
 }
 
-// UnmarshalJSON restores a stored seal and refuses any value no constructor could produce.
+// UnmarshalJSON restores a stored seal and refuses a value whose shape no constructor produces.
 func (p *Provenance) UnmarshalJSON(raw []byte) error {
 	var v provenanceJSON
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return err
 	}
-	decoded := Provenance{v.Trust, v.RepositoryID, v.Ref, v.SHA, v.Event, v.Pipeline, v.DefaultBranch, v.Base, v.Delivery, v.Writer}
+	decoded := Provenance{v.Trust, v.RepositoryID, v.Ref, v.SHA, v.Event, v.Pipeline, v.DefaultBranch, v.Base, v.Delivery, v.Writer, v.SharedOnly}
 	if decoded != (Provenance{}) {
 		if err := decoded.validate(); err != nil {
 			return err
@@ -211,8 +261,8 @@ func (p *Provenance) UnmarshalJSON(raw []byte) error {
 // same branch. An empty selector matches every branch.
 type BranchSelector []string
 
-// normalizeBranch strips the refs/heads/ prefix every branch selector compares without.
-func normalizeBranch(branch string) string {
+// NormalizedBranch strips the refs/heads/ prefix every branch comparison drops.
+func NormalizedBranch(branch string) string {
 	return strings.TrimPrefix(strings.TrimSpace(branch), "refs/heads/")
 }
 
@@ -220,7 +270,7 @@ func normalizeBranch(branch string) string {
 func ParseBranchSelector(patterns []string) (BranchSelector, error) {
 	out := make(BranchSelector, 0, len(patterns))
 	for _, pattern := range patterns {
-		pattern = normalizeBranch(pattern)
+		pattern = NormalizedBranch(pattern)
 		if pattern == "" {
 			return nil, errors.New("branch pattern is empty")
 		}
@@ -237,9 +287,9 @@ func (s BranchSelector) Matches(branch string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	branch = normalizeBranch(branch)
+	branch = NormalizedBranch(branch)
 	for _, pattern := range s {
-		if matched, err := path.Match(normalizeBranch(pattern), branch); err == nil && matched {
+		if matched, err := path.Match(NormalizedBranch(pattern), branch); err == nil && matched {
 			return true
 		}
 	}

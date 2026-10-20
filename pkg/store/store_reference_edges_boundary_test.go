@@ -126,7 +126,7 @@ func storeBoundaryForeignUploader(t *testing.T, s *Store) (*Tenant, blob.UploadI
 	publisher.Subject.ID = "publisher"
 	publisher.Grants = []capability.Grant{capability.DataRead, capability.DataWrite}
 	publisher.Binding = capability.Binding{Kind: capability.BindingRun, RunID: "foreign"}
-	publisher.Data = &capability.DataScope{Use: capability.DataPublish, RepositoryKey: "gh:1", RunID: "foreign", WriteRef: fixtureRef("").CapabilityScope(), ReadRefs: []string{fixtureRef("").CapabilityScope()}}
+	publisher.Data = &capability.DataScope{Use: capability.DataPublish, RepositoryKey: "gh:1", RunID: "foreign", WriteRef: assertedRef("").CapabilityScope(), ReadRefs: []string{assertedRef("").CapabilityScope()}}
 	authorityPersist(t, s, publisher)
 	foreign := &Tenant{s: s, team: "b"}
 	object := blob.UploadIntent{Authority: blob.Authority{CapabilityRef: publisher.Prefix}, Identity: blob.UploadIdentity{Kind: blob.UploadPublication, Team: "b", RunID: "foreign", Principal: "publisher", CapabilityRef: publisher.Prefix}, Digest: blob.Digest(strings.Repeat("e", 64)), Size: 3}

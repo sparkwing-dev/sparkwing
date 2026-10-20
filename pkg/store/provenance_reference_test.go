@@ -16,3 +16,7 @@ func TestProvenanceReferenceModel(t *testing.T) {
 func TestProvenanceUnverifiedWritersShareNoScope(t *testing.T) {
 	store.UnverifiedWritersShareNoScope(t, func(t *testing.T) *store.Store { return storetest.Open(t) })
 }
+
+func TestChildPipelinesMustBeDeclared(t *testing.T) {
+	store.ChildPipelinesMustBeDeclared(t, func(t *testing.T) *store.Store { return storetest.Open(t) })
+}

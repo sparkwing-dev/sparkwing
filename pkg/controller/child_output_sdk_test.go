@@ -91,6 +91,9 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 	if _, err := e.Store.DB().ExecContext(ctx, `UPDATE teams SET next_run_number=2 WHERE name='a'`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := e.Store.DB().ExecContext(ctx, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":["weather-report"]}`)); err != nil {
+		t.Fatal(err)
+	}
 	objectDirectory := t.TempDir()
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: objectDirectory, Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {

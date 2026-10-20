@@ -19,7 +19,7 @@ func TestReleaseSubscriptionRequiresATagPattern(t *testing.T) {
 	if githubAppSubscribes(open, "release", "published", env, "") {
 		t.Fatal("a release with no tag pattern started a run")
 	}
-	open.Tags = []string{"v*"}
+	open.ReleaseTags = []string{"v*"}
 	if !githubAppSubscribes(open, "release", "published", env, "") {
 		t.Fatal("a release on a matching tag did not start")
 	}

@@ -30,7 +30,7 @@ func scheduleIntakeFixture(t *testing.T, suffix uint32) (*Tenant, CronSchedule, 
 	}
 	s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		location, err := VerifiedScheduleIntake(ctx, resolver, in)
-		return IntakePolicyFacts{SourceLocation: &location, RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, err
+		return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 	}))
 	rewriteSchemaExec(t, s.db, `UPDATE cron_schedules SET github_installation_id=7,github_repository_id=701`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',1,'acme','Organization',1,1) ON CONFLICT DO NOTHING`)

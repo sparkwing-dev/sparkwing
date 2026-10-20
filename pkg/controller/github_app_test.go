@@ -1008,7 +1008,7 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 		"push": false, "pull_request": false, "pull_request_closed": true,
 		"pull_request_labeled": true, "pull_request_labels": []string{"ship"},
 		"pull_request_ready_for_review": true, "release_published": true,
-		"release_prereleased": true, "branch_create": true, "branch_delete": true, "tags": []string{"v1-*"},
+		"release_prereleased": true, "branch_create": true, "branch_delete": true, "tags": []string{"v1-*"}, "release_tags": []string{"v1-*"},
 	}); code != http.StatusOK {
 		t.Fatalf("opt-in subscription = %d", code)
 	}
@@ -1090,7 +1090,12 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 		switch event {
 		case "pull_request":
 			pr := request.PullRequest
-			if ref != "refs/pull/12/head" || !pr.Set || pr.Value.Action == "" {
+			// A merged closed pull request runs the merge commit on its base branch.
+			wantRef := "refs/pull/12/head"
+			if pr.Value.Action == "closed" {
+				wantRef = "refs/heads/main"
+			}
+			if ref != wantRef || !pr.Set || pr.Value.Action == "" {
 				t.Fatalf("PR facts = %+v", request)
 			}
 			if pr.Value.Action == "closed" && !pr.Value.Merged.Set {
@@ -1166,7 +1171,7 @@ func TestGitHubAppReleaseReplayAndCoverage(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
-	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "release_published": true, "tags": []string{"*"}}); code != http.StatusOK {
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "release_published": true, "release_tags": []string{"*"}}); code != http.StatusOK {
 		t.Fatal(code)
 	}
 	f.app.SetCommit("acme/widgets", "refs/tags/v1", headSHA)
@@ -1258,7 +1263,7 @@ func TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	for _, pipeline := range []string{"build", "test"} {
-		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"push": false, "release_published": true, "tags": []string{"*"}}); code != http.StatusOK {
+		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"push": false, "release_published": true, "release_tags": []string{"*"}}); code != http.StatusOK {
 			t.Fatal(code)
 		}
 	}

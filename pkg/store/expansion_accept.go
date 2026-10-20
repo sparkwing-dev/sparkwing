@@ -143,12 +143,16 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 }
 
 func checkExpansionSecretPoolsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, jobs map[string]runspec.JobExecutionSettings) error {
+	pipeline, err := secretPipeline(spec.Request)
+	if err != nil {
+		return err
+	}
 	for _, name := range spec.Resolved.SecretNames {
 		if slices.Contains(spec.Request.Request.LocalSecretNames, name) {
 			continue
 		}
 		var pool string
-		err := tx.QueryRowContext(ctx, `SELECT only_on FROM secrets WHERE team=? AND name=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY CASE WHEN pipeline='' THEN 1 ELSE 0 END LIMIT 1`+tx.forShare(), team, name, spec.Request.Provenance.Pipeline()).Scan(&pool)
+		err := tx.QueryRowContext(ctx, `SELECT only_on FROM secrets WHERE team=? AND name=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY CASE WHEN pipeline='' THEN 1 ELSE 0 END LIMIT 1`+tx.forShare(), team, name, pipeline).Scan(&pool)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}

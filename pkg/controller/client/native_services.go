@@ -59,7 +59,7 @@ func (c *NativeProcessClient) Summary(ctx context.Context, input nodeproto.Summa
 // Secret reads a declared secret under the live parent award.
 func (c *NativeProcessClient) Secret(ctx context.Context, name string) (string, bool, error) {
 	var result controllerwire.SecretValue
-	query := url.Values{"run": {c.run}, "pipeline": {c.request.Pipeline}}
+	query := url.Values{"run": {c.run}}
 	err := c.transport.request(ctx, "GET", "/api/v1/secrets/{name}", "/api/v1/secrets/"+url.PathEscape(name)+"?"+query.Encode(), "", nil, &result)
 	return result.Value, result.Masked, err
 }

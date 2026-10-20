@@ -20,8 +20,9 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 	authorityPersist(t, tenant.s, parent)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET capability_prefix='child-parent'`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET spec_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":["child"]}`))
 	// Intake seals the parent's repository alongside its repo_key column.
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, fixtureSeal(t, "ci", runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}))
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, sealWith(t, runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}, assertedProvenance(t, "ci", "", "")))
 	tenant.s.intake = fakeIntakeContracts{}
 	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil

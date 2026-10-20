@@ -35,7 +35,7 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*Server, cli
 		RequestedArgs: map[string]string{"public": "visible", "secret": value}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"secret"}},
 		Source: runspec.Source{Ref: strings.Repeat("a", 40), Location: runspec.SourceLocation{LocalCheckout: "/private/original-checkout", PipelineDir: ".sparkwing"}},
 	}
-	sealed, err := runspec.SealRequest(input, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Unix(1, 0).UTC(), Provenance: requestProvenance(t, "ci", input)})
+	sealed, err := runspec.SealRequest(input, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Unix(1, 0).UTC(), Provenance: assertedProvenance(t, "ci", "refs/heads/main", strings.Repeat("a", 40))})
 	if err != nil {
 		t.Fatal(err)
 	}

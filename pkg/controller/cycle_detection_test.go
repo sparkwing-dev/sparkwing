@@ -108,6 +108,7 @@ func TestChildCycleWalkStaysInsideItsTeamProperty(t *testing.T) {
 	}
 	setChildAncestor(t, e, "run", "private-root")
 	property := func(pipeline string) bool {
+		declareChildren(t, e, "safe-"+pipeline)
 		w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "safe-"+pipeline, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), 404)
 		return !strings.Contains(w.Body.String(), "private-pipeline") && !strings.Contains(w.Body.String(), "private-root")
 	}

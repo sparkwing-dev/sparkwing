@@ -126,7 +126,7 @@ func TestNativeDataWritesBindTicketsAndRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Request.Request.Git.Ref = "main"
-	sealed := fixtureReseal(t, "ci", run.Request)
+	sealed := sealWith(t, run.Request, assertedProvenance(t, "ci", "main", run.Request.Request.Git.SHA))
 	engineSQL(t, e.Store, `UPDATE runs SET git_branch='main',request_json=? WHERE team='a' AND id='run'`, sealed)
 	a := engineRuntimeClaim(t, e, capability.UnitNode)
 	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","memo":{}}`))

@@ -115,7 +115,11 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	if len(required) == 0 {
 		return nil
 	}
-	runID, pipeline := run.ID, run.Request.Provenance.Pipeline()
+	runID := run.ID
+	pipeline, err := secretPipeline(run.Request)
+	if err != nil {
+		return err
+	}
 	readable := map[string]bool{}
 	for _, name := range run.Request.Request.LocalSecretNames {
 		if _, err := tx.store.localSecret(team, runID, name); err != nil {

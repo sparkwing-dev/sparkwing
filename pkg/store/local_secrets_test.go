@@ -156,7 +156,8 @@ func FuzzLocalSecretsNeverPersistOrEscapeTheirRun(f *testing.F) {
 			t.Fatal("secret reached persisted projection")
 		}
 		rewriteSchemaCount(t, tenant.s.db, "secrets", 0)
-		switch attack % 5 {
+		// A run-bound read ignores a caller-named pipeline, so it is no escape route to test here.
+		switch attack % 4 {
 		case 0:
 			a.Target.Team = "foreign"
 		case 1:
@@ -164,8 +165,6 @@ func FuzzLocalSecretsNeverPersistOrEscapeTheirRun(f *testing.F) {
 		case 2:
 			a.Target.SecretName = "UNDECLARED"
 		case 3:
-			a.Target.Pipeline = "foreign"
-		case 4:
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=1 WHERE id=?`, a.Binding.RunID)
 		}
 		row, err := tenant.ReadSecret(t.Context(), a)

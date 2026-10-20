@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -157,7 +158,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err := checkActionsOwnerTx(ctx, tx, team, input); err != nil {
 			return AdmissionResult{}, err
 		}
-		owner, appRepository, err := trustedAppRunnerTx(ctx, tx, request)
+		owner, err := trustedAppRunnerTx(ctx, tx, request)
 		if err != nil {
 			return AdmissionResult{}, err
 		}
@@ -166,7 +167,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err != nil {
 			return AdmissionResult{}, err
 		}
-		pools, err := intakePoolsTx(ctx, tx, team, &input, provenance, policy.RepositoryAuthorized || appRepository)
+		pools, err := intakePoolsTx(ctx, tx, team, &input, provenance)
 		if err != nil {
 			return AdmissionResult{}, err
 		}
@@ -405,12 +406,14 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	return input, nil
 }
 
-func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, provenance runspec.Provenance, authorized bool) ([]string, error) {
+// intakePoolsTx grants reserved pools from sealed provenance alone: only a run whose
+// identity a signed App delivery or an App-armed schedule established qualifies.
+func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, provenance runspec.Provenance) ([]string, error) {
 	pools := []string{}
-	if !authorized {
+	if !provenance.Verified() && provenance.Trust() != runspec.TrustSchedule {
 		return pools, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT pool,branch,source,route FROM pool_access_rules WHERE team=? AND repo_key=? ORDER BY pool,id`+tx.forShare(), team, input.Git.Repository.Key)
+	rows, err := tx.QueryContext(ctx, `SELECT pool,branch,source,route FROM pool_access_rules WHERE team=? AND repo_key=? ORDER BY pool,id`+tx.forShare(), team, fmt.Sprintf("gh:%d", provenance.RepositoryID()))
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +423,7 @@ func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.R
 		if err = rows.Scan(&pool, &branch, &source, &route); err != nil {
 			return nil, err
 		}
-		if source != "" && source != string(input.Origin) {
+		if source != "" && (source != string(runspec.OriginApp) || !provenance.Verified()) {
 			continue
 		}
 		if branch != "" && !provenanceOnBranch(provenance, branch) {
@@ -516,6 +519,9 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 				return 0, authorityError(apierr.Forbidden, "a child run uses its parent's repository")
 			}
 			input.Git.Repository.Display = parent.Git.Repository.Display
+			if err := childDeclaredTx(ctx, tx, team, input.Lineage, input.Pipeline); err != nil {
+				return 0, err
+			}
 		}
 		if parent.Pipeline == input.Pipeline {
 			return 0, authorityError(apierr.Conflict, "child pipeline cycle")
@@ -526,10 +532,26 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 	return depth, nil
 }
 
+// childDeclaredTx refuses a child pipeline the creating job's accepted plan did not declare.
+func childDeclaredTx(ctx context.Context, tx *storeTx, team Team, lineage runspec.Lineage, pipeline string) error {
+	node, err := readNodeTx(ctx, tx, team, NodeRef{RunID: lineage.ParentRunID, NodeID: lineage.ParentJobID})
+	if err != nil {
+		return err
+	}
+	var spec nodeproto.JobSpec
+	if err := json.Unmarshal(node.Spec, &spec); err != nil {
+		return err
+	}
+	if !slices.Contains(spec.Children, pipeline) {
+		return &apierr.Error{Code: apierr.Forbidden, Message: fmt.Sprintf("job %q does not declare child pipeline %q", lineage.ParentJobID, pipeline), Details: map[string]any{"reason": apierr.ReasonBinding}}
+	}
+	return nil
+}
+
 // provenanceOnBranch reports whether a verified run speaks for a branch the selector names.
 func provenanceOnBranch(p runspec.Provenance, selector string) bool {
 	branch, ok := strings.CutPrefix(p.Ref(), "refs/heads/")
-	return p.Verified() && ok && runspec.BranchSelector{selector}.Matches(branch)
+	return (p.Verified() || p.Trust() == runspec.TrustSchedule) && ok && runspec.BranchSelector{selector}.Matches(branch)
 }
 
 func intakeScope(principal capability.Principal, pipeline string) (string, error) {

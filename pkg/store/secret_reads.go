@@ -30,23 +30,17 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 		if claim {
 			run = p.Capability.Binding.RunID
 		}
+		var selected RunRow
 		if run != "" {
-			selected, err := readRunTx(ctx, tx, t.team, run)
-			if err != nil {
+			if selected, err = readRunTx(ctx, tx, t.team, run); err != nil {
 				return err
 			}
-			speaksFor := selected.Request.Provenance.Pipeline()
-			if speaksFor == "" || pipeline != "" && pipeline != speaksFor {
-				return bindingRefusal()
+			// safety: a run-bound read selects the pipeline the run speaks for; a caller's selector cannot widen it.
+			if pipeline, err = secretPipeline(selected.Request); err != nil {
+				return err
 			}
-			pipeline = speaksFor
 		}
 		if claim {
-			var selected RunRow
-			selected, err = readRunTx(ctx, tx, t.team, run)
-			if err != nil {
-				return err
-			}
 			if slices.Contains(selected.Request.Request.LocalSecretNames, a.Target.SecretName) {
 				var value string
 				value, err = tx.store.localSecret(t.team, run, a.Target.SecretName)

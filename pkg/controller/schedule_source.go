@@ -59,8 +59,42 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 		return request, err
 	}
 	request.Git, request.Source = git, code
+	if row.LockedRef == "" && row.Where != store.CronWhereLocal && s.githubApp != nil && strings.HasPrefix(string(request.Git.Repository.Key), "gh:") {
+		branch, err := s.githubDefaultBranch(ctx, row)
+		if err != nil {
+			return request, err
+		}
+		request.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: branch}
+	}
 
 	return request, nil
+}
+
+// githubDefaultBranch asks GitHub, through the team's installation covering the
+// schedule's repository, which branch the repository serves as its head.
+func (s *Server) githubDefaultBranch(ctx context.Context, row store.CronSchedule) (string, error) {
+	tenant, err := s.tenantForTeam(ctx, row.Team)
+	if err != nil {
+		return "", err
+	}
+	display, err := sourceurl.Identity(row.RepoPath)
+	if err != nil {
+		return "", err
+	}
+	_, slug, _ := strings.Cut(display, "/")
+	installation, repository, err := s.resolveGitHubAppRepository(ctx, tenant, strings.TrimSuffix(slug, ".git"))
+	if err != nil {
+		return "", err
+	}
+	token, err := s.githubApp.client.InstallationTokenByIDs(ctx, installation.InstallationID, []int64{repository.ID}, map[string]string{"metadata": "read"})
+	if err != nil {
+		return "", err
+	}
+	repo, err := s.githubApp.client.RepositoryByID(ctx, token.Token, repository.ID)
+	if err == nil && repo.DefaultBranch == "" {
+		err = errors.New("GitHub reported no default branch")
+	}
+	return repo.DefaultBranch, err
 }
 
 func (s *Server) commitLocalSchedules(ctx context.Context, a capability.Authorized, root string, rows []store.CronSchedule, registration crons.LocalRegistration, replace bool) (crons.ArmReport, error) {

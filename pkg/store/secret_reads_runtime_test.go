@@ -124,7 +124,12 @@ func TestSecretReadAuthorityAndSelectionProperty(t *testing.T) {
 			case 1:
 				a.Target.RunID = "other"
 			case 2:
+				// A run-bound read selects the pipeline its provenance speaks for, whatever the caller names.
 				a.Target.Pipeline = "other"
+				if row, err := tenant.ReadSecret(t.Context(), a); err != nil || row == nil || row.Pipeline != "p" {
+					t.Fatalf("caller pipeline steered a run-bound read: %+v %v", row, err)
+				}
+				return
 			case 3:
 				a.Access.Liveness = capability.LiveReporting
 			case 4:

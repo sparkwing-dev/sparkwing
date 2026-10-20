@@ -113,7 +113,9 @@ func TestGitHubAppAutomationOwnerSelectionReachesPushesAndArmedSchedules(t *test
 	}
 }
 
-func TestGitHubAppPoolScheduleReachesItsReservedRunner(t *testing.T) {
+// A member's manual fire of an App schedule is asserted provenance, and reserved pools
+// admit only verified or verified-schedule provenance, so the pool's runner never gets it.
+func TestGitHubAppPoolScheduleManualFireStaysOffItsReservedRunner(t *testing.T) {
 	f := newAppFixture(t, func(s *controller.Server) *controller.Server { return s.WithCloudDeployment(true) })
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
@@ -143,8 +145,8 @@ func TestGitHubAppPoolScheduleReachesItsReservedRunner(t *testing.T) {
 		t.Fatalf("run App schedule = %d %+v", code, started)
 	}
 	var claimed controllerwire.ClaimResponse
-	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+minted.Capability, githubClaimBody(capability.UnitTrigger, "", ""), &claimed); code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != started.RunID {
-		t.Fatalf("prod runner claim of the pool schedule = %d, claimed=%v", code, claimed.Claim != nil)
+	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+minted.Capability, githubClaimBody(capability.UnitTrigger, "", ""), &claimed); code != http.StatusOK || claimed.Claim != nil {
+		t.Fatalf("prod runner claim of a manual pool schedule fire = %d, claimed=%+v", code, claimed.Claim)
 	}
 }
 

@@ -19,10 +19,15 @@ func blobRestoreFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) 
 	s, records, intent := blobRecordFixture(t)
 	intent.Authority.Ref = blob.RefFacts{}
 	app := runspec.AppFacts{Event: "pull_request", RepositoryID: 1, Ref: "refs/heads/feature", SHA: fixtureFeatureSHA, DeliveryKey: "feature-delivery", DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
-	body := fixtureSeal(t, "ci", runspec.SealedRequest{Version: 1, Request: runspec.Request{
+	pr := runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{BaseRepo: "gh:1", BaseRef: "release"}}
+	verified, err := runspec.AppProvenance(app, pr, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := sealWith(t, runspec.SealedRequest{Version: 1, Request: runspec.Request{
 		Git:         runspec.Git{Ref: app.Ref, SHA: app.SHA, DefaultBranch: runspec.Optional[string]{Set: true, Value: "main"}, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: app}},
-		PullRequest: runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{BaseRepo: "gh:1", BaseRef: "release"}},
-	}})
+		PullRequest: pr,
+	}}, verified)
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE team='a' AND id='run'", body)
 	if err := s.db.QueryRow("SELECT authority_json FROM capabilities WHERE prefix=?", intent.Authority.CapabilityRef).Scan(&body); err != nil {
 		t.Fatal(err)
@@ -33,7 +38,7 @@ func blobRestoreFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) 
 	}
 	record.Value.Data.ReadRefs = []string{"refs/heads/feature", "refs/heads/release", "refs/heads/main"}
 	record.Value.Data.WriteRef = "refs/heads/feature"
-	body, err := json.Marshal(record)
+	body, err = json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}

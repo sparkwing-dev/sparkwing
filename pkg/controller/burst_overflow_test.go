@@ -28,7 +28,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)
 			budget := int64(1)
 			seal := runspec.SealedRequest{Request: runspec.Request{Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}, OverflowMinutes: &budget}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}
-			request := fixtureSeal(t, "ci", seal)
+			request := sealWith(t, seal, assertedProvenance(t, "ci", "", ""))
 			engineSQL(t, e.Store, `UPDATE runs SET request_json=?,created_principal='account',created_subject_kind='account'`, request)
 			for _, id := range []string{"one", "two"} {
 				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
@@ -193,7 +193,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 		t.Fatalf("personal enrollment: %v", err)
 	}
 	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=0 WHERE name='a'`)
-	request := fixtureSeal(t, "ci", runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}}}})
+	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}}}}, assertedProvenance(t, "ci", "", ""))
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display='https://github.com/acme/repo',created_principal='someone-else',created_subject_kind='account'`, request)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	body := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job","available_cores":64}`

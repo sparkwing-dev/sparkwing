@@ -631,6 +631,7 @@ CREATE TABLE github_app_triggers (
     on_pr_ready_for_review BIGINT NOT NULL DEFAULT 0,
     on_release_published BIGINT NOT NULL DEFAULT 0,
     on_release_prereleased BIGINT NOT NULL DEFAULT 0,
+    release_tag_patterns TEXT NOT NULL DEFAULT '[]',
     on_branch_create BIGINT NOT NULL DEFAULT 0,
     on_branch_delete BIGINT NOT NULL DEFAULT 0,
     runner TEXT NOT NULL DEFAULT 'anywhere',

@@ -546,8 +546,9 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	if !githubCommit(pr.Head.SHA) {
 		return githubAppIntake{}, "the pull request names no head commit", nil
 	}
-	// safety: a closed pull request's head is code nobody merged; only a merge
-	// commit, which branch protection on the base admitted, may run.
+	// safety: a closed pull request's head is code nobody merged; only the merge
+	// commit GitHub reports for a merged pull request may run, and it runs as the
+	// base branch it landed on.
 	sha := pr.Head.SHA
 	if env.Action == "closed" {
 		if !pr.Merged {
@@ -564,6 +565,9 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	base["GITHUB_BASE_REF"], base["GITHUB_BASE_SHA"] = pr.Base.Ref, pr.Base.SHA
 	base["GITHUB_HEAD_REF"], base["GITHUB_HEAD_SHA"] = pr.Head.Ref, pr.Head.SHA
 	base["GITHUB_REF"], base["GITHUB_REF_TYPE"] = "refs/pull/"+strconv.Itoa(p.Number)+"/head", "branch"
+	if env.Action == "closed" {
+		base["GITHUB_REF"] = "refs/heads/" + pr.Base.Ref
+	}
 	base["GITHUB_LABEL"] = p.Label.Name
 	base["GITHUB_MERGED"] = strconv.FormatBool(pr.Merged)
 	// safety: an unreadable updated_at leaves the time zero, and the caller
@@ -953,7 +957,7 @@ func githubAppSubscribes(sub store.GitHubAppTrigger, event, action string, env m
 			}
 		}
 	case "release":
-		return (action == "published" && sub.ReleasePublished || action == "prereleased" && sub.ReleasePrereleased) && githubTagMatches(sub.Tags, env["GITHUB_TAG_NAME"])
+		return (action == "published" && sub.ReleasePublished || action == "prereleased" && sub.ReleasePrereleased) && githubTagMatches(sub.ReleaseTags, env["GITHUB_TAG_NAME"])
 	case "create":
 		return sub.BranchCreate && runspec.BranchSelector(sub.Branches).Matches(env["GITHUB_REF"])
 	case "delete":

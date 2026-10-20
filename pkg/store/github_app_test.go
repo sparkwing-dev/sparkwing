@@ -157,7 +157,7 @@ func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
 	opt := store.GitHubAppTrigger{
 		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "opt",
 		PullRequestClosed: true, PullRequestLabeled: true, PullRequestLabels: []string{"ship"}, PullRequestReadyForReview: true,
-		ReleasePublished: true, ReleasePrereleased: true, BranchCreate: true, BranchDelete: true,
+		ReleasePublished: true, ReleasePrereleased: true, ReleaseTags: []string{"v*"}, BranchCreate: true, BranchDelete: true,
 	}
 	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), opt); err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
 	}
 	got := subs[1]
 	if !got.PullRequestClosed || !got.PullRequestLabeled || len(got.PullRequestLabels) != 1 || got.PullRequestLabels[0] != "ship" ||
-		!got.PullRequestReadyForReview || !got.ReleasePublished || !got.ReleasePrereleased || !got.BranchCreate || !got.BranchDelete {
+		!got.PullRequestReadyForReview || !got.ReleasePublished || !got.ReleasePrereleased || !reflect.DeepEqual(got.ReleaseTags, []string{"v*"}) || !got.BranchCreate || !got.BranchDelete {
 		t.Fatalf("new event options = %+v", got)
 	}
 	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), store.GitHubAppTrigger{

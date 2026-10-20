@@ -75,7 +75,7 @@ func checkBlobSourceSetup(t *testing.T, previousAttempts int64, mutation, source
 func seedSourceSetupBundle(t *testing.T, s *Store, sourceDigest string) {
 	t.Helper()
 	seal := runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main"}, Source: runspec.Source{BundleDigest: runspec.Optional[string]{Set: true, Value: sourceDigest}}}}
-	rawSeal := fixtureSeal(t, "ci", seal)
+	rawSeal := sealWith(t, seal, assertedProvenance(t, "ci", "main", ""))
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, rawSeal)
 	identity := blob.UploadIdentity{Kind: blob.UploadSubmission, Team: "a", RunID: "run", Principal: "requester", CapabilityRef: "member"}
 	sourceJSON, err := json.Marshal(identity)
@@ -83,5 +83,5 @@ func seedSourceSetupBundle(t *testing.T, s *Store, sourceDigest string) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,3,1)`, sourceDigest)
-	rewriteSchemaExec(t, s.db, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,pipeline,created_at) VALUES ('a','source_bundle','source','source',?,'run','gh:1',?,'requester','local',?,'submission','run',0,0,?,'ci',1)`, sourceDigest, fixtureRef("main").CapabilityScope(), sourceJSON, []byte(`{"scope":{"ref":"main","writer":"account/fixture"}}`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,pipeline,created_at) VALUES ('a','source_bundle','source','source',?,'run','gh:1',?,'requester','local',?,'submission','run',0,0,?,'ci',1)`, sourceDigest, assertedRef("main").CapabilityScope(), sourceJSON, []byte(`{"scope":{"ref":"main","writer":"account/fixture"}}`))
 }

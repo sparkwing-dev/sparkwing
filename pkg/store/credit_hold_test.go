@@ -20,7 +20,7 @@ func meteredRunnerOnly(t *testing.T, s *Store) {
 func executingRunFixture(t *testing.T) (*Store, UnitDemand) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
-	request := fixtureSeal(t, "ci", runspec.SealedRequest{Request: runspec.Request{Mode: runspec.IntakeExecute, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}})
+	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Mode: runspec.IntakeExecute, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}, assertedProvenance(t, "ci", "", ""))
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?`, request)
 	return s, demand
 }

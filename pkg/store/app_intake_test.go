@@ -48,7 +48,7 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 	s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
 		delivery, err := VerifiedAppIntake(ctx, resolver, request)
 		location := request.Request.Source.Location
-		return IntakePolicyFacts{Delivery: &delivery, SourceLocation: &location, RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, err
+		return IntakePolicyFacts{Delivery: &delivery, SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 	}))
 	return s, tenant, in
 }
@@ -162,7 +162,7 @@ func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
 			git.App.Set = false
 		}
 		// Intake seals verified provenance only from App facts it could verify.
-		request.Provenance = fixtureProvenance(t, "ci", git.Ref)
+		request.Provenance = assertedProvenance(t, "ci", git.Ref, "")
 		if p, err := runspec.AppProvenance(git.App.Value, request.Request.PullRequest, "ci"); git.App.Set && err == nil {
 			request.Provenance = p
 		}

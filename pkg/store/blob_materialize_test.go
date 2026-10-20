@@ -54,7 +54,7 @@ func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef Nod
 	owner.Purpose, owner.Delivery, owner.Issuance = capability.PurposeTrigger, capability.DeliveryDirect, capability.Award
 	owner.Billing = &capability.BillingProvenance{PayerTeam: "a", ReservationID: "target-owner", ExecutorClass: "customer", Unit: capability.BillingHost, Start: capability.BillingAtAward}
 	owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: "target", Holder: "host", Generation: 1}
-	owner.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:1", RunID: "target", WriteRef: fixtureRef("main").CapabilityScope(), ReadRefs: []string{fixtureRef("main").CapabilityScope()}}
+	owner.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "gh:1", RunID: "target", WriteRef: assertedRef("main").CapabilityScope(), ReadRefs: []string{assertedRef("main").CapabilityScope()}}
 	expiry := s.now().Add(time.Hour)
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, s, owner)

@@ -362,7 +362,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 			}
 		}
 	}
-	if c.Data, err = awardDataScope(row, c); err != nil {
+	if c.Data, err = awardDataScope(row, sealed, c); err != nil {
 		return capability.Capability{}, err
 	}
 	if spec.Delivery == capability.DeliveryBootstrap {
@@ -389,11 +389,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	return c, nil
 }
 
-func awardDataScope(row awardRow, c capability.Capability) (*capability.DataScope, error) {
-	var sealed runspec.SealedRequest
-	if err := json.Unmarshal(row.request, &sealed); err != nil {
-		return nil, err
-	}
+func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Capability) (*capability.DataScope, error) {
 	facts, err := provenanceRefFacts(sealed)
 	if err != nil {
 		return nil, err

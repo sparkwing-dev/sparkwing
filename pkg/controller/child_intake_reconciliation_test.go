@@ -20,6 +20,7 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 	t.Helper()
 	e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
 	engineSQL(t, e.Store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
+	declareChildren(t, e, "deploy", "Deploy", "ci", "root", "fresh")
 	var req runspec.SealedRequest
 	row, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
@@ -35,7 +36,7 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 	req.Request.Git.Ref = "main"
 	req.Request.Git.SHA = "0123456789abcdef0123456789abcdef01234567"
 	req.Request.Source.Ref = req.Request.Git.SHA
-	raw := fixtureReseal(t, "ci", req)
+	raw := sealWith(t, req, assertedProvenance(t, "ci", req.Request.Git.Ref, req.Request.Git.SHA))
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, raw)
 	claimed := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
 	var award controllerwire.ClaimResponse
@@ -44,6 +45,16 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 	}
 	engineClaimHTTP(t, h, award.Claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	return e, h, award.Claim.Capability
+}
+
+// declareChildren makes the parent job's plan declare the child pipelines it may start.
+func declareChildren(t *testing.T, e *EngineController, pipelines ...string) {
+	t.Helper()
+	spec, err := json.Marshal(map[string]any{"id": "job", "children": pipelines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, spec)
 }
 
 func childIntakeBody(t *testing.T, pipeline string, git runspec.Git) string {
@@ -169,6 +180,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 		}
 		cycle := childIntakeBody(t, parent.Request.Request.Pipeline, parent.Request.Request.Git)
 		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", cycle, 409)
+		declareChildren(t, e, private)
 		body := childIntakeBody(t, private, parent.Request.Request.Git)
 		var replies []string
 		for _, id := range []string{ancestor, ancestor + "-missing"} {

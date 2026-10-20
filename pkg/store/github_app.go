@@ -52,11 +52,13 @@ type GitHubAppTrigger struct {
 	PullRequestReadyForReview bool
 	ReleasePublished          bool
 	ReleasePrereleased        bool
-	BranchCreate              bool
-	BranchDelete              bool
-	Runner                    GitHubAppRunner
-	CreatedBy                 string
-	CreatedAt                 time.Time
+	// ReleaseTags are the tag patterns a published or prereleased release must match.
+	ReleaseTags  []string
+	BranchCreate bool
+	BranchDelete bool
+	Runner       GitHubAppRunner
+	CreatedBy    string
+	CreatedAt    time.Time
 }
 
 // ErrInstallationBoundElsewhere is returned when a team connects an
@@ -240,21 +242,24 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 
 const githubAppTriggerCols = `repository_id, pipeline, repository, installation_id, on_push, tag_patterns, on_pull_request,
        branches, base_branches, created_by, created_at, on_pr_closed, on_pr_labeled, pr_labels, on_pr_ready_for_review,
-       on_release_published, on_release_prereleased, on_branch_create, on_branch_delete, runner`
+       on_release_published, on_release_prereleased, release_tag_patterns, on_branch_create, on_branch_delete, runner`
 
 func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, error) {
 	var out []GitHubAppTrigger
 	for rows.Next() {
 		tr := GitHubAppTrigger{Team: t.team}
 		var push, pr, closed, labeled, ready, published, prereleased, create, deleted int
-		var patterns, branches, baseBranches, labels, runner string
+		var patterns, releasePatterns, branches, baseBranches, labels, runner string
 		var created int64
 		if err := rows.Scan(&tr.RepositoryID, &tr.Pipeline, &tr.Repository, &tr.InstallationID, &push, &patterns, &pr,
 			&branches, &baseBranches, &tr.CreatedBy, &created,
-			&closed, &labeled, &labels, &ready, &published, &prereleased, &create, &deleted, &runner); err != nil {
+			&closed, &labeled, &labels, &ready, &published, &prereleased, &releasePatterns, &create, &deleted, &runner); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(patterns), &tr.Tags); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(releasePatterns), &tr.ReleaseTags); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(branches), &tr.Branches); err != nil {
@@ -284,6 +289,19 @@ func (t *Tenant) putGitHubAppTriggerTx(ctx context.Context, tx *storeTx, tr GitH
 		return GitHubAppTrigger{}, fmt.Errorf("%w: a subscription needs a repository, a pipeline and at least one event", ErrInvalidInput)
 	}
 	if err := ValidateGitHubTagPatterns(tr.Tags); err != nil {
+		return GitHubAppTrigger{}, err
+	}
+	if err := ValidateGitHubTagPatterns(tr.ReleaseTags); err != nil {
+		return GitHubAppTrigger{}, err
+	}
+	if (tr.ReleasePublished || tr.ReleasePrereleased) && len(tr.ReleaseTags) == 0 {
+		return GitHubAppTrigger{}, fmt.Errorf("%w: a release subscription needs release_tags patterns; anyone who can push a tag can publish a release on it", ErrInvalidInput)
+	}
+	if tr.ReleaseTags == nil {
+		tr.ReleaseTags = []string{}
+	}
+	releasePatterns, err := json.Marshal(tr.ReleaseTags)
+	if err != nil {
 		return GitHubAppTrigger{}, err
 	}
 	runner, err := ParseGitHubAppRunner(string(tr.Runner))
@@ -342,20 +360,20 @@ func (t *Tenant) putGitHubAppTriggerTx(ctx context.Context, tx *storeTx, tr GitH
 	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO github_app_triggers (team, repo_key, `+githubAppTriggerCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (team, repository_id, pipeline) DO UPDATE SET
 		    repository = excluded.repository, installation_id = excluded.installation_id,
 		    on_push = excluded.on_push, tag_patterns = excluded.tag_patterns, on_pull_request = excluded.on_pull_request,
 		    branches = excluded.branches, base_branches = excluded.base_branches,
 		    on_pr_closed = excluded.on_pr_closed, on_pr_labeled = excluded.on_pr_labeled,
 		    pr_labels = excluded.pr_labels, on_pr_ready_for_review = excluded.on_pr_ready_for_review,
-		    on_release_published = excluded.on_release_published, on_release_prereleased = excluded.on_release_prereleased,
+		    on_release_published = excluded.on_release_published, on_release_prereleased = excluded.on_release_prereleased, release_tag_patterns = excluded.release_tag_patterns,
 		    on_branch_create = excluded.on_branch_create, on_branch_delete = excluded.on_branch_delete,
 		    runner = excluded.runner, created_by = excluded.created_by, created_at = excluded.created_at`,
 		string(t.team), fmt.Sprintf("gh:%d", tr.RepositoryID), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push), string(patterns),
 		flag(tr.PullRequest), string(branches), string(baseBranches), tr.CreatedBy, tr.CreatedAt.UnixNano(),
 		flag(tr.PullRequestClosed), flag(tr.PullRequestLabeled), string(labels), flag(tr.PullRequestReadyForReview),
-		flag(tr.ReleasePublished), flag(tr.ReleasePrereleased), flag(tr.BranchCreate), flag(tr.BranchDelete), string(tr.Runner))
+		flag(tr.ReleasePublished), flag(tr.ReleasePrereleased), string(releasePatterns), flag(tr.BranchCreate), flag(tr.BranchDelete), string(tr.Runner))
 	if err != nil {
 		return GitHubAppTrigger{}, err
 	}

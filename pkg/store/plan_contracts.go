@@ -86,7 +86,11 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 		}
 		values = append(values, value)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared FROM secrets WHERE team=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY name,pipeline`+tx.forShare(), team, spec.Request.Provenance.Pipeline())
+	pipeline, err := secretPipeline(spec.Request)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared FROM secrets WHERE team=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY name,pipeline`+tx.forShare(), team, pipeline)
 	if err != nil {
 		return nil, err
 	}

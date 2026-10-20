@@ -311,21 +311,22 @@ func blobCacheRepositoryAllowed(a blobActor, kind blob.Kind) bool {
 	return !blobLocalRepo(a.authority.Repo) || kind == blob.KindDepcache && a.capability.Subject.Kind == capability.SubjectLocal && a.capability.Data.Use == capability.DataClaim
 }
 
-// provenanceRefFacts derives a run's data scope and its verified fallbacks from its
-// sealed provenance alone.
+// provenanceRefFacts is the one owner of a run's data scope: the scope it writes,
+// from its trust class, and the verified fallbacks it reads, from the default
+// branch and pull request base its provenance sealed.
 func provenanceRefFacts(sealed runspec.SealedRequest) (blob.RefFacts, error) {
 	p := sealed.Provenance
 	if !p.Valid() {
 		return blob.RefFacts{}, authorityError(apierr.IntegrityFailure, "run has no sealed provenance")
 	}
 	facts := blob.RefFacts{Scope: blob.ScopeFor(p), SHA: p.SHA()}
+	if p.DefaultBranch() != "" {
+		facts.DefaultBranch = "refs/heads/" + p.DefaultBranch()
+	}
 	if !p.Verified() {
 		return facts, nil
 	}
 	facts.AppDeliveryKey = p.Delivery()
-	if p.DefaultBranch() != "" {
-		facts.DefaultBranch = "refs/heads/" + p.DefaultBranch()
-	}
 	facts.DefaultBranchVerified = p.Trust() == runspec.TrustVerifiedDefault
 	if base := p.PullRequestBase(); base != "" {
 		facts.PullRequestBase = runspec.Optional[string]{Set: true, Value: "refs/heads/" + base}

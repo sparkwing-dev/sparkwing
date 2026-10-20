@@ -18,7 +18,7 @@ func TestStoreReachabilityRetention(t *testing.T) {
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	intent := blobIntent(change.Actor, runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 2, Generation: 7})
-	intent.Authority.Ref.Scope = fixtureRef("main")
+	intent.Authority.Ref.Scope = assertedRef("main")
 	expires := now.Add(time.Minute)
 	for _, object := range []struct {
 		kind    blob.Kind
@@ -195,7 +195,7 @@ func TestStoreReachabilityNewReferenceWinsMarkedCollection(t *testing.T) {
 	authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: identity}}
 	intent := blob.UploadIntent{Authority: authority, Identity: identity, Digest: blob.Digest(strings.Repeat("a", 64)), Size: 3}
 	storeBoundaryUpload(t, tenant, intent, "rescued")
-	key := blob.RecordKey{Team: "a", Kind: blob.KindSourceBundle, Scope: blob.Scope{Repo: "gh:1", Ref: fixtureRef("main"), Pipeline: "ci", Key: "rescued"}, Name: "modules"}
+	key := blob.RecordKey{Team: "a", Kind: blob.KindSourceBundle, Scope: blob.Scope{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Key: "rescued"}, Name: "modules"}
 	if _, err := tenant.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Key: key, Source: identity, Digest: intent.Digest}); err != nil {
 		t.Fatal(err)
 	}

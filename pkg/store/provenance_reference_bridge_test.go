@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -50,6 +52,11 @@ func referenceWorld(t *testing.T, s *Store, repo string) *Tenant {
 		s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	}
 	s.SetIntakePolicy(referencePolicy())
+	// A verified push of main left a record, so every run of the repository reads
+	// its cache from main.
+	digest := strings.Repeat("d", 64)
+	s.testOnlyExec(t, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,1,1)`, digest)
+	s.testOnlyExec(t, `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at) VALUES ('a','depcache','default','modules',?,?,'refs/heads/main','runner','cloud',?,'job','main-run',1,1,?,1)`, digest, repo, []byte(`{}`), []byte(`{}`))
 	s.testOnlyExec(t, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,source,route,created_by,created_at) VALUES ('a','main-only.000000','deploy-pool',?,'main','','','owner',1)`, repo)
 	for _, row := range [][2]string{{"team-token", ""}, {"ci-token", "ci"}, {"deploy-token", "deploy"}} {
 		shared := 0
@@ -70,9 +77,26 @@ func referenceMember(t *testing.T, s *Store, id string, role Role) Actor {
 }
 
 // referencePolicy answers intake for every entrypoint the reference model drives.
+// referenceIntakePolicy resolves a following schedule to the head of its branch, as
+// the controller does through the App at fire time.
+type referenceIntakePolicy struct{ fakeIntakePolicy }
+
+func (referenceIntakePolicy) ResolveScheduleSource(_ context.Context, row CronSchedule, input runspec.Request) (runspec.Request, error) {
+	input.Version, input.Pipeline, input.Mode, input.Origin = 1, row.Pipeline, runspec.IntakeExecute, runspec.OriginSchedule
+	input.Git.Repository, input.Git.Ref = runspec.Repository{Key: "gh:701", Display: "acme/app"}, row.GitBranch
+	input.Source.Location = runspec.SourceLocation{RemoteURL: row.RepoPath, PipelineDir: ".sparkwing"}
+	input.Git.SHA, input.Source.Ref = referenceMain, referenceMain
+	if row.LockedRef != "" {
+		input.Git.SHA, input.Source.Ref = row.LockedRef, row.LockedRef
+	} else {
+		input.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: "main"}
+	}
+	return input, nil
+}
+
 func referencePolicy() IntakePolicy {
-	return fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
-		facts := IntakePolicyFacts{RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}
+	return referenceIntakePolicy{fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
+		facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}
 		location := request.Request.Source.Location
 		facts.SourceLocation = &location
 		switch {
@@ -86,7 +110,7 @@ func referencePolicy() IntakePolicy {
 			return facts, err
 		}
 		return facts, nil
-	})
+	})}
 }
 
 func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObservation {
@@ -103,18 +127,18 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := json.Marshal(row.Request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope, err := awardDataScope(awardRow{run: run, repo: string(row.Request.Request.Git.Repository.Key), request: request}, capability.Capability{Unit: capability.UnitNode})
+	scope, err := awardDataScope(awardRow{run: run, repo: string(row.Request.Request.Git.Repository.Key)}, row.Request, capability.Capability{Unit: capability.UnitNode})
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := provenanceObservation{Subject: subject, SHA: facts.SHA, Write: scope.WriteRef, Reads: scope.ReadRefs, Pools: slices.Clone(row.Request.AllowedPools), Secrets: []string{}}
 	err = tenant.s.inTx(t.Context(), func(tx *storeTx) error {
 		for _, name := range []string{"ci-token", "deploy-token", "team-token"} {
-			if _, _, err := selectedSecretTx(t.Context(), tx, tenant.team, name, row.Request.Provenance.Pipeline(), true); err == nil {
+			pipeline, err := secretPipeline(row.Request)
+			if err != nil {
+				return err
+			}
+			if _, _, err := selectedSecretTx(t.Context(), tx, tenant.team, name, pipeline, true); err == nil {
 				out.Secrets = append(out.Secrets, name)
 			} else if !errors.Is(err, ErrNotFound) {
 				return err
@@ -186,12 +210,16 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 	sched, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
 		ID: "schedule-9", RepoPath: "https://github.com/acme/repo-9.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: CronWhereController,
-		GitBranch: "main", LockedRef: referenceMain, ArmedBy: "owner@example.com", Args: map[string]string{"message": "hello"},
+		GitBranch: "main", ArmedBy: "owner@example.com", Args: map[string]string{"message": "hello"},
 	}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.testOnlyExec(t, `UPDATE pool_access_rules SET repo_key=?`, sched.RepositoryKey)
+	s.testOnlyExec(t, `UPDATE blob_records SET repo_key=?`, sched.RepositoryKey)
+	if mode == "locked" {
+		s.testOnlyExec(t, `UPDATE cron_schedules SET locked_ref=?`, referenceMain)
+	}
 	s.testOnlyExec(t, `UPDATE cron_schedules SET github_installation_id=7,github_repository_id=701`)
 	s.testOnlyExec(t, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',1,'acme','Organization',1,1) ON CONFLICT DO NOTHING`)
 	s.testOnlyExec(t, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a',?,701,'acme/repo',7,'owner',1)`, sched.RepositoryKey)
@@ -200,10 +228,10 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 	}
 	var result AdmissionResult
 	switch mode {
-	case "fire":
+	case "fire", "locked":
 		result, err = tenant.AdmitScheduledRun(t.Context(), sched, now)
 	case "override":
-		if err := tenant.SetCronOverride(t.Context(), sched.ID, CronOverride{Args: map[string]string{"message": "chosen"}}, now); err != nil {
+		if err := tenant.SetCronOverride(t.Context(), sched.ID, CronOverride{TZSet: true, TZ: "Europe/Paris"}, now); err != nil {
 			t.Fatal(err)
 		}
 		if sched, err = tenant.GetCronSchedule(t.Context(), sched.ID); err != nil {
@@ -214,6 +242,33 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 		owner := referenceMember(t, s, "owner", RoleOwner)
 		_, result.RunID, _, err = tenant.RunAuthorizedSchedule(t.Context(), teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/schedules/repos"), sched.ID, "now")
 	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tenant, result.RunID
+}
+
+// memberScheduleReference arms a schedule through the member route, as a member of
+// the given role, and fires it at its next due instant.
+func memberScheduleReference(t *testing.T, s *Store, role Role) (*Tenant, string) {
+	t.Helper()
+	tenant := referenceWorld(t, s, "gh:701")
+	armer := referenceMember(t, s, "armer", role)
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), teamAuthorization(t, s, armer, "a", "PUT", "/api/v1/schedules/repos"), controllerwire.ScheduleRepoRequest{
+		Mode: controllerwire.ScheduleReplace, RepoURL: "https://github.com/acme/app.git", Branch: "main", Follow: true,
+		Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fire is a minute already past, so it is due on either dialect's clock.
+	due := s.now().Truncate(time.Minute).Add(-time.Minute)
+	s.testOnlyExec(t, `UPDATE cron_schedules SET cursor_at=?,next_due_at=? WHERE id=?`, due.Add(-time.Minute).UnixNano(), due.UnixNano(), ids[0])
+	row, err := tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tenant.AdmitScheduledRun(t.Context(), row, due)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,6 +297,15 @@ func actionsReference(t *testing.T, s *Store) (*Tenant, string) {
 // claim, then submits the child request through the real intake with that claim.
 func childReference(t *testing.T, s *Store, parent runspec.Provenance, parentGit runspec.Git, child runspec.Request) (*Tenant, string) {
 	t.Helper()
+	tenant, run, err := admitReferenceChild(t, s, parent, parentGit, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tenant, run
+}
+
+func admitReferenceChild(t *testing.T, s *Store, parent runspec.Provenance, parentGit runspec.Git, child runspec.Request) (*Tenant, string, error) {
+	t.Helper()
 	tenant := referenceWorld(t, s, "gh:1")
 	now := s.now()
 	sealed := runspec.SealedRequest{Version: 1, RunID: "run", Provenance: parent, Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Git: parentGit, Source: runspec.Source{Ref: parentGit.SHA}}}
@@ -251,7 +315,7 @@ func childReference(t *testing.T, s *Store, parent runspec.Provenance, parentGit
 	}
 	s.testOnlyExec(t, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_subject_kind,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','host','execute',?,'account','owner',1,'r30',30)`, body, []byte(`[]`))
 	s.testOnlyExec(t, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
-	s.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,started_at,lease_expires_at) VALUES ('a','run','job','running',?,?,'runner','child-parent',2,3,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(time.Hour).UnixNano())
+	s.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,started_at,lease_expires_at) VALUES ('a','run','job','running',?,?,'runner','child-parent',2,3,?,?)`, []byte(`{"id":"job","children":["deploy"]}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(time.Hour).UnixNano())
 	s.testOnlyExec(t, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','run','job',3,2,'runner','child-parent','runner','runner','remote',?)`, now.Add(-time.Minute).UnixNano())
 	expiry := now.Add(time.Hour)
 	claim := authorityRoot("child-parent", "a")
@@ -262,10 +326,7 @@ func childReference(t *testing.T, s *Store, parent runspec.Provenance, parentGit
 	child.Version, child.Team, child.Mode, child.Dispatch = 1, "a", runspec.IntakeExecute, runspec.DispatchHost
 	child.Lineage = runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}
 	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, IdempotencyKey: "child", Request: child})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tenant, result.RunID
+	return tenant, result.RunID, err
 }
 
 func referenceAppProvenance(t *testing.T, ref, sha string) (runspec.Provenance, runspec.Git) {
@@ -287,10 +348,15 @@ func childRequest(pipeline, ref, sha string) runspec.Request {
 // parent, and states every authority that identity decides. {run} is the admitted
 // run's ID.
 func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
+	// An asserted run claims no repository, ref or commit, writes only its writer's
+	// scope and reads that scope plus the repository's verified default branch.
 	asserted := func(pipeline, writer, ref string, secrets ...string) provenanceObservation {
 		write := "manual:" + writer + ":" + ref
-		return provenanceObservation{Subject: "team:a:repository_id::pipeline:" + pipeline + ":trigger:manual:runner:runner:ref:", Write: write, Reads: []string{write}, Pools: []string{}, Secrets: secrets}
+		return provenanceObservation{Subject: "team:a:repository_id::pipeline:" + pipeline + ":trigger:manual:runner:runner:ref:", Write: write, Reads: []string{write, "refs/heads/main"}, Pools: []string{}, Secrets: secrets}
 	}
+	verifiedSchedule := provenanceObservation{Subject: "team:a:repository_id:701:pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:schedule/schedule-9:refs/heads/main", Reads: []string{"manual:schedule/schedule-9:refs/heads/main", "refs/heads/main"}, Pools: []string{"deploy-pool"}, Secrets: []string{"team-token"}}
+	memberSchedule := verifiedSchedule
+	memberSchedule.Write, memberSchedule.Reads = "manual:schedule/{schedule}:refs/heads/main", []string{"manual:schedule/{schedule}:refs/heads/main", "refs/heads/main"}
 	rows := []struct {
 		name  string
 		admit func(t *testing.T, s *Store) (*Tenant, string)
@@ -332,13 +398,33 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			want: asserted("ci", "account/alice", "refs/heads/main", "ci-token", "team-token"),
 		},
 		{
-			name:  "an unmodified schedule fire speaks as cron with its own scope",
+			// A schedule an admin armed on the default branch, unmodified,
+			// whose commit GitHub resolved at fire time, is verified: it gets the
+			// main-only pool and reads main's cache, but writes only its own scope.
+			name:  "an App-armed schedule following the default branch is verified",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "fire") },
-			want:  provenanceObservation{Subject: "team:a:repository_id::pipeline:nightly:trigger:cron:runner:runner:ref:main", SHA: referenceMain, Write: "manual:schedule/schedule-9/owner@example.com:main", Reads: []string{"manual:schedule/schedule-9/owner@example.com:main"}, Pools: []string{}, Secrets: []string{"team-token"}},
+			want:  verifiedSchedule,
 		},
 		{
-			name:  "a schedule fire with overridden arguments is asserted",
+			name:  "a schedule a team admin armed on the default branch is verified",
+			admit: func(t *testing.T, s *Store) (*Tenant, string) { return memberScheduleReference(t, s, RoleOwner) },
+			want:  memberSchedule,
+		},
+		{
+			name:  "a schedule an editor armed is asserted under the armer",
+			admit: func(t *testing.T, s *Store) (*Tenant, string) { return memberScheduleReference(t, s, RoleEditor) },
+			want:  asserted("nightly", "armer/armer", "main", "team-token"),
+		},
+		{
+			// 11 M2 and the M1 review: any override, here only the time zone, means a
+			// principal chose part of the fire, so it cannot keep trigger:cron.
+			name:  "a schedule fire with any override is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "override") },
+			want:  asserted("nightly", "run/{run}", "main", "team-token"),
+		},
+		{
+			name:  "a schedule locked to a commit is asserted",
+			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "locked") },
 			want:  asserted("nightly", "run/{run}", "main", "team-token"),
 		},
 		{
@@ -349,14 +435,14 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		{
 			name:  "a GitHub Actions push keeps its proven ref under its own scope",
 			admit: actionsReference,
-			want:  provenanceObservation{Subject: "team:a:repository_id::pipeline:ci:trigger:manual:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:actions:refs/heads/main", Reads: []string{"manual:actions:refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
+			want:  provenanceObservation{Subject: "team:a:repository_id:701:pipeline:ci:trigger:manual:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:actions:refs/heads/main", Reads: []string{"manual:actions:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
 			name: "a retry by another member copies the App provenance whole",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				tenant, source := appReference(t, s, "refs/heads/main", referenceMain, "")
-				owner := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "owner"}}
-				result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: owner.Authority, Request: runspec.Request{Version: 1, Team: "a", Lineage: runspec.Lineage{RetryOf: source}}})
+				bob := referenceMember(t, s, "bob", RoleEditor)
+				result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: bob.Authority, Request: runspec.Request{Version: 1, Team: "a", Lineage: runspec.Lineage{RetryOf: source}}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -374,14 +460,14 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		},
 		{
 			// 10#1 and 13 C1: a feature-branch job names main and the deploy pipeline
-			// with its own commit. It must not mint main's deploy subject, reach the
-			// deploy pipeline's secrets, the main-only pool or main's cache.
+			// with its own commit. It must not mint main's subject, reach any
+			// pipeline's scoped secrets, the main-only pool or main's write scope.
 			name: "attack: a feature child claiming main's ref and the deploy pipeline is refused main's identity",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				parent, git := referenceAppProvenance(t, "refs/heads/feature", referenceFeature)
 				return childReference(t, s, parent, git, childRequest("deploy", "refs/heads/main", referenceFeature))
 			},
-			want: asserted("ci", "run/run", "refs/heads/main", "ci-token", "team-token"),
+			want: asserted("deploy", "run/run", "refs/heads/main", "team-token"),
 		},
 		{
 			name: "a child of main that resolves another branch is asserted under its parent run",
@@ -389,7 +475,19 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 				parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
 				return childReference(t, s, parent, git, childRequest("deploy", "refs/heads/feature", referenceFeature))
 			},
-			want: asserted("ci", "run/run", "refs/heads/feature", "ci-token", "team-token"),
+			want: asserted("deploy", "run/run", "refs/heads/feature", "team-token"),
+		},
+		{
+			name: "a child at an asserted parent's revision keeps the parent's identity and secrets",
+			admit: func(t *testing.T, s *Store) (*Tenant, string) {
+				parent, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "alice"), "refs/heads/main", referenceMain, "ci")
+				if err != nil {
+					t.Fatal(err)
+				}
+				git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: referenceMain}
+				return childReference(t, s, parent, git, childRequest("deploy", "refs/heads/main", referenceMain))
+			},
+			want: provenanceObservation{Subject: "team:a:repository_id::pipeline:ci:trigger:manual:runner:runner:ref:", Write: "manual:account/alice:refs/heads/main", Reads: []string{"manual:account/alice:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
 			name: "a child of an asserted run keeps its parent's writer",
@@ -401,7 +499,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 				git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: referenceMain}
 				return childReference(t, s, parent, git, childRequest("deploy", "refs/heads/feature", referenceFeature))
 			},
-			want: asserted("ci", "account/alice", "refs/heads/feature", "ci-token", "team-token"),
+			want: asserted("deploy", "account/alice", "refs/heads/feature", "team-token"),
 		},
 	}
 	for _, row := range rows {
@@ -409,10 +507,15 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			tenant, run := row.admit(t, open(t))
 			got := observeProvenance(t, tenant, run)
 			want := row.want
-			want.Write = strings.ReplaceAll(want.Write, "{run}", run)
+			row, err := tenant.ReadRun(t.Context(), run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fill := strings.NewReplacer("{run}", run, "{schedule}", row.Request.AuthorityRef.ID).Replace
+			want.Write = fill(want.Write)
 			want.Reads = slices.Clone(want.Reads)
 			for i := range want.Reads {
-				want.Reads[i] = strings.ReplaceAll(want.Reads[i], "{run}", run)
+				want.Reads[i] = fill(want.Reads[i])
 			}
 			if want.Subject != got.Subject || want.SHA != got.SHA || want.Write != got.Write || !slices.Equal(want.Reads, got.Reads) || !slices.Equal(want.Pools, got.Pools) || !slices.Equal(want.Secrets, got.Secrets) {
 				t.Fatalf("observed %+v\nwant     %+v", got, want)
@@ -443,5 +546,16 @@ func UnverifiedWritersShareNoScope(t *testing.T, open func(*testing.T) *Store) {
 		if slices.Contains(reader.Reads, alice.Write) || reader.Write == alice.Write {
 			t.Fatalf("%s reads or writes alice's scope %q: %+v", name, alice.Write, reader)
 		}
+	}
+}
+
+// ChildPipelinesMustBeDeclared is decision 28 item 11: a job starts only the child
+// pipelines its accepted plan declared.
+func ChildPipelinesMustBeDeclared(t *testing.T, open func(*testing.T) *Store) {
+	parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
+	_, _, err := admitReferenceChild(t, open(t), parent, git, childRequest("deploy2", "refs/heads/main", referenceMain))
+	var refused *apierr.Error
+	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+		t.Fatalf("undeclared child pipeline admitted: %v", err)
 	}
 }

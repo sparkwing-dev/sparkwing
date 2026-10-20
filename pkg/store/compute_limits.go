@@ -395,13 +395,11 @@ func globalRunsPerHourRefusal(ctx context.Context, q rowQuerier, limit, since in
 }
 
 // enforceChildLimitsTx bounds a child's depth and its root's descendants, and returns
-// the subject that created the root, whose hourly budget the child spends.
+// the subject that created the root, whose hourly budget the child spends. The
+// caller's per-team intake lock serializes the count.
 func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root string, depth int) (capability.Subject, error) {
 	if depth > limits.MaxChildDepth {
 		return capability.Subject{}, &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("child runs nest at most %d levels deep, counting the root run", limits.MaxChildDepth), Details: map[string]any{"limit": "max_child_depth", "cap": limits.MaxChildDepth}}
-	}
-	if err := lockComputeGuardsTx(ctx, tx); err != nil {
-		return capability.Subject{}, err
 	}
 	var subject capability.Subject
 	var created int64

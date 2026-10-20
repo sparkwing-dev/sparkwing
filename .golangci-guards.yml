@@ -211,10 +211,10 @@ linters:
           msg: "F1: widening the store to a team or operator handle belongs to a composition root (cmd/*, internal/wingd/localcontroller). Take the narrowed port as a dependency instead."
         - pattern: \.TestOnly\w*$
           msg: "F1: TestOnly hooks are for tests; call them only from _test.go files."
-        - pattern: ^runspec\.(AppProvenance|ScheduleProvenance|ActionsProvenance|AssertedProvenance)$
+        - pattern: ^runspec\.(AppProvenance|ScheduleProvenance|ActionsProvenance|AssertedProvenance|AssertedChildProvenance|Provenance\.ReadingDefault)$
           msg: "F2: only the intake transaction (pkg/store/intake_provenance.go) seals the identity a run speaks for; a child or retry copies its parent's sealed value."
-        - pattern: ^runspec\.Git\.(Ref|SHA|App)$
-          msg: "F3: the store decides trust from runspec.SealedRequest.Provenance, never from the submitted ref, commit or App facts."
+        - pattern: ^runspec\.(Git\.(Ref|SHA|App)|Request\.Pipeline)$
+          msg: "F3: the store decides trust from runspec.SealedRequest.Provenance, never from the submitted ref, commit, pipeline or App facts."
   exclusions:
     paths:
       - web/node_modules/
@@ -234,13 +234,16 @@ linters:
         text: "F2:"
         linters:
           - forbidigo
-      # F3 guards the store; other packages read git facts for display and checkout.
+      # F3 guards the store's trust decisions. The controller still reads Git.App to route
+      # check reports and source tokens to an installation; that routing is not trust.
       - path-except: ^pkg/store/
         text: "F3:"
         linters:
           - forbidigo
-      # Intake and sealing build provenance from these facts; the rest only project or display them.
-      - path: ^pkg/store/(intake_runtime|intake_provenance|app_intake|schedule_intake|schedule_transactions|run_spec|plan_seal|source_upload|github_app_runner|github_source_release|latest_run)\.go$
+      # Intake and sealing build provenance from these facts. run_spec, latest_run and
+      # binding_execution project or name the run's own pipeline; github_app_runner and
+      # github_source_release route to the App installation that delivered the run.
+      - path: ^pkg/store/(intake_runtime|intake_provenance|app_intake|schedule_intake|schedule_transactions|run_spec|plan_seal|source_upload|github_app_runner|github_source_release|latest_run|binding_execution)\.go$
         text: "F3:"
         linters:
           - forbidigo

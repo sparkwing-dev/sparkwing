@@ -4372,6 +4372,12 @@ components:
                 $ref: '#/components/schemas/internal.nodeproto.CacheSpec'
               type: array
             - type: "null"
+        children:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         closures:
           $ref: '#/components/schemas/internal.nodeproto.ClosureSpec'
         concurrency:
@@ -5562,6 +5568,8 @@ components:
               type: integer
             sha:
               type: string
+            shared_secrets_only:
+              type: boolean
             trust:
               enum:
                 - verified-default

@@ -23,7 +23,7 @@ func TestPipelineLatestHTTPUsesNativeDeclaredJobReference(t *testing.T) {
 		RequestedArgs: map[string]string{"secret": "never-expose-secret", "public": "visible"},
 		SecretArgs:    runspec.Optional[[]string]{Set: true, Value: []string{"secret"}},
 	}
-	request, err := runspec.SealRequest(input, runspec.IntakeFacts{RunID: "producer-run", AdmittedAt: now.Add(-time.Hour), Provenance: requestProvenance(t, "producer", input)})
+	request, err := runspec.SealRequest(input, runspec.IntakeFacts{RunID: "producer-run", AdmittedAt: now.Add(-time.Hour), Provenance: assertedProvenance(t, "producer", "", strings.Repeat("a", 40))})
 	if err != nil {
 		t.Fatal(err)
 	}

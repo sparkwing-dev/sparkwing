@@ -8,49 +8,32 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// fixtureProvenance is what intake seals for a run an account submitted.
-func fixtureProvenance(t testing.TB, pipeline, ref string) runspec.Provenance {
+// fixtureWriter is the principal every asserted fixture run was submitted by.
+var fixtureWriter = runspec.PrincipalWriter("account", "fixture")
+
+// assertedProvenance is what intake seals for a run the fixture account submitted.
+func assertedProvenance(t testing.TB, pipeline, ref, sha string) runspec.Provenance {
 	t.Helper()
-	p, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "fixture"), ref, "", pipeline)
+	p, err := runspec.AssertedProvenance(fixtureWriter, ref, sha, pipeline)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return p
 }
 
-// fixtureRef is the record scope fixtureProvenance yields for ref.
-func fixtureRef(ref string) blob.RefScope {
-	p, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "fixture"), ref, "", "fixture")
+// assertedRef is the record scope an asserted fixture run of ref writes.
+func assertedRef(ref string) blob.RefScope {
+	p, err := runspec.AssertedProvenance(fixtureWriter, ref, "", "fixture")
 	if err != nil {
 		panic(err)
 	}
 	return blob.ScopeFor(p)
 }
 
-// fixtureSeal marshals sealed with the provenance intake would have sealed for a
-// run of pipeline: verified when it carries App facts, asserted otherwise.
-func fixtureSeal(t testing.TB, pipeline string, sealed runspec.SealedRequest) []byte {
+// sealWith marshals sealed carrying p as its sealed provenance.
+func sealWith(t testing.TB, sealed runspec.SealedRequest, p runspec.Provenance) []byte {
 	t.Helper()
-	if !sealed.Provenance.Valid() {
-		git := sealed.Request.Git
-		if git.App.Set {
-			p, err := runspec.AppProvenance(git.App.Value, sealed.Request.PullRequest, pipeline)
-			if err != nil {
-				t.Fatal(err)
-			}
-			sealed.Provenance = p
-		} else {
-			sha := ""
-			if runspec.IsCommitID(git.SHA) {
-				sha = git.SHA
-			}
-			p, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "fixture"), git.Ref, sha, pipeline)
-			if err != nil {
-				t.Fatal(err)
-			}
-			sealed.Provenance = p
-		}
-	}
+	sealed.Provenance = p
 	body, err := json.Marshal(sealed)
 	if err != nil {
 		t.Fatal(err)
