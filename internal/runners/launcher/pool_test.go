@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -26,7 +27,10 @@ func TestPoolClaimsLaunchFreshPodsWithoutThePoolCredential(t *testing.T) {
 				t.Fatalf("pool transport: %q %v", token, err)
 			}
 			return launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-				response := controllerwire.LauncherSyncResponse{Prepared: request.Preparing}
+				response := controllerwire.LauncherSyncResponse{}
+				for _, fence := range request.Preparing {
+					response.Prepared = append(response.Prepared, controllerwire.LauncherPreparation{LeaseRef: fence, ExpiresAt: time.Now().Add(time.Minute)})
+				}
 				for _, observed := range request.Observed {
 					copy := unit
 					copy.Binding.Generation = observed.Award.Generation
