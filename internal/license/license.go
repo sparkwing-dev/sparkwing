@@ -38,7 +38,8 @@ const FeatureMetering = "metering"
 //go:embed license_key.pub
 var embeddedKey string
 
-// Errors Verify returns. Each one leaves the deployment unlicensed.
+// Errors Verify returns. Startup refuses a supplied license that fails with
+// any of them.
 var (
 	ErrMalformed    = errors.New("license: malformed")
 	ErrBadSignature = errors.New("license: signature does not verify")

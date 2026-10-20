@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -182,11 +183,36 @@ func parsePublicOrigin(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", fmt.Errorf("--external-url %q is not an absolute http(s) URL without credentials, query or fragment", raw)
+	if err := CheckControllerURL("--external-url", raw); err != nil {
+		return "", err
 	}
 	return raw, nil
+}
+
+// CheckControllerURL is the one transport rule for a URL that carries a
+// controller credential: the public origin a deployment hands to runners,
+// and the controller URL a runner or launcher starts with. It must be an
+// absolute http(s) URL without credentials, query or fragment, and plain
+// http is allowed only where the traffic cannot leave the host or the
+// cluster network: loopback, or a Kubernetes Service name.
+func CheckControllerURL(flag, raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%s %q is not an absolute http(s) URL without credentials, query or fragment", flag, raw)
+	}
+	if u.Scheme == "http" && !plainHTTPHost(u.Hostname()) {
+		return fmt.Errorf("%s %q would send a machine token unencrypted; use https, or http only to localhost or a Kubernetes Service (*.svc, *.svc.cluster.local)", flag, raw)
+	}
+	return nil
+}
+
+func plainHTTPHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost" || strings.HasSuffix(host, ".localhost") ||
+		strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster.local")
 }
 
 // safety: the license decides the kind only at startup. A license that

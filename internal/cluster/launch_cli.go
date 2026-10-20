@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 )
 
@@ -56,7 +57,7 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if err := checkControllerTransport("--controller", cfg.ControllerURL); err != nil {
+	if err := deployment.CheckControllerURL("--controller", cfg.ControllerURL); err != nil {
 		return err
 	}
 	if factory == nil {

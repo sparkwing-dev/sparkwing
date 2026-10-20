@@ -123,9 +123,8 @@ func readCredentials(path string) (controllerCredentials, error) {
 	return c, nil
 }
 
-// safety: an absent file leaves a credential off, but a present empty one is a
-// mistake that would otherwise read as off too, which for bootstrap-admin-token
-// serves without auth and for pg-url opens SQLite, so it refuses startup.
+// safety: a present but empty file is a mistake, not a way to turn a
+// credential off, so it refuses startup naming the file.
 func readCredential(dir credentials.Dir, name string) (string, error) {
 	raw, err := dir.ReadBytes(name)
 	if err != nil || raw == nil {

@@ -48,28 +48,34 @@ func openControllerStore(ctx context.Context, cfg deployment.Config, sqlitePath 
 	return store.Open(sqlitePath) //nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
 }
 
-// deploymentRecord is what a started controller leaves beside its state for
+// deploymentRecord is what a serving controller leaves beside its state for
 // `admin`, which runs in the same pod and must act on the same store
-// without the operator repeating the controller's flags.
+// without the operator repeating the controller's flags. It is written only
+// once startup has succeeded and the serve lease is held, and it names the
+// store by its identity, so admin cannot be pointed at another database by
+// a failed start or a rotated pg-url.
 type deploymentRecord struct {
 	Kind           deployment.Kind  `json:"kind"`
 	Store          deployment.Store `json:"store"`
 	CredentialsDir string           `json:"credentials_dir"`
+	StoreIdentity  string           `json:"store_identity"`
 }
 
 func deploymentRecordPath(stateDB string) string {
 	return filepath.Join(filepath.Dir(stateDB), "deployment.json")
 }
 
-func writeDeploymentRecord(stateDB string, cfg deployment.Config, credentialsDir string) error {
+func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.Config, credentialsDir string, st *store.Store) error {
+	identity, err := st.StoreIdentity(ctx)
+	if err != nil {
+		return err
+	}
 	if credentialsDir != "" {
-		abs, err := filepath.Abs(credentialsDir)
-		if err != nil {
+		if credentialsDir, err = filepath.Abs(credentialsDir); err != nil {
 			return err
 		}
-		credentialsDir = abs
 	}
-	body, err := json.Marshal(deploymentRecord{Kind: cfg.Kind(), Store: cfg.Store(), CredentialsDir: credentialsDir})
+	body, err := json.Marshal(deploymentRecord{Kind: cfg.Kind(), Store: cfg.Store(), CredentialsDir: credentialsDir, StoreIdentity: identity})
 	if err != nil {
 		return err
 	}
@@ -88,47 +94,52 @@ func writeDeploymentRecord(stateDB string, cfg deployment.Config, credentialsDir
 	return nil
 }
 
-func readDeploymentRecord(stateDB string) (deploymentRecord, error) {
-	var rec deploymentRecord
+// openDeclaredStore opens the store the serving controller recorded, refuses
+// rather than create one, and refuses a store whose identity differs.
+func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error) {
 	path := deploymentRecordPath(stateDB)
 	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return rec, fmt.Errorf("no controller has started here (%s is missing); run admin in the controller's pod, beside the controller it acts for", path)
+		return nil, fmt.Errorf("no controller is serving here (%s is missing); run admin in the controller's pod, beside the controller it acts for", path)
 	}
 	if err != nil {
-		return rec, err
+		return nil, err
 	}
+	var rec deploymentRecord
 	if err := json.Unmarshal(body, &rec); err != nil {
-		return rec, fmt.Errorf("deployment record %s: %w", path, err)
+		return nil, fmt.Errorf("deployment record %s: %w", path, err)
 	}
-	return rec, nil
-}
-
-// openDeclaredStore opens the store the controller that last started here
-// declared, and refuses rather than create one.
-func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error) {
-	rec, err := readDeploymentRecord(stateDB)
+	if rec.StoreIdentity == "" {
+		return nil, fmt.Errorf("deployment record %s names no store", path)
+	}
+	dialect, target := store.DialectSQLite, stateDB
+	if rec.Store == deployment.StorePostgres {
+		creds, err := readCredentials(rec.CredentialsDir)
+		if err != nil {
+			return nil, err
+		}
+		dialect, target = store.DialectPostgres, creds.PGURL
+	}
+	st, err := store.OpenExisting(ctx, dialect, target)
 	if err != nil {
 		return nil, err
 	}
-	if rec.Store != deployment.StorePostgres {
-		return store.OpenExisting(ctx, store.DialectSQLite, stateDB)
+	identity, err := st.StoreIdentity(ctx)
+	if err == nil && identity != rec.StoreIdentity {
+		err = fmt.Errorf("the store admin reached is %s, but the serving controller recorded %s; the credentials changed since it started", identity, rec.StoreIdentity)
 	}
-	creds, err := readCredentials(rec.CredentialsDir)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, st.Close())
 	}
-	if creds.PGURL == "" {
-		return nil, fmt.Errorf("the controller declared --store=postgres, but %s holds no %s", rec.CredentialsDir, credPGURL)
-	}
-	return store.OpenExisting(ctx, store.DialectPostgres, creds.PGURL)
+	return st, nil
 }
 
 const (
-	serveLeaseName  = "controller.serve"
-	serveLeaseTTL   = 30 * time.Second
-	serveLeaseRenew = serveLeaseTTL / 3
+	serveLeaseName = "controller.serve"
+	serveLeaseTTL  = 30 * time.Second
 )
+
+var errServeLeaseExpired = errors.New("serve lease expired before it was renewed; another controller may now serve this store")
 
 // safety: per-process state such as flood budgets, live logs and the
 // filesystem signing key is right only while one controller serves a store,
@@ -152,35 +163,48 @@ func acquireServeLease(ctx context.Context, st *store.Store, holder string, logg
 		select {
 		case <-ctx.Done():
 			return store.SingletonLease{}, ctx.Err()
-		case <-time.After(serveLeaseRenew):
+		case <-time.After(serveLeaseTTL / 3):
 		}
 	}
 }
 
-// keepServeLease renews lease until ctx ends, and calls lost when the
-// lease can no longer be renewed, so the controller stops serving.
-func keepServeLease(ctx context.Context, st *store.Store, lease store.SingletonLease, lost func(error)) {
-	ticker := time.NewTicker(serveLeaseRenew)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			renewed, err := st.AsOperator().RenewSingletonLease(ctx, lease, serveLeaseTTL)
-			if ctx.Err() != nil {
+// serveWhileLeased runs serve until it returns or serving authority ends.
+// Authority runs on this process's own clock: it ends ttl after the start
+// of the last renewal that succeeded, whether or not a later renewal has
+// returned, and each renewal must finish inside the window that is left.
+// held is when the lease was last acquired. It does not wait for a renewal
+// that ignores its deadline, so serving ends on time even then.
+func serveWhileLeased(ctx context.Context, held time.Time, ttl time.Duration, renew, serve func(context.Context) error) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	expiry := held.Add(ttl)
+	watchdog := time.AfterFunc(time.Until(expiry), func() { cancel(errServeLeaseExpired) })
+	defer watchdog.Stop()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(ttl / 3):
+			}
+			sent := time.Now()
+			rctx, rcancel := context.WithDeadline(ctx, expiry)
+			err := renew(rctx)
+			rcancel()
+			switch {
+			case err == nil:
+				expiry = sent.Add(ttl)
+				watchdog.Reset(time.Until(expiry))
+			case errors.Is(err, store.ErrLockHeld):
+				cancel(fmt.Errorf("serve lease lost: %w", err))
 				return
 			}
-			// safety: a failed renewal is retried while the lease still runs,
-			// so one database blip does not stop a healthy controller.
-			if err != nil && !errors.Is(err, store.ErrLockHeld) && time.Until(lease.ExpiresAt) > serveLeaseRenew {
-				continue
-			}
-			if err != nil {
-				lost(fmt.Errorf("serve lease lost: %w", err))
-				return
-			}
-			lease = renewed
 		}
+	}()
+	err := serve(ctx)
+	cancel(nil)
+	if cause := context.Cause(ctx); err == nil && cause != nil && !errors.Is(cause, context.Canceled) {
+		err = cause
 	}
+	return err
 }

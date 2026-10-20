@@ -81,17 +81,18 @@ func TestParseRefusesAMisdeclaredDeployment(t *testing.T) {
 		"cloud without an origin": {with(multi, func(in *deployment.Inputs) {
 			in.Kind, in.Store, in.PGURL = "cloud", "postgres", "postgres://db"
 		}), "--external-url"},
-		"postgres without pg-url":    {deployment.Inputs{Store: "postgres"}, "pg-url"},
-		"pg-url under sqlite":        {deployment.Inputs{PGURL: "postgres://db"}, "--store=postgres"},
-		"unknown kind":               {deployment.Inputs{Kind: "hosted"}, "--deployment"},
-		"unknown store":              {deployment.Inputs{Store: "mysql"}, "--store"},
-		"unknown payment mode":       {deployment.Inputs{PaymentMode: "prod"}, "--payment-mode"},
-		"origin with a query":        {deployment.Inputs{PublicOrigin: "https://x.test/?a=b"}, "--external-url"},
-		"relative origin":            {deployment.Inputs{PublicOrigin: "x.test"}, "--external-url"},
-		"cloud limits off the cloud": {deployment.Inputs{LimitsCloud: true}, "--deployment=cloud"},
-		"previous secrets key alone": {deployment.Inputs{SecretsPreviousKey: []byte("k")}, "secrets-key.previous"},
-		"published oidc key alone":   {deployment.Inputs{OIDCPublishedKey: []byte("k")}, "oidc-key.published"},
-		"previous webhook alone":     {deployment.Inputs{PreviousWebhookSecret: []byte("k")}, "github-app-webhook-secret.previous"},
+		"postgres without pg-url":     {deployment.Inputs{Store: "postgres"}, "pg-url"},
+		"pg-url under sqlite":         {deployment.Inputs{PGURL: "postgres://db"}, "--store=postgres"},
+		"unknown kind":                {deployment.Inputs{Kind: "hosted"}, "--deployment"},
+		"unknown store":               {deployment.Inputs{Store: "mysql"}, "--store"},
+		"unknown payment mode":        {deployment.Inputs{PaymentMode: "prod"}, "--payment-mode"},
+		"origin with a query":         {deployment.Inputs{PublicOrigin: "https://x.test/?a=b"}, "--external-url"},
+		"origin runners would refuse": {deployment.Inputs{PublicOrigin: "http://controller.example.com"}, "unencrypted"},
+		"relative origin":             {deployment.Inputs{PublicOrigin: "x.test"}, "--external-url"},
+		"cloud limits off the cloud":  {deployment.Inputs{LimitsCloud: true}, "--deployment=cloud"},
+		"previous secrets key alone":  {deployment.Inputs{SecretsPreviousKey: []byte("k")}, "secrets-key.previous"},
+		"published oidc key alone":    {deployment.Inputs{OIDCPublishedKey: []byte("k")}, "oidc-key.published"},
+		"previous webhook alone":      {deployment.Inputs{PreviousWebhookSecret: []byte("k")}, "github-app-webhook-secret.previous"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := deployment.Parse(tc.in); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -112,5 +113,26 @@ func TestParseAcceptsTheHostedDeployment(t *testing.T) {
 	if !cfg.Hosted() || !cfg.DeploymentBearer() || cfg.Store() != deployment.StorePostgres || cfg.PGURL() != "postgres://db" ||
 		!ok || origin != "https://api.sparkwing.dev" || cfg.PaymentMode() != "live" {
 		t.Fatalf("hosted deployment = %+v", cfg)
+	}
+}
+
+// A typo such as http://api.sparkwing.dev must not send a runner's machine
+// token in clear text; in-cluster and loopback controllers stay on http.
+func TestControllerTransportRefusesPlainHTTPOffTheCluster(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"https://api.sparkwing.dev":                               true,
+		"http://127.0.0.1:4344":                                   true,
+		"http://[::1]:4344":                                       true,
+		"http://localhost:4344":                                   true,
+		"http://sparkwing-controller.sparkwing.svc":               true,
+		"http://sparkwing-controller.sparkwing.svc.cluster.local": true,
+		"http://api.sparkwing.dev":                                false,
+		"http://10.0.0.5:4344":                                    false,
+		"http://controller.svc.example.com":                       false,
+		"http://localhost.example.com":                            false,
+	} {
+		if err := deployment.CheckControllerURL("--controller", raw); (err == nil) != ok {
+			t.Errorf("%s: err = %v, want allowed %v", raw, err, ok)
+		}
 	}
 }

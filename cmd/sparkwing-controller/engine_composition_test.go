@@ -38,7 +38,7 @@ func composedClaimants(t *testing.T, version string, policy *http.Client) map[st
 	if _, err := controller.EnsureBootstrapAdminToken(t.Context(), st, admin); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := newControllerServer(st, root, version, policy)
+	srv, err := newControllerServer(st, deployment.Config{}, root, version, policy)
 	if err != nil {
 		t.Fatal(err)
 	}

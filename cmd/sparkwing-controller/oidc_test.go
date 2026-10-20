@@ -40,7 +40,7 @@ func TestLoadOIDCIssuer(t *testing.T) {
 	if _, err := deployment.Parse(deployment.Inputs{OIDCPublishedKey: key, PublicOrigin: "https://api.sparkwing.dev"}); err == nil {
 		t.Error("a published key with no signing key was accepted")
 	}
-	for _, external := range []string{"", "http://api.sparkwing.dev", "https://api.sparkwing.dev/oidc"} {
+	for _, external := range []string{"", "http://127.0.0.1:4344", "https://api.sparkwing.dev/oidc"} {
 		if _, err := loadOIDCIssuer(parse(t, deployment.Inputs{OIDCKey: key, PublicOrigin: external}), 0, &bytes.Buffer{}); err == nil {
 			t.Errorf("external URL %q was accepted as an issuer", external)
 		}

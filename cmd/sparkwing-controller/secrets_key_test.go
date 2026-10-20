@@ -28,7 +28,7 @@ func secretsTestServer(t *testing.T, cfg deployment.Config) (*controller.Server,
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return controller.New(st, nil).WithDeployment(cfg), st
+	return controller.NewDeployment(st, cfg, nil), st
 }
 
 func postSecret(t *testing.T, srv *controller.Server, st *store.Store, name, value string) (int, string) {

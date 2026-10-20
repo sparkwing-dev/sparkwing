@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -176,7 +177,7 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 	if cfg.Controller == nil || strings.TrimSpace(*cfg.Controller) == "" {
 		return options, errors.New("runner controller is required")
 	}
-	if err := checkControllerTransport("runner controller", *cfg.Controller); err != nil {
+	if err := deployment.CheckControllerURL("runner controller", *cfg.Controller); err != nil {
 		return options, err
 	}
 	if cfg.MaxConcurrent != nil {

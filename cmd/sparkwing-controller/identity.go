@@ -13,6 +13,7 @@ import (
 )
 
 type identityFlags struct {
+	MultiTeam          bool
 	GoogleClientID     string
 	GoogleClientSecret string
 	GitHubClientID     string
@@ -54,7 +55,7 @@ func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Log
 	if github {
 		srv.WithGitHubSignIn(githubauth.New(githubauth.GitHub(f.GitHubClientID, f.GitHubClientSecret)), uris)
 	}
-	if !srv.MultiTeam() {
+	if !f.MultiTeam {
 		logger.Warn("sign-in is configured but not offered: it needs --deployment=team or cloud")
 	}
 	return nil

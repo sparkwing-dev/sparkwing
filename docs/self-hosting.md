@@ -67,12 +67,14 @@ integration evidence. See [log completeness](observability.md#log-completeness).
 
 ### Overlapping controllers during an upgrade
 
-One controller serves a store at a time. Before it writes anything or opens its
-listener, a controller takes the `controller.serve` lease in the store and
-renews it every 10 seconds. A second controller pointed at the same store, such
-as a new pod during an upgrade or a laptop given the production `pg-url`, logs
-that it is standing by and waits until the first stops or its lease lapses after
-30 seconds. A controller that loses the lease stops serving. Flood budgets, live
+One controller serves a store at a time. Before it writes anything, a
+controller takes the `controller.serve` lease in the store and renews it every
+10 seconds. A second controller pointed at the same store, such as a new pod
+during an upgrade or a laptop given the production `pg-url`, logs that it is
+standing by and waits until the first stops or its lease lapses after 30
+seconds. Serving authority runs on the controller's own clock: it ends 30
+seconds after the last renewal that succeeded began, even while a renewal is
+stalled on the database, and the controller then closes its listeners. Flood budgets, live
 logs and per-token limits live in one process's memory, so they are right only
 with one controller.
 
@@ -85,7 +87,7 @@ to exist, and it settles the answer once at startup.
 |---|---|---|
 | `--deployment` | `local` (default), `team`, `cloud` | `local` holds one team. `team` holds many teams under a multi-team license and meters usage. `cloud` is the hosted service. |
 | `--store` | `sqlite` (default), `postgres` | Where state lives. `postgres` reads the `pg-url` credential. |
-| `--external-url` | an absolute `http(s)` URL, or empty | The origin runners, OIDC tokens and GitHub Actions workflows name. |
+| `--external-url` | an `https` URL, an `http` URL on loopback or a Kubernetes Service (`*.svc`), or empty | The origin runners, OIDC tokens and GitHub Actions workflows name. Runners accept the same addresses. |
 | `--payment-mode` | `test`, `live` or empty | Which Stripe credentials settle payments. |
 
 Startup refuses, before it opens the store or writes any setting, when:
@@ -98,8 +100,10 @@ Startup refuses, before it opens the store or writes any setting, when:
   or `--deployment=cloud` is not on PostgreSQL;
 - `--deployment=cloud` has no `--external-url`, or a `cloud` limits profile runs
   under another kind;
-- any other flag is invalid. Settings startup writes to the database, the payment
-  mode and the free team slots, are written only after every check passes.
+- any other flag is invalid, or `--addr`, `--trusted-proxy-addr` or
+  `--metrics-addr` cannot be bound. Every listener is bound before the store is
+  opened. The bootstrap seed, the payment mode and the free team slots are
+  written only after every check passes and under the serve lease.
 
 A license that expires while the controller runs does not change the
 deployment. Metering, the free tier and sign-in keep working, and

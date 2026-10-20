@@ -210,20 +210,21 @@ func openState(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeDeploymentRecord(p.StateDB(), deployment.Config{}, ""); err != nil {
+	if err := writeDeploymentRecord(t.Context(), p.StateDB(), deployment.Config{}, "", st); err != nil {
 		t.Fatal(err)
 	}
 	return st
 }
 
-// Break-glass acts only on a store a started controller declared, so an
-// operator in the wrong pod, or one who forgot a flag, gets a refusal
-// rather than a fresh SQLite store with a default team to act on.
-func TestAdminRefusesWithoutADeclaredStore(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	err := runAdmin([]string{"freeze", "--team", "default", "--reason", "abuse"}, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "deployment.json") {
+// Break-glass acts only on the store the serving controller recorded: an
+// operator in the wrong pod gets a refusal rather than a fresh SQLite store,
+// and a store that is not the recorded one is refused by identity.
+func TestAdminActsOnlyOnTheRecordedStore(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	freeze := func() error {
+		return runAdmin([]string{"freeze", "--team", "default", "--reason", "abuse"}, &bytes.Buffer{}, &bytes.Buffer{})
+	}
+	if err := freeze(); err == nil || !strings.Contains(err.Error(), "deployment.json") {
 		t.Fatalf("admin on an empty home = %v, want a refusal naming the deployment record", err)
 	}
 	p, err := paths.DefaultPaths()
@@ -234,30 +235,25 @@ func TestAdminRefusesWithoutADeclaredStore(t *testing.T) {
 		t.Fatalf("admin created a store: %v", err)
 	}
 
-	if err := p.EnsureRoot(); err != nil {
+	if err := openState(t).Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeDeploymentRecord(p.StateDB(), deployment.Config{}, ""); err != nil {
-		t.Fatal(err)
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(p.StateDB() + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
 	}
-	err = runAdmin([]string{"freeze", "--team", "default", "--reason", "abuse"}, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "open existing store") {
+	if err := freeze(); err == nil || !strings.Contains(err.Error(), "open existing store") {
 		t.Fatalf("admin with a record and no store = %v, want an open-existing refusal", err)
 	}
-	if _, err := os.Stat(p.StateDB()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("admin created a store: %v", err)
-	}
-
-	creds := t.TempDir()
-	cfg, err := deployment.Parse(deployment.Inputs{Store: "postgres", PGURL: "postgres://x"})
+	other, err := openControllerStore(t.Context(), deployment.Config{}, p.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeDeploymentRecord(p.StateDB(), cfg, creds); err != nil {
+	if err := other.Close(); err != nil {
 		t.Fatal(err)
 	}
-	err = runAdmin([]string{"freeze", "--team", "default", "--reason", "abuse"}, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), credPGURL) {
-		t.Fatalf("admin on a postgres record without pg-url = %v", err)
+	if err := freeze(); err == nil || !strings.Contains(err.Error(), "recorded") {
+		t.Fatalf("admin on a store other than the recorded one = %v, want an identity refusal", err)
 	}
 }

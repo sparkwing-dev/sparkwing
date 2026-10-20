@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,6 +42,65 @@ func TestServeLeaseKeepsOneControllerServing(t *testing.T) {
 	}
 	if _, err := acquireServeLease(t.Context(), st, "second", logger); err != nil {
 		t.Fatalf("second controller after release: %v", err)
+	}
+}
+
+// A renewal that never returns, such as a stalled database connection, must
+// not let the controller serve past its lease: the listener stops admitting
+// at expiry, and the stalled renewal is bounded by the same deadline.
+func TestServeLeaseExpiryStopsAStalledController(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	const ttl = 600 * time.Millisecond
+	held := time.Now()
+	renewDeadline := make(chan time.Time, 1)
+	unstall := make(chan struct{})
+	t.Cleanup(func() { close(unstall) })
+	stall := func(ctx context.Context) error {
+		deadline, _ := ctx.Deadline()
+		renewDeadline <- deadline
+		<-unstall
+		return ctx.Err()
+	}
+	serve := func(ctx context.Context) error {
+		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }), ReadHeaderTimeout: time.Second}
+		go func() {
+			<-ctx.Done()
+			_ = srv.Close()
+		}()
+		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- serveWhileLeased(t.Context(), held, ttl, stall, serve) }()
+
+	resp, err := http.Get("http://" + addr)
+	if err != nil {
+		t.Fatalf("leased controller refused a request: %v", err)
+	}
+	_ = resp.Body.Close()
+	if deadline := <-renewDeadline; deadline.After(held.Add(ttl)) {
+		t.Fatalf("renewal deadline %s runs past the lease's %s", deadline, held.Add(ttl))
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, errServeLeaseExpired) {
+			t.Fatalf("serving ended with %v, want the lease expiry", err)
+		}
+	case <-time.After(ttl + 2*time.Second):
+		t.Fatal("controller kept serving after its lease expired while renewal stalled")
+	}
+	if elapsed := time.Since(held); elapsed < ttl {
+		t.Fatalf("serving stopped after %s, before the lease expired", elapsed)
+	}
+	if conn, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+		_ = conn.Close()
+		t.Fatal("listener still admits connections after the lease expired")
 	}
 }
 

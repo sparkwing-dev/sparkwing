@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -415,6 +417,12 @@ func run(args []string) error {
 			"the checkout service refuses a controller without its token")
 	}
 
+	listeners, err := bindListeners(*addr, *trustedProxyAddr, *metricsAddr)
+	if err != nil {
+		return err
+	}
+	defer listeners.close()
+
 	budget, err := objectguard.ParseBudget(*objectStoreBudget)
 	if err != nil {
 		return err
@@ -443,31 +451,32 @@ func run(args []string) error {
 	if err := p.EnsureRoot(); err != nil {
 		return err
 	}
-	if err := writeDeploymentRecord(p.StateDB(), cfg, *credentialsDir); err != nil {
-		return err
-	}
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithCancelCause(sigCtx)
-	defer cancel(nil)
+	ctx := sigCtx
 
 	st, serr := openControllerStore(ctx, cfg, p.StateDB())
 	if serr != nil {
 		return fmt.Errorf("open state db: %w", serr)
 	}
 	defer func() { _ = st.Close() }()
-	holder := rand.Text()
-	lease, err := acquireServeLease(ctx, st, holder, slog.Default())
+	lease, err := acquireServeLease(ctx, st, rand.Text(), slog.Default())
 	if err != nil {
 		return err
 	}
+	leaseHeld := time.Now()
+	var leaseMu sync.Mutex
+	current := func() store.SingletonLease {
+		leaseMu.Lock()
+		defer leaseMu.Unlock()
+		return lease
+	}
 	defer func() {
-		if err := st.AsOperator().ReleaseSingletonLease(context.WithoutCancel(ctx), lease); err != nil {
+		if err := st.AsOperator().ReleaseSingletonLease(context.WithoutCancel(ctx), current()); err != nil {
 			slog.Warn("release serve lease", "err", err)
 		}
 	}()
-	go keepServeLease(ctx, st, lease, cancel)
 
 	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller", Log: readLog()})
 	if err != nil {
@@ -475,13 +484,11 @@ func run(args []string) error {
 	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
-	srv, err := newControllerServer(st, p.Root, readProvenance().Version, nil)
+	srv, err := newControllerServer(st, cfg, p.Root, readProvenance().Version, nil)
 	if err != nil {
 		return err
 	}
 	srv = srv.
-		WithDeployment(cfg).
-		WithTrustedProxyAddr(*trustedProxyAddr).
 		WithTrustedProxyCIDRs(proxyCIDRs).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithDashboardURL(*dashboardURL).
@@ -509,6 +516,7 @@ func run(args []string) error {
 		WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
 		WithEgressMeter(egress.New(egressCfg))
 	if err := configureIdentity(srv, identityFlags{
+		MultiTeam:          cfg.MultiTeam(),
 		GoogleClientID:     *googleClientID,
 		GoogleClientSecret: creds.GoogleClientSecret,
 		GitHubClientID:     *githubClientID,
@@ -560,7 +568,7 @@ func run(args []string) error {
 		}
 		srv = srv.WithDataObjects(backend)
 	} else {
-		objects, err := openFilesystemData(p.Root, *externalURL, *addr)
+		objects, err := openFilesystemData(p.Root, *externalURL, listeners.API.Addr().String())
 		if err != nil {
 			return fmt.Errorf("filesystem data: %w", err)
 		}
@@ -573,9 +581,10 @@ func run(args []string) error {
 	}
 	srv.WithDashboard(dashboard(p, *hsts, *insecureCookies))
 
-	// safety: these are the only database writes startup makes, and they
-	// come after every check above and under the serve lease, so a start
-	// that fails or a second controller changes nothing.
+	// safety: these are the only database writes startup makes. They come
+	// after every check above and every listener is bound, and under the
+	// serve lease, so a start that fails earlier, or a second controller,
+	// changes nothing.
 	if err := ensureBootstrapAdmin(ctx, st, creds.BootstrapAdminToken, slog.Default()); err != nil {
 		return err
 	}
@@ -591,13 +600,55 @@ func run(args []string) error {
 	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
 		return fmt.Errorf("--free-team-slots: %w", err)
 	}
-	if err := controller.ServeWith(ctx, srv, *addr); err != nil {
+	if err := writeDeploymentRecord(ctx, p.StateDB(), cfg, *credentialsDir, st); err != nil {
 		return err
 	}
-	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, context.Canceled) {
-		return cause
+	renew := func(ctx context.Context) error {
+		renewed, err := st.AsOperator().RenewSingletonLease(ctx, current(), serveLeaseTTL)
+		if err == nil {
+			leaseMu.Lock()
+			lease = renewed
+			leaseMu.Unlock()
+		}
+		return err
 	}
-	return nil
+	return serveWhileLeased(ctx, leaseHeld, serveLeaseTTL, renew, func(ctx context.Context) error {
+		return controller.ServeWith(ctx, srv, listeners.Listeners)
+	})
+}
+
+type boundListeners struct{ controller.Listeners }
+
+// safety: every socket is bound before the store is opened, so a malformed
+// address or a taken port fails the start before it changes anything.
+func bindListeners(api, trustedProxy, metrics string) (boundListeners, error) {
+	var b boundListeners
+	for _, l := range []struct {
+		flag, addr string
+		into       *net.Listener
+	}{{"--addr", api, &b.API}, {"--trusted-proxy-addr", trustedProxy, &b.TrustedProxy}, {"--metrics-addr", metrics, &b.Metrics}} {
+		if l.addr == "" {
+			continue
+		}
+		ln, err := net.Listen("tcp", l.addr)
+		if err != nil {
+			b.close()
+			return boundListeners{}, fmt.Errorf("%s: %w", l.flag, err)
+		}
+		*l.into = ln
+	}
+	return b, nil
+}
+
+func (b boundListeners) close() {
+	for _, ln := range []net.Listener{b.API, b.TrustedProxy, b.Metrics} {
+		if ln == nil {
+			continue
+		}
+		if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			slog.Warn("close listener", "addr", ln.Addr().String(), "err", err)
+		}
+	}
 }
 
 // safety: a mounted seed that already bootstrapped this store has done its
