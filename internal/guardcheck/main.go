@@ -66,6 +66,10 @@ func envOr(name, fallback string) string {
 }
 
 func run(repo string, fast, unexport bool, base string) ([]string, error) {
+	repo, err := filepath.Abs(repo)
+	if err != nil {
+		return nil, err
+	}
 	findings, err := lintFindings(repo, fast)
 	if err != nil {
 		return nil, err
@@ -117,6 +121,7 @@ func lintFindings(repo string, fast bool) (map[string][]string, error) {
 	}
 	cmd := exec.Command("golangci-lint", append(args, "./...")...)
 	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "GOLANGCI_LINT_CACHE="+lintCacheDir(repo))
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
@@ -132,10 +137,20 @@ func lintFindings(repo string, fast bool) (map[string][]string, error) {
 	return classify(report.Issues)
 }
 
+// safety: golangci-lint replays a cached finding under the path of the tree
+// that filled the cache, so a cache shared between worktrees reports another
+// checkout's files. Each worktree gets its own cache, whatever the caller set.
+func lintCacheDir(repo string) string {
+	return filepath.Join(repo, ".sparkwing", "cache", "golangci-guards")
+}
+
 func classify(issues []lintIssue) (map[string][]string, error) {
 	out := map[string][]string{}
 	for _, issue := range issues {
 		file := filepath.ToSlash(issue.Pos.Filename)
+		if filepath.IsAbs(issue.Pos.Filename) || file == ".." || strings.HasPrefix(file, "../") {
+			return nil, fmt.Errorf("finding outside the checked tree, %s: a lint cache shared with another worktree replays its paths", file)
+		}
 		switch issue.FromLinter {
 		case "depguard":
 			m := depguardText.FindStringSubmatch(issue.Text)
