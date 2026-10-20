@@ -718,6 +718,39 @@ func TestRunnersEnrollmentSendsReservedPoolProposal(t *testing.T) {
 	}
 }
 
+func TestRunnersEnrollmentLauncherOnly(t *testing.T) {
+	f := newRunnersFixture(t)
+	enrollment, _, err := prepareRunnerEnrollmentArgs([]string{"--profile", "prod", "--runner", "deploy", "--reserved-for", "deploy", "--trust", "verified-default", "--launcher", "--config", f.config, "--output", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := enrollRunner(t.Context(), f, enrollment); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if len(f.enrolled) != 1 || !slices.Equal(f.enrolled[0].Grants, []string{"claims.launch"}) || f.enrolled[0].Trust != "verified-default" {
+		t.Fatalf("launcher enrollment: %+v", f.enrolled)
+	}
+	var result runnerEnrollmentResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(*f.calls) != 0 || result.Service.Status != "skipped" || len(result.Service.Command) != 0 {
+		t.Fatalf("launcher started or suggested a persistent service: %+v %v", result.Service, *f.calls)
+	}
+}
+
+func TestRunnersLauncherEnrollmentRequiresSharedPool(t *testing.T) {
+	for _, flags := range [][]string{{}, {"--reserved-for", "deploy", "--personal", "--session-stdin"}} {
+		f := newRunnersFixture(t)
+		args := append([]string{"add", "--profile", "prod", "--runner", "deploy", "--launcher", "--config", f.config}, flags...)
+		if err := f.run(args); err == nil || len(f.enrolled) > 0 {
+			t.Fatalf("invalid launcher enrollment: %v %+v", err, f.enrolled)
+		}
+	}
+}
+
 func TestRunnersEnrollmentRequestsPersonalCapacityOnlyWhenSelected(t *testing.T) {
 	for _, personal := range []bool{false, true} {
 		t.Run(fmt.Sprint(personal), func(t *testing.T) {

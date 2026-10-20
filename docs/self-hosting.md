@@ -361,9 +361,7 @@ installing a login service. See [runner reference](cli-runners.md) and
 
 ### Shared runners and pool trust
 
-A shared runner runs one job after another under one account, so a job can
-leave files, caches and processes that a later job meets. Trust decides which
-runs may share that state:
+A runner's credential fixes which runs it accepts:
 
 - A runner that holds a pool with a secret reserved to it takes only runs from
   a verified push to the repository's default branch. Pull request, feature
@@ -375,17 +373,36 @@ runs may share that state:
   reserved secrets. The class is stored with the runner's credential, so the
   runner, or anyone holding its token, cannot change it.
 
+For a verified-default pool, enroll a launcher-only credential with
+`--reserved-for deploy --trust verified-default --launcher` on `runners add`.
+On Kubernetes, set `launcher.enabled=true` and reference that credential in
+`launcher.tokenSecret` in the runner bundle chart. The server refuses verified
+pool work to persistent runner credentials, including when reserved secrets
+select verified-default by default. Pool and trust settings live on the
+credential. A run-level `--requires pool=deploy` uses controller dispatch so
+its plan and jobs can be claimed by the launcher.
+The launcher runs each plan, evaluation and job claim in a fresh pod through the
+same admission policy, bootstrap exchange, quarantine and boundary probe as Cloud.
+Only the launcher mounts the pool credential. Each job receives a one-time
+bootstrap, its own scratch storage and no persistent cache volumes. Self-hosted
+pool claims consume no Cloud credits. See the [runner chart](../charts/sparkwing-runner-bundle/README.md)
+for enrollment and node prerequisites.
+
+On plain machines (VMs and bare metal), pipeline code runs under the runner's
+Unix uid and can read its credential, rewrite its caches, inspect concurrent
+jobs and leave files or processes for later claims. A trust class restricts
+admission; it does not isolate jobs. Keep machines that serve untrusted branches
+apart from pools that hold deployment secrets. GitHub documents the same risk
+for [persistent self-hosted runners](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners).
+
 A cached pipeline binary runs only as a private copy whose bytes matched the
 digest recorded when it was compiled. Jobs on a shared runner run under the
 runner's account and can rewrite both the binary and its digest, so the check
-catches corruption, not tampering, until jobs run under a separate account. Builds on a host the run's owner does not own set
+catches corruption rather than tampering on a persistent machine runner. Builds
+on a host the run's owner does not own set
 `GOENV=off`. A run's submitted environment reaches the runner only under names
 the runner's own `run.submit_env_allow` lists; see
 [machine settings](machine-config.md).
-
-Pipeline code runs as the runner's own account and can read the runner's
-credential file. Keep runners that serve untrusted branches apart from pools
-that hold deployment secrets.
 
 ### Operate the service
 

@@ -1,5 +1,6 @@
 {{- if .Values.launcher.enabled }}
 {{- $launcher := .Values.launcher }}
+{{- $credential := $launcher.tokenSecret }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,6 +50,7 @@ spec:
           command: ["/usr/local/bin/sparkwing-runner"]
           args:
             - launch
+            {{- include "sparkwing-runner-bundle.runnerLabelArgs" . | nindent 12 }}
             - {{ printf "--controller=%s" (required "launcher requires controller.url" (include "sparkwing-runner-bundle.controllerURL" .)) | quote }}
             - {{ printf "--namespace=%s" (include "sparkwing-runner-bundle.jobNamespace" .) | quote }}
             - {{ printf "--image=%s" (include "sparkwing-runner-bundle.digestImage" $launcher.jobImage) | quote }}
@@ -76,8 +78,8 @@ spec:
             defaultMode: 0400
             sources:
               - secret:
-                  name: {{ required "launcher.tokenSecret.name is required" $launcher.tokenSecret.name | quote }}
+                  name: {{ required "launcher.tokenSecret.name is required" $credential.name | quote }}
                   items:
-                    - key: {{ required "launcher.tokenSecret.key is required" $launcher.tokenSecret.key | quote }}
+                    - key: {{ required "launcher.tokenSecret.key is required" $credential.key | quote }}
                       path: agent-token
 {{- end }}

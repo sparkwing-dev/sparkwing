@@ -50,6 +50,7 @@ type runnerEnrollment struct {
 	pools        []string
 	trust        string
 	personal     bool
+	launcher     bool
 	sessionStdin bool
 }
 
@@ -124,6 +125,10 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--trust applies to shared runners only"}
 	}
 	enrollment.personal = inv.Bool("personal")
+	enrollment.launcher = inv.Bool("launcher")
+	if enrollment.launcher && (enrollment.personal || len(enrollment.pools) == 0) {
+		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--launcher requires --reserved-for on a shared runner"}
+	}
 	enrollment.sessionStdin = inv.Bool("session-stdin")
 	if enrollment.personal && !enrollment.sessionStdin {
 		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--personal requires --session-stdin with an existing independent account session"}
@@ -140,7 +145,7 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 		return enrollment, nil, err
 	}
 	enrollment.profileName, enrollment.force = prof.Name, inv.Bool("force")
-	enrollment.service.skipped = inv.Bool("no-service")
+	enrollment.service.skipped = inv.Bool("no-service") || enrollment.launcher
 	contribution := "50%,50%"
 	if inv.Has("contribution") {
 		contribution = inv.Value("contribution")
@@ -151,7 +156,11 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 }
 
 func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enrollment runnerEnrollment) error {
-	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal})
+	request := client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal}
+	if enrollment.launcher {
+		request.Grants = []string{string(capability.ClaimsLaunch)}
+	}
+	issued, err := manager.EnrollRunner(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -172,6 +181,10 @@ func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enroll
 	})
 	if err != nil {
 		return err
+	}
+	if enrollment.launcher {
+		service.Command = nil
+		service.Detail = "Launcher-only credential. Configure sparkwing-runner launch or the runner chart's launcher with the enrolled credential."
 	}
 	return renderRunnerEnrollment(enrollment, minted.Metadata, service)
 }

@@ -176,7 +176,7 @@ func actionsClaimant(c capability.Capability) bool {
 }
 
 func registeredClaimant(c capability.Capability) bool {
-	return c.Subject.Kind == capability.SubjectMachine && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
+	return c.Subject.Kind == capability.SubjectMachine && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim) || launcherClaimant(c))
 }
 
 // WaitingNode is a ready node no agent holds, with what a claim of it checks.

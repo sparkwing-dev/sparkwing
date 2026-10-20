@@ -65,7 +65,7 @@ func (s *Store) ReadLauncherAwards(ctx context.Context, authority capability.Aut
 }
 
 func launcherPrefixesTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject string) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind='service' AND c.subject_id=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND (c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?) AND (
+	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind IN ('service','machine') AND c.subject_id=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND (c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?) AND (
 EXISTS (SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.bind_run AND n.node_id=c.bind_node AND n.capability_prefix=c.prefix AND n.status<>'done' AND n.claimed_by IS NOT NULL)
 OR EXISTS (SELECT 1 FROM triggers t WHERE t.team=c.team AND t.id=c.bind_run AND t.capability_prefix=c.prefix AND t.status='claimed' AND t.finished_at IS NULL)
 OR EXISTS (SELECT 1 FROM eval_units e WHERE e.team=c.team AND e.run_id=c.bind_run AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.status IN ('claimed','running'))) ORDER BY c.prefix`, root.Kind, root.ID, subject, tx.now().UnixNano(), tx.now().UnixNano())
@@ -80,7 +80,7 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
-	if c.Parent == nil || *c.Parent != root.Authority || c.Subject != claimant.Subject || c.Audience != capability.Controller || !slices.Contains([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, c.Unit) || c.Purpose != claimPurpose(c.Unit) || c.Billing == nil || c.Billing.ExecutorClass != "cloud" || c.Delivery != capability.DeliveryBootstrap && c.Issuance != capability.Exchange {
+	if c.Parent == nil || *c.Parent != root.Authority || c.Subject != claimant.Subject || c.Audience != capability.Controller || !slices.Contains([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, c.Unit) || c.Purpose != claimPurpose(c.Unit) || c.Billing == nil || c.Billing.ExecutorClass != launcherExecutor(claimant) || c.Delivery != capability.DeliveryBootstrap && c.Issuance != capability.Exchange {
 		return LauncherAward{}, false, authorityError(apierr.IntegrityFailure, "invalid persisted launcher award")
 	}
 	row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
@@ -263,8 +263,15 @@ func launcherReservationAwardTx(ctx context.Context, tx *storeTx, root capabilit
 	if c.Unit == capability.UnitEval && c.Binding.Expansion != nil {
 		fence = *c.Binding.Expansion
 	}
-	if fence != lease || c.Parent == nil || *c.Parent != root || c.Subject != subject || c.Billing == nil || c.Billing.ExecutorClass != "cloud" {
+	if fence != lease || c.Parent == nil || *c.Parent != root || c.Subject != subject || c.Billing == nil || c.Delivery != capability.DeliveryBootstrap {
 		return bindingRefusal()
 	}
 	return nil
+}
+
+func launcherExecutor(c capability.Capability) string {
+	if capability.CloudLauncher(c) {
+		return "cloud"
+	}
+	return "runner"
 }

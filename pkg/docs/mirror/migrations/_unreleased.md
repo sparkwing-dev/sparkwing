@@ -32,13 +32,15 @@ should use the private socket, which needs no session.
 A runner runs one job after another in shared host state, so three inputs a run
 supplied no longer reach it unchecked.
 
-- **Pool trust.** A runner that holds a pool with a secret reserved to it takes only
-  runs from a verified push to the repository's default branch. Pull request,
-  feature branch, manual and scheduled runs wait for another runner. To keep the
-  old behavior for such a pool, a team admin re-registers its runners with
-  `sparkwing runners add --profile prod --runner deploy-1 --trust=any`. `--trust=verified-default` applies the
-  restriction to a pool without reserved secrets. The class is stored with the
-  runner's credential and survives rotation.
+- **Pool trust.** A pool with reserved secrets defaults to `verified-default`.
+  It requires verified default-branch work and a launcher-only credential.
+  Enroll with `sparkwing runners add --profile prod --runner deploy-1 --repos github.com/acme/* --reserved-for deploy --trust verified-default --launcher`.
+  In the runner chart, use `launcher.enabled=true` and `launcher.tokenSecret`.
+  Remove `runner.trustClass` and `runner.reservedPools`; the credential supplies
+  both facts. Enabling the launcher replaces the persistent runner and cache
+  PVC. A run-level pool pin now uses controller dispatch. A team admin can
+  register a persistent pool with `--trust=any`, which retains the same-uid
+  credential and cross-claim state exposure described in the self-hosting guide.
 - **Submitted environment.** A run's `run.submit_env_allow` values reach a
   shared runner only under names the runner's operator also lists, in the
   runner's own machine file `run.submit_env_allow`, `--submit-env-allow`, or the

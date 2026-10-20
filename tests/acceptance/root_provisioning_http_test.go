@@ -266,7 +266,7 @@ func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 			}
 			f := &rootIssuer{}
 			w := authorityHTTP(rootServer(b, f), b, "POST", path, string(raw))
-			allowed := grant == capability.NodesClaim || grant == capability.TriggersClaim
+			allowed := grant == capability.NodesClaim || grant == capability.TriggersClaim || grant == capability.ClaimsLaunch
 			if service {
 				allowed = grant == capability.ClaimsLaunch || grant == capability.OperatorLimits || grant == capability.OperatorObjectStore || grant == capability.OperatorTokens
 			}

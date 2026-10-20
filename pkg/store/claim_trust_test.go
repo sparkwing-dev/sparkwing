@@ -22,22 +22,26 @@ func TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork(t *testing.T) {
 		trust    capability.Trust
 		verified bool
 		claims   bool
+		launcher bool
 	}{
 		{name: "pool without a reserved secret takes any run", claims: true},
 		{name: "reserved secret pool refuses an unverified run", secret: true},
-		{name: "reserved secret pool takes the verified default branch", secret: true, verified: true, claims: true},
+		{name: "reserved secret pool launcher refuses an unverified run", secret: true, launcher: true},
+		{name: "reserved secret pool launcher takes the verified default branch", secret: true, verified: true, launcher: true, claims: true},
+		{name: "reserved secret pool refuses a persistent runner even for verified work", secret: true, verified: true},
+		{name: "explicit verified pool refuses a persistent runner", trust: capability.TrustVerifiedDefault, verified: true},
 		{name: "operator opts the pool into any run", secret: true, trust: capability.TrustAny, claims: true},
 		{name: "declared verified-default refuses an unverified run", trust: capability.TrustVerifiedDefault},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, named := range []bool{false, true} {
-				checkPoolTrust(t, named, tc.secret, tc.trust, tc.verified, tc.claims)
+				checkPoolTrust(t, named, tc.secret, tc.trust, tc.verified, tc.claims, tc.launcher)
 			}
 		})
 	}
 }
 
-func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, verified, claims bool) {
+func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, verified, claims, launcher bool) {
 	t.Helper()
 	ctx := t.Context()
 	s := storetest.OpenSQLite(t)
@@ -81,7 +85,11 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 		}
 	}
 	authority := plan.Seal.Request.AuthorityRef
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":pool", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pool"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}, Trust: trust})
+	grants := []capability.Grant{capability.NodesClaim}
+	if launcher {
+		grants = []capability.Grant{capability.ClaimsLaunch}
+	}
+	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":pool", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pool"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}, Trust: trust})
 	if err != nil {
 		t.Fatal(err)
 	}
