@@ -60,12 +60,12 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 | `exp` | Issue time plus the token lifetime, shortened by the claim’s ancestry expiry, revocation deadline and binding deadline. |
 | `jti` | 128 random bits, hex. |
 | `team` | The run's team slug. |
-| `pipeline` | The pipeline name. |
-| `trigger` | `push`, `pull_request`, `cron` or `manual`, described below. |
+| `pipeline` | The pipeline the run speaks for. A child at its parent's exact revision speaks for its parent's pipeline. |
+| `trigger` | `push`, `pull_request`, `release`, `create`, `delete`, `cron` or `manual`, described below. |
 | `runner_kind` | `runner`, `personal`, `github-actions`, `user` or `service`, described below. |
-| `ref` | `refs/pull/<number>/head` for a pull request; `refs/tags/<tag>` for a tag push; otherwise `refs/heads/<branch>` when the run names a branch; absent when it names none. |
-| `sha` | The commit the run names; absent when it names none. |
-| `repository` | `<host>/<owner>/<name>`, for example `github.com/acme/api`, when the run names a repository; absent otherwise. |
+| `ref` | The ref the controller established: the verified delivery's ref (`refs/pull/<number>/head` for a pull request, `refs/heads/<base>` for a merged pull request's `closed` event, `refs/tags/<tag>` for a tag push or release, otherwise `refs/heads/<branch>`), the default branch an admin-armed schedule follows, or the push a GitHub Actions credential is bound to. Absent for an asserted run. |
+| `sha` | The commit the controller established alongside `ref`; absent whenever `ref` is. |
+| `repository` | `<host>/<owner>/<name>`, for example `github.com/acme/api`, when `repository_id` is set; absent otherwise. |
 | `run_id` | The run id. |
 
 ### Subject format
@@ -74,7 +74,7 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 team:<team>:repository_id:<repository_id>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>
 ```
 
-`<repository_id>` is GitHub's numeric repository id, which survives a rename or a transfer. Read it with `gh api repos/<owner>/<name> --jq .id`. It is set when a GitHub App delivery started the run, and for a retry or a child run that inherits that repository. It is empty for every other run, including runs started by the CLI, the API and a schedule. A run whose trigger names a GitHub event but no repository id mints `trigger:manual`, so `trigger:push`, `trigger:pull_request`, `trigger:release`, `trigger:create` and `trigger:delete` always carry a repository id.
+`<repository_id>` is GitHub's numeric repository id, which survives a rename or a transfer. Read it with `gh api repos/<owner>/<name> --jq .id`. It is set for a run a signed GitHub App delivery started, a run bound to a GitHub Actions push, a fire of an admin-armed default-branch schedule, and a retry or child run that inherits one of those identities whole. It is empty for every asserted run, including runs started by the CLI, the API, the dashboard and every other schedule. `trigger:push`, `trigger:pull_request`, `trigger:release`, `trigger:create` and `trigger:delete` always carry a repository id.
 
 For example, a push to `main` of repository `123456789` delivered by the GitHub App and executed by a team runner:
 
@@ -90,25 +90,27 @@ The same pipeline run for pull request 42, even one opened from a branch named `
 team:acme:repository_id:123456789:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/42/head
 ```
 
-The format is stable. Segments run from the coarsest to the finest: a team holds repositories and a repository declares pipelines, so a trust condition that ends in `*` narrows by prefix, and `team:acme:repository_id:123456789:*` admits every pipeline of one repository. A pipeline name is not unique across repositories: a team that subscribes `deploy` on two repositories gets two subjects that differ only in `repository_id`. `<repository_id>` is empty when no GitHub App delivery names the repository, which leaves `repository_id::` in the subject, and `<ref>` is empty when the run names no branch, which leaves the subject ending in `:ref:`. Every segment value is printable ASCII with no `:`, `*` or `?`: the controller refuses to sign for a run whose pipeline or branch holds one of those, whitespace, or any other character (400), so a submitted value cannot forge a later segment or match as a wildcard.
+The format is stable. Segments run from the coarsest to the finest: a team holds repositories and a repository declares pipelines, so a trust condition that ends in `*` narrows by prefix, and `team:acme:repository_id:123456789:*` admits every pipeline of one repository. A pipeline name is not unique across repositories: a team that subscribes `deploy` on two repositories gets two subjects that differ only in `repository_id`. `<repository_id>` is empty for an asserted run, which leaves `repository_id::` in the subject, and `<ref>` is empty when the `ref` claim is absent, which leaves the subject ending in `:ref:`. Every segment value is printable ASCII with no `:`, `*` or `?`: the controller refuses to sign for a run whose pipeline or branch holds one of those, whitespace, or any other character (400), so a submitted value cannot forge a later segment or match as a wildcard.
 
 ### What each value proves
 
-The controller vouches for the team: it comes from the claimed run's row. The other values are as trustworthy as the path that created the run.
+Intake seals every run with the identity it speaks for: a trust class, and the ref, commit, event and pipeline that class establishes. `trigger`, `repository_id`, `ref`, `sha` and `pipeline` read only that sealed identity, never the request body. The controller vouches for the team: it comes from the claimed run's row.
 
-- `trigger` comes from the event the controller recorded when it admitted the run, in fields an API submission cannot set:
-  - `push`: a GitHub push delivery whose signature the controller verified. The `ref`, `sha` and `repository` come from that delivery.
-  - `pull_request`: a verified GitHub `pull_request` delivery. The `ref` is `refs/pull/<number>/head` whatever the head branch is called, and the `sha` is the head commit. Pull requests from forks never run.
-  - `cron`: a schedule on this controller launched the run. That proves the controller started it, not that anyone reviewed it: any principal with `runs.control` can create a schedule, point it at any branch, and fire it at once.
-  - `manual`: every other start, including the CLI, the dashboard and the API. Its `pipeline`, `ref`, `sha` and `repository` are whatever the submitter sent.
-  - A retry or child run carries the `trigger` of the run it descends from, so a retried push stays `push` and a retried schedule run stays `cron`.
+- `trigger` names the trust class:
+  - `push`, `pull_request`, `release`, `create`, `delete`: a GitHub App delivery whose signature the controller verified. The `repository_id`, `ref` and `sha` come from that delivery. A pull request's `ref` is `refs/pull/<number>/head` whatever the head branch is called, and its `sha` is the head commit. A `closed` event runs only a merged pull request, at its merge commit, with `ref` `refs/heads/<base>`. Pull requests from forks never run.
+  - `cron`: a fire of an admin-armed default-branch schedule: a team admin armed it (through GitHub App automation consent, or as a member who holds `team.admin` when it fires), it follows the repository's default branch as GitHub reports it through the App at fire time, it has no locked commit and no override of arguments, cadence, timezone, overlap or catch-up, and the App resolves its commit at fire time. `ref` is `refs/heads/<default>`, `sha` is that branch's head when the schedule fired, and `repository_id` is set.
+  - `manual` with `repository_id`, `ref` and `sha`: a run bound to a GitHub Actions push. The values are the push's, which GitHub's own ID token proved.
+  - `manual` with no `repository_id`, `ref` or `sha`: every asserted run, including the CLI, the dashboard, the API, a schedule a non-admin armed, a locked, overridden or non-default-branch schedule, a schedule's "run now", a child run that does not run its parent's exact revision, and a run whose `source:` pin is a branch or tag. The controller proves none of its repository, ref or commit, so the token claims none of them.
+- `repository` is emitted only alongside `repository_id`, so an asserted run's token has neither.
+- A child run either runs its parent's exact revision (same repository, ref, commit and code commit) and inherits the parent's identity whole, including its `pipeline`, or is asserted under its own pipeline name and mints `manual` with no `repository_id`, `ref` or `sha`. The accepted plan declares each child pipeline and repository. Award issuance seals the authorized pairs in a separate child-start capability, using the team's registered repositories or live App installation coverage. The claim's source and data scope remain on the parent repository. A child in another repository is asserted even when the ref and commit text match. A job may start only the child pipelines its plan declares with `StartsChildren` for its own repository or `StartsChildrenIn("gh:123", "deploy")` for an explicit repository. A retry copies its source run's identity whole, so a retried push stays `push` and a retried schedule fire stays `cron`.
+- A `source:` code pin that is a full commit ID keeps the run's identity. A branch or tag pin, unless it resolves to the execution commit itself, runs code whoever can push that ref chooses, so the run mints `manual` with no `ref` or `sha`.
 - `runner_kind` names the credential that holds the claim: `runner` for a shared runner token, `personal` for a member's personal machine, `github-actions` for the credential a GitHub Actions job received through the [runner exchange](github-actions-runners.md), `user` for a person's token or session, which is how a laptop run reaches the controller, and `service` for a service token.
 
 A deploy role should therefore require one repository, `trigger:push` on a protected branch, and `runner:runner`, for example `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`. Branch protection on that repository then decides what reaches `main`; the protection of another repository that subscribes the same pipeline name does not matter, because its runs carry a different `repository_id`. A policy that leaves the repository open, such as `team:acme:repository_id:*:pipeline:deploy:...`, accepts a push to `main` of any repository the team subscribes, and so trusts the weakest branch protection among them. Data records retain their repository, ref and provenance. The controller
 authorizes every reference edge. Manual publication retains local provenance,
-and pipeline binaries stay local. A self-hosted runner's machine is a different matter: whoever runs code on it can change what the next run there finds. `trigger:cron` means "launched by a schedule that any editor can create", so reserve it for roles an editor may use anyway. A trust policy that accepts `trigger:manual` or `runner:user` accepts any code a team member with `runs.write` chooses to run.
+and pipeline binaries stay local. A self-hosted runner's machine is a different matter: whoever runs code on it can change what the next run there finds. `trigger:cron` means "declared by the repository's configuration on that branch", so it is as protected as the branch. A trust policy that accepts `trigger:manual` with an empty `repository_id` or `runner:user` accepts any code a team member with `runs.write` chooses to run. A GitHub Actions-bound run carries `trigger:manual` with its own `repository_id`, so a policy for it names the repository like any other, and subjects never collide across a team's repositories.
 
-A GitHub Actions job holding a claim can request a token too, with `runner:github-actions`. Such a job's credential is bound to its own repository's push, so its `ref` and `sha` are the push's. GitHub's own ID token proves the same repository facts with GitHub as the issuer; use Sparkwing's when the trust policy should name the Sparkwing team and pipeline.
+A GitHub Actions job holding a claim can request a token too, with `runner:github-actions`. Such a job's credential is bound to its own repository's push, so its `repository_id`, `ref` and `sha` are the push's. GitHub's own ID token proves the same repository facts with GitHub as the issuer; use Sparkwing's when the trust policy should name the Sparkwing team and pipeline.
 
 ## The token route
 

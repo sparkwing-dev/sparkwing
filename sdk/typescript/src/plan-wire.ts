@@ -18,6 +18,7 @@ export interface JobSpec {
   artifacts?: string[];
   consumes?: { producer: string; into?: string }[];
   pipeline_refs?: { pipeline: string; job: string }[];
+  children?: { pipeline: string; repository?: string }[];
   approval?: { message?: string; timeout_ms?: number; on_timeout?: string };
   on_failure_of?: string;
   retry?: { attempts: number; backoff_ms?: number };

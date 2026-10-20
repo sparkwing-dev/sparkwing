@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -257,9 +258,9 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 func automationSubscribes(decl githubAppAutomationPipeline, event, action string, intake githubAppIntake) bool {
 	switch event {
 	case "push":
-		return decl.Push && intake.env["GITHUB_REF_TYPE"] == "branch" && githubAppBranchMatches(decl.Branches, intake.branch)
+		return decl.Push && intake.env["GITHUB_REF_TYPE"] == "branch" && runspec.BranchSelector(decl.Branches).Matches(intake.branch)
 	case "pull_request":
-		return decl.PullRequest && slices.Contains(decl.Actions, action) && githubAppBranchMatches(decl.BaseBranches, intake.env["GITHUB_BASE_REF"])
+		return decl.PullRequest && slices.Contains(decl.Actions, action) && runspec.BranchSelector(decl.BaseBranches).Matches(intake.env["GITHUB_BASE_REF"])
 	}
 	return false
 }

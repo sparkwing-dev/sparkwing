@@ -92,6 +92,21 @@
       ],
       "type": "object"
     },
+    "childPipeline": {
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipeline"
+      ],
+      "type": "object"
+    },
     "closures": {
       "additionalProperties": false,
       "properties": {
@@ -269,6 +284,12 @@
         "caches": {
           "items": {
             "$ref": "#/$defs/cache"
+          },
+          "type": "array"
+        },
+        "children": {
+          "items": {
+            "$ref": "#/$defs/childPipeline"
           },
           "type": "array"
         },

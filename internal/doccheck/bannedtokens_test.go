@@ -17,7 +17,7 @@ func TestDocsRefuseRemovedCacheAndRetryRecipes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "cmd", "sparkwing", "help_registry.go"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, recipe := range []string{"sparkwing-cache", "gitcache", "RetryAuto()", "cache-grant-key", "SPARKWING_GITCACHE_URL", "SPARKWING_CACHE_URL", "SPARKWING_CACHE_GRANT"} {
+	for _, recipe := range []string{"sparkwing-cache", "gitcache", "RetryAuto()", "cache-grant-key", "SPARKWING_GITCACHE_URL", "SPARKWING_CACHE_URL", "SPARKWING_CACHE_GRANT", "A child always uses its parent's repository", "A child always uses the parent's repository"} {
 		t.Run(recipe, func(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(docs, "guide.md"), []byte(recipe), 0o600); err != nil {
 				t.Fatal(err)

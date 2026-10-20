@@ -159,12 +159,12 @@ func checkStorageNamespaces(t *testing.T) {
 				return r
 			}, part)
 		}
-		key := blob.MemoKey{Repo: runspec.RepoKey(parts[0]), Ref: blob.RefScope{Ref: parts[1]}, Pipeline: parts[2], Job: parts[3], Hash: runspec.Hash(storageDigest([]byte(parts[4])))}
+		key := blob.MemoKey{Repo: runspec.RepoKey(parts[0]), Ref: blob.RefScope{Ref: parts[1], Writer: "account/fixture"}, Pipeline: parts[2], Job: parts[3], Hash: runspec.Hash(storageDigest([]byte(parts[4])))}
 		manual, err := blob.MemoNamespace(key)
 		if err != nil {
 			return false
 		}
-		key.Ref.Verified = true
+		key.Ref.Verified, key.Ref.Writer = true, ""
 		verified, err := blob.MemoNamespace(key)
 		if err != nil || manual == verified {
 			return false

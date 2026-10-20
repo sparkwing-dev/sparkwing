@@ -110,6 +110,11 @@ func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) 
 	unit.Request.Request.Git.SHA = strings.Repeat("a", 40)
 	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo.git", PipelineDir: ".sparkwing"}
 	unit.Request.Hash = "request"
+	provenance, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "fixture"), "", unit.Request.Request.Git.SHA, "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit.Request.Provenance = provenance
 	unit.Accepted.Spec.Request = unit.Request
 	unit.Accepted.Spec.Hash = "spec"
 	request, err := json.Marshal(unit.Request)

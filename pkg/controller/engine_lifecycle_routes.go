@@ -56,7 +56,7 @@ func (s *Server) handleRetry(engine *EngineController) func(http.ResponseWriter,
 		if err := body.Validate(); err != nil {
 			return err
 		}
-		response, err := s.admitWithFlood(r.Context(), func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
+		response, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.Retry(ctx, a, body)
 		})
 		if err != nil {

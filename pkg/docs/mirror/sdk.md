@@ -175,6 +175,20 @@ waits for its output. Options include `sw.WithFreshInputs(in)`,
 submission, authorization, cancellation and cycle checks. Call it inside an
 execution callback. Compose reusable job types into a plan when the work belongs
 in the same run.
+Declare every pipeline a job may start with
+`sw.Job(plan, "release", &Release{}).StartsChildren("deploy-us", "deploy-eu")`
+(TypeScript `job.startsChildren("deploy-us", "deploy-eu")`); the controller
+refuses an undeclared child with `403`. A child at its parent's exact revision
+inherits the parent's identity, including its pipeline for OIDC claims and
+pipeline-scoped secrets. A child that names a branch the controller resolves
+runs as an asserted manual run under its own pipeline name and reads only
+team-wide shared secrets. Use `WithFreshRepo("owner/repo")` (TypeScript
+`runAndAwait` option `repo`) for an explicit repository and `WithFreshBranch`
+(option `branch`) to override its default `main` branch. The parent's live claim
+must authorize that repository. A child in another repository is always asserted.
+Children nest at most 10 levels deep
+counting the root, and one root starts at most 50; see
+[limits](limits.md#execution-and-records).
 The creating job reads the child's committed output under its live claim.
 Missing output, missing bytes and failed digest verification fail the await.
 An explicit JSON `null` remains a valid output.

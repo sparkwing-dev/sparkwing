@@ -22,7 +22,7 @@ type retrySourcePolicy struct {
 
 func (p retrySourcePolicy) ResolveIntake(ctx context.Context, reader capability.AuthorityResolver, in store.IntakeRequest) (store.IntakePolicyFacts, error) {
 	facts, err := (sealIntakePolicy{}).ResolveIntake(ctx, reader, in)
-	facts.SourceLocation, facts.RepositoryAuthorized = &p.location, true
+	facts.SourceLocation = &p.location
 	if in.VerifiedDeliveryID != "" {
 		facts.Delivery = p.delivery
 	}
@@ -105,7 +105,7 @@ func TestManualRetryRetainsVerifiedRepositoryFacts(t *testing.T) {
 	request := plan.Seal.Request.Request
 	git := request.Git
 	git.Ref, git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
-	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: plan.Seal.Request.AdmittedAt}}
+	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: plan.Seal.Request.AdmittedAt}}
 	s.SetIntakePolicy(retrySourcePolicy{delivery: &store.VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "app-actor"}}})
 	source, err := own.AdmitRun(t.Context(), store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request, VerifiedDeliveryID: "verified-delivery"})
 	if err != nil {

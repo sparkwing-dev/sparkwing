@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,18 +165,27 @@ func githubAppRerunIntake(anchor *store.RunRow, user string) githubAppIntake {
 	if strings.HasPrefix(request.Git.Ref, "refs/tags/") {
 		env["GITHUB_REF_TYPE"], branch = "tag", ""
 		env["GITHUB_TAG"] = strings.TrimPrefix(request.Git.Ref, "refs/tags/")
+		if app.Event == "release" {
+			env["GITHUB_TAG_NAME"] = env["GITHUB_TAG"]
+		}
 	} else {
 		env["GITHUB_REF_TYPE"] = "branch"
 	}
 	var pr *sparkwing.PullRequest
+	var head int64
 	if request.PullRequest.Set {
 		p := request.PullRequest.Value
 		pr = &sparkwing.PullRequest{Number: int(p.Number), Action: p.Action, BaseRef: p.BaseRef, BaseSHA: p.BaseSHA, HeadRef: p.HeadRef, HeadSHA: p.HeadSHA}
 		branch, env["GITHUB_BASE_REF"] = p.HeadRef, p.BaseRef
+		if id, ok := strings.CutPrefix(string(p.HeadRepo), "gh:"); ok {
+			if parsed, err := strconv.ParseInt(id, 10, 64); err == nil {
+				head = parsed
+			}
+		}
 		env["GITHUB_LABEL"] = p.Label
 		if p.Merged.Set {
 			env["GITHUB_MERGED"] = fmt.Sprint(p.Merged.Value)
 		}
 	}
-	return githubAppIntake{user: user, branch: branch, sha: request.Git.SHA, env: env, at: time.Now(), prInfo: pr}
+	return githubAppIntake{user: user, branch: branch, sha: request.Git.SHA, env: env, at: time.Now(), prInfo: pr, headRepo: head}
 }

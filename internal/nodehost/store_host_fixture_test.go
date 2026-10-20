@@ -26,7 +26,7 @@ type hostIntakePolicy struct{}
 
 func (hostIntakePolicy) ResolveIntake(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
 	_, err := resolver.ResolveAuthority(ctx, request.Authority)
-	return store.IntakePolicyFacts{Options: &request.Request.Options, SourceLocation: &request.Request.Source.Location, RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, err
+	return store.IntakePolicyFacts{Options: &request.Request.Options, SourceLocation: &request.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 }
 
 type hostEnrollment struct{}

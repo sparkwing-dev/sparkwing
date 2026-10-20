@@ -38,16 +38,16 @@ func checkBlobManifestRecords(t testing.TB, ctx context.Context, root string, ob
 	if err := json.Unmarshal(raw, &record); err != nil {
 		return err
 	}
-	record.Value.Data.WriteRef = "manual:main"
-	record.Value.Data.ReadRefs = []string{"manual:main"}
+	record.Value.Data.WriteRef = fixtureMainRef.CapabilityScope()
+	record.Value.Data.ReadRefs = []string{fixtureMainRef.CapabilityScope()}
 	raw, err = json.Marshal(record)
 	if err != nil {
 		return err
 	}
-	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET authority_json=?,ref_scope='manual:main' WHERE prefix=?", raw, record.Value.Prefix); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET authority_json=?,ref_scope='manual:account/fixture:main' WHERE prefix=?", raw, record.Value.Prefix); err != nil {
 		return err
 	}
-	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE runs SET request_json=? WHERE id='upload'", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`)); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE runs SET request_json=? WHERE id='upload'", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`)); err != nil {
 		return err
 	}
 	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
@@ -104,7 +104,7 @@ func checkBlobManifestRecords(t testing.TB, ctx context.Context, root string, ob
 		members := []blob.Member{{Team: attempt.Team, ManifestDigest: manifestDigest, Digest: memberDigest, Path: "file", Size: int64(len(body)), Mode: 0o640}}
 		commit := blob.CommitRecordRequest{
 			Source: request.Intent.Identity, Authority: request.Intent.Authority, Digest: manifestDigest, Members: members,
-			Key: blob.ResultRecordKey(request.Intent.Identity.Attempt.Value, "gh:1", blob.RefScope{Ref: "main"}, "fixture", blob.KindManifest),
+			Key: blob.ResultRecordKey(request.Intent.Identity.Attempt.Value, "gh:1", fixtureMainRef, "fixture", blob.KindManifest),
 		}
 		forged := commit
 		forged.Members = append([]blob.Member(nil), members...)

@@ -97,6 +97,34 @@ Attached and detached local runs use the checkout's origin default branch as a
 lookup hint. The controller verifies the producing run's default-branch trust.
 Local pipeline binaries stay on the machine that builds them.
 
+### Who shares a cache
+
+Memo, dependency-cache, output and pipeline-reference records are written
+under the scope of the identity the run was sealed with at intake. A run
+started by a signed GitHub App delivery writes under its verified ref. Every
+other run writes under its own scope, `manual:<writer>:<ref>`:
+
+| Run | Writer |
+| --- | --- |
+| CLI, API or dashboard run, and a schedule's "run now" | The submitting principal, for example `account/<id>` |
+| Fire of a schedule a non-admin armed | The member who armed it, `armer/<id>`, shared across that member's schedules |
+| Fire of an admin-armed default-branch schedule ([schedules](schedules.md#pause-edit-and-run)) | That schedule, `schedule/<id>` |
+| Fire of a locked, overridden or non-default-branch admin-armed schedule, and an App, schedule or Actions run demoted by a branch or tag `source:` pin | That run alone |
+| Child not at its parent's exact revision, under an asserted parent | The parent's writer |
+| Child not at its parent's exact revision, under any other parent | The parent run, `run/<id>` |
+| Run bound to a GitHub Actions push | `actions`, shared per ref |
+
+A child at its parent's exact revision, and a retry, write under the scope of
+the run they inherit from. Every run writes only its own scope. Every run also
+reads verified records of the repository's default branch, which intake learns
+from the verified records already stored, and a verified pull request also
+reads verified records of its base branch. One member's manual run therefore
+cannot feed memo or cache entries to another member's runs or to scheduled,
+Actions or App builds of `main`, and manual runs by different members do not
+share a cache. GitHub Actions restores from the current branch, the default
+branch and a pull request's base, never a sibling branch; CircleCI shares
+caches across a project.
+
 ## Pipeline binary cache
 
 Sparkwing compiles the pipeline module and stores the binary under

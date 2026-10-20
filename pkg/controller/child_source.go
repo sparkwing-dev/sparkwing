@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -16,8 +17,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// resolveChildRevisions preserves an authorized explicit source, or pins an
+// inherited source to the parent's revision or a branch the controller resolves.
 func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineController, a capability.Authorized, request *runspec.Request) error {
-	if request.Lineage.ParentRunID == "" || request.Git.SHA != "" {
+	if request.Lineage.ParentRunID == "" {
 		return nil
 	}
 	if a.Target.RunID != request.Lineage.ParentRunID || a.Target.NodeID != request.Lineage.ParentJobID {
@@ -31,8 +34,19 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if request.Git.Repository.Key != parent.Request.Request.Git.Repository.Key || request.Source.Location != parent.Request.Request.Source.Location {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "fresh child source must use its parent's repository location")
+	from := parent.Request.Request
+	if !a.Principal.Capability.AllowsChild(request.Pipeline, string(request.Git.Repository.Key)) {
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's declared children")
+	}
+	sameRepository := request.Git.Repository.Key == from.Git.Repository.Key
+	if sameRepository && request.Source.Location != from.Source.Location {
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "an inherited repository uses its parent's source location")
+	}
+	if request.Git.SHA != "" {
+		if sameRepository && (request.Git.SHA != from.Git.SHA || request.Git.Ref != from.Git.Ref || request.Source.Ref != from.Source.Ref) {
+			return apierr.Authorization(apierr.ReasonBinding, "a child runs its parent's revision or a branch the controller resolves")
+		}
+		return nil
 	}
 	if request.Git.Ref == "" {
 		return invalidEngineBody("fresh child source requires a branch")
@@ -127,4 +141,24 @@ func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, ho
 
 func (*intakeRevisionAccess) BundleURL(context.Context, string) (string, error) {
 	return "", errors.New("child revision lookup cannot read bundles")
+}
+
+// CoveredChildRepositories confirms App coverage independently of event subscriptions.
+func (s *Server) CoveredChildRepositories(ctx context.Context, installations []store.GitHubAppInstallation) ([]string, error) {
+	if s.githubApp == nil {
+		return nil, nil
+	}
+	var keys []string
+	for _, in := range installations {
+		repositories, err := s.githubApp.client.InstallationRepositories(ctx, in.InstallationID)
+		if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
+			return nil, err
+		}
+		for _, repo := range repositories {
+			if repo.ID > 0 && repo.Owner.ID == in.AccountID {
+				keys = append(keys, fmt.Sprintf("gh:%d", repo.ID))
+			}
+		}
+	}
+	return keys, nil
 }

@@ -56,8 +56,14 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 		}
 		stored := dataResultUpload(t, tenant, objects, authority, identity, "manifest", raw)
 		New(engine.Store, nil).WithDataObjects(objects)
-		outputKey := blob.ResultRecordKey(identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
-		manifestKey := blob.ResultRecordKey(identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindManifest)
+		run, err := tenant.ReadRun(t.Context(), "run")
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		scope := blob.ScopeFor(run.Request.Provenance)
+		outputKey := blob.ResultRecordKey(identity.Attempt.Value, "gh:1", scope, "ci", blob.KindOutput)
+		manifestKey := blob.ResultRecordKey(identity.Attempt.Value, "gh:1", scope, "ci", blob.KindManifest)
 		for _, request := range []blob.CommitRecordRequest{
 			{Authority: authority, Source: identity, Key: outputKey, Digest: output.Digest},
 			{Authority: authority, Source: identity, Key: manifestKey, Digest: stored.Digest, Members: []blob.Member{{Team: c.Team, ManifestDigest: stored.Digest, Digest: output.Digest, Path: "result", Size: output.Size, Mode: 0o640}}},

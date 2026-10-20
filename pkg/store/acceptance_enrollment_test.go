@@ -72,8 +72,16 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 		return errors.Join(errors.New("reopening lost enrolled identity"), err)
 	}
 	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}, Labels: []string{"name=forged", "pool=forged", "class=cloud"}}
+	var admitted []byte
+	if err := s.DB().QueryRowContext(ctx, `SELECT request_json FROM runs`).Scan(&admitted); err != nil {
+		return err
+	}
+	var sealed runspec.SealedRequest
+	if err := json.Unmarshal(admitted, &sealed); err != nil {
+		return err
+	}
 	for _, repository := range []string{"foreign", "acme"} {
-		request := runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "https://github.com/" + repository + "/repo"}}}}
+		request := runspec.SealedRequest{Provenance: sealed.Provenance, Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "https://github.com/" + repository + "/repo"}}}}
 		body, err := json.Marshal(request)
 		if err != nil {
 			return err

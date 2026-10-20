@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -44,15 +43,14 @@ func TestSelectDispatchRunsUnselectedWorkAnywhereOnEveryController(t *testing.T)
 func TestAdmissionSealsDispatchAfterRouteRules(t *testing.T) {
 	for name, route := range map[string]bool{"launcher": false, "routed pool": true} {
 		t.Run(name, func(t *testing.T) {
-			tenant, request, _ := intakeFixture(t)
-			request.Request.Dispatch = ""
+			// Reserved pools route only verified provenance, so the run is a signed App push.
+			s, tenant, in := appAdmissionFixture(t, true, "signed")
+			defer s.Close()
+			in.Request.Dispatch = ""
 			if route {
-				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,route,created_by,created_at) VALUES ('a','route','prod','gh:1','true','owner',1)`)
+				rewriteSchemaExec(t, s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,route,created_by,created_at) VALUES ('a','route','prod','gh:701','true','owner',1)`)
 			}
-			tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
-				return IntakePolicyFacts{RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
-			}))
-			result, err := tenant.AdmitRun(t.Context(), request)
+			result, err := tenant.AdmitGitHubAppRun(t.Context(), in)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -17,13 +17,13 @@ type VerifiedRunDelivery struct {
 
 // IntakePolicyFacts captures server policy while the admission transaction holds live authority.
 type IntakePolicyFacts struct {
-	Options              *runspec.Options
-	Ceilings             runspec.Ceilings
-	RepositoryAuthorized bool
-	SourceLocation       *runspec.SourceLocation
-	Delivery             *VerifiedRunDelivery
-	LogRetentionClass    string
-	LogRetentionDays     int
+	AdmissionKey      string
+	Options           *runspec.Options
+	Ceilings          runspec.Ceilings
+	SourceLocation    *runspec.SourceLocation
+	Delivery          *VerifiedRunDelivery
+	LogRetentionClass string
+	LogRetentionDays  int
 }
 
 // IntakePolicy resolves request options against operator ceilings, retention and verified repository facts.

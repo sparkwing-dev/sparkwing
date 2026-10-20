@@ -7,7 +7,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -147,7 +146,7 @@ func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string
 	if err != nil {
 		return false, err
 	}
-	return verifiedDefaultBranch(seal.Request.Git), nil
+	return seal.Provenance.TrustedDefault(), nil
 }
 
 func poolsHoldSecretsTx(ctx context.Context, tx *storeTx, team Team, pools []string) (bool, error) {
@@ -159,10 +158,4 @@ func poolsHoldSecretsTx(ctx context.Context, tx *storeTx, team Team, pools []str
 		}
 	}
 	return false, nil
-}
-
-// safety: facts a child or retry carried from another push must not vouch for a different ref or commit.
-func verifiedDefaultBranch(git runspec.Git) bool {
-	app := git.App.Value
-	return git.App.Set && app.DefaultBranchPush && app.DefaultBranch != "" && app.Ref == "refs/heads/"+app.DefaultBranch && app.Ref == git.Ref && app.SHA == git.SHA
 }

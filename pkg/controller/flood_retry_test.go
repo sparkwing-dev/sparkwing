@@ -22,23 +22,24 @@ func TestFloodRunTokenSurvivesPolicyRechecksProperty(t *testing.T) {
 		admit := func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			calls++
 			for range int(rechecks) + 1 {
-				if err := s.admissionFloodRefusal(ctx, nil, request, p); err != nil {
+				if _, err := s.admissionFloodRefusal(ctx, nil, request, p); err != nil {
 					return controllerwire.CreateRunResponse{}, err
 				}
 			}
 			other := p
 			other.Authority.ID = "other"
 			var pending *intakeRunToken
-			if !errors.As(s.admissionFloodRefusal(ctx, nil, request, other), &pending) {
+			_, err := s.admissionFloodRefusal(ctx, nil, request, other)
+			if !errors.As(err, &pending) {
 				return controllerwire.CreateRunResponse{}, errors.New("run token authorized another principal")
 			}
 			return controllerwire.CreateRunResponse{RunID: "admitted"}, nil
 		}
-		result, err := s.admitWithFlood(t.Context(), admit)
+		result, err := admitWithFlood(t.Context(), s, admit)
 		if err != nil || result.RunID != "admitted" || calls != 2 {
 			return false
 		}
-		_, err = s.admitWithFlood(t.Context(), admit)
+		_, err = admitWithFlood(t.Context(), s, admit)
 		var refusal *apierr.Error
 		return errors.As(err, &refusal) && refusal.Code == apierr.RateLimited && calls == 3
 	}

@@ -166,9 +166,11 @@ type SourceLocation struct {
 }
 
 // safety: Lineage records retriers separately from immutable original actor and git facts.
+// RootRunID bounds structural nesting and descendant counts.
 type Lineage struct {
 	RepoInherited bool            `json:"repo_inherited,omitempty"`
 	ParentRunID   string          `json:"parent_run_id"`
+	RootRunID     string          `json:"root_run_id,omitempty"`
 	ParentJobID   string          `json:"parent_job_id"`
 	RetryOf       string          `json:"retry_of"`
 	Retrier       Optional[Actor] `json:"retrier"`
@@ -389,6 +391,7 @@ type IntakeFacts struct {
 	AllowedPools []string
 	AuthorityRef capability.AuthorityRef
 	Ceilings     Ceilings
+	Provenance   Provenance
 }
 
 // safety: SealedRequest is immutable at intake, even when later settings resolve from code.
@@ -400,6 +403,7 @@ type SealedRequest struct {
 	AllowedPools []string                `json:"allowed_pools"`
 	AuthorityRef capability.AuthorityRef `json:"authority_ref"`
 	Ceilings     Ceilings                `json:"ceilings"`
+	Provenance   Provenance              `json:"provenance"`
 	Hash         Hash                    `json:"hash"`
 }
 

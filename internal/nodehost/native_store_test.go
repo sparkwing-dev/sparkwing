@@ -260,7 +260,11 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 		}
 		attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: input.Attempt, Generation: input.Generation}}
 		identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: request.Team, RunID: input.Accepted.RunID, Principal: blob.Principal(principal.Capability.Subject.ID), CapabilityRef: input.Authority.CapabilityPrefix, Attempt: attempt}
-		authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Repo: request.Git.Repository.Key, Attempt: attempt, Ref: blob.RefFacts{SHA: request.Git.SHA}}
+		run, err := f.Tenant.ReadRun(ctx, input.Accepted.RunID)
+		if err != nil {
+			return JobUpload{}, err
+		}
+		authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Repo: request.Git.Repository.Key, Attempt: attempt, Ref: blob.RefFacts{Scope: blob.ScopeFor(run.Request.Provenance), SHA: request.Git.SHA}}
 		return JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt.Value, authority.Repo, authority.Ref.Scope, request.Pipeline, blob.KindOutput)}, nil
 	}}, directory
 }

@@ -44,7 +44,7 @@ type fakeIntakeContracts struct {
 }
 
 func (fakeIntakeContracts) SealRequest(in runspec.Request, facts runspec.IntakeFacts) (runspec.SealedRequest, error) {
-	out := runspec.SealedRequest{Version: 1, Request: in, RunID: facts.RunID, AdmittedAt: facts.AdmittedAt, AllowedPools: facts.AllowedPools, AuthorityRef: facts.AuthorityRef, Ceilings: facts.Ceilings}
+	out := runspec.SealedRequest{Version: 1, Request: in, RunID: facts.RunID, AdmittedAt: facts.AdmittedAt, AllowedPools: facts.AllowedPools, AuthorityRef: facts.AuthorityRef, Ceilings: facts.Ceilings, Provenance: facts.Provenance}
 	hash, err := stateHash(out)
 	out.Hash = runspec.Hash(hash)
 	return out, err
@@ -244,10 +244,10 @@ func TestAdmissionPoolTrustRequiresIndependentFacts(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			tenant, request, now := intakeFixture(t)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,created_by,created_at) VALUES ('a','repo','repo-pool','gh:1','','owner',1),('a','branch','branch-pool','gh:1','main','owner',1),('b','other','foreign-pool','gh:1','','owner',1)`)
-			facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, RepositoryAuthorized: mode != "typed" && mode != "forged_app"}
+			facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}
 			if mode == "app" || mode == "fork_app" {
 				request.VerifiedDeliveryID = "delivery"
-				facts.Delivery = &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "verified", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", Ref: "main", SHA: "verified", DefaultBranch: "main", VerifiedAt: *now}}}}
+				facts.Delivery = &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: fixtureOtherSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", Ref: "refs/heads/main", SHA: fixtureOtherSHA, DefaultBranch: "main", VerifiedAt: *now}}}}
 				if mode == "fork_app" {
 					facts.Delivery.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Fork: true}}
 				}
@@ -267,12 +267,9 @@ func TestAdmissionPoolTrustRequiresIndependentFacts(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := []string{}
-			if mode == "repository" {
-				want = []string{"repo-pool"}
-			}
 			if mode == "app" {
 				want = []string{"branch-pool", "repo-pool"}
-				if result.Request.Request.Git.SHA != "verified" || result.Request.Request.Actor.ID != "actor" {
+				if result.Request.Request.Git.SHA != fixtureOtherSHA || result.Request.Request.Actor.ID != "actor" {
 					t.Fatal("App facts were not sealed")
 				}
 			}
@@ -687,13 +684,12 @@ func TestAdmissionConcurrentNumberingAndReplay(t *testing.T) {
 }
 
 func TestAdmissionRouteNarrowsSealedRequirements(t *testing.T) {
-	tenant, request, _ := intakeFixture(t)
+	// Reserved pools route only verified provenance, so the run is a signed App push.
+	s, tenant, request := appAdmissionFixture(t, true, "signed")
+	defer s.Close()
 	request.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"linux"}}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "runner"}}
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,route,created_by,created_at) VALUES ('a','route','prod','gh:1','true','owner',1)`)
-	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
-		return IntakePolicyFacts{RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
-	}))
-	result, err := tenant.AdmitRun(t.Context(), request)
+	rewriteSchemaExec(t, s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,route,created_by,created_at) VALUES ('a','route','prod','gh:701','true','owner',1)`)
+	result, err := tenant.AdmitGitHubAppRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -798,7 +794,7 @@ func TestPlanGuardRefusalPersistsSealWithoutOfferingJobs(t *testing.T) {
 func TestAdmissionRetryKeepsVerifiedAppFactsAndDoesNotReplayDelivery(t *testing.T) {
 	tenant, request, now := intakeFixture(t)
 	request.VerifiedDeliveryID = "delivery"
-	facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, RepositoryAuthorized: true, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "verified-sha", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: "verified-sha", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}
+	facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}
 	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return facts, nil
 	}))
@@ -808,12 +804,12 @@ func TestAdmissionRetryKeepsVerifiedAppFactsAndDoesNotReplayDelivery(t *testing.
 	}
 	request.VerifiedDeliveryID = ""
 	request.Request.Lineage.RetryOf = original.RunID
-	request.Request.Git.SHA = "later-head"
+	request.Request.Git.SHA = fixtureOtherSHA
 	retry, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(retry.Request, original.Request) || retry.Request.Request.Git.SHA != "verified-sha" || !retry.Request.Request.Git.App.Value.DefaultBranchPush || retry.Request.Request.Actor.ID != "original-actor" {
+	if !reflect.DeepEqual(retry.Request, original.Request) || retry.Request.Request.Git.SHA != fixtureFeatureSHA || !retry.Request.Request.Git.App.Value.DefaultBranchPush || retry.Request.Request.Actor.ID != "original-actor" {
 		t.Fatalf("retry changed original authority: %+v", retry.Request)
 	}
 	var delivery string
@@ -826,7 +822,7 @@ func TestAdmissionDeduplicatesVerifiedAppDeliveryWithoutClientKey(t *testing.T) 
 	tenant, request, now := intakeFixture(t)
 	request.VerifiedDeliveryID = "delivery"
 	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
-		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, RepositoryAuthorized: true, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "verified-sha", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: "verified-sha", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}, nil
+		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}, nil
 	}))
 	first, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {

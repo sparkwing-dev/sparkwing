@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // Compute guards use zero for an unlimited operator ceiling.
@@ -352,12 +353,12 @@ func runsPerHourRefusal(
 ) error {
 	since := now.Add(-time.Hour).UnixNano()
 	if limits.RunsPerHour > 0 && principal.ID != "" {
-		kind := `COALESCE(CASE WHEN retry_of<>'' THEN json_extract(lineage_json, '$.retrier.value.kind') ELSE json_extract(request_json, '$.request.actor.kind') END, '')`
+		kind, id := `json_extract(lineage_json, '$.admission_subject.kind')`, `json_extract(lineage_json, '$.admission_subject.id')`
 		if q.dialect == DialectPostgres {
-			kind = `COALESCE(CASE WHEN retry_of<>'' THEN convert_from(lineage_json,'UTF8')::jsonb->'retrier'->'value'->>'kind' ELSE convert_from(request_json,'UTF8')::jsonb->'request'->'actor'->>'kind' END,'')`
+			kind, id = `convert_from(lineage_json,'UTF8')::jsonb->'admission_subject'->>'kind'`, `convert_from(lineage_json,'UTF8')::jsonb->'admission_subject'->>'id'`
 		}
 		var runs int64
-		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team = ? AND created_principal = ? AND created_at >= ? AND `+kind+`=?`, team, principal.ID, since, principal.Kind).Scan(&runs); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=? AND created_at>=? AND `+kind+`=? AND `+id+`=?`, team, since, principal.Kind, principal.ID).Scan(&runs); err != nil {
 			return err
 		}
 		if runs >= limits.RunsPerHour {
@@ -382,6 +383,30 @@ func globalRunsPerHourRefusal(ctx context.Context, q rowQuerier, limit, since in
 			Limit: ComputeLimitGlobalRunsPerHour, Cap: limit,
 			Observed: runs, Scope: "controller",
 		}
+	}
+	return nil
+}
+
+// enforceChildLimitsTx bounds a child's depth and its root's descendants.
+// The caller's per-team intake lock serializes the count.
+func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root string, depth int) error {
+	if depth > limits.MaxChildDepth {
+		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("child runs nest at most %d levels deep, counting the root run", limits.MaxChildDepth), Details: map[string]any{"limit": "max_child_depth", "cap": limits.MaxChildDepth}}
+	}
+	var created int64
+	if err := tx.QueryRowContext(ctx, `SELECT created_at FROM runs WHERE team=? AND id=?`, team, root).Scan(&created); err != nil {
+		return err
+	}
+	expression := `json_extract(lineage_json, '$.root_run_id')`
+	if tx.dialect == DialectPostgres {
+		expression = `convert_from(lineage_json,'UTF8')::jsonb->>'root_run_id'`
+	}
+	var children int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=? AND created_at>=? AND COALESCE(parent_run_id,'')<>'' AND retry_of='' AND `+expression+`=?`, team, created, root).Scan(&children); err != nil {
+		return err
+	}
+	if children >= int64(limits.MaxChildrenPerRoot) {
+		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("a root run starts at most %d child runs", limits.MaxChildrenPerRoot), Details: map[string]any{"limit": "max_children_per_root", "cap": limits.MaxChildrenPerRoot, "observed": children}}
 	}
 	return nil
 }

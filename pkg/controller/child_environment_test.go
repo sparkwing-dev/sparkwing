@@ -80,7 +80,7 @@ func TestNativeChildIntakeInheritsCapturedEnvironment(t *testing.T) {
 			t.Fatal(err)
 		}
 		forged := parent.Request.Request
-		forged.Pipeline, forged.Origin = "forged", runspec.OriginChild
+		forged.Pipeline, forged.Origin = "deploy", runspec.OriginChild
 		forged.Lineage = runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}
 		if descendant {
 			forged.EnvironmentSource = runspec.EnvironmentSubmitted

@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"net/url"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -29,7 +28,7 @@ func (p ProfileData) Close(ctx context.Context) error {
 
 // OpenProfileData narrows a live profile to verified cache reads or one publication.
 func OpenProfileData(ctx context.Context, options EngineOptions, scope capability.DataScope) (ProfileData, error) {
-	if scope.Use != capability.DataRemoteCache && scope.Use != capability.DataPublish || scope.Use == capability.DataPublish && !strings.HasPrefix(scope.WriteRef, "manual:") {
+	if scope.Use != capability.DataRemoteCache && scope.Use != capability.DataPublish || scope.Use == capability.DataPublish && blob.ParseCapabilityScope(scope.WriteRef).Verified {
 		return ProfileData{}, dataProtocolError("invalid profile data purpose or ref")
 	}
 	c, err := newEngineClient(options)
@@ -55,7 +54,7 @@ func OpenProfileData(ctx context.Context, options EngineOptions, scope capabilit
 		return c.request(ctx, "DELETE", "/api/v1/tokens/{token}", "/api/v1/tokens/"+url.PathEscape(result.Prefix), "", nil, nil)
 	}
 	if scope.Use == capability.DataPublish {
-		p.Authority.Ref.Scope = blob.RefScope{Ref: scope.WriteRef[len("manual:"):]}
+		p.Authority.Ref.Scope = blob.ParseCapabilityScope(scope.WriteRef)
 		p.Authority.Upload = runspec.Optional[blob.UploadIdentity]{Set: true, Value: blob.UploadIdentity{Kind: blob.UploadPublication, Team: result.Team, RunID: scope.RunID, Principal: p.Authority.Principal, CapabilityRef: result.Prefix}}
 	}
 	return p, nil

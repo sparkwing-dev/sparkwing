@@ -111,23 +111,9 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return a, err
 	}
-	git := sealed.Request.Git
-	facts := blob.RefFacts{Scope: blob.RefScope{Ref: git.Ref}, SHA: git.SHA}
-	if git.DefaultBranch.Set {
-		facts.DefaultBranch = git.DefaultBranch.Value
-	}
-	if git.App.Set && git.App.Value.Ref == git.Ref && git.App.Value.SHA == git.SHA {
-		app := git.App.Value
-		facts.Scope.Verified = true
-		facts.AppDeliveryKey = app.DeliveryKey
-		facts.DefaultBranch = app.DefaultBranch
-		if strings.HasPrefix(app.Ref, "refs/heads/") {
-			facts.DefaultBranch = "refs/heads/" + app.DefaultBranch
-		}
-		facts.DefaultBranchVerified = app.DefaultBranchPush && app.Ref == facts.DefaultBranch
-		if sealed.Request.PullRequest.Set && sealed.Request.PullRequest.Value.BaseRepo == a.authority.Repo {
-			facts.PullRequestBase = runspec.Optional[string]{Set: true, Value: sealed.Request.PullRequest.Value.BaseRef}
-		}
+	facts, err := provenanceRefFacts(sealed)
+	if err != nil {
+		return a, err
 	}
 	a.authority.Ref = facts
 	a.source = blob.UploadIdentity{Team: string(team), RunID: c.Binding.RunID, Principal: a.authority.Principal, CapabilityRef: c.Prefix}
@@ -323,4 +309,40 @@ func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.
 
 func blobCacheRepositoryAllowed(a blobActor, kind blob.Kind) bool {
 	return !blobLocalRepo(a.authority.Repo) || kind == blob.KindDepcache && a.capability.Subject.Kind == capability.SubjectLocal && a.capability.Data.Use == capability.DataClaim
+}
+
+// provenanceRefFacts is the one owner of a run's data scope: the scope it writes,
+// from its trust class, and the verified fallbacks it reads, from the default
+// branch and pull request base its provenance sealed.
+func provenanceRefFacts(sealed runspec.SealedRequest) (blob.RefFacts, error) {
+	p := sealed.Provenance
+	if !p.Valid() {
+		return blob.RefFacts{}, authorityError(apierr.IntegrityFailure, "run has no sealed provenance")
+	}
+	facts := blob.RefFacts{Scope: blob.ScopeFor(p), SHA: p.SHA()}
+	if p.DefaultBranch() != "" {
+		facts.DefaultBranch = "refs/heads/" + p.DefaultBranch()
+	}
+	if !p.Verified() {
+		return facts, nil
+	}
+	facts.AppDeliveryKey = p.Delivery()
+	facts.DefaultBranchVerified = p.Trust() == runspec.TrustVerifiedDefault
+	if base := p.PullRequestBase(); base != "" {
+		facts.PullRequestBase = runspec.Optional[string]{Set: true, Value: "refs/heads/" + base}
+	}
+	return facts, nil
+}
+
+// readScopes lists what a run may read: its own scope, then the verified default
+// branch and a pull request's base. Readers still require verified provenance on
+// any record outside the run's own scope.
+func readScopes(facts blob.RefFacts) []string {
+	scopes := []string{facts.Scope.CapabilityScope()}
+	for _, ref := range []string{facts.DefaultBranch, facts.PullRequestBase.Value} {
+		if ref != "" && !slices.Contains(scopes, ref) {
+			scopes = append(scopes, ref)
+		}
+	}
+	return scopes
 }

@@ -15,34 +15,42 @@ type PlanDoc struct {
 
 // JobSpec is flat so every placement validates the same execution envelope.
 type JobSpec struct {
-	ID                  string              `json:"id"`
-	Needs               []string            `json:"deps,omitempty"`
-	NeedsIfPresent      []string            `json:"deps_if_present,omitempty"`
-	NeedsGenerated      []string            `json:"needs_generated,omitempty"`
-	Groups              []string            `json:"groups,omitempty"`
-	Env                 map[string]EnvValue `json:"env,omitempty"`
-	Artifacts           []string            `json:"artifacts,omitempty"`
-	Consumes            []ArtifactInput     `json:"consumes,omitempty"`
-	References          []PipelineReference `json:"pipeline_refs,omitempty"`
-	Approval            *ApprovalSpec       `json:"approval,omitempty"`
-	OnFailureOf         string              `json:"on_failure_of,omitempty"`
-	Retry               *RetrySpec          `json:"retry,omitempty"`
-	TimeoutMS           *int64              `json:"timeout_ms,omitempty"`
-	NoProgressTimeoutMS *int64              `json:"no_progress_timeout_ms,omitempty"`
-	Requires            []string            `json:"requires,omitempty"`
-	Prefers             []string            `json:"prefers,omitempty"`
-	Inline              bool                `json:"inline,omitempty"`
-	Optional            bool                `json:"optional,omitempty"`
-	ContinueOnError     bool                `json:"continue_on_error,omitempty"`
-	Memo                *MemoSpec           `json:"memo,omitempty"`
-	Caches              []CacheSpec         `json:"caches,omitempty"`
-	Concurrency         []ConcurrencySpec   `json:"concurrency,omitempty"`
-	Resources           *ResourceSpec       `json:"resources,omitempty"`
-	Closures            ClosureSpec         `json:"closures,omitzero"`
-	SkipIfBudgetMS      *int64              `json:"skip_if_budget_ms,omitempty"`
-	Steps               []StepSpec          `json:"steps,omitempty"`
-	ResultStep          string              `json:"result_step,omitempty"`
-	FailurePolicy       string              `json:"failure_policy,omitempty"`
+	ID             string              `json:"id"`
+	Needs          []string            `json:"deps,omitempty"`
+	NeedsIfPresent []string            `json:"deps_if_present,omitempty"`
+	NeedsGenerated []string            `json:"needs_generated,omitempty"`
+	Groups         []string            `json:"groups,omitempty"`
+	Env            map[string]EnvValue `json:"env,omitempty"`
+	Artifacts      []string            `json:"artifacts,omitempty"`
+	Consumes       []ArtifactInput     `json:"consumes,omitempty"`
+	References     []PipelineReference `json:"pipeline_refs,omitempty"`
+	// Children names the pipelines this job may start as child runs; intake refuses any other.
+	Children            []ChildPipeline   `json:"children,omitempty"`
+	Approval            *ApprovalSpec     `json:"approval,omitempty"`
+	OnFailureOf         string            `json:"on_failure_of,omitempty"`
+	Retry               *RetrySpec        `json:"retry,omitempty"`
+	TimeoutMS           *int64            `json:"timeout_ms,omitempty"`
+	NoProgressTimeoutMS *int64            `json:"no_progress_timeout_ms,omitempty"`
+	Requires            []string          `json:"requires,omitempty"`
+	Prefers             []string          `json:"prefers,omitempty"`
+	Inline              bool              `json:"inline,omitempty"`
+	Optional            bool              `json:"optional,omitempty"`
+	ContinueOnError     bool              `json:"continue_on_error,omitempty"`
+	Memo                *MemoSpec         `json:"memo,omitempty"`
+	Caches              []CacheSpec       `json:"caches,omitempty"`
+	Concurrency         []ConcurrencySpec `json:"concurrency,omitempty"`
+	Resources           *ResourceSpec     `json:"resources,omitempty"`
+	Closures            ClosureSpec       `json:"closures,omitzero"`
+	SkipIfBudgetMS      *int64            `json:"skip_if_budget_ms,omitempty"`
+	Steps               []StepSpec        `json:"steps,omitempty"`
+	ResultStep          string            `json:"result_step,omitempty"`
+	FailurePolicy       string            `json:"failure_policy,omitempty"`
+}
+
+// ChildPipeline names an allowed child pipeline; an empty repository inherits the parent repository.
+type ChildPipeline struct {
+	Pipeline   string `json:"pipeline"`
+	Repository string `json:"repository,omitempty"`
 }
 
 // EnvValue distinguishes interpreter startup from SDK-applied body environment.

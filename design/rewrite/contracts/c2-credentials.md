@@ -3575,3 +3575,24 @@ team ID and display name to deployment credentials. Console callers retain their
 existing view. OperatorManager.ReadOperatorTeam consumes this safe projection.
 The CLI derives the protected node label value through the launcher's shared
 TeamNodeValue. The read grants no team credential or financial authority.
+
+
+## Sealed child authority and admission accounting
+
+A node award carries `children`, the accepted plan's declared pipeline/repository
+pairs that the team may run. An empty declaration repository means the parent's
+repository. Explicit repositories use canonical keys. The award checks team
+repository registration or live GitHub App installation coverage. Child intake
+checks this capability independently of the claim's source and data scope.
+Another repository or revision produces asserted provenance and shared-only
+secret access. Cycle detection compares both repository and pipeline.
+
+Admission stores the charged flood key and hourly subject in the run's private
+execution record, outside source seals and public display lineage. App and
+schedule roots share the team bucket for flood and hourly limits. Retries charge
+the retrier. Children inherit their parent's charged identity, including after a
+retry, without reclassifying the source envelope.
+
+Secret preflight, plan validation, pool restrictions and release use the same row
+selector. Its explicit scope is pipeline, shared-only or none. Shared-only scope
+cannot select an unshared team secret or a pipeline secret.

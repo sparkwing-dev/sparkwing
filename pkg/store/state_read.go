@@ -37,6 +37,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 		}
 	}
 	v.Lineage, v.Retry = execution.Lineage, execution.Retry
+	v.admission = execution.admissionIdentity
 	v.Plan = plan
 	v.CreatedAt = time.Unix(0, created).UTC()
 	v.CancelRequestedAt, v.StartedAt, v.FinishedAt = stateTime(cancel), stateTime(start), stateTime(finish)

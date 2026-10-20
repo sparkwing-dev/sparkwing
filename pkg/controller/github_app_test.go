@@ -1013,7 +1013,7 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 		"push": false, "pull_request": false, "pull_request_closed": true,
 		"pull_request_labeled": true, "pull_request_labels": []string{"ship"},
 		"pull_request_ready_for_review": true, "release_published": true,
-		"release_prereleased": true, "branch_create": true, "branch_delete": true,
+		"release_prereleased": true, "branch_create": true, "branch_delete": true, "tags": []string{"v1-*"}, "release_tags": []string{"v1-*"},
 	}); code != http.StatusOK {
 		t.Fatalf("opt-in subscription = %d", code)
 	}
@@ -1029,12 +1029,13 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 	pr["label"] = map[string]any{"name": "skip"}
 	check("pull_request", pr, "ignored")
 	pr["action"] = "closed"
-	check("pull_request", pr, "dispatched")
+	check("pull_request", pr, "ignored")
 	pr["label"] = map[string]any{"name": "ship"}
 	pr["action"] = "labeled"
 	check("pull_request", pr, "dispatched")
 	pr["action"] = "closed"
 	pr["pull_request"].(map[string]any)["merged"] = true
+	pr["pull_request"].(map[string]any)["merge_commit_sha"] = strings.Repeat("3", 40)
 	check("pull_request", pr, "dispatched")
 	pr["action"] = "ready_for_review"
 	check("pull_request", pr, "dispatched")
@@ -1069,8 +1070,8 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 		check(event, branch, "ignored")
 	}
 	got := f.triggers(olga.team)
-	if len(got) != 9 {
-		t.Fatalf("triggers = %d, want 9", len(got))
+	if len(got) != 8 {
+		t.Fatalf("triggers = %d, want 8", len(got))
 	}
 	counts := map[string]int{}
 	for _, tr := range got {
@@ -1084,13 +1085,22 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 			continue
 		}
 		ref := request.Git.Ref
-		if ref == "" || request.Git.SHA != headSHA {
+		want := headSHA
+		if request.Git.App.Value.Action == "closed" {
+			want = strings.Repeat("3", 40)
+		}
+		if ref == "" || request.Git.SHA != want {
 			t.Fatalf("missing ref or resolved commit: %+v", request.Git)
 		}
 		switch event {
 		case "pull_request":
 			pr := request.PullRequest
-			if ref != "refs/pull/12/head" || !pr.Set || pr.Value.Action == "" {
+			// A merged closed pull request runs the merge commit on its base branch.
+			wantRef := "refs/pull/12/head"
+			if pr.Value.Action == "closed" {
+				wantRef = "refs/heads/main"
+			}
+			if ref != wantRef || !pr.Set || pr.Value.Action == "" {
 				t.Fatalf("PR facts = %+v", request)
 			}
 			if pr.Value.Action == "closed" && !pr.Value.Merged.Set {
@@ -1107,7 +1117,7 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 		}
 	}
 
-	if counts["pull_request"] != 5 || counts["release"] != 2 || counts["create"] != 1 || counts["delete"] != 1 {
+	if counts["pull_request"] != 4 || counts["release"] != 2 || counts["create"] != 1 || counts["delete"] != 1 {
 		t.Fatalf("event counts = %v", counts)
 	}
 }
@@ -1166,7 +1176,7 @@ func TestGitHubAppReleaseReplayAndCoverage(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
-	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "release_published": true}); code != http.StatusOK {
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "release_published": true, "release_tags": []string{"*"}}); code != http.StatusOK {
 		t.Fatal(code)
 	}
 	f.app.SetCommit("acme/widgets", "refs/tags/v1", headSHA)
@@ -1258,7 +1268,7 @@ func TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	for _, pipeline := range []string{"build", "test"} {
-		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"push": false, "release_published": true}); code != http.StatusOK {
+		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"push": false, "release_published": true, "release_tags": []string{"*"}}); code != http.StatusOK {
 			t.Fatal(code)
 		}
 	}
@@ -1414,6 +1424,8 @@ func TestGitHubAppBranchFiltersGateBranchAndPullRequestEvents(t *testing.T) {
 	}
 	pr := prPayload(7, 701, "acme/widgets", 701)
 	pr["action"] = "closed"
+	pr["pull_request"].(map[string]any)["merged"] = true
+	pr["pull_request"].(map[string]any)["merge_commit_sha"] = strings.Repeat("3", 40)
 	pr["pull_request"].(map[string]any)["base"].(map[string]any)["ref"] = "topic"
 	if _, out := f.deliver("pull_request", pr, ""); out["status"] != "ignored" {
 		t.Fatalf("closed PR into an unlisted base = %v", out)

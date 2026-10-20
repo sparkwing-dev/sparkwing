@@ -39,7 +39,7 @@ func SeedUpload(ctx context.Context, db *sql.DB) (store.UploadReservationRequest
 		return store.UploadReservationRequest{}, err
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES (?,'upload',1,'fixture','running',?,'fixture',?,'gh:1','host','publish',?,'publisher',?,'r30',30)`, store.DefaultTeam, []byte(`{"version":1}`), now.UnixNano(), []byte(`[]`), now.UnixNano()); err != nil {
+VALUES (?,'upload',1,'fixture','running',?,'fixture',?,'gh:1','host','publish',?,'publisher',?,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"fixture","writer":"account/fixture"}}`), now.UnixNano(), []byte(`[]`), now.UnixNano()); err != nil {
 		return store.UploadReservationRequest{}, err
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,reserved_pools,created_at,created_by,repo_key,repo_scope)
@@ -68,6 +68,9 @@ func SeedPresence(ctx context.Context, db *sql.DB) (store.UploadReservationReque
 	return request, nil
 }
 
+// FeatureSHA is the verified commit SeedCacheScope seals.
+const FeatureSHA = "fea7fea7fea7fea7fea7fea7fea7fea7fea7fea7"
+
 // SeedCacheScope seeds verified cache records for read-policy tests.
 func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error) {
 	request, err := SeedPresence(ctx, db)
@@ -76,9 +79,15 @@ func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationReq
 	}
 	attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "upload", NodeID: "a", Attempt: 1, Generation: 7}}
 	request.Intent.Authority.Attempt, request.Intent.Identity.Attempt = attempt, attempt
-	sealed := runspec.SealedRequest{Version: 1, Request: runspec.Request{
-		Git:         runspec.Git{Ref: "feature", SHA: "feature-sha", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Ref: "feature", SHA: "feature-sha", DeliveryKey: "feature-delivery", DefaultBranch: "main"}}},
-		PullRequest: runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{BaseRepo: "gh:1", BaseRef: "release"}},
+	app := runspec.AppFacts{Event: "pull_request", RepositoryID: 1, Ref: "refs/heads/feature", SHA: FeatureSHA, DeliveryKey: "feature-delivery", DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
+	pr := runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{BaseRepo: "gh:1", BaseRef: "release"}}
+	provenance, err := runspec.AppProvenance(app, pr, "fixture")
+	if err != nil {
+		return request, err
+	}
+	sealed := runspec.SealedRequest{Version: 1, Provenance: provenance, Request: runspec.Request{
+		Git:         runspec.Git{Ref: app.Ref, SHA: app.SHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: app}},
+		PullRequest: pr,
 	}}
 	body, err := json.Marshal(sealed)
 	if err != nil {
@@ -97,12 +106,12 @@ func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationReq
 	if err := json.Unmarshal(body, &record); err != nil {
 		return request, err
 	}
-	record.Value.Data.WriteRef, record.Value.Data.ReadRefs = "feature", []string{"feature", "release", "main"}
+	record.Value.Data.WriteRef, record.Value.Data.ReadRefs = "refs/heads/feature", []string{"refs/heads/feature", "refs/heads/release", "refs/heads/main"}
 	body, err = json.Marshal(record)
 	if err != nil {
 		return request, err
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE capabilities SET authority_json=?,ref_scope='feature' WHERE prefix=?", body, request.Intent.Authority.CapabilityRef); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE capabilities SET authority_json=?,ref_scope='refs/heads/feature' WHERE prefix=?", body, request.Intent.Authority.CapabilityRef); err != nil {
 		return request, err
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,3,1)", store.DefaultTeam, request.Intent.Digest); err != nil {
@@ -112,6 +121,6 @@ func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationReq
 	if err != nil {
 		return request, err
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,source_node_id,source_attempt,source_generation,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'memo','fixture','output',?,'gh:1','feature','publisher','local',?,'publication','upload','a',1,7,1,0,'fixture-sha',?,'fixture',1)`, store.DefaultTeam, request.Intent.Digest, source, []byte(`{}`))
+	_, err = db.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,source_node_id,source_attempt,source_generation,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'memo','fixture','output',?,'gh:1','refs/heads/feature','publisher','local',?,'publication','upload','a',1,7,1,0,'fixture-sha',?,'fixture',1)`, store.DefaultTeam, request.Intent.Digest, source, []byte(`{}`))
 	return request, err
 }

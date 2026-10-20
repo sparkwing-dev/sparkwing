@@ -124,7 +124,12 @@ func TestSecretReadAuthorityAndSelectionProperty(t *testing.T) {
 			case 1:
 				a.Target.RunID = "other"
 			case 2:
+				// A run-bound read selects the pipeline its provenance speaks for, whatever the caller names.
 				a.Target.Pipeline = "other"
+				if row, err := tenant.ReadSecret(t.Context(), a); err != nil || row == nil || row.Pipeline != "p" {
+					t.Fatalf("caller pipeline steered a run-bound read: %+v %v", row, err)
+				}
+				return
 			case 3:
 				a.Access.Liveness = capability.LiveReporting
 			case 4:
@@ -179,7 +184,7 @@ func TestSecretReadMemberScopesAndMaskedRefusal(t *testing.T) {
 		t.Fatalf("masked member read: %+v %v", row, err)
 	}
 	a.Target.SecretName, a.Target.RunID = "KEY", "foreign"
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('b','foreign',1,'build','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('b','foreign',1,'build','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"build","writer":"account/fixture"}}`), []byte(`[]`))
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatalf("foreign run selector: %+v %v", row, err)
 	}

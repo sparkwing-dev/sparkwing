@@ -107,7 +107,7 @@ func (t *Tenant) githubSourceReleaseTx(ctx context.Context, tx *storeTx, authori
 	if err != nil {
 		return out, err
 	}
-	ids, names, err := t.githubSourceRepositoriesTx(ctx, tx, slug, id)
+	ids, names, err := t.githubSourceRepositoriesTx(ctx, tx, slug, id, run.Request.Provenance.Trust() == runspec.TrustVerifiedDefault)
 	if err != nil {
 		return out, err
 	}
@@ -175,7 +175,13 @@ func (t *Tenant) githubSourceInstallationTx(ctx context.Context, tx *storeTx, se
 	return installation, strings.ToLower(slug), err
 }
 
-func (t *Tenant) githubSourceRepositoriesTx(ctx context.Context, tx *storeTx, slug string, id int64) ([]int64, []string, error) {
+// githubSourceRepositoriesTx lists the repositories a source token reads. The owner's
+// extra repositories reach only a verified push to the default branch, so a writer of
+// another branch cannot read repositories they may lack access to.
+func (t *Tenant) githubSourceRepositoriesTx(ctx context.Context, tx *storeTx, slug string, id int64, extras bool) ([]int64, []string, error) {
+	if !extras {
+		return []int64{id}, []string{slug}, nil
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT extra_repo_id,extra_repo FROM github_app_extra_repos WHERE team=? AND repository_id=? ORDER BY extra_repo`+tx.forShare(), t.team, id)
 	if err != nil {
 		return nil, nil, err

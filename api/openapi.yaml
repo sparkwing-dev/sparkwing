@@ -255,9 +255,12 @@ components:
           type: string
         Verified:
           type: boolean
+        Writer:
+          type: string
       required:
         - Ref
         - Verified
+        - Writer
       type: object
       x-sparkwing-go-type: blob.RefScope
     internal.blob.Scope:
@@ -4275,6 +4278,17 @@ components:
         - key_files
       type: object
       x-sparkwing-go-type: nodeproto.CacheSpec
+    internal.nodeproto.ChildPipeline:
+      additionalProperties: true
+      properties:
+        pipeline:
+          type: string
+        repository:
+          type: string
+      required:
+        - pipeline
+      type: object
+      x-sparkwing-go-type: nodeproto.ChildPipeline
     internal.nodeproto.ClosureSpec:
       additionalProperties: true
       properties:
@@ -4386,6 +4400,12 @@ components:
           anyOf:
             - items:
                 $ref: '#/components/schemas/internal.nodeproto.CacheSpec'
+              type: array
+            - type: "null"
+        children:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.nodeproto.ChildPipeline'
               type: array
             - type: "null"
         closures:
@@ -5072,6 +5092,8 @@ components:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Actor.'
         retry_of:
           type: string
+        root_run_id:
+          type: string
       required:
         - parent_run_id
         - parent_job_id
@@ -5557,6 +5579,40 @@ components:
           $ref: '#/components/schemas/internal.runspec.Ceilings'
         hash:
           type: string
+        provenance:
+          additionalProperties: false
+          properties:
+            default_branch:
+              type: string
+            delivery:
+              type: string
+            event:
+              type: string
+            pipeline:
+              type: string
+            pull_request_base:
+              type: string
+            ref:
+              type: string
+            repository_id:
+              type: integer
+            sha:
+              type: string
+            shared_secrets_only:
+              type: boolean
+            trust:
+              enum:
+                - verified-default
+                - verified
+                - actions
+                - schedule
+                - asserted
+              type: string
+            writer:
+              type: string
+          required:
+            - trust
+          type: object
         request:
           $ref: '#/components/schemas/internal.runspec.Request'
         run_id:
@@ -5571,6 +5627,7 @@ components:
         - allowed_pools
         - authority_ref
         - ceilings
+        - provenance
         - hash
       type: object
       x-sparkwing-go-type: runspec.SealedRequest

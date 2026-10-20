@@ -176,7 +176,8 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := runspec.SealRequest(runspec.Request{Version: 1, Team: "a", Pipeline: "Generator", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: sha}, Source: code, EnvironmentSource: runspec.EnvironmentSubmitted, Env: env, Options: runspec.Options{SubmitEnvAllow: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"BUILD_NOTE"}}}}}, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Now().UTC()})
+	input := runspec.Request{Version: 1, Team: "a", Pipeline: "Generator", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: sha}, Source: code, EnvironmentSource: runspec.EnvironmentSubmitted, Env: env, Options: runspec.Options{SubmitEnvAllow: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"BUILD_NOTE"}}}}}
+	request, err := runspec.SealRequest(input, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Now().UTC(), Provenance: controller.AssertedProvenance(t, "Generator", "", sha)})
 	if err != nil {
 		t.Fatal(err)
 	}

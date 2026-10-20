@@ -19,6 +19,7 @@ type RunRow struct {
 	State             RunState
 	Request           runspec.SealedRequest
 	Lineage           runspec.Lineage
+	admission         admissionIdentity
 	Retry             *RetrySelection
 	Spec              *runspec.Spec
 	Plan              json.RawMessage

@@ -9,6 +9,31 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+type secretScope uint8
+
+const (
+	secretNone secretScope = iota
+	secretPipelineScope
+	secretSharedOnly
+)
+
+type secretSelection struct {
+	scope           secretScope
+	pipeline        string
+	includeUnshared bool
+}
+
+func runSecretSelection(r runspec.SealedRequest) (secretSelection, error) {
+	p := r.Provenance
+	if !p.Valid() {
+		return secretSelection{}, bindingRefusal()
+	}
+	if p.SharedSecretsOnly() {
+		return secretSelection{scope: secretSharedOnly}, nil
+	}
+	return secretSelection{scope: secretPipelineScope, pipeline: p.Pipeline()}, nil
+}
+
 func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
 	if c.Binding.RunID == "" || target.SecretName == "" || target.RunID != "" && target.RunID != c.Binding.RunID {
 		return bindingRefusal()
@@ -20,14 +45,15 @@ func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	if run.Spec == nil || !slices.Contains(run.Spec.Resolved.SecretNames, target.SecretName) {
 		return &apierr.Error{Code: apierr.Forbidden, Message: "the run's pipeline does not declare this secret", Details: map[string]any{"reason": apierr.ReasonSecretUndeclared}}
 	}
-	if target.Pipeline != "" && target.Pipeline != run.Pipeline {
-		return bindingRefusal()
+	selection, err := runSecretSelection(run.Request)
+	if err != nil {
+		return err
 	}
 	if slices.Contains(run.Request.Request.LocalSecretNames, target.SecretName) {
 		_, err := tx.store.localSecret(Team(c.Team), run.ID, target.SecretName)
 		return err
 	}
-	_, pool, err := selectedSecretTx(ctx, tx, Team(c.Team), target.SecretName, run.Pipeline, true)
+	_, pool, err := selectedSecretTx(ctx, tx, Team(c.Team), target.SecretName, selection)
 	if err != nil {
 		return err
 	}

@@ -76,6 +76,7 @@ func TestAcceptedPlanUsesSharedStrictValidator(t *testing.T) {
 		`{"jobs":[{"id":"a","deps":["b"]},{"id":"b","deps":["a"]}]}`,
 		`{"jobs":[{"id":"job","resources":{"cores":0}}]}`,
 		`{"jobs":[],"source":{"depth":-1}}`,
+		`{"jobs":[{"id":"job","children":[{"pipeline":"deploy","repository":"github.com/acme/repo"}]}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})

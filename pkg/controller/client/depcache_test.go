@@ -12,7 +12,7 @@ import (
 )
 
 func depcacheAuthority() blob.Authority {
-	return blob.Authority{Repo: "gh:42", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "build", Generation: 1, Attempt: 1}}, Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "feature"}, PullRequestBase: runspec.Optional[string]{Set: true, Value: "base"}, DefaultBranch: "main"}}
+	return blob.Authority{Repo: "gh:42", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "build", Generation: 1, Attempt: 1}}, Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "feature", Writer: "account/fixture"}, PullRequestBase: runspec.Optional[string]{Set: true, Value: "base"}, DefaultBranch: "main"}}
 }
 
 func TestDataClientReadsExecutionDepcacheWithoutExposingAuthority(t *testing.T) {
@@ -21,7 +21,7 @@ func TestDataClientReadsExecutionDepcacheWithoutExposingAuthority(t *testing.T) 
 		ref    string
 		source blob.RestoreSource
 	}{
-		{"manual:feature", blob.RestoreOwnRef}, {"base", blob.RestorePRBase}, {"main", blob.RestoreDefaultBranch},
+		{"manual:account/fixture:feature", blob.RestoreOwnRef}, {"base", blob.RestorePRBase}, {"main", blob.RestoreDefaultBranch},
 	} {
 		t.Run(tc.ref, func(t *testing.T) {
 			_, records := testDataClient(t, func(request *http.Request) (*http.Response, error) {
@@ -54,7 +54,7 @@ func FuzzDataClientDepcacheRejectsChangedScope(f *testing.F) {
 			t.Skip()
 		}
 		authority := depcacheAuthority()
-		record := map[string]any{"pipeline": "", "job": "", "provenance": "", "created_at": time.Time{}, "kind": "depcache", "repo": "gh:42", "ref": "manual:feature", "name": "modules", "key": "dep-key", "digest": strings.Repeat("a", 64)}
+		record := map[string]any{"pipeline": "", "job": "", "provenance": "", "created_at": time.Time{}, "kind": "depcache", "repo": "gh:42", "ref": "manual:account/fixture:feature", "name": "modules", "key": "dep-key", "digest": strings.Repeat("a", 64)}
 		source := blob.RestoreOwnRef
 		switch field % 12 {
 		case 0:

@@ -370,6 +370,14 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
     this.#args = structuredClone(all);
     return this;
   }
+  startsChildren(...pipelines: readonly string[]): this {
+    return this.startsChildrenIn("", ...pipelines);
+  }
+  startsChildrenIn(repository: string, ...pipelines: readonly string[]): this {
+    this.assertMutable();
+    (this.spec.children ??= []).push(...pipelines.map((pipeline) => ({ pipeline, ...(repository ? { repository } : {}) })));
+    return this;
+  }
   references(...refs: readonly API.PipelineRef<unknown>[]): this {
     this.assertMutable();
     const entries = (this.spec.pipeline_refs ??= []);

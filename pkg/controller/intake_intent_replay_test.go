@@ -13,7 +13,6 @@ import (
 )
 
 func TestFreshChildReplayIgnoresBranchMovementAndSourceOutage(t *testing.T) {
-	e, h, claim := childIntakeFixture(t)
 	repo, original := sourcetest.Repository(t)
 	remote := "https://8.8.8.8/team/repo"
 	sourcetest.Remote(t, map[string]string{remote: repo})
@@ -22,6 +21,25 @@ func TestFreshChildReplayIgnoresBranchMovementAndSourceOutage(t *testing.T) {
 	sourcetest.Git(t, repo, "add", ".")
 	sourcetest.Git(t, repo, "commit", "-qm", "child")
 	selected := sourcetest.Git(t, repo, "rev-parse", "HEAD")
+	key := runspec.RepoKey("git:8.8.8.8/team/repo")
+	e, h, claim := childIntakeFixtureWith(t, func(e *EngineController) {
+		tenant, err := e.Store.ForTeam(t.Context(), "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parent, err := tenant.ReadRun(t.Context(), "run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parent.Request.Request.Git.SHA = original
+		parent.Request.Request.Git.Repository = runspec.Repository{Key: key, Display: remote}
+		parent.Request.Request.Source = runspec.Source{Ref: original, Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}}
+		sealed, err := json.Marshal(parent.Request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_key=? WHERE team='a' AND id='run'`, sealed, string(key))
+	})
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -30,16 +48,6 @@ func TestFreshChildReplayIgnoresBranchMovementAndSourceOutage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := runspec.RepoKey("git:8.8.8.8/team/repo")
-	parent.Request.Request.Git.SHA = original
-	parent.Request.Request.Git.Repository = runspec.Repository{Key: key, Display: remote}
-	parent.Request.Request.Source = runspec.Source{Ref: original, Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}}
-	childSourceRepositories(t, e, claim, []string{string(key)})
-	sealed, err := json.Marshal(parent.Request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_key=? WHERE team='a' AND id='run'`, sealed, string(key))
 	intake := func(args map[string]string) string {
 		request := runspec.Request{
 			Version: 1, Pipeline: "deploy", RequestedArgs: args, Origin: runspec.OriginChild, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController,

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,9 +30,7 @@ func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 	if err := json.Unmarshal(body, &seal); err != nil {
 		t.Fatal(err)
 	}
-	seal.Request.Git.SHA = strings.Repeat("a", 40)
-	seal.Request.Git.Ref = "refs/heads/main"
-	seal.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Ref: seal.Request.Git.Ref, SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: true}}
+	seal.Provenance, seal.Request.Git = referenceAppProvenance(t, "refs/heads/main", fixtureOtherSHA)
 	body, err := json.Marshal(seal)
 	if err != nil {
 		t.Fatal(err)
@@ -123,9 +120,9 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 	input.VerifiedDeliveryID = "delivery"
 	git := input.Request.Git
 	git.Ref = "refs/heads/main"
-	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}
+	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}
 	s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
-		return IntakePolicyFacts{RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "actor"}}}, nil
+		return IntakePolicyFacts{SourceLocation: &input.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "actor"}}}, nil
 	}))
 	rewriteSchemaExec(t, s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('a','deploy','deploy','gh:1','owner',1)`)
 	admitted, err := tenant.AdmitRun(ctx, input)

@@ -142,6 +142,9 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			return replay, err
 		}
 	}
+	// safety: only the controller's fire-time lookup through the App names the default
+	// branch; an armed request cannot carry one in.
+	input.Git.DefaultBranch = runspec.Optional[string]{}
 	if policy, ok := t.s.intakePolicy.(ScheduleSourcePolicy); ok && (in.consent != "" || schedule.LockedRef == "") {
 		var err error
 		input, err = policy.ResolveScheduleSource(ctx, schedule, input)

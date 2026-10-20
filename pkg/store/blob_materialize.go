@@ -193,7 +193,7 @@ func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobAc
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return nil, err
 	}
-	if repo != string(a.authority.Repo) || pipeline != a.pipeline || ref.NodeID != target.Ref.NodeID || sealed.Request.Git.Ref != a.authority.Ref.Scope.Ref {
+	if repo != string(a.authority.Repo) || pipeline != a.pipeline || ref.NodeID != target.Ref.NodeID || blob.ScopeFor(sealed.Provenance) != a.authority.Ref.Scope {
 		return nil, blob.ErrDigestNotReadable
 	}
 	row, err := readNodeTx(ctx, tx, team, ref)

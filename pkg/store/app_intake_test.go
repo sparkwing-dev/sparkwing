@@ -48,7 +48,7 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 	s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
 		delivery, err := VerifiedAppIntake(ctx, resolver, request)
 		location := request.Request.Source.Location
-		return IntakePolicyFacts{Delivery: &delivery, SourceLocation: &location, RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, err
+		return IntakePolicyFacts{Delivery: &delivery, SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 	}))
 	return s, tenant, in
 }
@@ -142,7 +142,14 @@ func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
 		ref := "refs/heads/" + branch
 		git := &request.Request.Git
 		git.Ref = ref
-		git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: "signed", Ref: ref, SHA: git.SHA, DefaultBranch: branch, DefaultBranchPush: true, VerifiedAt: request.AdmittedAt}}
+		if !runspec.IsCommitID(git.SHA) {
+			git.SHA = fixtureFeatureSHA
+		}
+		verifiedAt := request.AdmittedAt
+		if verifiedAt.IsZero() {
+			verifiedAt = time.Unix(1, 0).UTC()
+		}
+		git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "signed", Ref: ref, SHA: git.SHA, DefaultBranch: branch, DefaultBranchPush: true, VerifiedAt: verifiedAt}}
 		switch mode % 5 {
 		case 1:
 			git.Ref = "refs/tags/" + branch
@@ -153,6 +160,11 @@ func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
 			git.App.Value.DefaultBranchPush = false
 		case 4:
 			git.App.Set = false
+		}
+		// Intake seals verified provenance only from App facts it could verify.
+		request.Provenance = assertedProvenance(t, "ci", git.Ref, "")
+		if p, err := runspec.AppProvenance(git.App.Value, request.Request.PullRequest, "ci"); git.App.Set && err == nil {
+			request.Provenance = p
 		}
 		raw, err := json.Marshal(request)
 		if err != nil {
@@ -208,9 +220,12 @@ func TestAppAdmissionOIDCUsesSealedEventAfterReplayExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `DELETE FROM github_app_deliveries`)
-	facts := capability.OIDCFacts{Trigger: "manual"}
-	err = s.inTx(t.Context(), func(tx *storeTx) error { return oidcTriggerTx(t.Context(), tx, tenant.team, admitted.Request, &facts) })
-	if err != nil || facts.Trigger != "push" || facts.RepositoryID != 701 {
-		t.Fatalf("sealed event facts=%+v err=%v", facts, err)
+	run, err := tenant.ReadRun(t.Context(), admitted.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, repository, _, _ := run.Request.Provenance.OIDC()
+	if trigger != "push" || repository != 701 {
+		t.Fatalf("sealed event trigger=%s repository=%d", trigger, repository)
 	}
 }

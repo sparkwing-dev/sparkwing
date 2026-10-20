@@ -37,6 +37,9 @@ func TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain(t *testing.T) {
 	if !errors.As(err, &canonical) || canonical.Code != apierr.RateLimited {
 		t.Fatalf("hourly refusal has no canonical rate_limited code: %v", err)
 	}
+	if canonical.Details["reason"] != "compute_limit" || canonical.Details["scope"] != refusal.Scope {
+		t.Fatalf("hourly refusal lost its compute guard details: %+v", canonical.Details)
+	}
 	rewriteSchemaCount(t, tenant.s.db, "runs", 1)
 	rewriteSchemaCount(t, tenant.s.db, "triggers", 1)
 	root := authorityRoot("other", "a")

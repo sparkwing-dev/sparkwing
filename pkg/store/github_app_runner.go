@@ -57,9 +57,7 @@ func (r GitHubAppRunner) apply(options *runspec.Options) {
 	}
 }
 
-// safety: authorized holds only for an App-armed schedule whose automation consent this admission
-// validated, so a typed schedule source alone never qualifies for pool access rules.
-func trustedAppRunnerTx(ctx context.Context, tx *storeTx, request IntakeRequest) (_ GitHubAppRunner, authorized bool, _ error) {
+func trustedAppRunnerTx(ctx context.Context, tx *storeTx, request IntakeRequest) (GitHubAppRunner, error) {
 	var raw string
 	var err error
 	switch {
@@ -74,18 +72,16 @@ func trustedAppRunnerTx(ctx context.Context, tx *storeTx, request IntakeRequest)
 	case tx.scheduleAdmission != nil && tx.scheduleAdmission.authority() == request.Authority && tx.scheduleAdmission.schedule.GitHubInstallationID > 0:
 		s := tx.scheduleAdmission.schedule
 		err = tx.QueryRowContext(ctx, `SELECT runner FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, s.Team, s.GitHubInstallationID, s.GitHubRepositoryID).Scan(&raw)
-		authorized = string(request.Request.Git.Repository.Key) == fmt.Sprintf("gh:%d", s.GitHubRepositoryID)
 	default:
-		return "", false, nil
+		return "", nil
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, ErrGitHubAppAutomationRevoked
+		return "", ErrGitHubAppAutomationRevoked
 	}
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
-	runner, err := ParseGitHubAppRunner(raw)
-	return runner, authorized && err == nil, err
+	return ParseGitHubAppRunner(raw)
 }
 
 func checkActionsOwnerTx(ctx context.Context, tx *storeTx, team Team, input runspec.Request) error {

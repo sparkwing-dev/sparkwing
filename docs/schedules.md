@@ -61,6 +61,17 @@ may contain `=`. Duplicate argument names fail. Arguments replace the declared
 argument map. `--arg=` alone replaces it with an empty map. `--reset` drops the override. Pin, unpin and reset each require
 a separate invocation from cadence edits.
 
+A schedule speaks for the repository only when a team admin armed it (through GitHub App automation consent, or as a member who holds `team.admin` when it fires), it follows the repository's default branch as GitHub reports it through the App at fire time, it has no locked commit and no override of arguments, cadence, timezone, overlap or catch-up, and the App resolves its commit at fire time. Its fires claim
+`trigger:cron` with `repository_id`, `refs/heads/<default>` and the branch head
+at fire time, receive reserved pools whose rules allow the default branch, read
+the default branch's verified cache, and write only that schedule's own scope,
+`manual:schedule/<id>:refs/heads/<default>`. Every other fire, and an immediate
+`run`, is asserted: it claims `trigger:manual` with no `repository_id`, `ref` or
+`sha`. A schedule a non-admin armed writes under that member's scope, an
+immediate `run` under the caller's, and a locked, overridden or
+non-default-branch schedule's fires each under their own.
+See [OIDC](oidc.md#what-each-value-proves).
+
 Mutation JSON reports the confirmed result. Plain output emits schedule IDs,
 or the new run ID for `run`. A deletion
 result distinguishes removal from an already absent row.

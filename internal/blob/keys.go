@@ -51,17 +51,24 @@ func namespace(parts ...string) (string, error) {
 }
 
 func refComponent(ref RefScope) (string, error) {
-	if ref.Ref == "" && !ref.Verified {
-		return "manual:", nil
+	if ref.Verified && ref.Writer != "" || !ref.Verified && ref.Writer == "" {
+		return "", fmt.Errorf("record scope must be verified or name its writer")
 	}
-	encoded, err := component(ref.Ref)
-	if err != nil {
-		return "", err
+	encoded := ""
+	if ref.Ref != "" || ref.Verified {
+		var err error
+		if encoded, err = component(ref.Ref); err != nil {
+			return "", err
+		}
 	}
 	// safety: escape the colon before applying the trust tag, including literal manual: refs.
 	encoded = strings.ReplaceAll(encoded, ":", "%3A")
 	if !ref.Verified {
-		encoded = "manual:" + encoded
+		writer, err := component(ref.Writer)
+		if err != nil {
+			return "", err
+		}
+		encoded = "manual:" + strings.ReplaceAll(writer, ":", "%3A") + ":" + encoded
 	}
 	return encoded, nil
 }
@@ -110,7 +117,7 @@ func RecordNamespace(key RecordKey) (string, error) {
 		return DepcacheNamespace(DepcacheKey{Repo: s.Repo, Ref: s.Ref, Name: key.Name, Key: s.Key})
 	default:
 		// safety: optional fields retain their positions so keys cannot alias.
-		parts := []string{string(key.Kind), string(s.Repo), s.Ref.Ref, fmt.Sprint(s.Ref.Verified), s.Pipeline, s.Job, s.Key, key.Name}
+		parts := []string{string(key.Kind), string(s.Repo), s.Ref.Ref, fmt.Sprint(s.Ref.Verified), s.Ref.Writer, s.Pipeline, s.Job, s.Key, key.Name}
 		for i, p := range parts {
 			parts[i] = fmt.Sprintf("%d:%s", len(p), p)
 		}

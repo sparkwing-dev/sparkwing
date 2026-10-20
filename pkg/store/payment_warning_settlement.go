@@ -58,5 +58,5 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 	if err := recordPaymentConsequenceTx(ctx, tx, e, "warning"); err != nil {
 		return "", err
 	}
-	return team, applyPaymentConsequencesTx(ctx, tx, payment)
+	return team, applyPaymentConsequencesTx(ctx, tx, team, payment)
 }

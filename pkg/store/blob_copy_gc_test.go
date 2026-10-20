@@ -31,7 +31,7 @@ func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
 		var deleted int64
 		copyOutput := func() {
 			hit, copyErr = records.CopyMemo(t.Context(), blob.CopyMemoRequest{
-				Lookup:      blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}},
+				Lookup:      blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}},
 				Destination: intent.Identity.Attempt.Value,
 			})
 		}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -29,7 +30,7 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 		}
 		request := run.Request.Request
 		if request.Mode != runspec.IntakePublish || request.Actor.ID != parent.Capability.Subject.ID || request.Actor.Kind != string(parent.Capability.Subject.Kind) ||
-			string(request.Git.Repository.Key) != spec.Data.RepositoryKey || spec.Data.WriteRef != "manual:"+request.Git.Ref {
+			string(request.Git.Repository.Key) != spec.Data.RepositoryKey || spec.Data.WriteRef != blob.ScopeFor(run.Request.Provenance).CapabilityScope() || blob.ParseCapabilityScope(spec.Data.WriteRef).Verified {
 			return capability.Capability{}, authorityError(apierr.Forbidden, "publication scope differs from its intake")
 		}
 	}
@@ -47,7 +48,7 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 		Audience: spec.Audience, Grants: slices.Clone(spec.Grants), Binding: spec.Binding,
 		Issuance: capability.Delegate, Parent: &spec.Parent, ExpiresAt: spec.ExpiresAt,
 		ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: slices.Clone(spec.Repositories),
-		Data: spec.Data, RootMetered: parent.Capability.RootMetered,
+		Children: slices.Clone(parent.Capability.Children), Data: spec.Data, RootMetered: parent.Capability.RootMetered,
 		Unit: parent.Capability.Unit, UnitID: parent.Capability.UnitID,
 		Purpose: parent.Capability.Purpose, Delivery: parent.Capability.Delivery,
 		Billing: parent.Capability.Billing,

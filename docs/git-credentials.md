@@ -28,7 +28,10 @@ Team owners manage GitHub App extra-repository lists at
 with the list so a rename cannot transfer access to a reused name. Both the source and extra repositories are bound by numeric ID. The store
 checks live installation ownership and coverage before minting. Revoked
 coverage of an approved extra returns 409 naming that repository. The request
-body cannot add repositories to the token.
+body cannot add repositories to the token. Extra repositories join the token
+only for a verified push to the repository's default branch, so a writer of
+another branch cannot read repositories they may lack access to; every other
+run's token covers only its own repository.
 
 ## Store a credential
 

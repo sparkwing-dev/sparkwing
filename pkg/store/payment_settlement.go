@@ -265,7 +265,7 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		}
 	}
 	checkout.result.GrantID, checkout.result.Granted = id, true
-	if err := applyPaymentConsequencesTx(ctx, tx, event.PaymentID); err != nil {
+	if err := applyPaymentConsequencesTx(ctx, tx, team, event.PaymentID); err != nil {
 		return err
 	}
 	return recordGrantEventTx(tx, grant, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS, "liability_shift": event.LiabilityShift, "refill": checkout.kind == CheckoutKindRefill})

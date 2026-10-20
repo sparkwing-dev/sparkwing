@@ -125,9 +125,11 @@ func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
 	server, tenant, finish := preparedProfileRun(t, clock.option())
 	f := &githubCompletionFixture{t: t, server: server, tenant: tenant, finish: finish, now: time.Now(), api: &completionGitHub{repository: 42, name: "acme/app", checksGranted: true}}
 	clock.pin(func() time.Time { return f.now })
+	app := runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", Event: "push", VerifiedAt: f.now}
 	f.changeRequest(func(input *runspec.Request) {
-		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", VerifiedAt: f.now}}}
+		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: app.SHA, Ref: app.Ref, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: app}}
 	})
+	f.attach(appProvenance(t, app, runspec.Optional[runspec.PullRequest]{}, "ci"))
 	teststore.SeedGitHubInstallation(t, server.store, tenant.Team(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization"}, f.now)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -145,11 +147,26 @@ func (f *githubCompletionFixture) changeRequest(change func(*runspec.Request)) {
 		f.t.Fatal(err)
 	}
 	change(&run.Request.Request)
-	sealed, err := json.Marshal(run.Request)
+	f.store(run.Request)
+}
+
+// attach replaces the run's sealed provenance with p.
+func (f *githubCompletionFixture) attach(p runspec.Provenance) {
+	f.t.Helper()
+	run, err := f.tenant.ReadRun(f.t.Context(), "run")
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	engineSQL(f.t, f.server.store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, sealed)
+	f.store(withProvenance(run.Request, p))
+}
+
+func (f *githubCompletionFixture) store(sealed runspec.SealedRequest) {
+	f.t.Helper()
+	body, err := json.Marshal(sealed)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	engineSQL(f.t, f.server.store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, body)
 }
 
 func (f *githubCompletionFixture) reconcile() {
@@ -316,6 +333,9 @@ func TestGitHubCompletionUsesCurrentNumericRepository(t *testing.T) {
 func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 	property := func(scenario uint8, display string) bool {
 		f := newGitHubCompletion(t)
+		// The App facts only route the report to an installation, so a run whose facts name
+		// another repository or no installation is invalid, while any other drift in them
+		// cannot move the report off the sealed commit.
 		f.changeRequest(func(input *runspec.Request) {
 			input.Git.Repository.Display = display
 			switch scenario % 12 {
@@ -358,8 +378,11 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 		f.now = f.now.Add(time.Hour)
 		f.reconcile()
 		_, delivered, attempts, _ := f.revision()
-		if scenario%12 < 8 {
+		switch scenario % 12 {
+		case 0, 5:
 			return len(f.api.checks) == 0 && len(f.api.statuses) == 0 && delivered == 1 && attempts == 1 && strings.Count(logs.String(), "deliver run effect") == 1
+		case 1, 2, 3, 4, 6, 7:
+			return len(f.api.checks) == 1 && f.api.checks[0].HeadSHA == strings.Repeat("a", 40) && f.api.checks[0].ExternalID == "run" && delivered == 1 && attempts == 0
 		}
 		return len(f.api.checks) == 0 && len(f.api.statuses) == 0 && delivered == 0 && attempts == 2
 	}
@@ -469,7 +492,11 @@ func TestGitHubCompletionTwoControllersDeliverOnce(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- f.server.ReconcileRunEffects(t.Context()) }()
-	<-entered
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("reconcile created no check: %v", err)
+	}
 	other := New(f.server.store, nil).WithGitHubApp(f.cfg)
 	if err := other.ReconcileRunEffects(t.Context()); err != nil {
 		t.Fatal(err)
@@ -564,7 +591,8 @@ func TestGitHubCompletionRejectsForeignTenant(t *testing.T) {
 
 func TestGitHubCompletionUnverifiedRunReportsNothing(t *testing.T) {
 	f := newGitHubCompletion(t)
-	f.changeRequest(func(input *runspec.Request) { input.Git.App = runspec.Optional[runspec.AppFacts]{} })
+	// The App facts stay, so only the asserted provenance keeps the run from reporting.
+	f.attach(assertedProvenance(t, "ci", "refs/heads/main", strings.Repeat("a", 40)))
 	f.finish(store.RunSuccess)
 	f.reconcile()
 	_, delivered, attempts, _ := f.revision()

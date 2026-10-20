@@ -154,7 +154,7 @@ func nativePlanBody(t *testing.T, e *EngineController, tenant *store.Tenant, a c
 		t.Fatal(err)
 	}
 	run.Request.Request.Dispatch = runspec.Dispatch(run.Dispatch)
-	sealed, err := runspec.SealRequest(run.Request.Request, runspec.IntakeFacts{RunID: run.ID, AuthorityRef: a.Principal.Authority})
+	sealed, err := runspec.SealRequest(run.Request.Request, runspec.IntakeFacts{RunID: run.ID, AuthorityRef: a.Principal.Authority, Provenance: run.Request.Provenance})
 	if err != nil {
 		t.Fatal(err)
 	}

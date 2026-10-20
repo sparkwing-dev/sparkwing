@@ -24,7 +24,16 @@ func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, 
 	return guards, funded, err
 }
 
-// IntakeQueueDepth reads pending work from the admission transaction.
+// ChildAdmissionKey returns the charged identity inherited from the parent admission.
+func ChildAdmissionKey(ctx context.Context, resolver capability.AuthorityResolver, team Team, parent string) (string, error) {
+	tx, ok := resolver.(*storeTx)
+	if !ok {
+		return "", authorityError(apierr.Unavailable, "child root requires the admission transaction")
+	}
+	run, err := readRunTx(ctx, tx, team, parent)
+	return run.admission.AdmissionKey, err
+}
+
 func IntakeQueueDepth(ctx context.Context, resolver capability.AuthorityResolver, team Team) (int, error) {
 	tx, ok := resolver.(*storeTx)
 	if !ok {

@@ -99,6 +99,21 @@
       ],
       "type": "object"
     },
+    "ChildPipeline": {
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipeline"
+      ],
+      "type": "object"
+    },
     "ClosureSpec": {
       "additionalProperties": false,
       "properties": {
@@ -251,6 +266,12 @@
         "caches": {
           "items": {
             "$ref": "#/$defs/CacheSpec"
+          },
+          "type": "array"
+        },
+        "children": {
+          "items": {
+            "$ref": "#/$defs/ChildPipeline"
           },
           "type": "array"
         },

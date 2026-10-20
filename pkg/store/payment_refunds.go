@@ -38,7 +38,7 @@ func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.P
 
 // safety: pending payments retain their obligations; refused payments have no grant to reverse.
 // Each consequence has one reference, and all reversals together are capped by the original grant.
-func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, paymentIntent string) error {
+func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, team Team, paymentIntent string) error {
 	mode, err := paymentModeTx(ctx, tx)
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, paymentIntent 
 	var protected sql.NullInt64
 	var grant sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT liability_shift, grant_id FROM credit_checkouts
-	    WHERE payment_mode = ? AND payment_id = ?`, mode, paymentIntent).Scan(&protected, &grant)
+	    WHERE team = ? AND payment_mode = ? AND payment_id = ?`, string(team), mode, paymentIntent).Scan(&protected, &grant)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

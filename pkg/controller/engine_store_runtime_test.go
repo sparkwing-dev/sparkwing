@@ -32,11 +32,11 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*EngineController, 
 		}
 	})
 	engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
-	request, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "run", Hash: "request", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}}})
+	request, err := json.Marshal(withProvenance(runspec.SealedRequest{Version: 1, RunID: "run", Hash: "request", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}}}, assertedProvenance(t, "ci", "", "0123456789abcdef0123456789abcdef01234567")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, s, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','host','execute',?,'account',?,'r30',30)`, request, []byte(`[]`), time.Now().UnixNano())
+	engineSQL(t, s, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,lineage_json,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','host','execute',?,'account',?,?,'r30',30)`, request, []byte(`[]`), time.Now().UnixNano(), []byte(`{"admission_key":"capability:fixture","admission_subject":{"kind":"account","id":"account"}}`))
 	engineSQL(t, s, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','trigger',1,1,?,?,?)`, time.Now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	tenant, err := s.ForTeam(t.Context(), "a")
 	if err != nil {

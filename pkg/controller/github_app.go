@@ -572,6 +572,7 @@ type githubAppTriggerReq struct {
 	PullRequestReadyForReview bool     `json:"pull_request_ready_for_review"`
 	ReleasePublished          bool     `json:"release_published"`
 	ReleasePrereleased        bool     `json:"release_prereleased"`
+	ReleaseTags               []string `json:"release_tags"`
 	BranchCreate              bool     `json:"branch_create"`
 	BranchDelete              bool     `json:"branch_delete"`
 	Runner                    string   `json:"runner"`
@@ -593,6 +594,7 @@ type githubAppTriggerJSON struct {
 	PullRequestReadyForReview bool     `json:"pull_request_ready_for_review"`
 	ReleasePublished          bool     `json:"release_published"`
 	ReleasePrereleased        bool     `json:"release_prereleased"`
+	ReleaseTags               []string `json:"release_tags"`
 	BranchCreate              bool     `json:"branch_create"`
 	BranchDelete              bool     `json:"branch_delete"`
 	Runner                    string   `json:"runner"`
@@ -610,7 +612,7 @@ func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 		Branches: tr.Branches, BaseBranches: tr.BaseBranches,
 		PullRequestClosed: tr.PullRequestClosed, PullRequestLabeled: tr.PullRequestLabeled,
 		PullRequestLabels: tr.PullRequestLabels, PullRequestReadyForReview: tr.PullRequestReadyForReview,
-		ReleasePublished: tr.ReleasePublished, ReleasePrereleased: tr.ReleasePrereleased,
+		ReleasePublished: tr.ReleasePublished, ReleasePrereleased: tr.ReleasePrereleased, ReleaseTags: tr.ReleaseTags,
 		BranchCreate: tr.BranchCreate, BranchDelete: tr.BranchDelete, Runner: string(tr.Runner),
 		CreatedBy: tr.CreatedBy, CreatedAt: tr.CreatedAt.Unix(),
 	}
@@ -704,7 +706,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		Branches: req.Branches, BaseBranches: req.BaseBranches,
 		PullRequestClosed: req.PullRequestClosed, PullRequestLabeled: req.PullRequestLabeled,
 		PullRequestLabels: req.PullRequestLabels, PullRequestReadyForReview: req.PullRequestReadyForReview,
-		ReleasePublished: req.ReleasePublished, ReleasePrereleased: req.ReleasePrereleased,
+		ReleasePublished: req.ReleasePublished, ReleasePrereleased: req.ReleasePrereleased, ReleaseTags: req.ReleaseTags,
 		BranchCreate: req.BranchCreate, BranchDelete: req.BranchDelete, Runner: runner,
 	})
 	if err != nil {
@@ -772,26 +774,20 @@ func (s *Server) githubAppCheckUpdate(ctx context.Context, tenant *store.Tenant,
 	if err != nil {
 		return githubCheckUpdate{}, false, err
 	}
-	input := run.Request.Request
-	if !input.Git.App.Set {
+	// safety: the App facts only route the report to an installation; whether to report, and for
+	// which pipeline and commit, is the sealed identity's, so a demoted or child run never reports.
+	app, provenance := run.Request.Request.Git.App, run.Request.Provenance
+	if !app.Set || !provenance.Verified() {
 		return githubCheckUpdate{}, false, nil
 	}
-	app := input.Git.App.Value
-	if app.InstallationID <= 0 || app.RepositoryID <= 0 || string(input.Git.Repository.Key) != fmt.Sprintf("gh:%d", app.RepositoryID) || app.DeliveryKey == "" || app.VerifiedAt.IsZero() || app.SHA != input.Git.SHA || app.Ref != input.Git.Ref || !githubCommit(app.SHA) {
-		return githubCheckUpdate{}, false, errInvalidGitHubCompletion
-	}
-	sha := app.SHA
-	if input.PullRequest.Set {
-		sha = input.PullRequest.Value.HeadSHA
-	}
-	if !githubCommit(sha) {
+	if app.Value.InstallationID <= 0 || provenance.RepositoryID() != app.Value.RepositoryID || !githubCommit(provenance.SHA()) {
 		return githubCheckUpdate{}, false, errInvalidGitHubCompletion
 	}
 	status := string(effect.State)
 	if effect.State == store.RunFailed && (effect.Reason == "timeout" || effect.Reason == "queue_timeout") {
 		status = "timed_out"
 	}
-	return githubCheckUpdate{installation: app.InstallationID, repository: app.RepositoryID, sha: sha, pipeline: run.Pipeline, runID: run.ID, runStatus: status, team: tenant.Team()}, true, nil
+	return githubCheckUpdate{installation: app.Value.InstallationID, repository: provenance.RepositoryID(), sha: provenance.SHA(), pipeline: provenance.Pipeline(), runID: run.ID, runStatus: status, team: tenant.Team()}, true, nil
 }
 
 // perf: Reuse a covering installation briefly rather than call GitHub for every run.

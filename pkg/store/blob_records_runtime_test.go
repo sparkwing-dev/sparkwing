@@ -44,7 +44,7 @@ func blobRecordFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) {
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'", []byte(`{"id":"job","memo":{}}`))
 	intent := blobIntent(actor, attempt)
 	setBlobRecordRef(t, s, intent.Authority.CapabilityRef)
-	intent.Authority.Ref.Scope.Ref = "main"
+	intent.Authority.Ref.Scope = assertedRef("main")
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {
 		t.Fatal(err)
 	}
@@ -61,14 +61,15 @@ func setBlobRecordRef(t *testing.T, s *Store, prefix string) {
 	if err := json.Unmarshal(body, &record); err != nil {
 		t.Fatal(err)
 	}
-	record.Value.Data.WriteRef = "manual:main"
-	record.Value.Data.ReadRefs = []string{"manual:main"}
+	scope := assertedRef("main").CapabilityScope()
+	record.Value.Data.WriteRef = scope
+	record.Value.Data.ReadRefs = []string{scope}
 	body, err := json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,ref_scope='manual:main' WHERE prefix=?", body, prefix)
-	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE team='a' AND id='run'", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`))
+	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,ref_scope=? WHERE prefix=?", body, scope, prefix)
+	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE team='a' AND id='run'", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`))
 }
 
 func blobOutputRequest(intent blob.UploadIntent) blob.CommitRecordRequest {
@@ -213,7 +214,7 @@ func TestBlobRecordsMemoCopyAndDepcachePointers(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 		t.Fatal(err)
 	}
-	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
+	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
 	hit, err := records.LookupMemo(t.Context(), lookup)
 	if err != nil || !hit.Found || hit.Output.Value != intent.Digest {
 		t.Fatalf("memo=%+v,%v", hit, err)
@@ -226,11 +227,11 @@ func TestBlobRecordsMemoCopyAndDepcachePointers(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "blob_records", 2)
 	dep := blobOutputRequest(intent)
-	dep.Key = blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Key: "v1"}, Name: "modules"}
+	dep.Key = blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: "gh:1", Ref: assertedRef("main"), Key: "v1"}, Name: "modules"}
 	if _, err := records.CommitRecord(t.Context(), dep); err != nil {
 		t.Fatal(err)
 	}
-	cache, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Name: "modules", Key: "v1"}})
+	cache, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: assertedRef("main"), Name: "modules", Key: "v1"}})
 	if err != nil || !cache.Found || cache.Source != blob.RestoreOwnRef || cache.Record.Digest != intent.Digest {
 		t.Fatalf("depcache=%+v,%v", cache, err)
 	}
@@ -257,7 +258,7 @@ func TestBlobRecordsMemoCopyRollsBackBothDestinations(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_manifest_copy BEFORE INSERT ON blob_records WHEN NEW.kind='manifest' BEGIN SELECT RAISE(ABORT,'manifest insert unavailable'); END`)
-	request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}, Destination: intent.Identity.Attempt.Value}
+	request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}, Destination: intent.Identity.Attempt.Value}
 	if _, err := records.CopyMemo(t.Context(), request); err == nil {
 		t.Fatal("partial copy accepted")
 	}

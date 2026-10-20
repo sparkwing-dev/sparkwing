@@ -227,7 +227,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 			if err := recordPaymentConsequenceTx(ctx, tx, e, "dispute"); err != nil {
 				return result, err
 			}
-			if err := applyPaymentConsequencesTx(ctx, tx, e.PaymentID); err != nil {
+			if err := applyPaymentConsequencesTx(ctx, tx, team, e.PaymentID); err != nil {
 				return result, err
 			}
 			reversal, found, err := creditGrantByReferenceTx(ctx, tx, team, CreditGrantReversal, e.ObjectID)
@@ -251,7 +251,7 @@ func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.Payme
 	if err := recordPaymentConsequenceTx(ctx, tx, e, "refund"); err != nil {
 		return result, err
 	}
-	if err := applyPaymentConsequencesTx(ctx, tx, e.PaymentID); err != nil {
+	if err := applyPaymentConsequencesTx(ctx, tx, team, e.PaymentID); err != nil {
 		return result, err
 	}
 	if err := closeRefundedQueueTx(ctx, tx, e.PaymentID); err != nil {

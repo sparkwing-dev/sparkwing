@@ -2,7 +2,6 @@ package controller_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -42,12 +41,23 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: remote}},
 	}}
 	if appID > 0 {
-		seal.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{RepositoryID: appID, InstallationID: 7, Ref: ref, SHA: sha, VerifiedAt: now}}
+		seal.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{RepositoryID: appID, InstallationID: 7, Ref: ref, SHA: sha, Event: "push", DeliveryKey: "delivery-" + run, VerifiedAt: now, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main"}}
+		// The fixture keeps its run's origin, which decides placement, while sealing
+		// the verified identity its App facts describe.
+		provenance, err := runspec.AppProvenance(seal.Request.Git.App.Value, seal.Request.PullRequest, "build")
+		if err != nil {
+			t.Fatal(err)
+		}
+		seal.Provenance = provenance
+	} else {
+		// Without App facts the run is one the fixture account submitted.
+		commit := ""
+		if runspec.IsCommitID(sha) {
+			commit = sha
+		}
+		seal.Provenance = controller.AssertedProvenance(t, "build", ref, commit)
 	}
-	body, err := json.Marshal(seal)
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := controller.SealWith(t, seal, seal.Provenance)
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `UPDATE runs SET repo_key=?,repo_display=?,request_json=?,dispatch=? WHERE team=? AND id=?`, key, remote, body, dispatch, team, run); err != nil {
 		t.Fatal(err)
 	}

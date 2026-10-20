@@ -274,10 +274,12 @@ type Installation struct {
 
 // Repository is a repository an installation covers.
 type Repository struct {
-	ID       int64   `json:"id"`
-	FullName string  `json:"full_name"`
-	Private  bool    `json:"private"`
-	Owner    Account `json:"owner"`
+	ID       int64  `json:"id"`
+	FullName string `json:"full_name"`
+	Private  bool   `json:"private"`
+	// DefaultBranch is the branch GitHub serves as the repository's head.
+	DefaultBranch string  `json:"default_branch"`
+	Owner         Account `json:"owner"`
 }
 
 // Token is an installation access token.

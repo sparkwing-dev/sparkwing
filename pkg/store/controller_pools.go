@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // PoolAccessRule is one canonical repository and branch selector persisted for a pool.
@@ -58,21 +60,12 @@ func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[stri
 			continue
 		}
 		for _, pool := range c.ReservedPools {
-			if !containsPoolRunner(runners[pool], c.Subject.ID) {
+			if !slices.Contains(runners[pool], c.Subject.ID) {
 				runners[pool] = append(runners[pool], c.Subject.ID)
 			}
 		}
 	}
 	return rules, runners, tx.Commit()
-}
-
-func containsPoolRunner(names []string, name string) bool {
-	for _, n := range names {
-		if n == name {
-			return true
-		}
-	}
-	return false
 }
 
 func readPoolRulesTx(ctx context.Context, tx *storeTx, team Team, id string) ([]PoolAccessRule, error) {
@@ -123,6 +116,13 @@ func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, ru
 		var found int64
 		if err := tx.QueryRowContext(ctx, `SELECT installation_id FROM github_app_installations WHERE team=? AND installation_id=? AND suspended=0`+tx.forShare(), t.team, rule.InstallationID).Scan(&found); err != nil {
 			return false, err
+		}
+		if rule.Branch != "" {
+			selector, err := runspec.ParseBranchSelector([]string{rule.Branch})
+			if err != nil {
+				return false, authorityError(apierr.BadRequest, err.Error())
+			}
+			rule.Branch = selector[0]
 		}
 		rule.ID = fmt.Sprintf("%s.%06d", id, i)
 		rule.InstallationID = 0

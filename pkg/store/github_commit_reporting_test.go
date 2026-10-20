@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"slices"
@@ -17,6 +18,8 @@ func TestGitHubCommitReportingUsesSealedIdentityProperty(t *testing.T) {
 		tenant, input, _ := intakeFixture(t)
 		repoID := int64(raw) + 1
 		input.Request.Git.Repository.Key = runspec.RepoKey(githubRepositoryKey(repoID))
+		// Intake seals only full commit IDs.
+		sha = fmt.Sprintf("%x", sha1.Sum([]byte(sha)))
 		input.Request.Git.SHA = sha
 		first, err := tenant.AdmitRun(t.Context(), input)
 		if err != nil {
@@ -32,7 +35,7 @@ func TestGitHubCommitReportingUsesSealedIdentityProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		unrelated = input
-		unrelated.Request.Git.SHA = sha + "different"
+		unrelated.Request.Git.SHA = fmt.Sprintf("%x", sha1.Sum([]byte(sha+"different")))
 		if _, err := tenant.AdmitRun(t.Context(), unrelated); err != nil {
 			t.Fatal(err)
 		}

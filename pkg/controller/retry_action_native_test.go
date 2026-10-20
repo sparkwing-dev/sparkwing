@@ -29,13 +29,14 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*Server, cli
 	s.WithEngineController(&EngineController{Store: s.store, VersionPolicy: engineVersionPolicy(&engineVersionFake{})})
 	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.control'`)
 	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
-	sealed, err := runspec.SealRequest(runspec.Request{
+	input := runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Actor:         runspec.Actor{Kind: "account", ID: "original-author"},
 		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main"},
 		RequestedArgs: map[string]string{"public": "visible", "secret": value}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"secret"}},
 		Source: runspec.Source{Ref: strings.Repeat("a", 40), Location: runspec.SourceLocation{LocalCheckout: "/private/original-checkout", PipelineDir: ".sparkwing"}},
-	}, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Unix(1, 0).UTC()})
+	}
+	sealed, err := runspec.SealRequest(input, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Unix(1, 0).UTC(), Provenance: assertedProvenance(t, "ci", "refs/heads/main", strings.Repeat("a", 40))})
 	if err != nil {
 		t.Fatal(err)
 	}

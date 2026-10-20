@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -17,9 +19,14 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 	parent := authorityRoot("child-parent", "a")
 	parent.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: actor.Holder, Generation: actor.Generation}
 	parent.Grants = []capability.Grant{capability.ChildrenStart}
+	parent.Children = []nodeproto.ChildPipeline{{Pipeline: "child", Repository: "gh:1"}}
 	authorityPersist(t, tenant.s, parent)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET capability_prefix='child-parent'`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET spec_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"child"}]}`))
+	// Intake seals the parent's repository alongside its repo_key column.
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, sealWith(t, runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}, assertedProvenance(t, "ci", "", "")))
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET lineage_json=? WHERE id='run'`, []byte(`{"admission_key":"capability:root","admission_subject":{"kind":"account","id":"alice"}}`))
 	tenant.s.intake = fakeIntakeContracts{}
 	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil
@@ -30,7 +37,7 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 func TestChildIntakePersistsLineageAndInvocationReplay(t *testing.T) {
 	tenant, request := childIntakeFixture(t)
 	first, err := tenant.AdmitRun(t.Context(), request)
-	if err != nil || first.Replayed || first.OwnerUnit == nil || first.Request.Request.Origin != runspec.OriginChild || first.Request.Request.Lineage != request.Request.Lineage {
+	if err != nil || first.Replayed || first.OwnerUnit == nil || first.Request.Request.Origin != runspec.OriginChild || first.Request.Request.Lineage != (runspec.Lineage{ParentRunID: "run", ParentJobID: "job", RootRunID: "run"}) {
 		t.Fatalf("child admission %q replayed=%t: %v", first.RunID, first.Replayed, err)
 	}
 	for range 2 {
@@ -107,5 +114,72 @@ func TestIntakeRefusesAClientDeclaredScheduleOrigin(t *testing.T) {
 	request.Request.Origin = runspec.OriginSchedule
 	if _, err := tenant.AdmitRun(t.Context(), request); err == nil || !strings.Contains(err.Error(), "schedule firing") {
 		t.Fatalf("a client started a schedule run: %v", err)
+	}
+}
+
+func TestChildIntakeUsesSealedTargetsAfterPlanMutation(t *testing.T) {
+	tenant, request := childIntakeFixture(t)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET spec_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"foreign","repository":"gh:2"}]}`))
+	request.Request.Pipeline = "foreign"
+	request.Request.Git.Repository.Key = "gh:2"
+	if _, err := tenant.AdmitRun(t.Context(), request); err == nil {
+		t.Fatal("mutated plan granted a child target")
+	}
+	request.Request.Pipeline = "child"
+	request.Request.Git.Repository.Key = "gh:1"
+	if _, err := tenant.AdmitRun(t.Context(), request); err != nil {
+		t.Fatalf("sealed target lost authority after plan mutation: %v", err)
+	}
+}
+
+func TestChildOfRetriedChildSpendsRetriersHourlyBudget(t *testing.T) {
+	tenant, request := childIntakeFixture(t)
+	s := tenant.s
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_subject_kind,created_principal,created_at,lineage_json,log_retention_class,log_retention_days) SELECT team,'original-root',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,'account','alice',created_at,?,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, []byte(`{"admission_subject":{"kind":"account","id":"alice"}}`))
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET parent_run_id='original-root',retry_of='previous-child',created_subject_kind='account',created_principal='bob',lineage_json=? WHERE team='a' AND id='run'`, []byte(`{"root_run_id":"original-root","parent_run_id":"original-root","retry_of":"previous-child","retrier":{"set":true,"value":{"kind":"account","id":"bob"}},"admission_subject":{"kind":"account","id":"bob"}}`))
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET next_run_number=3 WHERE name='a'`)
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET created_at=? WHERE team='a'`, s.now().UnixNano())
+	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: 1}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := tenant.AdmitRun(t.Context(), request)
+	var limit *ComputeLimitError
+	if !errors.As(err, &limit) || limit.Principal != "bob" {
+		t.Fatalf("child did not spend retrier's exhausted hourly budget: %v", err)
+	}
+}
+
+func TestAppAndScheduleAdmissionRecordTeamBucket(t *testing.T) {
+	for _, origin := range []runspec.Origin{runspec.OriginApp, runspec.OriginSchedule} {
+		t.Run(string(origin), func(t *testing.T) {
+			var tenant *Tenant
+			var admit func() (AdmissionResult, error)
+			if origin == runspec.OriginApp {
+				_, row, in := appAdmissionFixture(t, true, "team-charge")
+				tenant = row
+				admit = func() (AdmissionResult, error) { return tenant.AdmitGitHubAppRun(t.Context(), in) }
+			} else {
+				row, schedule, now := scheduleIntakeFixture(t, 1)
+				tenant = row
+				admit = func() (AdmissionResult, error) { return tenant.AdmitScheduledRun(t.Context(), schedule, now) }
+			}
+			policy := tenant.s.intakePolicy
+			tenant.s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
+				facts, err := policy.ResolveIntake(ctx, resolver, request)
+				facts.AdmissionKey = "team:a"
+				return facts, err
+			}))
+			admitted, err := admit()
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := tenant.ReadRun(t.Context(), admitted.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run.admission.AdmissionKey != "team:a" || run.admission.AdmissionSubject != (capability.Subject{Kind: capability.SubjectService, ID: "team:a"}) {
+				t.Fatalf("team admission charged another identity: %+v", run.admission)
+			}
+		})
 	}
 }

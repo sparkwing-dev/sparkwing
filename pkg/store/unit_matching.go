@@ -96,8 +96,8 @@ func loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, runID string, l
 	if run.err = checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: repo, Display: display}); run.err != nil {
 		return run
 	}
-	git := run.request.Request.Git
-	if run.err = checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); run.err != nil {
+	speaksFor := run.request.Provenance
+	if run.err = checkPushClaimScope(chain, string(run.request.Request.Git.Repository.Key), speaksFor.Ref(), speaksFor.SHA()); run.err != nil {
 		return run
 	}
 	if run.err = checkPersonalMachineTx(ctx, tx, chain, runID); run.err != nil {

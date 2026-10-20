@@ -48,10 +48,12 @@ const (
 // safety: Principal is an opaque server-resolved C2 reference, never a bearer token.
 type Principal string
 
-// safety: RefScope distinguishes submitter-vouched refs from verified refs.
+// safety: RefScope distinguishes verified refs from unverified ones, and keys every
+// unverified scope by its writer so one writer's records never reach another's runs.
 type RefScope struct {
 	Ref      string
 	Verified bool
+	Writer   string
 }
 
 // safety: RefFacts carries server-sealed evidence rather than accepting client trust flags.

@@ -56,8 +56,14 @@ func githubSourceFixture(t *testing.T, extra int64) (*Tenant, capability.Authori
 	if err != nil {
 		t.Fatal(err)
 	}
-	run.Request.Request.Git.Ref, run.Request.Request.Git.SHA = "refs/heads/main", "sealed-sha"
-	run.Request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{RepositoryID: 1, InstallationID: 7, VerifiedAt: s.clock(), Ref: "refs/heads/main", SHA: "sealed-sha"}}
+	app := runspec.AppFacts{Event: "push", RepositoryID: 1, InstallationID: 7, VerifiedAt: s.clock(), Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "push-delivery", DefaultBranch: "main", DefaultBranchPush: true}
+	run.Request.Request.Git.Ref, run.Request.Request.Git.SHA = app.Ref, app.SHA
+	run.Request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: app}
+	// A verified push to the default branch is the one provenance the owner's extra repositories reach.
+	run.Request.Provenance, err = runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, run.Pipeline)
+	if err != nil {
+		t.Fatal(err)
+	}
 	body, err := json.Marshal(run.Request)
 	if err != nil {
 		t.Fatal(err)
@@ -165,6 +171,10 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 			run.Request.Request.Pipeline = run.Pipeline
 			run.Request.Request.Origin = runspec.OriginSchedule
 			run.Request.Request.Git.App = runspec.Optional[runspec.AppFacts]{}
+			run.Request.Provenance, err = runspec.ScheduleProvenance(sched.ID, 1, "main", fixtureFeatureSHA, run.Pipeline)
+			if err != nil {
+				t.Fatal(err)
+			}
 			switch mode {
 			case 1:
 				run.Request.AuthorityRef.ID += "-foreign"
@@ -192,7 +202,8 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == 0 {
-				if err != nil || token.Secret == "" || audits != 1 || !reflect.DeepEqual(provider.ids, []int64{1, extra}) || !reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"}) {
+				// The owner's extra repositories reach only a verified push to the default branch.
+				if err != nil || token.Secret == "" || audits != 1 || !reflect.DeepEqual(provider.ids, []int64{1}) || !reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"}) {
 					t.Logf("scheduled release=%+v ids=%v err=%v", token, provider.ids, err)
 					return false
 				}

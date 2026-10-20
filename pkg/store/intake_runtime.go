@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -15,11 +16,10 @@ import (
 )
 
 type admittedSnapshot struct {
-	request runspec.SealedRequest
-	spec    *runspec.Spec
-	plan    json.RawMessage
-	lineage runspec.Lineage
-	retry   *RetrySelection
+	request   runspec.SealedRequest
+	spec      *runspec.Spec
+	plan      json.RawMessage
+	execution executionLineage
 }
 
 // ReplayRun validates private inputs and returns a keyed admission before source resolution.
@@ -103,8 +103,8 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if tx.store.intakePolicy == nil {
 		return AdmissionResult{}, authorityError(apierr.Unavailable, "intake policy is not configured")
 	}
-	if snapshot.retry != nil {
-		if err := selectRetryTx(ctx, tx, team, snapshot.lineage.RetryOf, snapshot.retry); err != nil {
+	if snapshot.execution.Retry != nil {
+		if err := selectRetryTx(ctx, tx, team, snapshot.execution.Lineage.RetryOf, snapshot.execution.Retry); err != nil {
 			return AdmissionResult{}, err
 		}
 	}
@@ -118,6 +118,10 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	id, err := newCreditID("run")
 	if err != nil {
 		return AdmissionResult{}, err
+	}
+	charge := admissionIdentity{AdmissionSubject: principal.Capability.Subject, AdmissionKey: policy.AdmissionKey}
+	if policy.AdmissionKey == "team:"+string(team) {
+		charge.AdmissionSubject = capability.Subject{Kind: capability.SubjectService, ID: policy.AdmissionKey}
 	}
 	if snapshot.request.RunID == "" {
 		input, err := trustedIntakeRequest(request, principal, team, policy)
@@ -140,8 +144,18 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 				return admissionResultTx(ctx, tx, team, previous)
 			}
 		}
-		if err := validateChildLineageTx(ctx, tx, team, &input); err != nil {
+		depth, inherited, err := validateChildLineageTx(ctx, tx, team, &input, principal.Capability)
+		if err != nil {
 			return AdmissionResult{}, err
+		}
+		if depth > 0 {
+			if err = enforceChildLimitsTx(ctx, tx, team, input.Lineage.RootRunID, depth); err != nil {
+				return AdmissionResult{}, err
+			}
+			charge = inherited
+			if charge.AdmissionSubject.Kind == "" {
+				return AdmissionResult{}, authorityError(apierr.IntegrityFailure, "parent run has no charged admission subject")
+			}
 		}
 		if input.Origin == runspec.OriginSchedule && tx.scheduleAdmission == nil {
 			return AdmissionResult{}, authorityError(apierr.Forbidden, "only a schedule firing starts a schedule run")
@@ -149,24 +163,29 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err := checkActionsOwnerTx(ctx, tx, team, input); err != nil {
 			return AdmissionResult{}, err
 		}
-		owner, appRepository, err := trustedAppRunnerTx(ctx, tx, request)
+		owner, err := trustedAppRunnerTx(ctx, tx, request)
 		if err != nil {
 			return AdmissionResult{}, err
 		}
 		owner.apply(&input.Options)
-		pools, err := intakePoolsTx(ctx, tx, team, &input, policy.RepositoryAuthorized || appRepository)
+		provenance, err := sealProvenanceTx(ctx, tx, team, request, principal, input, id)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+		pools, err := intakePoolsTx(ctx, tx, team, &input, provenance)
 		if err != nil {
 			return AdmissionResult{}, err
 		}
 		if request.Request.Dispatch == "" {
 			input.Dispatch = SelectDispatch(input)
 		}
-		snapshot.request, err = tx.store.intakeServices().SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AllowedPools: pools, AuthorityRef: request.Authority, Ceilings: policy.Ceilings})
+		snapshot.request, err = tx.store.intakeServices().SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AllowedPools: pools, AuthorityRef: request.Authority, Ceilings: policy.Ceilings, Provenance: provenance})
 		if err != nil {
 			return AdmissionResult{}, err
 		}
-		snapshot.lineage = input.Lineage
+		snapshot.execution.Lineage = input.Lineage
 	}
+	snapshot.execution.admissionIdentity = charge
 	if _, err = intakeAuthorityTx(ctx, tx, team, request); err != nil {
 		return AdmissionResult{}, err
 	}
@@ -179,10 +198,10 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		scope = ""
 		digest = ""
 	}
-	if err = enforceRunsPerHourTx(ctx, tx, team, id, principal.Capability.Subject, now); err != nil {
+	if err = enforceRunsPerHourTx(ctx, tx, team, id, charge.AdmissionSubject, now); err != nil {
 		var refused *ComputeLimitError
 		if errors.As(err, &refused) {
-			err = errors.Join(err, &apierr.Error{Code: apierr.RateLimited, Message: "hourly run admission limit reached", Details: map[string]any{"limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed, "retry_after_ms": 5000}})
+			err = errors.Join(err, &apierr.Error{Code: apierr.RateLimited, Message: refused.Error(), Details: map[string]any{"reason": "compute_limit", "limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed, "scope": refused.Scope, "retry_after_ms": 5000}})
 		}
 		return AdmissionResult{}, err
 	}
@@ -237,8 +256,8 @@ func intakeDigest(tx *storeTx, request IntakeRequest, snapshot admittedSnapshot)
 		Request  runspec.Request
 		Delivery string
 	}{intent, request.VerifiedDeliveryID}
-	if snapshot.retry != nil {
-		identity = struct{ SourceRunID, Mode string }{snapshot.lineage.RetryOf, snapshot.retry.Mode}
+	if snapshot.execution.Retry != nil {
+		identity = struct{ SourceRunID, Mode string }{snapshot.execution.Lineage.RetryOf, snapshot.execution.Retry.Mode}
 	}
 	return tx.store.planServices().CanonicalHash(identity)
 }
@@ -335,7 +354,7 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 	if err != nil {
 		return admittedSnapshot{}, err
 	}
-	out := admittedSnapshot{request: carried.Request, plan: carried.Plan, lineage: carried.Lineage, retry: &RetrySelection{Mode: mode}}
+	out := admittedSnapshot{request: carried.Request, plan: carried.Plan, execution: executionLineage{Lineage: carried.Lineage, Retry: &RetrySelection{Mode: mode}}}
 	if carried.Spec.Set {
 		out.spec = &carried.Spec.Value
 	}
@@ -393,12 +412,14 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	return input, nil
 }
 
-func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, authorized bool) ([]string, error) {
+// intakePoolsTx grants reserved pools from sealed provenance alone: only a run whose
+// identity a signed App delivery or an App-armed schedule established qualifies.
+func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, provenance runspec.Provenance) ([]string, error) {
 	pools := []string{}
-	if !authorized {
+	if !provenance.Verified() && !provenance.TrustedDefault() {
 		return pools, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT pool,branch,source,route FROM pool_access_rules WHERE team=? AND repo_key=? ORDER BY pool,id`+tx.forShare(), team, input.Git.Repository.Key)
+	rows, err := tx.QueryContext(ctx, `SELECT pool,branch,source,route FROM pool_access_rules WHERE team=? AND repo_key=? ORDER BY pool,id`+tx.forShare(), team, fmt.Sprintf("gh:%d", provenance.RepositoryID()))
 	if err != nil {
 		return nil, err
 	}
@@ -408,10 +429,10 @@ func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.R
 		if err = rows.Scan(&pool, &branch, &source, &route); err != nil {
 			return nil, err
 		}
-		if source != "" && source != string(input.Origin) {
+		if source != "" && (source != string(runspec.OriginApp) || !provenance.Verified()) {
 			continue
 		}
-		if branch != "" && (!input.Git.App.Set || branch != input.Git.App.Value.Ref) {
+		if branch != "" && (!strings.HasPrefix(provenance.Ref(), "refs/heads/") || !(runspec.BranchSelector{branch}).Matches(provenance.Ref())) {
 			continue
 		}
 		if route != "" {
@@ -472,39 +493,50 @@ func appReplayKey(input runspec.Request) string {
 	return fmt.Sprintf("%s:%s", input.Git.App.Value.DeliveryKey, input.Pipeline)
 }
 
-func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request) error {
-	if input.Lineage.RepoInherited && input.Lineage.ParentRunID == "" {
-		return authorityError(apierr.BadRequest, "repository inheritance requires a parent")
+// validateChildLineageTx checks a child against every ancestor and returns its depth,
+// counting the root as one level, or zero for a run that is not a child.
+func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, claim capability.Capability) (int, admissionIdentity, error) {
+	var admission admissionIdentity
+	input.Lineage.RootRunID = ""
+	if input.Lineage.ParentRunID == "" {
+		if input.Lineage.RepoInherited {
+			return 0, admissionIdentity{}, authorityError(apierr.BadRequest, "repository inheritance requires a parent")
+		}
+		return 0, admissionIdentity{}, nil
+	}
+	if !claim.AllowsChild(input.Pipeline, string(input.Git.Repository.Key)) {
+		return 0, admissionIdentity{}, authorityError(apierr.Forbidden, "child source is outside the parent claim's declared children")
 	}
 	seen := map[string]bool{}
+	depth := 1
 	for id := input.Lineage.ParentRunID; id != ""; {
 		if seen[id] {
-			return authorityError(apierr.Conflict, "child pipeline cycle")
+			return 0, admissionIdentity{}, authorityError(apierr.Conflict, "child pipeline cycle")
 		}
 		seen[id] = true
+		depth++
 		ancestor, err := readRunTx(ctx, tx, team, id)
 		if err != nil {
-			return err
+			return 0, admissionIdentity{}, err
 		}
 		parent := ancestor.Request.Request
 		if id == input.Lineage.ParentRunID {
 			if input.Env.Digest != "" && (input.Env.Digest != parent.Env.Digest || !slices.Equal(input.Env.Names, parent.Env.Names) || input.EnvironmentSource != parent.EnvironmentSource) {
-				return authorityError(apierr.SpecDrift, "child environment differs from its parent")
+				return 0, admissionIdentity{}, authorityError(apierr.SpecDrift, "child environment differs from its parent")
 			}
 			input.Env, input.EnvironmentSource = parent.Env, parent.EnvironmentSource
+			admission = ancestor.admission
+			if parent.Git.Repository.Key == input.Git.Repository.Key {
+				input.Git.Repository.Display = parent.Git.Repository.Display
+			}
 		}
-		if id == input.Lineage.ParentRunID && input.Lineage.RepoInherited && parent.Git.Repository.Key != input.Git.Repository.Key {
-			return authorityError(apierr.BadRequest, "inherited repository differs from its parent")
+		if parent.Git.Repository.Key == input.Git.Repository.Key && parent.Pipeline == input.Pipeline {
+			return 0, admissionIdentity{}, authorityError(apierr.Conflict, "child pipeline cycle")
 		}
-		if id == input.Lineage.ParentRunID && parent.Git.Repository.Key == input.Git.Repository.Key {
-			input.Git.Repository.Display = parent.Git.Repository.Display
-		}
-		if parent.Pipeline == input.Pipeline && parent.Git.Repository.Key == input.Git.Repository.Key {
-			return authorityError(apierr.Conflict, "child pipeline cycle")
-		}
+		input.Lineage.RootRunID = id
 		id = ancestor.Lineage.ParentRunID
 	}
-	return nil
+	return depth, admission, nil
 }
 
 func intakeScope(principal capability.Principal, pipeline string) (string, error) {

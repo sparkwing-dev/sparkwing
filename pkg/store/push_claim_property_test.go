@@ -1,7 +1,6 @@
 package store
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -24,7 +23,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 						root := authorityRoot("actions", "a")
 						root.Grants = []capability.Grant{capability.TriggersClaim, capability.NodesClaim}
 						root.Repositories = []string{"gh:1"}
-						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: "original", WorkflowRunID: "workflow"}}
+						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow"}}
 						authorityPersist(t, s, root)
 						demand.CapabilityPrefix = root.Prefix
 						if descendant {
@@ -42,7 +41,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 						if named {
 							demand.Target = &unit
 						}
-						git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "original"}
+						git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA}
 						altered := git
 						value := fmt.Sprintf("adversarial-%016x:' OR 1=1 --/雪", random.Uint64())
 						switch field {
@@ -51,7 +50,8 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 						case "ref":
 							altered.Ref = value
 						case "sha":
-							altered.SHA = value
+							// A sealed commit is always a full commit ID.
+							altered.SHA = fmt.Sprintf("%040x", random.Uint64())
 						}
 						writePushRun(t, s, altered)
 						_, err := s.ClaimUnit(t.Context(), demand)
@@ -75,10 +75,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 
 func writePushRun(t *testing.T, s *Store, git runspec.Git) {
 	t.Helper()
-	body, err := json.Marshal(runspec.SealedRequest{Request: runspec.Request{Git: git}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: git}}, assertedProvenance(t, "ci", git.Ref, git.SHA))
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_key=?,git_branch=?,git_sha=? WHERE id='run'`, body, git.Repository.Key, git.Ref, git.SHA)
 }
 
@@ -87,9 +84,9 @@ func TestPushAwardRefusesScopeEscape(t *testing.T) {
 	root := authorityRoot("actions", "a")
 	root.Grants = []capability.Grant{capability.TriggersClaim}
 	root.Repositories = []string{"gh:1"}
-	root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: "original", WorkflowRunID: "workflow"}}
+	root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow"}}
 	authorityPersist(t, s, root)
-	writePushRun(t, s, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "different"})
+	writePushRun(t, s, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureOtherSHA})
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET claimed_by='actions',generation=1,lease_expires_at=?`, s.now().Add(time.Hour).UnixNano())
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
 		_, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect}})
@@ -108,9 +105,9 @@ func TestPushAwardedHostRetainsAncestorScopeProperty(t *testing.T) {
 		root := authorityRoot("actions", "a")
 		root.Grants = []capability.Grant{capability.TriggersClaim, capability.NodesClaim}
 		root.Repositories = []string{"gh:1"}
-		root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: "original", WorkflowRunID: "workflow"}}
+		root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow"}}
 		authorityPersist(t, s, root)
-		git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "original"}
+		git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA}
 		writePushRun(t, s, git)
 		host, err := s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
 		if err != nil {
@@ -118,7 +115,7 @@ func TestPushAwardedHostRetainsAncestorScopeProperty(t *testing.T) {
 		}
 		demand.CapabilityPrefix = host.Award.CapabilityPrefix
 		altered := git
-		altered.SHA = fmt.Sprint(random.Uint64())
+		altered.SHA = fmt.Sprintf("%040x", random.Uint64())
 		writePushRun(t, s, altered)
 		_, err = s.ClaimUnit(t.Context(), demand)
 		var refused *apierr.Error

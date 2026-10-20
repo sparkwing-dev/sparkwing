@@ -91,6 +91,52 @@ public run details keep secret arguments redacted. Admission checks ancestor
 pipeline and repository identities within the same team. Re-entering one returns
 `409`; a missing ancestor returns `404` without disclosing foreign run facts.
 
+### Sealed run identity
+
+Intake seals each run with the identity it speaks for, derived from facts the
+admission transaction verified and never from the request body: a trust class,
+the ref, commit, event and pipeline, and GitHub's repository ID for every class
+but `asserted`. The classes are `verified-default` (a signed App push to the
+default branch), `verified` (any other signed App delivery), `actions` (a run
+bound to a GitHub Actions push), `schedule` (a fire of a schedule a team admin
+armed, following the default branch GitHub reports at fire time, unlocked and
+unmodified, at the commit the App resolves) and `asserted` (every run whose ref,
+commit or inputs a principal chose, including schedules a non-admin armed,
+locked, overridden or non-default-branch schedules and "run now"). OIDC claims, data and
+cache scopes, pool access rules and pipeline-scoped secret release read only
+this value.
+
+A job may start only the child pipelines its plan declares with
+`StartsChildren`; an undeclared child is refused with `403`. A child either runs
+its parent's exact revision (same repository, ref, commit and code commit) and
+inherits the parent's identity whole, including its pipeline for OIDC and
+pipeline-scoped secrets, or names a branch that the controller resolves and is
+sealed `asserted` under its own pipeline name. An asserted child reads only
+team-wide shared secrets, like a GitHub reusable workflow called without
+`secrets: inherit`. A request that pairs another ref or code commit with its
+own commit in the inherited repository is refused with `403`. An explicit
+child repository requires authorization from the parent's live claim and always
+runs as asserted. Cycle checks compare repository and pipeline together. A
+retry copies its source run's identity whole.
+
+A `source:` code pin that is a full commit ID keeps the run's class. A branch or
+tag pin that does not resolve to the execution commit demotes the run to
+`asserted`, because whoever can push that ref chooses the code. The demoted run
+still receives its pipeline's scoped secrets; see [secrets](secrets.md).
+
+Reserved pools are granted only to verified App runs, the children and retries
+that inherit them, and admin-armed default-branch schedule fires, which receive
+only pools whose rules allow the default branch. A typed repository grants no
+pool. Owner-approved extra repositories join the source token only for a
+verified push to the default branch.
+
+Child runs nest at most 10 levels deep counting the root, and one root run
+starts at most 50 children at every depth, retries excluded. Either bound
+refuses with `409` and conflict detail `limit` set to `max_child_depth` or
+`max_children_per_root`. A child spends the hourly run, flood and queue-depth
+budgets of whoever created its root, not the runner holding the parent's
+claim. See [limits](limits.md#execution-and-records).
+
 ### Request audit log
 
 Audit records identify the route, operation, team, subject and public credential
@@ -243,7 +289,10 @@ Signed-object clients receive only signed headers and never attach a reusable
 controller credential, including to the controller's own origin.
 
 Every record edge checks authority, integrity and existence. An unrelated
-same-team or same-run receipt cannot authorize another job's manifest. A remote
+same-team or same-run receipt cannot authorize another job's manifest. Each
+unverified writer keeps its own data scope, so a member's manual run cannot feed
+memo or cache entries to another member or to App, schedule or Actions builds;
+see [caching](caching.md#who-shares-a-cache). A remote
 cache profile permits only the user's authorized verified-default-branch memo,
 artifact and dependency-cache reads, and needs the editor role, because
 dependency-cache archives are not checked for secrets. It exposes no write or binary-fetch method.

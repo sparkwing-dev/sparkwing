@@ -45,7 +45,8 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 	if err != nil {
 		return "", err
 	}
-	scope := capability.DataScope{Use: capability.DataPublish, RepositoryKey: string(response.Request.Request.Git.Repository.Key), RunID: response.RunID, WriteRef: "manual:" + request.Git.Ref, ReadRefs: []string{"manual:" + request.Git.Ref}}
+	write := blob.ScopeFor(response.Request.Provenance).CapabilityScope()
+	scope := capability.DataScope{Use: capability.DataPublish, RepositoryKey: string(response.Request.Request.Git.Repository.Key), RunID: response.RunID, WriteRef: write, ReadRefs: []string{write}}
 	publisher, err := OpenProfileData(ctx, options, scope)
 	if err != nil {
 		return response.RunID, err

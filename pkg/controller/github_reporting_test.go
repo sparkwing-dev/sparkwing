@@ -132,10 +132,7 @@ func TestGitHubAppWithoutChecksPermissionPostsStatuses(t *testing.T) {
 		run.Request.RunID = c.id
 		run.Request.Request.Git.SHA = strings.Repeat(map[bool]string{false: "b", true: "c"}[c.granted], 40)
 		run.Request.Request.Git.App.Value.SHA = run.Request.Request.Git.SHA
-		request, err := json.Marshal(run.Request)
-		if err != nil {
-			t.Fatal(err)
-		}
+		request := sealWith(t, run.Request, appProvenance(t, run.Request.Request.Git.App.Value, run.Request.Request.PullRequest, "ci"))
 		if err := teststore.SeedRun(f.server.store, t.Context(), "a", store.Run{ID: c.id, Pipeline: "ci", Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}

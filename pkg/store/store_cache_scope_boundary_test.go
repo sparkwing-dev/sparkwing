@@ -21,11 +21,11 @@ func TestStoreCacheScope(t *testing.T) {
 			verifiedDefault    bool
 			allowed            bool
 		}{
-			{"feature", "main", false, true},
-			{"release", "main", false, kind == blob.KindDepcache},
-			{"release", "release", true, kind == blob.KindDepcache},
-			{"main", "main", false, false},
-			{"main", "main", true, true},
+			{"refs/heads/feature", "refs/heads/main", false, true},
+			{"refs/heads/release", "refs/heads/main", false, kind == blob.KindDepcache},
+			{"refs/heads/release", "refs/heads/release", true, kind == blob.KindDepcache},
+			{"refs/heads/main", "refs/heads/main", false, false},
+			{"refs/heads/main", "refs/heads/main", true, true},
 		} {
 			t.Run(fmt.Sprintf("%s/%s/%s/%t", kind, test.ref, test.defaultBranch, test.verifiedDefault), func(t *testing.T) {
 				rewriteSchemaExec(t, s.db, "DELETE FROM blob_records")

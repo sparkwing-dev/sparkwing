@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -106,8 +105,7 @@ func dataRecordQuery(query url.Values) (blob.RecordLookup, error) {
 	}
 	request := blob.RecordLookup{Key: blob.RecordKey{Kind: blob.Kind(query.Get("kind")), Name: query.Get("name"), Scope: blob.Scope{Ref: blob.RefScope{Ref: query.Get("ref")}, Pipeline: query.Get("pipeline"), Job: query.Get("job"), Key: query.Get("key")}}}
 	if ref := query.Get("ref"); ref != "" {
-		name, manual := strings.CutPrefix(ref, "manual:")
-		request.Key.Scope.Ref = blob.RefScope{Ref: name, Verified: !manual}
+		request.Key.Scope.Ref = blob.ParseCapabilityScope(ref)
 	}
 	if !slices.Contains(blob.Kinds, request.Key.Kind) || request.Key.Name == "" {
 		return blob.RecordLookup{}, invalidEngineBody("record query requires a known kind and name")

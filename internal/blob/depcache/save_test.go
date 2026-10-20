@@ -47,7 +47,7 @@ func (s *saveBoundary) CommitRecord(_ context.Context, q blob.CommitRecordReques
 
 func saveData(s *saveBoundary) Data {
 	i := blob.UploadIdentity{Kind: blob.UploadJob, Team: "team", RunID: "run", Principal: "principal", CapabilityRef: "cap", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Attempt: 1, Generation: 2}}}
-	a := blob.Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "feature"}}}
+	a := blob.Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "feature", Writer: "account/fixture"}}}
 	return Data{Bytes: s, Records: s, Authority: a, Identity: i}
 }
 

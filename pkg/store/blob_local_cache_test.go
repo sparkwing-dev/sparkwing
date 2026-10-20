@@ -45,7 +45,7 @@ func TestLocalDepcacheRoundTrip(t *testing.T) {
 				dataRepo, dataRef := "", ""
 				if c.Value.Data != nil {
 					c.Value.Data.RepositoryKey = string(repo)
-					c.Value.Data.WriteRef = (blob.RefScope{Ref: ref}).CapabilityScope()
+					c.Value.Data.WriteRef = assertedRef(ref).CapabilityScope()
 					c.Value.Data.ReadRefs = []string{c.Value.Data.WriteRef}
 					dataRepo, dataRef = string(repo), c.Value.Data.WriteRef
 				}
@@ -55,12 +55,9 @@ func TestLocalDepcacheRoundTrip(t *testing.T) {
 				}
 				rewriteSchemaExec(t, s.db, "UPDATE capabilities SET subject_kind=?,repo_key=?,ref_scope=?,authority_json=? WHERE prefix=?", c.Value.Subject.Kind, dataRepo, dataRef, body, c.Value.Prefix)
 			}
-			body, err := json.Marshal(runspec.SealedRequest{Request: runspec.Request{Origin: runspec.OriginLocal, Git: runspec.Git{Ref: ref}}})
-			if err != nil {
-				t.Fatal(err)
-			}
+			body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Origin: runspec.OriginLocal, Git: runspec.Git{Ref: ref}}}, assertedProvenance(t, "ci", ref, ""))
 			rewriteSchemaExec(t, s.db, "UPDATE runs SET repo_key=?,request_json=? WHERE team='a' AND id='run'", repo, body)
-			intent.Authority.Repo, intent.Authority.Ref.Scope.Ref = repo, ref
+			intent.Authority.Repo, intent.Authority.Ref.Scope = repo, assertedRef(ref)
 			authority, err := records.tenant.ResolveBlobAuthority(t.Context(), intent.Authority, capability.DataWrite)
 			if err != nil {
 				t.Fatal(err)
@@ -69,7 +66,7 @@ func TestLocalDepcacheRoundTrip(t *testing.T) {
 			if _, err := commitTestBlob(t, records.tenant, intent); err != nil {
 				t.Fatal(err)
 			}
-			key := blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: repo, Ref: blob.RefScope{Ref: ref}, Key: "v1"}, Name: "modules"}
+			key := blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: repo, Ref: assertedRef(ref), Key: "v1"}, Name: "modules"}
 			if _, err := records.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Source: intent.Identity, Key: key, Digest: intent.Digest}); err != nil {
 				t.Fatal(err)
 			}

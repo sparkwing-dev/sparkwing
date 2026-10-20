@@ -12,6 +12,8 @@ var (
 	ChildIntakeFixture     = childIntakeFixture
 	EngineSQL              = engineSQL
 	EngineHTTPRoot         = engineHTTPRoot
+	AssertedProvenance     = assertedProvenance
+	SealWith               = sealWith
 )
 
 // SetHostKeyScan replaces the ssh host key read a new git credential makes,

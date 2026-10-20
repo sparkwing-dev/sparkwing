@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
-	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -50,7 +48,11 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
-	facts := capability.OIDCFacts{Now: snapshot.Now, Team: string(t.team), RunID: run.ID, Pipeline: run.Request.Request.Pipeline, Ref: run.Request.Request.Git.Ref, SHA: run.Request.Request.Git.SHA, Repository: run.Request.Request.Git.Repository.Display, Trigger: "manual", RunnerKind: oidcRunnerKind(chain, personal)}
+	facts, err := oidcIdentity(t.team, run)
+	if err != nil {
+		return capability.OIDCFacts{}, err
+	}
+	facts.Now, facts.RunnerKind = snapshot.Now, oidcRunnerKind(chain, personal)
 	facts.NotAfter = state.LeaseExpiresAt
 	if state.Expansion != nil {
 		facts.NotAfter = state.Expansion.ExpiresAt
@@ -66,15 +68,22 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if !facts.NotAfter.After(facts.Now) {
 		return capability.OIDCFacts{}, authorityError(apierr.Unauthenticated, "claim issuance window has ended")
 	}
-	identity, err := originalRequestTx(ctx, tx, t.team, run.Request)
-	if err != nil {
-		return capability.OIDCFacts{}, err
-	}
-	if err := oidcTriggerTx(ctx, tx, t.team, identity, &facts); err != nil {
-		return capability.OIDCFacts{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return capability.OIDCFacts{}, err
+	}
+	return facts, nil
+}
+
+// oidcIdentity is the part of an ID token that the run's sealed provenance alone decides.
+func oidcIdentity(team Team, run RunRow) (capability.OIDCFacts, error) {
+	provenance := run.Request.Provenance
+	if !provenance.Valid() {
+		return capability.OIDCFacts{}, authorityError(apierr.IntegrityFailure, "run has no sealed provenance")
+	}
+	facts := capability.OIDCFacts{Team: string(team), RunID: run.ID, Pipeline: provenance.Pipeline()}
+	facts.Trigger, facts.RepositoryID, facts.Ref, facts.SHA = provenance.OIDC()
+	if facts.RepositoryID > 0 {
+		facts.Repository = run.Request.Request.Git.Repository.Display
 	}
 	return facts, nil
 }
@@ -121,33 +130,4 @@ func originalRequestTx(ctx context.Context, tx *storeTx, team Team, request runs
 		}
 		request = run.Request
 	}
-}
-
-func oidcTriggerTx(ctx context.Context, tx *storeTx, team Team, identity runspec.SealedRequest, facts *capability.OIDCFacts) error {
-	request := identity.Request
-	if request.Origin == runspec.OriginSchedule {
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM cron_fires WHERE team=? AND run_id=? AND outcome='fired'`, team, identity.RunID).Scan(&count); err != nil {
-			return err
-		}
-		if count > 0 {
-			facts.Trigger = "cron"
-		}
-	}
-	app := request.Git.App
-	if request.Origin != runspec.OriginApp || !app.Set || app.Value.VerifiedAt.IsZero() || app.Value.RepositoryID <= 0 || app.Value.DeliveryKey == "" {
-		return nil
-	}
-	event := app.Value.Event
-	if !slices.Contains([]string{"push", "pull_request", "release", "create", "delete"}, event) {
-		return nil
-	}
-	facts.Trigger, facts.RepositoryID = event, app.Value.RepositoryID
-	if event == "pull_request" {
-		if !request.PullRequest.Set || request.PullRequest.Value.Number <= 0 {
-			return authorityError(apierr.IntegrityFailure, "verified pull request identity is incomplete")
-		}
-		facts.Ref = fmt.Sprintf("refs/pull/%d/head", request.PullRequest.Value.Number)
-	}
-	return nil
 }

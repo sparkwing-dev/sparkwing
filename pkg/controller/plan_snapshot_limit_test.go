@@ -28,7 +28,7 @@ func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc) (*EngineControl
 		t.Fatal(err)
 	}
 	run.Request.Request.Dispatch = runspec.DispatchController
-	request, err := runspec.SealRequest(run.Request.Request, runspec.IntakeFacts{RunID: run.ID})
+	request, err := runspec.SealRequest(run.Request.Request, runspec.IntakeFacts{RunID: run.ID, Provenance: run.Request.Provenance})
 	if err != nil {
 		t.Fatal(err)
 	}

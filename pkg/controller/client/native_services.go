@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -59,7 +60,7 @@ func (c *NativeProcessClient) Summary(ctx context.Context, input nodeproto.Summa
 // Secret reads a declared secret under the live parent award.
 func (c *NativeProcessClient) Secret(ctx context.Context, name string) (string, bool, error) {
 	var result controllerwire.SecretValue
-	query := url.Values{"run": {c.run}, "pipeline": {c.request.Pipeline}}
+	query := url.Values{"run": {c.run}}
 	err := c.transport.request(ctx, "GET", "/api/v1/secrets/{name}", "/api/v1/secrets/"+url.PathEscape(name)+"?"+query.Encode(), "", nil, &result)
 	return result.Value, result.Masked, err
 }
@@ -120,7 +121,18 @@ func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, a
 		Lineage:           runspec.Lineage{ParentRunID: c.run, ParentJobID: c.job, RepoInherited: repo == ""},
 	}
 	if repo != "" && repo != string(request.Git.Repository.Key) {
-		return "", localHostClientRefusal()
+		remote := repo
+		if strings.HasPrefix(remote, "git:") && !strings.Contains(remote, "://") {
+			remote = "https://" + strings.TrimPrefix(remote, "git:")
+		} else if !strings.Contains(remote, ":") {
+			remote = "https://github.com/" + remote
+		}
+		request.Git = runspec.Git{}
+		request.Source = runspec.Source{Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}}
+		request.PullRequest = runspec.Optional[runspec.PullRequest]{}
+		if branch == "" {
+			branch = "main"
+		}
 	}
 	if branch != "" {
 		request.Git.Ref = branch

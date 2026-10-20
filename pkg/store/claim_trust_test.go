@@ -3,6 +3,7 @@ package store_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -74,9 +75,10 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 		if err := json.Unmarshal(body, &seal); err != nil {
 			t.Fatal(err)
 		}
-		git := &seal.Request.Git
-		git.Ref = "refs/heads/main"
-		git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true}}
+		seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "verified", VerifiedAt: time.Now(), Ref: "refs/heads/main", SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, seal.Request.Pipeline)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if body, err = json.Marshal(seal); err != nil {
 			t.Fatal(err)
 		}

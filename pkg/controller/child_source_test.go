@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -41,7 +42,7 @@ func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := capability.Authorized{Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
+	a := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Children: []nodeproto.ChildPipeline{{Pipeline: parent.Request.Request.Pipeline, Repository: string(parent.Request.Request.Git.Repository.Key)}}}}, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
 	property := func(value []byte, mutation uint8) bool {
 		request := parent.Request.Request
 		request.Git.SHA, request.Git.Ref = "", "deploy"
@@ -69,9 +70,14 @@ func (e childSourceEngine) Ensure(ctx context.Context, identity engine.Identity,
 }
 
 func TestNativeFreshBranchChildResolvesBeforeIntakeAndAcquisition(t *testing.T) {
-	e, _, claim := childIntakeFixture(t)
-	handler := New(e.Store, nil).WithEngineController(e).Handler()
-	engineClaimHTTP(t, handler, claim, "POST", "/api/v1/runs/run/source-credential", "", http.StatusForbidden)
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit_repository=%v", explicit), func(t *testing.T) {
+			checkNativeFreshBranchChild(t, explicit)
+		})
+	}
+}
+
+func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 	repo, original := sourcetest.Repository(t)
 	remote := "https://8.8.8.8/team/repo"
 	sourcetest.Remote(t, map[string]string{remote: repo})
@@ -82,23 +88,40 @@ func TestNativeFreshBranchChildResolvesBeforeIntakeAndAcquisition(t *testing.T) 
 	sourcetest.Git(t, repo, "commit", "-qm", "child")
 	selected := sourcetest.Git(t, repo, "rev-parse", "HEAD")
 	sourcetest.Git(t, repo, "checkout", "-q", "trunk")
+	parentRemote := remote
+	if explicit {
+		parentRemote = "https://8.8.8.8/team/parent"
+	}
+	parentRepository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: parentRemote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _, claim := childIntakeFixtureWith(t, func(e *EngineController) {
+		tenant, err := e.Store.ForTeam(t.Context(), "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parent, err := tenant.ReadRun(t.Context(), "run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parent.Request.Request.Git.SHA = original
+		parent.Request.Request.Git.Repository = parentRepository
+		parent.Request.Request.Source = runspec.Source{Ref: original, Location: runspec.SourceLocation{RemoteURL: parentRemote, PipelineDir: ".sparkwing"}}
+		body, err := json.Marshal(parent.Request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_key=? WHERE team='a' AND id='run'`, body, string(parentRepository.Key))
+		engineSQL(t, e.Store, `INSERT INTO repos(team,repo_key,updated_at) VALUES ('a','git:8.8.8.8/team/repo',1)`)
+		engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","children":[{"pipeline":"deploy","repository":"git:8.8.8.8/team/repo"}]}`))
+	})
+	handler := New(e.Store, nil).WithEngineController(e).Handler()
+	engineClaimHTTP(t, handler, claim, "POST", "/api/v1/runs/run/source-credential", "", http.StatusForbidden)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent.Request.Request.Git.SHA = original
-	parent.Request.Request.Git.Repository = runspec.Repository{Key: "git:8.8.8.8/team/repo", Display: remote}
-	childSourceRepositories(t, e, claim, []string{"git:8.8.8.8/team/repo"})
-	parent.Request.Request.Source = runspec.Source{Ref: original, Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}}
-	body, err := json.Marshal(parent.Request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_key=? WHERE team='a' AND id='run'`, body, "git:8.8.8.8/team/repo")
 	host, err := client.NewNodeHostClient(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: childRecorderTransport{handler}}, Bearer: func(context.Context) (string, error) { return claim, nil }}, "run", "job")
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +139,11 @@ func TestNativeFreshBranchChildResolvesBeforeIntakeAndAcquisition(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := process.StartChild(t.Context(), "deploy", nil, "", "deploy")
+	repoArgument := ""
+	if explicit {
+		repoArgument = remote
+	}
+	id, err := process.StartChild(t.Context(), "deploy", nil, repoArgument, "deploy")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +189,7 @@ type childSourcePublicAccess struct{}
 func (childSourcePublicAccess) GitCredential(context.Context, source.Spec) (source.Credential, error) {
 	return source.Credential{}, nil
 }
+
 func (childSourcePublicAccess) BundleURL(context.Context, string) (string, error) {
 	return "", fmt.Errorf("unexpected bundle")
 }
