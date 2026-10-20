@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -171,9 +172,19 @@ func TestReconcileSelfClaimRenewalKeepsOwnerFence(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=? WHERE run_id='run'`, now.UnixNano())
 				before = *now
 			case "revoked":
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, got.Claim.CapabilityPrefix)
+				if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error {
+					return revokeAuthorityTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: got.Claim.CapabilityPrefix})
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if _, err := tenant.RenewOwner(t.Context(), actor); err != nil {
+			_, err = tenant.RenewOwner(t.Context(), actor)
+			if problem == "expired" || problem == "revoked" {
+				var refusal *ErrIllegalTransition
+				if !errors.As(err, &refusal) || refusal.Reason != ReasonHolderRights {
+					t.Fatalf("owner renewed its %s child: %v", problem, err)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
 			node, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})

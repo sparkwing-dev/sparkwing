@@ -282,8 +282,11 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	case event.Kind == capability.PaymentCheckoutExpired:
 		kind = BusinessEventCheckoutExpired
 	}
+	// A successful Add funds supersedes failures from earlier refill reservations, including delayed outcomes.
 	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?,
-	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team) THEN 1 ELSE 0 END
+	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team)
+	      AND NOT EXISTS (SELECT 1 FROM credit_checkouts recovery WHERE recovery.team = credit_checkouts.team
+	        AND recovery.kind = 'checkout' AND recovery.paid_at > credit_checkouts.opened_at) THEN 1 ELSE 0 END
 	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}

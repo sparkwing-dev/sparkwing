@@ -218,6 +218,48 @@ func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 	return fundedBoundTx(ctx, tx, team, unit, generation, now)
 }
 
+// Hold mutations use whole-transaction retries because cancellation reaches run locks after the ledger lock.
+func stopHeldAwardsTx(ctx context.Context, tx *storeTx, team Team) error {
+	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+		return err
+	}
+	cause, err := teamHoldTx(ctx, tx, team)
+	if err != nil || cause == "" {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT reservation_id FROM billing_awards WHERE team=? AND metered=1 AND settled_at IS NULL AND stop_reason='' ORDER BY run_id,reservation_id`, team)
+	if err != nil {
+		return err
+	}
+	var reservations []string
+	for rows.Next() {
+		var reservation string
+		if err := rows.Scan(&reservation); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		reservations = append(reservations, reservation)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	reason := (&InsufficientCreditsError{Hold: cause}).Error()
+	drain := tx.now().Add(SliceSeconds * time.Second)
+	for _, reservation := range reservations {
+		a, err := readBillingAwardTx(ctx, tx, team, reservation)
+		if err != nil {
+			return err
+		}
+		// Cancellation refunds unstarted siblings, which can no longer start or renew.
+		if a.settled.Valid || a.stop != "" {
+			continue
+		}
+		if err := stopAwardTx(ctx, tx, team, a, reason, drain); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, reason string, drain time.Time) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE billing_awards SET stop_reason=?,drain_deadline_at=? WHERE team=? AND reservation_id=? AND stop_reason=''`, reason, drain.UnixNano(), team, a.provenance.ReservationID); err != nil {
 		return err
@@ -333,19 +375,20 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 	if actor.CapabilityPrefix == "" {
 		return nil, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,lease_expires_at FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder)
+	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,lease_expires_at,capability_prefix FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder)
 	if err != nil {
 		return nil, err
 	}
 	type held struct {
 		node       string
 		generation int64
+		prefix     string
 	}
 	var awards []held
 	for rows.Next() {
 		var award held
 		var expiry int64
-		if err := rows.Scan(&award.node, &award.generation, &expiry); err != nil {
+		if err := rows.Scan(&award.node, &award.generation, &expiry, &award.prefix); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
 		if expiry <= now.UnixNano() {
@@ -359,6 +402,10 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 	var bounds []time.Time
 	for _, award := range awards {
 		bound, err := renewUnitBillingTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: actor.Owner.RunID, NodeID: award.node}, award.generation, beat)
+		if err != nil {
+			return nil, err
+		}
+		bound, err = leaseBoundTx(ctx, tx, award.prefix, now, bound)
 		if err != nil {
 			return nil, err
 		}

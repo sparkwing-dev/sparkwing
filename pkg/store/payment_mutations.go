@@ -104,6 +104,9 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 		disputeID, string(team), paymentID, stored, cause, actor, now.UnixNano()); err != nil {
 		return false, err
 	}
+	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
+		return false, err
+	}
 	attrs := map[string]any{"payment_id": paymentID}
 	// safety: provider dispute reasons are untrusted free text and never enter audit events.
 	if actor != "" {

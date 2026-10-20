@@ -8,14 +8,14 @@ import (
 )
 
 // safety: every lease the store writes, and so every keeper deadline, is the earliest of the default lease, the
-// capability's expiry and binding deadline, and each metered award's funded bound. A lapse settles through the lease,
+// capability's expiry, revocation and binding deadline, and each metered award's funded bound. A lapse settles through the lease,
 // so no unit can run on time nobody paid for beyond the one-slice drain a refusal grants.
 func leaseBoundTx(ctx context.Context, tx *storeTx, prefix string, now time.Time, funded ...time.Time) (time.Time, error) {
 	c, err := loadCapabilityTx(ctx, tx, prefix)
 	if err != nil {
 		return time.Time{}, err
 	}
-	return leaseBound(now, append(funded, deref(c.ExpiresAt), deref(c.Binding.Deadline))...)
+	return leaseBound(now, append(funded, deref(c.ExpiresAt), deref(c.Binding.Deadline), deref(c.RevokedAt))...)
 }
 
 // safety: an absent bound leaves the default lease, and expired authority cannot be renewed.

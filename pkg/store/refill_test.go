@@ -457,6 +457,43 @@ func TestAFailedRefillWaitsForANewCardOrAddFunds(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE failure='insufficient_funds' AND refill_blocked=0", 1)
 }
 
+func TestALateRefillFailureDoesNotUndoNewerAddFunds(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	r := openRefill(t, s, "a", 1_000, "pi_delayed_failure")
+	now = now.Add(time.Minute)
+	s.clock = func() time.Time { return now }
+	addFunds(t, s, 100, "pi_manual_recovery")
+	failed := refillPaid(now.Add(-time.Minute), r.PaymentIntent, 1_000)
+	failed.Kind, failed.Status, failed.DeclineCode, failed.Fingerprint = capability.PaymentCardFailed, "requires_payment_method", "insufficient_funds", ""
+	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Refill.Failure != "" {
+		t.Fatalf("delayed failure undid Add funds recovery: %+v, %v", st.Refill, err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 1 {
+		t.Fatalf("refills did not resume after Add funds: %+v", due)
+	}
+}
+
+func TestAddFundsDoesNotRecoverANewerRefillFailure(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	addFunds(t, s, 100, "pi_manual_before_refill")
+	now = now.Add(time.Minute)
+	s.clock = func() time.Time { return now }
+	r := openRefill(t, s, "a", 1_000, "pi_new_failure")
+	failed := refillPaid(now, r.PaymentIntent, 1_000)
+	failed.Kind, failed.Status, failed.DeclineCode, failed.Fingerprint = capability.PaymentCardFailed, "requires_payment_method", "insufficient_funds", ""
+	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.Refill.Failure != "insufficient_funds" {
+		t.Fatalf("earlier Add funds hid a newer failure: %+v, %v", st.Refill, err)
+	}
+}
+
 func TestARefundedRefillStillCountsAgainstEveryWindow(t *testing.T) {
 	s, tenant, now := refillFixture(t, false)
 	r := openRefill(t, s, "a", 1_000, "payment")

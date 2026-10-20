@@ -495,13 +495,19 @@ and record graphs still protect a shared digest.
 Every metered renewal charges usage and reserves the next slice under the team's
 ledger lock. A refusal writes `billing_awards.stop_reason` and
 `drain_deadline_at` (one slice out) and cancels the run in the same
-transaction; the stop is never cleared. `leaseBoundTx` in `lease_bound.go` is
+transaction. Placing a dispute, warning or operator hold, or revoking standing,
+also writes the stop and cancellation for active metered awards before the hold
+commits. Releasing a hold never clears that stop. These billing mutations use
+the same whole-transaction retry as other admin/work lock-order exceptions.
+`leaseBoundTx` in `lease_bound.go` is
 the only lease bound: every node, owner, eval and launcher-preparation lease is
-the earliest of the default lease, the capability expiry and binding deadline,
+the earliest of the default lease, the capability expiry, revocation and binding deadline,
 each metered award's funded horizon and its durable drain deadline. A stopped,
 unstarted award retains its drain after refunding the reservation. A refunded
 award without a stop cannot renew. Launcher preparation returns the committed
 expiry to its keeper, including capability bounds shorter than a slice.
+An owner renewing self-claimed jobs uses those jobs' authority bounds as well
+as their funded horizons, so its keeper cannot outlive any child it renews.
 
 The schema enforces one billing award per capability and per unit generation.
 Refill settlement scopes its checkout and grant to the same team. Every new job attempt clears its job summary and annotations.

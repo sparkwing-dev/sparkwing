@@ -17,7 +17,7 @@ job may run. Payment history alone caps its automatic refills; see
 | Established | 32 | 4 hours | First payment | $20 |
 | Trusted | 128 | 6 hours | At least $50 paid and 30 clean days | $100 |
 | High | 512 | 6 hours | At least $500 paid and 30 clean days, or operator grant of standing. More capacity is available by request. | None; prepaid funds never back High |
-| Held | 0 new admissions | Running Cloud work stops at its next lease renewal | Dispute, early fraud warning, operator hold or revoked standing | An active hold takes precedence over prepaid funds |
+| Held | 0 new admissions | Running Cloud work receives a durable cancellation | Dispute, early fraud warning, operator hold or revoked standing | An active hold takes precedence over prepaid funds |
 | Launch admission | Automatic admission stops at 100 admitted accounts. Further signups join the waitlist until an operator admits them. | | | |
 
 Standing is the higher of the history tier and the tier backed by the current
@@ -102,7 +102,7 @@ commits.
 Refills are capped by the team's paid history alone, so a stolen card cannot buy
 much compute before its owner disputes the charge. The prepaid balance never
 raises these caps, and a history tier counts for refills only once the team's
-first payment is 7 days old with no hold since; until then a team has the New
+first payment is at least 7 days old and its history has 7 clean days; until then a team has the New
 caps, whatever its balance or capacity tier. An operator grant of standing
 gives the High caps. Teams that outgrow these caps use the contact request for
 higher limits.
@@ -140,7 +140,8 @@ the card. A refill paid with a card pinned to another team is refused, refunded
 in full, and the card is taken off the team, which turns refills off. Either
 way no further refill starts until an owner saves a card or an Add funds payment
 succeeds; changing the refill settings does not restart them. The balance runs
-down as usual.
+down as usual. A delayed failure from a refill opened before a successful Add
+funds payment does not block refills again. A failure from a newer refill does.
 
 ## Metering
 
@@ -150,9 +151,10 @@ with "out of credits", naming the balance and what the slice needs. Each lease
 renewal charges the time used and reserves the next slice in the same
 transaction, and a metered lease never runs past the time already paid for, so
 a job whose runner loses the controller stops, and is settled, within what it
-paid. When the balance or a hold cannot pay the next slice, the renewal records
-the stop and cancels the run in the same transaction, with a reason that names
-the shortfall or hold and what resolves it. The owner and keeper stop execution
+paid. When the balance cannot pay the next slice, the renewal records
+the stop and cancels the run in the same transaction. Placing a hold does the
+same for active metered work. The reason names the shortfall or hold and what
+resolves it. The owner and keeper stop execution
 when they receive that cancellation. The lease ends at the earlier of its paid
 horizon and a drain deadline at most one slice away. Renewals cannot move the
 deadline, even if the runner ignores cancellation. There is no grace period,
@@ -166,8 +168,12 @@ is forgiven and is not collected after a top-up.
 
 ## Holds
 
-A hold stops new Cloud admissions and stops running Cloud work at its next
-lease renewal, whatever the balance. Work on the team's own runners continues.
+A hold stops new Cloud admissions and records cancellation and a drain deadline
+for active metered work in the same transaction. Running Cloud work stops when
+the owner or keeper receives the cancellation, or when its funded lease expires
+if the controller connection is lost. Releasing the hold before the next
+heartbeat still leaves that cancellation in place. Start a new run after the
+hold is resolved. Work on the team's own runners continues.
 A hold has one of four causes:
 
 - an operator hold, placed from the operator console;

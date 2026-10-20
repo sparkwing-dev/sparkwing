@@ -142,6 +142,9 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 		freezeID, string(team), paymentIntent, "early fraud warning "+warning, HoldCauseWarning, now.UnixNano()); err != nil {
 		return err
 	}
+	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
+		return err
+	}
 	return RecordBusinessEvent(tx, BusinessEvent{
 		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: freezeID,
 		Attrs: map[string]any{"payment_id": paymentIntent, "cause": HoldCauseWarning, "warning_id": warning},
