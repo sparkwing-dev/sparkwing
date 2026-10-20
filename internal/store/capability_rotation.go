@@ -37,7 +37,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if err != nil {
 			return err
 		}
-		c, previous, err := capabilityMetadataTx(ctx, tx, prefix)
+		c, previous, err := managedCapabilityMetadataTx(ctx, tx, prefix)
 		if err != nil {
 			return err
 		}

@@ -76,7 +76,7 @@ func (s *Store) listCapabilities(ctx context.Context, team Team, a capability.Au
 	}
 	out := []capability.Metadata{}
 	for _, prefix := range prefixes {
-		_, row, err := capabilityMetadataTx(ctx, tx, prefix)
+		_, row, err := managedCapabilityMetadataTx(ctx, tx, prefix)
 		if err != nil {
 			return nil, err
 		}
@@ -101,7 +101,7 @@ func (s *Store) readCapability(ctx context.Context, team Team, a capability.Auth
 	if err != nil {
 		return capability.Metadata{}, err
 	}
-	_, row, err := capabilityMetadataTx(ctx, tx, a.Target.TokenPrefix)
+	_, row, err := managedCapabilityMetadataTx(ctx, tx, a.Target.TokenPrefix)
 	if err != nil {
 		return capability.Metadata{}, err
 	}
@@ -157,13 +157,21 @@ func managementAuthorityTx(ctx context.Context, tx *storeTx, team Team, a capabi
 	return fresh.Principal, nil
 }
 
-func capabilityMetadataTx(ctx context.Context, tx *storeTx, prefix string) (capability.Capability, capability.Metadata, error) {
-	c, err := loadCapabilityTx(ctx, tx, prefix)
+func managedCapabilityMetadataTx(ctx context.Context, tx *storeTx, prefix string) (capability.Capability, capability.Metadata, error) {
+	c, row, err := capabilityMetadataTx(ctx, tx, prefix)
 	if err != nil {
 		return capability.Capability{}, capability.Metadata{}, err
 	}
 	if c.Audience != capability.Controller || c.Binding != (capability.Binding{Kind: capability.BindingNone}) || c.Unit != "" || c.Purpose != "" || c.Team == "" && (c.Parent != nil || c.Subject.Kind != capability.SubjectService && c.Subject.Kind != capability.SubjectOperator) || c.Team != "" && c.Subject.Kind != capability.SubjectAccount && c.Subject.Kind != capability.SubjectMachine {
 		return capability.Capability{}, capability.Metadata{}, bindingRefusal()
+	}
+	return c, row, nil
+}
+
+func capabilityMetadataTx(ctx context.Context, tx *storeTx, prefix string) (capability.Capability, capability.Metadata, error) {
+	c, err := loadCapabilityTx(ctx, tx, prefix)
+	if err != nil {
+		return capability.Capability{}, capability.Metadata{}, err
 	}
 	row := capability.Metadata{Prefix: c.Prefix, Team: c.Team, Subject: c.Subject, Audience: c.Audience, Grants: slices.Clone(c.Grants), IssuedAt: c.IssuedAt, ExpiresAt: c.ExpiresAt, RevokedAt: c.RevokedAt, Metered: c.RootMetered}
 	var last sql.NullInt64

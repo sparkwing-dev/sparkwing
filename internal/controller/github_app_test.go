@@ -349,10 +349,15 @@ func TestGitHubAppExistingPickerRefusesForeignIdentityAndReclaimsBoundInstallati
 		t.Fatalf("listed installation shows binding state: %s", available.page)
 	}
 	code, body := f.pick(olga, start, available.authorization, 7)
-	if code != http.StatusOK {
+	if code != http.StatusCreated {
 		t.Fatalf("verified administrator reclaim = %d: %s", code, body)
 	}
-
+	if ids := f.installations(bob); len(ids) != 0 {
+		t.Fatalf("former team's installations = %v, want none", ids)
+	}
+	if ids := f.installations(olga); !slices.Equal(ids, []int64{7}) {
+		t.Fatalf("reclaiming team's installations = %v, want [7]", ids)
+	}
 }
 
 func TestGitHubAppExistingPickerHidesVisibleInstallationWithoutAdminMembership(t *testing.T) {
@@ -489,11 +494,14 @@ func TestGitHubAppInstallationBelongsToOneTeam(t *testing.T) {
 	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
 	f.connect(olga, 501, 7, acmeAdmin)
 	s := f.start(bob)
-	if code := f.finish(bob, s, s.Verifier, 502, 7, acmeAdmin); code != http.StatusConflict {
-		t.Fatalf("second team's connect of a bound installation = %d, want 409", code)
+	if code := f.finish(bob, s, s.Verifier, 502, 7, acmeAdmin); code != http.StatusCreated {
+		t.Fatalf("verified administrator reclaim = %d, want 201", code)
 	}
-	if ids := f.installations(bob); len(ids) != 0 {
-		t.Fatalf("bob's team holds %v", ids)
+	if ids := f.installations(olga); len(ids) != 0 {
+		t.Fatalf("former team's installations = %v, want none", ids)
+	}
+	if ids := f.installations(bob); !slices.Equal(ids, []int64{7}) {
+		t.Fatalf("reclaiming team's installations = %v, want [7]", ids)
 	}
 	if code := f.call("DELETE", "/api/v1/operator/github-app/installations/7", f.consoleAuth(), nil, nil); code != http.StatusNoContent {
 		t.Fatalf("operator unbind = %d", code)

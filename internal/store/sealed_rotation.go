@@ -200,7 +200,7 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 		return err
 	}
 	for _, row := range credentials {
-		value, err := r.reseal(secrets.PurposeGitCredential, t.team, "git-credential:"+row.Host, "git-credential", false, true, row.Secret)
+		value, err := r.reseal(secrets.PurposeGitCredential, t.team, "git-credential:"+row.Host, row.CredentialScope(), false, true, row.Secret)
 		if errors.Is(err, errSealedUnreadable) {
 			continue
 		}

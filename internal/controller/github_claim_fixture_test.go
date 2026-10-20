@@ -61,6 +61,7 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `UPDATE runs SET repo_key=?,repo_display=?,request_json=?,dispatch=? WHERE team=? AND id=?`, key, remote, body, dispatch, team, run); err != nil {
 		t.Fatal(err)
 	}
+	controller.EngineAcceptedFixturePlan(t, &controller.EngineController{Store: st}, store.Team(team), run, "compile")
 	kind := capability.UnitTrigger
 	if dispatch == runspec.DispatchController {
 		kind = capability.UnitPlan

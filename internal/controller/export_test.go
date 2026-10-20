@@ -7,13 +7,14 @@ import (
 )
 
 var (
-	EngineClaimHTTPFixture = engineClaimHTTPFixture
-	EngineClaimHTTP        = engineClaimHTTP
-	ChildIntakeFixture     = childIntakeFixture
-	EngineSQL              = engineSQL
-	EngineHTTPRoot         = engineHTTPRoot
-	AssertedProvenance     = assertedProvenance
-	SealWith               = sealWith
+	EngineAcceptedFixturePlan = engineAcceptedFixturePlan
+	EngineClaimHTTPFixture    = engineClaimHTTPFixture
+	EngineClaimHTTP           = engineClaimHTTP
+	ChildIntakeFixture        = childIntakeFixture
+	EngineSQL                 = engineSQL
+	EngineHTTPRoot            = engineHTTPRoot
+	AssertedProvenance        = assertedProvenance
+	SealWith                  = sealWith
 )
 
 // SetHostKeyScan replaces the ssh host key read a new git credential makes,

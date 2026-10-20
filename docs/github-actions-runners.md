@@ -116,6 +116,8 @@ jobs:
           grep ' sparkwing-runner-linux-amd64$' SHA256SUMS | sha256sum -c -
           install -m 0755 sparkwing-runner-linux-amd64 "$RUNNER_TEMP/sparkwing-runner"
       - name: Run this repository's Sparkwing work
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           "$RUNNER_TEMP/sparkwing-runner" warm --github-actions \
             --team acme \
