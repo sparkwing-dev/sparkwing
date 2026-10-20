@@ -215,7 +215,7 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 	}
 	if s.controllerEpoch != 0 {
 		var epoch int64
-		err := tx.QueryRowContext(ctx, `SELECT convert_from(value,'UTF8')::bigint FROM settings WHERE key='controller_epoch' FOR SHARE`).Scan(&epoch)
+		err := tx.QueryRowContext(ctx, controllerEpochLockSQL).Scan(&epoch)
 		if err != nil || epoch != s.controllerEpoch {
 			fenced := err == nil || errors.Is(err, sql.ErrNoRows)
 			err = errors.Join(err, tx.Rollback())
