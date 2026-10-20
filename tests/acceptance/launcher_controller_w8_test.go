@@ -155,7 +155,8 @@ func TestLauncherControllerW8Components(t *testing.T) {
 				}
 				b := binding
 				response.Awards = append(response.Awards, controllerwire.ClaimedUnit{
-					Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
+					LeaseExpiresAt: award.LeaseExpiresAt,
+					Unit:           capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
 					UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID,
 					Binding:       capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt},
 					Request:       runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}},

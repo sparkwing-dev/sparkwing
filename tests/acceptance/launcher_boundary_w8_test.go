@@ -61,7 +61,7 @@ func (c *cloudControlW8) Claim(context.Context) (*launcher.CloudJobAward, error)
 func (c *cloudControlW8) Sync(_ context.Context, bindings []launcher.CloudJobObservation) ([]launcher.CloudJobState, error) {
 	states := make([]launcher.CloudJobState, len(bindings))
 	for i, binding := range bindings {
-		states[i] = launcher.CloudJobState{Binding: binding.Binding, Delete: c.remove}
+		states[i] = launcher.CloudJobState{Binding: binding.Binding, LeaseExpiresAt: c.award.LeaseExpiresAt, Delete: c.remove}
 	}
 	return states, nil
 }
@@ -157,7 +157,8 @@ func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.C
 	t.Helper()
 	b := award.Binding
 	unit := controllerwire.ClaimedUnit{
-		Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
+		LeaseExpiresAt: award.LeaseExpiresAt,
+		Unit:           capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
 		UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID,
 		Binding:       capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt},
 		Request:       runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}},
