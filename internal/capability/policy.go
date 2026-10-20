@@ -523,16 +523,6 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 	return false
 }
 
-// LookupRoute accepts the router's registered pattern, never a prefix match on untrusted paths.
-func LookupRoute(method, pattern string) (RoutePolicy, bool) {
-	for _, route := range routes {
-		if route.Method == method && route.Path == pattern {
-			return route, true
-		}
-	}
-	return RoutePolicy{}, false
-}
-
 // ValidateRoutes rejects missing, extra or duplicate registrations and malformed policy rows.
 // Registration keys are METHOD followed by one space and the router pattern.
 func ValidateRoutes(registered []string) error {
