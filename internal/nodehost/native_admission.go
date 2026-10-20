@@ -35,7 +35,7 @@ func ComposeNativeAdmission(capacity CapacityStore, compute *LocalAdmission, req
 }
 
 func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity *storeAdmission, required bool) {
-	owner.retainRemote = local != nil
+	owner.retainRemote = capacity != nil || local != nil
 	owner.bindAdmission = func(bound *OwnerHost, actor store.Actor) {
 		if capacity == nil {
 			return
