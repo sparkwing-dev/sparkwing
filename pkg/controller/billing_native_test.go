@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
@@ -86,6 +87,56 @@ func TestBillingModelProductionPages(t *testing.T) {
 	call("POST", "checkout", `{"amount_cents":100001}`, 400)
 	if calls != 1 {
 		t.Fatalf("provider calls=%d", calls)
+	}
+}
+
+func TestLargerPaymentRequestReachesOperatorQueueAtHighStanding(t *testing.T) {
+	s, session, _ := billingNativeServer(t)
+	s.WithOperatorAccounts([]string{"owner"})
+	engineSQL(t, s.store, `UPDATE teams SET billing_trust='granted' WHERE name='a'`)
+	s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("oversized payment reached Checkout: %s", r.URL)
+		return nil, nil
+	})
+	h := s.Handler()
+	call := func(method, path, body string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, "https://controller.test/api/v1/"+path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", "https://controller.test")
+		r.Header.Set("Idempotency-Key", path)
+		if err := ConsoleFixtureRequest(s, r, session); err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s: %d %s", method, path, w.Code, w.Body)
+		}
+		return w
+	}
+	for _, request := range []struct{ method, path, body string }{
+		{"POST", "checkout", `{"amount_cents":100001}`},
+		{"PUT", "refill", `{"enabled":true,"amount_cents":100001}`},
+	} {
+		refusal := call(request.method, "team/billing/"+request.path, request.body, http.StatusBadRequest)
+		if !strings.Contains(refusal.Body.String(), "larger payments") || !strings.Contains(refusal.Body.String(), "request-tier") {
+			t.Fatalf("%s refusal omitted the request flow: %s", request.path, refusal.Body)
+		}
+	}
+	const message = "We need larger payments of $2,000 for release builds."
+	request := call("POST", "team/billing/standing-request", `{"tier":"high","message":"`+message+`"}`, http.StatusCreated)
+	var made controllerwire.StandingRequest
+	if err := json.Unmarshal(request.Body.Bytes(), &made); err != nil {
+		t.Fatal(err)
+	}
+	listed := call("GET", "operator/standing-requests", "", http.StatusOK)
+	var queue controllerwire.OperatorStandingQueue
+	if err := json.Unmarshal(listed.Body.Bytes(), &queue); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.Requests) != 1 || queue.Requests[0].Request.ID != made.ID || queue.Requests[0].Request.Message != message || queue.Requests[0].Standing != "High" {
+		t.Fatalf("larger-payment queue = %+v", queue)
 	}
 }
 

@@ -100,6 +100,8 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 
 func billingMutationError(err error) error {
 	switch {
+	case errors.Is(err, store.ErrInvalidInput):
+		return invalidEngineBody(err.Error())
 	case errors.Is(err, store.ErrNoCard):
 		return &apierr.Error{Code: apierr.Conflict, Message: err.Error(), Details: map[string]any{"reason": NoCardCode}}
 	case moneyInFlight(err):
