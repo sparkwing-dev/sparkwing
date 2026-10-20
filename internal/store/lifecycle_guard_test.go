@@ -36,7 +36,7 @@ func TestLifecycleGuard_StatusLiteralsStayCanonical(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		if strings.HasPrefix(path, filepath.Join(root, "pkg", "store")+string(filepath.Separator)) {
+		if strings.HasPrefix(path, filepath.Join(root, "internal", "store")+string(filepath.Separator)) {
 			return nil
 		}
 		b, err := os.ReadFile(path)

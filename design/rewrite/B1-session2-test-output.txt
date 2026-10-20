@@ -1,0 +1,114 @@
+# B1 session 2 verification
+
+Worktree: /home/bombuntu/.xwing/envs/1087/sparkwing
+HEAD: f8ba35d93a93d4e2eab5a913f677590fe6cca5de
+Integration: 215ddd7d4ed4d7af52ebff9d3d4bf790dd269a42 (bw-3095-rewrite), already an ancestor of HEAD.
+Go environment: GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache TMPDIR=/tmp/sw-astra-B1
+All go commands used go -C with the absolute repository path.
+
+PASS: go build ./... (exit 0, no output)
+PASS: go vet ./... (exit 0, no output)
+PASS: go build -tags qatrust ./... (exit 0, no output)
+PASS: go vet -tags qatrust ./... (exit 0, no output)
+PASS: go test ./internal/store -run "^(TestConcurrencyGuard_|TestLifecycleGuard_)" -count=1
+ok  github.com/sparkwing-dev/sparkwing/internal/store 0.109s
+
+Before fix: go test ./internal/store -run "^(TestConcurrencyGuard_TablesTouchedOnlyByStore|TestLifecycleGuard_StatusLiteralsStayCanonical)$" -count=1 (exit 1)
+--- FAIL: TestConcurrencyGuard_TablesTouchedOnlyByStore (0.03s)
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/capacity_adoption.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/capacity_adoption.go contains "UPDATE concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/capacity_owner.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/concurrency.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/concurrency.go contains "INTO concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/concurrency.go contains "UPDATE concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/concurrency_authorized.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/concurrency_authorized.go contains "UPDATE concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/concurrency_continuity.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/concurrency_continuity.go contains "UPDATE concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/concurrency_maintenance.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/execution_activity.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/lock_order.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+    concurrency_guard_test.go:39: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/tenant_reads.go contains "FROM concurrency_": concurrency tables may only be touched by internal/store
+--- FAIL: TestLifecycleGuard_StatusLiteralsStayCanonical (0.03s)
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/authority_issue.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/authority_issue.go contains "UPDATE triggers": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/blob_result_records.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/capacity_owner.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/claim_attention.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/controller_reporting.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/debug_pause_resume.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/github_app.go contains "UPDATE triggers": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/launcher_preparation.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/launcher_preparation.go contains "UPDATE triggers": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/metric_writes.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/node_state.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/result_metadata.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/run_control.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/run_spec.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/run_spec.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/run_state.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/run_state.go contains "UPDATE triggers": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/run_state.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/sealed_rotation.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/state_renewal.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/state_renewal.go contains "UPDATE triggers": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/store.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/submitted_environment.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/teststore/publication.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/teststore/publication.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/teststore/run.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/teststore/run.go contains "UPDATE runs": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/unit_billing.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/unit_claim.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/unit_claim_rows.go contains "UPDATE triggers": lifecycle tables may only be written by internal/store
+    lifecycle_guard_test.go:49: /home/bombuntu/.xwing/envs/1087/sparkwing/internal/store/unit_matching.go contains "UPDATE nodes": lifecycle tables may only be written by internal/store
+FAIL
+FAIL	github.com/sparkwing-dev/sparkwing/internal/store	0.117s
+FAIL
+
+After fix: go test -tags qatrust ./internal/store -run "^(TestConcurrencyGuard_|TestLifecycleGuard_)" -count=1 (exit 0)
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	0.111s
+
+After fix: go test -tags rewrite_integration ./internal/store -run "^(TestConcurrencyGuard_|TestLifecycleGuard_)" -count=1 (exit 0)
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	0.114s
+
+npm run build in sdk/typescript (exit 0)
+
+> @sparkwing/sdk@0.0.0 build
+> tsc -p tsconfig.build.json
+
+
+./node_modules/.bin/tsc --noEmit --incremental false in web (exit 0)
+
+go run ./internal/guardcheck -base HEAD <repo> (exit 1, same three inherited findings as session 1)
+NEW  forbidigo-f3.allow: internal/store/secret_preflight.go	Pipeline (fix the code; a guard allow-list only shrinks)
+NEW  unexport.allow: internal/limits has 117 exported identifiers no other package uses, allow-list says 116; unexport them: AdmissionFrameBytes, ApprovalWait, Author, BinaryBytes, BucketMaxBytes, BucketMaxObjects, BucketMeasurePages, BucketReconcileInterval, BucketWarnBytes, BucketWarnObjects, CapabilityRetention, ClaimsPerRunnerMinute, Class, CleanupBodyBytes, CleanupDescriptionBytes, CloudClaimsPerRunnerMinute, CloudEgressDailyAlarmBytes, CloudEventRetention, CloudFreeClaimsPerRunnerMinute, CloudFreeEgressDailyAlarmBytes, CloudFreeHeartbeatsPerRunnerMinute, CloudFreeMaxDownloads, CloudFreeMaxLogStreams, CloudFreeRequestsPerTokenMinute, CloudFreeRunsPerPrincipalHour, CloudFreeShedQueueDepth, CloudHeartbeatsPerRunnerMinute, CloudMaxDownloads, CloudMaxLogStreams, CloudRequestRateAlarm, CloudRequestsPerTokenMinute, CloudRunsPerPrincipalHour, CloudShedQueueDepth, CompletionEffectRetention, EgressDailyAlarmBytes, FailureBytes, FreeDailyDownloadBytes, FreeStorageBytes, FreeTeamSlots, FundedDailyDownloadBytes, HeartbeatMaxSilence, HeartbeatsPerRunnerMinute, IdleClaimPoll, Internal, InvitationTTL, JobIDBytes, JobSlack, LabelBytes, Limit, LiveLogIdleTimeout, LiveLogJobBytes, LiveLogMaxJobs, LiveLogTotalBytes, LocalControllerDrain, LocalControllerHandshake, LocalControllerReattach, LocalControllerRecoveryGrace, LocalControllerTermGrace, LogSegmentInterval, MaxCleanupArgs, MaxCleanups, MaxDownloadsPerPrincipal, MaxFanOut, MaxGitHubRunnerBindings, MaxGitHubRunnerCredentials, MaxInvitationsPerDay, MaxJobs, MaxLabels, MaxLease, MaxLogStreamsPerPrincipal, MaxOpenInvitations, MaxPipelineRefs, MaxPollAdvice, MaxSecrets, MaxTeamCloudJobs, MaxTeamsPerUser, MaxTokensPerMember, MaxTokensPerTeam, OIDCDefaultTTL, OIDCMaxTTL, OIDCMinTTL, ObjectDeletePerDay, ObjectDeletePerMinute, ObjectGetPerDay, ObjectGetPerMinute, ObjectListPerDay, ObjectListPerMinute, ObjectPutPerDay, ObjectPutPerMinute, Operator, OutputRetention, PlacementHold, PlacementLiveness, ProcessTerminationGrace, RequestsPerMinuteAlarm, RequestsPerTokenMinute, RetainedScheduleFires, RootCapabilityTTL, RunOutputBytes, RunnerHeartbeat, RunnerIdleExit, RunnersPerToken, RunsPerPrincipalHour, SecretBytes, SecretJSONRequestBytes, ServiceReadyWait, SessionIdleTTL, SessionMaxTTL, SettleMargin, ShedQueueDepth, Table, TeamCloudJobs, TotalWallTime, TriggerDedupeWindow, UnpaidOutputBytes, UnpaidOutputOverageBytes, WatchedLogPushInterval
+GONE unexport.allow: internal/runspec has 4 unexport candidates (lower its count from 5 in .guards/unexport.allow)
+guardcheck: 3 problem(s); .guards/README.md explains each allow-list
+exit status 1
+
+Current B1 tree
+go test ./internal/wingd/localcontroller -run "^TestLocalControllerTwoJobProcessesUseIndependentAwards$" -count=1 (exit 1)
+2026/10/20 10:01:59 INFO http request_id=91a06ba4b44134061d50ce1b method=GET route=/api/v1/runs/{run}/local-host/nodes/{job} status=200 dur_ms=4
+2026/10/20 10:01:59 INFO audit ts=2026-10-20T16:01:59.123289726Z request_id=00026740d5a3b25519ee8fa3 method=POST route=/api/v1/claims/{claim}/heartbeat status=409 dur_ms=4 client_ip=pipe client_class=go-http-client principal_kind=local principal_id=local:1000 team=default
+--- FAIL: TestLocalControllerTwoJobProcessesUseIndependentAwards (0.26s)
+    node_pipeline_test.go:336: job first:  read=<nil>
+    node_pipeline_test.go:336: job second:  read=<nil>
+    node_pipeline_test.go:338: local pipeline: {Outcome: Reason:}: lease authority lost read=<nil>
+FAIL
+FAIL	github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller	0.333s
+FAIL
+
+Integration baseline at bw-3095-rewrite, extracted with git archive into /tmp/sw-astra-B1/baseline
+go test ./internal/wingd/localcontroller -run "^TestLocalControllerTwoJobProcessesUseIndependentAwards$" -count=1 (exit 1)
+2026/10/20 10:02:20 INFO http request_id=3686dc45fe09e6af05582e39 method=GET route=/api/v1/runs/{run}/local-host/nodes/{job} status=200 dur_ms=4
+2026/10/20 10:02:20 INFO audit ts=2026-10-20T16:02:20.600382303Z request_id=86f3ff590f5e1b2227d7d8f1 method=POST route=/api/v1/claims/{claim}/heartbeat status=409 dur_ms=4 client_ip=pipe client_class=go-http-client principal_kind=local principal_id=local:1000 team=default
+--- FAIL: TestLocalControllerTwoJobProcessesUseIndependentAwards (0.23s)
+    node_pipeline_test.go:336: job first:  read=<nil>
+    node_pipeline_test.go:336: job second:  read=<nil>
+    node_pipeline_test.go:338: local pipeline: {Outcome: Reason:}: lease authority lost read=<nil>
+FAIL
+FAIL	github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller	0.295s
+FAIL
+
+Full suites and PostgreSQL/socket checks remain with the lead. The unchanged web production build was not repeated after the prior session established its Google Fonts network dependency.

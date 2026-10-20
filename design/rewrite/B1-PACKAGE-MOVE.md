@@ -1,19 +1,22 @@
 # Barrier B1 package move
 
-Integration already matched HEAD at 215ddd7d4. The merge command could not write ORIG_HEAD in the sandbox. No commit was made. The harness owns committing.
+The harness committed session 1 as f8ba35d93. Integration (215ddd7d4, bw-3095-rewrite) is already an ancestor of HEAD. This session made no commit.
 
-Moved the store, store/teststore, controller, controller/client, controller/ciphertest and complete storage trees from pkg/ to internal/, including nested store helpers. No facade remains. NodeRef, CreateTokenRequest, CreateServiceTokenRequest, EnrollRunnerRequest, CreatedToken and RotatedToken moved to internal/controllerwire. RunSnapshot remains the private host read model because it contains store authority state.
+Moved store, store/teststore, controller, controller/client, controller/ciphertest and all storage packages under internal/, including nested helpers. No alias facade remains. NodeRef, CreateTokenRequest, CreateServiceTokenRequest, EnrollRunnerRequest, CreatedToken and RotatedToken moved to internal/controllerwire. RunSnapshot remains a private store read model because it contains authority state.
 
-Go rewrite tools updated imports, guards, paths, generators and docs. Positional NodeRef literals became keyed literals. VERSIONING.md and package docs describe internal implementation scope. The Breaking changelog entry links to migration guidance. Ten public snapshots were removed. Regeneration also captured two existing SDK declarations missing from its snapshot.
+Session 1 updated imports, depguard rules, allow-list paths, generators, documentation, package comments and VERSIONING.md, added the Breaking changelog entry, and removed ten public snapshots. Production Go is net +9 lines. No behavioral bug closure is claimed.
 
-Production Go: 249,723 to 249,732 lines, net +9. Of 9,955 production functions compared after normalizing moved types and literal keys, only the doc checker's required file-path update differs. No behavioral bug closure is claimed.
+Session 2 corrected two remaining split-component paths in the concurrency and lifecycle guards using gofmt -r. Both tests failed before the change and pass afterward, including qatrust and rewrite_integration builds. This session changes no production Go and adds no mechanism.
 
-Build and vet pass in default and qatrust modes. Focused tests, selected rewrite_integration tests, SDK compilation, web type checking, API drift checks and doc synchronization pass. The web production build needs network access to Google Fonts. Full suites, PostgreSQL and socket checks remain with the lead.
+Build and vet pass in default and qatrust modes. TypeScript SDK compilation and web type checking pass. See B1-session2-test-output.txt for commands and results.
 
-The move accepts 368 existing unexport candidates once across seven newly internal packages. No permanent growth exception was added. Guardcheck exactly reproduces three integration-baseline failures after path translation.
+The one-time acceptance of 368 existing unexport candidates across seven newly internal packages was committed in session 1. This is census growth from the move, with no standing exemption. No allow-list grew this session.
+
+Guardcheck still reports the three inherited findings. The local-controller independent-awards test fails identically on both B1 and the integration baseline: heartbeat 409, lease authority lost.
 
 ## Decisions needing the lead
 
-Resolve the inherited F3 secret_preflight finding and stale unexport counts for internal/limits (116 to 117) and internal/runspec (5 to 4). Run the remaining checks and commit the reviewed tree.
+- Handle inherited F3 secret_preflight and unexport counts for limits (116 to 117) and runspec (5 to 4), plus the pre-existing local-controller lease failure.
+- Rerun the full suites with the corrected guards, PostgreSQL/socket checks and the web production build with Google Fonts access. Review and commit.
 
 STATUS: COMPLETE
