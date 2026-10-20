@@ -20,7 +20,6 @@ internal/clisurface	11
 internal/cluster	3
 internal/configguard	2
 internal/crons	39
-internal/depcache	2
 internal/discovery	4
 internal/diskspace	1
 internal/egress	22

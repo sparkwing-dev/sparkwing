@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
 // Data supplies the host's run-bound storage clients in memory. Budget is the
@@ -26,13 +27,12 @@ type Data struct {
 }
 
 // New constructs the signed-data backend for a host's job binding.
-func New(data Data) depcache.Backend { return &dataBackend{data: data} }
+func New(data Data) *Backend { return &Backend{data: data} }
 
-type dataBackend struct{ data Data }
+// Backend stores and fetches dependency archives for one bound attempt.
+type Backend struct{ data Data }
 
-func (b *dataBackend) Label() string { return "data" }
-
-func (b *dataBackend) lookup(ctx context.Context, key string) (blob.DepcacheHit, error) {
+func (b *Backend) lookup(ctx context.Context, key string) (blob.DepcacheHit, error) {
 	if b.data.Records == nil || b.data.Bytes == nil {
 		return blob.DepcacheHit{}, fmt.Errorf("dependency cache requires records and bytes")
 	}
@@ -54,12 +54,12 @@ func (b *dataBackend) lookup(ctx context.Context, key string) (blob.DepcacheHit,
 	return hit, nil
 }
 
-func (b *dataBackend) Exists(ctx context.Context, key string) (bool, error) {
+func (b *Backend) exists(ctx context.Context, key string) (bool, error) {
 	hit, err := b.lookup(ctx, key)
 	return hit.Found, err
 }
 
-func (b *dataBackend) Fetch(ctx context.Context, key, dir string) (int64, error) {
+func (b *Backend) Fetch(ctx context.Context, key, dir string) (int64, error) {
 	hit, err := b.lookup(ctx, key)
 	if err != nil {
 		return 0, err
@@ -126,7 +126,7 @@ func RestoreArchiveIn(ctx context.Context, r blob.VerifiedReader, parent *os.Roo
 	return n, depcache.ExtractArchiveStagedRoot(ctx, f, parent, name)
 }
 
-func (b *dataBackend) Store(ctx context.Context, key, dir string) (size int64, err error) {
+func (b *Backend) Store(ctx context.Context, key, dir string) (size int64, err error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -146,7 +146,7 @@ func (b *dataBackend) Store(ctx context.Context, key, dir string) (size int64, e
 	}
 	defer func() { err = errors.Join(err, f.Close(), os.Remove(f.Name())) }()
 	sum := sha256.New()
-	if err = depcache.WriteArchive(io.MultiWriter(f, sum), dir); err != nil {
+	if err = tarsafe.WriteGzip(ctx, io.MultiWriter(f, sum), dir); err != nil {
 		return 0, err
 	}
 	size, err = f.Seek(0, io.SeekCurrent)

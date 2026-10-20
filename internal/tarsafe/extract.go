@@ -107,7 +107,7 @@ func ExtractIntoRoot(tr *tar.Reader, root *os.Root, policy Policy) error {
 			}
 			if written > maxExtractBytes {
 				f.Close()
-				return fmt.Errorf("archive exceeds the %s extraction limit; refusing to fill the disk", HumanBytes(maxExtractBytes))
+				return fmt.Errorf("archive exceeds the %s extraction limit; refusing to fill the disk", humanBytes(maxExtractBytes))
 			}
 			if err := f.Close(); err != nil {
 				return err
@@ -309,8 +309,7 @@ func ExtractIntoRootStaged(parent *os.Root, name, stagePrefix string, extract fu
 	return nil
 }
 
-// HumanBytes renders n in decimal units, such as "1.5 MB".
-func HumanBytes(n int64) string {
+func humanBytes(n int64) string {
 	const unit = 1000
 	if n < unit {
 		return fmt.Sprintf("%d B", n)

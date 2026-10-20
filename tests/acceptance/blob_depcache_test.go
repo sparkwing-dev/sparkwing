@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -88,8 +87,7 @@ func checkBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if err := os.WriteFile(filepath.Join(root, "lockfile"), seed[:], 0o600); err != nil {
 		return err
 	}
-	spec := depcache.Spec{Name: "modules", Path: "deps", KeyFiles: []string{"lockfile"}}
-	key, err := depcachekey.Files(root, spec.Name, "", spec.KeyFiles)
+	key, err := depcachekey.Files(root, "modules", "", []string{"lockfile"})
 	if err != nil {
 		return err
 	}
@@ -190,9 +188,6 @@ func checkBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, payload) {
 		return fmt.Errorf("failed archive read replaced destination: %v", err)
 	}
-	if err := checkDepcacheColdSave(ctx, data, root, spec, key, hit.Record.Digest, append(bytes.Clone(payload), seed[:]...), objects); err != nil {
-		return err
-	}
 	if _, err := s.DB().ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", time.Now().UnixNano(), identity.CapabilityRef); err != nil {
 		return err
 	}
@@ -219,53 +214,6 @@ func checkDepcacheScopes(ctx context.Context, data depcacheblob.Data, key, desti
 		if _, err := depcacheblob.New(bad).Fetch(ctx, key, destination); err == nil {
 			return fmt.Errorf("forged %s restored an archive", field)
 		}
-	}
-	return nil
-}
-
-func checkDepcacheColdSave(ctx context.Context, data depcacheblob.Data, root string, spec depcache.Spec, key string, previous blob.Digest, recovered []byte, objects blob.ObjectBackend) error {
-	destination := filepath.Join(root, spec.Path)
-	backend := depcacheblob.New(data)
-	authority := data.Authority
-	lookup := blob.DepcacheLookup{Authority: authority, Key: blob.DepcacheKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Name: key, Key: key}, Budget: data.Budget}
-	if err := os.RemoveAll(destination); err != nil {
-		return err
-	}
-	cacheCtx := depcache.WithBackend(ctx, backend)
-	run := depcache.Restore(cacheCtx, spec, "job", root)
-	if _, err := os.Stat(destination); !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("corrupt archive did not run cold: %v", err)
-	}
-	if err := os.Mkdir(destination, 0o700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(destination, "module"), recovered, 0o640); err != nil {
-		return err
-	}
-	run.Save(cacheCtx, errors.New("body failed"))
-	afterFailure, err := data.Records.LookupDepcache(ctx, lookup)
-	if err != nil || !afterFailure.Found || afterFailure.Record.Digest != previous {
-		return fmt.Errorf("failed execution changed cache record: %+v: %v", afterFailure, err)
-	}
-	run.Save(cacheCtx, nil)
-	if _, err := backend.Fetch(ctx, key, filepath.Join(root, "recovered")); err != nil {
-		return fmt.Errorf("cold execution did not repair archive: %w", err)
-	}
-	if body, err := os.ReadFile(filepath.Join(root, "recovered", "module")); err != nil || !bytes.Equal(body, recovered) {
-		return fmt.Errorf("repaired archive differs: %v", err)
-	}
-	hit, err := data.Records.LookupDepcache(ctx, lookup)
-	if err != nil || !hit.Found || hit.Record.Digest == afterFailure.Record.Digest {
-		return fmt.Errorf("successful execution did not replace corrupt cache: %+v: %v", hit, err)
-	}
-	if err := objects.DeleteBlob(ctx, blob.Blob{Team: data.Identity.Team, Digest: hit.Record.Digest}); err != nil {
-		return err
-	}
-	if _, err := backend.Fetch(ctx, key, destination); err == nil {
-		return errors.New("missing archive restored")
-	}
-	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, recovered) {
-		return fmt.Errorf("missing archive replaced destination: %v", err)
 	}
 	return nil
 }

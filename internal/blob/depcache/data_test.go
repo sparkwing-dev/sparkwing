@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
 type fixture struct {
@@ -88,7 +88,7 @@ func TestSignedDepcacheRejectsInvalidGzip(t *testing.T) {
 		t.Fatal(err)
 	}
 	var archive bytes.Buffer
-	if err := depcache.WriteArchive(&archive, source); err != nil {
+	if err := tarsafe.WriteGzip(t.Context(), &archive, source); err != nil {
 		t.Fatal(err)
 	}
 	raw := archive.Bytes()
@@ -115,7 +115,7 @@ func TestDepcacheProbePreservesCancellation(t *testing.T) {
 	f := &fixture{record: blob.Record{Digest: "present"}, onLookup: cancel}
 	a := blob.Authority{Repo: "gh:123", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{NodeID: "job"}}}
 	b := New(Data{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: f, HTTPClient: f}), Records: f, Authority: a, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}})
-	if found, err := b.Exists(ctx, "deps"); found || !errors.Is(err, context.Canceled) {
+	if found, err := b.exists(ctx, "deps"); found || !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled probe = %v, %v", found, err)
 	}
 }
@@ -130,7 +130,7 @@ func TestSignedDepcacheMissSaveHitAndCorruption(t *testing.T) {
 	i := blob.UploadIdentity{Kind: blob.UploadJob, Team: "team", RunID: "run", Principal: "principal", CapabilityRef: "cap", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Attempt: 1, Generation: 2}}}
 	a := blob.Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "feature"}}}
 	b := New(Data{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: f, HTTPClient: f}), Records: f, Authority: a, Identity: i, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}})
-	if hit, err := b.Exists(t.Context(), "deps"); err != nil || hit {
+	if hit, err := b.exists(t.Context(), "deps"); err != nil || hit {
 		t.Fatalf("initial lookup: %v %v", hit, err)
 	}
 	source := t.TempDir()
@@ -144,7 +144,7 @@ func TestSignedDepcacheMissSaveHitAndCorruption(t *testing.T) {
 	if f.record.Key.Kind != blob.KindDepcache || f.record.Key.Scope.Ref.Verified || f.record.Source != i {
 		t.Fatalf("incorrect record binding: %+v", f.record)
 	}
-	if hit, err := b.Exists(t.Context(), "deps"); err != nil || !hit {
+	if hit, err := b.exists(t.Context(), "deps"); err != nil || !hit {
 		t.Fatalf("saved lookup: %v %v", hit, err)
 	}
 	dest := filepath.Join(t.TempDir(), "restore")

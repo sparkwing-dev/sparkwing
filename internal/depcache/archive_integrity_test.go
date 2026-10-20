@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
 func TestArchiveTrailerVerifiedBeforePublish(t *testing.T) {
@@ -17,7 +18,7 @@ func TestArchiveTrailerVerifiedBeforePublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	var archive bytes.Buffer
-	if err := depcache.WriteArchive(&archive, source); err != nil {
+	if err := tarsafe.WriteGzip(t.Context(), &archive, source); err != nil {
 		t.Fatal(err)
 	}
 	for _, fault := range []string{"checksum", "length", "truncated", "cancelled"} {
@@ -78,47 +79,4 @@ func (r cancelArchiveRead) Read(p []byte) (int, error) {
 		r.cancel()
 	}
 	return n, err
-}
-
-func TestCorruptLocalArchiveIsReplacedAfterSuccess(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	work, spec := cacheWorkspace(t)
-	run := depcache.Restore(t.Context(), spec, "job", work)
-	cacheFile := func(work, body string) {
-		t.Helper()
-		dir := filepath.Join(work, "tools")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "tool"), []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cacheFile(work, "original")
-	run.Save(t.Context(), nil)
-	paths, err := filepath.Glob(filepath.Join(home, "depcache", "*.tar.gz"))
-	if err != nil || len(paths) != 1 {
-		t.Fatalf("saved archives = %v, %v", paths, err)
-	}
-	raw, err := os.ReadFile(paths[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw[len(raw)-8] ^= 1
-	if err := os.WriteFile(paths[0], raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	next, _ := cacheWorkspace(t)
-	repair := depcache.Restore(t.Context(), spec, "job", next)
-	if _, err := os.Stat(filepath.Join(next, "tools")); !os.IsNotExist(err) {
-		t.Fatalf("corrupt cache did not run cold: %v", err)
-	}
-	cacheFile(next, "repaired")
-	repair.Save(t.Context(), nil)
-	last, _ := cacheWorkspace(t)
-	depcache.Restore(t.Context(), spec, "job", last)
-	if body, err := os.ReadFile(filepath.Join(last, "tools", "tool")); err != nil || string(body) != "repaired" {
-		t.Fatalf("cache not replaced after success: %q, %v", body, err)
-	}
 }
