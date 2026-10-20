@@ -3,6 +3,8 @@ package store
 import (
 	"cmp"
 	"context"
+	"database/sql"
+	"errors"
 	"slices"
 	"strings"
 
@@ -128,4 +130,26 @@ func (t *storeTx) forNoKeyUpdate() string {
 		return " FOR NO KEY UPDATE"
 	}
 	return ""
+}
+
+// tryLockEntryTx takes a concurrency entry for update unless another
+// transaction holds it, and reports that it is busy instead of waiting.
+// SQLite serializes writers, so there it never reports busy.
+func tryLockEntryTx(ctx context.Context, tx *storeTx, team Team, key string) (busy bool, err error) {
+	if tx.dialect != DialectPostgres || tx.snapshotRead {
+		return false, nil
+	}
+	var one int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ? FOR UPDATE SKIP LOCKED`, string(team), key).Scan(&one)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`, string(team), key).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
