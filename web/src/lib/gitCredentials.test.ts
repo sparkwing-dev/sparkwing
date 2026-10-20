@@ -50,6 +50,8 @@ afterEach(() => {
 const cred = (
   over: Partial<import("./gitCredentials").GitCredential>,
 ): import("./gitCredentials").GitCredential => ({
+  repository: "",
+  host_wide: true,
   host: "gitlab.com",
   kind: "ssh",
   confirmed: false,
@@ -72,7 +74,7 @@ describe("hostProblem", () => {
   it("refuses a scheme, port, path or bare name", () => {
     for (const bad of [
       "",
-      "https://gitlab.com",
+      "https://gitlab.com?repository=",
       "gitlab.com:22",
       "gitlab.com/acme",
       "git@gitlab.com",
@@ -89,10 +91,18 @@ describe("hostProblem", () => {
 });
 
 describe("draftProblem", () => {
+ it("requires repository scope unless the admin opts into a host grant", () => {
+   const draft = {...lib.emptyDraft, host:"gitlab.com", kind:"https" as const, token:"t"};
+   assert.match(lib.draftProblem(draft) ?? "", /repository/);
+   assert.equal(lib.draftProblem({...draft, repository:"git:gitlab.com/team/repo"}), null);
+   assert.equal(lib.draftProblem({...draft, host_wide:true}), null);
+ });
   const ssh = { ...blankDraft(), host: "gitlab.com", privateKey: key };
   const https = {
     ...blankDraft(),
-    host: "bitbucket.org",
+    repository: "",
+  host_wide: true,
+  host: "bitbucket.org",
     kind: "https" as const,
     token: "tok",
   };
@@ -134,7 +144,9 @@ describe("draftProblem", () => {
 
 function blankDraft() {
   return {
-    host: "",
+    repository: "",
+  host_wide: true,
+  host: "",
     kind: "ssh" as const,
     privateKey: "",
     port: "",
@@ -148,38 +160,48 @@ describe("draftBody", () => {
     assert.deepEqual(
       lib.draftBody({
         ...blankDraft(),
-        host: " GitLab.com ",
+        repository: "",
+  host_wide: true,
+  host: " GitLab.com ",
         privateKey: key,
         token: "ignored",
       }),
-      { host: "gitlab.com", kind: "ssh", private_key: key },
+      { host: "gitlab.com", repository:"", host_wide:true, kind: "ssh", private_key: key },
     );
     assert.deepEqual(
       lib.draftBody({
         ...blankDraft(),
-        host: "git.acme.io",
+        repository: "",
+  host_wide: true,
+  host: "git.acme.io",
         privateKey: key,
         port: " 2222 ",
       }),
-      { host: "git.acme.io", kind: "ssh", private_key: key, port: 2222 },
+      { host: "git.acme.io", repository:"", host_wide:true, kind: "ssh", private_key: key, port: 2222 },
     );
   });
 
   it("sends https with the token and only a named username", () => {
     const base = {
       ...blankDraft(),
-      host: "bitbucket.org",
+      repository: "",
+  host_wide: true,
+  host: "bitbucket.org",
       kind: "https" as const,
       token: "tok",
       privateKey: "ignored",
     };
     assert.deepEqual(lib.draftBody(base), {
-      host: "bitbucket.org",
+      repository: "",
+  host_wide: true,
+  host: "bitbucket.org",
       kind: "https",
       token: "tok",
     });
     assert.deepEqual(lib.draftBody({ ...base, username: " x-token-auth " }), {
-      host: "bitbucket.org",
+      repository: "",
+  host_wide: true,
+  host: "bitbucket.org",
       kind: "https",
       token: "tok",
       username: "x-token-auth",
@@ -207,14 +229,18 @@ describe("rows", () => {
     assert.deepEqual(
       lib.updateDraft(
         cred({
-          host: "bitbucket.org",
+          repository: "",
+  host_wide: true,
+  host: "bitbucket.org",
           kind: "https",
           username: "x-token-auth",
         }),
       ),
       {
         ...blankDraft(),
-        host: "bitbucket.org",
+        repository: "",
+  host_wide: true,
+  host: "bitbucket.org",
         kind: "https",
         username: "x-token-auth",
       },
@@ -245,8 +271,8 @@ describe("rows", () => {
       rows.map((r) => r.host),
       ["a.io", "z.io"],
     );
-    assert.equal(lib.existingCredential(rows, " Z.io ")?.host, "z.io");
-    assert.equal(lib.existingCredential(rows, "b.io"), undefined);
+    assert.equal(lib.existingCredential(rows, " Z.io ", "")?.host, "z.io");
+    assert.equal(lib.existingCredential(rows, "b.io", ""), undefined);
   });
 
   it("recognises github.com only", () => {
@@ -277,14 +303,18 @@ describe("API helpers", () => {
         { status: 200 },
       );
     const got = await lib.putGitCredential({
-      host: "gitlab.com",
+      repository: "",
+  host_wide: true,
+  host: "gitlab.com",
       kind: "ssh",
       private_key: key,
     });
     assert.equal(got.public_key, "ssh-ed25519 AAAA");
     assert.equal(calls[0].method, "POST");
     assert.deepEqual(JSON.parse(calls[0].body), {
-      host: "gitlab.com",
+      repository: "",
+  host_wide: true,
+  host: "gitlab.com",
       kind: "ssh",
       private_key: key,
     });
@@ -293,13 +323,13 @@ describe("API helpers", () => {
   it("confirms with the displayed fingerprint and escapes the host", async () => {
     respond = () =>
       new Response(JSON.stringify(cred({ confirmed: true })), { status: 200 });
-    await lib.confirmGitCredential("gitlab.com", "SHA256:abc");
-    await lib.deleteGitCredential("gitlab.com");
+    await lib.confirmGitCredential("gitlab.com", "SHA256:abc", "");
+    await lib.deleteGitCredential("gitlab.com", "");
     assert.deepEqual(
       calls.map((c) => `${c.method} ${c.url}`),
       [
-        "POST /api/v1/team/git-credentials/gitlab.com/confirm",
-        "DELETE /api/v1/team/git-credentials/gitlab.com",
+        "POST /api/v1/team/git-credentials/gitlab.com/confirm?repository=",
+        "DELETE /api/v1/team/git-credentials/gitlab.com?repository=",
       ],
     );
     assert.deepEqual(JSON.parse(calls[0].body), { fingerprint: "SHA256:abc" });
@@ -307,7 +337,9 @@ describe("API helpers", () => {
 
   it("lists releases", async () => {
     const release = {
-      host: "gitlab.com",
+      repository: "",
+  host_wide: true,
+  host: "gitlab.com",
       run_id: "r1",
       runner: "cloud",
       token_prefix: "",
@@ -332,7 +364,7 @@ describe("API helpers", () => {
         { status: 503 },
       );
     await assert.rejects(
-      lib.putGitCredential({ host: "gitlab.com", kind: "https", token: "t" }),
+      lib.putGitCredential({ repository:"", host_wide:true, host: "gitlab.com", kind: "https", token: "t" }),
       /Save the credential for gitlab.com: bound secret encryption is unavailable$/,
     );
   });

@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type launcherControllerW8 struct {
@@ -65,7 +64,7 @@ func TestLauncherPollingW8Components(t *testing.T) {
 					want = time.Second
 				}
 				err = cluster.RunLaunchCLI(ctx, args, func(_ context.Context, cfg launcher.CloudJobConfig, _ func(context.Context) (string, error)) (*launcher.Launcher, error) {
-					return &launcher.Launcher{Config: cfg, Kube: admitW8(cloudKubeW8(), cfg), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil
+					return &launcher.Launcher{Config: cfg, Kube: cloudKubeW8(), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -137,11 +136,13 @@ func TestLauncherControllerW8Components(t *testing.T) {
 		},
 		sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 			want := []controllerwire.LauncherObservation{
-				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: award.Binding.UnitID, Holder: award.Binding.Holder, Generation: award.Binding.Generation}, Job: controllerwire.LauncherJobRef{Namespace: resources.Job.Namespace, Name: resources.Job.Name, UID: string(resources.Job.UID)}, NodeUID: resources.Reservation.NodeUID},
-				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: second.Binding.UnitID, Holder: second.Binding.Holder, Generation: second.Binding.Generation}, Job: controllerwire.LauncherJobRef{Namespace: other.Job.Namespace, Name: other.Job.Name, UID: string(other.Job.UID)}, NodeUID: other.Reservation.NodeUID},
+				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: award.Binding.UnitID, Holder: award.Binding.Holder, Generation: award.Binding.Generation}},
+				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: second.Binding.UnitID, Holder: second.Binding.Holder, Generation: second.Binding.Generation}},
 			}
-			slices.SortFunc(want, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.Job.Name, b.Job.Name) })
-			if !slices.Equal(request.Observed, want) {
+			slices.SortFunc(want, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.Award.ID, b.Award.ID) })
+			observed := slices.Clone(request.Observed)
+			slices.SortFunc(observed, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.Award.ID, b.Award.ID) })
+			if !slices.Equal(observed, want) {
 				t.Fatalf("restart lost persisted observation: %+v", request.Observed)
 			}
 			if transportErr != nil {
@@ -150,18 +151,12 @@ func TestLauncherControllerW8Components(t *testing.T) {
 			response := controllerwire.LauncherSyncResponse{}
 			for _, binding := range []launcher.CloudJobBinding{second.Binding, award.Binding} {
 				if remove && binding.UnitID == award.Binding.UnitID {
-					response.Remove = append(response.Remove, controllerwire.LauncherJobRef{Namespace: resources.Job.Namespace, Name: resources.Job.Name, UID: string(resources.Job.UID)})
+					response.Retired = append(response.Retired, binding.LeaseRef())
 					continue
 				}
-				b := binding
-				response.Awards = append(response.Awards, controllerwire.ClaimedUnit{
-					LeaseExpiresAt: award.LeaseExpiresAt,
-					Unit:           capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
-					UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID,
-					Binding:       capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt},
-					Request:       runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}},
-					OwnerDeadline: &b.OwnerDeadline, AttemptDeadline: &b.AttemptDeadline, ParentCapabilityExpiry: &b.ParentCapabilityExpiry,
-				})
+				current := award
+				current.Binding = binding
+				response.Awards = append(response.Awards, cloudWireAwardW8(current))
 			}
 			return response, nil
 		},

@@ -26,9 +26,7 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 		ExpiresAt: spec.ExpiresAt, ReservedPools: slices.Clone(spec.ReservedPools), Trust: spec.Trust,
 		Repositories: slices.Clone(spec.Repositories), Data: spec.Data, RootMetered: spec.Metered,
 	}
-	if tx.rotatingRoot != nil && !sameRotationScope(*tx.rotatingRoot, c) {
-		return capability.Capability{}, bindingRefusal()
-	}
+
 	if spec.Kind == capability.ProvisionBootstrap && tx.rotatingRoot == nil {
 		if err := checkBootstrapGateTx(ctx, tx); err != nil {
 			return capability.Capability{}, err
@@ -65,6 +63,16 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 		if err := checkActionsEnrollmentTx(ctx, tx, spec); err != nil {
 			return capability.Capability{}, err
 		}
+	}
+	if spec.Kind == capability.ProvisionMember || spec.Kind == capability.ProvisionTeamAdmin && tx.rotatingRoot != nil {
+		var err error
+		c, err = memberIssuancePolicy(ctx, tx, spec, c)
+		if err != nil {
+			return capability.Capability{}, err
+		}
+	}
+	if tx.rotatingRoot != nil && !sameRotationScope(*tx.rotatingRoot, c) {
+		return capability.Capability{}, bindingRefusal()
 	}
 	return c, nil
 }
@@ -153,10 +161,8 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 			return bindingRefusal()
 		}
 	case capability.ProvisionActions:
-		push := spec.Binding.Push
-		if spec.Team == "" || spec.Subject.Kind != capability.SubjectMachine || spec.Binding.Kind != capability.BindingPush || push == nil || push.RepositoryKey == "" || push.Ref == "" || push.SHA == "" || push.WorkflowRunID == "" || spec.ExpiresAt == nil || !slices.Equal(spec.Repositories, []string{push.RepositoryKey}) {
-			return bindingRefusal()
-		}
+		// Verified repository and workflow facts are checked by checkActionsEnrollmentTx.
+
 	default:
 		return authorityError(apierr.BadRequest, "unknown root origin")
 	}

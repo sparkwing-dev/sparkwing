@@ -51,7 +51,7 @@ func consoleBoundary() *credentialBoundary {
 		},
 	}
 	p.Authority = sessionReference(p)
-	b.snapshot.Authorities = []capability.AuthorityState{{Principal: p, MembershipValid: true}}
+	b.snapshot.Authorities = []capability.AuthorityState{{Principal: p}}
 	return b
 }
 
@@ -114,7 +114,7 @@ func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 					p.Capability.ExpiresAt = &b.snapshot.Now
 					want = apierr.Unauthenticated
 				case "membership lost":
-					b.snapshot.Authorities[0].MembershipValid = false
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 					want = apierr.Unauthenticated
 				case "wrong audience":
 					want = apierr.Unauthenticated

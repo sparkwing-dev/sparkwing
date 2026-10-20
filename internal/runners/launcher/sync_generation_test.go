@@ -48,7 +48,7 @@ func TestLauncherRetiresStaleGenerationAfterRestart(t *testing.T) {
 		response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}
 		for _, observation := range request.Observed {
 			if observation.Award.Generation == stale.Generation {
-				response.Remove = append(response.Remove, observation.Job)
+				response.Retired = append(response.Retired, observation.Award)
 			}
 		}
 		return response, nil
@@ -110,16 +110,16 @@ func FuzzControllerSyncSeparatesClaimGenerations(f *testing.F) {
 			if len(request.Observed) != 2 {
 				t.Fatal("sync did not retain both Jobs")
 			}
-			var remove controllerwire.LauncherJobRef
+			var remove capability.LeaseRef
 			for i, observation := range request.Observed {
 				if observation.Award.Generation != observations[i].Binding.Generation || observation.Award.Holder != observations[i].Binding.Holder || observation.Award.ID != unit.UnitID || observation.Award.Kind != unit.Unit {
 					t.Fatal("sync changed a persisted award")
 				}
 				if observation.Award.Generation == stale.Generation {
-					remove = observation.Job
+					remove = observation.Award
 				}
 			}
-			return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}, Remove: []controllerwire.LauncherJobRef{remove}}, nil
+			return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}, Retired: []capability.LeaseRef{remove}}, nil
 		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{unit.Unit}})
 		if err != nil {
 			t.Fatal(err)
@@ -155,7 +155,7 @@ func FuzzControllerSyncRequiresExactlyObservedDecisions(f *testing.F) {
 			if mode%2 == 0 {
 				response.Awards = append(response.Awards, unit)
 			} else {
-				response.Remove = []controllerwire.LauncherJobRef{{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID}}
+				response.Retired = []capability.LeaseRef{observation.Binding.LeaseRef()}
 			}
 			if mode%4 < 2 {
 				foreign := wireAward(unit.Unit)

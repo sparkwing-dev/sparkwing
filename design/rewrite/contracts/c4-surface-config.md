@@ -564,10 +564,8 @@ credential expiry or give eval units a job-attempt grace exception.
 
 ## Authentication and billing bounds
 
-C2 selects a five-second auth-cache bound; C4 owns `limits.AuthCacheTTL`.
-Every reuse also requires a fresh, identical store generation vector for the
-credential, all ancestors and team membership. The TTL cannot authorize reuse
-on its own. Binding liveness and credential expiry remain per-request checks.
+Authentication reads fresh authority, ancestry, membership and binding liveness
+on every request. There is no cache lifetime setting.
 
 `limits.WorkBillingMinimum` and `HostBillingMinimum` are the numerical owners
 for the separate job and host minimums. Both are sixty seconds. Plan and eval

@@ -366,10 +366,10 @@ func removeRunner(ctx context.Context, manager controllerwire.TokenManager, remo
 }
 
 func tokenPrefix(raw string) (string, error) {
-	if len(raw) < store.PrefixLen {
+	if len(raw) < store.CredentialPrefixLength {
 		return "", errors.New("token is too short to carry a prefix")
 	}
-	return raw[:store.PrefixLen], nil
+	return raw[:store.CredentialPrefixLength], nil
 }
 
 func requireRunnerToken(ctx context.Context, manager controllerwire.TokenManager, prefix, configPath string) error {

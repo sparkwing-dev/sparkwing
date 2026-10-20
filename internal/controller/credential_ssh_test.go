@@ -63,7 +63,7 @@ func TestCredentialSSHWritePinsHostAndKeepsKeyPrivate(t *testing.T) {
 				Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 			}).WithCredentialWriter(func(context.Context, store.Team) (controller.CredentialWriter, error) { return writer, nil })
 			port, scans := 22, 0
-			body := map[string]any{"host": "Git.Invalid", "kind": "ssh", "private_key": key}
+			body := map[string]any{"host_wide": true, "host": "Git.Invalid", "kind": "ssh", "private_key": key}
 			status, code := 200, apierr.Code("")
 			switch name {
 			case "explicit port":
@@ -108,7 +108,7 @@ func TestCredentialSSHWritePinsHostAndKeepsKeyPrivate(t *testing.T) {
 			if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Confirmed || result.PublicKey == "" || result.HostKey == "" || result.Fingerprint != ssh.FingerprintSHA256(hostKey) || writer.calls != 1 || scans != 1 || writer.actor.Principal.Authority != principal.Authority || writer.row.CreatedBy != "account" || writer.row.Team != "team" {
 				t.Fatalf("result=%+v row=%+v scans=%d", result, writer.row, scans)
 			}
-			plain, err := cipher.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, writer.row.Secret)
+			plain, err := cipher.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, writer.row.Secret)
 			if err != nil || plain != key {
 				t.Fatalf("stored key did not open: %v", err)
 			}

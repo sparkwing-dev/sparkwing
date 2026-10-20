@@ -39,7 +39,7 @@ func runTokenCommand(ctx context.Context, inv clisurface.Invocation) error {
 }
 
 func parseTokenMutation(inv clisurface.Invocation) (controllerwire.TokenCreate, controllerwire.TokenRotate, error) {
-	create := controllerwire.TokenCreate{Kind: inv.Value("type"), Principal: inv.Value("principal")}
+	create := controllerwire.TokenCreate{AllowTeamAdmin: inv.Bool("allow-team-admin"), Kind: inv.Value("type"), Principal: inv.Value("principal")}
 	for _, scope := range inv.Flags["scope"] {
 		create.Scopes = append(create.Scopes, capability.Grant(scope))
 	}

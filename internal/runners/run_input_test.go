@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	award "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -149,7 +150,7 @@ func FuzzAwardInputCapturesRetrySeals(f *testing.F) {
 			unit.Accepted.Spec.Request = unit.Request
 			state.snapshot.Run.Spec = &unit.Accepted.Spec
 		}
-		if err := validateHostedAward(unit); err != nil {
+		if err := award.ValidateAward(unit, capability.DeliveryDirect); err != nil {
 			t.Fatal(err)
 		}
 		input, err := nodehost.NewRunInput(unit)

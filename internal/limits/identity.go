@@ -21,8 +21,6 @@ const (
 	MaxGitHubRunnerCredentials int = 20
 	// SecretBytes bounds individual secret.
 	SecretBytes int64 = 128 << 10
-	// RootCapabilityTTL bounds default idle lifetime of runner and CLI root capabilities.
-	RootCapabilityTTL time.Duration = 90 * 24 * time.Hour
 	// InvitationTTL bounds invitation lifetime.
 	InvitationTTL time.Duration = 7 * 24 * time.Hour
 	// SessionIdleTTL bounds session idle lifetime.

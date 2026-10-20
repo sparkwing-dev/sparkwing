@@ -2231,13 +2231,9 @@ delivery and unit separately. `billing_unit` stores `host`, `plan`, `eval`, `job
 with checks for trigger-to-host and node-to-job. Both ledger tables preserve the
 operational kind and financial classification after run or capability pruning.
 
-`Store.AuthGenerations` returns one consistent vector covering the leaf, every
-capability/session ancestor and the awarded team's membership generation. Launcher
-roots remain in that vector across team boundaries. Missing ancestors refuse cache
-reuse. C2 additionally checks the five-second `limits.AuthCacheTTL`, expiry and
-route liveness. `RevokeAuthority` advances the affected capability/session generation
-in its revocation transaction. `UpdateMembership` advances the team generation in
-its membership transaction. The internal advancement helper cannot commit separately.
+Authentication reads the complete capability/session ancestry and current
+membership in one snapshot on every request. Revocation, role changes and
+membership epochs take effect at use time. Authentication facts are not cached.
 
 `Store.SettlePayment` accepts C2's opaque verified event and looks up the committed
 checkout by provider session ID and configured test/live mode. The checkout supplies
@@ -2320,7 +2316,6 @@ allowance and rate-table presence. Their unused Store getters are removed.
 | Export | Purpose |
 |---|---|
 | `CapabilityRecord`, `CapabilityRecord.Validate` | Preserve and validate complete versioned authority alongside indexed projections. |
-| `Store.AuthGenerations` | Read the complete ancestor and membership cache fence. |
 | `Tenant.RevokeAuthority`, `Operator.RevokeAuthority` | Revoke authorized tenant or deployment authority and advance its generation atomically. |
 | `MembershipUpdate`, `Tenant.UpdateMembership` | Change or remove membership with current account authority, invitation withdrawal, minter revocation, session movement and the corresponding generation increment. |
 | `PaymentSettlement`, `Store.SettlePayment` | Deduplicate verified checkout events and commit their derived-team financial result. |

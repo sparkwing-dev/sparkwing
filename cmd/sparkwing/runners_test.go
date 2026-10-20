@@ -371,8 +371,8 @@ func TestTokenPrefixMatchesTheStoresPrefixLength(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tokenPrefix: %v", err)
 	}
-	if len(prefix) != store.PrefixLen {
-		t.Errorf("prefix = %q, want %d characters", prefix, store.PrefixLen)
+	if prefix != "swk_0123456789ab" {
+		t.Errorf("prefix = %q, want the full persisted 16-character prefix", prefix)
 	}
 	if _, err := tokenPrefix("swk_"); err == nil {
 		t.Error("tokenPrefix accepted a token shorter than one prefix")
@@ -543,7 +543,7 @@ func TestRunnersAddRefusesASymlinkedConfig(t *testing.T) {
 func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 	f := newRunnersFixture(t)
 	raw := "swk_service1_secret"
-	f.tokens = append(f.tokens, controllerwire.TokenMetadata{Prefix: raw[:store.PrefixLen], Kind: "member", Principal: "runner:deploy-bot", Scopes: []capability.Grant{capability.RunsRead}})
+	f.tokens = append(f.tokens, controllerwire.TokenMetadata{Prefix: raw[:store.CredentialPrefixLength], Kind: "member", Principal: "runner:deploy-bot", Scopes: []capability.Grant{capability.RunsRead}})
 	if _, err := writeRunnerConfig(f.config, userconfig.RunnerConfig{Controller: preferencePointer("https://controller.example"), HolderPrefix: preferencePointer("desk"), MaxConcurrent: preferencePointer(1)}, raw, false); err != nil {
 		t.Fatal(err)
 	}

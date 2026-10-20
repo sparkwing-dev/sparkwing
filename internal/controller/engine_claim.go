@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -183,6 +184,9 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 			return controllerwire.ClaimedUnit{}, err
 		}
 		unit.ParentCapabilityExpiry = p.Capability.ExpiresAt
+	}
+	if err := runners.ValidateAward(*unit, principal.Capability.Delivery); err != nil {
+		return controllerwire.ClaimedUnit{}, err
 	}
 	return *unit, nil
 }

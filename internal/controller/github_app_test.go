@@ -330,7 +330,7 @@ func TestGitHubAppExistingPickerOnlyBindsListedInstallations(t *testing.T) {
 	}
 }
 
-func TestGitHubAppExistingPickerRefusesForeignIdentityAndBoundInstallation(t *testing.T) {
+func TestGitHubAppExistingPickerRefusesForeignIdentityAndReclaimsBoundInstallation(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	bob := f.ghUser(502, "bob")
@@ -348,13 +348,11 @@ func TestGitHubAppExistingPickerRefusesForeignIdentityAndBoundInstallation(t *te
 	if !strings.Contains(available.page, "acme (Organization)") || strings.Contains(available.page, "bob") {
 		t.Fatalf("listed installation shows binding state: %s", available.page)
 	}
-	code, refused := f.pick(olga, start, available.authorization, 7)
-	if code != http.StatusConflict {
-		t.Fatalf("bound selection = %d, want 409", code)
+	code, body := f.pick(olga, start, available.authorization, 7)
+	if code != http.StatusOK {
+		t.Fatalf("verified administrator reclaim = %d: %s", code, body)
 	}
-	if msg := strings.ToLower(refused); strings.Contains(msg, "bob") || strings.Contains(msg, "another team") {
-		t.Fatalf("conflict names another team: %s", refused)
-	}
+
 }
 
 func TestGitHubAppExistingPickerHidesVisibleInstallationWithoutAdminMembership(t *testing.T) {

@@ -6,10 +6,15 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func attemptExecutorTx(ctx context.Context, tx *storeTx, actor Actor, observed *NodeAttempt) (kind, name, location string, err error) {
 	chain, err := authorityChainTx(ctx, tx, actor.Authority, false)
+	if err != nil {
+		return "", "", "", err
+	}
+	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
 	if err != nil {
 		return "", "", "", err
 	}
@@ -24,20 +29,17 @@ func attemptExecutorTx(ctx context.Context, tx *storeTx, actor Actor, observed *
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return "", "", "", err
 			}
-			return "github-actions", name + " run " + push.WorkflowRunID, "cloud", nil
-		}
-		if c.Purpose == capability.PurposeHere {
-			kind = "local"
+			return TierActions, name + " run " + push.WorkflowRunID, TierCloud, nil
 		}
 	}
-	if root.Subject.Kind == capability.SubjectLocal {
+	if facts.ExecutorClass == "local" || facts.ExecutorClass == TierHere {
 		kind = "local"
 	}
 	if leaf.Billing != nil && leaf.Billing.Metered {
-		location = "cloud"
+		location = TierCloud
 	}
-	if leaf.Billing != nil && leaf.Billing.ExecutorClass == "cloud" {
-		kind, name, location = "kubernetes", leaf.Binding.Holder, "cloud"
+	if facts.Cloud {
+		kind, name, location = "kubernetes", leaf.Binding.Holder, TierCloud
 	}
 	if observed != nil && (kind == "local" || kind == "kubernetes") && observed.ExecutorName != "" {
 		if len(observed.ExecutorName) > maxExecutionExecutorNameLen {

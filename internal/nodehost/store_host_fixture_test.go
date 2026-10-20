@@ -179,7 +179,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	}
 	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}
 	if intake.Request.Burst != nil {
-		_, requester, err := teststore.ProvisionCredential(ctx, database, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-requester"}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+		_, requester, err := teststore.ProvisionCredential(ctx, database, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-requester"}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 		if err != nil {
 			t.Fatal(err)
 		}

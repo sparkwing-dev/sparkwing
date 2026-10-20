@@ -155,6 +155,9 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.validate(); err != nil {
 		return false, err
 	}
+	if err := l.verifyAdmission(ctx); err != nil {
+		return false, err
+	}
 	if err := l.placeWaiting(ctx); err != nil {
 		return false, err
 	}

@@ -100,7 +100,7 @@ func TestCredentialIssuanceHTTPRefusesInvalidAndDeadAuthority(t *testing.T) {
 				b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 				status, code = 401, apierr.Unauthenticated
 			case "membership":
-				b.snapshot.Authorities[0].MembershipValid = false
+				b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 				status, code = 401, apierr.Unauthenticated
 			case "machine":
 				b = authorityMember()

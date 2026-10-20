@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -76,6 +77,9 @@ func githubRepositoryKey(repositoryID int64) string {
 
 func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	push := spec.Binding.Push
+	if push == nil {
+		return bindingRefusal()
+	}
 	var repositoryID, ownerID int64
 	err := tx.QueryRowContext(ctx, `SELECT repository_id,repository_owner_id FROM github_runner_bindings WHERE team=? AND repo_key=?`+tx.forShare(), spec.Team, push.RepositoryKey).Scan(&repositoryID, &ownerID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -85,7 +89,7 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 		return err
 	}
 	registration := "github:" + strconv.FormatInt(repositoryID, 10) + ":" + strconv.FormatInt(ownerID, 10)
-	if repositoryID <= 0 || ownerID <= 0 || push.RepositoryKey != githubRepositoryKey(repositoryID) || spec.RegistrationID != registration || spec.Subject.ID != registration+":"+push.WorkflowRunID || spec.Authority != nil || spec.Metered || spec.Data != nil || len(spec.ReservedPools) != 0 ||
+	if spec.Team == "" || spec.Subject.Kind != capability.SubjectMachine || spec.Binding.Kind != capability.BindingPush || push.WorkflowRunID == "" || push.WorkflowRunAttempt == "" || push.Ref == "" || push.SHA == "" || !strings.HasSuffix(push.WorkflowRef, "@"+push.Ref) || !slices.Equal(spec.Repositories, []string{push.RepositoryKey}) || repositoryID <= 0 || ownerID <= 0 || push.RepositoryKey != githubRepositoryKey(repositoryID) || spec.RegistrationID != registration || spec.Subject.ID != registration+":"+push.WorkflowRunID+":"+push.WorkflowRunAttempt || spec.Authority != nil || spec.Metered || spec.Data != nil || len(spec.ReservedPools) != 0 ||
 		len(spec.Grants) != 2 || !slices.Contains(spec.Grants, capability.NodesClaim) || !slices.Contains(spec.Grants, capability.TriggersClaim) {
 		return bindingRefusal()
 	}
@@ -93,11 +97,27 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 		return authorityError(apierr.Forbidden, "Actions credential exceeds its lifetime")
 	}
 	var live int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM capabilities WHERE team=? AND bind_kind='push' AND parent_id IS NULL AND (revoked_at IS NULL OR revoked_at>?) AND expires_at>?`, spec.Team, tx.now().UnixNano(), tx.now().UnixNano()).Scan(&live); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM capabilities WHERE team=? AND bind_kind='push' AND parent_id IS NULL AND `+liveCredentialSQL(""), spec.Team, tx.now().UnixNano(), tx.now().UnixNano()).Scan(&live); err != nil {
 		return err
 	}
 	if live >= MaxGitHubRunnerCredentials {
 		return ErrGitHubRunnerCredentialLimit
+	}
+	return nil
+}
+
+func consumeActionsExchangeTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
+	push := spec.Binding.Push
+	result, err := tx.ExecContext(ctx, `INSERT INTO github_actions_exchanges(team,repository_key,run_id,run_attempt) VALUES (?,?,?,?) ON CONFLICT(team,repository_key,run_id,run_attempt) DO NOTHING`, spec.Team, push.RepositoryKey, push.WorkflowRunID, push.WorkflowRunAttempt)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return bindingRefusal()
 	}
 	return nil
 }

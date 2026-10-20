@@ -79,7 +79,7 @@ func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 		t.Fatalf("evaluation created work: %+v %v", row, err)
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "host-fixture-root"}
-	_, admin, err := teststore.ProvisionCredential(t.Context(), f.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "admin"}, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	_, admin, err := teststore.ProvisionCredential(t.Context(), f.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "admin"}, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

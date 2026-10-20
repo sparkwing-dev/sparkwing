@@ -26,7 +26,7 @@ func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
 	digest := sha256.Sum256([]byte(f.raw))
 	origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 	issued, err := f.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{
-		Kind: capability.ProvisionMember, Authority: &origin, Team: "team",
+		Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &origin, Team: "team",
 		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
 	})
@@ -164,7 +164,7 @@ func TestLoginHTTPRefusesDataScopeProperty(t *testing.T) {
 	b.raw = root.Raw
 	b.snapshot.Now = time.Now()
 	p := capability.Principal{Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Capability: root.Capability}
-	b.snapshot.Authorities = []capability.AuthorityState{{Principal: p, MembershipValid: true}}
+	b.snapshot.Authorities = []capability.AuthorityState{{Principal: p}}
 	h := f.server.WithAuthorization(consoleAuthorization(b)).WithDashboard(controller.Dashboard{}).Handler()
 	property := func(value []byte, publish bool) bool {
 		scope := &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "repo-" + hex.EncodeToString(value), ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}

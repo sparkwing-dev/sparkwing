@@ -58,7 +58,7 @@ func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), teststore.SealGitCredential(t, tenant.Team(), store.GitCredential{Host: string(team) + ".invalid", Kind: store.GitCredentialHTTPS, Secret: string(team) + "-git-secret"})); err != nil {
+		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), teststore.SealGitCredential(t, tenant.Team(), store.GitCredential{HostWide: true, Host: string(team) + ".invalid", Kind: store.GitCredentialHTTPS, Secret: string(team) + "-git-secret"})); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -186,7 +186,7 @@ func TestCredentialInventoryHTTPRefusesUnrelatedAuthority(t *testing.T) {
 				case "expired":
 					p.Capability.ExpiresAt, code = &b.snapshot.Now, apierr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].MembershipValid, code = false, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
 				case "grant":
 					p.Capability.Grants = nil
 				case "machine":

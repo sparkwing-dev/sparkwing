@@ -87,7 +87,8 @@ func cloudKubeW8(objects ...runtime.Object) *fake.Clientset {
 		}
 		return true, list, nil
 	})
-	return kube
+	_, cfg, _ := cloudFixture(launcher.CloudWork)
+	return admitW8(kube, cfg)
 }
 
 func cloudPtrW8[T any](v T) *T { return &v }

@@ -29,8 +29,10 @@ type GitHubAppInstallation struct {
 	// GitHubUserID the GitHub user that account proved it was.
 	ConnectedBy  string
 	GitHubUserID int64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// Reclaim is provider-verified current administration supplied by the connection flow.
+	Reclaim   bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // GitHubAppTrigger subscribes one pipeline to one repository's events

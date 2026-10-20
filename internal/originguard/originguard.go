@@ -175,7 +175,8 @@ func LoopbackHost(hostport string) bool {
 		host = h
 	}
 	host = strings.TrimSuffix(strings.Trim(host, "[]"), ".")
-	if strings.EqualFold(host, "localhost") {
+	host = strings.ToLower(host)
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
 	ip := net.ParseIP(host)

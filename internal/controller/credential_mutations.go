@@ -19,8 +19,8 @@ type CredentialWriter interface {
 	WriteSecret(context.Context, capability.Authorized, store.SealedSecret) error
 	RemoveSecret(context.Context, capability.Authorized, string, string) error
 	WriteGitCredential(context.Context, capability.Authorized, store.SealedGitCredential) (store.GitCredential, error)
-	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string) (store.GitCredential, error)
-	RemoveGitCredential(context.Context, capability.Authorized, string) error
+	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string, string) (store.GitCredential, error)
+	RemoveGitCredential(context.Context, capability.Authorized, string, string) error
 }
 
 // WithCredentialWriter supplies tenant credential transactions before Handler is constructed.

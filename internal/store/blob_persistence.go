@@ -214,7 +214,7 @@ func checkBlobAuthorityHints(input, actual blob.Authority) error {
 }
 
 func blobActorProvenance(a blobActor) blob.Provenance {
-	if a.mode != "publish" && a.capability.Billing != nil && a.capability.Billing.ExecutorClass == "cloud" {
+	if a.mode != "publish" && a.capability.Billing != nil && a.capability.Billing.ExecutorClass == TierCloud {
 		return blob.ProvenanceCloud
 	}
 	return blob.ProvenanceLocal

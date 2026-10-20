@@ -26,7 +26,8 @@ trust comes from a signed App delivery. See [GitHub App](github-app.md) and
 
 The exchange issues a controller capability with `nodes.claim` and
 `triggers.claim`, a one-hour lifetime, and the verified repository, ref, commit
-and workflow run binding. Repository identity uses GitHub's numeric ID, so a
+workflow run, run attempt and workflow reference binding. Each repository/run/attempt
+can exchange once, including after the first credential is revoked. Repository identity uses GitHub's numeric ID, so a
 rename preserves that identity. An owner transfer requires a matching new
 binding.
 
@@ -72,11 +73,17 @@ binaries remain local to the executing machine.
 
 Source acquisition uses the live run claim at
 `POST /api/v1/runs/{run}/source-credential`. The controller checks sealed
-repository authority and records the release before returning a credential.
+repository authority. Actions source acquisition uses the workflow's own
+`GITHUB_TOKEN`, scoped to the registered repository. It receives no team
+credential or App token.
 See [team git credentials](git-credentials.md).
 
 Revoking a registration or credential stops later controller operations. It
 cannot recall GitHub tokens, provider sessions or signed URLs already issued.
+Set `GITHUB_TOKEN` to `${{ github.token }}` on the runner step. The generated
+workflow includes this setting. The token stays in source acquisition and does
+not enter the pipeline environment.
+
 ## Workflow
 
 Commit this workflow as `.github/workflows/sparkwing.yml`, replacing the team

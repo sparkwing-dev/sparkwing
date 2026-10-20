@@ -48,9 +48,9 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 			}
 			originals[team] = append(originals[team], *row)
 		}
-		seedMaintenanceGit(t, tn, GitCredential{Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old/key", CreatedBy: "author"})
+		seedMaintenanceGit(t, tn, GitCredential{HostWide: true, Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old/key", CreatedBy: "author"})
 	}
-	before, err := tenant.GitCredentialForHost(t.Context(), "git.example.test")
+	before, err := tenant.GitCredentialForRepository(t.Context(), "", "git.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 				t.Fatalf("secret row changed: got=%+v want=%+v, %v", got, want, err)
 			}
 		}
-		got, err := tn.GitCredentialForHost(t.Context(), "git.example.test")
+		got, err := tn.GitCredentialForRepository(t.Context(), "", "git.example.test")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +96,7 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			seedMaintenanceGit(t, tenant, GitCredential{Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old"})
+			seedMaintenanceGit(t, tenant, GitCredential{HostWide: true, Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old"})
 			if failure == "demoted" {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE memberships SET role='reader' WHERE account_id='owner'`)
 			}
@@ -130,7 +130,7 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 					t.Fatalf("secret partially rotated: %+v,%v", got, err)
 				}
 			}
-			got, err := tenant.GitCredentialForHost(t.Context(), "git.example.test")
+			got, err := tenant.GitCredentialForRepository(t.Context(), "", "git.example.test")
 			if err != nil || got.Secret != "old" {
 				t.Fatalf("git partially rotated: %+v,%v", got, err)
 			}
@@ -195,7 +195,7 @@ func TestCredentialRotationCommittedAttemptMetadataProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		seedMaintenanceGit(t, tenant, GitCredential{Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old"})
+		seedMaintenanceGit(t, tenant, GitCredential{HostWide: true, Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old"})
 		attempts := 0
 		result, err := tenant.RotateCredentials(t.Context(), a, func(row Secret) (string, bool, error) {
 			return "new", attempts < retries || row.Name == "unreadable", nil

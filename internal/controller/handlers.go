@@ -10,10 +10,11 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -21,8 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
-
-var gitObjectSHA = regexp.MustCompile(`^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
@@ -63,7 +62,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // safety: a stored sha reaches a runner's git as a revision argument, so only an object id may pass.
 func validateGitSHA(sha string) error {
-	if sha == "" || gitObjectSHA.MatchString(sha) {
+	if sha == "" || runspec.IsCommitID(sha) {
 		return nil
 	}
 	return errors.New("git.sha must be a 40- or 64-character hex object id")

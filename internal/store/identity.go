@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -746,12 +747,12 @@ func acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invi
 	var none InvitationAcceptance
 	at := now.UTC().UnixNano()
 
-	var team, email, role string
+	var team, email, role, inviter string
 	var expires int64
 	var accepted, withdrawn sql.NullInt64
 	err := tx.QueryRowContext(ctx,
-		`SELECT team, email, role, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
-		Scan(&team, &email, &role, &expires, &accepted, &withdrawn)
+		`SELECT team, email, role, invited_by, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
+		Scan(&team, &email, &role, &inviter, &expires, &accepted, &withdrawn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return none, ErrNotFound
 	}
@@ -778,6 +779,15 @@ func acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invi
 	}
 	if err := checkTeamRoomTx(ctx, tx, Team(team), gate.Limits.FreeTeamMembers); err != nil {
 		return none, err
+	}
+	var inviterRole Role
+	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, inviter).Scan(&inviterRole); errors.Is(err, sql.ErrNoRows) {
+		return none, ErrInvitationClosed
+	} else if err != nil {
+		return none, err
+	}
+	if !slices.Contains(ScopesForRole(inviterRole), ScopeTeamAdmin) {
+		return none, ErrInvitationClosed
 	}
 	// safety: the update repeats the unaccepted predicate and counts what it
 	// changed, because two callers that both read it open would otherwise both
@@ -920,8 +930,12 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 	}
 	now := tx.now()
 	expires := now.Add(ttl)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
- VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
+	epoch, err := membershipEpochTx(ctx, tx, string(team), acct.ID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at,membership_epoch)
+ VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano(), epoch); err != nil {
 		return "", "", nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -986,8 +1000,8 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 		return nil
 	}
 	_, err := tx.ExecContext(ctx,
-		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
-		active, accountID, string(t.team))
+		`UPDATE sessions SET team = ?,membership_epoch=COALESCE((SELECT epoch FROM membership_epochs WHERE team=? AND account_id=?),0) WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
+		active, active, accountID, accountID, string(t.team))
 	return err
 }
 
@@ -1112,6 +1126,3 @@ func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation
 	}()
 	return scanInvitations(rows)
 }
-
-// CLITokenLifetime bounds a legacy member credential.
-const CLITokenLifetime = 90 * 24 * time.Hour

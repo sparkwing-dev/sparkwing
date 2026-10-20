@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // RotateCapability replaces an owned tenant credential and commits its grace deadline.
@@ -28,8 +29,8 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 	var out capability.Rotation
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		requested, expires := expires, expires
-		var prefix string
-		if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=? AND COALESCE(team,'')=?`+tx.forUpdate(), a.Target.TokenPrefix, team).Scan(&prefix); err != nil {
+		prefix := a.Target.TokenPrefix
+		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{a.Principal.Authority, {Kind: capability.AuthorityCapability, ID: prefix}}, prefix); err != nil {
 			return err
 		}
 		p, err := managementAuthorityTx(ctx, tx, team, a, "POST", true)
@@ -40,7 +41,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if err != nil {
 			return err
 		}
-		if !inventoryOwned(p, team, c, previous.CreatedBy) {
+		if !capability.OwnsToken(p, previous) {
 			return bindingRefusal()
 		}
 		if err := rotationOwnerTx(ctx, tx, p, c, previous.CreatedBy); err != nil {
@@ -74,7 +75,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if err != nil {
 			return err
 		}
-		if c.Parent == nil {
+		if request.Provision != nil {
 			tx.rotatingRoot = &c
 		}
 		issued, err := s.Issue(ctx, tx, request)
@@ -113,11 +114,11 @@ func rotationOwnerTx(ctx context.Context, tx *storeTx, p capability.Principal, c
 		return nil
 	}
 	if c.Subject.Kind == capability.SubjectMachine && slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
-		record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+		facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: capability.Principal{Capability: c}}}, runspec.Request{})
 		if err != nil {
 			return err
 		}
-		if record.Origin != nil && !record.Origin.Personal {
+		if facts.Shared {
 			return nil
 		}
 	}
@@ -139,19 +140,19 @@ func rotationExpiryCeilingTx(ctx context.Context, tx *storeTx, caller capability
 }
 
 func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal, c capability.Capability, expires *time.Time) (capability.IssueRequest, error) {
-	if c.Parent != nil {
-		spec := capability.DelegateSpec{Parent: *c.Parent, Audience: c.Audience, Grants: slices.Clone(c.Grants), Binding: c.Binding, Repositories: slices.Clone(c.Repositories), Data: c.Data, ExpiresAt: expires}
-		return capability.IssueRequest{Kind: capability.Delegate, Delegate: &spec}, nil
-	}
 	record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
 	if err != nil {
 		return capability.IssueRequest{}, err
+	}
+	if c.Parent != nil && (record.Origin == nil || record.Origin.Kind != capability.ProvisionMember) {
+		spec := capability.DelegateSpec{Parent: *c.Parent, Audience: c.Audience, Grants: slices.Clone(c.Grants), Binding: c.Binding, Repositories: slices.Clone(c.Repositories), Data: c.Data, ExpiresAt: expires}
+		return capability.IssueRequest{Kind: capability.Delegate, Delegate: &spec}, nil
 	}
 	if record.Origin == nil {
 		return capability.IssueRequest{}, authorityError(apierr.IntegrityFailure, "credential provisioning origin is unavailable")
 	}
 	origin := record.Origin
-	spec := capability.ProvisionSpec{Personal: origin.Personal, Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Trust: c.Trust, Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
+	spec := capability.ProvisionSpec{AllowTeamAdmin: slices.Contains(c.Grants, capability.TeamAdmin), Personal: origin.Personal, Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Trust: c.Trust, Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
 	return capability.IssueRequest{Kind: capability.Delegate, Provision: &spec}, nil
 }
 
@@ -172,14 +173,22 @@ func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if err := credentialRowChanged(result, err); err != nil {
 		return err
 	}
-	return advanceAuthGenerationsTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: c.Prefix}}, nil)
+	return nil
 }
 
 func validCapabilityOrigin(c capability.Capability, origin CapabilityOrigin) bool {
-	if origin.Personal && origin.Kind != capability.ProvisionMachine {
+	if origin.Personal && (origin.Kind != capability.ProvisionMachine || origin.Requirement == nil) {
 		return false
 	}
-	if c.Parent != nil || c.Unit != "" || c.Issuance != capability.Delegate {
+	if requirement := origin.Requirement; requirement != nil {
+		if requirement.Account == "" || requirement.Epoch < 0 || requirement.Grant != "" && !slices.Contains(capability.Grants(), requirement.Grant) {
+			return false
+		}
+	}
+	if origin.Kind == capability.ProvisionMember && (c.Parent == nil || c.Parent.Kind != capability.AuthoritySession || c.ExpiresAt == nil || origin.Requirement == nil) {
+		return false
+	}
+	if (c.Parent != nil && (origin.Kind != capability.ProvisionMember || c.Parent.Kind != capability.AuthoritySession)) || c.Unit != "" || c.Issuance != capability.Delegate {
 		return false
 	}
 	switch origin.Kind {

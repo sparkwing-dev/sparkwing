@@ -28,7 +28,7 @@ Manage team credentials
 
 Mint a new API token
 
-Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry.
+Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. Member tokens expire within 90 days and end with their minting session. team.admin requires --allow-team-admin and expires within 30 days.
 
 ### Flags
 
@@ -42,6 +42,7 @@ Create a member credential through the team token route. Enroll runners with run
 | `--principal NAME` | principal |
 | `--scope SCOPE` | Credential scope. Repeatable; comma-separated values are accepted. |
 | `--ttl DURATION` | ttl |
+| `--allow-team-admin` | allow team admin |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 
 ## `sparkwing tokens list`

@@ -34,12 +34,12 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 	if body := call("GET", "/api/v1/secrets/MASKED", "", 403); strings.Contains(body, "private-masked") {
 		t.Fatal("masked value escaped member read")
 	}
-	call("POST", "/api/v1/team/git-credentials?team=foreign", `{"host":"git.example.test","kind":"https","token":"private-key"}`, 200)
+	call("POST", "/api/v1/team/git-credentials?team=foreign", `{"host_wide":true, "host":"git.example.test","kind":"https","token":"private-key"}`, 200)
 	tenant, err := f.store.ForTeam(t.Context(), "team")
 	if err != nil {
 		t.Fatal(err)
 	}
-	credential, err := tenant.GitCredentialForHost(t.Context(), "git.example.test")
+	credential, err := tenant.GitCredentialForRepository(t.Context(), "", "git.example.test")
 	if err != nil || credential.Team != "team" || credential.CreatedBy != "member" || credential.ConfirmedAt == nil || credential.Secret == "private-key" {
 		t.Fatalf("committed git credential: %+v %v", credential, err)
 	}
@@ -59,11 +59,11 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 		t.Fatal(err)
 	}
 	call("POST", "/api/v1/secrets", `{"name":"DENIED","value":"private-value"}`, 403)
-	call("POST", "/api/v1/team/git-credentials", `{"host":"git.example.test","kind":"https","token":"private-key"}`, 403)
+	call("POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"git.example.test","kind":"https","token":"private-key"}`, 403)
 	if _, err := tenant.GetSecretRow("DENIED", ""); err == nil {
 		t.Fatal("demoted member stored secret")
 	}
-	if _, err := tenant.GitCredentialForHost(t.Context(), "git.example.test"); err == nil {
+	if _, err := tenant.GitCredentialForRepository(t.Context(), "", "git.example.test"); err == nil {
 		t.Fatal("demoted member stored git credential")
 	}
 	if strings.Contains(f.logs.String(), "private-") {

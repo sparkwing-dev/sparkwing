@@ -20,6 +20,9 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 	if err != nil {
 		return capability.Capability{}, err
 	}
+	if spec.ExpiresAt == nil {
+		spec.ExpiresAt = parent.Capability.ExpiresAt
+	}
 	if err := capability.ValidateDelegation(parent, spec, tx.now()); err != nil {
 		return capability.Capability{}, err
 	}

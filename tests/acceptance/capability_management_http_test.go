@@ -195,10 +195,10 @@ func TestCapabilityManagementHTTPRefusals(t *testing.T) {
 					p.Capability.Parent = &parent
 					root := *p
 					root.Authority, root.Capability.Prefix, root.Capability.Parent, root.Capability.RevokedAt = parent, parent.ID, nil, &b.snapshot.Now
-					b.snapshot.Authorities = append(b.snapshot.Authorities, capability.AuthorityState{Principal: root, MembershipValid: true})
+					b.snapshot.Authorities = append(b.snapshot.Authorities, capability.AuthorityState{Principal: root})
 					code = apierr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].MembershipValid, code = false, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
 				case "grant":
 					p.Capability.Grants = nil
 				case "machine":

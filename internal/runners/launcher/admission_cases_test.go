@@ -221,6 +221,12 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		}), reason: "runs privileged"},
 		{name: "probe_host_pid", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
 		{name: "missing_node_selector", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.NodeSelector = nil }), reason: "own team's nodes"},
+		{name: "extra_toleration", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Tolerations = append(p.Spec.Tolerations, corev1.Toleration{Operator: corev1.TolerationOpExists})
+		}), reason: "own team's nodes"},
+		{name: "toleration_seconds", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Tolerations[1].TolerationSeconds = ptr(int64(30))
+		}), reason: "own team's nodes"},
 		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "own team's nodes"},
 		{name: "wrong_team_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels[TeamLabel] = labelHash("other-team") }), reason: "own team's nodes"},
 		{name: "injected_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels["escape"] = "true" }), reason: "launcher's labels"},

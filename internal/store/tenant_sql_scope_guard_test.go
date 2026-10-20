@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"githubInstallationOwnerTx":             "a provider-verified current GitHub administrator resolves the prior installation tenant before locking both tenants and replacing its consent in one transaction",
 	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
 	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
 	"(*Operator).DeleteExpiredBlobStaging":  "leased maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
@@ -43,10 +44,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"deleteRetentionRecordsTx":          "the elected maintenance pass selects expired records across teams and deletes exact tenant record keys",
 
 	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
-	"readAuthorityTx":                     "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
+	"readAuthorityNodeTx":                 "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
 	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
-	"advanceAuthGenerationsTx":            "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
 	"lockAuthorityTx":                     "globally unique capability prefixes and session hashes are locked before authority resolution reads their teams",
 	"lockUnitsTx":                         "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",

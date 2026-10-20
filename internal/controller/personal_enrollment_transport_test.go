@@ -39,7 +39,7 @@ func TestPersonalEnrollmentTransportNeverPromotesCapabilityAncestryProperty(t *t
 		if administrative {
 			grants = append(grants, capability.TeamAdmin)
 		}
-		member, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}})
+		member, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}})
 		if err != nil {
 			t.Fatal(err)
 		}

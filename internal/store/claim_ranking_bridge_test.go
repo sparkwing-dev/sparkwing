@@ -43,7 +43,7 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	f.Second = f.personalMachine(t, f.Member, "desktop")
 	actions := authorityRoot("actions", "a")
 	actions.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
-	actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: rankingSHA, WorkflowRunID: "77"}}
+	actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: rankingSHA, WorkflowRunID: "77", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, actions)
 	f.Actions = actions.Prefix
 	launcher := authorityRoot("launcher", "")

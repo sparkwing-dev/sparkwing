@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -50,20 +51,17 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	for i := range response.Awards {
 		response.Awards[i].Capability = ""
 	}
-	response.Remove = append([]controllerwire.LauncherJobRef{}, response.Remove...)
-	response.RemoveReservations = append([]controllerwire.LauncherReservationRef{}, response.RemoveReservations...)
+	response.Retired = append([]capability.LeaseRef{}, response.Retired...)
 	return response, nil
 }
 
 type storeLauncherSync struct{ store *store.Store }
 
 func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
-	if err := validateLauncherObservations(observed); err != nil {
-		return controllerwire.LauncherSyncResponse{}, err
-	}
+
 	var reservations []capability.LeaseRef
 	for _, observation := range observed {
-		if observation.ReservationID != "" {
+		if observation.Reservation {
 			reservations = append(reservations, observation.Award)
 		}
 	}
@@ -87,15 +85,11 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 		fence := capability.LeaseRef{Kind: award.Claim.Kind, ID: award.Capability.UnitID, Holder: award.Claim.Award.Holder, Generation: award.Claim.Award.Generation}
 		current[fence] = award
 	}
-	response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []controllerwire.LauncherJobRef{}, RemoveReservations: []controllerwire.LauncherReservationRef{}}
+	response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Retired: []capability.LeaseRef{}}
 	for _, observation := range observed {
 		award, found := current[observation.Award]
 		if !found {
-			if observation.ReservationID != "" {
-				response.RemoveReservations = append(response.RemoveReservations, controllerwire.LauncherReservationRef{Award: observation.Award, NodeUID: observation.NodeUID, ReservationID: observation.ReservationID})
-			} else {
-				response.Remove = append(response.Remove, observation.Job)
-			}
+			response.Retired = append(response.Retired, observation.Award)
 			continue
 		}
 		unit := engineReconciledClaim(award.Capability, store.ReconciledNode{Node: award.Node, Claim: &award.Claim.Award}, award.Run)
@@ -105,11 +99,14 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 		if award.Claim.Kind != capability.UnitNode {
 			unit.Execution = nil
 		}
-		if observation.ReservationID != "" {
+		if observation.Reservation {
 			unit.CloudResources, err = s.store.CloudAwardResources(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Capability.Prefix})
 			if err != nil {
 				return controllerwire.LauncherSyncResponse{}, err
 			}
+		}
+		if err := runners.ValidateAward(*unit, capability.DeliveryBootstrap); err != nil {
+			return controllerwire.LauncherSyncResponse{}, err
 		}
 		response.Awards = append(response.Awards, *unit)
 	}
@@ -117,18 +114,13 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 }
 
 func validateLauncherObservations(observed []controllerwire.LauncherObservation) error {
-	jobs := map[[2]string]bool{}
 	units := map[capability.LeaseRef]bool{}
 	for _, observation := range observed {
 		if err := observation.Validate(); err != nil {
 			return err
 		}
-		job := [2]string{observation.Job.Namespace, observation.Job.Name}
-		if observation.ReservationID == "" && jobs[job] || units[observation.Award] {
-			return invalidEngineBody("launcher observations must name unique Jobs and awards")
-		}
-		if observation.ReservationID == "" {
-			jobs[job] = true
+		if units[observation.Award] {
+			return invalidEngineBody("launcher observations must name unique awards")
 		}
 		units[observation.Award] = true
 	}

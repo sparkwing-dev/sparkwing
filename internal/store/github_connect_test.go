@@ -279,3 +279,22 @@ func TestGitHubConnectionNonceIsAtomicAndExpiresOnStoreClock(t *testing.T) {
 		t.Fatalf("refused nonce committed count=%d: %v", count, err)
 	}
 }
+
+func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
+	s, tenant, a, now := githubConnectionFixture(t)
+	old := &Tenant{s: s, team: "b"}
+	row := GitHubAppInstallation{InstallationID: 8, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", GitHubUserID: 501}
+	if _, err := old.TestOnlySeedGitHubInstallation(t.Context(), row, *now); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_triggers(team,repository_id,pipeline,repository,installation_id,created_at,repo_key) VALUES ('b',42,'build','acme/repo',8,1,'gh:42')`)
+	row.Reclaim = true
+	got, err := tenant.BindAuthorizedGitHubInstallation(t.Context(), a, row)
+	if err != nil || got.Team != "a" {
+		t.Fatalf("reclaim=%+v: %v", got, err)
+	}
+	var remaining int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM github_app_triggers WHERE team='b' AND installation_id=8`).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("former subscriptions=%d: %v", remaining, err)
+	}
+}

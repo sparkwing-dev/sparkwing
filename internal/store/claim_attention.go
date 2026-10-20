@@ -41,7 +41,12 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 		if err := lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
 			return err
 		}
-		principal, err := tx.ResolveAuthority(ctx, ref)
+		chain, err := authorityChainTx(ctx, tx, ref, false)
+		if err != nil {
+			return err
+		}
+		principal := chain[0].principal
+		facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
 		if err != nil {
 			return err
 		}
@@ -50,7 +55,7 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 			return err
 		}
 		c := principal.Capability
-		if !rankedObservable(c) && !here {
+		if !facts.Observable && !here {
 			return authorityError(apierr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 		}
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
@@ -113,7 +118,7 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 	now := tx.now()
 	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at,claim_observation_json FROM capabilities
  WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
- AND (revoked_at IS NULL OR revoked_at>?) AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, now.UnixNano(), now.UnixNano())
+ AND `+liveCredentialSQL("")+` ORDER BY prefix`, team, now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, err
 	}

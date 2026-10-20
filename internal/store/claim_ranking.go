@@ -88,41 +88,6 @@ func sealedRequestTx(ctx context.Context, tx *storeTx, team Team, run string) (r
 	return seal, json.Unmarshal(body, &seal)
 }
 
-func claimTierTx(ctx context.Context, tx *storeTx, chain []authorityNode, request runspec.Request) (string, error) {
-	if capability.CloudLauncher(chain[0].principal.Capability) {
-		return TierCloud, nil
-	}
-	for _, ancestor := range chain {
-		if ancestor.principal.Capability.Binding.Kind == capability.BindingPush {
-			return TierActions, nil
-		}
-	}
-	root := chain[len(chain)-1].principal.Capability
-	if root.Subject.Kind == capability.SubjectLocal {
-		return TierSelfHosted, nil
-	}
-	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
-		return "", nil
-	}
-	personal, err := personalRootTx(ctx, tx, chain)
-	switch {
-	case err != nil || !personal:
-		return TierSelfHosted, err
-	case request.OriginMachine != "" && request.OriginMachine == root.Subject.ID:
-		return TierHere, nil
-	}
-	return TierPersonal, nil
-}
-
-func personalRootTx(ctx context.Context, tx *storeTx, chain []authorityNode) (bool, error) {
-	root := chain[len(chain)-1].principal.Capability
-	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
-		return false, nil
-	}
-	record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
-	return err == nil && record.Origin != nil && record.Origin.Personal, err
-}
-
 var errTierOutsideRanking = authorityError(apierr.Forbidden, "claimant tier is outside the team's claim ranking")
 
 func claimRankTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, request runspec.Request) (int, error) {
@@ -130,11 +95,11 @@ func claimRankTx(ctx context.Context, tx *storeTx, team Team, chain []authorityN
 	if err != nil || len(ranking) == 0 {
 		return -1, err
 	}
-	tier, err := claimTierTx(ctx, tx, chain, request)
+	facts, err := claimantFactsTx(ctx, tx, chain, request)
 	if err != nil {
 		return -1, err
 	}
-	rank := slices.Index(ranking, tier)
+	rank := slices.Index(ranking, facts.Tier)
 	if rank < 0 {
 		return -1, errTierOutsideRanking
 	}

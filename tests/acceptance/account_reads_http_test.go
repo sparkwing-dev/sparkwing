@@ -113,7 +113,7 @@ func TestAccountReadHTTPRefusesUnrelatedAuthority(t *testing.T) {
 				case "revoked":
 					p.Capability.RevokedAt = &b.snapshot.Now
 				case "removed":
-					b.snapshot.Authorities[0].MembershipValid = false
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 				case "bearer":
 					p.Class, code = capability.CredentialBearer, apierr.Forbidden
 					p.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: p.Capability.Prefix}

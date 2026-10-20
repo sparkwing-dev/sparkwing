@@ -300,6 +300,10 @@ unlock.
   The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
 ### Changed
 
+- **controller (Breaking):** Member tokens expire within 90 days and end with their minting session. Administration requires `--allow-team-admin` and expires within 30 days. Personal runners recheck their enrollment authority, and removing then re-adding a member cannot revive old credentials. Shared runners remain team-owned after their registrar leaves. Invitations recheck their inviter at acceptance
+- **credentials (Breaking):** Stored git credentials name a repository, with host-wide access requiring an explicit administrator choice. Actions runners use the workflow token for checkout. Each Actions workflow run attempt exchanges its identity once. Source URLs reject credentials in queries and fragments
+- **launcher (Breaking):** Claim, exchange, hosting and sync use one award validator. Direct launches verify admission policy, tolerations must match exactly, and only `apps/v1` DaemonSets receive the daemon exemption
+
 - **store (Breaking):** Named job claims and renewal use current capability authority
   Removed `ClaimNamedNode`, `NamedClaimOptions`, `HeartbeatNodeClaim`, `HeartbeatNodeClaimWithCredits` and the two legacy HTTP routes. Use `ClaimUnit`, `ReconcileNode` and `RenewUnit`. See [migration guide](docs/migrations/_unreleased.md#named-job-claims-and-renewal).
 

@@ -9,13 +9,12 @@ package envredact
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 var credentialWords = map[string]bool{
@@ -262,13 +261,21 @@ func CredentialValue(value string) bool {
 // URL names like a credential. Values that are not URL-shaped come back
 // unchanged.
 func RedactValue(value string) string {
-	out := value
-	if strings.Contains(out, "://") && strings.Contains(out, "@") {
-		if redacted := sourceurl.Redact(out); redacted != "" {
-			out = redacted
+	if !strings.Contains(value, "://") {
+		if account, hostPath, ok := strings.Cut(value, "@"); ok && account != "" && strings.Contains(hostPath, ":") {
+			return "redacted@" + hostPath
 		}
+		return value
 	}
-	return redactURLCredentials(out)
+	u, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	if u.User != nil {
+		u.User = url.User("redacted")
+		value = u.String()
+	}
+	return redactURLCredentials(value)
 }
 
 func credentialShaped(name string) bool {
@@ -427,17 +434,20 @@ func redactURLCredentials(value string) string {
 		return value
 	}
 	changed := false
-	if u.RawQuery != "" {
-		pairs := strings.Split(u.RawQuery, "&")
+	for _, raw := range []*string{&u.RawQuery, &u.Fragment} {
+		pairs := strings.Split(*raw, "&")
+		replaced := false
 		for i, pair := range pairs {
 			name, _, ok := strings.Cut(pair, "=")
-			if ok && credentialShaped(name) {
+			decoded, err := url.QueryUnescape(name)
+			if ok && err == nil && credentialShaped(decoded) {
 				pairs[i] = name + "=" + redactedPlaceholder
-				changed = true
+				replaced = true
 			}
 		}
-		if changed {
-			u.RawQuery = strings.Join(pairs, "&")
+		if replaced {
+			*raw = strings.Join(pairs, "&")
+			changed = true
 		}
 	}
 	segments := strings.Split(u.Path, "/")
@@ -795,4 +805,38 @@ func fileNameAndExtension(path string) (string, string) {
 
 func dotenvName(lower string) bool {
 	return lower == ".env" || strings.HasPrefix(lower, ".env.") || strings.HasSuffix(lower, ".env")
+}
+
+// ValidateSourceReference refuses credentials in URL source references, including fragments.
+// SSH usernames identify the transport account and are permitted without a password.
+func ValidateSourceReference(ref string) error {
+	if !strings.Contains(ref, "://") {
+		if host, path, ok := strings.Cut(ref, ":"); ok && strings.Contains(host, "@") {
+			ref = "ssh://" + host + "/" + path
+		} else {
+			return nil
+		}
+	}
+	u, err := url.Parse(ref)
+	if err != nil {
+		return errors.New("invalid source reference")
+	}
+	if u.User != nil {
+		_, password := u.User.Password()
+		if password || u.Scheme != "ssh" {
+			return errors.New("source reference must not embed credentials")
+		}
+	}
+	for _, raw := range []string{u.RawQuery, u.Fragment} {
+		values, err := url.ParseQuery(raw)
+		if err != nil {
+			return errors.New("invalid source reference")
+		}
+		for name := range values {
+			if CredentialName(name) {
+				return errors.New("source reference must not embed credentials")
+			}
+		}
+	}
+	return nil
 }

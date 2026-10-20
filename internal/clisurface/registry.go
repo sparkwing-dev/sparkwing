@@ -697,11 +697,12 @@ func Registry() []Command {
 			{Name: "only-on", Argument: "POOL"},
 		}},
 		{Path: "sparkwing tokens", Flags: []Flag{}},
-		{Path: "sparkwing tokens create", Authority: TeamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
+		{Path: "sparkwing tokens create", Authority: TeamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. Member tokens expire within 90 days and end with their minting session. team.admin requires --allow-team-admin and expires within 30 days."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"member"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "ttl", Argument: "DURATION"},
+			{Name: "allow-team-admin"},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing tokens list", Authority: TeamCredential, Rules: []string{"JSON emits one metadata record per token with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix. Deployment credentials use operator tokens."}, Flags: []Flag{

@@ -5,7 +5,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -48,32 +47,11 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	if result.Claim == nil {
 		return response, nil
 	}
-	principal, err := s.Store.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: result.Claim.CapabilityPrefix})
+	claim, err := s.claimedUnit(ctx, store.UnitClaim{Team: store.Team(authorized.Target.Team), Kind: capability.UnitNode, RunID: request.Ref.RunID, NodeID: request.Ref.NodeID, Award: *result.Claim, Bearer: result.Bearer})
 	if err != nil {
 		return controllerwire.ReconcileResponse{}, err
 	}
-	run, err := tenant.ReadRun(ctx, request.Ref.RunID)
-	if err != nil {
-		return controllerwire.ReconcileResponse{}, err
-	}
-	response.Claim = engineReconciledClaim(principal.Capability, result, run)
-	claimant, err := s.Store.ForTeam(ctx, store.Team(principal.Capability.Team))
-	if err != nil {
-		return controllerwire.ReconcileResponse{}, err
-	}
-	if response.Claim.OwnerMachine, err = claimant.OwnerMachineClaimant(ctx, principal, run.ID); err != nil {
-		return controllerwire.ReconcileResponse{}, err
-	}
-	if len(result.Bearer) > 0 && principal.Capability.Delivery == capability.DeliveryDirect && run.Request.Request.Origin != runspec.OriginLocal && len(run.Request.Request.Env.Names) > 0 {
-		owner, err := s.Store.ForTeam(ctx, store.Team(principal.Capability.Team))
-		if err != nil {
-			return controllerwire.ReconcileResponse{}, err
-		}
-		response.Claim.SubmittedEnv, err = owner.ReadSubmittedEnvironment(ctx, principal.Authority)
-		if err != nil {
-			return controllerwire.ReconcileResponse{}, err
-		}
-	}
+	response.Claim = &claim
 	return response, nil
 }
 

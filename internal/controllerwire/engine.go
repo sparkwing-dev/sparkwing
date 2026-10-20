@@ -115,13 +115,11 @@ type ClaimResponse struct {
 	Claim *ClaimedUnit `json:"claim,omitempty"`
 }
 
-// LauncherObservation compares an immutable award and Kubernetes instance against stored ownership.
+// LauncherObservation reports one award's preparation state without Kubernetes identities.
 type LauncherObservation struct {
-	Award         capability.LeaseRef `json:"award"`
-	Job           LauncherJobRef      `json:"job,omitzero"`
-	NodeUID       string              `json:"node_uid"`
-	ReservationID string              `json:"reservation_id,omitempty"`
-	Rejected      bool                `json:"rejected,omitempty"`
+	Award       capability.LeaseRef `json:"award"`
+	Reservation bool                `json:"reservation,omitempty"`
+	Rejected    bool                `json:"rejected,omitempty"`
 }
 
 // LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.
@@ -136,12 +134,11 @@ type LauncherPreparation struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// LauncherSyncResponse carries immutable execution inputs and cleanup identities without bearers.
+// LauncherSyncResponse carries execution inputs and retired award fences without bearers.
 type LauncherSyncResponse struct {
-	Prepared           []LauncherPreparation    `json:"prepared,omitempty"`
-	Awards             []ClaimedUnit            `json:"awards"`
-	Remove             []LauncherJobRef         `json:"remove"`
-	RemoveReservations []LauncherReservationRef `json:"remove_reservations"`
+	Prepared []LauncherPreparation `json:"prepared,omitempty"`
+	Awards   []ClaimedUnit         `json:"awards"`
+	Retired  []capability.LeaseRef `json:"retired"`
 }
 
 // ExchangeResponse returns the original unit with its exchanged in-memory authority once.

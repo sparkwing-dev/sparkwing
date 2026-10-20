@@ -119,7 +119,7 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a c
 		if row.Team != rotator.Team() {
 			return "", errors.New("invalid rotation tenant")
 		}
-		binding := gitCredentialBinding(row.Team, row.Host)
+		binding := gitCredentialBinding(row)
 		plain, err := openSecret(cipher, binding, row.Secret)
 		if errors.Is(err, secrets.ErrKeyRefused) {
 			return "", err

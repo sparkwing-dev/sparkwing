@@ -26,6 +26,7 @@ import (
 
 // Cloud Jobs use a separate API identity, and labels bind Kubernetes objects to their reservation.
 const (
+	jobHostUsers          = false
 	ServiceAccount        = "sparkwing-customer-job"
 	JobLabel              = "sparkwing.dev/job"
 	JobBinary             = "sparkwing-runner"
@@ -183,7 +184,7 @@ func validateAward(a CloudJobAward) error {
 	}
 	switch b.Kind {
 	case CloudPlan:
-		if b.NodeID != "" || b.SourceNodeID != "" || b.SourceGeneration != 0 {
+		if b.NodeID != "" || b.SourceNodeID != "" || b.SourceGeneration != 0 || b.Attempt != 0 {
 			return errors.New("plan award requires a run binding without a job or expansion source")
 		}
 	case CloudEval:
@@ -224,7 +225,7 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 		NodeName:    r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(cfg.Namespace, a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 		// safety: a user-namespaced Pod's IDs map to unprivileged host IDs, so
 		// nothing in it, including the Docker sidecar's root, holds node root.
-		HostUsers:                     ptr(false),
+		HostUsers:                     ptr(jobHostUsers),
 		SecurityContext:               jobPodSecurity(),
 		TerminationGracePeriodSeconds: ptr(int64(0)),
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.

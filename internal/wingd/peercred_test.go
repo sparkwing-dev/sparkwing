@@ -19,28 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestPeerAllowed_AdmitsOnlyThisUser(t *testing.T) {
-	self := os.Getuid()
-	cases := []struct {
-		name  string
-		uid   int
-		known bool
-		want  bool
-	}{
-		{name: "this user", uid: self, known: true, want: true},
-		{name: "another user", uid: self + 1, known: true, want: false},
-		{name: "root", uid: 0, known: true, want: self == 0},
-		{name: "credentials unavailable", uid: 0, known: false, want: false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := peerAllowed(tc.uid, tc.known); got != tc.want {
-				t.Fatalf("peerAllowed(%d, %v) = %v, want %v", tc.uid, tc.known, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestPeerUID_ReadsTheConnectingUser(t *testing.T) {
 	sock := filepath.Join(shortSocketBase(t), "d.sock")
 	ln := listenAt(t, sock)

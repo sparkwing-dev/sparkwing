@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // OwnerMachineClaimant reports whether an award's root credential is the run requester itself or a personal machine the requester enrolled.
@@ -34,15 +35,11 @@ func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Prin
 			if err != nil || account == "" {
 				return err
 			}
-			record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
-			if err != nil || record.Origin == nil || !record.Origin.Personal {
+			facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
+			if err != nil {
 				return err
 			}
-			var enrolledBy string
-			if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, t.team, root.Prefix).Scan(&enrolledBy); err != nil {
-				return err
-			}
-			owner = enrolledBy != "" && enrolledBy == account
+			owner = facts.Personal && facts.OwnerAccount != "" && facts.OwnerAccount == account
 			return nil
 		}
 		return nil
@@ -82,11 +79,15 @@ func personalMachineOwnerTx(ctx context.Context, tx *storeTx, team Team, machine
 	}
 	var owner string
 	for prefix, by := range enrolled {
-		record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+		c, err := loadCapabilityTx(ctx, tx, prefix)
 		if err != nil {
 			return "", err
 		}
-		if record.Origin == nil || !record.Origin.Personal || by == "" || owner != "" && owner != by {
+		facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: capability.Principal{Capability: c}}}, runspec.Request{})
+		if err != nil {
+			return "", err
+		}
+		if !facts.Personal || by == "" || owner != "" && owner != by {
 			return "", nil
 		}
 		owner = by

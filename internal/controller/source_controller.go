@@ -99,7 +99,7 @@ func (s *SourceController) Release(ctx context.Context, a capability.Authorized)
 	if err := ctx.Err(); err != nil {
 		return SourceCredentialResponse{}, err
 	}
-	plain, err := openSecret(s.Cipher, gitCredentialBinding(credential.Team, credential.Host), credential.Secret)
+	plain, err := openSecret(s.Cipher, gitCredentialBinding(credential), credential.Secret)
 	if err != nil || plain == "" {
 		return SourceCredentialResponse{}, errors.New("stored source credential did not open")
 	}
@@ -109,7 +109,7 @@ func (s *SourceController) Release(ctx context.Context, a capability.Authorized)
 func sourceReleaseMatches(a capability.Authorized, c store.GitCredential, audit capability.SourceReleaseAudit) bool {
 	p, b := a.Principal.Capability, a.Binding
 	return audit.ID != "" && !audit.ReleasedAt.IsZero() && audit.MachineID != "" && c.ID != "" && c.Host != "" &&
-		c.ConfirmedAt != nil && (c.Kind == store.GitCredentialSSH || c.Kind == store.GitCredentialHTTPS) &&
+		(c.HostWide || c.Repository == audit.RepositoryKey) && c.ConfirmedAt != nil && (c.Kind == store.GitCredentialSSH || c.Kind == store.GitCredentialHTTPS) &&
 		string(c.Team) == a.Target.Team && audit.Team == a.Target.Team && audit.CredentialID == c.ID && audit.Host == c.Host &&
 		p.Data != nil && audit.RepositoryKey == p.Data.RepositoryKey && audit.RepositoryKey != "" &&
 		audit.RunID == a.Target.RunID && audit.RunID == b.RunID && audit.NodeID == b.NodeID && audit.Generation == b.Generation &&

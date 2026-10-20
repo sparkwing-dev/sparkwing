@@ -28,7 +28,7 @@ func TestAuthenticationSnapshotReadsAncestryAndCurrentJob(t *testing.T) {
 	if err != nil || len(got.Authorities) != 2 || got.Now != *now {
 		t.Fatalf("authentication snapshot: %+v, %v", got, err)
 	}
-	if got.Authorities[0].Principal.Authority.ID != "claim" || got.Authorities[1].Principal.Authority.ID != "root" || !got.Authorities[0].MembershipValid || !got.Authorities[1].MembershipValid {
+	if got.Authorities[0].Principal.Authority.ID != "claim" || got.Authorities[1].Principal.Authority.ID != "root" || !capability.CredentialAlive(got.Authorities[0].Principal.Capability, got.Now) || !capability.CredentialAlive(got.Authorities[1].Principal.Capability, got.Now) {
 		t.Fatalf("ancestry: %+v", got.Authorities)
 	}
 	if got.Binding.Current.RunID != "run" || got.Binding.Current.NodeID != "job" || got.Binding.Current.Generation != 2 || got.Binding.Current.Attempt != 3 || got.Binding.Current.Holder != "runner" || !got.Binding.LeaseExpiresAt.After(*now) {
@@ -91,7 +91,7 @@ func TestAuthenticationSnapshotLooksUpSessionDigestWithoutBearer(t *testing.T) {
 	hash := hex.EncodeToString(digest[:])
 	rewriteSchemaExec(t, s.db, `UPDATE sessions SET hash=? WHERE hash=?`, hash, member.Authority.ID)
 	got, err := s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{})
-	if err != nil || len(got.Authorities) != 1 || got.Authorities[0].Principal.Authority.ID != hash || got.Authorities[0].Principal.Class != capability.CredentialSession || !got.Authorities[0].MembershipValid {
+	if err != nil || len(got.Authorities) != 1 || got.Authorities[0].Principal.Authority.ID != hash || got.Authorities[0].Principal.Class != capability.CredentialSession || !capability.CredentialAlive(got.Authorities[0].Principal.Capability, got.Now) {
 		t.Fatalf("session: %+v, %v", got, err)
 	}
 }

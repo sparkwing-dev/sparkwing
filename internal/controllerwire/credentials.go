@@ -36,6 +36,7 @@ type Tokens struct {
 // TokenCreate requests a root through the issuer's provisioning rules. TTL is
 // seconds: nil and zero preserve the issuer's expiry policy.
 type TokenCreate struct {
+	AllowTeamAdmin bool               `json:"allow_team_admin,omitempty"`
 	Kind           string             `json:"kind,omitempty"`
 	Principal      string             `json:"principal,omitempty"`
 	Scopes         []capability.Grant `json:"scopes,omitempty"`

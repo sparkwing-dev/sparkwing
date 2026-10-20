@@ -35,7 +35,7 @@ func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.Creden
 	}
 	out := capability.AuthenticationSnapshot{}
 	for _, node := range chain {
-		out.Authorities = append(out.Authorities, capability.AuthorityState{Principal: node.principal, MembershipValid: true})
+		out.Authorities = append(out.Authorities, capability.AuthorityState{Principal: node.principal})
 	}
 	out.Binding, err = authenticationBindingTx(ctx, tx, chain[0].principal.Capability)
 	if err != nil {
@@ -89,7 +89,7 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 		return capability.AuthenticationSnapshot{}, authorityError(apierr.Unauthenticated, "invalid local peer authority")
 	}
 	p.Class = capability.CredentialPeer
-	out := capability.AuthenticationSnapshot{Now: tx.now(), Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: true}}}
+	out := capability.AuthenticationSnapshot{Now: tx.now(), Authorities: []capability.AuthorityState{{Principal: p}}}
 	return out, tx.Commit()
 }
 

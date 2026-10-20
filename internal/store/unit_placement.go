@@ -32,10 +32,7 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 	if err != nil {
 		return decision, err
 	}
-	liveness := policy.Liveness
-	if liveness <= 0 && (seal.Request.Burst != nil || runAnywhere(seal.Request)) {
-		liveness = time.Minute
-	}
+	liveness := claimLiveness(ctx, seal.Request)
 	if rankedUnit(seal.Request, demand) {
 		decision.hold, err = rankingHoldTx(ctx, tx, team, unit, seal.Request, prefix, liveness)
 		return decision, err

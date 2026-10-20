@@ -10,10 +10,11 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
@@ -208,10 +209,7 @@ func CheckControllerURL(flag, raw string) error {
 
 func plainHTTPHost(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return host == "localhost" || strings.HasSuffix(host, ".localhost") ||
+	return originguard.LoopbackHost(host) ||
 		strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster.local")
 }
 

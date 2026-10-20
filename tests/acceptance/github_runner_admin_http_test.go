@@ -100,7 +100,7 @@ func TestGitHubRunnerAdminHTTPRefusals(t *testing.T) {
 				case "expiry":
 					p.Capability.ExpiresAt, want = &b.snapshot.Now, apierr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].MembershipValid, want = false, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, want = &b.snapshot.Now, apierr.Unauthenticated
 				case "grant":
 					p.Capability.Grants = nil
 				case "machine":

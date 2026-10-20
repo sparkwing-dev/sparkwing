@@ -63,7 +63,7 @@ func unavailableRunner(err error) bool {
 func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c JOIN runs r ON r.team=c.team AND r.id=c.bind_run
 	WHERE c.team=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND r.finished_at IS NULL AND r.status IN ('pending','running')
- AND (c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?) AND (
+ AND `+liveCredentialSQL("c.")+` AND (
  EXISTS (SELECT 1 FROM nodes n WHERE c.unit_kind='node' AND n.team=c.team AND n.run_id=c.bind_run AND n.node_id=c.bind_node
  AND n.capability_prefix=c.prefix AND n.generation=c.bind_generation AND n.claimed_by=c.bind_holder AND n.status<>'done' AND n.lease_expires_at>?)
  OR EXISTS (SELECT 1 FROM triggers t WHERE c.unit_kind=t.unit_kind AND t.team=c.team AND t.id=c.bind_run
@@ -99,7 +99,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 			key = parent.Prefix
 			break
 		}
-		if c.Billing.ExecutorClass == "here" && parent.Purpose == capability.PurposeHere && parent.Billing != nil {
+		if c.Billing.ExecutorClass == TierHere && parent.Purpose == capability.PurposeHere && parent.Billing != nil {
 			key = parent.Billing.ReservationID
 			break
 		}
@@ -118,8 +118,8 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 	i, found := indices[key]
 	if !found {
 		location := "local"
-		if c.Billing.ExecutorClass == "cloud" {
-			location = "cloud"
+		if c.Billing.ExecutorClass == TierCloud {
+			location = TierCloud
 		}
 		i, indices[key] = len(out.Runners), len(out.Runners)
 		out.Runners = append(out.Runners, capability.RunnerObservation{Team: string(team), Runner: nodeproto.RunnerIdentity{Name: c.Binding.Holder, Type: c.Billing.ExecutorClass}, Location: location, ActiveJobs: []string{}})

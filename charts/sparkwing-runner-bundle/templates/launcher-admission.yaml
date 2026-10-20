@@ -101,7 +101,8 @@ spec:
     message: Pods run only the launcher's container set and pinned images
   - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))'
     message: no container runs privileged
-  - expression: '!variables.create || variables.shape != ''job'' || !variables.spec.?hostUsers.orValue(true)'
+  - expression: '!variables.create || variables.shape != ''job'' || variables.spec.?hostUsers.orValue(true)
+      == false'
     message: Job Pods run in their own user namespace
   - expression: '!variables.create || !has(variables.spec.runtimeClassName) && !variables.spec.?shareProcessNamespace.orValue(false)
       && size(variables.spec.?resourceClaims.orValue([])) == 0 && variables.containers.all(c,
@@ -222,25 +223,28 @@ spec:
       "--tls=false"]'
     message: the Docker sidecar runs only the launcher's dockerd command
   - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
-      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && (e.name in [''HOME'',
-      ''DOCKER_HOST'', ''AWS_REGION'', ''AWS_DEFAULT_REGION'', ''AWS_STS_REGIONAL_ENDPOINTS'']
+      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && (e.name in ["HOME",
+      "DOCKER_HOST", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_STS_REGIONAL_ENDPOINTS"]
       && !has(e.valueFrom))))'
     message: containers carry only the launcher's environment and EKS region values,
       never AWS credentials
   - expression: '!variables.create || variables.team != '''' && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
-      == variables.team && variables.spec.?tolerations.orValue([]).exists(t, t.?key.orValue('''')
-      == ''node-restriction.kubernetes.io/sparkwing-team-node'' && t.?operator.orValue(''Equal'')
-      == ''Equal'' && t.?value.orValue('''') == variables.team && t.?effect.orValue('''')
-      == ''NoSchedule'')'
+      == variables.team && size(variables.spec.?tolerations.orValue([])) == 2 && variables.spec.?tolerations.orValue([]).exists(t,
+      t.?key.orValue('''') == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'')
+      == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule"
+      && !has(t.tolerationSeconds)) && variables.spec.?tolerations.orValue([]).exists(t,
+      t.?key.orValue('''') == "node-restriction.kubernetes.io/sparkwing-team-node"
+      && t.?operator.orValue(''Equal'') == "Equal" && t.?value.orValue('''') == variables.team
+      && t.?effect.orValue('''') == "NoSchedule" && !has(t.tolerationSeconds))'
     message: Pods select and tolerate only their own team's nodes
   - expression: '!variables.create || (variables.shape == ''capacity'' ? variables.spec.?nodeName.orValue('''')
       == '''' : variables.spec.?nodeName.orValue('''') != '''')'
     message: Job and probe Pods are bound to their reserved node; capacity requests
       are not
   - expression: '!variables.create || (variables.shape == ''job'' ? variables.labels.all(k,
-      k in [''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'',
-      ''batch.kubernetes.io/controller-uid'', ''batch.kubernetes.io/job-name'', ''controller-uid'',
-      ''job-name''] || k in variables.nodeTopology) && variables.labels[?''app''].orValue('''')
+      k in ["app", "app.kubernetes.io/managed-by", "sparkwing.dev/job", "sparkwing.dev/team",
+      "batch.kubernetes.io/controller-uid", "batch.kubernetes.io/job-name", "controller-uid",
+      "job-name"] || k in variables.nodeTopology) && variables.labels[?''app''].orValue('''')
       == ''sparkwing-job'' && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''')
       == ''sparkwing-launcher'' && variables.labels[?''sparkwing.dev/job''].orValue('''')
       != '''' : variables.shape == ''capacity'' ? variables.labels.all(k, k in [''app'',
@@ -366,7 +370,8 @@ spec:
     message: Pods run only the launcher's container set and pinned images
   - expression: '!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))'
     message: no container runs privileged
-  - expression: '!variables.create || variables.shape != ''job'' || !variables.spec.?hostUsers.orValue(true)'
+  - expression: '!variables.create || variables.shape != ''job'' || variables.spec.?hostUsers.orValue(true)
+      == false'
     message: Job Pods run in their own user namespace
   - expression: '!variables.create || !has(variables.spec.runtimeClassName) && !variables.spec.?shareProcessNamespace.orValue(false)
       && size(variables.spec.?resourceClaims.orValue([])) == 0 && variables.containers.all(c,
@@ -487,25 +492,28 @@ spec:
       "--tls=false"]'
     message: the Docker sidecar runs only the launcher's dockerd command
   - expression: '!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([]))
-      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && (e.name in [''HOME'',
-      ''DOCKER_HOST'', ''AWS_REGION'', ''AWS_DEFAULT_REGION'', ''AWS_STS_REGIONAL_ENDPOINTS'']
+      == 0 && c.?env.orValue([]).all(e, variables.shape == ''job'' && (e.name in ["HOME",
+      "DOCKER_HOST", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_STS_REGIONAL_ENDPOINTS"]
       && !has(e.valueFrom))))'
     message: containers carry only the launcher's environment and EKS region values,
       never AWS credentials
   - expression: '!variables.create || variables.team != '''' && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
-      == variables.team && variables.spec.?tolerations.orValue([]).exists(t, t.?key.orValue('''')
-      == ''node-restriction.kubernetes.io/sparkwing-team-node'' && t.?operator.orValue(''Equal'')
-      == ''Equal'' && t.?value.orValue('''') == variables.team && t.?effect.orValue('''')
-      == ''NoSchedule'')'
+      == variables.team && size(variables.spec.?tolerations.orValue([])) == 2 && variables.spec.?tolerations.orValue([]).exists(t,
+      t.?key.orValue('''') == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'')
+      == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule"
+      && !has(t.tolerationSeconds)) && variables.spec.?tolerations.orValue([]).exists(t,
+      t.?key.orValue('''') == "node-restriction.kubernetes.io/sparkwing-team-node"
+      && t.?operator.orValue(''Equal'') == "Equal" && t.?value.orValue('''') == variables.team
+      && t.?effect.orValue('''') == "NoSchedule" && !has(t.tolerationSeconds))'
     message: Pods select and tolerate only their own team's nodes
   - expression: '!variables.create || (variables.shape == ''capacity'' ? variables.spec.?nodeName.orValue('''')
       == '''' : variables.spec.?nodeName.orValue('''') != '''')'
     message: Job and probe Pods are bound to their reserved node; capacity requests
       are not
   - expression: '!variables.create || (variables.shape == ''job'' ? variables.labels.all(k,
-      k in [''app'', ''app.kubernetes.io/managed-by'', ''sparkwing.dev/job'', ''sparkwing.dev/team'',
-      ''batch.kubernetes.io/controller-uid'', ''batch.kubernetes.io/job-name'', ''controller-uid'',
-      ''job-name''] || k in variables.nodeTopology) && variables.labels[?''app''].orValue('''')
+      k in ["app", "app.kubernetes.io/managed-by", "sparkwing.dev/job", "sparkwing.dev/team",
+      "batch.kubernetes.io/controller-uid", "batch.kubernetes.io/job-name", "controller-uid",
+      "job-name"] || k in variables.nodeTopology) && variables.labels[?''app''].orValue('''')
       == ''sparkwing-job'' && variables.labels[?''app.kubernetes.io/managed-by''].orValue('''')
       == ''sparkwing-launcher'' && variables.labels[?''sparkwing.dev/job''].orValue('''')
       != '''' : variables.shape == ''capacity'' ? variables.labels.all(k, k in [''app'',

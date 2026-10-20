@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	award "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 )
 
 // Hosting binds remote awards to the shared native hosts and their authenticated store adapter.
@@ -31,8 +32,11 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) erro
 }
 
 func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(context.Context, controllerwire.ClaimedUnit, controllerwire.ClaimedUnit, nodehost.RunInput) (NativeServices, storeInputs, error)) (result error) {
-	if err := validateHostedAward(unit); err != nil {
+	if err := award.ValidateAward(unit, capability.DeliveryDirect); err != nil {
 		return err
+	}
+	if unit.Capability == "" {
+		return errors.New("runner hosting requires a directly usable award")
 	}
 	captured, err := captureUnit(unit)
 	if err != nil {
@@ -136,51 +140,6 @@ func (h Hosting) controller(bearer string) (controllerwire.Controller, error) {
 		return nil, errors.New("runner controller factory returned no client")
 	}
 	return controller, nil
-}
-
-func validateHostedAward(unit controllerwire.ClaimedUnit) error {
-	if err := ValidateAwardIdentity(unit); err != nil {
-		return err
-	}
-	if err := validateUnit(unit); err != nil {
-		return err
-	}
-	if unit.Delivery != capability.DeliveryDirect {
-		return errors.New("runner hosting requires a directly usable award")
-	}
-	binding := unit.Binding
-	if unit.Unit != capability.UnitEval && (binding.Holder == "" || binding.Generation <= 0) {
-		return errors.New("runner award has an invalid run or claim fence")
-	}
-	switch unit.Unit {
-	case capability.UnitNode:
-		if unit.Purpose != capability.PurposeWork || binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
-			return errors.New("runner award has an invalid job or attempt binding")
-		}
-		if unit.Engine == nil || unit.Accepted == nil || unit.Execution == nil || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
-			return errors.New("runner award is missing its matching accepted engine, execution settings and run")
-		}
-		if unit.Runner.Name == "" || unit.Runner.Type == "" {
-			return errors.New("runner award is missing its granted runner identity")
-		}
-	case capability.UnitTrigger:
-		if (unit.Purpose != capability.PurposeTrigger && unit.Purpose != capability.PurposeHere) || binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {
-			return errors.New("runner award has an invalid trigger binding")
-		}
-	case capability.UnitPlan:
-		if unit.Purpose != capability.PurposePlan || binding.Kind != capability.BindingRun || unit.JobID != "" || binding.NodeID != "" || binding.Expansion != nil || binding.Attempt != 0 {
-			return errors.New("runner award has an invalid plan binding")
-		}
-	case capability.UnitEval:
-		fence := binding.Expansion
-		if unit.Purpose != capability.PurposeEval || binding.Kind != capability.BindingNode || unit.JobID == "" || unit.JobID != binding.NodeID || unit.SourceGeneration < 0 || unit.SourceGeneration != binding.Generation || fence == nil || fence.Kind != capability.UnitEval || fence.ID != unit.UnitID || fence.Holder == "" || fence.Generation <= 0 || unit.Accepted == nil || unit.Engine == nil || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
-			return errors.New("runner award has an invalid source or eval lease binding")
-		}
-	}
-	if unit.LeaseExpiresAt.IsZero() {
-		return errors.New("runner award is missing its lease expiry")
-	}
-	return nil
 }
 
 var _ UnitHost = Hosting{}

@@ -59,7 +59,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	}
 	s.SetProvisionPolicy(storeActionsProof{})
 	until := time.Now().Add(30 * time.Minute)
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", WorkflowRunID: "1000"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
+	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000:1"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
 	if err != nil {
 		t.Fatal(err)
 	}

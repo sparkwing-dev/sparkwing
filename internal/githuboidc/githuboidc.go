@@ -60,6 +60,7 @@ type Claims struct {
 	EventName   string
 	WorkflowRef string
 	RunID       string
+	RunAttempt  string
 	Subject     string
 	ExpiresAt   time.Time
 }
@@ -93,6 +94,7 @@ type tokenClaims struct {
 	EventName         string        `json:"event_name"`
 	WorkflowRef       string        `json:"workflow_ref"`
 	RunID             string        `json:"run_id"`
+	RunAttempt        string        `json:"run_attempt"`
 }
 
 // Verify checks token's signature, issuer, audience and validity window, and
@@ -138,7 +140,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {
 	return Claims{
 		Repository: cl.Repository, RepositoryID: repoID, RepositoryOwnerID: ownerID,
 		Ref: cl.Ref, SHA: cl.SHA, EventName: cl.EventName,
-		WorkflowRef: cl.WorkflowRef, RunID: cl.RunID, Subject: cl.Sub,
+		WorkflowRef: cl.WorkflowRef, RunID: cl.RunID, RunAttempt: cl.RunAttempt, Subject: cl.Sub,
 		ExpiresAt: time.Unix(cl.Exp, 0),
 	}, nil
 }

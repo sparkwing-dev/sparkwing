@@ -50,6 +50,7 @@ func TestEngineClaimHTTPRepositorySelectionUsesEnrollment(t *testing.T) {
 					e, _ := engineRuntimeStore(t)
 					if kind == capability.UnitNode {
 						engineRuntimeClaim(t, e, capability.UnitTrigger)
+						engineAcceptedFixturePlan(t, e)
 						engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 					}
 					engineSQL(t, e.Store, `UPDATE runs SET repo_display='https://github.com/acme/repo' WHERE id='run'`)

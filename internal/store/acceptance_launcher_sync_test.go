@@ -72,7 +72,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	old := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: first.Award.Holder, Generation: first.Award.Generation}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "first", UID: "first-uid"}, NodeUID: "node-uid"}
+	old := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: first.Award.Holder, Generation: first.Award.Generation}}
 	for exchange := range 2 {
 		if err := reopen(); err != nil {
 			return err
@@ -81,7 +81,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		if err != nil {
 			return err
 		}
-		if len(response.Awards) != 1 || len(response.Remove) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != old.Award.ID || response.Awards[0].Binding.Generation != first.Award.Generation || response.Awards[0].Delivery != capability.DeliveryBootstrap {
+		if len(response.Awards) != 1 || len(response.Retired) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != old.Award.ID || response.Awards[0].Binding.Generation != first.Award.Generation || response.Awards[0].Delivery != capability.DeliveryBootstrap {
 			return errors.New("reopening or exchange lost the immutable launcher award")
 		}
 		if exchange == 0 {
@@ -104,7 +104,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	}
 	current := old
 	current.Award.Generation = second.Award.Generation
-	current.Job = controllerwire.LauncherJobRef{Namespace: "ci", Name: "second", UID: "second-uid"}
+
 	if err := reopen(); err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	if len(response.Awards) != 1 || response.Awards[0].Capability != "" || response.Awards[0].Binding.Generation != second.Award.Generation || len(response.Remove) != 1 || response.Remove[0] != old.Job {
+	if len(response.Awards) != 1 || response.Awards[0].Capability != "" || response.Awards[0].Binding.Generation != second.Award.Generation || len(response.Retired) != 1 || response.Retired[0] != old.Award {
 		return errors.New("stale Job cleanup selected the replacement award")
 	}
 	row, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runID, NodeID: "alpha"})

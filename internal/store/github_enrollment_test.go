@@ -33,9 +33,9 @@ func actionsSpec(t *testing.T, s *Store, team Team, run string) capability.Provi
 
 	return capability.ProvisionSpec{
 		Kind: capability.ProvisionActions, Team: string(team), RegistrationID: "github:42:7",
-		Subject:      capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:" + run},
+		Subject:      capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:" + run + ":1"},
 		Grants:       []capability.Grant{capability.NodesClaim, capability.TriggersClaim},
-		Binding:      capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: run}},
+		Binding:      capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: run, WorkflowRunAttempt: "1", WorkflowRef: "Acme/Widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}},
 		Repositories: []string{"gh:42"}, ExpiresAt: new(now.Add(time.Hour)),
 	}
 }
@@ -174,7 +174,8 @@ func TestGitHubEnrollmentRemovalFencesRootsAndDescendants(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := actionsSpec(t, tenant.s, tenant.team, "other")
-	other.RegistrationID, other.Subject.ID = "github:43:7", "github:43:7:other"
+	other.RegistrationID, other.Subject.ID = "github:43:7", "github:43:7:other:1"
+	other.Binding.Push.WorkflowRef = "acme/other/.github/workflows/sparkwing.yaml@refs/heads/main"
 	other.Binding.Push.RepositoryKey, other.Repositories = "gh:43", []string{"gh:43"}
 	if _, err := tenant.RegisterGitHubRunner(t.Context(), a, GitHubRunnerBinding{RepositoryID: 43, RepositoryOwnerID: 7, Repository: "acme/other"}); err != nil {
 		t.Fatal(err)

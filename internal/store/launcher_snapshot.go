@@ -66,7 +66,7 @@ func (s *Store) ReadLauncherAwards(ctx context.Context, authority capability.Aut
 }
 
 func launcherPrefixesTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject string) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind IN ('service','machine') AND c.subject_id=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND (c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?) AND (
+	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind IN ('service','machine') AND c.subject_id=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND `+liveCredentialSQL("c.")+` AND (
 EXISTS (SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.bind_run AND n.node_id=c.bind_node AND n.capability_prefix=c.prefix AND n.status<>'done' AND n.claimed_by IS NOT NULL)
 OR EXISTS (SELECT 1 FROM triggers t WHERE t.team=c.team AND t.id=c.bind_run AND t.capability_prefix=c.prefix AND t.status='claimed' AND t.finished_at IS NULL)
 OR EXISTS (SELECT 1 FROM eval_units e WHERE e.team=c.team AND e.run_id=c.bind_run AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.status IN ('claimed','running'))) ORDER BY c.prefix`, root.Kind, root.ID, subject, tx.now().UnixNano(), tx.now().UnixNano())
@@ -96,12 +96,9 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
-	fence := capability.LeaseRef{Kind: c.Unit, ID: c.UnitID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
-	if c.Unit == capability.UnitEval {
-		if c.Binding.Expansion == nil || c.Binding.Expansion.Kind != c.Unit || c.Binding.Expansion.ID != c.UnitID || c.Binding.Generation != unit.SourceGeneration {
-			return LauncherAward{}, false, authorityError(apierr.IntegrityFailure, "invalid persisted eval fence")
-		}
-		fence = *c.Binding.Expansion
+	fence, err := launcherFence(c)
+	if err != nil {
+		return LauncherAward{}, false, err
 	}
 	if row.team != c.Team || row.run != c.Binding.RunID || row.node != c.Binding.NodeID || row.holder != fence.Holder || row.generation != fence.Generation || row.prefix != prefix || !row.lease.Valid || row.lease.Int64 <= tx.now().UnixNano() || row.expiry.Valid && row.expiry.Int64 <= tx.now().UnixNano() {
 		return LauncherAward{}, false, nil
@@ -260,9 +257,9 @@ func launcherReservationAwardTx(ctx context.Context, tx *storeTx, root capabilit
 	if err != nil {
 		return err
 	}
-	fence := capability.LeaseRef{Kind: c.Unit, ID: c.UnitID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
-	if c.Unit == capability.UnitEval && c.Binding.Expansion != nil {
-		fence = *c.Binding.Expansion
+	fence, err := launcherFence(c)
+	if err != nil {
+		return err
 	}
 	if fence != lease || c.Parent == nil || *c.Parent != root || c.Subject != subject || c.Billing == nil || c.Delivery != capability.DeliveryBootstrap {
 		return bindingRefusal()
@@ -272,7 +269,25 @@ func launcherReservationAwardTx(ctx context.Context, tx *storeTx, root capabilit
 
 func launcherExecutor(c capability.Capability) string {
 	if capability.CloudLauncher(c) {
-		return "cloud"
+		return TierCloud
 	}
 	return "runner"
+}
+
+func launcherFence(c capability.Capability) (capability.LeaseRef, error) {
+	fence := capability.LeaseRef{Kind: c.Unit, ID: c.UnitID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+	if c.Unit == capability.UnitEval {
+		unit, err := decodeAwardUnit(c.Unit, c.UnitID)
+		if err != nil {
+			return capability.LeaseRef{}, err
+		}
+		if c.Binding.Expansion == nil || c.Binding.Expansion.Kind != c.Unit || c.Binding.Expansion.ID != c.UnitID || c.Binding.Generation != unit.SourceGeneration {
+			return capability.LeaseRef{}, authorityError(apierr.IntegrityFailure, "invalid persisted eval fence")
+		}
+		fence = *c.Binding.Expansion
+	}
+	if fence.Holder == "" || fence.Generation <= 0 {
+		return capability.LeaseRef{}, authorityError(apierr.IntegrityFailure, "invalid persisted launcher fence")
+	}
+	return fence, nil
 }

@@ -69,7 +69,8 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		if err != nil {
 			return e, err
 		}
-		e.tier, err = claimTierTx(ctx, tx, chain, seal.Request)
+		facts, err := claimantFactsTx(ctx, tx, chain, seal.Request)
+		e.tier = facts.Tier
 		e.failed, e.refused = stepTier, errTierOutsideRanking
 		return e, err
 	case refusal(err):
@@ -116,10 +117,6 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 func refusal(err error) bool {
 	var denied *apierr.Error
 	return errors.As(err, &denied) && (denied.Code == apierr.Forbidden || denied.Code == apierr.Unauthenticated)
-}
-
-func rankedObservable(c capability.Capability) bool {
-	return registeredClaimant(c) || actionsClaimant(c) || launcherClaimant(c) || localClaimant(c)
 }
 
 func localClaimant(c capability.Capability) bool {

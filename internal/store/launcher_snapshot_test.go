@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"testing/quick"
 	"time"
@@ -298,5 +299,33 @@ func TestLauncherReservationOwnershipProperty(t *testing.T) {
 	}
 	if err := quick.Check(check, &quick.Config{MaxCount: 90}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLauncherPreparationRefusesEvalWithoutLease(t *testing.T) {
+	s, demand, claim, _ := launcherSnapshotFixture(t, capability.UnitEval)
+	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
+	awards, err := s.ReadLauncherAwards(t.Context(), root, nil)
+	if err != nil || len(awards) != 1 {
+		t.Fatalf("initial award: %v", err)
+	}
+	c := awards[0].Capability
+	c.Binding.Expansion = nil
+	body, err := json.Marshal(CapabilityRecord{Version: 1, Value: c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET authority_json=?,eval_unit_generation=NULL WHERE prefix=?`, body, c.Prefix)
+	fence := capability.LeaseRef{Kind: c.Unit, ID: c.UnitID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+	prepared, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence})
+	if err == nil || len(prepared) != 0 {
+		t.Fatal("source generation was accepted as an eval lease")
+	}
+	var expires int64
+	if err := s.db.QueryRowContext(t.Context(), `SELECT lease_expires_at FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	if expires != claim.Award.LeaseExpiresAt.UnixNano() {
+		t.Fatal("invalid eval lease changed persisted preparation")
 	}
 }

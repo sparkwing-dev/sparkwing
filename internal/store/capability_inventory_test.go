@@ -93,7 +93,7 @@ func TestCapabilityInventoryOwnershipProperty(t *testing.T) {
 		c.Subject.ID = []string{"member", "other"}[rng.IntN(2)]
 		c.Audience = []capability.Audience{capability.Controller, capability.NodeHost}[rng.IntN(2)]
 		if rng.IntN(3) == 0 {
-			c.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "repo", Ref: "main", SHA: "sha", WorkflowRunID: "workflow"}}
+			c.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "repo", Ref: "main", SHA: "sha", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 		}
 		if rng.IntN(4) == 0 {
 			c.RevokedAt = new(s.now().Add(-time.Minute))
@@ -225,7 +225,7 @@ func inventoryMemberRoot(t *testing.T, s *Store, actor Actor) capability.Issued 
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &actor.Authority, Team: p.Capability.Team, Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
+	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &actor.Authority, Team: p.Capability.Team, Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,9 +426,8 @@ func TestCapabilityRotationDeadlinesAndAncestryProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		generations, err := s.AuthGenerations(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}, "a")
-		if err != nil || len(generations.Authorities) != 1 || generations.Authorities[0].Generation != 1 {
-			t.Fatalf("rotation generation: %+v %v", generations, err)
+		if _, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}); err != nil {
+			t.Fatalf("rotation ended predecessor before grace: %v", err)
 		}
 		end := start.Add(grace)
 		for _, at := range []time.Time{start, end.Add(-time.Nanosecond), end, end.Add(time.Nanosecond)} {
@@ -678,7 +677,7 @@ func TestCapabilityRotationBearerCannotExtendExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	expiry := s.now().Add(time.Hour).Truncate(time.Second)
-	old, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
+	old, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,7 +712,7 @@ func TestCapabilityRotationSessionMayExtendExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	expiry := s.now().Add(time.Hour).Truncate(time.Second)
-	old, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
+	old, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +729,7 @@ func adminRotationToken(t *testing.T, s *Store, owner Actor, expiry time.Time) c
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &owner.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, ExpiresAt: &expiry})
+	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &owner.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}

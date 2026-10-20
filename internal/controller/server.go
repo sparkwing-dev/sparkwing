@@ -335,7 +335,10 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) handler() http.Handler {
 	router := s.routers()
 	router.HandleFunc("/", s.writeRouteMiss)
-	return s.observedHandler(router)
+	next := s.observedHandler(router)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(s.placementContext(r.Context())))
+	})
 }
 
 func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux) http.Handler {
@@ -761,4 +764,8 @@ type flushingStatusRecorder struct {
 
 func (r *flushingStatusRecorder) Flush() {
 	r.ResponseWriter.(http.Flusher).Flush()
+}
+
+func (s *Server) placementContext(ctx context.Context) context.Context {
+	return store.WithClaimPlacement(ctx, store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
 }

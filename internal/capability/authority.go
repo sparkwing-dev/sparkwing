@@ -18,7 +18,7 @@ type ConsoleProof struct{ Session AuthorityRef }
 func ConsoleAuthority(p Principal, configured bool, now time.Time, lifetime time.Duration) bool {
 	c := p.Capability
 	return configured && p.DirectAccountSession() && c.Audience == Controller &&
-		(c.ExpiresAt == nil || now.Before(*c.ExpiresAt)) && (c.RevokedAt == nil || now.Before(*c.RevokedAt)) &&
+		CredentialAlive(c, now) &&
 		(lifetime <= 0 || now.Before(c.IssuedAt.Add(lifetime)))
 }
 

@@ -105,11 +105,11 @@ func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized
 }
 
 // ConfirmGitCredentialFor confirms only the currently pinned host fingerprint.
-func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, fingerprint string) (GitCredential, error) {
+func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, repository, fingerprint string) (GitCredential, error) {
 	var out GitCredential
 	err := t.mutateCredentials(ctx, a, func(tx *storeTx, _ string) error {
 		var err error
-		out, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=?`+tx.forUpdate(), t.team, host))
+		out, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=? AND repository_key=?`+tx.forUpdate(), t.team, host, repository))
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -137,9 +137,9 @@ func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Autho
 }
 
 // RemoveGitCredential deletes a host credential under current administration authority.
-func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host string) error {
+func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host, repository string) error {
 	return t.mutateCredentials(ctx, a, func(tx *storeTx, _ string) error {
-		result, err := tx.ExecContext(ctx, `DELETE FROM git_credentials WHERE team=? AND host=?`, t.team, host)
+		result, err := tx.ExecContext(ctx, `DELETE FROM git_credentials WHERE team=? AND host=? AND repository_key=?`, t.team, host, repository)
 		return credentialRowChanged(result, err)
 	})
 }

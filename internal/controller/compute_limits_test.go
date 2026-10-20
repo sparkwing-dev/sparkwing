@@ -211,7 +211,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 	f := newCreditsFixture(t)
 	ctx := context.Background()
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
-	writer, _, err := teststore.ProvisionCredential(ctx, f.store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "pool"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.control", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
+	writer, _, err := teststore.ProvisionCredential(ctx, f.store, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "pool"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.control", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
 	if err != nil {
 		t.Fatalf("mint a writer for the metered principal: %v", err)
 	}

@@ -80,7 +80,7 @@ func TestBurstOverflowAPIUsesAuthenticatedAccount(t *testing.T) {
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 	engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('session','account','runs.read,runs.write',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"}
-	issued, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestBurstOverflowAPIUsesAuthenticatedAccount(t *testing.T) {
 		t.Fatal("budget clear failed")
 	}
 	call("PUT", `{"monthly_minutes":-1}`, http.StatusBadRequest)
-	writeOnly, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	writeOnly, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	h := server.Handler()
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	member, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	member, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

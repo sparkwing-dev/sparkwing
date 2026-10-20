@@ -60,8 +60,7 @@ func AuthorizeSourceRelease(request SourceReleaseRequest, now time.Time) (Source
 	if c.Audience != Controller {
 		return SourceReleaseAudit{}, forbidden(apierr.ReasonAudience)
 	}
-	if c.RevokedAt != nil && !now.Before(*c.RevokedAt) || c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) ||
-		c.Binding.Deadline != nil && !now.Before(*c.Binding.Deadline) {
+	if !CredentialAlive(c, now) {
 		return SourceReleaseAudit{}, unauthenticated()
 	}
 	executor := request.Executor

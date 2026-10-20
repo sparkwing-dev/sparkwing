@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
@@ -84,13 +85,9 @@ func redirectAllowlist(raw string) ([]string, error) {
 			parsed.RawQuery != "" || parsed.Fragment != "" {
 			return nil, fmt.Errorf("--oauth-redirect-uris: %q is not an absolute http(s) URL without a query", u)
 		}
-		if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		if parsed.Scheme == "http" && !originguard.LoopbackHost(parsed.Host) {
 			return nil, fmt.Errorf("--oauth-redirect-uris: %q uses http on a host that is not loopback", u)
 		}
 	}
 	return uris, nil
-}
-
-func isLoopbackHost(host string) bool {
-	return host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".localhost")
 }

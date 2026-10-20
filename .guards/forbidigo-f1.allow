@@ -52,8 +52,6 @@ internal/controller/deletion.go	AsOperator
 internal/controller/egress.go	AsOperator
 internal/controller/egress.go	AsOperator
 internal/controller/egress.go	ForTeam
-internal/controller/engine.go	ForTeam
-internal/controller/engine.go	ForTeam
 internal/controller/engine_claim.go	ForTeam
 internal/controller/engine_intake.go	ForTeam
 internal/controller/engine_jobs.go	ForTeam

@@ -47,7 +47,7 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref, fence := launcherFence(t, s, demand, claim, capability.UnitNode)
+	ref, fence := launcherMeteredFence(t, s, demand, claim, capability.UnitNode)
 	awards, err := s.ReadLauncherAwards(t.Context(), ref, nil)
 	if err != nil || len(awards) != 1 {
 		t.Fatalf("pool reconciliation: %+v %v", awards, err)

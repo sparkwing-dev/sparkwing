@@ -112,7 +112,7 @@ func FuzzOwnerProcessCannotOutliveItsAuthority(f *testing.F) {
 		case 1:
 			parent.snapshot.Binding.RunFinished = true
 		case 2:
-			parent.snapshot.Authorities[0].MembershipValid = false
+			parent.snapshot.Authorities[0].Principal.Capability.RevokedAt = &parent.snapshot.Now
 		case 3:
 			parent.snapshot.Authorities[0].Principal.Capability.RevokedAt = &parent.snapshot.Now
 		case 4:

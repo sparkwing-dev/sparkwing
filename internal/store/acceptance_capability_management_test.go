@@ -34,7 +34,7 @@ func checkStoreCapabilityManagement(t *testing.T) (err error) {
 	}
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: string(team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: string(team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		return err
 	}

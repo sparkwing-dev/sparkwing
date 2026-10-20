@@ -72,8 +72,8 @@ func newKeyRotationFixture(t *testing.T, st *store.Store) *keyRotationFixture {
 		if err := teststore.SeedSecret(st, team, store.Secret{Name: "TOKEN", Pipeline: "build", Masked: true, Principal: "seed", Value: seal(t, f.old, secrets.PurposeSecret, team, "TOKEN", "build", "secret-"+string(team))}, now); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO git_credentials(id,team,host,kind,secret,created_at,updated_at) VALUES ($1,$2,'git.example','https',$3,1,1)`,
-			"gc-"+string(team), team, seal(t, f.old, secrets.PurposeGitCredential, team, "git-credential:git.example", "git-credential", "git-"+string(team))); err != nil {
+		if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO git_credentials(host_wide,id,team,host,kind,secret,created_at,updated_at) VALUES (1,$1,$2,'git.example','https',$3,1,1)`,
+			"gc-"+string(team), team, seal(t, f.old, secrets.PurposeGitCredential, team, "git-credential:git.example", "git-credential:host:git.example", "git-"+string(team))); err != nil {
 			t.Fatal(err)
 		}
 		seedRun(t, st, forTeam(t, st, team), "run-"+string(team), "build")
@@ -124,7 +124,7 @@ func (f *keyRotationFixture) opensUnder(t *testing.T, c *secrets.Cipher) (secret
 		if v, err := c.OpenBound(secrets.PurposeSecret, string(team), "TOKEN", "build", false, true, secret); err == nil && v == "secret-"+string(team) {
 			secretsOpen++
 		}
-		if v, err := c.OpenBound(secrets.PurposeGitCredential, string(team), "git-credential:git.example", "git-credential", false, true, cred); err == nil && v == "git-"+string(team) {
+		if v, err := c.OpenBound(secrets.PurposeGitCredential, string(team), "git-credential:git.example", "git-credential:host:git.example", false, true, cred); err == nil && v == "git-"+string(team) {
 			git++
 		}
 		if v, err := c.OpenBound(secrets.PurposeRunEnvironment, string(team), "run-"+string(team), "run-environment", false, true, run); err == nil && v == "env-"+string(team) {

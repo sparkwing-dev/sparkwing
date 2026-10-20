@@ -109,6 +109,7 @@ func (i *Issuer) sign(key *rsa.PrivateKey, job Job, audience string, override ma
 		"event_name":          event,
 		"workflow_ref":        job.Repository + "/.github/workflows/sparkwing.yaml@" + ref,
 		"run_id":              runID,
+		"run_attempt":         "1",
 	}
 	for k, v := range override {
 		if v == nil {

@@ -1126,8 +1126,6 @@ All capability names below are in `internal/capability`.
 | `AuthenticationReader.ReadAuthentication` | Load committed facts for the verifier, including the awarded team's membership and cross-team ancestors. |
 | `NewAuthenticator`, `ValidateAuthority` | Verify fresh snapshots and share ancestry checks with transactional authority resolution. |
 | `AuthorityResolver.ResolveAuthority` | Resolve tagged capability/session authority and recheck ancestry and membership inside the store transaction. |
-| `AuthorityGeneration`, `AuthGenerations`, `AuthCacheEntry` | Bind cached credential facts to every ancestor and the awarded team's membership generation. |
-| `AuthCacheEntry.Reusable` | Require a fresh complete generation vector, an unexpired credential and age strictly below the shared cache TTL. |
 | `Authenticator.Authenticate` | Validate identity and ancestry using route-specific liveness. |
 | `LiveAccess`, `Authenticated` | Preserve which alternatives passed liveness for the matched route. |
 | `BindingChecker.CheckBinding` | Resolve relational authority in the store or sealed node-host plan. |
@@ -1343,14 +1341,9 @@ session, origin, CSRF, nonce and account-link rules. Signed object routes
 check the URL's exact key, method, expiry, size and digest as applicable.
 They do not accept a capability as a substitute for the signature.
 
-Authentication caches have a five-second maximum age, owned by
-`limits.AuthCacheTTL`. Every reuse reads C1's current `AuthGenerations` and
-requires equality for the full capability/session ancestry and the awarded
-team's membership generation. The ancestry includes cross-team launcher
-roots. Missing ancestors, changed generations or a failed generation read
-refuse cache reuse. Revocation and membership changes advance the affected
-generations in the same transaction. Expiry, route liveness and binding fences
-are rechecked on each request. TTL never substitutes for generation checks.
+Authentication reads fresh authority and binding facts for every request.
+The store checks the complete ancestry, current membership and the recorded
+membership epoch before granting access.
 
 ### Authentication read boundary
 
@@ -1370,8 +1363,7 @@ The original here Award also requires its immediate requester's current
 `ValidateAuthority` supplies these checks to the transactional resolver too.
 
 The verifier reads a fresh snapshot for each request. It does not cache
-authority or liveness. An adapter that later caches facts must still satisfy
-`AuthCacheEntry.Reusable` and read fresh liveness on every request.
+authority or liveness.
 
 `Presentation.Evidence` supplies decoded selectors and the exact request-body
 SHA-256. The verifier supplies method and pattern from the matched route.
@@ -2472,7 +2464,7 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 | Other area | Types it must match |
 | --- | --- |
-| C1 data | `Capability`, `AuthorityRef`, `AuthorityResolver`, `AuthGenerations`, `VerifiedPaymentEvent`, `UnitKind`, `AwardPurpose`, `DeliveryPurpose`, `Binding`, `LeaseRef`, `IssueRequest`, `BillingProvenance`, `BillableInterval`, `BillingSettlement`, `DataScope`, `DataTarget`, `SourceReleaseAudit`; implement `BindingChecker` and `DataAccessChecker`, use the existing transaction wrapper in `Store.Issue`. |
+| C1 data | `Capability`, `AuthorityRef`, `AuthorityResolver`, `VerifiedPaymentEvent`, `UnitKind`, `AwardPurpose`, `DeliveryPurpose`, `Binding`, `LeaseRef`, `IssueRequest`, `BillingProvenance`, `BillableInterval`, `BillingSettlement`, `DataScope`, `DataTarget`, `SourceReleaseAudit`; implement `BindingChecker` and `DataAccessChecker`, use the existing transaction wrapper in `Store.Issue`. |
 | C3 protocol and SDK | `apierr.Code`, `apierr.Error`, `apierr.Envelope`, `Audience`, `Binding`, `DelegateSpec`, `Authenticated`, `Authorized`, `Routes`; node-host admission and hello use the same fence and grant rules. |
 | C4 surface and config | `Routes`, `Grant`, `CredentialRule`, `ProvisionSpec`, `DataSigner`, `ObjectToSign`, `BillingRules`, `PaymentConfig`; own the TTLs, billing minimum constants, local peer identity, private files and profile options. |
 | T1 acceptance | `Routes`, `AwardPolicies`, `LivenessPolicies`, `apierr.Codes`, `Store.Issue`, `Authenticator`, `Authorize`, `AuthorizeData`, `AuthorizeSourceRelease`; runtime tests need the persistent adapters and final controller cutover. |

@@ -6,6 +6,8 @@ export type GitCredentialKind = "ssh" | "https";
 // never returns the private key or token.
 export interface GitCredential {
   host: string;
+  repository: string;
+  host_wide: boolean;
   kind: GitCredentialKind;
   username?: string;
   fingerprint?: string;
@@ -22,6 +24,8 @@ export interface StoredGitCredential extends GitCredential {
 
 export interface GitCredentialRelease {
   host: string;
+  repository: string;
+  host_wide: boolean;
   run_id: string;
   runner: string;
   token_prefix: string;
@@ -30,6 +34,8 @@ export interface GitCredentialRelease {
 
 export interface GitCredentialDraft {
   host: string;
+  repository: string;
+  host_wide: boolean;
   kind: GitCredentialKind;
   privateKey: string;
   port: string;
@@ -37,12 +43,14 @@ export interface GitCredentialDraft {
   username: string;
 }
 
-export type GitCredentialWriteBody =
+export type GitCredentialWriteBody = { repository: string; host_wide: boolean } & (
   | { host: string; kind: "ssh"; private_key: string; port?: number }
-  | { host: string; kind: "https"; token: string; username?: string };
+  | { host: string; kind: "https"; token: string; username?: string });
 
 export const emptyDraft: GitCredentialDraft = {
   host: "",
+  repository: "",
+  host_wide: false,
   kind: "ssh",
   privateKey: "",
   port: "",
@@ -53,7 +61,7 @@ export const emptyDraft: GitCredentialDraft = {
 export const defaultHTTPSUsername = "x-access-token";
 
 export const recipientsHelp =
-  "Shared runners and Cloud work receive a team's git credentials. Personal machines never do; they use their owner's own git access.";
+  "Shared runners and Cloud work receive credentials for the run's repository. Actions runners use their own checkout credentials. Personal machines never do; they use their owner's own git access.";
 
 export function normalizeHost(host: string): string {
   return host.trim().toLowerCase();
@@ -97,6 +105,8 @@ const printable = /^[!-~]+$/;
 export function draftProblem(draft: GitCredentialDraft): string | null {
   const host = hostProblem(draft.host);
   if (host) return host;
+  if (!draft.host_wide && !draft.repository.trim()) return "Enter the repository key, or allow all repositories on this host.";
+  if (draft.host_wide && draft.repository.trim()) return "A host-wide credential cannot name one repository.";
   if (draft.kind === "ssh") {
     if (!draft.privateKey.includes("PRIVATE KEY")) {
       return "Paste an unencrypted PEM or OpenSSH private key.";
@@ -115,22 +125,11 @@ export function draftProblem(draft: GitCredentialDraft): string | null {
 }
 
 export function draftBody(draft: GitCredentialDraft): GitCredentialWriteBody {
-  const host = normalizeHost(draft.host);
+  const common = {host: normalizeHost(draft.host), repository: draft.repository.trim(), host_wide: draft.host_wide};
   if (draft.kind === "ssh") {
-    const port = draft.port.trim();
-    return port === ""
-      ? { host, kind: "ssh", private_key: draft.privateKey }
-      : {
-          host,
-          kind: "ssh",
-          private_key: draft.privateKey,
-          port: Number(port),
-        };
+    return {...common, kind: "ssh", private_key: draft.privateKey, ...(draft.port.trim() ? {port: Number(draft.port.trim())} : {})};
   }
-  const username = draft.username.trim();
-  return username === ""
-    ? { host, kind: "https", token: draft.token }
-    : { host, kind: "https", token: draft.token, username };
+  return {...common, kind: "https", token: draft.token, ...(draft.username.trim() ? {username: draft.username.trim()} : {})};
 }
 
 // A known_hosts line names a non-default port as "[host]:port", so replacing
@@ -146,6 +145,8 @@ export function updateDraft(row: GitCredential): GitCredentialDraft {
   return {
     ...emptyDraft,
     host: row.host,
+    repository: row.repository,
+    host_wide: row.host_wide,
     kind: row.kind,
     port: row.kind === "ssh" ? portFromHostKey(row.host_key) : "",
     username: row.kind === "https" ? (row.username ?? "") : "",
@@ -168,9 +169,10 @@ export function sortCredentials(rows: GitCredential[]): GitCredential[] {
 export function existingCredential(
   rows: GitCredential[],
   host: string,
+  repository: string,
 ): GitCredential | undefined {
   const h = normalizeHost(host);
-  return rows.find((r) => r.host === h);
+  return rows.find((r) => r.host === h && r.repository === repository.trim());
 }
 
 const seg = encodeURIComponent;
@@ -199,20 +201,21 @@ export async function putGitCredential(
 export async function confirmGitCredential(
   host: string,
   fingerprint: string,
+  repository: string,
 ): Promise<GitCredential> {
   const res = await send(
     "POST",
-    `/api/v1/team/git-credentials/${seg(host)}/confirm`,
+    `/api/v1/team/git-credentials/${seg(host)}/confirm?repository=${seg(repository)}`,
     `Confirm the host key of ${host}`,
     { fingerprint },
   );
   return (await res.json()) as GitCredential;
 }
 
-export async function deleteGitCredential(host: string): Promise<void> {
+export async function deleteGitCredential(host: string, repository: string): Promise<void> {
   await send(
     "DELETE",
-    `/api/v1/team/git-credentials/${seg(host)}`,
+    `/api/v1/team/git-credentials/${seg(host)}?repository=${seg(repository)}`,
     `Delete the credential for ${host}`,
   );
 }

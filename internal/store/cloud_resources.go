@@ -35,7 +35,7 @@ func (s *Store) CloudAwardResources(ctx context.Context, ref capability.Authorit
 		}
 		return &allocation, nil
 	}
-	if c.Billing == nil || c.Billing.ExecutorClass != "cloud" {
+	if c.Billing == nil || c.Billing.ExecutorClass != TierCloud {
 		return nil, tx.Commit()
 	}
 	if !c.Billing.Metered {

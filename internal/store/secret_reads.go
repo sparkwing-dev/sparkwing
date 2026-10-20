@@ -75,7 +75,7 @@ func (t *Tenant) authorizeSecretReadTx(ctx context.Context, tx *storeTx, a capab
 	}
 	states := make([]capability.AuthorityState, len(chain))
 	for i, node := range chain {
-		states[i] = capability.AuthorityState{Principal: node.principal, MembershipValid: true}
+		states[i] = capability.AuthorityState{Principal: node.principal}
 	}
 	p, err := capability.ValidateAuthority(states, tx.now())
 	if err != nil {

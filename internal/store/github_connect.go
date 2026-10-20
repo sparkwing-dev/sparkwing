@@ -64,6 +64,21 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		if row.Team != "" && row.Team != t.team || row.ConnectedBy != "" && row.ConnectedBy != p.Capability.Subject.ID || row.GitHubUserID <= 0 || strconv.FormatInt(row.GitHubUserID, 10) != subject || row.AccountType != "User" && row.AccountType != "Organization" {
 			return bindingRefusal()
 		}
+		if row.Reclaim {
+			previous, err := githubInstallationOwnerTx(ctx, tx, row.InstallationID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if err == nil && previous != string(t.team) {
+				prior := &Tenant{s: t.s, team: Team(previous)}
+				if err := prior.unbindGitHubAppInstallationTx(ctx, tx, row.InstallationID); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=?`, previous, row.InstallationID); err != nil {
+					return err
+				}
+			}
+		}
 		row.ConnectedBy = p.Capability.Subject.ID
 		var err error
 		out, err = t.bindGitHubInstallationTx(ctx, tx, row, tx.now())
@@ -73,4 +88,10 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		return GitHubAppInstallation{}, err
 	}
 	return out, nil
+}
+
+func githubInstallationOwnerTx(ctx context.Context, tx *storeTx, installation int64) (string, error) {
+	var owner string
+	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`+tx.forUpdate(), installation).Scan(&owner)
+	return owner, err
 }

@@ -206,9 +206,10 @@ linters:
             - "!$test"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/runners
-              desc: "internal/runners/* are the execution backends. Only internal/cluster, internal/wingd/localcontroller and cmd/sparkwing select one; service installers import internal/runners/service/unitfile alone."
+              desc: "internal/runners/* are the execution backends. Only internal/cluster, internal/wingd/localcontroller and cmd/sparkwing select one; service installers import internal/runners/service/unitfile, and award validation is the shared leaf internal/runners/award."
           allow:
             - github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile
+            - github.com/sparkwing-dev/sparkwing/internal/runners/award
 
     forbidigo:
       analyze-types: true

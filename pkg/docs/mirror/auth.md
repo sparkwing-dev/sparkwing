@@ -310,8 +310,17 @@ Shared runners require current team administration for enrollment, token
 rotation and revocation. Members enroll their own personal machines through
 `sparkwing runners add --personal --session-stdin` with an independent account
 session. The team setting `members_can_add_machines` defaults to true. When it
-is false, personal enrollment requires administration too. Existing machines
-keep their owner-only claim scope until explicitly revoked.
+is false, personal enrollment requires administration too. A personal runner
+records the membership epoch, grant and setting that authorized enrollment.
+Every use checks them again. Removing and re-adding the member cannot revive
+an old credential. Shared runners belong to the team and survive the
+registrar's demotion or removal. An administrator revokes them.
+
+Member tokens expire within 90 days and remain children of the minting session,
+so logout ends their authority. `team.admin` requires `--allow-team-admin`
+(`allow_team_admin` in the API) and expires within 30 days. Omitted expiry uses
+the applicable ceiling. A requested expiry beyond that ceiling is refused.
+Invitation acceptance checks that the inviter still holds team administration.
 
 `GET /api/v1/team/settings` returns `members_can_add_machines` and
 `claim_ranking` under `runs.read`. `PUT /api/v1/team/settings` requires
@@ -407,7 +416,7 @@ not identify a human, runner or administrator. The issuer records the subject,
 team, exact grants, binding and lifetime.
 
 The lookup key is SHA-256 of the complete reference token. Metadata carries a
-public `prefix` for selection and audit. Creation and rotation return the raw
+16-character public `prefix` for selection and audit. Creation and rotation return the raw
 bearer once. Metadata lists contain no bearer.
 
 Credentials travel in memory, a private file read by the process, or the private
@@ -627,7 +636,7 @@ runner enrollment or operator-console authority.
 
 A live seed can be reused while setup is unfinished. Issuing the first real
 deployment administrator closes the gate, revokes the seed and its descendants,
-and advances revocation generation in one transaction. Remove the mounted seed
+in one transaction. Remove the mounted seed
 after that handoff. A seed left mounted after its handoff only logs a warning
 at startup, because its digest matches the one that bootstrapped the store; a
 different seed still stops startup. An empty input provisions nothing. Private

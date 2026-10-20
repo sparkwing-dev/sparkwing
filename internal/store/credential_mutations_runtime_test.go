@@ -35,14 +35,14 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 	if err != nil || openSecretFixture(t, tenant, second) != "replacement" || second.Principal != "replacement-author" || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.Equal(now) {
 		t.Fatalf("replacement: %+v %v", second, err)
 	}
-	c, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{Host: "git.test", Kind: GitCredentialSSH, Secret: "sealed", Fingerprint: "SHA256:key"}))
+	c, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: "git.test", Kind: GitCredentialSSH, Secret: "sealed", Fingerprint: "SHA256:key"}))
 	if err != nil || c.ID == "" || c.Team != tenant.team || c.CreatedBy != "owner" || c.ConfirmedAt != nil || !c.CreatedAt.Equal(now) {
 		t.Fatalf("git: %+v %v", c, err)
 	}
-	if row, err := tenant.ConfirmGitCredentialFor(t.Context(), a, c.Host, "wrong"); !errors.Is(err, ErrFingerprintMismatch) || row.ID != "" {
+	if row, err := tenant.ConfirmGitCredentialFor(t.Context(), a, c.Host, "", "wrong"); !errors.Is(err, ErrFingerprintMismatch) || row.ID != "" {
 		t.Fatalf("mismatched confirmation: %+v %v", row, err)
 	}
-	c, err = tenant.ConfirmGitCredentialFor(t.Context(), a, c.Host, c.Fingerprint)
+	c, err = tenant.ConfirmGitCredentialFor(t.Context(), a, c.Host, "", c.Fingerprint)
 	if err != nil || c.ConfirmedAt == nil || !c.ConfirmedAt.Equal(now) {
 		t.Fatalf("confirmation: %+v %v", c, err)
 	}
@@ -59,13 +59,13 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 	if err := tenant.RemoveSecret(t.Context(), a, sec.Name, sec.Pipeline); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.RemoveGitCredential(t.Context(), a, c.Host); err != nil {
+	if err := tenant.RemoveGitCredential(t.Context(), a, c.Host, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.RemoveSecret(t.Context(), a, sec.Name, sec.Pipeline); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing secret: %v", err)
 	}
-	if err := tenant.RemoveGitCredential(t.Context(), a, c.Host); !errors.Is(err, ErrNotFound) {
+	if err := tenant.RemoveGitCredential(t.Context(), a, c.Host, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing git: %v", err)
 	}
 }
@@ -99,16 +99,16 @@ func TestCredentialMutationsAuthorityProperty(t *testing.T) {
 		if err := target.WriteSecret(t.Context(), a, sealedSecretFixture(t, &target, Secret{Name: name, Value: "sealed"})); err == nil {
 			t.Fatalf("write %d passed invalid authority", i)
 		}
-		row, err := target.WriteGitCredential(t.Context(), a, sealedGitFixture(t, &target, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "sealed"}))
+		row, err := target.WriteGitCredential(t.Context(), a, sealedGitFixture(t, &target, GitCredential{HostWide: true, Host: "git.test", Kind: GitCredentialHTTPS, Secret: "sealed"}))
 		if err == nil || row.ID != "" {
 			t.Fatalf("git write %d returned a row: %+v %v", i, row, err)
 		}
-		for _, err := range []error{target.RemoveSecret(t.Context(), a, name, ""), target.RemoveGitCredential(t.Context(), a, "git.test")} {
+		for _, err := range []error{target.RemoveSecret(t.Context(), a, name, ""), target.RemoveGitCredential(t.Context(), a, "git.test", "")} {
 			if err == nil || errors.Is(err, ErrNotFound) {
 				t.Fatalf("delete %d did not refuse authority first: %v", i, err)
 			}
 		}
-		if row, err := target.ConfirmGitCredentialFor(t.Context(), a, "git.test", "key"); err == nil || errors.Is(err, ErrNotFound) || row.ID != "" {
+		if row, err := target.ConfirmGitCredentialFor(t.Context(), a, "git.test", "", "key"); err == nil || errors.Is(err, ErrNotFound) || row.ID != "" {
 			t.Fatalf("confirmation %d did not refuse authority: %+v %v", i, row, err)
 		}
 	}
@@ -118,15 +118,15 @@ func TestCredentialMutationsAuthorityProperty(t *testing.T) {
 
 func TestCredentialMutationsFailedReplacementPreservesPreviousRow(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
-	before, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "old"}))
+	before, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: "git.test", Kind: GitCredentialHTTPS, Secret: "old"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_credential BEFORE INSERT ON git_credentials BEGIN SELECT RAISE(ABORT,'refused'); END`)
-	if row, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "new"})); err == nil || row.ID != "" {
+	if row, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: "git.test", Kind: GitCredentialHTTPS, Secret: "new"})); err == nil || row.ID != "" {
 		t.Fatalf("failed replacement: %+v %v", row, err)
 	}
-	after, err := tenant.GitCredentialForHost(t.Context(), before.Host)
+	after, err := tenant.GitCredentialForRepository(t.Context(), "", before.Host)
 	if err != nil || after.ID != before.ID || after.Secret != before.Secret {
 		t.Fatalf("replacement was partially committed: %+v %v", after, err)
 	}
@@ -142,7 +142,7 @@ func TestCredentialMutationsRecheckAuthorityAfterWriting(t *testing.T) {
 				err = tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: "KEY", Value: "sealed"}))
 			} else {
 				var row GitCredential
-				row, err = tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "sealed"}))
+				row, err = tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: "git.test", Kind: GitCredentialHTTPS, Secret: "sealed"}))
 				if row.ID != "" {
 					t.Fatal("failed commit returned credential")
 				}

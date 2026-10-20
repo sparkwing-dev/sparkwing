@@ -87,7 +87,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	if err := json.Unmarshal(private.Body.Bytes(), &snapshot); err != nil || snapshot.Run.Request.Request.RequestedArgs["token"] != "s3cret" {
 		t.Fatalf("private snapshot: %s: %v", private.Body, err)
 	}
-	reader, _, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	reader, _, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}

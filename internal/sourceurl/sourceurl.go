@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 )
 
 var scpLikeRE = regexp.MustCompile(`^[A-Za-z0-9._-]+@([^:]+):(.+)$`)
@@ -32,6 +34,9 @@ func ValidateCloneURL(raw string) (string, error) {
 	// safety: git reads a leading dash as an option rather than a repository.
 	if strings.HasPrefix(raw, "-") {
 		return "", fmt.Errorf("repo URL must not begin with '-'")
+	}
+	if err := envredact.ValidateSourceReference(raw); err != nil {
+		return "", err
 	}
 	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
 		// safety: ssh splits the destination at the last '@', so a capture that still holds
@@ -60,13 +65,7 @@ func ValidateCloneURL(raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("repo URL scheme %q is not allowed", u.Scheme)
 	}
-	if u.Scheme == "https" && u.User != nil {
-		return "", fmt.Errorf("repo URL must not include userinfo")
-	}
 	if u.Scheme == "ssh" && u.User != nil {
-		if _, ok := u.User.Password(); ok {
-			return "", fmt.Errorf("repo URL must not include userinfo password")
-		}
 		// safety: the userinfo becomes the leading token of the ssh destination argument.
 		if strings.HasPrefix(u.User.Username(), "-") {
 			return "", fmt.Errorf("repo URL userinfo must not begin with '-'")
@@ -83,22 +82,6 @@ func ValidateCloneURL(raw string) (string, error) {
 
 func isControl(r rune) bool {
 	return r < 0x20 || r == 0x7f
-}
-
-func Redact(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
-		return "redacted@" + match[1] + ":" + match[2]
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
-		return raw
-	}
-	u.User = url.User("redacted")
-	return u.String()
 }
 
 func validateHost(host string) error {

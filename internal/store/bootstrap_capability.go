@@ -63,7 +63,7 @@ func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.P
 			return err
 		}
 		if prefix != "" {
-			if prefix != spec.Seed[:16] {
+			if prefix != spec.Seed[:CredentialPrefixLength] {
 				return authorityError(apierr.Conflict, "bootstrap has already been consumed")
 			}
 			var digest string
@@ -122,7 +122,7 @@ func hasDeploymentAdministratorTx(ctx context.Context, tx *storeTx) (bool, error
 		if err == nil {
 			states := make([]capability.AuthorityState, len(chain))
 			for i, node := range chain {
-				states[i] = capability.AuthorityState{Principal: node.principal, MembershipValid: true}
+				states[i] = capability.AuthorityState{Principal: node.principal}
 			}
 			p, err = capability.ValidateAuthority(states, tx.now())
 		}

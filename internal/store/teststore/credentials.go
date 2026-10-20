@@ -29,6 +29,7 @@ func ProvisionCredential(ctx context.Context, st *store.Store, spec capability.P
 	}
 	ref := root.Authority
 	if spec.Kind == capability.ProvisionMember {
+		spec.AllowTeamAdmin = true
 		if err := seedCredentialMember(ctx, st, spec.Team, spec.Subject.ID); err != nil {
 			return "", nil, err
 		}

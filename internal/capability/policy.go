@@ -205,7 +205,6 @@ type AuthorityResolver interface {
 }
 
 // Authenticator rechecks ancestor and binding liveness using the matched route's classes.
-// Auth caches obey limits.AuthCacheTTL and compare the complete AuthGenerations on every reuse.
 type Authenticator interface {
 	Authenticate(context.Context, Presentation, RoutePolicy) (Authenticated, error)
 }

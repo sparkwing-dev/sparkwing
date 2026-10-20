@@ -131,7 +131,7 @@ func TestCredentialMaintenanceHTTPRequiresLiveAuthority(t *testing.T) {
 				case "expired":
 					p.Capability.ExpiresAt, code = &b.snapshot.Now, apierr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].MembershipValid, code = false, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
 				case "grant":
 					p.Capability.Grants = nil
 				case "machine":
@@ -194,7 +194,7 @@ func TestCredentialRotationHTTPPreservesTenantAndRowBindings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		git := store.GitCredential{ID: "credential", Team: "team", Host: "git.invalid", Kind: store.GitCredentialHTTPS, Secret: sealed, CreatedBy: "owner"}
+		git := store.GitCredential{HostWide: true, ID: "credential", Team: "team", Host: "git.invalid", Kind: store.GitCredentialHTTPS, Secret: sealed, CreatedBy: "owner"}
 		b := authorityMember()
 		f := &credentialMaintenance{team: "team", secrets: []store.Secret{row}, git: []store.GitCredential{git}}
 		query := url.Values{"team": {selector}, "pipeline": {selector}, "run": {selector}}
@@ -301,7 +301,7 @@ func TestCredentialRotationHTTPGitFailureCommitsNothing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		row := store.GitCredential{Team: "team", Host: "git.invalid", Secret: "private-broken-envelope"}
+		row := store.GitCredential{HostWide: true, Team: "team", Host: "git.invalid", Secret: "private-broken-envelope"}
 		if failure == "team" {
 			row.Team = "foreign"
 			row.Secret, err = old.SealBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential", false, true, "foreign-private")
@@ -576,7 +576,7 @@ func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	if err := teststore.SeedSecret(f.store, tenant.Team(), row, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	gitValue, err := store.SealGitCredential(cipher, "team", store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: "private key"})
+	gitValue, err := store.SealGitCredential(cipher, "team", store.GitCredential{HostWide: true, Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: "private key"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-func launcherFence(t *testing.T, s *Store, demand UnitDemand, claim UnitClaim, kind capability.UnitKind) (capability.AuthorityRef, capability.LeaseRef) {
+func launcherMeteredFence(t *testing.T, s *Store, demand UnitDemand, claim UnitClaim, kind capability.UnitKind) (capability.AuthorityRef, capability.LeaseRef) {
 	t.Helper()
 	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
 	awards, err := s.ReadLauncherAwards(t.Context(), root, nil)
@@ -31,7 +31,7 @@ func TestLauncherAwardMetersFromFirstPodRenewal(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand, claim, now := launcherSnapshotFixture(t, kind)
-			root, fence := launcherFence(t, s, demand, claim, kind)
+			root, fence := launcherMeteredFence(t, s, demand, claim, kind)
 			reserved := chargedMicro(t, s)
 			for range 6 {
 				*now = now.Add(SliceSeconds * time.Second * 2 / 3)
@@ -63,7 +63,7 @@ func TestCancelledUnstartedLauncherAwardEndsMetering(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand, claim, now := launcherSnapshotFixture(t, kind)
-			root, fence := launcherFence(t, s, demand, claim, kind)
+			root, fence := launcherMeteredFence(t, s, demand, claim, kind)
 			*now = now.Add(time.Minute)
 			if _, err := s.RenewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 				t.Fatal(err)
@@ -97,7 +97,7 @@ func TestUnstartedLauncherAwardRefundsItsReservation(t *testing.T) {
 		for _, path := range []string{"lapse", "renewed_lapse", "lapse_then_cancel"} {
 			t.Run(string(kind)+"/"+path, func(t *testing.T) {
 				s, demand, claim, now := launcherSnapshotFixture(t, kind)
-				root, fence := launcherFence(t, s, demand, claim, kind)
+				root, fence := launcherMeteredFence(t, s, demand, claim, kind)
 				if chargedMicro(t, s) == 0 {
 					t.Fatal("award reserved nothing")
 				}

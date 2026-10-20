@@ -4,7 +4,7 @@ import "github.com/sparkwing-dev/sparkwing/internal/store"
 
 var (
 	machineScopes = []string{"nodes.claim", "triggers.claim"}
-	memberScopes  = store.CLITokenScopes(store.RoleEditor)
+	memberScopes  = store.ScopesForRole(store.RoleEditor)
 )
 
 type mintedRunner struct {

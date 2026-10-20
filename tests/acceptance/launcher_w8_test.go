@@ -10,9 +10,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type cloudBoundaryFake struct {
@@ -44,7 +48,7 @@ func cloudFixture(kind launcher.CloudUnitKind) (time.Time, launcher.CloudJobConf
 	if kind != launcher.CloudPlan {
 		award.Engine = &engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("b", 64)}
 	} else {
-		award.Binding.NodeID = ""
+		award.Binding.NodeID, award.Binding.Attempt = "", 0
 	}
 	if kind == launcher.CloudEval {
 		award.Binding.SourceNodeID = award.Binding.NodeID
@@ -214,7 +218,7 @@ func TestLauncherCloudBoundaryRefusal(t *testing.T) {
 
 func TestLauncherCloudPlanUsesRunBinding(t *testing.T) {
 	now, cfg, award := cloudFixture(launcher.CloudPlan)
-	award.Binding.NodeID = ""
+	award.Binding.NodeID, award.Binding.Attempt = "", 0
 	award.Binding.Attempt = 0
 	r, err := launcher.BuildJob(t.Context(), now, cfg, award, &cloudBoundaryFake{})
 	if err != nil {
@@ -230,3 +234,20 @@ func TestLauncherCloudPlanUsesRunBinding(t *testing.T) {
 }
 
 func (b *cloudBoundaryFake) Retire(context.Context, launcher.CloudNodeReservation) error { return nil }
+
+func cloudWireAwardW8(award launcher.CloudJobAward) controllerwire.ClaimedUnit {
+	b := award.Binding
+	unit := controllerwire.ClaimedUnit{LeaseExpiresAt: award.LeaseExpiresAt, Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap, UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID, Binding: capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt}, Request: runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}}, OwnerDeadline: &b.OwnerDeadline, AttemptDeadline: &b.AttemptDeadline, ParentCapabilityExpiry: &b.ParentCapabilityExpiry, Engine: award.Engine, Execution: &runspec.JobExecutionSettings{}, CloudResources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}}
+	if award.Engine != nil {
+		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: *award.Engine}}}
+	}
+	switch b.Kind {
+	case launcher.CloudPlan:
+		unit.Unit, unit.Purpose, unit.Binding.Kind = capability.UnitPlan, capability.PurposePlan, capability.BindingRun
+	case launcher.CloudEval:
+		unit.Unit, unit.Purpose, unit.SourceGeneration = capability.UnitEval, capability.PurposeEval, b.SourceGeneration
+		unit.Binding.Generation = b.SourceGeneration
+		unit.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: b.UnitID, Holder: b.Holder, Generation: b.Generation}
+	}
+	return unit
+}

@@ -148,11 +148,11 @@ func TestIntakeSourcePrivateGitHubUsesStoredTeamCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.WithSecretsCipher(cipher)
-	sealed, err := sealSecret(cipher, gitCredentialBinding("a", "github.com"), "team-read-token")
+	sealed, err := sealSecret(cipher, gitCredentialBinding(store.GitCredential{Team: "a", Host: "github.com", HostWide: true}), "team-read-token")
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, s.store, `INSERT INTO git_credentials(id,team,host,kind,username,secret,confirmed_at,created_at,updated_at) VALUES ('source','a','github.com','https','oauth',?,1,1,1)`, sealed)
+	engineSQL(t, s.store, `INSERT INTO git_credentials(host_wide,id,team,host,kind,username,secret,confirmed_at,created_at,updated_at) VALUES (1,'source','a','github.com','https','oauth',?,1,1,1)`, sealed)
 	original := http.DefaultTransport
 	http.DefaultTransport = intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://api.github.com/repos/acme/app" || r.Header.Get("Authorization") != "Bearer team-read-token" {

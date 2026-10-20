@@ -35,7 +35,7 @@ func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team sto
 	if err != nil || row == nil || row.Value != sealed.Row().Value || row.Principal != p.Capability.Subject.ID || row.CreatedAt.IsZero() {
 		return fmt.Errorf("current session secret transaction: %+v, %v", row, err)
 	}
-	sealedGit, err := store.SealGitCredential(cipher, team, store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: "stored-envelope"})
+	sealedGit, err := store.SealGitCredential(cipher, team, store.GitCredential{HostWide: true, Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: "stored-envelope"})
 	if err != nil {
 		return err
 	}
@@ -46,13 +46,13 @@ func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team sto
 	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "build"); err != nil {
 		return err
 	}
-	if err := tenant.RemoveGitCredential(ctx, a, git.Host); err != nil {
+	if err := tenant.RemoveGitCredential(ctx, a, git.Host, ""); err != nil {
 		return err
 	}
 	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "build"); !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("missing secret deletion: %v", err)
 	}
-	if err := tenant.RemoveGitCredential(ctx, a, git.Host); !errors.Is(err, store.ErrNotFound) {
+	if err := tenant.RemoveGitCredential(ctx, a, git.Host, ""); !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("missing git deletion: %v", err)
 	}
 	return nil

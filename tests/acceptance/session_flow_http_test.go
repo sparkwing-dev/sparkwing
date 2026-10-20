@@ -217,7 +217,7 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 		f := newSessionFlow(t)
 		digest := sha256.Sum256([]byte(f.raw))
 		parent, err := f.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{
-			Kind: capability.ProvisionMember, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
+			Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
 			Team: "team", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 			Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone},
 		})

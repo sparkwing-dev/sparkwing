@@ -49,7 +49,7 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 				t.Fatalf("capability-derived %s machine provisioning: issued=%v err=%v", origin.Kind, issued.Raw != "", err)
 			}
 		}
-		spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &derived, Subject: root.Subject, Team: "a", Grants: root.Grants, Binding: root.Binding}
+		spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &derived, Subject: root.Subject, Team: "a", Grants: root.Grants, Binding: root.Binding}
 		issued, err := s.ProvisionCapability(t.Context(), spec)
 		if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || issued.Raw != "" {
 			t.Fatalf("capability-derived session member provisioning: issued=%v err=%v", issued.Raw != "", err)

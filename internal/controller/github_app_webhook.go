@@ -437,7 +437,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		}
 		branch, isBranch := strings.CutPrefix(p.Ref, "refs/heads/")
 		tag, isTag := strings.CutPrefix(p.Ref, "refs/tags/")
-		if (!isBranch && !isTag) || (isBranch && branch == "") || (isTag && tag == "") || !githubCommit(p.After) {
+		if (!isBranch && !isTag) || (isBranch && branch == "") || (isTag && tag == "") || !runspec.IsCommitID(p.After) {
 			return githubAppIntake{}, "not a branch or tag push", nil
 		}
 		if !isBranch {
@@ -543,7 +543,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	if !sameRepoPullRequest(pr.Head.Repo, pr.Base.Repo) {
 		return githubAppIntake{}, githubAppForkReason, nil
 	}
-	if !githubCommit(pr.Head.SHA) {
+	if !runspec.IsCommitID(pr.Head.SHA) {
 		return githubAppIntake{}, "the pull request names no head commit", nil
 	}
 	// safety: a closed pull request's head is code nobody merged; only the merge
@@ -554,7 +554,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		if !pr.Merged {
 			return githubAppIntake{}, "an unmerged closed pull request starts nothing", nil
 		}
-		if !githubCommit(pr.MergeCommitSHA) {
+		if !runspec.IsCommitID(pr.MergeCommitSHA) {
 			return githubAppIntake{}, "the merged pull request names no merge commit", nil
 		}
 		sha = pr.MergeCommitSHA

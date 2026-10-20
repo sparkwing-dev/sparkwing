@@ -37,15 +37,7 @@ func (s *Server) sessionPresentation(r *http.Request) (string, error) {
 		}
 		return "", sessionUnavailable()
 	}
-	var raw string
-	for _, cookie := range r.Cookies() {
-		if cookie.Name == cookieName(sessionCookieName, s.cookiesSecure()) {
-			if raw != "" || cookie.Value == "" {
-				return "", sessionUnavailable()
-			}
-			raw = cookie.Value
-		}
-	}
+	raw := sessionCookie(r, s.cookiesSecure())
 	if raw == "" {
 		return "", sessionUnavailable()
 	}

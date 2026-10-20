@@ -131,7 +131,7 @@ chart's privileged level.
 
 ## Award backstop
 
-Admission cannot know an award. `LaunchOne` checks every create and patch
+Admission cannot know an award. `LaunchOne` verifies the live admission policies before any claim, then checks every create and patch
 response for the Job and its Secret; the activated template must equal the one
 built from the award, including `demandFor(award)` resources. After activation,
 and for each live Job on every sync, the launcher compares the Job template's
@@ -354,20 +354,17 @@ For eval, `Binding.Generation` fences the terminal source and
 `Binding.Expansion` identifies the eval's own live lease. Both survive dispatch.
 
 The Job's binding retains the controller unit ID, kind, holder and awarded
-generation. Sync sends that fence with the actual Job namespace, name and UID
-and the reserved node UID reconstructed from Kubernetes metadata. Different
-generations of one unit can coexist during teardown. Sync correlates each live
-award by its complete lease fence and each removal by its observed Job instance.
-Deletion retains that UID as a Kubernetes precondition. Changed fences,
-duplicate or missing decisions and returned credentials fail before activation
-or teardown. No in-memory award map or replacement bootstrap is needed after
-restart.
+generation. Sync sends only that award fence, whether it describes an orphaned
+reservation, and whether admission rejected its Job. The controller checks the
+award against transactional ownership and returns live awards or retired fences.
+Different generations of one unit can coexist during teardown.
 
-The adapter retains observed Job identities separately from the request passed
-to the transport, so request mutation cannot select a different cleanup target.
-The launcher-side award fence and Job-instance correlation are implemented.
-The controller and store must check those observations against transactional
-ownership before returning decisions.
+Kubernetes Job and node identities stay in the launcher. It matches each returned
+fence to its locally verified observation and retains the observed UID as a
+Kubernetes deletion precondition. The controller cannot select a Kubernetes
+cleanup target. Changed fences, duplicate or missing decisions and returned
+credentials fail before activation or teardown. Restart reconstructs observations
+from Kubernetes without an in-memory award map or replacement bootstrap.
 
 `BootstrapHost` creates a separate controller client whose bearer callback holds
 only the Job's bootstrap. It calls exchange once. Before dispatch, it checks the

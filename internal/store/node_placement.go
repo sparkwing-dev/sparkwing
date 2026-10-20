@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // Placement reasons record the winning preference.
@@ -51,4 +53,12 @@ func (p ClaimPlacement) preferencesFor(nodePrefers []string) []PlacementPreferen
 type placementDecision struct {
 	reason string
 	hold   bool
+}
+
+func claimLiveness(ctx context.Context, request runspec.Request) time.Duration {
+	policy, _ := ClaimPlacementFromContext(ctx)
+	if policy.Liveness <= 0 && (request.Burst != nil || runAnywhere(request)) {
+		return time.Minute
+	}
+	return policy.Liveness
 }

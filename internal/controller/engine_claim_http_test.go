@@ -94,6 +94,7 @@ func engineClaimHTTPFixture(t *testing.T, grants []capability.Grant) (*EngineCon
 	t.Helper()
 	e, _ := engineRuntimeStore(t)
 	engineRuntimeClaim(t, e, capability.UnitTrigger)
+	engineAcceptedFixturePlan(t, e)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	e.Store.SetClaimProfileResolver(engineProfileFake{})
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })

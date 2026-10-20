@@ -22,9 +22,15 @@ func acceptedPeerIdentity(nc net.Conn) (LocalPeerIdentity, error) {
 	if !known {
 		return LocalPeerIdentity{}, fmt.Errorf("wingd: peer identity unavailable; local API access refused")
 	}
-	if !peerAllowed(uid, known) {
-		return LocalPeerIdentity{}, fmt.Errorf("wingd: refused a connection from uid %d; this daemon serves uid %d only", uid, os.Getuid())
-	}
+
 	value := uint32(uid)
-	return LocalPeerIdentity{GOOS: runtime.GOOS, UID: &value}, nil
+	peer := LocalPeerIdentity{GOOS: runtime.GOOS, UID: &value}
+	owner, err := controllerPeerIdentity()
+	if err == nil {
+		_, err = LocalSubject(peer, owner)
+	}
+	if err != nil {
+		return LocalPeerIdentity{}, fmt.Errorf("wingd: refused a connection from uid %d; this daemon serves uid %d only: %w", uid, os.Getuid(), err)
+	}
+	return peer, nil
 }

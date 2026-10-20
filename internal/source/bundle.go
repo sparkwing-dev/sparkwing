@@ -12,8 +12,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
@@ -103,18 +104,16 @@ func bundlePrerequisites(name string) ([]string, error) {
 		}
 		line = strings.TrimSuffix(line, "\n")
 		switch {
-		case first && line != "# v2 git bundle":
-			return nil, errors.New("source bundle is not a v2 Git bundle")
+		case first && line != "# v2 git bundle" && line != "# v3 git bundle":
+			return nil, errors.New("source bundle version is unsupported")
 		case line == "":
 			return out, nil
 		case strings.HasPrefix(line, "-"):
 			sha, _, _ := strings.Cut(line[1:], " ")
-			if !gitSHA.MatchString(sha) {
+			if !runspec.IsCommitID(sha) {
 				return nil, errors.New("source bundle prerequisite is malformed")
 			}
 			out = append(out, sha)
 		}
 	}
 }
-
-var gitSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)

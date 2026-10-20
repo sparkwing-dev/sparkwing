@@ -241,3 +241,20 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 		t.Fatalf("owner status=%s, %v", status, err)
 	}
 }
+
+func engineAcceptedFixturePlan(t *testing.T, e *EngineController) {
+	t.Helper()
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := json.Marshal(runspec.Spec{Version: 1, Request: run.Request, Hash: "spec", PlanHash: "plan", Resolved: runspec.Resolved{Guards: runspec.Guards{Passed: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `UPDATE runs SET spec_json=?,spec_hash='spec',sealed_at=1,plan_json=?,plan_hash='plan' WHERE team='a' AND id='run'`, spec, []byte(`{"jobs":[{"id":"job"}]}`))
+}

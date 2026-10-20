@@ -218,7 +218,7 @@ func newDeploymentScheduleHTTPFixture(t *testing.T, cfg deployment.Config) sched
 			Grants: []capability.Grant{capability.RunsRead, capability.RunsControl},
 		},
 	}
-	facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: true}}}}
+	facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p}}}}
 	s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
 	return scheduleHTTPFixture{s, writer, raw, facts}
 }

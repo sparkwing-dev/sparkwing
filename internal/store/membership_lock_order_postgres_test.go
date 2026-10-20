@@ -42,7 +42,7 @@ func TestPostgresAccountResolutionLocksMembershipBeforeAuthorityAgainstDemotion(
 	}
 	ownerActor := membershipActor(t, st, owner.Account.ID, tn.Team())
 	session := membershipActor(t, st, member.Account.ID, tn.Team()).Authority
-	issued, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &session, Team: string(tn.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	issued, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &session, Team: string(tn.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}

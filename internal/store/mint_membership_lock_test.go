@@ -41,7 +41,7 @@ func TestCapabilityMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
 			}
 			digest := sha256.Sum256([]byte(raw))
 			ref := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &ref, Team: string(owner.PersonalTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone}}
+			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &ref, Team: string(owner.PersonalTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone}}
 			if name == "machine" {
 				spec.Kind = capability.ProvisionMachine
 				spec.Subject = capability.Subject{Kind: capability.SubjectMachine, ID: "machine"}

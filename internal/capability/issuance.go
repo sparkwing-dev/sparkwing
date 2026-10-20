@@ -183,6 +183,7 @@ const (
 
 // ProvisionSpec is trusted root-issuance input whose origin Store.Issue rechecks in its transaction.
 type ProvisionSpec struct {
+	AllowTeamAdmin bool
 	Personal       bool
 	Seed           string `json:"-"`
 	Kind           ProvisionKind
@@ -214,8 +215,7 @@ type IssueRequest struct {
 // ValidateDelegation rejects any widening before persistence or in-memory nodehost admission.
 func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) error {
 	p := parent.Capability
-	if p.RevokedAt != nil && !now.Before(*p.RevokedAt) || p.ExpiresAt != nil && !now.Before(*p.ExpiresAt) ||
-		p.Binding.Deadline != nil && !now.Before(*p.Binding.Deadline) {
+	if !CredentialAlive(p, now) {
 		return unauthenticated()
 	}
 	if child.Parent.ID == "" || child.Parent != parent.Authority {

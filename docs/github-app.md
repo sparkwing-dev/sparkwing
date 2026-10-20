@@ -65,15 +65,15 @@ The controller binds the installation to the caller's active team only when all 
 
 The last rule is stricter than "the user can see the installation" on purpose. An organization member with read access to one repository sees the organization's installation in `GET /user/installations`, and a binding would give their team source tokens for every repository in it.
 
-An installation belongs to one team. Connecting one bound to another team answers 409 with the generic message that the installation is unavailable to this team, so the refusal does not say whether another team holds it. Reconnecting one the team already holds refreshes it.
+An installation belongs to one team. A freshly verified current GitHub account owner or organization admin can reconnect it to their active team. The transaction removes the former team's subscriptions and automation consent, withdraws its schedules, and binds the installation to the new team. Reconnecting one the team already holds refreshes it.
 
 ### Connecting an App installed on GitHub already
 
-On **Team -> GitHub**, choose **Already installed the app? Connect an existing installation**. Sparkwing sends the browser straight to GitHub's authorization page. After GitHub returns, Sparkwing lists installations of this App that the linked GitHub user administers: the user's account and organizations where their membership is active and has the `admin` role. The list carries no binding state: an installation another team holds appears like any other, and selecting it answers **Installation unavailable**. If the list is empty, use **Connect GitHub** to install the App.
+On **Team -> GitHub**, choose **Already installed the app? Connect an existing installation**. Sparkwing sends the browser straight to GitHub's authorization page. After GitHub returns, Sparkwing lists installations of this App that the linked GitHub user administers: the user's account and organizations where their membership is active and has the `admin` role. The list carries no binding state: an installation another team holds appears like any other. Selecting it repeats the current admin check before transferring the binding. If the list is empty, use **Connect GitHub** to install the App.
 
 Choosing an installation binds it to the active team. The controller checks the signed, unexpired state and PKCE verifier against the account and team, confirms the linked GitHub identity, and consumes the state before checking the selected installation. The encrypted authorization proof carries the IDs shown in the list, so an ID absent from that list answers 404 and cannot bind. For a listed ID, the controller reads the installation with the App credential and repeats the admin check. A selection with valid state, proof and linked identity consumes the state, including across controller replicas; retry by starting a new connection flow.
 
-An installation stops being bound when GitHub reports it deleted, when a team owner calls `DELETE /api/v1/team/github-app/installations/{installation_id}`, or when the operator calls `DELETE /api/v1/operator/github-app/installations/{installation_id}`, which is how a binding moves to another team. Unbinding does not uninstall the App from GitHub.
+An installation stops being bound when GitHub reports it deleted, when a team owner calls `DELETE /api/v1/team/github-app/installations/{installation_id}`, or when the operator calls `DELETE /api/v1/operator/github-app/installations/{installation_id}`. A verified current administrator can also reclaim it through a new connection flow. Unbinding does not uninstall the App from GitHub.
 
 ## Runs from GitHub events
 

@@ -109,15 +109,15 @@ func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Sp
 		requestMasker(ctx).Register(token.Token)
 		return source.Credential{Kind: "github_app", Host: host, Secret: token.Token}, nil
 	}
-	return s.intakeStoredCredential(ctx, a.team, host, "")
+	return s.intakeStoredCredential(ctx, a.team, string(spec.RepoKey), host, "")
 }
 
-func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, host, kind string) (source.Credential, error) {
+func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, repository, host, kind string) (source.Credential, error) {
 	tenant, err := s.store.ForTeam(ctx, team)
 	if err != nil {
 		return source.Credential{}, engineLookupError(err)
 	}
-	credential, err := tenant.GitCredentialForHost(ctx, host)
+	credential, err := tenant.GitCredentialForRepository(ctx, repository, host)
 	if errors.Is(err, store.ErrNotFound) {
 		return source.Credential{}, nil
 	}
@@ -131,7 +131,7 @@ func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, ho
 	if !ok || cipher == nil {
 		return source.Credential{}, &apierr.Error{Code: apierr.Unavailable, Message: "source credential cipher is unavailable"}
 	}
-	plain, err := openSecret(cipher, gitCredentialBinding(credential.Team, credential.Host), credential.Secret)
+	plain, err := openSecret(cipher, gitCredentialBinding(credential), credential.Secret)
 	if err != nil || plain == "" {
 		return source.Credential{}, &apierr.Error{Code: apierr.Unavailable, Message: "source credential could not be opened"}
 	}

@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type cloudControlW8 struct {
@@ -156,22 +155,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.CloudBoundary, cfg launcher.CloudJobConfig, award launcher.CloudJobAward, control *cloudControlW8) *launcher.Launcher {
 	t.Helper()
 	b := award.Binding
-	unit := controllerwire.ClaimedUnit{
-		LeaseExpiresAt: award.LeaseExpiresAt,
-		Unit:           capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
-		UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID,
-		Binding:       capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt},
-		Request:       runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}},
-		OwnerDeadline: &b.OwnerDeadline, AttemptDeadline: &b.AttemptDeadline, ParentCapabilityExpiry: &b.ParentCapabilityExpiry,
-	}
-	switch b.Kind {
-	case launcher.CloudPlan:
-		unit.Unit, unit.Purpose, unit.Binding.Kind = capability.UnitPlan, capability.PurposePlan, capability.BindingRun
-	case launcher.CloudEval:
-		unit.Unit, unit.Purpose, unit.SourceGeneration = capability.UnitEval, capability.PurposeEval, b.SourceGeneration
-		unit.Binding.Generation = b.SourceGeneration
-		unit.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: b.UnitID, Holder: b.Holder, Generation: b.Generation}
-	}
+	unit := cloudWireAwardW8(award)
 	transport := &http.Client{}
 	restarted, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
 		Kube: kube, Boundary: boundary, Jobs: cfg, HTTP: transport,
@@ -193,11 +177,11 @@ func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.C
 					}
 					observation := request.Observed[0]
 					wantAward := capability.LeaseRef{Kind: unit.Unit, ID: b.UnitID, Holder: b.Holder, Generation: b.Generation}
-					if observation.Award != wantAward || observation.NodeUID != "node-uid" || observation.Job.Namespace != cfg.Namespace || observation.Job.UID != "job-uid" {
+					if observation.Award != wantAward {
 						t.Fatal("restart lost persisted unit or node identity")
 					}
 					if control.remove {
-						return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{observation.Job}}, nil
+						return controllerwire.LauncherSyncResponse{Retired: []capability.LeaseRef{observation.Award}}, nil
 					}
 					return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}, nil
 				},

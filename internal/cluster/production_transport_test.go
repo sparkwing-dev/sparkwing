@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/source"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -35,7 +37,7 @@ func TestProductionHostingRetainsPrivateTransport(t *testing.T) {
 				return nil, boundary
 			})}
 			connection := client.EngineOptions{URL: "http://private.invalid", HTTP: transport, Launcher: true, Bearer: fixedBearer("ambient-root")}
-			hosting := productionHostingAt(t.TempDir(), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{})
+			hosting := productionHostingAt(t.TempDir(), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{}, nil)
 			if hosting.HTTP != transport || hosting.ControllerURL != connection.URL {
 				t.Fatal("hosting lost its configured transport")
 			}
@@ -68,7 +70,7 @@ func FuzzProductionHostingUsesOnlyAwardedCredential(f *testing.F) {
 			}
 			return nil, boundary
 		})}
-		hosting := productionHostingAt(t.TempDir(), "v1.2.3", client.EngineOptions{URL: "http://private.invalid", HTTP: httpClient, Bearer: fixedBearer(ambient)}, "", "", false, procenv.SubmitAccept{})
+		hosting := productionHostingAt(t.TempDir(), "v1.2.3", client.EngineOptions{URL: "http://private.invalid", HTTP: httpClient, Bearer: fixedBearer(ambient)}, "", "", false, procenv.SubmitAccept{}, nil)
 		unit := controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, RunID: "run", Capability: bearer}
 		if node {
 			unit.Unit, unit.JobID = capability.UnitNode, "build"
@@ -82,4 +84,18 @@ func FuzzProductionHostingUsesOnlyAwardedCredential(f *testing.F) {
 func productionTestBearer(value string) string {
 	digest := sha256.Sum256([]byte(value))
 	return capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(digest[:])
+}
+
+func TestActionsSourceUsesOnlyWorkflowRepositoryCredential(t *testing.T) {
+	access := &githubActionsSource{repository: "gh:42", token: "job-github-token"}
+	spec := source.Spec{RepoKey: "gh:42", RemoteURL: "git@github.com:acme/repo.git"}
+	got, err := access.GitCredential(t.Context(), spec)
+	if err != nil || got.Secret != "job-github-token" || got.Host != "github.com" {
+		t.Fatalf("workflow source: %+v %v", got, err)
+	}
+	for _, foreign := range []source.Spec{{RepoKey: "gh:43", RemoteURL: spec.RemoteURL}, {RepoKey: spec.RepoKey, RemoteURL: "https://other.example/acme/repo"}} {
+		if got, err := access.GitCredential(t.Context(), foreign); err == nil || got.Secret != "" {
+			t.Fatalf("foreign source credential: %+v %v", got, err)
+		}
+	}
 }

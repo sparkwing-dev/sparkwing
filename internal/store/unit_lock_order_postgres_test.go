@@ -239,3 +239,26 @@ func TestPostgresConcurrentEvaluationReleasesRequestTheRunForWriting(t *testing.
 	}
 	b.release(2)
 }
+
+func TestPostgresRenewalWaitsForMembershipBeforeLockingAuthority(t *testing.T) {
+	st := storetest.NewPostgres(t).Open(t)
+	f := st.TestOnlyRankingFixture(t, true)
+	claim, err := f.Claim(t, f.Personal, capability.UnitNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	blocker := blockRun(t, ctx, st)
+	if _, err := blocker.tx.ExecContext(ctx, `SELECT account_id FROM memberships WHERE team='a' AND account_id='owner' FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	blocker.start(func() error { _, err := st.RenewUnit(ctx, claim.Award.CapabilityPrefix, false); return err })
+	blocker.waitBlocked(1)
+	for _, prefix := range []string{f.Personal, claim.Award.CapabilityPrefix} {
+		if blocker.held(`SELECT 1 FROM capabilities WHERE prefix='` + prefix + `' FOR UPDATE`) {
+			t.Fatalf("renewal holds %s while waiting for membership", prefix)
+		}
+	}
+	blocker.release(1)
+}

@@ -22,10 +22,9 @@ type CredentialLookup struct {
 	Peer     Subject
 }
 
-// AuthorityState is one persisted authority and its current membership verdict.
+// AuthorityState is one persisted authority whose membership the reader has checked.
 type AuthorityState struct {
-	Principal       Principal
-	MembershipValid bool
+	Principal Principal
 }
 
 // RecordedResult identifies the committed write, including its actor's fence.

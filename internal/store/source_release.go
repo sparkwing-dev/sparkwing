@@ -34,7 +34,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		credential, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=?`+tx.forUpdate(), t.team, request.Host))
+		credential, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=? AND (repository_key=? OR host_wide=1) ORDER BY host_wide LIMIT 1`+tx.forUpdate(), t.team, request.Host, request.RepositoryKey))
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: "store a git credential for " + request.Host + " in the team's Git credentials"})
 		}
@@ -167,23 +167,21 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 		return capability.SourceExecutor{}, bindingRefusal()
 	}
 	root := chain[len(chain)-1].principal.Capability
-	cloud := p.Capability.Billing != nil && p.Capability.Billing.ExecutorClass == "cloud" && profile.Location == "cloud"
-	executor := capability.SourceExecutor{Team: string(t.team), MachineID: root.Subject.ID, Cloud: cloud, AuthorizedRepositories: []string{repo}}
-	if cloud {
+	facts, err := claimantFactsTx(ctx, tx, chain, run.Request.Request)
+	if err != nil {
+		return capability.SourceExecutor{}, err
+	}
+	executor := capability.SourceExecutor{Team: string(t.team), MachineID: root.Subject.ID, Cloud: facts.Cloud, Shared: facts.Shared, OwnerAccountID: facts.OwnerAccount, AuthorizedRepositories: []string{repo}}
+	if facts.OIDCKind == TierActions {
+		return capability.SourceExecutor{}, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "Actions runners use their own repository credential")
+	}
+	if facts.Cloud {
 		return executor, nil
 	}
 	if root.Subject.Kind != capability.SubjectMachine || root.Team != string(t.team) {
 		return capability.SourceExecutor{}, bindingRefusal()
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, t.team, root.Prefix).Scan(&executor.OwnerAccountID); err != nil {
-		return capability.SourceExecutor{}, err
-	}
-	record, err := loadCapabilityRecordTx(ctx, tx, root.Prefix)
-	if err != nil {
-		return capability.SourceExecutor{}, err
-	}
-	executor.Shared = record.Origin != nil && !record.Origin.Personal
-	if !executor.Shared {
+	if !facts.Shared {
 		return capability.SourceExecutor{}, apierr.Authorization(apierr.ReasonPersonalMachine, "team git credentials are released only to shared runners and Cloud work, never to a personal machine")
 	}
 	return executor, nil

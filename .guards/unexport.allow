@@ -15,7 +15,7 @@ internal/authwire	2
 internal/backend	1
 internal/bincache	17
 internal/blob	20
-internal/capability	30
+internal/capability	28
 internal/capacity	9
 internal/chaos	11
 internal/clisurface	11
@@ -70,7 +70,7 @@ internal/runners	3
 internal/runners/launcher	4
 internal/runners/service	4
 internal/runners/service/unitfile	1
-internal/runspec	5
+internal/runspec	4
 internal/secrets	7
 internal/secretsource	2
 internal/sessionledger	8
@@ -80,7 +80,7 @@ internal/sparks	5
 internal/sparkwingruntime	5
 internal/storage/logseg	24
 internal/storage/s3	1
-internal/store	268
+internal/store	266
 internal/store/internal/storetest	1
 internal/store/teststore	5
 internal/tokenpark	3

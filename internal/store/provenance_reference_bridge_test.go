@@ -287,7 +287,7 @@ func actionsReference(t *testing.T, s *Store) (*Tenant, string) {
 	tenant := referenceWorld(t, s, "gh:701")
 	push := authorityRoot("actions-push", "a")
 	push.Grants = []capability.Grant{capability.RunsWrite}
-	push.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:701", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow"}}
+	push.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:701", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, push)
 	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: push.Prefix}, IdempotencyKey: "actions", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,

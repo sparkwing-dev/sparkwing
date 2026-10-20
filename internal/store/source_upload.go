@@ -3,11 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -48,7 +46,7 @@ func sourceUploaderTx(ctx context.Context, tx *storeTx, team Team, authority cap
 
 // ReserveSourceUpload reserves monthly storage before signing any source transfer.
 func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.AuthorityRef, u SourceUpload) (SourceUpload, error) {
-	if !validUploadTicket(u.ID) || !validBlobDigest(u.Blob.Digest) || u.Blob.Size < 0 || u.Scope.Repository == "" || !validCommitHash(u.Scope.ExecutionSHA) || !validCommitHash(u.Scope.PipelineSHA) {
+	if !validUploadTicket(u.ID) || !validBlobDigest(u.Blob.Digest) || u.Blob.Size < 0 || u.Scope.Repository == "" || !runspec.IsCommitID(u.Scope.ExecutionSHA) || !runspec.IsCommitID(u.Scope.PipelineSHA) {
 		return u, authorityError(apierr.BadRequest, "source upload requires a repository, full revisions, digest and size")
 	}
 	tx, err := t.s.beginTx(ctx)
@@ -90,11 +88,6 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 	}
 	u.Blob.Team = string(t.team)
 	return u, tx.Commit()
-}
-
-func validCommitHash(s string) bool {
-	_, err := hex.DecodeString(s)
-	return err == nil && strings.ToLower(s) == s && (len(s) == 40 || len(s) == 64)
 }
 
 func readSourceUploadTx(ctx context.Context, tx *storeTx, team Team, authority capability.AuthorityRef, id string) (SourceUpload, error) {

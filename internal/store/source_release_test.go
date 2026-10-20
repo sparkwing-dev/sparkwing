@@ -76,7 +76,7 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, raw)
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
 	setMachineOrigin(t, s, "runner", &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
-	rewriteSchemaExec(t, s.db, `INSERT INTO git_credentials(id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES ('credential','a','github.com','https','encrypted-secret',1,1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO git_credentials(host_wide,id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES (1,'credential','a','github.com','https','encrypted-secret',1,1,1)`)
 	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "remote"}})
 	if kind == capability.UnitPlan {
 		s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "cloud"}})

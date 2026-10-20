@@ -153,7 +153,7 @@ func (c *tokenManager) CreateToken(ctx context.Context, input controllerwire.Tok
 	for _, grant := range input.Scopes {
 		grants = append(grants, string(grant))
 	}
-	var request any = controllerwire.CreateTokenRequest{Grants: grants, ExpiresAt: expires}
+	var request any = controllerwire.CreateTokenRequest{Grants: grants, ExpiresAt: expires, AllowTeamAdmin: input.AllowTeamAdmin}
 	if c.deployment {
 		request = controllerwire.CreateServiceTokenRequest{Name: input.Principal, Grants: grants, ExpiresAt: expires}
 	}

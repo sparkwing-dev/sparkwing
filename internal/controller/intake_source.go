@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -159,7 +160,7 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		}
 		return repo.ID, nil
 	}
-	credential, err := s.intakeStoredCredential(ctx, store.Team(team), "github.com", store.GitCredentialHTTPS)
+	credential, err := s.intakeStoredCredential(ctx, store.Team(team), "", "github.com", store.GitCredentialHTTPS)
 	if err != nil {
 		return 0, err
 	}
@@ -182,11 +183,8 @@ func parseIntakeRemote(remote string) (*url.URL, error) {
 		parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "ssh" && parsed.Scheme != "git" {
 		return nil, invalidEngineBody("source remote must be a credential-free repository URL")
 	}
-	if parsed.User != nil {
-		_, password := parsed.User.Password()
-		if parsed.Scheme != "ssh" || password {
-			return nil, invalidEngineBody("source remote must not contain credentials")
-		}
+	if err := envredact.ValidateSourceReference(parsedRemote); err != nil {
+		return nil, invalidEngineBody(err.Error())
 	}
 	return parsed, nil
 }

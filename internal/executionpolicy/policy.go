@@ -15,6 +15,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
@@ -597,7 +599,7 @@ func normalizeExecutionPolicyV1(policy NodeExecutionPolicy) (NodeExecutionPolicy
 	}
 	switch policy.Body.Source.Kind {
 	case "git":
-		if !validLowerHexRevision(policy.Body.Source.Identity) {
+		if !runspec.IsCommitID(policy.Body.Source.Identity) {
 			return NodeExecutionPolicy{}, fmt.Errorf("%w: git source identity must be an immutable lowercase commit", ErrExecutionPolicyInvalid)
 		}
 	case "working_tree", "artifact":
@@ -822,14 +824,6 @@ func validateDigest(field, value string) error {
 		return fmt.Errorf("%w: %s must be a sha256 digest", ErrExecutionPolicyInvalid, field)
 	}
 	return nil
-}
-
-func validLowerHexRevision(value string) bool {
-	if len(value) != 40 && len(value) != 64 || value != strings.ToLower(value) {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
 }
 
 func validateRelativeLiteralPath(field, value string, emptyOK bool) error {

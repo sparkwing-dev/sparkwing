@@ -35,7 +35,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	}
 	snapshot := capability.AuthenticationSnapshot{Now: tx.now(), Binding: state}
 	for _, node := range chain {
-		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal, MembershipValid: true})
+		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
 	}
 	path, run := "/api/v1/runs/{run}/jobs/{job}/output", supplied.Target.RunID
 	if child {

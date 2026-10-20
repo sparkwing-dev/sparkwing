@@ -26,7 +26,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	}
 	snapshot := capability.AuthenticationSnapshot{Now: tx.now(), Binding: state}
 	for _, node := range chain {
-		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal, MembershipValid: true})
+		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
 	}
 	route, _ := capability.LookupRoute("POST", "/api/v1/runs/{run}/oidc-token")
 	auth, err := capability.AuthenticateSnapshot(snapshot, route, capability.RequestEvidence{Target: supplied.Target})
@@ -44,7 +44,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
-	personal, err := personalRootTx(ctx, tx, chain)
+	factsClass, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
@@ -52,7 +52,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
-	facts.Now, facts.RunnerKind = snapshot.Now, oidcRunnerKind(chain, personal)
+	facts.Now, facts.RunnerKind = snapshot.Now, factsClass.OIDCKind
 	facts.NotAfter = state.LeaseExpiresAt
 	if state.Expansion != nil {
 		facts.NotAfter = state.Expansion.ExpiresAt
@@ -60,11 +60,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 			facts.NotAfter = *end
 		}
 	}
-	for _, end := range []*time.Time{authorized.Principal.Capability.ExpiresAt, authorized.Binding.Deadline} {
-		if end != nil && (facts.NotAfter.IsZero() || end.Before(facts.NotAfter)) {
-			facts.NotAfter = *end
-		}
-	}
+	facts.NotAfter = authorityNotAfter(chain, facts.NotAfter)
 	if !facts.NotAfter.After(facts.Now) {
 		return capability.OIDCFacts{}, authorityError(apierr.Unauthenticated, "claim issuance window has ended")
 	}
@@ -86,25 +82,6 @@ func oidcIdentity(team Team, run RunRow) (capability.OIDCFacts, error) {
 		facts.Repository = run.Request.Request.Git.Repository.Display
 	}
 	return facts, nil
-}
-
-func oidcRunnerKind(chain []authorityNode, personal bool) string {
-	for _, node := range chain {
-		if node.principal.Capability.Binding.Kind == capability.BindingPush {
-			return "github-actions"
-		}
-	}
-	switch chain[0].principal.Capability.Subject.Kind {
-	case capability.SubjectMachine:
-		if personal {
-			return "personal"
-		}
-		return "runner"
-	case capability.SubjectService, capability.SubjectOperator:
-		return "service"
-	default:
-		return "user"
-	}
 }
 
 func originalRequestTx(ctx context.Context, tx *storeTx, team Team, request runspec.SealedRequest) (runspec.SealedRequest, error) {
@@ -130,4 +107,16 @@ func originalRequestTx(ctx context.Context, tx *storeTx, team Team, request runs
 		}
 		request = run.Request
 	}
+}
+
+func authorityNotAfter(chain []authorityNode, ceiling time.Time) time.Time {
+	for _, node := range chain {
+		c := node.principal.Capability
+		for _, end := range []*time.Time{c.ExpiresAt, c.RevokedAt, c.Binding.Deadline} {
+			if end != nil && (ceiling.IsZero() || end.Before(ceiling)) {
+				ceiling = *end
+			}
+		}
+	}
+	return ceiling
 }
